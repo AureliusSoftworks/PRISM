@@ -11,8 +11,10 @@ import {
   deleteAllBots,
   deleteBot,
   deleteBots,
+  deleteSelectedBots,
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
+  setSelectedBotsDeleteProtection,
 } from "../bots.ts";
 
 /**
@@ -86,6 +88,20 @@ describe("composeBotSystemPrompt", () => {
     const prompt = composeBotSystemPrompt("DJ K-Razor", "");
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
+  });
+
+  it("adds gentle rejection guidance when flirt mode is disabled", () => {
+    const prompt = composeBotSystemPrompt("Tim", "Stay concise.", false);
+    assert.ok(prompt);
+    assert.match(prompt!, /decline gently in character/i);
+    assert.match(prompt!, /avoid policy-style refusal wording/i);
+  });
+
+  it("adds reciprocal roleplay guidance when flirt mode is enabled", () => {
+    const prompt = composeBotSystemPrompt("Tim", "Stay concise.", true);
+    assert.ok(prompt);
+    assert.match(prompt!, /engage in consensual flirt or romantic roleplay/i);
+    assert.match(prompt!, /stays respectful and in character/i);
   });
 });
 
@@ -610,6 +626,146 @@ describe("deleteAllBots", () => {
       (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>)
         .map((memory) => memory.id),
       ["memory-protected"]
+    );
+  });
+
+  it("deletes protected bots when explicitly requested", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
+    seedBot(db, "user-1", "unprotected");
+    seedBot(db, "user-2", "theirs", "2026-01-04T00:00:00.000Z", true);
+    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
+    seedHistoryReferencingBot(db, "user-1", "unprotected", "unprotected");
+    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
+    seedMemory(db, "user-1", "protected", "memory-protected");
+    seedMemory(db, "user-1", "unprotected", "memory-unprotected");
+    seedMemory(db, "user-2", "theirs", "memory-theirs");
+
+    const deleted = deleteAllBots(db, "user-1", { includeProtected: true });
+
+    assert.equal(deleted, 2);
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM bots ORDER BY id").all() as Array<{ id: string }>).map(
+        (bot) => bot.id
+      ),
+      ["theirs"]
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-protected") as { bot_id: string | null }).bot_id,
+      null
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
+        .get("msg-theirs") as { bot_id: string | null }).bot_id,
+      "theirs"
+    );
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>).map(
+        (memory) => memory.id
+      ),
+      ["memory-theirs"]
+    );
+  });
+});
+
+describe("deleteSelectedBots", () => {
+  it("deletes only selected unprotected bots and reports protected skips", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
+    seedBot(db, "user-1", "delete-a");
+    seedBot(db, "user-1", "delete-b");
+    seedHistoryReferencingBot(db, "user-1", "delete-a", "delete-a");
+    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
+    seedMemory(db, "user-1", "delete-a", "memory-delete-a");
+    seedMemory(db, "user-1", "protected", "memory-protected");
+
+    const result = deleteSelectedBots(db, "user-1", [
+      "delete-a",
+      "delete-b",
+      "protected",
+    ]);
+
+    assert.deepEqual(result, { deleted: 2, protectedSkipped: 1 });
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM bots ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id
+      ),
+      ["protected"]
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?").get("msg-delete-a") as {
+        bot_id: string | null;
+      }).bot_id,
+      null
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM messages WHERE id = ?").get("msg-protected") as {
+        bot_id: string | null;
+      }).bot_id,
+      "protected"
+    );
+    assert.deepEqual(
+      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id
+      ),
+      ["memory-protected"]
+    );
+  });
+});
+
+describe("setSelectedBotsDeleteProtection", () => {
+  it("protects selected owned bots and ignores other users", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "a");
+    seedBot(db, "user-1", "b");
+    seedBot(db, "user-2", "theirs");
+
+    const result = setSelectedBotsDeleteProtection(
+      db,
+      "user-1",
+      ["a", "b", "theirs"],
+      true
+    );
+
+    assert.deepEqual(result, { updated: 2 });
+    assert.deepEqual(
+      (db.prepare("SELECT id, delete_protected FROM bots ORDER BY id").all() as Array<{
+        id: string;
+        delete_protected: number;
+      }>).map((row) => [row.id, row.delete_protected]),
+      [
+        ["a", 1],
+        ["b", 1],
+        ["theirs", 0],
+      ]
+    );
+  });
+
+  it("allows deletion for selected protected bots", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "protected-a", "2026-01-01T00:00:00.000Z", true);
+    seedBot(db, "user-1", "protected-b", "2026-01-02T00:00:00.000Z", true);
+    seedBot(db, "user-1", "still-protected", "2026-01-03T00:00:00.000Z", true);
+
+    const result = setSelectedBotsDeleteProtection(
+      db,
+      "user-1",
+      ["protected-a", "protected-b"],
+      false
+    );
+
+    assert.deepEqual(result, { updated: 2 });
+    assert.deepEqual(
+      (db.prepare("SELECT id, delete_protected FROM bots ORDER BY id").all() as Array<{
+        id: string;
+        delete_protected: number;
+      }>).map((row) => [row.id, row.delete_protected]),
+      [
+        ["protected-a", 0],
+        ["protected-b", 0],
+        ["still-protected", 1],
+      ]
     );
   });
 });

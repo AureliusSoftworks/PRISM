@@ -1,11 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
-import { composeAugmentedImagePrompt } from "@localai/shared";
+import { composeVerbatimFirstImagePrompt } from "@localai/shared";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import { generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import type { LlmProvider, ProviderMessage } from "./providers.ts";
 import { resolveImageGeneratePersistence } from "./image-generate-resolve.ts";
 import {
   buildGeneratedImageRelativePath,
@@ -47,6 +48,19 @@ const ASSISTANT_IMAGE_SIZE_TAGS = {
     "banner",
   ],
 } as const;
+
+async function readOpenAiGeneratedImageBytes(
+  result: Awaited<ReturnType<typeof generateImage>>,
+  signal: AbortSignal
+): Promise<Buffer> {
+  if (result.imageBytes) {
+    return result.imageBytes;
+  }
+  if (!result.url) {
+    throw new Error("OpenAI returned no downloadable image URL.");
+  }
+  return downloadRemoteImage(result.url, { signal });
+}
 
 function scoreSizeTags(text: string, tags: readonly string[]): number {
   let score = 0;
@@ -176,26 +190,146 @@ export function buildContextAwareImageUserPrompt(args: {
   const { allowPersonaPortrait, sceneOnlyComposition } =
     resolveImageSubjectPolicy(policySignalText);
   if (contextLines.length === 0) return caption;
+  const compactContext = contextLines.slice(-2).map((line) => `Context: ${line}`);
+  const compactSignals = latestUserPriorityLines
+    .slice(0, 2)
+    .map((line, index) => `Recent user signal ${index + 1}: ${line}`);
   return [
-    `Primary scene request: ${caption}`,
-    `User's latest message: ${userMessage}`,
-    "Instruction priority (highest to lowest):",
-    "1) User's latest message and the most recent user lines below.",
-    "2) Primary scene request line.",
-    "3) Assistant/context lines only for pronoun/reference resolution.",
-    ...latestUserPriorityLines.map((line, index) => `Recent user signal ${index + 1}: ${line}`),
-    "Recent conversation context (use this to resolve references like it/that/this scene):",
-    ...contextLines.map((line) => `- ${line}`),
+    `Primary scene request (keep wording): ${caption}`,
+    `Latest user message: ${userMessage}`,
+    "Use context only to resolve references (it/that/this), not to replace the request.",
+    ...compactSignals,
+    ...compactContext,
     allowPersonaPortrait
-      ? "The user explicitly asked for the persona/you to appear. Keep the requested scene details accurate, and include the persona only as requested."
-      : "Do NOT include the speaking persona in-frame by default. When the user asks to see a place/object/scene, depict that referenced subject (for example, the landscape itself) and avoid unsolicited portraits.",
+      ? "The user explicitly asked for the persona/you to appear. Include persona only as requested."
+      : "Do NOT include the speaking persona in-frame by default.",
     ...(sceneOnlyComposition
       ? [
-          "Composition constraint: this is a scene/place request. Do not include human figures, faces, or character portraits unless explicitly asked.",
+          "Composition constraint: scene/place request only. No people, portraits, or character figures unless explicitly requested.",
         ]
       : []),
-    "If assistant wording conflicts with the latest user request, follow the latest user request.",
+    "If context conflicts with the latest user request, follow the latest user request.",
   ].join("\n");
+}
+
+const IMAGE_DENIAL_BOUNDARY_FALLBACK =
+  "I don't want to send that kind of picture, but I can make it softer or more playful instead.";
+
+function clampImageRecoveryContext(text: string, max = 1800): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}...`;
+}
+
+export function buildDeterministicImagePromptRepair(prompt: string): string {
+  const cleaned = prompt
+    .replace(/\b(?:nude|naked|topless|bottomless|explicit|pornographic|erotic)\b/gi, "fully clothed")
+    .replace(/\b(?:sexual|sexually|horny|aroused|lustful)\b/gi, "romantic")
+    .replace(/\b(?:lingerie|underwear|panties|bra|thong)\b/gi, "everyday outfit")
+    .replace(/\b(?:cleavage|breasts?|boobs?|butt|ass|booty)\b/gi, "silhouette")
+    .replace(/\s+/g, " ")
+    .trim();
+  const base = cleaned || "a tasteful, fully clothed portrait with warm character mood";
+  return [
+    "Safe rewrite of the image request:",
+    base,
+    "Keep it non-explicit, fully clothed, adult, and suitable for a general audience. Preserve the character mood and scene with modest, non-sexual framing.",
+  ].join("\n");
+}
+
+async function inferImagePromptRepair(args: {
+  provider?: LlmProvider;
+  botName: string;
+  botSystemPrompt: string;
+  userMessage: string;
+  promptForModel: string;
+}): Promise<string> {
+  const fallback = buildDeterministicImagePromptRepair(args.promptForModel);
+  const provider = args.provider;
+  if (!provider) return fallback;
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "Rewrite one image-generation prompt after a safety or moderation denial.",
+        "This is not a bypass. Preserve only safe intent: character, setting, mood, outfit style, lighting, composition.",
+        "Remove explicit sexual content, nudity, fetish detail, undergarment emphasis, or body-part emphasis.",
+        "Make the result fully clothed, adult, non-explicit, and safe for a general audience.",
+        "Return only the revised image prompt. No commentary, markdown, JSON, or policy words.",
+        args.botSystemPrompt.trim()
+          ? `Bot persona excerpt for visual continuity:\n${clampImageRecoveryContext(args.botSystemPrompt)}`
+          : `Bot name: ${args.botName}`,
+      ].join("\n\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `User message: ${clampImageRecoveryContext(args.userMessage)}`,
+        `Denied image prompt: ${clampImageRecoveryContext(args.promptForModel)}`,
+      ].join("\n\n"),
+    },
+  ];
+  try {
+    const raw = await provider.generateResponse(messages, {
+      temperature: 0.4,
+      maxTokens: 220,
+    });
+    const repaired = raw.replace(/\s+/g, " ").trim();
+    if (!repaired || repaired.length > 1600) return fallback;
+    if (shouldAttemptLenientLocalImageFallback(new Error(repaired))) return fallback;
+    return repaired;
+  } catch {
+    return fallback;
+  }
+}
+
+async function inferImageBoundaryText(args: {
+  provider?: LlmProvider;
+  botName: string;
+  botSystemPrompt: string;
+  userMessage: string;
+  captionPrompt: string;
+}): Promise<string> {
+  const provider = args.provider;
+  if (!provider) return IMAGE_DENIAL_BOUNDARY_FALLBACK;
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        `You are ${args.botName || "Assistant"}, continuing a chat.`,
+        args.botSystemPrompt.trim()
+          ? `Persona excerpt:\n${clampImageRecoveryContext(args.botSystemPrompt)}`
+          : "",
+        "The requested image could not be sent even after one safe rewrite.",
+        "Write one short in-character boundary. The bot should organically say they do not want to send that kind of picture and may offer a softer alternative.",
+        "Do not mention policy, safety systems, moderation, model refusal, fallback, or errors.",
+        "Avoid phrases like \"I can't\" or \"I cannot\". No markdown, JSON, or tool calls.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `User message: ${clampImageRecoveryContext(args.userMessage)}`,
+        `Image topic: ${clampImageRecoveryContext(args.captionPrompt)}`,
+      ].join("\n\n"),
+    },
+  ];
+  try {
+    const raw = await provider.generateResponse(messages, {
+      temperature: 0.7,
+      maxTokens: 90,
+    });
+    const line = raw.replace(/\s+/g, " ").trim();
+    if (!line || line.length > 420) return IMAGE_DENIAL_BOUNDARY_FALLBACK;
+    if (shouldAttemptLenientLocalImageFallback(new Error(line))) {
+      return IMAGE_DENIAL_BOUNDARY_FALLBACK;
+    }
+    return line;
+  } catch {
+    return IMAGE_DENIAL_BOUNDARY_FALLBACK;
+  }
 }
 
 function isMissingComfyWorkflowError(error: unknown): boolean {
@@ -225,9 +359,14 @@ export interface AssistantSentImageUserPrefs {
   secondaryOllamaHost: string | null;
 }
 
+export type AssistantSentImageGenerationResult =
+  | { status: "succeeded"; payload: SentGeneratedImagePayload }
+  | { status: "denied"; message: string }
+  | { status: "failed" };
+
 /**
  * Runs image generation after the assistant emits a `sendGeneratedImage` tool stub.
- * Best-effort: returns `undefined` when generation cannot complete (does not throw).
+ * Best-effort: returns `failed` when generation cannot complete (does not throw).
  */
 export async function runAssistantSentImageGeneration(args: {
   db: DatabaseSync;
@@ -241,10 +380,11 @@ export async function runAssistantSentImageGeneration(args: {
   preferredProvider: "local" | "openai";
   openAiApiKey: string | undefined;
   prefs: AssistantSentImageUserPrefs;
+  promptRepairProvider?: LlmProvider;
   signal?: AbortSignal;
-}): Promise<SentGeneratedImagePayload | undefined> {
+}): Promise<AssistantSentImageGenerationResult> {
   if (args.mode !== "chat" && args.mode !== "sandbox") {
-    return undefined;
+    return { status: "failed" };
   }
   const cid = args.conversationId?.trim() ?? "";
   const bodyBotIdRaw = args.botIdTriState;
@@ -260,7 +400,7 @@ export async function runAssistantSentImageGeneration(args: {
     bodyBotId,
   });
   if (!persistence.ok) {
-    return undefined;
+    return { status: "failed" };
   }
 
   const prompt = args.captionPrompt.trim();
@@ -301,10 +441,11 @@ export async function runAssistantSentImageGeneration(args: {
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
     if (botPersona) {
       if (subjectPolicy.allowPersonaPortrait) {
-        promptForModel = composeAugmentedImagePrompt({
+        promptForModel = composeVerbatimFirstImagePrompt({
+          userPrompt: contextAwareUserPrompt,
           botName: botPersona.name,
           systemPrompt: botPersona.system_prompt,
-          userPrompt: contextAwareUserPrompt,
+          mode: "chat_balanced",
         });
         if (sceneOnlyHardConstraint) {
           promptForModel = `${sceneOnlyHardConstraint}\n${promptForModel}`;
@@ -367,12 +508,36 @@ export async function runAssistantSentImageGeneration(args: {
   const successPayload = (
     revised: string | undefined,
     imageModel: string
-  ): SentGeneratedImagePayload => ({
-    imageId,
-    prompt,
-    displayUrl,
-    imageModel: imageModel.trim(),
-    ...(revised ? { revisedPrompt: revised } : {}),
+  ): AssistantSentImageGenerationResult => ({
+    status: "succeeded",
+    payload: {
+      imageId,
+      prompt,
+      displayUrl,
+      imageModel: imageModel.trim(),
+      ...(revised ? { revisedPrompt: revised } : {}),
+    },
+  });
+
+  const botNameForRecovery = botPersona?.name?.trim() || "Assistant";
+  const botPromptForRecovery = botPersona?.system_prompt?.trim() || "";
+  const buildRepairPrompt = () =>
+    inferImagePromptRepair({
+      provider: args.promptRepairProvider,
+      botName: botNameForRecovery,
+      botSystemPrompt: botPromptForRecovery,
+      userMessage: args.userMessage,
+      promptForModel,
+    });
+  const deniedResult = async (): Promise<AssistantSentImageGenerationResult> => ({
+    status: "denied",
+    message: await inferImageBoundaryText({
+      provider: args.promptRepairProvider,
+      botName: botNameForRecovery,
+      botSystemPrompt: botPromptForRecovery,
+      userMessage: args.userMessage,
+      captionPrompt: prompt,
+    }),
   });
 
   try {
@@ -381,12 +546,12 @@ export async function runAssistantSentImageGeneration(args: {
         console.warn(
           "[assistant-sent-image] skipped: no local image model (bot default or Settings → preferred local image model)."
         );
-        return undefined;
+        return { status: "failed" };
       }
-      const runLocal = (modelId: string) =>
+      const runLocal = (modelId: string, promptOverride = promptForModel) =>
         generateLocalImageBytesByModelId({
           modelId,
-          promptForModel,
+          promptForModel: promptOverride,
           negativePrompt: sceneOnlyNegativePrompt,
           size: requestedSize,
           signal,
@@ -400,44 +565,65 @@ export async function runAssistantSentImageGeneration(args: {
       try {
         localOut = await runLocal(resolvedLocalImageModel);
       } catch (primaryError) {
-        const fallbackCandidates: string[] = [];
-        const primaryModel = resolvedLocalImageModel.trim();
-        const isWorkflowMissing = isMissingComfyWorkflowError(primaryError);
-        // Bot-specific model can point at a stale workflow; retry with account default.
-        if (
-          botLocalImageModel &&
-          preferredLocalImageModel &&
-          preferredLocalImageModel !== primaryModel
-        ) {
-          fallbackCandidates.push(preferredLocalImageModel);
-        }
-        if (
-          lenientFb &&
-          lenientFb !== primaryModel &&
-          (shouldAttemptLenientLocalImageFallback(primaryError) || isWorkflowMissing)
-        ) {
-          fallbackCandidates.push(lenientFb);
-        }
-        let fallbackSucceeded = false;
-        for (const candidate of fallbackCandidates) {
+        const primaryWasDenied = shouldAttemptLenientLocalImageFallback(primaryError);
+        if (primaryWasDenied) {
+          const repairedPrompt = await buildRepairPrompt();
+          const retryModel =
+            lenientFb && lenientFb !== resolvedLocalImageModel.trim()
+              ? lenientFb
+              : resolvedLocalImageModel;
           try {
-            localOut = await runLocal(candidate);
-            fallbackSucceeded = true;
-            break;
-          } catch {
-            // Try the next candidate.
+            localOut = await runLocal(retryModel, repairedPrompt);
+          } catch (retryError) {
+            if (shouldAttemptLenientLocalImageFallback(retryError)) {
+              return deniedResult();
+            }
+            console.warn(
+              "[assistant-sent-image] local repaired retry failed:",
+              retryError instanceof Error ? retryError.message : retryError
+            );
+            return { status: "failed" };
           }
-        }
-        if (!fallbackSucceeded) {
-          console.warn(
-            "[assistant-sent-image] local primary model failed:",
-            primaryError instanceof Error ? primaryError.message : primaryError
-          );
-          return undefined;
+        } else {
+          const fallbackCandidates: string[] = [];
+          const primaryModel = resolvedLocalImageModel.trim();
+          const isWorkflowMissing = isMissingComfyWorkflowError(primaryError);
+          // Bot-specific model can point at a stale workflow; retry with account default.
+          if (
+            botLocalImageModel &&
+            preferredLocalImageModel &&
+            preferredLocalImageModel !== primaryModel
+          ) {
+            fallbackCandidates.push(preferredLocalImageModel);
+          }
+          if (
+            lenientFb &&
+            lenientFb !== primaryModel &&
+            (shouldAttemptLenientLocalImageFallback(primaryError) || isWorkflowMissing)
+          ) {
+            fallbackCandidates.push(lenientFb);
+          }
+          let fallbackSucceeded = false;
+          for (const candidate of fallbackCandidates) {
+            try {
+              localOut = await runLocal(candidate);
+              fallbackSucceeded = true;
+              break;
+            } catch {
+              // Try the next candidate.
+            }
+          }
+          if (!fallbackSucceeded) {
+            console.warn(
+              "[assistant-sent-image] local primary model failed:",
+              primaryError instanceof Error ? primaryError.message : primaryError
+            );
+            return { status: "failed" };
+          }
         }
       }
       if (!localOut) {
-        return undefined;
+        return { status: "failed" };
       }
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
       await tryGenerateThumbAfterPngWrite(localRelPath);
@@ -452,7 +638,7 @@ export async function runAssistantSentImageGeneration(args: {
 
     const apiKey = args.openAiApiKey ?? config.openAiApiKey;
     if (!apiKey) {
-      return undefined;
+      return { status: "failed" };
     }
 
     try {
@@ -464,42 +650,85 @@ export async function runAssistantSentImageGeneration(args: {
       });
       let imageBytes: Buffer;
       try {
-        imageBytes = await downloadRemoteImage(openAiResult.url, { signal });
+        imageBytes = await readOpenAiGeneratedImageBytes(openAiResult, signal);
       } catch {
-        return undefined;
+        return { status: "failed" };
       }
       try {
         writeGeneratedImageBytes(localRelPath, imageBytes);
       } catch {
         tryUnlinkGeneratedImageFile(localRelPath);
-        return undefined;
+        return { status: "failed" };
       }
       await tryGenerateThumbAfterPngWrite(localRelPath);
+      const storedUrl = openAiResult.url || displayUrl;
       insertRow({
         revisedPrompt: openAiResult.revisedPrompt ?? null,
-        urlForDb: openAiResult.url,
+        urlForDb: storedUrl,
         providerTag: "openai",
         modelUsed: openAiResult.model,
       });
       return successPayload(openAiResult.revisedPrompt ?? undefined, openAiResult.model);
     } catch (primaryError) {
-      if (
-        !lenientFb ||
-        !shouldAttemptLenientLocalImageFallback(primaryError)
-      ) {
-        return undefined;
+      if (!shouldAttemptLenientLocalImageFallback(primaryError)) {
+        return { status: "failed" };
       }
-      const localOut = await generateLocalImageBytesByModelId({
-        modelId: lenientFb,
-        promptForModel,
-        negativePrompt: sceneOnlyNegativePrompt,
-        size: requestedSize,
-        signal,
-        comfyUiHost: args.prefs.comfyuiHost,
-        comfyUiWorkflows: args.prefs.comfyUiWorkflows,
-        secondaryOllamaHost: args.prefs.secondaryOllamaHost,
-        primaryOllamaHost: config.ollamaHost,
-      });
+      const repairedPrompt = await buildRepairPrompt();
+      if (!lenientFb) {
+        try {
+          const openAiRetry = await generateImage(repairedPrompt, apiKey, {
+            model: resolvedOpenAiImageModel || undefined,
+            size: requestedSize,
+            quality: ASSISTANT_SENT_IMAGE_QUALITY,
+            signal,
+          });
+          let imageBytes: Buffer;
+          try {
+            imageBytes = await readOpenAiGeneratedImageBytes(openAiRetry, signal);
+          } catch {
+            return { status: "failed" };
+          }
+          try {
+            writeGeneratedImageBytes(localRelPath, imageBytes);
+          } catch {
+            tryUnlinkGeneratedImageFile(localRelPath);
+            return { status: "failed" };
+          }
+          await tryGenerateThumbAfterPngWrite(localRelPath);
+          const storedUrl = openAiRetry.url || displayUrl;
+          insertRow({
+            revisedPrompt: openAiRetry.revisedPrompt ?? null,
+            urlForDb: storedUrl,
+            providerTag: "openai",
+            modelUsed: openAiRetry.model,
+          });
+          return successPayload(openAiRetry.revisedPrompt ?? undefined, openAiRetry.model);
+        } catch (retryError) {
+          if (shouldAttemptLenientLocalImageFallback(retryError)) {
+            return deniedResult();
+          }
+          return { status: "failed" };
+        }
+      }
+      let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+      try {
+        localOut = await generateLocalImageBytesByModelId({
+          modelId: lenientFb,
+          promptForModel: repairedPrompt,
+          negativePrompt: sceneOnlyNegativePrompt,
+          size: requestedSize,
+          signal,
+          comfyUiHost: args.prefs.comfyuiHost,
+          comfyUiWorkflows: args.prefs.comfyUiWorkflows,
+          secondaryOllamaHost: args.prefs.secondaryOllamaHost,
+          primaryOllamaHost: config.ollamaHost,
+        });
+      } catch (retryError) {
+        if (shouldAttemptLenientLocalImageFallback(retryError)) {
+          return deniedResult();
+        }
+        return { status: "failed" };
+      }
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
       await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
@@ -516,6 +745,6 @@ export async function runAssistantSentImageGeneration(args: {
       "[assistant-sent-image] generation failed:",
       err instanceof Error ? err.message : err
     );
-    return undefined;
+    return { status: "failed" };
   }
 }

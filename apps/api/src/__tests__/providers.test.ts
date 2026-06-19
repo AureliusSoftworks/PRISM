@@ -2,9 +2,11 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildModelCatalog,
+  checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   embedTextLocal,
   getAuxiliaryProvider,
+  AnthropicProvider,
   LocalOllamaProvider,
   OpenAiProvider,
   openAiModelUsesMaxCompletionTokens,
@@ -73,6 +75,21 @@ describe("selectProvider", () => {
       assert.equal(provider.name, "openai");
     });
   });
+
+  describe("ANTHROPIC mode", () => {
+    it("throws with a clear message when no key is available", () => {
+      assert.throws(
+        () => selectProvider("anthropic"),
+        /Anthropic is selected but no API key is available/
+      );
+    });
+
+    it("returns AnthropicProvider when a key is present", () => {
+      const provider = selectProvider("anthropic", undefined, undefined, "sk-ant-test-key");
+      assert.ok(provider instanceof AnthropicProvider);
+      assert.equal(provider.name, "anthropic");
+    });
+  });
 });
 
 /**
@@ -133,7 +150,7 @@ describe("buildModelCatalog", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("keeps fallback defaults available when discovery is unavailable", async () => {
+  it("does not advertise online providers without matching API keys", async () => {
     globalThis.fetch = (async () =>
       new Response("offline", { status: 503 })) as typeof fetch;
 
@@ -142,7 +159,20 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.defaults.local);
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
+    assert.deepEqual(catalog.online, []);
+  });
+
+  it("keeps fallback defaults available when keyed discovery is unavailable", async () => {
+    globalThis.fetch = (async () =>
+      new Response("offline", { status: 503 })) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test", undefined, "sk-ant-test");
+
+    assert.ok(catalog.defaults.local);
+    assert.equal(catalog.defaults.online, "gpt-4o-mini");
+    assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.equal(catalog.online[0]?.id, catalog.defaults.online);
+    assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
   });
 
   it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {
@@ -190,6 +220,34 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("falls back to IPv4 loopback when catalog discovery hits unreachable localhost", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.startsWith("http://localhost:11434/")) {
+        throw new Error("ECONNREFUSED ::1:11434");
+      }
+      if (url.startsWith("http://127.0.0.1:11434/")) {
+        return new Response(
+          JSON.stringify({
+            models: [{ name: "gemma3:latest" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined);
+
+    assert.ok(catalog.local.some((model) => model.id === "gemma3:latest"));
+    assert.ok(
+      requestedUrls.includes("http://127.0.0.1:11434/api/tags"),
+      `expected IPv4 loopback fallback, got ${JSON.stringify(requestedUrls)}`
+    );
   });
 
   it("merges secondary Ollama host models while preferring primary duplicate names", async () => {
@@ -284,6 +342,50 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(response, "final answer via thinking field");
   });
 
+  it("asks Ollama for JSON object output when jsonMode is enabled", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: '{"ok":true}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "llama3.2",
+      jsonMode: true,
+    });
+
+    assert.equal(requestedBody.format, "json");
+  });
+
+  it("sends JSON Schema to Ollama when provided", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    const schema = {
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+    };
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: '{"ok":true}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "llama3.2",
+      jsonMode: true,
+      jsonSchema: schema,
+    });
+
+    assert.deepEqual(requestedBody.format, schema);
+  });
+
   it("throws a clear error when the model returns only tool_calls", async () => {
     globalThis.fetch = (async () =>
       new Response(
@@ -314,6 +416,125 @@ describe("LocalOllamaProvider secondary routing", () => {
         ),
       /Second Ollama host is not configured/
     );
+  });
+
+  it("does not automatically route to the secondary host when dual routing is off", async () => {
+    let requestedChatUrl = "";
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({ models: [{ name: "llama3.2" }] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      requestedChatUrl = url;
+      assert.ok(init?.body);
+      return new Response(JSON.stringify({ message: { content: "primary ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider({
+      secondaryOllamaHost: "http://192.168.1.77:11434",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "llama3.2",
+    });
+
+    assert.ok(requestedChatUrl.endsWith("/api/chat"));
+    assert.ok(!requestedChatUrl.startsWith("http://192.168.1.77:11434/"));
+  });
+
+  it("routes Prism-owned local work to the secondary host when exact model parity is available", async () => {
+    let requestedChatUrl = "";
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: "llama3.2" },
+              { name: "nomic-embed-text" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      requestedChatUrl = url;
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "secondary ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider("llama3.2", {
+      secondaryOllamaHost: "http://192.168.1.78:11434",
+      experimentalDualOllama: true,
+    });
+    const response = await provider.generateResponse([{ role: "user", content: "title this" }]);
+
+    assert.equal(response, "secondary ok");
+    assert.equal(requestedChatUrl, "http://192.168.1.78:11434/api/chat");
+    assert.equal(requestedBody.model, "llama3.2");
+  });
+});
+
+describe("checkDualOllamaWorkloadStatus", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("enables dual routing only when primary and secondary model sets match exactly", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            { name: "llama3.2" },
+            { name: "nomic-embed-text" },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const status = await checkDualOllamaWorkloadStatus(
+      "http://192.168.1.80:11434",
+      { useCache: false }
+    );
+
+    assert.equal(status.enabled, true);
+    assert.equal(status.modelParity, true);
+    assert.equal(status.reason, "ready");
+    assert.deepEqual(status.sharedModelIds, ["llama3.2", "nomic-embed-text"]);
+  });
+
+  it("disables dual routing and reports missing models when catalogs differ", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      const models = url.includes("192.168.1.81")
+        ? [{ name: "llama3.2" }]
+        : [{ name: "gemma3:latest" }, { name: "llama3.2" }];
+      return new Response(JSON.stringify({ models }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const status = await checkDualOllamaWorkloadStatus(
+      "http://192.168.1.81:11434",
+      { useCache: false }
+    );
+
+    assert.equal(status.enabled, false);
+    assert.equal(status.modelParity, false);
+    assert.equal(status.reason, "model_mismatch");
+    assert.deepEqual(status.missingOnSecondary, ["gemma3:latest"]);
+    assert.deepEqual(status.missingOnPrimary, []);
   });
 });
 
@@ -589,6 +810,59 @@ describe("OpenAiProvider request shape", () => {
     });
 
     assert.equal(body.temperature, 0.91);
+  });
+
+  it("requests JSON object output when jsonMode is enabled", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "gpt-4o-mini",
+      jsonMode: true,
+    });
+
+    assert.deepEqual(body.response_format, { type: "json_object" });
+  });
+
+  it("requests JSON Schema output when a schema is provided", async () => {
+    let body: Record<string, unknown> = {};
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["ok"],
+      properties: { ok: { type: "boolean" } },
+    };
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "json" }], {
+      model: "gpt-4o-mini",
+      jsonMode: true,
+      jsonSchema: schema,
+      jsonSchemaName: "test_schema",
+    });
+
+    assert.deepEqual(body.response_format, {
+      type: "json_schema",
+      json_schema: {
+        name: "test_schema",
+        strict: true,
+        schema,
+      },
+    });
   });
 });
 

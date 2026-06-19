@@ -24,6 +24,7 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
       { id: "gpt-4o-mini", label: "GPT 4o Mini", provider: "openai", isDefault: true },
       { id: "gpt-4o", label: "GPT 4o", provider: "openai" },
       { id: "gpt-4.1-mini", label: "GPT 4.1 Mini", provider: "openai" },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
     ],
     defaults: {
       local: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
@@ -34,6 +35,22 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
 }
 
 describe("resolveAutoModel", () => {
+  it("uses an explicit picker override before a bot preferred model", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      explicitModelOverride: "gpt-4o",
+      botPreferredModel: "gpt-4.1-mini",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "openai",
+      model: "gpt-4o",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
   it("uses a visible bot preferred model before catalog fallbacks", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
@@ -60,6 +77,52 @@ describe("resolveAutoModel", () => {
     assert.deepEqual(resolved, {
       provider: "openai",
       model: "gpt-4o",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
+  it("routes an Anthropic saved online default through Anthropic while in online auto", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      botPreferredModel: "claude-sonnet-4-6",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
+  it("routes a stale Claude override through Anthropic even when the catalog is unavailable", () => {
+    const resolved = resolveAutoModel({
+      provider: "openai",
+      explicitModelOverride: "claude-sonnet-4-6",
+      hiddenModelIds: [],
+      catalog: catalog({ online: [] }),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      usedRequiredLocalFallback: false,
+    });
+  });
+
+  it("does not let an online model preference escalate a local request", () => {
+    const resolved = resolveAutoModel({
+      provider: "local",
+      explicitModelOverride: "claude-sonnet-4-6",
+      botPreferredModel: "gpt-4o",
+      hiddenModelIds: [],
+      catalog: catalog(),
+    });
+
+    assert.deepEqual(resolved, {
+      provider: "local",
+      model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
       usedRequiredLocalFallback: false,
     });
   });

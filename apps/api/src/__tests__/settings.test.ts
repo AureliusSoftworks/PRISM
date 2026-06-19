@@ -1,8 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_ZEN_WALLPAPER_OPACITY,
+  MAX_ZEN_WALLPAPER_OPACITY,
+  MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
+  parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
+  sanitizeAnthropicKeyInput,
+  sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
 } from "../settings.ts";
@@ -24,8 +30,10 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     providerLocked: 0,
     autoMemory: 1,
     composerWritingAssist: 1,
+    experimentalDualOllamaEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
+    hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
     lenientLocalFallbackModel: null,
@@ -34,6 +42,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     comfyUiHost: null,
     preferredLocalImageModel: null,
     preferredOpenAiImageModel: null,
+    preferredZenWallpaperLocalImageModel: null,
+    preferredZenWallpaperOpenAiImageModel: null,
+    zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -93,7 +104,7 @@ describe("resolveNextSettings — displayName", () => {
 });
 
 describe("resolveNextSettings — preferredProvider", () => {
-  it("accepts 'local' and 'openai'", () => {
+  it("accepts 'local', 'openai', and 'anthropic'", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
@@ -102,13 +113,17 @@ describe("resolveNextSettings — preferredProvider", () => {
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
       "openai"
     );
+    assert.equal(
+      resolveNextSettings({ preferredProvider: "anthropic" }, baseline()).preferredProvider,
+      "anthropic"
+    );
   });
 
   it("keeps the stored provider when the field is missing or invalid", () => {
     const current = baseline({ preferredProvider: "openai" });
     assert.equal(resolveNextSettings({}, current).preferredProvider, "openai");
     assert.equal(
-      resolveNextSettings({ preferredProvider: "anthropic" }, current).preferredProvider,
+      resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
     );
   });
@@ -188,6 +203,37 @@ describe("resolveNextSettings — composerWritingAssist", () => {
         current
       ).composerWritingAssist,
       0
+    );
+  });
+});
+
+describe("resolveNextSettings — experimentalDualOllamaEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: true },
+        baseline({ experimentalDualOllamaEnabled: 0 })
+      ).experimentalDualOllamaEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: false },
+        baseline({ experimentalDualOllamaEnabled: 1 })
+      ).experimentalDualOllamaEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ experimentalDualOllamaEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).experimentalDualOllamaEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: "true" as unknown as boolean },
+        current
+      ).experimentalDualOllamaEnabled,
+      1
     );
   });
 });
@@ -536,6 +582,151 @@ describe("resolveNextSettings — openAiApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — Zen Atmosphere model picks", () => {
+  it("stores preferred local wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors" },
+      baseline()
+    );
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+  });
+
+  it("stores preferred OpenAI wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperOpenAiImageModel: "gpt-image-2" },
+      baseline()
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+
+  it("clears wallpaper image model ids with empty strings", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "old-local",
+      preferredZenWallpaperOpenAiImageModel: "old-openai",
+    });
+    const next = resolveNextSettings(
+      {
+        preferredZenWallpaperLocalImageModel: "",
+        preferredZenWallpaperOpenAiImageModel: "",
+      },
+      current
+    );
+    assert.equal(next.preferredZenWallpaperLocalImageModel, null);
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, null);
+  });
+
+  it("keeps stored wallpaper ids when the patch omits them", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors",
+      preferredZenWallpaperOpenAiImageModel: "gpt-image-2",
+    });
+    const next = resolveNextSettings({ theme: "light" }, current);
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere opacity", () => {
+  it("stores numeric and numeric-string opacity values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.28 }, baseline()).zenWallpaperOpacity,
+      0.28
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "0.22" }, baseline()).zenWallpaperOpacity,
+      0.22
+    );
+  });
+
+  it("clamps opacity to the readable wallpaper range", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.01 }, baseline()).zenWallpaperOpacity,
+      MIN_ZEN_WALLPAPER_OPACITY
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.9 }, baseline()).zenWallpaperOpacity,
+      MAX_ZEN_WALLPAPER_OPACITY
+    );
+  });
+
+  it("keeps the stored opacity when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperOpacity: 0.19 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperOpacity, 0.19);
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "nope" }, current).zenWallpaperOpacity,
+      0.19
+    );
+  });
+});
+
+describe("resolveNextSettings — anthropicApiKey", () => {
+  it("non-empty string is a replace", () => {
+    const next = resolveNextSettings({ anthropicApiKey: "sk-ant-abc" }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, {
+      action: "replace",
+      plaintext: "sk-ant-abc",
+    });
+  });
+
+  it("whitespace keeps the stored key", () => {
+    const next = resolveNextSettings({ anthropicApiKey: "   " }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, { action: "keep" });
+  });
+
+  it("explicit null clears the stored key", () => {
+    const next = resolveNextSettings({ anthropicApiKey: null }, baseline());
+    assert.deepEqual(next.anthropicKeyIntent, { action: "clear" });
+  });
+
+  it("strips a pasted `ANTHROPIC_API_KEY=` prefix", () => {
+    const next = resolveNextSettings(
+      { anthropicApiKey: "ANTHROPIC_API_KEY=\"sk-ant-api03-abc\"" },
+      baseline()
+    );
+    assert.deepEqual(next.anthropicKeyIntent, {
+      action: "replace",
+      plaintext: "sk-ant-api03-abc",
+    });
+  });
+});
+
+describe("resolveNextSettings — elevenLabsApiKey", () => {
+  it("non-empty string is a replace", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "xi-abc" }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
+    });
+  });
+
+  it("whitespace keeps the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "   " }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "keep" });
+  });
+
+  it("explicit null clears the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: null }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "clear" });
+  });
+
+  it("strips a pasted `ELEVENLABS_API_KEY=` prefix", () => {
+    const next = resolveNextSettings(
+      { elevenLabsApiKey: "ELEVENLABS_API_KEY=\"xi-abc\"" },
+      baseline()
+    );
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
+    });
+  });
+});
+
 describe("sanitizeOpenAiKeyInput", () => {
   it("pass-through for a clean key", () => {
     assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc123"), "sk-proj-abc123");
@@ -595,6 +786,24 @@ describe("sanitizeOpenAiKeyInput", () => {
   it("returns empty string for all-whitespace / pure quotes", () => {
     assert.equal(sanitizeOpenAiKeyInput("   "), "");
     assert.equal(sanitizeOpenAiKeyInput('""'), "");
+  });
+});
+
+describe("sanitizeAnthropicKeyInput", () => {
+  it("uses the same env-line stripping behavior as OpenAI keys", () => {
+    assert.equal(
+      sanitizeAnthropicKeyInput("ANTHROPIC_API_KEY='sk-ant-api03-abc'"),
+      "sk-ant-api03-abc"
+    );
+  });
+});
+
+describe("sanitizeElevenLabsKeyInput", () => {
+  it("uses the same env-line stripping behavior as OpenAI keys", () => {
+    assert.equal(
+      sanitizeElevenLabsKeyInput("ELEVENLABS_API_KEY='xi-abc'"),
+      "xi-abc"
+    );
   });
 });
 
@@ -670,6 +879,50 @@ describe("resolveNextSettings — comfyUiWorkflows", () => {
     assert.equal(next.comfyUiWorkflows.length, 1);
     assert.equal(next.comfyUiWorkflows[0]?.remotePath, "default/workflows/foo.json");
     assert.equal(next.comfyUiWorkflows[0]?.workflow, undefined);
+  });
+});
+
+describe("resolveNextSettings — hiddenComfyUiWorkflowIds", () => {
+  it("keeps current hidden workflows when the field is omitted", () => {
+    const current = JSON.stringify(["comfyui-remote:default%2Fworkflows%2Fhidden.json"]);
+    const next = resolveNextSettings(
+      {},
+      baseline({ hiddenComfyUiWorkflowIds: current })
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+    ]);
+  });
+
+  it("accepts only ComfyUI workflow model ids", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenComfyUiWorkflowIds: [
+          " comfyui-remote:default%2Fworkflows%2Fhidden.json ",
+          "comfyui-workflow:legacy",
+          "llama3.2",
+          "not-a-workflow",
+        ],
+      },
+      baseline()
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+      "comfyui-workflow:legacy",
+    ]);
+  });
+
+  it("parses stored hidden workflows defensively", () => {
+    assert.deepEqual(
+      parseHiddenComfyUiWorkflowIds(
+        JSON.stringify([
+          "comfyui-remote:workflows%2Fscene.json",
+          "comfyui-remote:workflows%2Fscene.json",
+          "gpt-5",
+        ])
+      ),
+      ["comfyui-remote:workflows%2Fscene.json"]
+    );
   });
 });
 

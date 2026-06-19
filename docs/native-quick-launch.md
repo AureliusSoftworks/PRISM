@@ -13,7 +13,8 @@ prism ios
 prism phone
 prism mac-client
 prism mac-server
-prism web
+prism up
+prism down
 prism standalone
 prism standalone-win 0.2.0
 prism standalone-dev
@@ -28,10 +29,11 @@ SIMULATOR_ID="Simulator UDID" prism ios
 PHONE_DEVICE_ID="Device UDID" prism phone
 ```
 
-`prism web` and `prism standalone-dev` are the long-lived commands in this set:
-- `prism web` runs the browser dev server flow.
+`prism up` and `prism standalone-dev` are the long-lived commands in this set:
+- `prism up` runs the combined API + web dev flow.
+- `prism down` stops the combined API + web dev flow.
 - `prism standalone` opens the latest macOS desktop installer DMG (building one if needed).
-- `prism standalone-win <version> [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page.
+- `prism standalone-win [version] [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page. If `version` is omitted, the root `package.json` version is used.
 - `prism standalone-dev` runs the desktop standalone dev flow.
 - `prism reset` performs a local factory reset (prompts unless `--force`).
 
@@ -213,16 +215,23 @@ uploads `Prism-Server-Setup-v<version>-win-x64.exe` and the optional portable
 
 ## Web Dev Server
 
-Front-end iteration in the browser. Runs `next dev` on
-[http://localhost:18788](http://localhost:18788) and stays attached to the
-terminal — Ctrl+C stops it cleanly. Assumes the API is already running
-elsewhere (typically via `prism mac-server`).
+Browser + API iteration in one command. Runs the combined dev launcher and
+starts both API ([http://localhost:18787](http://localhost:18787)) and web
+([http://localhost:18788](http://localhost:18788)) in one foreground session.
+Use Ctrl+C to stop the running foreground process, or run `prism down` from
+another terminal to free both ports.
 
 ```bash
-prism web
+prism up
 ```
 
-Equivalent to `npm run dev:web` from the repo root.
+Equivalent to `npm run dev` from the repo root.
+
+To stop existing local API + web listeners:
+
+```bash
+prism down
+```
 
 ## Desktop Standalone Installer
 
@@ -243,6 +252,21 @@ prism standalone-dev
 ```
 
 Equivalent to `npm run desktop` from the repo root.
+
+## Shared Version Source
+
+Use this command to update the release version in one shot:
+
+```bash
+npm run version:set -- --version 0.2.0 --build 11
+```
+
+What this updates automatically:
+- root/workspace package versions
+- web version label (`PRISM_APP_VERSION`)
+- API/discovery server version (`PRISM_SERVER_VERSION`)
+- iOS `MARKETING_VERSION` (and `CURRENT_PROJECT_VERSION` when `--build` is provided)
+- desktop Cargo version and Windows server installer version
 
 ## Factory Reset
 

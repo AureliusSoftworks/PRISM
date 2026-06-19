@@ -16,12 +16,21 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Cancels in-flight provider work when the originating chat request is stopped. */
+  signal?: AbortSignal;
+  /** Ask providers that support it to constrain the visible reply to a JSON object. */
+  jsonMode?: boolean;
+  /** Optional JSON Schema for providers that support structured JSON output. */
+  jsonSchema?: Record<string, unknown>;
+  jsonSchemaName?: string;
 }
+
+export type ProviderName = "local" | "openai" | "anthropic";
 
 export interface ModelCatalogEntry {
   id: string;
   label: string;
-  provider: "local" | "openai";
+  provider: ProviderName;
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
@@ -44,8 +53,28 @@ export interface LocalModelHostStatus {
   modelCount: number;
 }
 
+export interface DualOllamaWorkloadStatus {
+  configured: boolean;
+  enabled: boolean;
+  primaryReachable: boolean;
+  secondaryReachable: boolean;
+  modelParity: boolean;
+  primaryModelCount: number;
+  secondaryModelCount: number;
+  sharedModelIds: string[];
+  missingOnPrimary: string[];
+  missingOnSecondary: string[];
+  reason:
+    | "not_configured"
+    | "primary_unreachable"
+    | "secondary_unreachable"
+    | "empty_catalog"
+    | "model_mismatch"
+    | "ready";
+}
+
 export interface LlmProvider {
-  name: "local" | "openai";
+  name: ProviderName;
   generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions
@@ -57,15 +86,32 @@ interface OpenAiConfig {
   apiKey: string;
 }
 
+interface AnthropicConfig {
+  apiKey: string;
+}
+
+interface DualOllamaWorkloadOptions {
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllama?: boolean;
+}
+
 const config = getAppConfig();
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
+const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+export const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
 const OPENAI_FALLBACK_MODELS = [
   OPENAI_DEFAULT_MODEL,
   "gpt-4o",
   "gpt-4.1-mini",
   "gpt-4.1",
+] as const;
+const ANTHROPIC_FALLBACK_MODELS = [
+  ANTHROPIC_DEFAULT_MODEL,
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-sonnet-4-5-20250929",
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
   "gpt-",
@@ -73,6 +119,8 @@ const OPENAI_CHAT_MODEL_PREFIXES = [
   "o3",
   "o4",
 ] as const;
+const ANTHROPIC_API_VERSION = "2023-06-01";
+const ANTHROPIC_CHAT_MODEL_PREFIXES = ["claude-"] as const;
 
 /**
  * Chat models whose API shape differs from classic GPT-4: completion token
@@ -130,13 +178,23 @@ export function fallbackEmbedding(text: string): number[] {
   return vector.map((value) => value / magnitude);
 }
 
-export async function embedTextLocal(text: string): Promise<number[]> {
+export async function embedTextLocal(
+  text: string,
+  options: DualOllamaWorkloadOptions = {}
+): Promise<number[]> {
+  const requestedModel = config.ollamaEmbeddingModel || "nomic-embed-text";
+  const secondaryModel = await resolveDualOllamaWorkloadModelId(
+    requestedModel,
+    options
+  );
+  const ollamaHost = secondaryModel ? options.secondaryOllamaHost!.trim() : config.ollamaHost;
+  const model = secondaryModel ?? requestedModel;
   try {
-    const response = await fetch(`${config.ollamaHost}/api/embeddings`, {
+    const response = await fetch(`${ollamaHost}/api/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: config.ollamaEmbeddingModel || "nomic-embed-text",
+        model,
         prompt: text
       })
     });
@@ -262,7 +320,7 @@ export function parseSecondaryOllamaModelId(id: string): string | null {
 
 function toCatalogEntry(
   id: string,
-  provider: "local" | "openai",
+  provider: ProviderName,
   defaultId: string,
   options: {
     label?: string;
@@ -298,12 +356,32 @@ function isAllowedOpenAiChatModel(id: string): boolean {
   return OPENAI_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
+function isAllowedAnthropicChatModel(id: string): boolean {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return false;
+  return ANTHROPIC_CHAT_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
+  return (await discoverLocalModels(ollamaHost)).modelIds;
+}
+
+async function discoverLocalModels(
+  ollamaHost: string
+): Promise<{ reachable: boolean; modelIds: string[] }> {
+  for (const host of localModelHostCandidates(ollamaHost)) {
+    const modelIds = await fetchLocalModelIds(host);
+    if (modelIds) return { reachable: true, modelIds };
+  }
+  return { reachable: false, modelIds: [] };
+}
+
+async function fetchLocalModelIds(ollamaHost: string): Promise<string[] | null> {
   try {
     const response = await fetch(`${ollamaHost}/api/tags`, {
       signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
     });
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const payload = (await response.json()) as {
       models?: Array<{ name?: unknown; model?: unknown }>;
     };
@@ -318,23 +396,17 @@ async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
         )
     );
   } catch {
-    return [];
+    return null;
   }
 }
 
-export async function checkLocalModelHostStatus(
-  ollamaHost: string | null | undefined
-): Promise<LocalModelHostStatus> {
-  const normalizedHost = ollamaHost?.trim();
-  if (!normalizedHost) {
-    return { configured: false, reachable: false, modelCount: 0 };
-  }
-  const hostCandidates = [normalizedHost];
-  const seenCandidates = new Set<string>([normalizedHost]);
+function localModelHostCandidates(ollamaHost: string): string[] {
+  const hostCandidates = [ollamaHost];
+  const seenCandidates = new Set<string>([ollamaHost]);
   try {
     // Some local setups resolve `localhost` to IPv6 first (::1) even when
     // Ollama only listens on IPv4. Probe 127.0.0.1 as a fallback.
-    const parsedHost = new URL(normalizedHost);
+    const parsedHost = new URL(ollamaHost);
     const hostname = parsedHost.hostname.toLowerCase();
     if (
       hostname === "localhost" ||
@@ -344,7 +416,7 @@ export async function checkLocalModelHostStatus(
       hostname === "::ffff:127.0.0.1" ||
       hostname === "host.docker.internal"
     ) {
-      const loopbackIpv4 = new URL(normalizedHost);
+      const loopbackIpv4 = new URL(ollamaHost);
       loopbackIpv4.hostname = "127.0.0.1";
       const loopbackIpv4Candidate = loopbackIpv4.toString().replace(/\/$/, "");
       if (!seenCandidates.has(loopbackIpv4Candidate)) {
@@ -352,8 +424,6 @@ export async function checkLocalModelHostStatus(
         seenCandidates.add(loopbackIpv4Candidate);
       }
 
-      // If this API's primary host is pinned to a LAN IP in env, also probe
-      // that address for loopback inputs.
       const primaryHostCandidate = config.ollamaHost.trim();
       if (primaryHostCandidate && !seenCandidates.has(primaryHostCandidate)) {
         hostCandidates.push(primaryHostCandidate);
@@ -363,35 +433,175 @@ export async function checkLocalModelHostStatus(
   } catch {
     // Keep the original candidate; malformed hosts are treated as unreachable.
   }
+  return hostCandidates;
+}
 
-  for (const host of hostCandidates) {
-    try {
-      const response = await fetch(`${host}/api/tags`, {
-        signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        continue;
-      }
-      const payload = (await response.json()) as {
-        models?: Array<{ name?: unknown; model?: unknown }>;
-      };
-      const modelIds = uniqueModelIds(
-        (payload.models ?? [])
-          .map((model) =>
-            typeof model.name === "string"
-              ? model.name
-              : typeof model.model === "string"
-                ? model.model
-                : ""
-          )
-      );
-      return { configured: true, reachable: true, modelCount: modelIds.length };
-    } catch {
-      // Try next host candidate.
+export async function checkLocalModelHostStatus(
+  ollamaHost: string | null | undefined
+): Promise<LocalModelHostStatus> {
+  const normalizedHost = ollamaHost?.trim();
+  if (!normalizedHost) {
+    return { configured: false, reachable: false, modelCount: 0 };
+  }
+
+  const discovered = await discoverLocalModels(normalizedHost);
+  return {
+    configured: true,
+    reachable: discovered.reachable,
+    modelCount: discovered.modelIds.length,
+  };
+}
+
+const dualOllamaWorkloadStatusCache = new Map<
+  string,
+  { expiresAt: number; status: DualOllamaWorkloadStatus }
+>();
+
+function sortedModelIds(ids: readonly string[]): string[] {
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueSortedModelIds(ids: readonly string[]): string[] {
+  return sortedModelIds(uniqueModelIds([...ids]));
+}
+
+function disabledDualOllamaStatus(
+  reason: DualOllamaWorkloadStatus["reason"],
+  overrides: Partial<DualOllamaWorkloadStatus> = {}
+): DualOllamaWorkloadStatus {
+  return {
+    configured: reason !== "not_configured",
+    enabled: false,
+    primaryReachable: false,
+    secondaryReachable: false,
+    modelParity: false,
+    primaryModelCount: 0,
+    secondaryModelCount: 0,
+    sharedModelIds: [],
+    missingOnPrimary: [],
+    missingOnSecondary: [],
+    reason,
+    ...overrides,
+  };
+}
+
+export async function checkDualOllamaWorkloadStatus(
+  secondaryOllamaHost: string | null | undefined,
+  options: { useCache?: boolean } = {}
+): Promise<DualOllamaWorkloadStatus> {
+  const secondaryHost = secondaryOllamaHost?.trim();
+  if (!secondaryHost) {
+    return disabledDualOllamaStatus("not_configured", { configured: false });
+  }
+
+  const cacheKey = `${config.ollamaHost} -> ${secondaryHost}`;
+  const useCache = options.useCache !== false;
+  if (useCache) {
+    const cached = dualOllamaWorkloadStatusCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.status;
     }
   }
 
-  return { configured: true, reachable: false, modelCount: 0 };
+  const [primary, secondary] = await Promise.all([
+    discoverLocalModels(config.ollamaHost),
+    discoverLocalModels(secondaryHost),
+  ]);
+  const primaryModelIds = uniqueSortedModelIds(primary.modelIds);
+  const secondaryModelIds = uniqueSortedModelIds(secondary.modelIds);
+  const primarySet = new Set(primaryModelIds);
+  const secondarySet = new Set(secondaryModelIds);
+  const sharedModelIds = primaryModelIds.filter((id) => secondarySet.has(id));
+  const missingOnPrimary = secondaryModelIds.filter((id) => !primarySet.has(id));
+  const missingOnSecondary = primaryModelIds.filter((id) => !secondarySet.has(id));
+  const primaryModelCount = primaryModelIds.length;
+  const secondaryModelCount = secondaryModelIds.length;
+
+  let status: DualOllamaWorkloadStatus;
+  if (!primary.reachable) {
+    status = disabledDualOllamaStatus("primary_unreachable", {
+      configured: true,
+      primaryReachable: false,
+      secondaryReachable: secondary.reachable,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (!secondary.reachable) {
+    status = disabledDualOllamaStatus("secondary_unreachable", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: false,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (primaryModelCount === 0 || secondaryModelCount === 0) {
+    status = disabledDualOllamaStatus("empty_catalog", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (missingOnPrimary.length > 0 || missingOnSecondary.length > 0) {
+    status = disabledDualOllamaStatus("model_mismatch", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else {
+    status = {
+      configured: true,
+      enabled: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      modelParity: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary: [],
+      missingOnSecondary: [],
+      reason: "ready",
+    };
+  }
+
+  if (useCache) {
+    dualOllamaWorkloadStatusCache.set(cacheKey, {
+      expiresAt: Date.now() + DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS,
+      status,
+    });
+  }
+  return status;
+}
+
+async function resolveDualOllamaWorkloadModelId(
+  requestedModel: string,
+  options: DualOllamaWorkloadOptions
+): Promise<string | null> {
+  if (!options.experimentalDualOllama || !options.secondaryOllamaHost?.trim()) {
+    return null;
+  }
+  if (parseSecondaryOllamaModelId(requestedModel)) {
+    return null;
+  }
+  const status = await checkDualOllamaWorkloadStatus(options.secondaryOllamaHost);
+  if (!status.enabled || !status.sharedModelIds.includes(requestedModel)) {
+    return null;
+  }
+  return requestedModel;
 }
 
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
@@ -416,25 +626,66 @@ async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> 
   }
 }
 
+async function discoverAnthropicModelIds(anthropicApiKey?: string): Promise<string[]> {
+  if (!anthropicApiKey) return [];
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      },
+      signal: AbortSignal.timeout(REMOTE_TAGS_PROBE_TIMEOUT_MS),
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    return uniqueModelIds(
+      (payload.data ?? [])
+        .map((model) => (typeof model.id === "string" ? model.id : ""))
+        .filter(isAllowedAnthropicChatModel)
+        .sort((a, b) => a.localeCompare(b))
+    );
+  } catch {
+    return [];
+  }
+}
+
 export async function buildModelCatalog(
   openAiApiKey?: string,
-  secondaryOllamaHost?: string | null
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
 ): Promise<ModelCatalog> {
-  const [discoveredLocal, discoveredSecondaryLocal, discoveredOnline] = await Promise.all([
+  const [
+    discoveredLocal,
+    discoveredSecondaryLocal,
+    discoveredOpenAi,
+    discoveredAnthropic,
+  ] = await Promise.all([
     discoverLocalModelIds(config.ollamaHost),
     secondaryOllamaHost ? discoverLocalModelIds(secondaryOllamaHost) : Promise.resolve([]),
     discoverOpenAiModelIds(openAiApiKey),
+    discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
   const secondaryLocalIds = removeModelIdsWithLabels(
     uniqueModelIdsByLabel(discoveredSecondaryLocal),
     localIds
   );
-  const onlineIds = uniqueModelIds([
-    OPENAI_DEFAULT_MODEL,
-    ...discoveredOnline,
-    ...OPENAI_FALLBACK_MODELS,
-  ]);
+  const onlineIds = openAiApiKey
+    ? uniqueModelIds([
+        OPENAI_DEFAULT_MODEL,
+        ...discoveredOpenAi,
+        ...OPENAI_FALLBACK_MODELS,
+      ])
+    : [];
+  const anthropicIds = anthropicApiKey
+    ? uniqueModelIds([
+        ANTHROPIC_DEFAULT_MODEL,
+        ...discoveredAnthropic,
+        ...ANTHROPIC_FALLBACK_MODELS,
+      ])
+    : [];
   return {
     local: [
       ...localIds.map((id) =>
@@ -451,7 +702,10 @@ export async function buildModelCatalog(
         })
       ),
     ],
-    online: onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
+    online: [
+      ...onlineIds.map((id) => toCatalogEntry(id, "openai", OPENAI_DEFAULT_MODEL)),
+      ...anthropicIds.map((id) => toCatalogEntry(id, "anthropic", ANTHROPIC_DEFAULT_MODEL)),
+    ],
     defaults: {
       local: config.ollamaModel,
       online: OPENAI_DEFAULT_MODEL,
@@ -462,9 +716,11 @@ export async function buildModelCatalog(
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
   private readonly secondaryOllamaHost: string | null;
+  private readonly experimentalDualOllama: boolean;
 
-  public constructor(options: { secondaryOllamaHost?: string | null } = {}) {
+  public constructor(options: DualOllamaWorkloadOptions = {}) {
     this.secondaryOllamaHost = options.secondaryOllamaHost?.trim() || null;
+    this.experimentalDualOllama = options.experimentalDualOllama === true;
   }
 
   public async generateResponse(
@@ -476,8 +732,15 @@ export class LocalOllamaProvider implements LlmProvider {
     if (secondaryModel && !this.secondaryOllamaHost) {
       throw new Error("Second Ollama host is not configured.");
     }
-    const ollamaHost = secondaryModel ? this.secondaryOllamaHost! : config.ollamaHost;
-    const model = secondaryModel ?? requestedModel;
+    const dualWorkloadModel = secondaryModel
+      ? null
+      : await resolveDualOllamaWorkloadModelId(requestedModel, {
+          secondaryOllamaHost: this.secondaryOllamaHost,
+          experimentalDualOllama: this.experimentalDualOllama,
+        });
+    const ollamaHost =
+      secondaryModel || dualWorkloadModel ? this.secondaryOllamaHost! : config.ollamaHost;
+    const model = secondaryModel ?? dualWorkloadModel ?? requestedModel;
     const ollamaOptions: Record<string, unknown> = {};
     if (typeof options?.temperature === "number") {
       ollamaOptions.temperature = options.temperature;
@@ -495,6 +758,11 @@ export class LocalOllamaProvider implements LlmProvider {
       // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
       think: false,
     };
+    if (options?.jsonSchema) {
+      requestBody.format = options.jsonSchema;
+    } else if (options?.jsonMode) {
+      requestBody.format = "json";
+    }
     if (Object.keys(ollamaOptions).length > 0) {
       requestBody.options = ollamaOptions;
     }
@@ -502,7 +770,8 @@ export class LocalOllamaProvider implements LlmProvider {
     const response = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       throw new Error(`Local model request failed (${response.status})`);
@@ -540,7 +809,10 @@ export class LocalOllamaProvider implements LlmProvider {
   }
 
   public async embedText(text: string): Promise<number[]> {
-    return embedTextLocal(text);
+    return embedTextLocal(text, {
+      secondaryOllamaHost: this.secondaryOllamaHost,
+      experimentalDualOllama: this.experimentalDualOllama,
+    });
   }
 }
 
@@ -561,6 +833,18 @@ export class OpenAiProvider implements LlmProvider {
       model: modelId,
       messages
     };
+    if (options?.jsonSchema) {
+      requestBody.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: options.jsonSchemaName?.trim() || "structured_response",
+          strict: true,
+          schema: options.jsonSchema,
+        },
+      };
+    } else if (options?.jsonMode) {
+      requestBody.response_format = { type: "json_object" };
+    }
     if (
       typeof options?.temperature === "number" &&
       !openAiModelUsesFixedDefaultTemperature(modelId)
@@ -581,7 +865,8 @@ export class OpenAiProvider implements LlmProvider {
         "content-type": "application/json",
         authorization: `Bearer ${this.openAiConfig.apiKey}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
@@ -625,6 +910,88 @@ export class OpenAiProvider implements LlmProvider {
   }
 }
 
+export class AnthropicProvider implements LlmProvider {
+  public readonly name = "anthropic" as const;
+  private readonly anthropicConfig: AnthropicConfig;
+
+  public constructor(anthropicConfig: AnthropicConfig) {
+    this.anthropicConfig = anthropicConfig;
+  }
+
+  public async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions
+  ): Promise<string> {
+    const modelId = options?.model?.trim() || ANTHROPIC_DEFAULT_MODEL;
+    const systemMessages = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content.trim())
+      .filter(Boolean);
+    const conversationMessages = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role as "user" | "assistant",
+        content: message.content,
+      }));
+    const requestBody: Record<string, unknown> = {
+      model: modelId,
+      max_tokens: options?.maxTokens ?? 2048,
+      messages: conversationMessages.length > 0
+        ? conversationMessages
+        : [{ role: "user", content: "" }],
+    };
+    if (systemMessages.length > 0) {
+      requestBody.system = systemMessages.join("\n\n");
+    }
+    if (options?.jsonSchema || options?.jsonMode) {
+      const jsonInstruction = options.jsonSchema
+        ? `Return only a JSON object matching this JSON Schema: ${JSON.stringify(options.jsonSchema)}`
+        : "Return only a JSON object.";
+      requestBody.system =
+        typeof requestBody.system === "string" && requestBody.system.length > 0
+          ? `${requestBody.system}\n\n${jsonInstruction}`
+          : jsonInstruction;
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": this.anthropicConfig.apiKey,
+        "anthropic-version": ANTHROPIC_API_VERSION,
+      },
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
+    });
+    if (!response.ok) {
+      const detail = await readOpenAiErrorMessage(response);
+      console.error(
+        `[anthropic] messages failed status=${response.status} model=${modelId} detail=${
+          detail || "<empty body>"
+        }`
+      );
+      throw new Error(formatOpenAiError("Anthropic request failed", response.status, detail));
+    }
+    const payload = (await response.json()) as {
+      content?: Array<{ type?: string; text?: unknown }>;
+      stop_reason?: string | null;
+    };
+    const content = (payload.content ?? [])
+      .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+      .join("")
+      .trim();
+    if (content) return content;
+    if (payload.stop_reason === "refusal") {
+      return "I cannot help with that request.";
+    }
+    throw new Error("Anthropic returned an empty response.");
+  }
+
+  public async embedText(text: string): Promise<number[]> {
+    return embedTextLocal(text);
+  }
+}
+
 /**
  * Resolved local model for Prism-only lanes (titles, summarization, memory
  * inference, Coffee router, image prompt suggestions). Per-user Settings
@@ -638,9 +1005,12 @@ export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null
   return config.ollamaAuxiliaryModel || "llama3.2";
 }
 
-export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmProvider {
+export function getAuxiliaryProvider(
+  prismDefaultLlmModel?: string | null,
+  options: DualOllamaWorkloadOptions = {}
+): LlmProvider {
   const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
-  const inner = new LocalOllamaProvider();
+  const inner = new LocalOllamaProvider(options);
   return {
     name: "local",
     async generateResponse(
@@ -653,7 +1023,7 @@ export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmP
       });
     },
     async embedText(text: string): Promise<number[]> {
-      return embedTextLocal(text);
+      return inner.embedText(text);
     }
   };
 }
@@ -687,9 +1057,10 @@ function formatOpenAiError(
  * mislabelling the reply.
  */
 export function selectProvider(
-  preferredProvider: "local" | "openai",
+  preferredProvider: ProviderName,
   openAiApiKey?: string,
-  secondaryOllamaHost?: string | null
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
 ): LlmProvider {
   if (preferredProvider === "openai") {
     if (!openAiApiKey) {
@@ -698,6 +1069,14 @@ export function selectProvider(
       );
     }
     return new OpenAiProvider({ apiKey: openAiApiKey });
+  }
+  if (preferredProvider === "anthropic") {
+    if (!anthropicApiKey) {
+      throw new Error(
+        "Anthropic is selected but no API key is available. Save a key in Settings or set ANTHROPIC_API_KEY in the server environment."
+      );
+    }
+    return new AnthropicProvider({ apiKey: anthropicApiKey });
   }
   return new LocalOllamaProvider({ secondaryOllamaHost });
 }

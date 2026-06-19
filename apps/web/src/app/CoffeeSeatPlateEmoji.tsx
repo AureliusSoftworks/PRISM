@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type JSX } from "react";
+import type { BotVoicePreset } from "@localai/shared";
 import { applyCoffeeSeatBlink } from "./coffee-seat-plate-blink.ts";
 
 function randomBetween(lo: number, hi: number): number {
@@ -24,6 +25,7 @@ export type CoffeeSeatPlateEmojiProps = {
   scheduleKey: string;
   baseText: string;
   rotateDeg: number;
+  voicePreset: BotVoicePreset;
   className: string;
 };
 
@@ -37,6 +39,7 @@ export function CoffeeSeatPlateEmoji({
   scheduleKey,
   baseText,
   rotateDeg,
+  voicePreset,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const [eyesOpen, setEyesOpen] = useState(true);
@@ -91,6 +94,7 @@ export function CoffeeSeatPlateEmoji({
   return (
     <span
       className={className}
+      data-voice-preset={voicePreset}
       style={{
         transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
       }}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { formatBotMentionMarkdown } from "./botMention.ts";
 import {
   applyPlainTextWordBackspace,
+  applyTaggedMentionBoundaryDelete,
   applyTaggedMentionWordBackspace,
 } from "./plainTextWordBackspace.ts";
 
@@ -75,5 +76,36 @@ describe("applyTaggedMentionWordBackspace", () => {
 
   it("returns null for a range selection", () => {
     assert.equal(applyTaggedMentionWordBackspace("abc", 0, 2), null);
+  });
+});
+
+describe("applyTaggedMentionBoundaryDelete", () => {
+  it("removes an entire committed mention on backspace from after the chip", () => {
+    const md = formatBotMentionMarkdown({ id: "x", name: "Harry Potter" });
+    const text = `Hi ${md}!`;
+    const caret = "Hi ".length + md.length;
+    const out = applyTaggedMentionBoundaryDelete(text, caret, caret, "backward");
+    assert.ok(out);
+    assert.equal(out.value, "Hi !");
+    assert.equal(out.caret, "Hi ".length);
+  });
+
+  it("removes an entire committed mention on delete from before the chip", () => {
+    const md = formatBotMentionMarkdown({ id: "x", name: "Harry Potter" });
+    const text = `Hi ${md}!`;
+    const caret = "Hi ".length;
+    const out = applyTaggedMentionBoundaryDelete(text, caret, caret, "forward");
+    assert.ok(out);
+    assert.equal(out.value, "Hi !");
+    assert.equal(out.caret, "Hi ".length);
+  });
+
+  it("returns null away from mention boundaries", () => {
+    const md = formatBotMentionMarkdown({ id: "x", name: "Harry Potter" });
+    const text = `Hi ${md}!`;
+    assert.equal(
+      applyTaggedMentionBoundaryDelete(text, "Hi [Harry".length, "Hi [Harry".length, "backward"),
+      null
+    );
   });
 });

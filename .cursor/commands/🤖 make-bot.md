@@ -6,11 +6,16 @@ You are creating an import-ready PRISM bot export by running the `/_make-bot` sk
 
 Build the most realistic, fully fleshed-out bot possible for the requested target, with rich memory coverage and accurate profile attributes (especially for real people).
 
+## Runbook reference
+
+Use `.cursor/runbooks/make_bot_export.md` as the operational checklist for the workflow: research plan, source checks, glyph/color choice, JSON save path, validation, and import opt-in handling. The `/_make-bot` skill remains the source of truth for detailed schema and quality rules.
+
 ## Required behavior
 
 1. Parse the command input as the bot target (for example: `/make-bot ada lovelace`).
 2. If no target is provided, run random-target mode exactly as defined in `/_make-bot`.
 3. Immediately load and follow the `/_make-bot` skill instructions end-to-end.
+4. Follow `.cursor/runbooks/make_bot_export.md` as the step-by-step execution reference, without replacing or weakening any `/_make-bot` requirements.
 
 ## Adaptive research depth (must decide before generation)
 

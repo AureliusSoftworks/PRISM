@@ -1,7 +1,8 @@
 # Prism
 
 <p align="center">
-  <img src="apps/web/public/icon-192.png" alt="Prism logo" width="96" height="96" />
+  <img alt="Prism logo" width="96" height="96" src="https://github.com/user-attachments/assets/8cea9f54-52de-4fa4-92b9-fce3460ba34a" />
+
 </p>
 
 <p align="center">
@@ -120,7 +121,7 @@ npm run dev
 - Chat fork/export flows
 - Persona bots with configurable behavior
 - In-thread image generation + image library
-- Memory pipelines for continuity (with mode-aware behavior)
+- Memory pipelines for continuity, including Coffee bots learning likely facts from each other
 - Dark/light theme and responsive UI
 
 ---

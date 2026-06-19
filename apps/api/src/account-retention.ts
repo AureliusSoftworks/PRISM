@@ -7,9 +7,25 @@ export function getInactiveAccountCutoff(now = new Date()): Date {
   );
 }
 
+export function resolveActivityTimestamp(
+  lastActiveAt: string | null | undefined,
+  createdAt: string
+): string {
+  const trimmedLastActive = typeof lastActiveAt === "string" ? lastActiveAt.trim() : "";
+  return trimmedLastActive.length > 0 ? trimmedLastActive : createdAt;
+}
+
 export function isInactiveAccount(
   lastActiveAt: string,
   now = new Date()
 ): boolean {
   return new Date(lastActiveAt).getTime() < getInactiveAccountCutoff(now).getTime();
+}
+
+export function isInactiveAccountWithFallback(
+  lastActiveAt: string | null | undefined,
+  createdAt: string,
+  now = new Date()
+): boolean {
+  return isInactiveAccount(resolveActivityTimestamp(lastActiveAt, createdAt), now);
 }

@@ -1,16 +1,29 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
 import { embedTextLocal, fallbackEmbedding } from "./providers.ts";
-import type { MemoryCategory, MemoryTier, UserMemory } from "@localai/shared";
-import { classifyMemoryCategoryFromText } from "@localai/shared";
+import type { MemoryCategory, MemorySource, MemoryTier, UserMemory } from "@localai/shared";
+import {
+  classifyMemoryCategoryFromText,
+  memoryLongTermScore as sharedMemoryLongTermScore,
+  memoryQualifiesLongTerm as sharedMemoryQualifiesLongTerm,
+} from "@localai/shared";
 import type { MemoryCandidate } from "./memory-extraction.ts";
 import {
   analyzeMemoryIntent,
+  extractBotPreferredAddressMemoryCandidates,
   estimateMemoryDurability,
+  extractBotJudgmentMemoryCandidates,
+  extractCoffeeObserverMemoryCandidates,
   extractMemoryCandidates,
 } from "./memory-extraction.ts";
 
-export { analyzeMemoryIntent, extractMemoryCandidates };
+export {
+  analyzeMemoryIntent,
+  extractBotPreferredAddressMemoryCandidates,
+  extractCoffeeObserverMemoryCandidates,
+  extractBotJudgmentMemoryCandidates,
+  extractMemoryCandidates,
+};
 
 interface StoredMemoryPayload {
   text: string;
@@ -108,12 +121,7 @@ const CULMINATION_MIN_SIMILARITY = 0.55;
 const CULMINATION_CONTRADICTION_SIMILARITY = 0.78;
 const CULMINATION_LOOKBACK_LIMIT = 80;
 const CULMINATION_MAX_DETAILS = 4;
-export const LONG_TERM_MEMORY_SCORE = 0.95;
 export const ABOUT_YOU_MEMORY_SOURCE = "about_you";
-const LONG_TERM_HIGH_TRUTH_SCORE = 0.9;
-const LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH = 0.5;
-const LONG_TERM_DURABILITY_PROMOTION = 0.72;
-const LONG_TERM_DURABILITY_TRUTH_FLOOR = 0.78;
 export const DEMOTED_LONG_TERM_CONFIDENCE = 0.34;
 const MEMORY_TARGET_LOOKBACK_LIMIT = 20;
 const MEMORY_TARGET_SCORE_THRESHOLD = 0.55;
@@ -194,46 +202,32 @@ function explicitMemoryDurability(durability: number | undefined): number | unde
     : undefined;
 }
 
-function memoryTruthScore(confidence: number, certainty = confidence): number {
-  const safeConfidence = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0;
-  const safeCertainty = Number.isFinite(certainty) ? Math.max(0, Math.min(1, certainty)) : safeConfidence;
-  return (safeConfidence + safeCertainty) / 2;
-}
-
 export function memoryLongTermScore(
   confidence: number,
   certainty = confidence,
   durability = 0
 ): number {
-  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
-  return (memoryTruthScore(confidence, certainty) + safeDurability) / 2;
+  return sharedMemoryLongTermScore(confidence, certainty, durability);
 }
 
 export function memoryQualifiesLongTerm(
   confidence: number,
   certainty = confidence,
-  durability = 0
+  durability = 0,
+  source: MemorySource | string | null = "direct"
 ): boolean {
-  const truthScore = memoryTruthScore(confidence, certainty);
-  const safeDurability = Number.isFinite(durability) ? Math.max(0, Math.min(1, durability)) : 0;
-  return (
-    truthScore >= LONG_TERM_MEMORY_SCORE ||
-    (
-      truthScore >= LONG_TERM_HIGH_TRUTH_SCORE &&
-      safeDurability >= LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH
-    ) ||
-    (safeDurability >= LONG_TERM_DURABILITY_PROMOTION && truthScore >= LONG_TERM_DURABILITY_TRUTH_FLOOR)
-  );
+  return sharedMemoryQualifiesLongTerm({ confidence, certainty, durability, source });
 }
 
 export function normalizeMemoryTier(
   tier: MemoryTier | string | null | undefined,
   confidence: number,
   certainty = confidence,
-  durability = 0
+  durability = 0,
+  source: MemorySource | string | null = "direct"
 ): MemoryTier {
-  if (tier === "short_term" || tier === "long_term") return tier;
-  return memoryQualifiesLongTerm(confidence, certainty, durability)
+  if (tier === "short_term") return "short_term";
+  return memoryQualifiesLongTerm(confidence, certainty, durability, source)
     ? "long_term"
     : "short_term";
 }
@@ -247,6 +241,33 @@ function normalizedMemoryText(text: string): string {
     .trim()
     .replace(MEMORY_CUE_PREFIX_PATTERN, "")
     .trim();
+}
+
+export function hasMemoryTextForBot(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  botId: string | null,
+  text: string
+): boolean {
+  const normalizedTarget = normalizedMemoryText(text);
+  if (!normalizedTarget) return false;
+  const rows = botId
+    ? db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ? AND bot_id = ?
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(userId, botId) as MemoryRow[]
+    : db.prepare(`
+        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        FROM memories
+        WHERE user_id = ? AND bot_id IS NULL
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(userId) as MemoryRow[];
+  return rows.some((row) => normalizedMemoryText(decryptMemoryRow(row, userKey).text) === normalizedTarget);
 }
 
 function normalizeSourceMessageIds(sourceMessageIds?: string[]): string[] {
@@ -302,6 +323,19 @@ function sourceIdsOverlap(raw: string, targetIds: Set<string>): boolean {
 
 function getSingleValueMemoryKey(text: string): string | null {
   const normalized = normalizedMemoryText(text);
+  const preferredNameMatch = normalized.match(
+    /^you\s+(?:prefer|want)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
+  );
+  const preferredNameWithLeadMatch = normalized.match(
+    /^([a-z0-9][a-z0-9'\-]*(?:\s+[a-z0-9][a-z0-9'\-]*){0,2})\s+(?:prefers|wants)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+(.+)$/
+  );
+  if (preferredNameMatch?.[1]) {
+    return "single-value:preferred-name:self";
+  }
+  const thirdPersonSubject = preferredNameWithLeadMatch?.[1]?.trim();
+  if (thirdPersonSubject) {
+    return `single-value:preferred-name:${thirdPersonSubject}`;
+  }
   const match = normalized.match(
     /^(?:my|your|the user's)\s+(.+?)\s+(?:is|are|was|were)\s+.+$/
   );
@@ -497,6 +531,19 @@ export function hasAboutYouMemoryForBot(
   return Boolean(row);
 }
 
+export function deleteMemoriesForBotScope(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null
+): number {
+  const trimmedBotId =
+    typeof botId === "string" && botId.trim().length > 0 ? botId.trim() : null;
+  const result = trimmedBotId
+    ? db.prepare("DELETE FROM memories WHERE user_id = ? AND bot_id = ?").run(userId, trimmedBotId)
+    : db.prepare("DELETE FROM memories WHERE user_id = ? AND bot_id IS NULL").run(userId);
+  return Number(result.changes ?? 0);
+}
+
 function firstNameFromDisplayName(displayName: string | null | undefined): string | null {
   const trimmed = typeof displayName === "string" ? displayName.trim() : "";
   if (!trimmed) return null;
@@ -614,12 +661,12 @@ export async function restoreMemory(
 
   const id = randomId(12);
   const createdAt = new Date().toISOString();
+  const source = options.source ?? "direct";
   const confidence = options.confidence ?? options.certainty ?? 0.9;
   const certainty = options.certainty ?? confidence;
   const category = normalizeMemoryCategory(options.category, options.text);
   const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, options.text);
-  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability);
-  const source = options.source ?? "direct";
+  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability, source);
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
   const encrypted = encryptJson(
     { text: options.text, embedding } as unknown as Record<string, unknown>,
@@ -699,7 +746,15 @@ function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbe
     botId: row.bot_id ?? undefined,
     confidence: row.confidence,
     category: normalizeMemoryCategory(row.category, decrypted.text),
-    tier: normalizeMemoryTier(row.tier, row.confidence, row.certainty ?? row.confidence, row.durability ?? undefined),
+    tier: row.tier === "long_term" || row.tier === "short_term"
+      ? row.tier
+      : normalizeMemoryTier(
+        undefined,
+        row.confidence,
+        row.certainty ?? row.confidence,
+        row.durability ?? undefined,
+        row.source
+      ),
     durability: normalizeMemoryDurability(row.durability, decrypted.text),
     source: row.source,
     certainty: row.certainty ?? row.confidence,
@@ -808,7 +863,7 @@ async function resolveMemoryCulmination(
     encrypted.tag,
     confidence,
     normalizeMemoryCategory(newMemory.category, compiledText),
-    normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+    normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability, "compiled"),
     newMemory.durability,
     confidence,
     sourceMessageIdsJson(sourceMessageIds),
@@ -833,7 +888,7 @@ async function resolveMemoryCulmination(
       botId: botId ?? undefined,
       confidence,
       category: normalizeMemoryCategory(newMemory.category, compiledText),
-      tier: normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability),
+      tier: normalizeMemoryTier(undefined, confidence, confidence, newMemory.durability, "compiled"),
       durability: newMemory.durability,
       source: "compiled",
       certainty: confidence,
@@ -894,7 +949,6 @@ function loadScopeMemoriesForReinforcement(
         FROM memories
         WHERE user_id = ?
           AND bot_id = ?
-          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
@@ -903,7 +957,6 @@ function loadScopeMemoriesForReinforcement(
         FROM memories
         WHERE user_id = ?
           AND bot_id IS NULL
-          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
@@ -967,7 +1020,7 @@ export async function persistMemoryCandidates(
     const target = source === "direct"
       ? pickReinforcementTarget(scopeMemoriesForReinforcement, candidate.text)
       : null;
-    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability);
+    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability, source);
     if (target) {
       const mergedSourceMessageIds = normalizeSourceMessageIds([
         ...target.sourceMessageIds,
@@ -986,7 +1039,8 @@ export async function persistMemoryCandidates(
         options.tier,
         reinforcedConfidence,
         reinforcedCertainty,
-        reinforcedDurability
+        reinforcedDurability,
+        source
       );
       db.prepare(`
         UPDATE memories
@@ -1149,7 +1203,7 @@ export function createDevSeedMemories(
         encrypted.tag,
         confidence,
         options.category ?? "user",
-        options.tier ?? normalizeMemoryTier(undefined, confidence, options.certainty ?? confidence, durability),
+        normalizeMemoryTier(options.tier, confidence, options.certainty ?? confidence, durability, options.source ?? "direct"),
         durability,
         options.source ?? "direct",
         options.certainty ?? confidence,
@@ -1357,6 +1411,37 @@ export function retrieveRecentMemoriesForStarter(
           "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR source = 'compiled') ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId) as MemoryRow[];
+
+  return filterConflictingMemories(
+    rows.map((row) => ({
+      ...decryptMemoryRow(row, userKey),
+      score: 0,
+    }))
+  )
+    .slice(0, limit)
+    .map(({ score: _unused, embedding: _embedding, ...memory }) => memory);
+}
+
+export function retrieveRecentBotMemoriesForStarter(
+  db: DatabaseSync,
+  userId: string,
+  userKey: Buffer,
+  botId: string,
+  limit = 4
+): UserMemory[] {
+  const normalizedBotId = botId.trim();
+  if (!normalizedBotId) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+       FROM memories
+       WHERE user_id = ?
+         AND bot_id = ?
+         AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
+       ORDER BY created_at DESC
+       LIMIT 100`
+    )
+    .all(userId, normalizedBotId) as MemoryRow[];
 
   return filterConflictingMemories(
     rows.map((row) => ({

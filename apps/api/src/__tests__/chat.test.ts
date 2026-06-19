@@ -16,6 +16,7 @@ import {
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
+import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
 const originalFetch = globalThis.fetch;
 
@@ -36,6 +37,12 @@ function createChatTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -55,9 +62,12 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT 'user-1',
       name TEXT NOT NULL,
+      system_prompt TEXT NOT NULL DEFAULT '',
       color TEXT,
       glyph TEXT,
-      delete_protected INTEGER NOT NULL DEFAULT 0
+      chat_enabled INTEGER NOT NULL DEFAULT 1,
+      delete_protected INTEGER NOT NULL DEFAULT 0,
+      visibility TEXT NOT NULL DEFAULT 'private'
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -290,6 +300,140 @@ describe("processChatMessage starter prompts", () => {
     assert.equal(fetchCount, 3);
   });
 
+  it("persists starter choices as AskQuestion metadata for restored Zen chats", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Help me sort one decision","Ask me something grounding","Follow a playful thread","Just sit with me for a minute"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const assistant = result.conversation.messages[0];
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      assistant?.askQuestion?.options.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+
+    const storedAssistant = db
+      .prepare("SELECT tool_payload FROM messages WHERE role = 'assistant'")
+      .get() as { tool_payload: string | null };
+    const storedPayload = JSON.parse(storedAssistant.tool_payload ?? "{}") as {
+      askQuestion?: { prompt?: string; options?: Array<{ label?: string }> };
+    };
+    assert.equal(storedPayload.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      storedPayload.askQuestion?.options?.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+  });
+
+  it("rejects internal third-person starter choice labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (fetchCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["The user has chosen the first of the options","The user selected the second option","User picked the third reply"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: '{"title":"Check In"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
+      "I'm not sure yet.",
+    ]);
+    assert.deepEqual(
+      result.conversation.messages[0]?.askQuestion?.options.map((option) => option.label),
+      [
+        "Something weighing on me.",
+        "A decision I keep circling.",
+        "A small moment from today.",
+      ]
+    );
+    await flushBackgroundTitleJobs();
+  });
+
   it("does not inject first-contact intro instructions for hero-start prompts", async () => {
     const db = createChatTestDb();
     db.prepare(
@@ -478,7 +622,7 @@ describe("processChatMessage starter prompts", () => {
       "user-1",
       "memory-conv-1",
       null,
-      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      [{ text: "You prefer reflective evening check-ins.", confidence: 0.96 }],
       userKey,
       { sourceMessageIds: ["memory-source-1"] }
     );
@@ -541,6 +685,7 @@ describe("processChatMessage starter prompts", () => {
       {
         preferredProvider: "local",
         autoMemory: true,
+        userDisplayName: "Jared",
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
@@ -552,10 +697,11 @@ describe("processChatMessage starter prompts", () => {
     const starterUserInstruction = starterBody?.messages?.filter((m) => m.role === "user").pop();
     assert.match(starterUserInstruction?.content ?? "", /Ask exactly ONE direct question/i);
     const memoryBlock = starterBody?.messages?.find((msg) =>
-      msg.content.startsWith("User memory hints:\n")
+      msg.content.startsWith("User memory hints about the human user:\n")
     );
     assert.ok(memoryBlock);
-    assert.match(memoryBlock?.content ?? "", /reflective evening check-ins/i);
+    assert.match(memoryBlock?.content ?? "", /Jared prefers reflective evening check-ins/i);
+    assert.doesNotMatch(memoryBlock?.content ?? "", /- You prefer/i);
   });
 
   it("rewrites generic starter openers into memory-anchored questions", async () => {
@@ -677,10 +823,171 @@ describe("processChatMessage starter prompts", () => {
     );
 
     assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
       "I'm not sure yet.",
-      "A small specific detail.",
-      "I need another clue.",
-      "Surprise me with your guess.",
+    ]);
+  });
+
+  it("uses starter chips from alternate JSON keys and object labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify({
+              options: [
+                { label: "Help me sort one decision" },
+                { label: "Ask me something grounding" },
+                { label: "Follow a playful thread" },
+                { label: "Just sit with me for a minute" },
+              ],
+            }),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Help me sort one decision",
+      "Ask me something grounding",
+      "Follow a playful thread",
+      "Just sit with me for a minute",
+    ]);
+  });
+
+  it("uses starter chips from bare JSON arrays", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Where should we begin tonight?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify([
+              "With the thing I keep postponing",
+              "With something lighter",
+              "Ask me one honest question",
+              "Help me slow down first",
+            ]),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "With the thing I keep postponing",
+      "With something lighter",
+      "Ask me one honest question",
+      "Help me slow down first",
+    ]);
+  });
+
+  it("uses starter chips from numbered list inference replies", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What would feel most useful to talk through first?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "1. A decision I keep avoiding",
+              "2. A feeling I cannot quite name",
+              "3. Something practical for tonight",
+              "4. Surprise me with a gentle prompt",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "A decision I keep avoiding",
+      "A feeling I cannot quite name",
+      "Something practical for tonight",
+      "Surprise me with a gentle prompt",
     ]);
   });
 
@@ -1369,7 +1676,7 @@ describe("processChatMessage copyright fallback", () => {
     assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
   });
 
-  it("suppresses denied primary output when fallback is not configured", async () => {
+  it("turns denied primary output into an organic bot boundary when fallback is not configured", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
@@ -1390,8 +1697,12 @@ describe("processChatMessage copyright fallback", () => {
       );
     }) as typeof fetch;
 
-    await assert.rejects(
-      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
         preferredProvider: "openai",
         openAiApiKey: "sk-test",
         autoMemory: false,
@@ -1399,8 +1710,13 @@ describe("processChatMessage copyright fallback", () => {
         lenientLocalFallbackModel: "",
         incognito: false,
         mode: "sandbox",
-      }),
-      /Configure a local fallback model/
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(
+      assistant?.content,
+      "I want to keep a boundary there, but I can still help shape a softer version."
     );
   });
 
@@ -1453,7 +1769,7 @@ describe("processChatMessage copyright fallback", () => {
     assert.equal(result.fallbackInvocation?.trigger, "generic_refusal_text");
   });
 
-  it("suppresses denial prose returned by the fallback model itself", async () => {
+  it("turns denial prose returned by the fallback model itself into an organic boundary", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -1484,16 +1800,25 @@ describe("processChatMessage copyright fallback", () => {
       return new Response("unexpected", { status: 404 });
     }) as typeof fetch;
 
-    await assert.rejects(
-      processChatMessage(db, "user-1", "continue", CHAT_TEST_USER_KEY, {
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
         preferredProvider: "local",
         autoMemory: false,
         botOverrides: { model: "strict-local:latest" },
         lenientLocalFallbackModel: "lenient-local:latest",
         incognito: false,
         mode: "sandbox",
-      }),
-      /local fallback model could not complete it/i
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((message) => message.role === "assistant").pop();
+    assert.equal(
+      assistant?.content,
+      "I want to keep a boundary there, but I can still help shape a softer version."
     );
   });
 });
@@ -1558,6 +1883,409 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(storedToolPayload.v, 1);
     assert.deepEqual(storedToolPayload.askQuestion, askPayload);
     assert.equal(typeof storedToolPayload.mood?.key, "string");
+  });
+
+  it("treats selected AskQuestion options as prose instead of forcing continuation", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-askquestion-prose-answer";
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which path?",
+      options: [
+        { id: "a", label: "Left" },
+        { id: "b", label: "Pause" },
+        { id: "c", label: "Right" },
+      ],
+    };
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "AskQuestion Answer",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Give me a fork.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Pick a path.",
+      "local",
+      "test-model",
+      null,
+      JSON.stringify({ v: 1, askQuestion: askPayload }),
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Plain prose after the choice." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Left",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Left/);
+    assert.doesNotMatch(promptText, /Continue the active AskQuestion flow/i);
+    assert.doesNotMatch(promptText, /follow-up multiple-choice/i);
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Plain prose after the choice.");
+    assert.equal(lastAssistant?.askQuestion, undefined);
+  });
+
+  it("nudges the model to resume an interrupted Zen reply after an excuse", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-resume";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "No worries. As I was saying, the outer loop coordinates without owning every detail." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "sorry, had to take a call",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /continue the unfinished thought only if that still fits/i);
+    assert.match(promptText, /bridge phrase is optional/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("keeps interruption context but prioritizes topic switches", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-topic-switch";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Sure, let's switch topics." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "actually, can we switch topics and talk about CSS?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /switch topics or replace the interrupted request/i);
+    assert.match(promptText, /Prioritize the new request/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("tells the model not to repeat interrupted text the user completed", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-user-completed";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Joke",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me a cliche joke.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Why did the chicken cross the ro—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Exactly. You spared us both the suspense." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "To get to the other side.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "Why did the chicken/i);
+    assert.match(promptText, /appears to complete, predict, or answer the unfinished thought/i);
+    assert.match(promptText, /do not continue repeating the interrupted text/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
   });
 
   it("skips AskQuestion payload when options are not synthesized", async () => {
@@ -1843,6 +2571,246 @@ describe("processChatMessage AskQuestion tool", () => {
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
     assert.equal(lastAssistant?.content, "Helpful context remains.");
+  });
+});
+
+describe("processChatMessage thread compaction context", () => {
+  it("uses compacted summaries instead of pre-compaction transcript rows", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-compact-current-chat";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Compact Current Chat",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "old-user",
+      conversationId,
+      userId,
+      "user",
+      "PRE_COMPACTION_SECRET_ALPHA should stay in the transcript only.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "old-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "PRE_COMPACTION_SECRET_BETA should also stay out of live context.",
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the compacted plan."
+          : "The compacted summary preserves the early planning decisions.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "manual", force: true }
+    );
+    assert.equal(compacted.triggered, true);
+    assert.ok(compacted.latestSummaryAt);
+    const summaryTime = Date.parse(compacted.latestSummaryAt ?? "");
+    assert.ok(Number.isFinite(summaryTime));
+    insertMessage.run(
+      "post-user",
+      conversationId,
+      userId,
+      "user",
+      "Post-compaction question about the next step.",
+      new Date(summaryTime + 1000).toISOString()
+    );
+    insertMessage.run(
+      "post-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Post-compaction answer with the latest decision.",
+      new Date(summaryTime + 2000).toISOString()
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after compaction." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue from the compacted context.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Earlier in this thread \(compacted context\):/);
+    assert.match(promptText, /compacted summary preserves the early planning decisions/i);
+    assert.match(promptText, /Post-compaction question about the next step/);
+    assert.match(promptText, /Post-compaction answer with the latest decision/);
+    assert.match(promptText, /Continue from the compacted context/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_ALPHA/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_BETA/);
+    const preservedOldRows = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND content LIKE '%PRE_COMPACTION_SECRET_%'"
+      )
+      .get(conversationId) as { n: number };
+    assert.equal(preservedOldRows.n, 2);
+  });
+
+  it("keeps the recent live tail after milestone compaction", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-milestone-tail";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Milestone Tail",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:40.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    const messageCount = RECENT_WINDOW_SIZE + 5;
+    for (let index = 0; index < messageCount; index += 1) {
+      const content =
+        index === messageCount - 1
+          ? "RECENT_UNSUMMARIZED_CONTEXT must remain in live history."
+          : `Milestone transcript row ${index}`;
+      insertMessage.run(
+        `milestone-${index}`,
+        conversationId,
+        userId,
+        index % 2 === 0 ? "user" : "assistant",
+        content,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1000).toISOString()
+      );
+    }
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the milestone summary."
+          : "Milestone summary covers only the older transcript rows.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "milestone" }
+    );
+    assert.equal(compacted.triggered, true);
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after milestone." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue after the milestone compaction.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Milestone summary covers only the older transcript rows/);
+    assert.match(promptText, /RECENT_UNSUMMARIZED_CONTEXT must remain in live history/);
+    assert.match(promptText, /Continue after the milestone compaction/);
   });
 });
 
@@ -2647,6 +3615,69 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
   });
 });
 
+describe("processChatMessage bot mentions", () => {
+  it("adds mentioned library bot profile context to the model prompt", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "bot-mentor",
+      "Mentor Bot",
+      "A patient mentor who asks crisp follow-up questions.",
+      "#4f8cff",
+      "spark"
+    );
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Mentor Bot gives me a useful reference point here.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Can you compare this with [Mentor Bot](prism-bot://bot-mentor)?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const mentionContext = bodies
+      .flatMap((body) => body.messages ?? [])
+      .find((message) =>
+        message.content.startsWith("Prism bot mentions in the latest user message:")
+      );
+    assert.ok(mentionContext);
+    assert.match(mentionContext.content, /Mentor Bot/);
+    assert.match(mentionContext.content, /patient mentor/i);
+    assert.match(mentionContext.content, /Stay in the current Prism\/persona voice/i);
+  });
+});
+
 function stubOpenAiProvider(): LlmProvider {
   return {
     name: "openai",
@@ -2797,19 +3828,19 @@ describe("compactPreImageLeadMessage", () => {
     );
   });
 
-  it("falls back to neutral lead when first sentence is descriptive instead of defer-style", () => {
+  it("keeps descriptive first sentence instead of forcing a canned fallback", () => {
     assert.equal(
       compactPreImageLeadMessage(
         "The view from my window is quite lovely today with mountains and rooftops. I'll share it now."
       ),
-      "One moment - I'll share that image shortly."
+      "The view from my window is quite lovely today with mountains and rooftops."
     );
   });
 
   it("falls back to a short default line when input is empty", () => {
     assert.equal(
       compactPreImageLeadMessage("   "),
-      "One moment - I'll share that image shortly."
+      "Got it - I will share it in a sec."
     );
   });
 });
@@ -3025,5 +4056,73 @@ describe("buildAssistantToolCallEvents", () => {
     assert.ok(detected, "expected a detected event");
     assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
     assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
+  });
+});
+
+describe("bot judgment memories", () => {
+  it("stores validated inferred bot-scoped judgment memories from assistant replies", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Lara", "#5b8cff", "triangle");
+    installChatFetchStub("Your vibe is creepy, and I need clearer boundaries.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Hi Lara",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: false,
+        starterPromptLabel: "Lara",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const created = result.memoryLearned?.created ?? [];
+    assert.ok(
+      created.some(
+        (memory) =>
+          memory.source === "inferred" &&
+          memory.botId === "bot-1" &&
+          memory.category === "general" &&
+          /Lara felt uneasy/i.test(memory.text)
+      )
+    );
+  });
+
+  it("does not store unsafe judgment content", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Lara", "#5b8cff", "triangle");
+    installChatFetchStub("You are disgusting and I never want to talk to you again.");
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Hi Lara",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        starterPrompt: false,
+        starterPromptLabel: "Lara",
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const inferredCount = db
+      .prepare(
+        "SELECT COUNT(*) as count FROM memories WHERE user_id = ? AND bot_id = ? AND source = 'inferred'"
+      )
+      .get("user-1", "bot-1") as { count: number };
+    assert.equal(inferredCount.count, 0);
   });
 });

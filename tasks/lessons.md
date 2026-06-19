@@ -4,6 +4,31 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-05-22 · [UX]
+**Trigger**: Coffee poll ideation expanded to include in-session poll creation, then was tightened to "poll only at session start."
+**Lesson**: In Coffee mode, polls are an opening ritual, not a mid-session interruption. Treat poll creation as pre-session setup; once live conversation begins, remove new-poll affordances and only show/collect the existing opening poll.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee start flow and autoplay dock controls; `apps/api/src/coffee.ts` session creation payload handling.
+
+### 2026-05-23 · [UX]
+**Trigger**: Opening poll controls were first placed in the Coffee Group "New session setup" panel, but the desired interaction is a fourth topic-choice option.
+**Lesson**: Coffee polls should be initiated from the topic picker as an alternate topic-starting path, alongside generated/manual topic choices. The poll modal collects the question/options, bots vote, and the poll result becomes the session topic/context.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee topic picker and poll modal flow; `apps/api/src/coffee.ts` poll result prompt context.
+
+### 2026-05-22 · [workflow]
+**Trigger**: `/make-bot Salvador Dali` attempted auto-import even though the preferred workflow is manual import by the user.
+**Lesson**: `/make-bot` should save an import-ready `.bot` file and stop by default. Only run the Prism import helper when the user explicitly asks to import the generated bot.
+**Applies to**: `~/.cursor/commands/🤖 make-bot.md`, `~/.cursor/skills/_make-bot/SKILL.md`, and `.cursor/output/*.bot` generation workflows.
+
+### 2026-05-22 · [UX]
+**Trigger**: The bot About birthday controls allowed BC birth years without automatically marking the bot/persona as deceased.
+**Lesson**: BC birth years should force deceased status on and prevent present-day age semantics. If a profile control implies an impossible living state, normalize the data and lock the dependent UI state.
+**Applies to**: `packages/shared/src/botProfile.ts`, `packages/shared/src/botProfile.test.ts`, and `apps/web/src/app/page.tsx` bot profile birthday controls.
+
+### 2026-05-22 · [UX]
+**Trigger**: Coffee starter topics improved from generic suggestions but still rendered nonsensical title fragments like "bold angle on Stoic ethics and physics as".
+**Lesson**: Coffee starter topics should be participant-relevant without usually naming the participant. Prefer broad, interesting prompts grounded in a seated bot's subject matter, such as "Is free will an illusion?" or "The hardest lesson a leader can learn." Avoid clever templates that splice profile snippets into headline fragments, and trim capped hints after truncation so labels never end on dangling words like "as" or "who".
+**Applies to**: `apps/api/src/coffee.ts` Coffee starter-topic inference and deterministic fallbacks.
+
 ### 2026-05-10 · [UX]
 **Trigger**: Sandbox focus layout reused Chat word-by-word reveal (`assistantRevealActive`) but the latest bot reply stayed truncated ("Oh," / one word) until the user sent again.
 **Lesson**: Reveal timing must stay coherent: (1) run the `chatEphemeralNowMs` interval whenever `assistantRevealActive` is true, not only `chatEphemeralMode`; (2) seed `chatMessageFirstSeenAtRef` for the latest assistant message when using reveal without Chat's temporal map — otherwise `forcedVisibleTokenCount` falls back to `?? chatEphemeralNowMs` every render and elapsed time never advances; (3) mark `chatCompletedRevealKeysRef` using the same active flag so completion logic runs in Zen.

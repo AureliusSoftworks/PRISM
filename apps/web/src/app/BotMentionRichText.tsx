@@ -5,6 +5,7 @@ import { Fragment, isValidElement } from "react";
 import {
   cleanBotMentionTextArtifacts,
   extractStageDirections,
+  normalizePeerMentionChipLabel,
   parsePrismBotMentionHref,
   splitTextByBotNames,
   tokenizeBotMentionSource,
@@ -107,7 +108,10 @@ export function renderPrismBotMarkdownAnchor(
   if (!id) return null;
   const textLabel = markdownChildrenToPlainText(children).trim();
   const bot = botsById.get(id);
-  const displayName = (textLabel || bot?.name || id).trim();
+  const rawLabel = (textLabel || bot?.name || id).trim();
+  const displayName = bot?.name
+    ? normalizePeerMentionChipLabel(rawLabel, bot.name)
+    : rawLabel;
   return (
     <BotMentionChip
       botId={id}
@@ -158,11 +162,15 @@ function buildRenderUnits(text: string, args: BuildRenderUnitsArgs): RenderUnit[
   const units: RenderUnit[] = [];
   for (const seg of segments) {
     if (seg.kind === "mention") {
+      const bot = botsById.get(seg.botId) ?? null;
+      const displayName = bot?.name
+        ? normalizePeerMentionChipLabel(seg.displayName, bot.name)
+        : seg.displayName;
       units.push({
         kind: "chip",
-        displayLen: seg.displayName.length,
-        text: seg.displayName,
-        bot: botsById.get(seg.botId) ?? null,
+        displayLen: displayName.length,
+        text: displayName,
+        bot,
         botId: seg.botId,
       });
       continue;

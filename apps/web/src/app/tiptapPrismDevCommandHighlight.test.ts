@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolveLeadingDevCommandTextRanges } from "./tiptapPrismDevCommandHighlight.ts";
+import {
+  resolveLeadingDevCommandTextRanges,
+  resolvePromptShortcutTextRanges,
+} from "./tiptapPrismDevCommandHighlight.ts";
 
 describe("resolveLeadingDevCommandTextRanges", () => {
   it("returns null for non-command text", () => {
@@ -18,8 +21,50 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
+  it("does not treat inline slash prompt shortcuts as leading dev commands", () => {
+    assert.equal(resolveLeadingDevCommandTextRanges("hello /clear"), null);
+  });
+
+  it("does not highlight partial known commands before the full token is typed", () => {
+    assert.equal(
+      resolveLeadingDevCommandTextRanges("/cle", { commandNames: ["clear", "cls"] }),
+      null
+    );
+    assert.deepEqual(
+      resolveLeadingDevCommandTextRanges("/clear", { commandNames: ["clear", "cls"] }),
+      {
+        commandStart: 0,
+        commandEnd: 6,
+        quotedStringRanges: [],
+        actionTokenRanges: [],
+      }
+    );
+  });
+
+  it("recognizes custom slash commands", () => {
+    const out = resolveLeadingDevCommandTextRanges("/summarize-this -f notes");
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 15,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
+  it("recognizes user-made command names when they are invoked with slash", () => {
+    const out = resolveLeadingDevCommandTextRanges("/draft-reply", {
+      commandNames: ["clear", "draft-reply"],
+    });
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 12,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
   it("resolves command bounds for a leading slash command", () => {
-    const out = resolveLeadingDevCommandTextRanges("  /echo \"hello\"");
+    const out = resolveLeadingDevCommandTextRanges('  /echo "hello"');
     assert.deepEqual(out, {
       commandStart: 2,
       commandEnd: 7,
@@ -29,7 +74,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("only highlights the first immediate quoted token after command", () => {
-    const out = resolveLeadingDevCommandTextRanges("/dev askquestion \"pick one\"");
+    const out = resolveLeadingDevCommandTextRanges('/dev askquestion "pick one"');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -119,5 +164,43 @@ describe("resolveLeadingDevCommandTextRanges", () => {
       quotedStringRanges: [{ start: 6, end: 28 }],
       actionTokenRanges: [{ start: 13, end: 21 }],
     });
+  });
+});
+
+describe("resolvePromptShortcutTextRanges", () => {
+  it("recognizes user-made prompt shortcuts inline", () => {
+    assert.deepEqual(
+      resolvePromptShortcutTextRanges("please /draft-reply now", {
+        promptNames: ["draft-reply"],
+      }),
+      [{ start: 7, end: 19, name: "draft-reply" }]
+    );
+  });
+
+  it("recognizes prompt shortcuts before punctuation", () => {
+    assert.deepEqual(
+      resolvePromptShortcutTextRanges("/draft-reply, please", {
+        promptNames: ["draft-reply"],
+      }),
+      [{ start: 0, end: 12, name: "draft-reply" }]
+    );
+  });
+
+  it("filters slash tokens to known prompt names", () => {
+    assert.deepEqual(
+      resolvePromptShortcutTextRanges("/clear /draft-reply", {
+        promptNames: ["draft-reply"],
+      }),
+      [{ start: 7, end: 19, name: "draft-reply" }]
+    );
+  });
+
+  it("does not treat URL path segments as prompt shortcuts", () => {
+    assert.deepEqual(
+      resolvePromptShortcutTextRanges("https://example.test/foo", {
+        promptNames: ["foo"],
+      }),
+      []
+    );
   });
 });

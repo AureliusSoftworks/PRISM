@@ -9,6 +9,7 @@ import {
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
   formatBotMentionMarkdown,
+  normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
   mentionTabPlainTextAction,
   parsePrismBotMentionHref,
@@ -46,6 +47,31 @@ describe("formatBotMentionMarkdown", () => {
       formatBotMentionMarkdown({ id: "x", name: "Pat" }),
       "[Pat](prism-bot://x)"
     );
+  });
+});
+
+describe("normalizePeerMentionChipLabel", () => {
+  it("uses the canonical roster name on chips", () => {
+    assert.equal(normalizePeerMentionChipLabel("Alan Watts", "Alan Watts"), "Alan Watts");
+    assert.equal(normalizePeerMentionChipLabel("Mr", "Mr. Krabs"), "Mr. Krabs");
+  });
+
+  it("keeps intentional non-canonical labels", () => {
+    assert.equal(
+      normalizePeerMentionChipLabel("Dr. Freud", "Sigmund Freud"),
+      "Dr. Freud"
+    );
+  });
+
+  it("honors an explicit preferred label when provided", () => {
+    assert.equal(
+      normalizePeerMentionChipLabel("Sigmund Freud", "Sigmund Freud", "Dr. Freud"),
+      "Dr. Freud"
+    );
+  });
+
+  it("falls back to the label when canonical name is missing", () => {
+    assert.equal(normalizePeerMentionChipLabel("Watts", ""), "Watts");
   });
 });
 
@@ -350,6 +376,30 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, []);
   });
 
+  it("extracts parenthetical stage directions into action badges", () => {
+    const out = extractStageDirections(
+      "(pausing to sip from an adjacent glass) I hear you."
+    );
+    assert.equal(out.mainText, "I hear you.");
+    assert.deepEqual(out.actions, ["pausing to sip from an adjacent glass"]);
+  });
+
+  it("extracts ambience parentheticals and keeps spoken table text", () => {
+    const out = extractStageDirections(
+      "I hear you. (The sound of gentle rain in the background.) We can keep going."
+    );
+    assert.equal(out.mainText, "I hear you. We can keep going.");
+    assert.deepEqual(out.actions, ["The sound of gentle rain in the background."]);
+  });
+
+  it("preserves normal explanatory parentheticals in prose", () => {
+    const out = extractStageDirections(
+      "Policy (for example, taxes and wages) matters to working families."
+    );
+    assert.equal(out.mainText, "Policy (for example, taxes and wages) matters to working families.");
+    assert.deepEqual(out.actions, []);
+  });
+
   it("extracts a single stage direction and returns the remainder as mainText", () => {
     const out = extractStageDirections("*pours coffee* Cheers.");
     assert.equal(out.mainText, "Cheers.");
@@ -419,6 +469,114 @@ describe("extractStageDirections", () => {
     assert.equal(out.mainText, "The idea is still terrible.");
     assert.deepEqual(out.actions, []);
   });
+
+  it("lifts clear leading unmarked actions out of the table text", () => {
+    const out = extractStageDirections(
+      "eyes narrow slightly as he gazes into the distance, his breathing heavy in the silence No offense, but this is boring."
+    );
+    assert.equal(out.mainText, "No offense, but this is boring.");
+    assert.deepEqual(out.actions, [
+      "eyes narrow slightly as he gazes into the distance, his breathing heavy in the silence",
+    ]);
+  });
+
+  it("handles leading unmarked actions that include the speaker name", () => {
+    const out = extractStageDirections(
+      "Darth Vader leans forward, voice low. I find your lack of snacks disturbing."
+    );
+    assert.equal(out.mainText, "I find your lack of snacks disturbing.");
+    assert.deepEqual(out.actions, ["Darth Vader leans forward, voice low"]);
+  });
+
+  it("lifts adverb-led actions before a named direct address", () => {
+    const out = extractStageDirections(
+      "dryly sets his cup down Patrick, you can't net a theory."
+    );
+    assert.equal(out.mainText, "Patrick, you can't net a theory.");
+    assert.deepEqual(out.actions, ["dryly sets his cup down"]);
+  });
+
+  it("lifts softer unmarked action verbs from table text", () => {
+    const out = extractStageDirections(
+      "ponders deeply Maybe there's no crab in there because mystery tastes better."
+    );
+    assert.equal(out.mainText, "Maybe there's no crab in there because mystery tastes better.");
+    assert.deepEqual(out.actions, ["ponders deeply"]);
+  });
+
+  it("lifts remaining transcript-style unmarked action openers", () => {
+    const snickers = extractStageDirections(
+      "snickers Dodging or not, Krabs, what's truly interesting is what makes an instrument stand out!"
+    );
+    assert.equal(
+      snickers.mainText,
+      "Dodging or not, Krabs, what's truly interesting is what makes an instrument stand out!"
+    );
+    assert.deepEqual(snickers.actions, ["snickers"]);
+
+    const pinches = extractStageDirections(
+      "pinches the bridge of his nose A kazoo, Patrick? That's not an instrument."
+    );
+    assert.equal(pinches.mainText, "A kazoo, Patrick? That's not an instrument.");
+    assert.deepEqual(pinches.actions, ["pinches the bridge of his nose"]);
+  });
+
+  it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {
+    const out = extractStageDirections(
+      "Marcus Aurelius, picks up an acorn from the table Consider this acorn: it already contains the potential of the entire tree."
+    );
+    assert.equal(
+      out.mainText,
+      "Consider this acorn: it already contains the potential of the entire tree."
+    );
+    assert.deepEqual(out.actions, ["Marcus Aurelius, picks up an acorn from the table"]);
+  });
+
+  it("lifts unmarked actions after an addressed bot mention", () => {
+    const out = extractStageDirections(
+      "[Darth Vader](prism-bot://cb8a490a078e8a66ef122aa3), pauses with a gentle smile, then says softly The greatest power is not in wielding authority."
+    );
+    assert.equal(
+      out.mainText,
+      "[Darth Vader](prism-bot://cb8a490a078e8a66ef122aa3), The greatest power is not in wielding authority."
+    );
+    assert.deepEqual(out.actions, ["pauses with a gentle smile, then says softly"]);
+  });
+
+  it("treats unmarked physical-only replies as action-only", () => {
+    const out = extractStageDirections("Sips coffee quietly, eyes slightly narrowing in contemplation");
+    assert.equal(out.mainText, "");
+    assert.deepEqual(out.actions, [
+      "Sips coffee quietly, eyes slightly narrowing in contemplation",
+    ]);
+  });
+
+  it("lifts trailing unmarked actions after spoken text", () => {
+    const out = extractStageDirections(
+      "Honestly, that tracks. [Darth Vader](prism-bot://cb8a490a078e8a66ef122aa3), looks away for a brief moment, then back at the table, his gaze softening ever so slightly"
+    );
+    assert.equal(out.mainText, "Honestly, that tracks.");
+    assert.deepEqual(out.actions, [
+      "looks away for a brief moment, then back at the table, his gaze softening ever so slightly",
+    ]);
+  });
+
+  it("does not turn ordinary leading prose into an action", () => {
+    const out = extractStageDirections("Looks like rain today.");
+    assert.equal(out.mainText, "Looks like rain today.");
+    assert.deepEqual(out.actions, []);
+  });
+
+  it("lifts unmarked strokes actions after a bot mention", () => {
+    const out = extractStageDirections(
+      "[SpongeBob](prism-bot://bot-sponge), strokes chin thoughtfully Now that's a true statement indeed."
+    );
+    assert.equal(
+      out.mainText,
+      "[SpongeBob](prism-bot://bot-sponge), Now that's a true statement indeed."
+    );
+    assert.deepEqual(out.actions, ["strokes chin thoughtfully"]);
+  });
 });
 
 describe("extractStageDirectionCues", () => {
@@ -447,5 +605,46 @@ describe("extractStageDirectionCues", () => {
     );
     assert.deepEqual(cues.map((cue) => cue.action), ["one", "two", "three"]);
     assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0, 11, 23]);
+  });
+
+  it("starts unmarked leading action cues before the spoken line reveals", () => {
+    const cues = extractStageDirectionCues(
+      "eyes narrow slightly as he gazes into the distance No offense, but this is boring."
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "eyes narrow slightly as he gazes into the distance",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0]);
+  });
+
+  it("starts addressed unmarked action cues after the mention reveals", () => {
+    const mention = "[Darth Vader](prism-bot://cb8a490a078e8a66ef122aa3),";
+    const cues = extractStageDirectionCues(
+      `${mention} pauses with a gentle smile, then says softly The greatest power is service.`
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "pauses with a gentle smile, then says softly",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), ["Darth Vader, ".length]);
+  });
+
+  it("starts comma-addressed unmarked action cues before a 'Consider' spoken handoff", () => {
+    const cues = extractStageDirectionCues(
+      "Marcus Aurelius, picks up an acorn from the table Consider this acorn: it already contains the potential of the entire tree."
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "Marcus Aurelius, picks up an acorn from the table",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0]);
+  });
+
+  it("starts trailing unmarked action cues after the spoken line reveals", () => {
+    const cues = extractStageDirectionCues(
+      "Honestly, that tracks. [Darth Vader](prism-bot://cb8a490a078e8a66ef122aa3), looks away for a brief moment"
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), ["looks away for a brief moment"]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [
+      "Honestly, that tracks.".length,
+    ]);
   });
 });

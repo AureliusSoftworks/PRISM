@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   encodeComfyUiRemoteWorkflowModelId,
   encodeComfyUiWorkflowModelId,
+  formatComfyUiRemoteWorkflowLabel,
   parseComfyUiRemoteWorkflowPath,
   parseComfyUiWorkflowSlug,
   parseStoredComfyUiWorkflows,
@@ -20,6 +21,12 @@ describe("comfyUiWorkflow model ids", () => {
     assert.ok(id.startsWith("comfyui-remote:"));
     assert.equal(parseComfyUiRemoteWorkflowPath(id), "default/workflows/foo.json");
     assert.equal(parseComfyUiWorkflowSlug(id), null);
+  });
+
+  it("formats remote workflow paths for picker labels", () => {
+    assert.equal(formatComfyUiRemoteWorkflowLabel("workflows/foo.json"), "foo.json");
+    assert.equal(formatComfyUiRemoteWorkflowLabel("default/workflows/foo.json"), "foo.json");
+    assert.equal(formatComfyUiRemoteWorkflowLabel("user/workflow/foo.json"), "user/foo.json");
   });
 });
 

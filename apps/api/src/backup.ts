@@ -1,15 +1,19 @@
 import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
+import type { ProviderName } from "./providers.ts";
+import { normalizeZenWallpaperOpacity } from "./settings.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
-  preferredProvider: "local" | "openai";
+  preferredProvider: ProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  experimentalDualOllamaEnabled: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
   lenientLocalFallbackModel: string;
@@ -19,11 +23,16 @@ export interface BackupUserSettings {
   comfyUiWorkflows: unknown[];
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
+  preferredZenWallpaperLocalImageModel: string;
+  preferredZenWallpaperOpenAiImageModel: string;
+  zenWallpaperOpacity: number;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
   openAiApiKey?: string;
+  anthropicApiKey?: string;
+  elevenLabsApiKey?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -38,6 +47,7 @@ export interface BackupBotSnapshot {
   openaiImageModel?: string | null;
   onlineEnabled: boolean;
   deleteProtected: boolean;
+  flirtEnabled: boolean;
   temperature: number;
   maxTokens: number;
   color?: string | null;
@@ -64,7 +74,7 @@ export interface BackupSnapshot {
       content: string;
       createdAt: string;
       /** Optional; older v1 snapshots omit this. */
-      provider?: "local" | "openai";
+      provider?: ProviderName;
       /** Optional; older v1 snapshots (pre-model tracking) omit this. */
       model?: string;
       /** Optional; older v1 snapshots (pre-per-message bot tracking) omit this. */
@@ -122,8 +132,10 @@ export function exportUserSnapshot(
          provider_locked,
          auto_memory,
          composer_writing_assist,
+         experimental_dual_ollama_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
+         hidden_comfyui_workflow_ids,
          preferred_local_model,
          preferred_online_model,
          lenient_local_fallback_model,
@@ -133,25 +145,36 @@ export function exportUserSnapshot(
          comfyui_workflows,
          preferred_local_image_model,
          preferred_openai_image_model,
+         preferred_zen_wallpaper_local_image_model,
+         preferred_zen_wallpaper_openai_image_model,
+         zen_wallpaper_opacity,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
          dev_memories_text,
          openai_key_ciphertext,
          openai_key_iv,
-         openai_key_tag
+         openai_key_tag,
+         anthropic_key_ciphertext,
+         anthropic_key_iv,
+         anthropic_key_tag,
+         elevenlabs_key_ciphertext,
+         elevenlabs_key_iv,
+         elevenlabs_key_tag
        FROM users
        WHERE id = ?`
     )
     .get(userId) as
     | {
         theme: "light" | "dark" | "system";
-        preferred_provider: "local" | "openai";
+        preferred_provider: ProviderName;
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
+        experimental_dual_ollama_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
+        hidden_comfyui_workflow_ids: string | null;
         preferred_local_model: string | null;
         preferred_online_model: string | null;
         lenient_local_fallback_model: string | null;
@@ -161,6 +184,9 @@ export function exportUserSnapshot(
         comfyui_workflows: string | null;
         preferred_local_image_model: string | null;
         preferred_openai_image_model: string | null;
+        preferred_zen_wallpaper_local_image_model: string | null;
+        preferred_zen_wallpaper_openai_image_model: string | null;
+        zen_wallpaper_opacity: number | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -168,6 +194,12 @@ export function exportUserSnapshot(
         openai_key_ciphertext: string | null;
         openai_key_iv: string | null;
         openai_key_tag: string | null;
+        anthropic_key_ciphertext: string | null;
+        anthropic_key_iv: string | null;
+        anthropic_key_tag: string | null;
+        elevenlabs_key_ciphertext: string | null;
+        elevenlabs_key_iv: string | null;
+        elevenlabs_key_tag: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -177,8 +209,10 @@ export function exportUserSnapshot(
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
         preferredLocalModel: user.preferred_local_model ?? "",
         preferredOnlineModel: user.preferred_online_model ?? "",
         lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
@@ -188,6 +222,13 @@ export function exportUserSnapshot(
         comfyUiWorkflows: safeParseArray(user.comfyui_workflows),
         preferredLocalImageModel: user.preferred_local_image_model ?? "",
         preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+        preferredZenWallpaperLocalImageModel:
+          user.preferred_zen_wallpaper_local_image_model ?? "",
+        preferredZenWallpaperOpenAiImageModel:
+          user.preferred_zen_wallpaper_openai_image_model ?? "",
+        zenWallpaperOpacity: normalizeZenWallpaperOpacity(
+          user.zen_wallpaper_opacity
+        ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
@@ -199,6 +240,34 @@ export function exportUserSnapshot(
                   ciphertext: user.openai_key_ciphertext,
                   iv: user.openai_key_iv,
                   tag: user.openai_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+        ...(user.anthropic_key_ciphertext &&
+        user.anthropic_key_iv &&
+        user.anthropic_key_tag
+          ? {
+              anthropicApiKey: decryptText(
+                {
+                  ciphertext: user.anthropic_key_ciphertext,
+                  iv: user.anthropic_key_iv,
+                  tag: user.anthropic_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+        ...(user.elevenlabs_key_ciphertext &&
+        user.elevenlabs_key_iv &&
+        user.elevenlabs_key_tag
+          ? {
+              elevenLabsApiKey: decryptText(
+                {
+                  ciphertext: user.elevenlabs_key_ciphertext,
+                  iv: user.elevenlabs_key_iv,
+                  tag: user.elevenlabs_key_tag,
                 },
                 userKey
               ),
@@ -220,6 +289,7 @@ export function exportUserSnapshot(
          openai_image_model,
          online_enabled,
          delete_protected,
+         flirt_enabled,
          temperature,
          max_tokens,
          color,
@@ -244,6 +314,7 @@ export function exportUserSnapshot(
     openai_image_model: string | null;
     online_enabled: number;
     delete_protected: number;
+    flirt_enabled: number;
     temperature: number | null;
     max_tokens: number | null;
     color: string | null;
@@ -286,8 +357,10 @@ export function exportUserSnapshot(
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
       messages: messages.map((message) => {
-        const provider: "local" | "openai" | undefined =
-          message.provider === "local" || message.provider === "openai"
+        const provider: ProviderName | undefined =
+          message.provider === "local" ||
+          message.provider === "openai" ||
+          message.provider === "anthropic"
             ? message.provider
             : undefined;
         const botId: string | undefined = message.bot_id ?? undefined;
@@ -344,6 +417,7 @@ export function exportUserSnapshot(
       openaiImageModel: bot.openai_image_model,
       onlineEnabled: bot.online_enabled !== 0,
       deleteProtected: bot.delete_protected === 1,
+      flirtEnabled: bot.flirt_enabled === 1,
       temperature: typeof bot.temperature === "number" ? bot.temperature : 0.7,
       maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
       color: bot.color,
@@ -387,7 +461,21 @@ export function importUserSnapshot(
       typeof settings.openAiApiKey === "string" && settings.openAiApiKey.length > 0
         ? settings.openAiApiKey
         : null;
+    const anthropicApiKey =
+      typeof settings.anthropicApiKey === "string" && settings.anthropicApiKey.length > 0
+        ? settings.anthropicApiKey
+        : null;
+    const elevenLabsApiKey =
+      typeof settings.elevenLabsApiKey === "string" && settings.elevenLabsApiKey.length > 0
+        ? settings.elevenLabsApiKey
+        : null;
     const encryptedOpenAiKey = openAiApiKey ? encryptText(openAiApiKey, userKey) : null;
+    const encryptedAnthropicKey = anthropicApiKey
+      ? encryptText(anthropicApiKey, userKey)
+      : null;
+    const encryptedElevenLabsKey = elevenLabsApiKey
+      ? encryptText(elevenLabsApiKey, userKey)
+      : null;
     db.prepare(`
       UPDATE users
       SET
@@ -396,8 +484,10 @@ export function importUserSnapshot(
         provider_locked = ?,
         auto_memory = ?,
         composer_writing_assist = ?,
+        experimental_dual_ollama_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
+        hidden_comfyui_workflow_ids = ?,
         preferred_local_model = ?,
         preferred_online_model = ?,
         lenient_local_fallback_model = ?,
@@ -407,24 +497,43 @@ export function importUserSnapshot(
         comfyui_workflows = ?,
         preferred_local_image_model = ?,
         preferred_openai_image_model = ?,
+        preferred_zen_wallpaper_local_image_model = ?,
+        preferred_zen_wallpaper_openai_image_model = ?,
+        zen_wallpaper_opacity = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
         dev_memories_text = ?,
         openai_key_ciphertext = ?,
         openai_key_iv = ?,
-        openai_key_tag = ?
+        openai_key_tag = ?,
+        anthropic_key_ciphertext = ?,
+        anthropic_key_iv = ?,
+        anthropic_key_tag = ?,
+        elevenlabs_key_ciphertext = ?,
+        elevenlabs_key_iv = ?,
+        elevenlabs_key_tag = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
-      settings.preferredProvider === "openai" ? "openai" : "local",
+      settings.preferredProvider === "openai" || settings.preferredProvider === "anthropic"
+        ? settings.preferredProvider
+        : "local",
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
+      settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
           ? settings.hiddenBotModelIds.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0
+            )
+          : []
+      ),
+      JSON.stringify(
+        Array.isArray(settings.hiddenComfyUiWorkflowIds)
+          ? settings.hiddenComfyUiWorkflowIds.filter(
               (value): value is string => typeof value === "string" && value.trim().length > 0
             )
           : []
@@ -438,6 +547,9 @@ export function importUserSnapshot(
       JSON.stringify(Array.isArray(settings.comfyUiWorkflows) ? settings.comfyUiWorkflows : []),
       settings.preferredLocalImageModel?.trim() ?? "",
       settings.preferredOpenAiImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperLocalImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperOpenAiImageModel?.trim() ?? "",
+      normalizeZenWallpaperOpacity(settings.zenWallpaperOpacity),
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,
@@ -445,6 +557,12 @@ export function importUserSnapshot(
       encryptedOpenAiKey?.ciphertext ?? null,
       encryptedOpenAiKey?.iv ?? null,
       encryptedOpenAiKey?.tag ?? null,
+      encryptedAnthropicKey?.ciphertext ?? null,
+      encryptedAnthropicKey?.iv ?? null,
+      encryptedAnthropicKey?.tag ?? null,
+      encryptedElevenLabsKey?.ciphertext ?? null,
+      encryptedElevenLabsKey?.iv ?? null,
+      encryptedElevenLabsKey?.tag ?? null,
       userId
     );
   }
@@ -464,6 +582,7 @@ export function importUserSnapshot(
         openai_image_model,
         online_enabled,
         delete_protected,
+        flirt_enabled,
         temperature,
         max_tokens,
         color,
@@ -472,7 +591,7 @@ export function importUserSnapshot(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -500,6 +619,7 @@ export function importUserSnapshot(
           : null,
         bot.onlineEnabled === false ? 0 : 1,
         bot.deleteProtected === true ? 1 : 0,
+        bot.flirtEnabled === true ? 1 : 0,
         typeof bot.temperature === "number" ? bot.temperature : 0.7,
         typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
         typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
@@ -535,7 +655,9 @@ export function importUserSnapshot(
     );
     for (const message of conversation.messages) {
       const providerValue =
-        message.provider === "local" || message.provider === "openai"
+        message.provider === "local" ||
+        message.provider === "openai" ||
+        message.provider === "anthropic"
           ? message.provider
           : null;
       const botIdValue =

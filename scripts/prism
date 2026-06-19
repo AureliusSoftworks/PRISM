@@ -24,9 +24,10 @@ Usage:
   prism phone
   prism mac-client
   prism mac-server
-  prism web
+  prism up
+  prism down
   prism standalone
-  prism standalone-win <version> [release-channel]
+  prism standalone-win [version] [release-channel]
   prism standalone-installer
   prism reset [--force]
 
@@ -36,13 +37,16 @@ Aliases:
   prism server
 
 Notes:
-  prism web now runs the combined dev launcher (`npm run dev`) which
+  prism up runs the combined dev launcher (`npm run dev`) which
   starts/restarts both API (http://localhost:18787) and web
   (http://localhost:18788) together in one foreground session.
+  prism down shuts down the local API/web dev processes by freeing
+  ports 18787 and 18788.
   prism standalone builds the desktop app and opens the folder containing
   the latest macOS DMG.
   prism standalone-win dispatches the desktop release workflow for Windows
-  packaging and opens the desktop/v<version> release page on GitHub.
+  packaging and opens the desktop/v<version> release page on GitHub. If
+  version is omitted, package.json version is used.
   prism standalone-installer opens the latest macOS Prism Desktop installer
   DMG (and builds one first if missing).
   prism reset removes local Prism account/data state (factory reset) while
@@ -312,6 +316,12 @@ run_web() {
   exec npm run dev
 }
 
+run_down() {
+  free_tcp_port "$API_PORT"
+  free_tcp_port "$WEB_PORT"
+  echo "Prism web stack stopped (ports $API_PORT and $WEB_PORT are now free)."
+}
+
 run_standalone() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "prism standalone currently targets macOS DMG output and is only supported on macOS." >&2
@@ -420,8 +430,13 @@ run_standalone_win() {
   local include_legacy_testflight=0
 
   if [[ -z "$version" ]]; then
-    echo "Usage: prism standalone-win <version> [release-channel]" >&2
-    exit 64
+    version="$(node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));process.stdout.write(p.version||'');")"
+    if [[ -z "$version" ]]; then
+      echo "Could not resolve version from package.json. Provide one explicitly." >&2
+      echo "Usage: prism standalone-win [version] [release-channel]" >&2
+      exit 64
+    fi
+    echo "No version provided; using package.json version $version."
   fi
   if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Version must follow SemVer core format (example: 0.2.0)." >&2
@@ -515,8 +530,11 @@ case "${1:-}" in
   mac-server | server)
     run_mac_server
     ;;
-  web)
+  up | web)
     run_web
+    ;;
+  down)
+    run_down
     ;;
   standalone | desktop)
     run_standalone

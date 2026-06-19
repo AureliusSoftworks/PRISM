@@ -7,12 +7,14 @@ This directory stores workspace-local runbooks that can be executed with `/run`.
 - `📖` In-progress workbook
 
 ## Completed Runbooks
+- `📘 make_bot_export`: Create a researched, import-ready PRISM `.bot` export and save it under `.cursor/output/` without auto-importing.
 - `📘 windows_server_app_port`: Implement and validate the Windows WPF + Inno Setup Prism Server app on a Windows machine.
 
 ## In-Progress Workbooks
 - `📖 runbook-build-prod`: Merge latest `dev` into `main` without tooling and produce the production-ready build defined by the root README.
 
 ## Usage
+- `/run make_bot_export`
 - `/run windows_server_app_port`
 - `/run windows_server_app_port validate existing artifact only`
 - `/run runbook-build-prod`

@@ -56,7 +56,7 @@ function mutexFor(userId: string): PerUserMutex {
   return m;
 }
 
-export type ImageJobSource = "chat_tool" | "images_panel";
+export type ImageJobSource = "chat_tool" | "images_panel" | "zen_wallpaper";
 
 export type RunningImageJob = {
   id: string;
@@ -166,6 +166,12 @@ export function pollImageJobForUser(userId: string, jobId: string): ImageJobPoll
     return { ok: true, status: "succeeded", messages: done.messages };
   }
   return { ok: true, status: "failed", error: done.error };
+}
+
+export function conversationIdForImageGeneration(
+  job: Pick<RunningImageJob, "conversationId" | "incognito">
+): string | null {
+  return job.incognito ? null : job.conversationId;
 }
 
 type MessageRow = {
@@ -321,6 +327,80 @@ async function failJobWithDbNote(args: {
   }
 }
 
+async function finishJobWithAssistantNote(args: {
+  db: DatabaseSync;
+  job: RunningImageJob;
+  chatProviderName: string;
+  chatModelUsed: string;
+  content: string;
+}): Promise<void> {
+  const { db, job, chatProviderName, chatModelUsed, content } = args;
+  const ts = new Date().toISOString();
+  const prov =
+    chatProviderName === "local" || chatProviderName === "openai" ? chatProviderName : undefined;
+  if (!job.conversationId || job.incognito) {
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: [
+        {
+          id: randomId(12),
+          role: "assistant",
+          content,
+          createdAt: ts,
+          provider: prov,
+          model: chatModelUsed,
+        },
+      ],
+    });
+    return;
+  }
+
+  const noteId = randomId(12);
+  try {
+    db.exec("BEGIN IMMEDIATE TRANSACTION");
+    try {
+      db.prepare(
+        `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
+      ).run(
+        noteId,
+        job.conversationId,
+        job.userId,
+        content,
+        chatProviderName,
+        chatModelUsed,
+        job.botId,
+        ts
+      );
+      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+        ts,
+        job.conversationId,
+        job.userId
+      );
+      db.exec("COMMIT");
+    } catch {
+      db.exec("ROLLBACK");
+      throw new Error("tx");
+    }
+    const hydrated = fetchHydratedMessagesByIds(db, job.userId, [noteId]);
+    await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
+  } catch {
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: [
+        {
+          id: randomId(12),
+          role: "assistant",
+          content,
+          createdAt: ts,
+          provider: prov,
+          model: chatModelUsed,
+        },
+      ],
+    });
+  }
+}
+
 /**
  * Fire-and-forget: generates image, follow-up line, persists messages (or in-memory envelope for incognito).
  */
@@ -356,11 +436,11 @@ export function startChatImageBackgroundJob(args: {
   void (async () => {
     const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
     try {
-      const payload = await runAssistantSentImageGeneration({
+      const result = await runAssistantSentImageGeneration({
         db,
         userId: job.userId,
         mode: job.mode,
-        conversationId: job.conversationId,
+        conversationId: conversationIdForImageGeneration(job),
         botIdTriState: job.botId,
         userMessage: job.userMessage,
         captionPrompt: job.captionPrompt,
@@ -368,10 +448,22 @@ export function startChatImageBackgroundJob(args: {
         preferredProvider,
         openAiApiKey,
         prefs,
+        promptRepairProvider: auxiliaryProvider,
         signal: job.abortController.signal,
       });
 
-      if (!payload) {
+      if (result.status === "denied") {
+        await finishJobWithAssistantNote({
+          db,
+          job,
+          chatProviderName,
+          chatModelUsed,
+          content: result.message,
+        });
+        return;
+      }
+
+      if (result.status !== "succeeded") {
         await failJobWithDbNote({
           db,
           job,
@@ -382,6 +474,8 @@ export function startChatImageBackgroundJob(args: {
         });
         return;
       }
+
+      const payload = result.payload;
 
       const followUp = await inferImageReadyFollowUpText({
         auxiliaryProvider,

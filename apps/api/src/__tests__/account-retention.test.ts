@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   INACTIVE_ACCOUNT_RETENTION_DAYS,
   getInactiveAccountCutoff,
-  isInactiveAccount
+  isInactiveAccount,
+  isInactiveAccountWithFallback,
+  resolveActivityTimestamp
 } from "../account-retention.ts";
 
 describe("account retention", () => {
@@ -21,5 +23,29 @@ describe("account retention", () => {
     const now = new Date("2026-04-22T00:00:00.000Z");
     assert.equal(isInactiveAccount("2026-02-20T23:59:59.000Z", now), true);
     assert.equal(isInactiveAccount("2026-02-21T00:00:01.000Z", now), false);
+  });
+
+  it("uses createdAt when lastActiveAt is missing", () => {
+    const now = new Date("2026-04-22T00:00:00.000Z");
+    assert.equal(
+      resolveActivityTimestamp(null, "2026-02-20T23:59:59.000Z"),
+      "2026-02-20T23:59:59.000Z"
+    );
+    assert.equal(
+      isInactiveAccountWithFallback(
+        "",
+        "2026-02-20T23:59:59.000Z",
+        now
+      ),
+      true
+    );
+    assert.equal(
+      isInactiveAccountWithFallback(
+        undefined,
+        "2026-02-21T00:00:01.000Z",
+        now
+      ),
+      false
+    );
   });
 });

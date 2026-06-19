@@ -16,6 +16,7 @@ export type MemoryValidationReasonCode =
   | "implausible_literal"
   | "joke_without_stable_signal"
   | "contradiction"
+  | "unsafe_judgment"
   | "low_confidence"
   | "malformed_text"
   | "validator_error";
@@ -63,7 +64,9 @@ interface CriticPayload {
 
 const MEMORY_VALIDATION_SYSTEM_PROMPT = `You are Prism's memory validation critic. Validate proposed saved memories before they are written.
 
-Memories must be durable, concise facts or preferences about the user, written in second person ("You prefer...") or as "The user...".
+Memories must be durable, concise facts or preferences about the user.
+For source="direct", write in second person ("You prefer...") or as "The user...".
+For source="inferred", bot-perspective relationship impressions are allowed when phrased as calm observations (for example "Lara felt uneasy about the user's tone and wanted clearer boundaries.").
 
 Return JSON only:
 {"results":[{"index":0,"decision":"approve|auto_fix|reject","text":"...","confidence":0.0-1.0,"reasonCodes":["..."],"notes":"optional"}]}
@@ -76,6 +79,8 @@ Rules:
 - If a joke has no stable user preference or fact, reject it with reasonCodes ["joke_without_stable_signal"].
 - If a literal claim is implausible and no useful preference can be inferred, reject it with reasonCodes ["implausible_literal"].
 - Reject one-off tasks, questions, ambiguous "you are" statements, malformed text, and low-confidence guesses.
+- For source="compiled", reject whole assistant replies, instructions, code snippets, and multi-step answers instead of saving them as facts.
+- Reject insulting, shaming, diagnosing, threatening, or punitive user labels and use reasonCodes ["unsafe_judgment"].
 - If userDisplayName is provided and the memory is about the human user, write the final memory with that name (for example, "Jared prefers..."). If the memory is about a bot/persona, keep the existing second-person framing.
 - Never invent new personal facts.
 - Preserve the payload of favorites/preferences when merging or rewriting.`;
@@ -89,6 +94,14 @@ const ASSISTANT_IDENTITY_COMMAND_PATTERN =
 const USER_PREFERENCE_PATTERN =
   /^(?:you|the user)\s+(?:prefer|prefers|would like|want|wants|need|needs)\b/i;
 
+const COMPILED_MEMORY_MAX_TEXT_LENGTH = 240;
+
+const COMPILED_MEMORY_ANSWER_SHAPE_PATTERN =
+  /(```|`[^`]+`|\b(?:in powershell|from (?:the )?(?:cli|console|terminal)|hit enter|run this|use this command|open explorer|here(?:'s| is) how|step \d+|first,|next,|finally,)\b|^\s*(?:to|if you want to|you can|use|run|open|click|select|type|enter)\s+)/i;
+
+const UNSAFE_JUDGMENT_PATTERN =
+  /\b(?:worthless|pathetic|disgusting|subhuman|idiot|moron|stupid|deranged|crazy|insane|psycho|hate\s+you|kill|harm|punish|ban(?:ned)?\s+you|never\s+talk\s+to\s+you)\b/i;
+
 const VALID_REASON_CODES = new Set<MemoryValidationReasonCode>([
   "subject_role_confusion",
   "assistant_identity_instruction",
@@ -100,6 +113,7 @@ const VALID_REASON_CODES = new Set<MemoryValidationReasonCode>([
   "implausible_literal",
   "joke_without_stable_signal",
   "contradiction",
+  "unsafe_judgment",
   "low_confidence",
   "malformed_text",
   "validator_error",
@@ -269,6 +283,13 @@ function memoryKey(text: string): string | null {
     .replace(/[^a-z0-9'\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  if (
+    /^you\s+(?:prefer|want)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+.+$/.test(
+      normalized
+    )
+  ) {
+    return "preferred-name";
+  }
   const match = normalized.match(
     /^(?:my|your|the user's)\s+(.+?)\s+(?:is|are|was|were)\s+.+$/
   );
@@ -291,11 +312,22 @@ function contradictsExisting(candidate: MemoryCandidate, existingMemories: strin
 
 function deterministicPreReject(
   candidate: MemoryCandidate,
-  existingMemories: string[]
+  existingMemories: string[],
+  source: MemoryValidationSource
 ): RejectedMemoryCandidate | null {
   const text = normalizeWhitespace(candidate.text);
   if (!text || text.length < 4) {
     return { originalText: candidate.text, reasonCodes: ["malformed_text"] };
+  }
+  if (
+    source === "compiled" &&
+    (text.length > COMPILED_MEMORY_MAX_TEXT_LENGTH ||
+      COMPILED_MEMORY_ANSWER_SHAPE_PATTERN.test(text))
+  ) {
+    return { originalText: candidate.text, reasonCodes: ["task_request_not_memory"] };
+  }
+  if (source === "inferred" && UNSAFE_JUDGMENT_PATTERN.test(text)) {
+    return { originalText: candidate.text, reasonCodes: ["unsafe_judgment"] };
   }
   if (TASK_LIKE_MEMORY_PATTERN.test(text)) {
     return { originalText: candidate.text, reasonCodes: ["task_request_not_memory"] };
@@ -304,6 +336,51 @@ function deterministicPreReject(
     return { originalText: candidate.text, reasonCodes: ["contradiction", "low_confidence"] };
   }
   return null;
+}
+
+function isCanonicalPreferredNameMemory(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/[^a-z0-9'\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^you\s+(?:prefer|want)(?:\s+to)?\s+be\s+(?:called|referred\s+to\s+as)\s+.+$/.test(
+    normalized
+  );
+}
+
+function deterministicPreApprove(
+  candidate: MemoryCandidate,
+  source: MemoryValidationSource,
+  userDisplayName?: string
+): ValidatedMemoryCandidate | null {
+  if (
+    source === "inferred" &&
+    (candidate.category === "user" || candidate.category === "bot_relation") &&
+    candidate.confidence <= 0.72
+  ) {
+    return {
+      ...candidate,
+      text:
+        candidate.category === "user"
+          ? normalizeMemoryDisplayText(candidate.text, userDisplayName)
+          : sentenceCase(candidate.text),
+      validationStatus: "approved",
+      originalText: candidate.text,
+      reasonCodes: [],
+    };
+  }
+  if (source !== "direct" || candidate.confidence < 0.95) return null;
+  const text = normalizeMemoryDisplayText(candidate.text, userDisplayName);
+  if (!isCanonicalPreferredNameMemory(text)) return null;
+  return {
+    ...candidate,
+    text,
+    validationStatus: "approved",
+    originalText: candidate.text,
+    reasonCodes: [],
+  };
 }
 
 function normalizeCriticResult(
@@ -414,9 +491,18 @@ export async function validateMemoryCandidates(
   for (let index = 0; index < options.candidates.length; index += 1) {
     const candidate = options.candidates[index];
     if (!candidate) continue;
-    const preReject = deterministicPreReject(candidate, existingMemories);
+    const preReject = deterministicPreReject(candidate, existingMemories, options.source);
     if (preReject) {
       rejected.push(preReject);
+      continue;
+    }
+    const preApprove = deterministicPreApprove(
+      candidate,
+      options.source,
+      options.userDisplayName
+    );
+    if (preApprove) {
+      acceptedBypass.push(preApprove);
     } else {
       candidatesForCritic.push(candidate);
     }

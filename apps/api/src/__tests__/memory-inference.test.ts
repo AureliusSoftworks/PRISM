@@ -74,6 +74,7 @@ async function seedDirectMemories(
 
 function memoryRows(db: DatabaseSync): Array<{
   source: string;
+  tier: string;
   certainty: number | null;
   source_message_ids: string;
   ciphertext: string;
@@ -81,9 +82,10 @@ function memoryRows(db: DatabaseSync): Array<{
   tag: string;
 }> {
   return db
-    .prepare("SELECT source, certainty, source_message_ids, ciphertext, iv, tag FROM memories ORDER BY source")
+    .prepare("SELECT source, tier, certainty, source_message_ids, ciphertext, iv, tag FROM memories ORDER BY source")
     .all() as Array<{
     source: string;
+    tier: string;
     certainty: number | null;
     source_message_ids: string;
     ciphertext: string;
@@ -132,6 +134,7 @@ describe("inferAndStoreBotMemories", () => {
     assert.equal(created.length, 1);
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.source, "inferred");
+    assert.equal(rows[0]?.tier, "short_term");
     assert.equal(rows[0]?.certainty, 0.92);
     assert.equal(payload.text, "Your favorite instrument is the piano.");
     assert.deepEqual(JSON.parse(rows[0]?.source_message_ids ?? "[]"), ["message-1"]);

@@ -20,6 +20,8 @@ export {
   ageFromIsoBirthday,
   buildImagePersonaContext,
   composeAugmentedImagePrompt,
+  composeVerbatimFirstImagePrompt,
+  type ImagePromptPersonaBlendMode,
   DEFAULT_IMAGE_PERSONA_CONTEXT_MAX_CHARS,
   parseIsoYmdParts,
   westernZodiacFromIsoBirthday,
@@ -62,11 +64,27 @@ export {
 } from "./prismTool.js";
 
 export {
+  normalizePromptShortcutMetadata,
+  parseStoredPromptShortcutPayload,
+  serializePromptShortcutPayload,
+  type PromptShortcutFlag,
+  type PromptShortcutMetadata,
+} from "./promptShortcut.js";
+
+export {
+  ELEVENLABS_IMAGE_MODEL_IDS,
+  ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
+  isElevenLabsImageModelId,
+  type ElevenLabsImageModelId,
+} from "./elevenLabsImageModels.js";
+
+export {
   OPENAI_IMAGE_MODEL_IDS,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
   isAllowedOpenAiImageModelId,
+  isGptImageModelId,
   normalizeOpenAiImageModelId,
   normalizeOpenAiImageGenerationParams,
   catalogEntriesMatchingLocalImageHeuristic,
@@ -90,6 +108,7 @@ export {
   MAX_COMFY_UI_WORKFLOWS_STORED_JSON_BYTES,
   encodeComfyUiRemoteWorkflowModelId,
   encodeComfyUiWorkflowModelId,
+  formatComfyUiRemoteWorkflowLabel,
   findComfyUiWorkflowBindingByRemotePath,
   findComfyUiWorkflowRegistration,
   isComfyUiApiWorkflowNode,
@@ -103,6 +122,67 @@ export {
   type ComfyUiWorkflowPatchMap,
   type ComfyUiWorkflowRegistration,
 } from "./comfyUiWorkflow.js";
+
+export {
+  PRISM_DEFAULT_STORY_THEME,
+  PRISM_DEFAULT_STORY_THEME_ID,
+  STORY_ITEM_GLYPH_CATEGORIES,
+  STORY_SPRITE_POSES,
+  STORY_THEME_PUBLIC_BASE_PATH,
+  getBuiltinStoryThemes,
+  getStoryThemeById,
+  isBuiltinStoryThemeAsset,
+  type StoryAssetKind,
+  type StoryItemGlyphCategory,
+  type StorySpritePose,
+  type StoryThemeAsset,
+  type StoryThemeManifest,
+} from "./storyThemes.js";
+
+export {
+  STORY_BOT_COUNT_MAX,
+  STORY_BOT_COUNT_MIN,
+  STORY_CHOICE_COUNT_MAX,
+  STORY_CHOICE_COUNT_MIN,
+  STORY_ENDING_COUNT_MAX,
+  STORY_ENDING_COUNT_MIN,
+  STORY_LOCATION_COUNT_MAX,
+  STORY_LOCATION_COUNT_MIN,
+  STORY_SCENE_COUNT_MAX,
+  STORY_SCENE_COUNT_MIN,
+  applyStoryChoice,
+  applyStoryItemPickup,
+  applyStoryTravel,
+  createInitialStoryProgress,
+  createInitialStoryTranscript,
+  createStorySceneTranscriptEntry,
+  getStoryCurrentScene,
+  getStoryLocation,
+  getStoryScene,
+  validateStoryEpisodeManifest,
+  type StoryChoice,
+  type StoryEpisodeManifest,
+  type StoryInventoryItem,
+  type StoryLocation,
+  type StoryProgressStatus,
+  type StoryScene,
+  type StorySessionChoiceRequest,
+  type StorySessionCreateRequest,
+  type StorySessionCreateResponse,
+  type StorySessionDeleteResponse,
+  type StorySessionDetail,
+  type StorySessionDetailResponse,
+  type StorySessionItemRequest,
+  type StorySessionListResponse,
+  type StorySessionMutationResponse,
+  type StorySessionProgress,
+  type StorySessionStatus,
+  type StorySessionSummary,
+  type StorySessionTravelRequest,
+  type StoryTranscriptEntry,
+  type StoryTranscriptEntryKind,
+  type StoryTransitionResult,
+} from "./storyRuntime.js";
 
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
@@ -125,9 +205,11 @@ export {
 } from "./color.js";
 
 import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type { PromptShortcutMetadata } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 
 export type UserRole = "user";
+export type LlmProviderName = "local" | "openai" | "anthropic";
 
 export interface UserProfile {
   id: string;
@@ -136,7 +218,7 @@ export interface UserProfile {
   role: UserRole;
   createdAt: string;
   theme: "light" | "dark" | "system";
-  preferredProvider: "local" | "openai";
+  preferredProvider: LlmProviderName;
 }
 
 export interface AuthSession {
@@ -151,7 +233,7 @@ export interface ChatMessage {
   content: string;
   createdAt: string;
   /** Provider that generated the message (assistant only; undefined for user/system). */
-  provider?: "local" | "openai";
+  provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
@@ -168,6 +250,8 @@ export interface ChatMessage {
   askQuestion?: AskQuestionPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** User-entered Prompt Center shortcut that resolved into this message content. */
+  promptShortcut?: PromptShortcutMetadata;
 }
 
 /**
@@ -204,10 +288,75 @@ export interface CoffeeInterruptionEvent {
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
-export type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+export type CoffeePollStatus = "open" | "collecting" | "closed" | "cancelled";
 
-export const COFFEE_SESSION_DURATION_MINUTES = [1, 5, 10] as const;
+export type CoffeePollVoteKind = "option" | "abstain" | "pending" | "error";
+
+export type CoffeePollVoterKind = "bot" | "player";
+
+/** Sentinel `botId` stored for the human player's poll vote row. */
+export const COFFEE_POLL_PLAYER_VOTER_ID = "__player__";
+
+export interface CoffeePollDeliberation {
+  stage:
+    | "idle"
+    | "evaluating"
+    | "teetering"
+    | "blocked"
+    | "deciding"
+    | "finalized"
+    | "error";
+  leaningOptionIndex?: number | null;
+  alternateOptionIndex?: number | null;
+  confidence?: number | null;
+  blocker?: string | null;
+  note?: string | null;
+  updatedAt: string;
+}
+
+export interface CoffeePollVote {
+  botId: string;
+  voterKind: CoffeePollVoterKind;
+  kind: CoffeePollVoteKind;
+  optionIndex?: number | null;
+  explanation?: string | null;
+  suggestedOption?: string | null;
+  confidence?: number | null;
+  deliberation?: CoffeePollDeliberation | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CoffeePollOptionTally {
+  optionIndex: number;
+  option: string;
+  voteCount: number;
+}
+
+export interface CoffeePoll {
+  id: string;
+  conversationId: string;
+  question: string;
+  options: string[];
+  status: CoffeePollStatus;
+  createdBy: "user";
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  votes: CoffeePollVote[];
+  tallies: CoffeePollOptionTally[];
+}
+
+export type CoffeeSessionDurationMinutes = 2 | 3 | 5;
+
+export const COFFEE_SESSION_DURATION_MINUTES = [2, 3, 5] as const;
 export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+/** Bots may hold their Coffee poll vote until this close to session end. */
+export const COFFEE_POLL_FINALIZE_REMAINING_MS = 30_000;
+/** Minimum answer choices when the player starts a Coffee poll. */
+export const COFFEE_POLL_OPTION_COUNT_MIN = 2;
+/** Maximum answer choices when the player starts a Coffee poll. */
+export const COFFEE_POLL_OPTION_COUNT_MAX = 4;
 
 export type CoffeePresetMode = "manual" | "auto";
 
@@ -245,6 +394,7 @@ export interface CoffeeGroupEvent {
 export interface CoffeeGroupModelChoice {
   local?: string;
   openai?: string;
+  anthropic?: string;
 }
 
 export interface CoffeeGroup {
@@ -366,6 +516,22 @@ export interface Conversation {
    * row WHITE, no-reply-yet falls back to the locked bot's color.
    */
   hasAssistantReply: boolean;
+  /** Zen-only generated ambient wallpaper metadata. */
+  zenWallpaper?: {
+    enabled: boolean;
+    imageId: string | null;
+    promptSeed: string | null;
+    generationMessageCount: number | null;
+    status: "idle" | "generating" | "ready" | "error";
+    history: Array<{
+      imageId: string;
+      promptSeed: string | null;
+      generationMessageCount: number;
+      revealStartMessageCount?: number;
+      revealFullMessageCount?: number;
+      createdAt?: string;
+    }>;
+  };
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -399,15 +565,28 @@ export type MemoryTier = "short_term" | "long_term";
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  MODEL_VISIBILITY_DEFAULTS_VERSION,
+  defaultHiddenModelIdsForCatalog,
+  isCommonOnlineChatModel,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
   type CatalogShapeForAuto,
+  type ModelForDefaultVisibility,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
 } from "./modelRouting.js";
 
-export { classifyMemoryCategoryFromText } from "./memoryClassification.js";
+export {
+  LONG_TERM_HIGH_TRUTH_SCORE,
+  LONG_TERM_MEMORY_SCORE,
+  LONG_TERM_MIN_DURABILITY_FOR_HIGH_TRUTH,
+  classifyMemoryCategoryFromText,
+  memoryLongTermScore,
+  memoryQualifiesLongTerm,
+  memoryTruthScore,
+  type MemorySource,
+} from "./memoryClassification.js";
 
 export type MemoryValidationStatus = "approved" | "auto_fixed";
 
@@ -418,7 +597,11 @@ export type MemoryValidationReasonCode =
   | "question_fragment"
   | "trailing_conversation_tag"
   | "lost_preference_payload"
+  | "figurative_preference"
+  | "implausible_literal"
+  | "joke_without_stable_signal"
   | "contradiction"
+  | "unsafe_judgment"
   | "low_confidence"
   | "malformed_text"
   | "validator_error";
@@ -446,11 +629,11 @@ export interface MemoryValidationEvent {
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
  */
-export type ChatMode = "chat" | "sandbox" | "coffee";
+export type ChatMode = "zen" | "chat" | "sandbox" | "coffee";
 
 /**
- * Companion-only preferences. These are intentionally "feel" controls, not
- * runtime model knobs, so Chat can stay calm and low-control.
+ * Companion-only preferences. These are intentionally "feel" controls, while
+ * an explicit model picker choice may still override the bot/account default.
  */
 export interface ChatCompanionPreferences {
   /** Optional tone cue for the single companion persona. */
@@ -460,13 +643,11 @@ export interface ChatCompanionPreferences {
 }
 
 /**
- * Advanced runtime controls reserved for Sandbox.
- *
- * In Chat mode these knobs are accepted for backwards compatibility but
- * ignored server-side so the companion contract remains stable.
+ * Advanced runtime controls. Sandbox uses the full set; Chat may honor the
+ * explicit model choice while keeping the rest of the companion contract stable.
  */
 export interface SandboxRuntimeControls {
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   modelOverride?: string;
   botId?: string | null;
 }
@@ -478,12 +659,12 @@ export interface ChatRequestPayload {
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
-  /** Companion-only optional preferences (used only when mode === "chat"). */
+  /** Companion-only optional preferences (used only when mode === "zen"). */
   companionPreferences?: ChatCompanionPreferences;
-  /** Advanced controls intended for Sandbox-only routing. */
+  /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
-  /** Back-compat top-level advanced knobs (ignored when mode === "chat"). */
-  preferredProvider?: "local" | "openai";
+  /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
+  preferredProvider?: LlmProviderName;
   modelOverride?: string;
   botId?: string | null;
   /**
@@ -605,6 +786,8 @@ export interface CoffeeSessionCreateRequest {
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
+  /** Optional opening poll that seeds the initial table topic. */
+  initialPoll?: CoffeePollCreateRequest;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -617,6 +800,8 @@ export interface CoffeeSessionCreateResponse {
    * already persisted {@link Conversation.coffeeTopic}, e.g. auto-topic groups).
    */
   coffeeStarterTopics?: string[];
+  /** Present when the session started with an opening poll. */
+  poll?: CoffeePoll;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
@@ -625,7 +810,7 @@ export interface CoffeeContinueRequest {
    * Per-request provider override for the next bot reply. Per-bot online
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -657,7 +842,7 @@ export interface CoffeeTurnRequest {
    * saved preference for this turn only. Per-bot online gating still
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
-  preferredProvider?: "local" | "openai";
+  preferredProvider?: LlmProviderName;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */
@@ -678,4 +863,39 @@ export interface CoffeeTurnResponse {
     jobId: string;
     conversationId: string | null;
   };
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls`. */
+export interface CoffeePollCreateRequest {
+  question: string;
+  options: string[];
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls`. */
+export interface CoffeePollCreateResponse {
+  poll: CoffeePoll;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
+export interface CoffeePollCollectVotesRequest {
+  preferredProvider?: LlmProviderName;
+  sessionRemainingMs?: number | null;
+  /** Optional player vote to record before bot deliberation is advanced. */
+  optionIndex?: number;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls/:pollId/collect`. */
+export interface CoffeePollCollectVotesResponse {
+  poll: CoffeePoll;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/polls/:pollId/vote`. */
+export interface CoffeePollPlayerVoteRequest {
+  optionIndex: number;
+  sessionRemainingMs?: number | null;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/polls/:pollId/vote`. */
+export interface CoffeePollPlayerVoteResponse {
+  poll: CoffeePoll;
 }

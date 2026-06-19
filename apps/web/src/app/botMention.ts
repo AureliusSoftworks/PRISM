@@ -50,6 +50,29 @@ export function formatBotMentionMarkdown(bot: { id: string; name: string }): str
 }
 
 /**
+ * Prefer the explicit chip label when it differs intentionally from the
+ * canonical roster name (for example learned address preferences like
+ * "Dr. Freud"), but still repair obvious truncations like `Mr` -> `Mr. Krabs`.
+ */
+export function normalizePeerMentionChipLabel(
+  label: string,
+  botCanonicalName: string,
+  preferredLabel?: string | null
+): string {
+  const canonical = botCanonicalName.trim();
+  const raw = label.trim();
+  const preferred = typeof preferredLabel === "string" ? preferredLabel.trim() : "";
+  if (preferred.length > 0) return preferred;
+  if (canonical.length === 0) return raw;
+  if (raw.length === 0) return canonical;
+  const rawLower = raw.toLocaleLowerCase();
+  const canonicalLower = canonical.toLocaleLowerCase();
+  if (rawLower === canonicalLower) return canonical;
+  if (canonicalLower.startsWith(rawLower)) return canonical;
+  return raw;
+}
+
+/**
  * Source-text segment used by both the static and reveal-aware bot-mention
  * renderers. `srcStart`/`srcEnd` are offsets into the original markdown
  * string. Mention segments span the entire `[name](prism-bot://id)` token;
@@ -207,7 +230,7 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   if (!normalized) return false;
   // Keep this conservative: only treat common physical/social action verbs
   // as stage directions when the token is embedded in prose.
-  return /^(?:glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing)\b/u.test(
+  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|mutters?|muttering|scoffs?|scoffing|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
     normalized
   );
 }
@@ -218,6 +241,132 @@ function looksLikeInlineActionAtSentenceBoundary(before: string, after: string):
   const beforeEndsSentence = /(?:[.!?…]|\.{3}|—|–|:|;)$/.test(beforeTrimmed);
   const afterStartsSentenceish = afterTrimmed.length === 0 || /^[\p{Lu}\p{N}"“'‘(\[]/u.test(afterTrimmed);
   return beforeEndsSentence && afterStartsSentenceish;
+}
+
+const PARENTHETICAL_STAGE_START_RE =
+  /^(?:the sound of|sound of|pauses?|pausing|takes?|taking|sips?|sipping|smiles?|smiling|grins?|grinning|frowns?|frowning|nods?|nodding|shrugs?|shrugging|sighs?|sighing|laughs?|laughing|chuckles?|chuckling|whispers?|whispering|murmurs?|murmuring|breathes?|breathing|inhales?|inhaling|exhales?|exhaling|glances?|glancing|looks?|looking|stares?|staring|glares?|glaring|leans?|leaning|tilts?|tilting|turns?|turning|gestures?|gesturing|points?|pointing|waves?|waving|with\s+|as\s+|while\s+|eyes?\s+|voice\s+|tone\s+)/u;
+
+function looksLikeParentheticalStageDirection(
+  inner: string,
+  before: string,
+  after: string
+): boolean {
+  const normalized = inner.trim().toLowerCase();
+  if (!normalized || normalized.length > 220) return false;
+  if (/\?|https?:\/\//u.test(normalized)) return false;
+  if (looksLikeStageDirectionAction(normalized)) return true;
+  if (PARENTHETICAL_STAGE_START_RE.test(normalized)) return true;
+  // Treat standalone-ish parentheticals as stage cues when they sit between
+  // sentence boundaries. This catches ambience-style notes like
+  // "(The sound of rain in the background.)" that some models emit.
+  return looksLikeInlineActionAtSentenceBoundary(before, after);
+}
+
+const LEADING_UNMARKED_STAGE_START_RE = new RegExp(
+  [
+    String.raw`^(?:(?:[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3})(?:,\s+|\s+))?`,
+    String.raw`(?:`,
+    String.raw`(?:his|her|their|its)\s+(?:eyes?|gaze|breath(?:ing)?|jaw|mouth|shoulders?)\b`,
+    String.raw`|eyes?\s+(?:narrow|narrowing|widen|widening|shift|shifting|glance|glancing|gaze|gazing|roll|rolling)\b`,
+    String.raw`|(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|leans?|leaning|glances?|glancing|gazes?|gazing|glares?|glaring|stares?|staring|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|blinks?|blinking|turns?|turning|tilts?|tilting|pauses?|pausing|sips?|sipping|picks?|picking|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting|strokes?|stroking|rubs?|rubbing|scratches?|scratching|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|drums?|drumming|twirls?|twirling|pats?|patting|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling)\b(?!\s+(?:like|are|is)\b)`,
+    String.raw`)`,
+  ].join(""),
+  "iu"
+);
+
+const MARKDOWN_BOT_MENTION_PATTERN = String.raw`\[[^\]\n]+\]\(prism-bot:\/\/[^)\n]+\)`;
+const UNMARKED_STAGE_ADDRESS_PREFIX_RE = new RegExp(
+  String.raw`^(?:${MARKDOWN_BOT_MENTION_PATTERN}\s*,?\s*)`,
+  "u"
+);
+
+const LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE =
+  /\s+(?=(?:["“'‘])?(?:[A-Z][\p{L}'-]{1,24},|(?:I|I'm|I've|I'd|You|You're|You've|We|We're|A|That's|The|This|These|Those|But|Still|Anyway|Honestly|Listen|Look,|Well|Ah|Oh|No offense|No,|Yes,|Okay|Sure|Mine|Yours|Consider|Imagine|Suppose|Notice|Think|Let's|Let us|Picture|Now|Yeah|Yup|Hey|Huh|Hmm|Actually|Me|True|False|Maybe|Perhaps|My|So|And|Because|If|When|Where|Why|How|What|Dodging)\b))/gu;
+
+function normalizeUnmarkedStageAction(raw: string): string {
+  return raw.replace(/[,.!?;:\s]+$/u, "").trim();
+}
+
+function splitUnmarkedAddressPrefix(text: string): {
+  prefix: string;
+  rest: string;
+} {
+  const match = text.match(UNMARKED_STAGE_ADDRESS_PREFIX_RE);
+  if (!match) return { prefix: "", rest: text };
+  const prefix = match[0] ?? "";
+  return { prefix, rest: text.slice(prefix.length).trimStart() };
+}
+
+function looksLikeStandaloneUnmarkedStageAction(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length >= 8 &&
+    trimmed.length <= 180 &&
+    !/[?"]/u.test(trimmed) &&
+    LEADING_UNMARKED_STAGE_START_RE.test(trimmed)
+  );
+}
+
+function extractLeadingUnmarkedStageDirection(text: string): {
+  action: string;
+  mainText: string;
+  revealAtDisplayLength: number;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const { prefix, rest } = splitUnmarkedAddressPrefix(trimmed);
+  const startsLikeAction = LEADING_UNMARKED_STAGE_START_RE.test(rest);
+  if (!startsLikeAction) return null;
+
+  for (const match of rest.matchAll(LEADING_UNMARKED_STAGE_SPOKEN_OPENER_RE)) {
+    const splitIndex = match.index ?? -1;
+    const action = normalizeUnmarkedStageAction(rest.slice(0, splitIndex));
+    if (splitIndex < 12 && !looksLikeStageDirectionAction(action)) continue;
+    if (splitIndex < 4 || splitIndex > 180) continue;
+    const spokenText = rest.slice(splitIndex).trim();
+    const mainText = normalizeStageDirectionMainText(`${prefix}${spokenText}`);
+    if (action.length > 0 && mainText.length > 0) {
+      return {
+        action,
+        mainText,
+        revealAtDisplayLength: getBotMentionDisplayLength(prefix),
+      };
+    }
+  }
+  if (looksLikeStandaloneUnmarkedStageAction(rest)) {
+    return {
+      action: normalizeUnmarkedStageAction(rest),
+      mainText: "",
+      revealAtDisplayLength: 0,
+    };
+  }
+  return null;
+}
+
+function extractTrailingUnmarkedStageDirection(text: string): {
+  action: string;
+  mainText: string;
+  revealAtDisplayLength: number;
+} | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const sentenceBreaks = Array.from(trimmed.matchAll(/[.!?…]\s+/gu));
+  for (let index = sentenceBreaks.length - 1; index >= 0; index -= 1) {
+    const match = sentenceBreaks[index]!;
+    const tailStart = (match.index ?? 0) + match[0].length;
+    const mainText = trimmed.slice(0, tailStart).trim();
+    const tail = trimmed.slice(tailStart).trim();
+    const { rest } = splitUnmarkedAddressPrefix(tail);
+    if (!mainText || !rest) continue;
+    if (looksLikeStandaloneUnmarkedStageAction(rest)) {
+      return {
+        action: normalizeUnmarkedStageAction(rest),
+        mainText,
+        revealAtDisplayLength: getBotMentionDisplayLength(mainText),
+      };
+    }
+  }
+  return null;
 }
 
 function normalizeStageDirectionMainText(raw: string): string {
@@ -232,15 +381,18 @@ function parseStageDirectionsDetailed(text: string): {
   cues: StageDirectionCue[];
 } {
   if (!text) return { mainText: "", actions: [], cues: [] };
-  // 1+ leading asterisks, non-asterisk content (lazy), 1+ trailing asterisks.
-  const re = /\*+([^*\n]+?)\*+/g;
+  // Stage-direction tokens:
+  // - `*action*` / `**action**` (canonical roleplay notation)
+  // - `(action)` (fallback style some models emit)
+  const re = /(\*+([^*\n]+?)\*+)|(\(([^()\n]+?)\))/g;
   const cues: StageDirectionCue[] = [];
   let spokenRaw = "";
   let cursor = 0;
   for (const match of text.matchAll(re)) {
     const start = match.index ?? 0;
     const token = match[0] ?? "";
-    const trimmed = String(match[1] ?? "").trim();
+    const isAsteriskToken = typeof match[2] === "string";
+    const trimmed = String(isAsteriskToken ? match[2] : match[4] ?? "").trim();
     if (start > cursor) {
       spokenRaw += text.slice(cursor, start);
     }
@@ -249,26 +401,53 @@ function parseStageDirectionsDetailed(text: string): {
     const hasSpokenBefore = /\p{L}|\p{N}/u.test(before);
     const hasSpokenAfter = /\p{L}|\p{N}/u.test(after);
 
-    if (
-      hasSpokenBefore &&
-      hasSpokenAfter &&
-      !looksLikeStageDirectionAction(trimmed) &&
-      !looksLikeInlineActionAtSentenceBoundary(before, after)
-    ) {
-      // Inline emphasis in ordinary prose.
-      spokenRaw += trimmed;
-    } else if (trimmed.length > 0) {
+    if (trimmed.length === 0) {
+      cursor = start + token.length;
+      continue;
+    }
+
+    if (isAsteriskToken) {
+      if (
+        hasSpokenBefore &&
+        hasSpokenAfter &&
+        !looksLikeStageDirectionAction(trimmed) &&
+        !looksLikeInlineActionAtSentenceBoundary(before, after)
+      ) {
+        // Inline emphasis in ordinary prose.
+        spokenRaw += trimmed;
+      } else {
+        const revealAtDisplayLength = getBotMentionDisplayLength(
+          normalizeStageDirectionMainText(spokenRaw)
+        );
+        cues.push({ action: trimmed, revealAtDisplayLength });
+      }
+    } else if (looksLikeParentheticalStageDirection(trimmed, before, after)) {
       const revealAtDisplayLength = getBotMentionDisplayLength(
         normalizeStageDirectionMainText(spokenRaw)
       );
       cues.push({ action: trimmed, revealAtDisplayLength });
+    } else {
+      // Non-stage parentheticals are ordinary prose.
+      spokenRaw += token;
     }
     cursor = start + token.length;
   }
   if (cursor < text.length) {
     spokenRaw += text.slice(cursor);
   }
-  const mainText = normalizeStageDirectionMainText(spokenRaw);
+  let mainText = normalizeStageDirectionMainText(spokenRaw);
+  if (cues.length === 0 && !text.includes("*")) {
+    const unmarked =
+      extractLeadingUnmarkedStageDirection(mainText) ??
+      extractTrailingUnmarkedStageDirection(mainText);
+    if (unmarked) {
+      mainText = unmarked.mainText;
+      cues.push({
+        action: unmarked.action,
+        revealAtDisplayLength: unmarked.revealAtDisplayLength,
+      });
+    }
+  }
   return {
     mainText,
     actions: cues.map((cue) => cue.action),
@@ -287,6 +466,7 @@ function parseStageDirectionsDetailed(text: string): {
  *   - `*pours coffee*`         (canonical, what the prompt asks for)
  *   - `**pours coffee**`       (Markdown bold — many models default to this)
  *   - `*pours coffee* and...`  (leading action, then spoken line)
+ *   - `eyes narrow... No offense` (unmarked leading physical action)
  *   - `*pours coffee` (no close) → orphan asterisks are still scrubbed so
  *     the table line never starts or ends with a stray `*`.
  *

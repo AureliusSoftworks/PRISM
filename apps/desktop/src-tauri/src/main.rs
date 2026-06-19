@@ -5,11 +5,13 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::MenuBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use url::Url;
 
-const DEFAULT_API_PORT: u16 = 18787;
-const DEFAULT_WEB_PORT: u16 = 18788;
+const DEFAULT_API_PORT: u16 = 19787;
+const DEFAULT_WEB_PORT: u16 = 19788;
 const STARTUP_TIMEOUT_SECS: u64 = 90;
 
 /// Strip the `\\?\` extended-length path prefix that Rust's `canonicalize()`
@@ -37,6 +39,18 @@ impl RuntimeState {
             qdrant_child: Mutex::new(None),
             api_child: Mutex::new(None),
             web_child: Mutex::new(None),
+        }
+    }
+}
+
+struct AppLifecycleState {
+    is_quitting: Mutex<bool>,
+}
+
+impl AppLifecycleState {
+    fn new() -> Self {
+        Self {
+            is_quitting: Mutex::new(false),
         }
     }
 }
@@ -104,10 +118,19 @@ fn node_binary(root: &Path) -> String {
         candidates.push(root.join("runtime").join("node").join("node.exe"));
         candidates.push(root.join("node").join("node.exe"));
     } else {
+        // Finder-launched apps often have a minimal PATH. Probe common absolute
+        // install paths first so desktop startup does not depend on shell PATH.
+        candidates.push(PathBuf::from("/opt/homebrew/bin/node"));
+        candidates.push(PathBuf::from("/usr/local/bin/node"));
+        candidates.push(PathBuf::from("/usr/bin/node"));
+        // Keep PATH-based lookup as a final host-runtime fallback.
+        candidates.push(PathBuf::from("node"));
         candidates.push(root.join("runtime").join("node").join("bin").join("node"));
         candidates.push(root.join("node").join("bin").join("node"));
     }
-    candidates.push(PathBuf::from("node"));
+    if cfg!(target_os = "windows") {
+        candidates.push(PathBuf::from("node"));
+    }
 
     candidates
         .into_iter()
@@ -164,10 +187,16 @@ fn io_error(message: impl Into<String>) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, message.into())
 }
 
-fn pick_available_port(preferred: u16) -> std::io::Result<u16> {
+fn pick_available_port(preferred: u16, forbidden: &[u16]) -> std::io::Result<u16> {
     for offset in 0..=100 {
         let candidate = preferred.saturating_add(offset);
-        if std::net::TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
+        if forbidden.contains(&candidate) {
+            continue;
+        }
+        // Probe via wildcard bind so ports already held by 0.0.0.0 listeners
+        // are treated as occupied. This avoids false positives that can let the
+        // desktop shell open while child runtimes fail to bind and render blank.
+        if std::net::TcpListener::bind(("0.0.0.0", candidate)).is_ok() {
             return Ok(candidate);
         }
     }
@@ -232,8 +261,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .append(true)
         .open(&qdrant_log)
         .map_err(|error| io_error(format!("Failed to open qdrant log file: {error}")))?;
-    let api_port = pick_available_port(DEFAULT_API_PORT)?;
-    let web_port = pick_available_port(DEFAULT_WEB_PORT)?;
+    let api_port = pick_available_port(DEFAULT_API_PORT, &[])?;
+    // Keep web on a different port than API even when both fall back into the
+    // same nearby range due local conflicts.
+    let web_port = pick_available_port(DEFAULT_WEB_PORT, &[api_port])?;
     let localai_api_origin = format!("http://127.0.0.1:{api_port}");
     let qdrant_url = "http://127.0.0.1:6333";
     let web_cwd = web
@@ -397,43 +428,157 @@ fn stop_runtime(state: &RuntimeState) {
     }
 }
 
+fn is_app_quitting(app_handle: &AppHandle) -> bool {
+    let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
+    lifecycle
+        .is_quitting
+        .lock()
+        .map(|guard| *guard)
+        .unwrap_or(false)
+}
+
+fn mark_app_quitting(app_handle: &AppHandle) {
+    let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
+    let lock_result = lifecycle.is_quitting.lock();
+    if let Ok(mut guard) = lock_result {
+        *guard = true;
+    }
+}
+
+fn show_main_window(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let tray_menu = MenuBuilder::new(app)
+        .text("restore", "Restore Prism")
+        .separator()
+        .text("exit", "Exit Prism")
+        .build()?;
+    let mut tray_builder = TrayIconBuilder::with_id("prism-tray")
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Prism")
+        .on_menu_event(|app_handle, event| match event.id().as_ref() {
+            "restore" => show_main_window(app_handle),
+            "exit" => {
+                mark_app_quitting(app_handle);
+                app_handle.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tray_builder = tray_builder.icon_as_template(true);
+    }
+    tray_builder.build(app)?;
+    Ok(())
+}
+
 fn main() {
-    tauri::Builder::default()
+    let app = match tauri::Builder::default()
         .manage(RuntimeState::new())
+        .manage(AppLifecycleState::new())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if is_app_quitting(&window.app_handle()) {
+                    return;
+                }
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
-            let (api_port, web_port) = start_runtime(&app.handle(), &state)?;
-            wait_for_api(api_port, &state)?;
-            wait_for_web(web_port, api_port, &state)?;
-            let web_url = Url::parse(&format!("http://127.0.0.1:{web_port}"))
-                .map_err(|error| io_error(format!("Invalid Prism web URL: {error}")))?;
+            let (api_port, web_port) = match start_runtime(&app.handle(), &state) {
+                Ok(ports) => ports,
+                Err(error) => {
+                    eprintln!("[PRISM] Runtime startup failed: {error}");
+                    // Keep app alive so startup errors never abort the process.
+                    // The default Tauri window still opens and logs guide recovery.
+                    return Ok(());
+                }
+            };
+
+            if let Err(error) = wait_for_api(api_port, &state) {
+                eprintln!("[PRISM] API readiness failed: {error}");
+                return Ok(());
+            }
+            if let Err(error) = wait_for_web(web_port, api_port, &state) {
+                eprintln!("[PRISM] Web readiness failed: {error}");
+                return Ok(());
+            }
+
+            let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
+                Ok(url) => url,
+                Err(error) => {
+                    eprintln!("[PRISM] Invalid web URL: {error}");
+                    return Ok(());
+                }
+            };
 
             if let Some(window) = app.get_webview_window("main") {
-                window.navigate(web_url.clone()).map_err(tauri::Error::from)?;
-            } else {
-                WebviewWindowBuilder::new(
-                    app,
-                    "main",
-                    WebviewUrl::External(web_url.clone()),
-                )
-                .title("PRISM")
-                .inner_size(1400.0, 948.0)
-                .min_inner_size(948.0, 760.0)
-                .resizable(true)
-                .maximizable(true)
-                .build()
-                .map_err(tauri::Error::from)?;
+                if let Err(error) = window.navigate(web_url.clone()) {
+                    eprintln!("[PRISM] Window navigate failed: {error}");
+                }
+            } else if let Err(error) = WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::External(web_url.clone()),
+            )
+            .title("PRISM")
+            .inner_size(1400.0, 948.0)
+            .min_inner_size(948.0, 760.0)
+            .resizable(true)
+            .maximizable(true)
+            .build() {
+                eprintln!("[PRISM] Window build failed: {error}");
             }
+            setup_tray(app)?;
 
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building PRISM")
-        .run(|app_handle, event| match event {
-            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+        .build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("[PRISM] Failed to start desktop app: {error}");
+            return;
+        }
+    };
+
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { api, .. } => {
+            if is_app_quitting(&app_handle) {
                 let state: State<'_, RuntimeState> = app_handle.state();
                 stop_runtime(&state);
+                return;
             }
-            _ => {}
-        });
+            api.prevent_exit();
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.hide();
+            }
+        }
+        RunEvent::Exit => {
+            let state: State<'_, RuntimeState> = app_handle.state();
+            stop_runtime(&state);
+        }
+        _ => {}
+    });
 }

@@ -261,6 +261,80 @@ describe("validateMemoryCandidates", () => {
     assert.deepEqual(result.rejected[0]?.reasonCodes, ["task_request_not_memory"]);
   });
 
+  it("rejects answer-shaped compiled memories before calling the critic", async () => {
+    const result = await validateMemoryCandidates(throwingProvider(), {
+      source: "compiled",
+      scope: "global",
+      rawContext: "assistant: Here is how to open a folder from the console.",
+      candidates: [
+        {
+          text:
+            "In PowerShell you can use this command: ``` explorer C:\\Path\\To\\Folder ``` and then hit Enter.",
+          confidence: 0.52,
+        },
+      ],
+    });
+
+    assert.equal(result.candidates.length, 0);
+    assert.deepEqual(result.rejected[0]?.reasonCodes, ["task_request_not_memory"]);
+  });
+
+  it("pre-approves explicit preferred-name memories without the critic", async () => {
+    const result = await validateMemoryCandidates(throwingProvider(), {
+      source: "direct",
+      scope: "bot",
+      rawContext: "Do not forget my name is Jared.",
+      candidates: [{ text: "You prefer to be called Jared.", confidence: 0.98 }],
+      userDisplayName: "Jared",
+    });
+
+    assert.equal(result.rejected.length, 0);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "You prefer to be called Jared.");
+    assert.equal(result.candidates[0]?.validationStatus, "approved");
+  });
+
+  it("pre-approves low-certainty Coffee observer user facts without the critic", async () => {
+    const result = await validateMemoryCandidates(throwingProvider(), {
+      source: "inferred",
+      scope: "bot",
+      rawContext: "[Coffee speaker: Alice]\nJared prefers short answers.",
+      candidates: [
+        {
+          text: "You prefer short answers.",
+          confidence: 0.64,
+          category: "user",
+        },
+      ],
+      userDisplayName: "Jared",
+    });
+
+    assert.equal(result.rejected.length, 0);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "You prefer short answers.");
+    assert.equal(result.candidates[0]?.category, "user");
+  });
+
+  it("pre-approves low-certainty Coffee observer bot relations without the critic", async () => {
+    const result = await validateMemoryCandidates(throwingProvider(), {
+      source: "inferred",
+      scope: "bot",
+      rawContext: "[Coffee speaker: Alice]\nBoris, I agree with your approach.",
+      candidates: [
+        {
+          text: "Alice tended to agree with Boris during Coffee.",
+          confidence: 0.56,
+          category: "bot_relation",
+        },
+      ],
+    });
+
+    assert.equal(result.rejected.length, 0);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.text, "Alice tended to agree with Boris during Coffee.");
+    assert.equal(result.candidates[0]?.category, "bot_relation");
+  });
+
   it("rejects malformed critic output without saving", async () => {
     const result = await validateMemoryCandidates(providerWithResponse("Looks good to me."), {
       source: "direct",

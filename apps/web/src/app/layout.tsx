@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, Instrument_Sans, Lora, Raleway } from "next/font/google";
+import {
+  Chewy,
+  Cormorant_Garamond,
+  Fredoka,
+  Geist_Mono,
+  Instrument_Sans,
+  Lora,
+  Raleway,
+} from "next/font/google";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import "./globals.css";
@@ -19,6 +27,24 @@ const chatSerif = Lora({
   variable: "--font-chat-serif",
   subsets: ["latin"],
   weight: ["400", "500"],
+});
+
+const formalSerif = Cormorant_Garamond({
+  variable: "--font-formal-serif",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+});
+
+const playfulDisplay = Chewy({
+  variable: "--font-playful-display",
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const conciseRounded = Fredoka({
+  variable: "--font-concise-rounded",
+  subsets: ["latin"],
+  weight: ["600", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -59,7 +85,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>

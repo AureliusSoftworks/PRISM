@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
+    "version:set": "node scripts/set-version.mjs",
     "dev:web": "npm run dev -w apps/web",
     "dev:api": "npm run dev -w apps/api",
     "desktop": "npm run desktop:dev",

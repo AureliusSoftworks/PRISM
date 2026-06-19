@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { ChatMessage } from "@localai/shared";
 import {
+  conversationIdForImageGeneration,
   finishImageJob,
   peekActiveImageJobForUser,
   pollImageJobForUser,
@@ -108,5 +109,16 @@ describe("image-job-slot", () => {
     const bad = pollImageJobForUser("someone-else", acq.job.id);
     assert.deepEqual(bad, { ok: false, error: "forbidden" });
     await releaseImageSlot("user-c");
+  });
+
+  it("does not attach private image generation to ephemeral conversation ids", () => {
+    assert.equal(
+      conversationIdForImageGeneration({ conversationId: "private-session-1", incognito: true }),
+      null
+    );
+    assert.equal(
+      conversationIdForImageGeneration({ conversationId: "conversation-1", incognito: false }),
+      "conversation-1"
+    );
   });
 });

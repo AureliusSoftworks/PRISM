@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   Suspense,
   Children,
   cloneElement,
@@ -15,6 +16,7 @@ import {
   forwardRef,
   useSyncExternalStore,
   useTransition,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -32,8 +34,42 @@ import {
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
+import {
+  coffeePendingSubmittedUserLineVisible,
+  coffeeShouldQueueAssistantRevealAfterUserTyping,
+} from "./coffee-user-reveal-flow";
+import {
+  clampCoffeeReplayMessageIndex,
+  coffeeReplayVisibleMessages,
+  collectCoffeeReplayActionsForBot,
+} from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
-import { Image as ImageGlyph } from "lucide-react";
+import {
+  createStoryDialogState,
+  createStoryInventoryViewState,
+  storyNpcFaceExpressionForPose,
+  storyNpcFaceTextForExpression,
+  storyChoiceMissingItemId,
+} from "./story-mode-dialog";
+import {
+  applyOnlineModelChoice,
+  combinedOnlineModelOptions,
+  nextResponseMode,
+  resolveModelChoiceForResponseMode,
+  responseModeForProvider,
+  type ResponseMode,
+} from "./providerMode";
+import {
+  Download,
+  Image as ImageGlyph,
+  LogOut,
+  Pause,
+  Play,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+  X,
+} from "lucide-react";
 import styles from "./page.module.css";
 import {
   BOT_FACT_KEY_LABELS,
@@ -52,10 +88,22 @@ import {
   westernZodiacFromIsoBirthday,
   catalogEntriesMatchingLocalImageHeuristic,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
+  isComfyUiModelId,
   normalizeOpenAiImageModelId,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
-  resolveAutoModel,
+  parseComfyUiRemoteWorkflowPath,
+  memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
+  PRISM_DEFAULT_STORY_THEME,
+  COFFEE_POLL_FINALIZE_REMAINING_MS,
+  COFFEE_POLL_OPTION_COUNT_MAX,
+  COFFEE_POLL_OPTION_COUNT_MIN,
+  COFFEE_POLL_PLAYER_VOTER_ID,
+  STORY_BOT_COUNT_MAX,
+  STORY_BOT_COUNT_MIN,
+  getStoryCurrentScene,
+  getStoryLocation,
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
@@ -66,7 +114,15 @@ import {
   type BotVoicePreset,
   type BotMoodKey,
   type ComfyUiWorkflowRegistration,
+  type PromptShortcutMetadata,
   type SentGeneratedImagePayload,
+  type StoryEpisodeManifest,
+  type StoryInventoryItem,
+  type StoryLocation,
+  type StoryScene,
+  type StorySessionDetail,
+  type StorySessionSummary,
+  type StoryTranscriptEntry,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -76,8 +132,10 @@ import {
 } from "./prismDevChatCommands";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
-  hasLeadingDevCommand,
+  findLeadingDevCommandTokenRange,
+  findPromptShortcutTokenRanges,
   PrismDevCommandHighlight,
+  resolvePromptShortcutTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
@@ -89,13 +147,19 @@ import {
   getBotMentionDisplayLength,
   type BotMentionPick,
 } from "./botMention";
-import { applyPrismBotLinkBackspace } from "./botMentionTipTapBackspace";
+import {
+  applyPrismBotLinkBackspace,
+  applyPrismBotLinkBoundaryDelete,
+} from "./botMentionTipTapBackspace";
 import {
   applyPrismBotLinkArrowKey,
   isCollapsedCaretInsidePrismBotLink,
   shouldBlockPrintableInPrismBotLink,
 } from "./botMentionTipTapArrow";
-import { applyTaggedMentionWordBackspace } from "./plainTextWordBackspace";
+import {
+  applyTaggedMentionBoundaryDelete,
+  applyTaggedMentionWordBackspace,
+} from "./plainTextWordBackspace";
 import {
   isCaretInPrismBotMarkdownLockedRegion,
   prismBotMarkdownArrowCaret,
@@ -105,6 +169,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
+  editorInFenceLikeContext,
   getAtMentionFromEditor,
 } from "./botMentionTipTap";
 import { ComposerBotMentionPopover } from "./ComposerBotMentionPopover";
@@ -156,8 +221,14 @@ const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
+const ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY = "prism_zen_initial_starter_cache_v1";
 const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
 const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
+const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
+
+function commandCenterPromptDeleteKey(commandId: string): string {
+  return `${COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX}${commandId}`;
+}
 
 // Namespace bot-delete keys so they can share the same single "armed" state
 // slot used for conversation deletion without id collisions.
@@ -196,7 +267,7 @@ const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
-const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 200;
+const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 244;
 /** Single-row "delete group chats" menu — keep in sync with clamp padding. */
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 220;
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
@@ -248,16 +319,13 @@ function tutorialStorageKeyForUser(userId: string): string {
   return `${MODE_TUTORIAL_STORAGE_PREFIX}:${userId}`;
 }
 
-function tutorialResetOnNextLaunchKeyForUser(userId: string): string {
-  return `${MODE_TUTORIAL_RESET_ON_NEXT_LAUNCH_PREFIX}:${userId}`;
-}
-
 function normalizeTutorialProgress(value: unknown): TutorialProgress {
   if (!value || typeof value !== "object") {
     return { ...DEFAULT_TUTORIAL_PROGRESS };
   }
   const record = value as Record<string, unknown>;
   return {
+    zen: record.zen === true,
     chat: record.chat === true,
     sandbox: record.sandbox === true,
     coffee: record.coffee === true,
@@ -282,13 +350,13 @@ const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const RECENT_AUTH_USERNAMES_KEY = "prism_recent_auth_usernames_v1";
 const MAX_RECENT_AUTH_USERNAMES = 12;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
-const MODE_TUTORIAL_RESET_ON_NEXT_LAUNCH_PREFIX = "prism_mode_tutorials_reset_on_next_launch_v1";
 
-type TutorialMode = "chat" | "sandbox" | "coffee";
+type TutorialMode = "zen" | "chat" | "sandbox" | "coffee";
 
 type TutorialProgress = Record<TutorialMode, boolean>;
 
 const DEFAULT_TUTORIAL_PROGRESS: TutorialProgress = {
+  zen: false,
   chat: false,
   sandbox: false,
   coffee: false,
@@ -304,11 +372,34 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-const DEV_TOOLS_BUTTON_DEFAULT_X = 14;
-const DEV_TOOLS_BUTTON_DEFAULT_Y = 76;
-const DEV_TOOLS_BUTTON_SIZE = 44;
+const DEV_TOOLS_NAV_ITEMS = [
+  {
+    id: "observe",
+    label: "Observe",
+    description: "Live traces, viewport, and surface diagnostics",
+  },
+  {
+    id: "seed",
+    label: "Seed",
+    description: "Bots, chats, and density stress states",
+  },
+  {
+    id: "conversation",
+    label: "Conversation",
+    description: "Connection, opinion, and summaries",
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    description: "Seed, inspect, and clear test memories",
+  },
+  {
+    id: "system",
+    label: "System",
+    description: "Local toggles and global dev rules",
+  },
+] as const;
 const IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX = 1260;
-const DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX = 4;
 const DEV_TOOLS_CONNECTION_PRESETS = [
   {
     id: "careful",
@@ -458,8 +549,8 @@ const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
 const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 /** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
-/** Stores the floating dev-tools toggle button's last placed position as `{x,y}` JSON. */
-const PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY = "prism_dev_tools_button_position";
+/** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
+const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
 const PRISM_MEMORY_BUBBLE_LAYOUT_STORAGE_KEY = "prism_memory_bubble_layout_v1";
 const MEMORY_RATIO_EMPTY_SIZE = 42;
@@ -479,13 +570,18 @@ type DevToolsBotQuantity = number | "";
 type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
 type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
 type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
+type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
 };
-type DevToolsButtonDragState = DevToolsPanelDragState & {
+type CoffeePollPanelPosition = { x: number; y: number };
+type CoffeePollPanelDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
   startClientX: number;
   startClientY: number;
 };
@@ -544,6 +640,8 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const ZEN_HEADER_REVEAL_EDGE_PX = 72;
+const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
@@ -573,6 +671,14 @@ const PRISM_NOTICE_PALETTE = [
   PRISM_COLORS.m,
 ] as const;
 
+const ZEN_USER_MESSAGE_PRISM_PALETTE = [
+  { bright: "#44d7e6", dark: "#006f7a" },
+  { bright: "#886cff", dark: "#4931c6" },
+  { bright: "#ff5f7c", dark: "#b31b3b" },
+  { bright: "#ffa933", dark: "#944600" },
+  { bright: "#bfeb4e", dark: "#5b7300" },
+] as const;
+
 type ImageReadyNoticeItem = { botId: string | null; imageId: string };
 type ImageReadyNoticeState = {
   items: ImageReadyNoticeItem[];
@@ -585,6 +691,31 @@ type ImageGenScopeUiContext = {
 };
 
 type ImageGenerateApiResponse = {
+  image?: { id: string };
+};
+
+type ZenWallpaperStatus = "idle" | "generating" | "ready" | "error";
+
+interface ZenWallpaperHistoryEntry {
+  imageId: string;
+  promptSeed: string | null;
+  generationMessageCount: number;
+  revealStartMessageCount?: number;
+  revealFullMessageCount?: number;
+  createdAt?: string;
+}
+
+interface ZenWallpaperMetadata {
+  enabled: boolean;
+  imageId: string | null;
+  promptSeed: string | null;
+  generationMessageCount: number | null;
+  status: ZenWallpaperStatus;
+  history?: ZenWallpaperHistoryEntry[];
+}
+
+type ZenWallpaperApiResponse = {
+  zenWallpaper: ZenWallpaperMetadata;
   image?: { id: string };
 };
 
@@ -605,6 +736,11 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
   letterbox: "1024x1024",
   landscape: "1536x1024",
 };
+const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
+const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 8;
+const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
+const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
+const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -711,7 +847,7 @@ function parseImageGenerationScopeKey(key: string): {
   };
 }
 
-/** Local GPU backends may idle-load checkpoints — show a warming hint after this delay. */
+/** Local GPU backends may idle-load models — show a warming hint after this delay. */
 const IMAGE_GEN_WARMUP_HINT_AFTER_MS = 22_000;
 
 // ── Prism wordmark ────────────────────────────────────────────────────
@@ -791,34 +927,6 @@ function clampDevToolsPanelPosition(
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
   };
-}
-
-// Reads the persisted dev-tools button position from localStorage. Returns
-// null when nothing is stored, the JSON is malformed, or storage access
-// throws (e.g. private browsing). Callers fall back to the default anchor.
-function readStoredDevToolsButtonPosition(): DevToolsPanelPosition | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(
-      PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY
-    );
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const candidate = parsed as { x?: unknown; y?: unknown };
-      if (
-        typeof candidate.x === "number" &&
-        typeof candidate.y === "number" &&
-        Number.isFinite(candidate.x) &&
-        Number.isFinite(candidate.y)
-      ) {
-        return { x: candidate.x, y: candidate.y };
-      }
-    }
-  } catch {
-    // localStorage / JSON failure; fall through to default anchor.
-  }
-  return null;
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -1080,41 +1188,6 @@ function PrismTriangleMark({ className }: PrismTriangleMarkProps): React.JSX.Ele
         strokeLinejoin="miter"
         strokeMiterlimit="10"
         strokeWidth="7"
-      />
-    </svg>
-  );
-}
-
-interface PrismHeroMarkProps {
-  className?: string;
-}
-
-function PrismHeroMark({ className }: PrismHeroMarkProps): React.JSX.Element {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 56 56"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <defs>
-        <linearGradient id="prismHeroRingGradient" gradientUnits="userSpaceOnUse" x1="8" y1="43" x2="48" y2="6">
-          <stop offset="0" stopColor="#e11d48" />
-          <stop offset="0.18" stopColor="#d97706" />
-          <stop offset="0.36" stopColor="#0d9488" />
-          <stop offset="0.54" stopColor="#0284c7" />
-          <stop offset="0.72" stopColor="#7c3aed" />
-          <stop offset="0.9" stopColor="#db2777" />
-          <stop offset="1" stopColor="#e11d48" />
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="56" height="56" rx="14" fill="#111827" />
-      <path
-        fill="url(#prismHeroRingGradient)"
-        fillRule="evenodd"
-        d="M28 6L48 43H8L28 6Z M28 20.31L19.6 35.85H36.4L28 20.31Z"
       />
     </svg>
   );
@@ -2150,7 +2223,7 @@ function ensureContrast(foreground: string, background: string, targetRatio = 4.
 // now?" doesn't have to duplicate literals. Mirrored in page.module.css
 // under .themeDark / .themeLight — keep these in sync.
 const THEME_BG: Record<"light" | "dark", string> = {
-  light: "#eee7dc",
+  light: "#f4f2ee",
   dark: "#0b0a09",
 };
 
@@ -2283,11 +2356,22 @@ function normalizeAccentForTheme(hex: string, theme?: "light" | "dark"): string 
   return clampLuminance(lightnessClamped, { max });
 }
 
+function coffeeBotTranscriptTextColor(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark"
+): string | undefined {
+  if (!rawHex) return undefined;
+  const normalized = normalizeAccentForTheme(rawHex, resolvedTheme);
+  const { h, s, l } = hexToHsl(normalized);
+  const desaturated = hslToHex(h, s * 0.28, l);
+  return ensureContrast(desaturated, THEME_BG[resolvedTheme], 4.5);
+}
+
 // --bg-surface hex per theme. Mirrored from .themeDark / .themeLight in
 // page.module.css so the swatch-border compensator can reason about what
 // surface the swatch actually sits on.
 const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
-  light: "#faf3e9",
+  light: "#fffdf8",
   dark: "#151311",
 };
 const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
@@ -2342,7 +2426,21 @@ function selectedRowTextColor(
   return ensureContrast(rowAccent, selectedFill, 4.5);
 }
 
-type Provider = "local" | "openai";
+type Provider = "local" | "openai" | "anthropic";
+function isProvider(value: unknown): value is Provider {
+  return value === "local" || value === "openai" || value === "anthropic";
+}
+function responseModeShortLabel(mode: ResponseMode): string {
+  return mode === "local" ? "LOCAL" : "ONLINE";
+}
+function responseModeDisplayLabel(mode: ResponseMode): string {
+  return mode === "local" ? "Local" : "Online";
+}
+function providerDisplayLabel(provider: Provider): string {
+  if (provider === "local") return "Local";
+  if (provider === "anthropic") return "Anthropic";
+  return "OpenAI";
+}
 type Theme = "dark" | "light" | "system";
 type PanelView = null | "settings" | "bots" | "images" | "memories" | "command-center";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
@@ -2354,7 +2452,12 @@ const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
 // screen shown after login; each mode tile navigates to a specific
 // experience. Future modes can be advertised as disabled Hub tiles
 // without entering this route union until their shells actually exist.
-type View = "hub" | "chat" | "sandbox" | "coffee";
+type View = "hub" | "chat" | "sandbox" | "coffee" | "story";
+type StoryDialogCursor = {
+  sessionId: string | null;
+  sceneId: string | null;
+  beatIndex: number;
+};
 
 // Coffee mode group-size bounds — intentionally duplicated from the
 // server-side `COFFEE_GROUP_MIN_SIZE`/`MAX_SIZE` (see `apps/api/src/coffee.ts`)
@@ -2370,24 +2473,124 @@ const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
 const COFFEE_REPLY_DELAY_FAST_MAX_MS = 2600;
 const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
+const COFFEE_POLL_REFRESH_MS = 4_000;
+const COFFEE_POLL_OPTION_PLACEHOLDERS = ["Choice A", "Choice B", "Choice C", "Choice D"] as const;
+const STORY_SESSION_POLL_MS = 1_500;
+const STORY_PROJECTION_FALLBACK_ASSET_ID = "projection_fallback";
+const STORY_SPRITE_FALLBACK_ASSET_ID = "sprite_fallback_silhouette";
+const PRISM_STORY_THEME_ASSET_BY_ID = new Map(
+  PRISM_DEFAULT_STORY_THEME.assets.map((asset) => [asset.id, asset])
+);
+
+function storyThemeAssetUrl(
+  assetId: string | null | undefined,
+  fallbackId: string
+): string {
+  return (
+    PRISM_STORY_THEME_ASSET_BY_ID.get(assetId ?? "")?.url ??
+    PRISM_STORY_THEME_ASSET_BY_ID.get(fallbackId)?.url ??
+    ""
+  );
+}
+
+function storyItemGlyph(item: StoryInventoryItem): string {
+  if (item.glyph?.trim()) return item.glyph.trim();
+  switch (item.category) {
+    case "weapon":
+      return "†";
+    case "potion":
+      return "◒";
+    case "key":
+      return "◇";
+    case "clue":
+      return "?";
+    case "document":
+      return "▤";
+    case "relic":
+      return "◈";
+    case "tool":
+      return "⌁";
+    case "collectible":
+      return "✦";
+    default:
+      return "•";
+  }
+}
+
+function storySceneItemStyle(index: number): React.CSSProperties {
+  const positions = [
+    [64, 48],
+    [76, 42],
+    [53, 54],
+    [84, 50],
+  ] as const;
+  const [x, y] = positions[index % positions.length]!;
+  return {
+    "--story-item-x": `${x}%`,
+    "--story-item-y": `${y}%`,
+  } as React.CSSProperties;
+}
+
+function storySessionStatusLabel(status: StorySessionSummary["status"]): string {
+  if (status === "generating") return "Generating";
+  if (status === "complete") return "Complete";
+  if (status === "failed") return "Failed";
+  return "Playing";
+}
+
+function buildDefaultCoffeePollOptionDraft(): string[] {
+  return Array.from({ length: COFFEE_POLL_OPTION_COUNT_MIN }, () => "");
+}
+
+function formatCoffeePollBotVoteLabel(
+  vote: CoffeePollVoteState | undefined,
+  options: readonly string[]
+): string {
+  if (!vote) return "No vote";
+  if (vote.kind === "option" && typeof vote.optionIndex === "number") {
+    return options[vote.optionIndex] ?? "Voted";
+  }
+  const leaningIndex = vote.deliberation?.leaningOptionIndex;
+  const alternateIndex = vote.deliberation?.alternateOptionIndex;
+  const leaning = typeof leaningIndex === "number" ? options[leaningIndex] : null;
+  const alternate = typeof alternateIndex === "number" ? options[alternateIndex] : null;
+  if (vote.deliberation?.stage === "deciding" && leaning) {
+    return `Deciding: ${leaning}`;
+  }
+  if (vote.deliberation?.stage === "teetering" && leaning && alternate) {
+    return `Teetering: ${leaning} vs ${alternate}`;
+  }
+  if (leaning) {
+    return `Leaning: ${leaning}`;
+  }
+  if (vote.kind === "pending") return "Thinking...";
+  return "No vote";
+}
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
 const COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND: Record<BotMoodKey, number> = {
-  joyful: 26,
-  warm: 21,
-  neutral: 16,
-  guarded: 12,
-  strained: 9,
+  joyful: 20,
+  warm: 16,
+  neutral: 12,
+  guarded: 9,
+  strained: 7,
 };
 const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
-const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [1, 5, 10];
+const COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS = 0.65;
+const COFFEE_CENTER_FEED_MAX_LINES = 14;
+const COFFEE_DISCARD_ON_EXIT_WINDOW_MS = 10_000;
+const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
+const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [2, 3, 5];
 const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
-const COFFEE_TABLE_MAX_CHARS = 250;
+const COFFEE_SEAT_ACTION_BADGE_MAX_CHARS = 48;
+const COFFEE_SEAT_ACTION_BADGE_MIN_CLAUSE_CHARS = 14;
+const COFFEE_POLL_PANEL_DEFAULT_POSITION: CoffeePollPanelPosition = { x: 28, y: 96 };
+const COFFEE_POLL_BUBBLE_DRAG_SUPPRESS_CLICK_PX = 6;
 
 /** Browser default for Coffee table-tuning sliders before a live session loads from the API. */
 const PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY = "prism_coffee_session_settings_v1";
@@ -2423,20 +2626,20 @@ function persistCoffeeSettingsToBrowser(settings: CoffeeSessionSettings): void {
 function loadCoffeePausedSessionIdsFromBrowser(): Set<string> {
   if (typeof window === "undefined") return new Set<string>();
   try {
-    const raw = window.localStorage.getItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
-    if (!raw) return new Set<string>();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return new Set<string>();
-    const ids = parsed.filter((value): value is string => typeof value === "string" && value.length > 0);
-    return new Set<string>(ids);
+    window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
   } catch {
-    return new Set<string>();
+    // Private mode / quota — ignore; paused sessions are no longer resumed.
   }
+  return new Set<string>();
 }
 
 function persistCoffeePausedSessionIdsToBrowser(sessionIds: Set<string>): void {
   if (typeof window === "undefined") return;
   try {
+    if (sessionIds.size === 0) {
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
+      return;
+    }
     window.localStorage.setItem(
       PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY,
       JSON.stringify(Array.from(sessionIds))
@@ -2449,26 +2652,11 @@ function persistCoffeePausedSessionIdsToBrowser(sessionIds: Set<string>): void {
 function loadCoffeePausedSessionRemainingMsByIdFromBrowser(): Record<string, number> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: Record<string, number> = {};
-    for (const [conversationId, remainingMs] of Object.entries(parsed as Record<string, unknown>)) {
-      if (
-        conversationId.length === 0 ||
-        typeof remainingMs !== "number" ||
-        !Number.isFinite(remainingMs) ||
-        remainingMs <= 0
-      ) {
-        continue;
-      }
-      result[conversationId] = remainingMs;
-    }
-    return result;
+    window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
   } catch {
-    return {};
+    // Private mode / quota — ignore; paused sessions are no longer resumed.
   }
+  return {};
 }
 
 function persistCoffeePausedSessionRemainingMsByIdToBrowser(
@@ -2476,6 +2664,10 @@ function persistCoffeePausedSessionRemainingMsByIdToBrowser(
 ): void {
   if (typeof window === "undefined") return;
   try {
+    if (Object.keys(remainingById).length === 0) {
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
+      return;
+    }
     window.localStorage.setItem(
       PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY,
       JSON.stringify(remainingById)
@@ -2485,7 +2677,7 @@ function persistCoffeePausedSessionRemainingMsByIdToBrowser(
   }
 }
 
-/** Treat sessions with a topic or any message as started, so preview can separate Resume vs Review states. */
+/** Treat sessions with a topic or any message as started, so preview can separate Join vs Review states. */
 function coffeeSessionHasStarted(conversation: CoffeeConversationState | null): boolean {
   if (!conversation) return false;
   if (typeof conversation.coffeeTopic === "string" && conversation.coffeeTopic.trim().length > 0) {
@@ -2512,7 +2704,7 @@ function coffeeSessionDurationMs(
   conversation: Pick<CoffeeConversationState, "coffeeSessionDurationMinutes"> | null | undefined
 ): number {
   const minutes = conversation?.coffeeSessionDurationMinutes;
-  if (minutes === 1 || minutes === 5 || minutes === 10) {
+  if (minutes === 2 || minutes === 3 || minutes === 5) {
     return minutes * 60 * 1000;
   }
   return COFFEE_SESSION_DURATION_MS;
@@ -2577,6 +2769,21 @@ function randomCoffeeRevealDelayMs(messageText: string, moodKey: BotMoodKey | un
     COFFEE_BOT_REVEAL_DELAY_MIN_MS,
     Math.min(COFFEE_BOT_REVEAL_DELAY_MAX_MS, baseMs + jitterMs)
   );
+}
+
+function clampCoffeePollPanelPosition(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  viewportWidth: number,
+  viewportHeight: number
+): CoffeePollPanelPosition {
+  const margin = 12;
+  return {
+    x: Math.max(margin, Math.min(viewportWidth - width - margin, x)),
+    y: Math.max(margin, Math.min(viewportHeight - height - margin, y)),
+  };
 }
 
 function emptyCoffeeSeatBotIds(): Array<string | null> {
@@ -2657,11 +2864,75 @@ interface CoffeeInterruptionEvent {
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
+type CoffeePollStatus = "open" | "collecting" | "closed" | "cancelled";
+type CoffeePollVoteKind = "option" | "abstain" | "pending" | "error";
+type CoffeePollVoterKind = "bot" | "player";
+
+interface CoffeePollDeliberationState {
+  stage:
+    | "idle"
+    | "evaluating"
+    | "teetering"
+    | "blocked"
+    | "deciding"
+    | "finalized"
+    | "error";
+  leaningOptionIndex?: number | null;
+  alternateOptionIndex?: number | null;
+  confidence?: number | null;
+  blocker?: string | null;
+  note?: string | null;
+  updatedAt: string;
+}
+
+interface CoffeePollVoteState {
+  botId: string;
+  voterKind?: CoffeePollVoterKind;
+  kind: CoffeePollVoteKind;
+  optionIndex?: number | null;
+  explanation?: string | null;
+  suggestedOption?: string | null;
+  confidence?: number | null;
+  deliberation?: CoffeePollDeliberationState | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CoffeePollTallyState {
+  optionIndex: number;
+  option: string;
+  voteCount: number;
+}
+
+interface CoffeePollState {
+  id: string;
+  conversationId: string;
+  question: string;
+  options: string[];
+  status: CoffeePollStatus;
+  createdBy: "user";
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  votes: CoffeePollVoteState[];
+  tallies: CoffeePollTallyState[];
+}
+
 interface CoffeeSeatInterruptedSnippetState {
   botId: string;
   snippet: string;
   sourceMessageId: string;
   createdAtMs: number;
+}
+
+interface CoffeeCenterFeedLine {
+  id: string;
+  role: CoffeeConversationMessage["role"];
+  speaker: string;
+  text: string;
+  botGlyph?: string;
+  botId?: string;
+  botTextColor?: string;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -2697,13 +2968,13 @@ interface CoffeeGroupState {
   /** When `auto`, new sessions pick a random generated topic server-side. */
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty/missing = Auto. */
-  modelChoiceByProvider?: { local?: string; openai?: string };
+  modelChoiceByProvider?: { local?: string; openai?: string; anthropic?: string };
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
 
-type CoffeeSessionDurationMinutes = 1 | 5 | 10;
+type CoffeeSessionDurationMinutes = 2 | 3 | 5;
 
 interface CoffeePresetState {
   id: string;
@@ -2729,13 +3000,26 @@ type ParsedGlobalClearCommand =
 
 function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
   const trimmed = text.trim();
-  const match = /^\/clear(?:\s|$)/i.exec(trimmed);
+  const match = /^\/(?:clear|cls)(?:\s|$)/i.exec(trimmed);
   if (!match) return { kind: "none" };
   const rest = trimmed.slice(match[0].length).trim();
   if (rest.length > 0) {
-    return { kind: "error", error: "Use `/clear` without extra arguments." };
+    return { kind: "error", error: `Use \`${match[0].trim().toLowerCase()}\` without extra arguments.` };
   }
   return { kind: "ok" };
+}
+
+function parsePrismCommandMentionHref(href?: string | null): string | null {
+  if (!href) return null;
+  if (!href.toLowerCase().startsWith("prism-command://")) return null;
+  const encoded = href.slice("prism-command://".length).trim();
+  if (!encoded) return null;
+  try {
+    const decoded = decodeURIComponent(encoded);
+    return decoded.trim() || null;
+  } catch {
+    return encoded || null;
+  }
 }
 
 /**
@@ -2751,7 +3035,7 @@ function extractCoffeeUserLineFromTurnMessages(
     for (let i = messages.length - 2; i >= 0; i -= 1) {
       const m = messages[i];
       if (m.role === "user") {
-        return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
+        return m.content.trim().length > 0 ? coffeeTableDisplayText(m.content) : null;
       }
     }
     return null;
@@ -2759,33 +3043,50 @@ function extractCoffeeUserLineFromTurnMessages(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
     if (m.role === "user") {
-      return m.content.trim().length > 0 ? clampCoffeeTableText(m.content) : null;
+      return m.content.trim().length > 0 ? coffeeTableDisplayText(m.content) : null;
     }
   }
   return null;
 }
 
 function clampCoffeeTableText(text: string): string {
-  return text.length > COFFEE_TABLE_MAX_CHARS ? text.slice(0, COFFEE_TABLE_MAX_CHARS) : text;
+  return text;
 }
 
-/**
- * True when the most recent assistant message in a conversation is composed
- * entirely of stage directions (`*…*`) with no spoken text after stripping.
- *
- * Used by the autoplay loop to recognise "silent gesture" turns and refrain
- * from auto-rotating to the next speaker — silent actions are presence
- * beats, not invitations to chime in.
- */
-function latestAssistantMessageIsActionOnly(
-  conversation: { messages?: readonly CoffeeConversationMessage[] } | null | undefined
-): boolean {
-  const messages = conversation?.messages;
-  if (!messages || messages.length === 0) return false;
-  const last = messages[messages.length - 1];
-  if (last.role !== "assistant") return false;
-  const { mainText, actions } = extractStageDirections(last.content);
-  return actions.length > 0 && mainText.trim().length === 0;
+function coffeeTableDisplayText(text: string): string {
+  return extractStageDirections(clampCoffeeTableText(text)).mainText;
+}
+
+function normalizeCoffeeSeatActionBadgeText(raw: string): string {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+  let text = collapsed
+    .replace(/^\*+|\*+$/g, "")
+    .replace(/^\[[^\]\n]+\]\(prism-bot:\/\/[^)\n]+\)\s*,?\s*/i, "")
+    .replace(/^[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3},\s+/u, "")
+    .replace(/[.!?;:,\s]+$/u, "")
+    .trim();
+  if (!text) return "";
+  if (text.length <= COFFEE_SEAT_ACTION_BADGE_MAX_CHARS) return text;
+
+  const firstClause = text
+    .split(/[.!?;:]\s+/u)
+    .map((segment) => segment.trim())
+    .find(
+      (segment) =>
+        segment.length >= COFFEE_SEAT_ACTION_BADGE_MIN_CLAUSE_CHARS &&
+        segment.length <= COFFEE_SEAT_ACTION_BADGE_MAX_CHARS
+    );
+  if (firstClause) return firstClause;
+
+  const sliced = text.slice(0, COFFEE_SEAT_ACTION_BADGE_MAX_CHARS).trimEnd();
+  const lastSpace = sliced.lastIndexOf(" ");
+  const cut =
+    lastSpace > COFFEE_SEAT_ACTION_BADGE_MAX_CHARS * 0.6
+      ? sliced.slice(0, lastSpace).trimEnd()
+      : sliced;
+  text = cut.length > 0 ? cut : sliced;
+  return `${text}...`;
 }
 
 function coffeeMessageHasTableText(
@@ -2797,6 +3098,27 @@ function coffeeMessageHasTableText(
   }
   const { mainText } = extractStageDirections(clampCoffeeTableText(message.content));
   return mainText.trim().length > 0;
+}
+
+function coffeeConversationHasSessionSynopsis(
+  conversation: CoffeeConversationState | null | undefined
+): boolean {
+  return Boolean(
+    conversation?.messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+    )
+  );
+}
+
+function coffeeReplayMessageKey(message: CoffeeConversationMessage, index: number): string {
+  return message.id || `${index}:${message.createdAt}:${message.role}:${message.botName ?? ""}`;
+}
+
+function coffeeReplayDisplayLengthForMessage(message: CoffeeConversationMessage): number {
+  if (!coffeeMessageHasTableText(message)) return 0;
+  return getBotMentionDisplayLength(coffeeTableDisplayText(message.content));
 }
 
 interface SessionUser {
@@ -2812,7 +3134,7 @@ interface ConversationSummary {
   title: string;
   updatedAt: string;
   createdAt?: string;
-  mode?: "chat" | "sandbox" | "coffee";
+  mode?: "zen" | "chat" | "sandbox" | "coffee";
   /** Bot locked to this chat when it was first created; `null` = default grayscale persona. */
   botId: string | null;
   /** Coffee-only bot lineup frozen when the Coffee Session starts. */
@@ -2820,7 +3142,7 @@ interface ConversationSummary {
   /** Coffee-only durable parent group id, null for legacy sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only timed session duration once group-owned sessions are used. */
-  coffeeSessionDurationMinutes?: 1 | 5 | 10;
+  coffeeSessionDurationMinutes?: 2 | 3 | 5;
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
@@ -2829,6 +3151,8 @@ interface ConversationSummary {
   lastBotColor: string | null;
   /** True when the conversation has at least one assistant reply; distinguishes "Default was last" from "no reply yet". */
   hasAssistantReply: boolean;
+  /** Zen-only ambient wallpaper metadata; absent on older responses means off. */
+  zenWallpaper?: ZenWallpaperMetadata;
 }
 
 interface ConversationSweepResponse {
@@ -2872,6 +3196,25 @@ interface Message {
   };
   /** Assistant attached a generated image (also listed in the Images library). */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** User-entered Prompt Center shortcut that resolved into this message content. */
+  promptShortcut?: PromptShortcutMetadata;
+}
+
+function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
+  const ms = Date.parse(message.createdAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatZenEraBoundaryLabel(message: Pick<Message, "createdAt">): string {
+  const ms = messageCreatedAtMs(message);
+  if (ms === null) return "A new stretch begins";
+  const label = new Date(ms).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `A new stretch begins · ${label}`;
 }
 
 function collectGeneratedImageIds(messages: readonly Message[]): string[] {
@@ -2966,6 +3309,15 @@ function coffeeSeatPlateGlyph(emojiMood: CoffeeSeatEmojiMood, mouthOpen: boolean
   }
 }
 
+function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
+  if (!bot) return "neutral";
+  try {
+    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
+  } catch {
+    return "neutral";
+  }
+}
+
 /** Dev-only: `"live"` uses thread + social moods; otherwise every seat shows this Prism mood. */
 type CoffeeSeatMoodDevSlot = "live" | BotMoodKey;
 
@@ -3010,30 +3362,33 @@ const SWEEP_UNDO_TOAST_DURATION_MS = 15000;
 const CHAT_MODE_MESSAGE_MANIFEST_MS = 480;
 const CHAT_MODE_OFFSCREEN_VISIBLE_MS = 12000;
 const CHAT_MODE_OFFSCREEN_DISSOLVE_MS = 2200;
-const CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX = 56;
 const CHAT_MODE_ARCHIVE_LOAD_DELAY_MS = 320;
-const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.5;
+const CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO = 0.34;
+const CHAT_MODE_NEW_TURN_START_RATIO = 0.32;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.8;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 36;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 2;
+const CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX = 36;
+const CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE = 0.22;
+const CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE = 0.5;
+const CHAT_MODE_SCROLL_ELASTIC_RESET_DELAY_MS = 90;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
-const CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS = 1800;
-const CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS = 1400;
-const CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY = 0.18;
-const CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS = 5200;
-const CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY = 0.05;
-const CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS = 700;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-// Significantly slower reveal cadence to keep the typing effect readable.
-const CHAT_MODE_WORD_REVEAL_MS = 600;
-const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 1000;
-const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_DOT_STEP_MS * 3;
+const CHAT_MODE_WORD_REVEAL_MS = 78;
+const CHAT_MODE_LETTER_REVEAL_MS = 170;
+const CHAT_MODE_LETTER_REVEAL_STEP_MS = 18;
+const CHAT_MODE_WORD_REVEAL_SETTLE_MS = 12;
+const CHAT_MODE_COMMA_PAUSE_MS = 140;
+const CHAT_MODE_PERIOD_PAUSE_MS = 260;
+const CHAT_MODE_ELLIPSIS_PAUSE_MS = 720;
+const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 240;
+const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_PAUSE_MS;
 const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
@@ -3049,10 +3404,10 @@ const CHAT_MODE_PULL_QUOTE_MARKER_PATTERN = /^\s*\[!pull\]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN = /^\s*pull\s+quote\s*[:\-–—]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN =
   /^\s*(?:\*\*|__)?\s*pull\s+quote\s*[:\-–—]/i;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 11;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 32;
-const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18;
-const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 40;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 9.7;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 30.7;
+const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 16.7;
+const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 38.7;
 const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
 const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
 const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
@@ -3065,11 +3420,11 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
 const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
-  joyful: 420,
-  warm: 520,
+  joyful: 58,
+  warm: 68,
   neutral: CHAT_MODE_WORD_REVEAL_MS,
-  guarded: 720,
-  strained: 860,
+  guarded: 104,
+  strained: 132,
 };
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
@@ -3312,6 +3667,33 @@ function normalizeAskQuestionComparisonText(text: string): string {
     .replace(/\s+\?/g, "?")
     .trim()
     .toLowerCase();
+}
+
+const GENERIC_ASK_QUESTION_PROMPTS = new Set([
+  "choose a reply",
+  "choose your reply",
+  "choose a response",
+  "choose one",
+  "choose an option",
+  "pick a reply",
+  "pick a response",
+  "pick one",
+  "pick an option",
+  "select a reply",
+  "select a response",
+  "select one",
+  "select an option",
+  "which option do you choose",
+  "which one do you choose",
+  "which answer do you choose",
+  "whats your pick",
+  "whats your choice",
+]);
+
+function askQuestionPromptForInlinePanel(text: string): string {
+  const prompt = normalizeAskQuestionText(text);
+  const normalized = normalizeAskQuestionComparisonText(prompt).replace(/[\s:?.-]+$/g, "");
+  return GENERIC_ASK_QUESTION_PROMPTS.has(normalized) ? "" : prompt;
 }
 
 function lineLooksLikeChooserPromptLineClient(line: string): boolean {
@@ -3659,6 +4041,12 @@ function stripEmojiFromAskQuestionLabel(label: string): string {
   const withoutEmoji = label.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "");
   return withoutEmoji.replace(/\s+/g, " ").trim();
 }
+
+function suggestedReplyLooksInternalChoiceNarration(label: string): boolean {
+  return /^(?:the\s+)?user\s+(?:has\s+)?(?:chosen|chose|chooses|selected|selects|picked|picks)\b/i.test(
+    label.trim()
+  );
+}
 type StatusTag = "human" | "local" | "online";
 
 const STATUS_LABEL: Record<StatusTag, string> = {
@@ -3669,7 +4057,7 @@ const STATUS_LABEL: Record<StatusTag, string> = {
 
 function getMessageStatus(msg: Message): StatusTag | null {
   if (msg.role === "user") return "human";
-  if (msg.provider === "openai") return "online";
+  if (msg.provider === "openai" || msg.provider === "anthropic") return "online";
   if (msg.provider === "local") return "local";
   // Pre-existing assistant messages without a provider record: no indicator.
   return null;
@@ -3699,6 +4087,77 @@ const GENERATING_PHRASE_BUILDERS = [
   (name: string) => `${name} is reflecting`,
 ] as const;
 
+const ZEN_INITIAL_STATUS_LABELS = [
+  "Thinking...",
+  "Composing...",
+  "Gathering...",
+  "Tuning in...",
+  "Shaping...",
+  "Reflecting...",
+  "Considering...",
+  "Listening...",
+  "Orienting...",
+  "Framing...",
+  "Sketching...",
+  "Mapping...",
+  "Tracing...",
+  "Reading...",
+  "Parsing...",
+  "Sorting...",
+  "Weighing...",
+  "Balancing...",
+  "Calibrating...",
+  "Distilling...",
+  "Synthesizing...",
+  "Connecting...",
+  "Threading...",
+  "Arranging...",
+  "Braiding...",
+  "Polishing...",
+  "Sharpening...",
+  "Forming...",
+  "Drafting...",
+  "Mulling...",
+  "Noticing...",
+  "Sensing...",
+  "Searching...",
+  "Finding...",
+  "Surfacing...",
+  "Reaching...",
+  "Unfolding...",
+  "Settling...",
+  "Aligning...",
+  "Focusing...",
+  "Scanning...",
+  "Decoding...",
+  "Combing...",
+  "Sifting...",
+  "Gathering context...",
+  "Taking shape...",
+  "Warming up...",
+  "Zeroing in...",
+  "Feeling through...",
+  "Holding the thread...",
+  "Making sense...",
+  "Reading the room...",
+  "Following the line...",
+  "Replying...",
+  "Writing...",
+  "Revealing...",
+  "Answering...",
+  "Continuing...",
+  "Speaking...",
+  "Rendering...",
+] as const;
+
+function pickStableStatusLabel(
+  labels: readonly string[],
+  salt: string
+): string {
+  if (labels.length === 0) return "";
+  return labels[hashToUnsignedInt(salt) % labels.length] ?? labels[0] ?? "";
+}
+
 const FALLBACK_PROCESSING_HINT_DELAY_MS = 3800;
 const FALLBACK_PROCESSING_TICK_MS = 300;
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
@@ -3723,148 +4182,136 @@ function promptLooksDenialProne(text: string): boolean {
 }
 
 type MessageMoodKey = NonNullable<Message["moodKey"]>;
-type InterruptionTone = "gentle" | "miffed" | "firm";
+type InterruptionTone = "gentle" | "steady" | "firm";
 type InterruptionLengthBand = "short" | "medium" | "long";
-const INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED = 70;
+const INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY = 70;
 const INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM = 140;
+
+const INTERRUPTION_SHORT_REMARKS = [
+  "I will pause here.",
+  "Pausing here. Take your time.",
+  "I can hold that thought.",
+  "Stopping at this point.",
+  "I will leave space here.",
+  "The thread can rest for a moment.",
+] as const;
+
+const INTERRUPTION_MEDIUM_REMARKS = [
+  "I will pause and let the moment breathe.",
+  "Stopping here. We can continue from this point.",
+  "I can leave the rest unspoken for now.",
+  "Pausing cleanly. Take the lead when you are ready.",
+  "I will set that thought down here.",
+  "Holding the rest until you want it.",
+] as const;
+
+const INTERRUPTION_LONG_REMARKS = [
+  "I will stop here and keep the rest quiet.",
+  "Pausing the longer thread. We can return only if you want.",
+  "I will leave the unfinished part unfinished.",
+  "Stopping cleanly before this gets too dense.",
+  "I can let the rest fade out here.",
+  "Holding the longer thought at the edge.",
+] as const;
 
 const INTERRUPTION_REMARKS: Record<
   InterruptionTone,
   Record<MessageMoodKey, readonly string[]>
 > = {
   gentle: {
-    joyful: [
-      "Sorry, what was that?",
-      "Okay, okay, I can pause there.",
-    ],
-    warm: [
-      "Sorry, what was that?",
-      "No worries, want the short version instead?",
-    ],
-    neutral: [
-      "Sorry, what was that?",
-      "Okay, I can pause there.",
-    ],
-    guarded: [
-      "Interrupted me there - did you want to jump in?",
-      "All good, should I stop here?",
-    ],
-    strained: [
-      "You cut me off - should I continue or stop?",
-      "I can stop there if you'd rather.",
-    ],
+    joyful: INTERRUPTION_SHORT_REMARKS,
+    warm: INTERRUPTION_SHORT_REMARKS,
+    neutral: INTERRUPTION_SHORT_REMARKS,
+    guarded: INTERRUPTION_SHORT_REMARKS,
+    strained: INTERRUPTION_SHORT_REMARKS,
   },
-  miffed: {
-    joyful: [
-      "Heh, got interrupted there - what did you need?",
-      "All right, I'll pause. What changed?",
-    ],
-    warm: [
-      "Okay, I got cut off - what did you want to add?",
-      "No problem, I'll pause. Want me to continue?",
-    ],
-    neutral: [
-      "Okay, that interruption threw me off - continue or stop?",
-      "All right, I'll pause. What did you need?",
-    ],
-    guarded: [
-      "That was the second interruption - want me brief and direct?",
-      "Okay, stopping there. Should I continue at all?",
-    ],
-    strained: [
-      "That interruption landed a little sharp. Continue or stop?",
-      "I'm pausing. If you want me to proceed, say the word.",
-    ],
+  steady: {
+    joyful: INTERRUPTION_MEDIUM_REMARKS,
+    warm: INTERRUPTION_MEDIUM_REMARKS,
+    neutral: INTERRUPTION_MEDIUM_REMARKS,
+    guarded: INTERRUPTION_MEDIUM_REMARKS,
+    strained: INTERRUPTION_MEDIUM_REMARKS,
   },
   firm: {
-    joyful: [
-      "Okay, okay - I'll be quiet. Want to take it from here?",
-      "Fair enough, I'll stop yapping. Need anything specific?",
-    ],
-    warm: [
-      "Okay, I'll be quiet for now. Want me to continue later?",
-      "All right, I'll hold it there. What do you need?",
-    ],
-    neutral: [
-      "Okay, never mind then. Want me to keep going or drop it?",
-      "Got it, I'll stop there. Continue or move on?",
-    ],
-    guarded: [
-      "Well, that was rude - but I'll stop there. Continue or no?",
-      "Interrupted again. I'll stay quiet unless you ask.",
-    ],
-    strained: [
-      "Interrupted again. I'll stop here unless you explicitly want more.",
-      "Okay. I'm done speaking for now - your call.",
-    ],
+    joyful: INTERRUPTION_LONG_REMARKS,
+    warm: INTERRUPTION_LONG_REMARKS,
+    neutral: INTERRUPTION_LONG_REMARKS,
+    guarded: INTERRUPTION_LONG_REMARKS,
+    strained: INTERRUPTION_LONG_REMARKS,
   },
 } as const;
 
 const INTERRUPTION_OPENERS: Record<InterruptionTone, readonly string[]> = {
   gentle: [
-    "Whoa, tiny pause.",
-    "Got it, I can pause here.",
-    "Okay, cutting myself off there.",
-    "All right, I can stop for a second.",
-    "Sure, I can hold that thought.",
-    "No stress, pausing there.",
-    "Yep, stopping right there.",
+    "Pausing here.",
+    "Holding that thought.",
+    "Setting this down for a moment.",
+    "Stopping at the edge of that thought.",
+    "Leaving a little space here.",
+    "Letting the sentence rest.",
+    "I can pause at this point.",
+    "The thought can stay unfinished.",
   ],
-  miffed: [
-    "Okay, that broke my flow.",
-    "Right, you jumped in there.",
-    "All right, that interruption threw me off.",
-    "Yep, interruption received.",
-    "Okay, that was abrupt.",
-    "Got it, we got cut in mid-thought.",
-    "All right, hard pause.",
+  steady: [
+    "Pausing again.",
+    "Holding the thread here.",
+    "Stopping before the thought gets ahead of us.",
+    "Letting the unfinished part stay unfinished.",
+    "Leaving this branch quiet for now.",
+    "Resting the answer here.",
+    "I can make room for the next turn.",
+    "The rest can wait.",
   ],
   firm: [
-    "All right, that's another cutoff.",
-    "Okay, hard stop then.",
-    "Got it, interrupted again.",
-    "Fine, pausing right now.",
-    "All right, we're stopping here.",
-    "Yep, that was a sharp interruption.",
-    "Understood, full stop.",
+    "Full pause.",
+    "Stopping completely here.",
+    "Letting the thread go quiet.",
+    "Setting the whole answer down.",
+    "Holding the rest outside the room.",
+    "Ending this pass here.",
+    "I will leave that thought unrecovered.",
+    "The unfinished part can disappear.",
   ],
 };
 
 const INTERRUPTION_REACTIONS: Record<MessageMoodKey, readonly string[]> = {
   joyful: [
-    "I can switch gears quickly.",
-    "I can keep this light.",
-    "I can roll with that.",
-    "I can pivot without drama.",
-    "I can keep it snappy.",
+    "We can move from here.",
+    "I can follow the next thread.",
+    "There is no rush to finish it.",
+    "The next turn can shape the conversation.",
+    "I can keep this spacious.",
   ],
   warm: [
-    "I can keep this easy.",
-    "I can make it simpler from here.",
-    "I can keep this short and clear.",
-    "I can slow down and keep it clean.",
-    "I can tighten this up for you.",
+    "We can keep this easy.",
+    "I can stay with the present turn.",
+    "I can let the rest go.",
+    "There is room to redirect.",
+    "I can keep the next part gentle.",
   ],
   neutral: [
-    "I can be brief from here.",
-    "I can reset and continue cleanly.",
-    "I can continue with less detail.",
-    "I can keep it direct.",
-    "I can summarize the rest.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
+    "I can keep the next turn simple.",
+    "Nothing needs to be recovered.",
+    "This can become a clean break.",
   ],
   guarded: [
-    "I can stay concise if you want.",
-    "I can keep this strictly to the point.",
-    "I can continue with just the essentials.",
-    "I can keep it short and functional.",
-    "I can avoid extra detail.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
   ],
   strained: [
-    "I can keep this very short.",
-    "I can continue, but only the essentials.",
-    "I can wrap this in one tight pass.",
-    "I can keep it minimal from here.",
-    "I can stop unless you want the rest.",
+    "We can continue from the next message.",
+    "I can stay quiet until needed.",
+    "I can follow whatever comes next.",
+    "The unfinished text is gone from here.",
+    "The conversation can continue cleanly.",
   ],
 };
 
@@ -3874,69 +4321,69 @@ const INTERRUPTION_CLOSERS: Record<
 > = {
   gentle: {
     short: [
-      "Want me to finish this thought?",
-      "Do you want the short version?",
-      "Should I keep going?",
-      "Want me to continue?",
+      "I will wait here.",
+      "Take the lead.",
+      "Send the next thought when you are ready.",
+      "We can continue from your next message.",
     ],
     medium: [
-      "Want me to give you the compact version?",
-      "Should I continue, but shorter?",
-      "Want the headline version only?",
-      "Should I trim this down and continue?",
+      "I will keep the rest quiet.",
+      "The next message can steer us.",
+      "We can pick up only what matters next.",
+      "I will wait for your direction.",
     ],
     long: [
-      "Want the rest as a quick summary?",
-      "Should I skip to the key points only?",
-      "Want me to compress the rest into bullets?",
-      "Should I continue with just essentials?",
+      "I will not restore the rest.",
+      "The unfinished part can stay gone.",
+      "We can begin again from the next prompt.",
+      "I will leave the longer thread behind.",
     ],
   },
-  miffed: {
+  steady: {
     short: [
-      "Continue or stop?",
-      "Do you want me to keep going?",
-      "Should I finish or drop it?",
-      "Need me to continue?",
+      "I will wait here.",
+      "The next turn is yours.",
+      "We can move cleanly from here.",
+      "I will leave space for you.",
     ],
     medium: [
-      "Want me to continue in strict short mode?",
-      "Should I finish this in one quick pass?",
-      "Do you want a tight summary instead?",
-      "Continue, or do we move on?",
+      "The answer can stay unfinished.",
+      "I will keep this quiet unless you return to it.",
+      "We can let this branch dissolve.",
+      "I will follow your next cue.",
     ],
     long: [
-      "Want only the key points from the rest?",
-      "Should I compress the rest aggressively?",
-      "Do you want the short version and nothing extra?",
-      "Continue with essentials only?",
+      "I will not pull the rest back in.",
+      "The longer thread can stay outside the chat.",
+      "We can continue without recovering it.",
+      "I will wait for the next shape of the conversation.",
     ],
   },
   firm: {
     short: [
-      "Say continue if you want more.",
-      "Want me to proceed, yes or no?",
-      "Should I continue at all?",
-      "Need the rest, or done?",
+      "I will be still here.",
+      "Take the next turn when you want.",
+      "This is a clean stop.",
+      "I will not continue that sentence.",
     ],
     medium: [
-      "If you want more, tell me to continue.",
-      "Want me to continue with bare essentials only?",
-      "Proceed or drop it?",
-      "Should I finish this in one short sweep?",
+      "I will leave the rest unspoken.",
+      "The unfinished reply stays behind us.",
+      "We can start from the next message.",
+      "I will hold silence until then.",
     ],
     long: [
-      "If you actually want the rest, say continue.",
-      "Want me to finish this with only critical points?",
-      "Should I reduce this to a strict summary?",
-      "Continue, or are we done here?",
+      "I will not recover that answer.",
+      "The rest is gone from the thread.",
+      "We can begin again from wherever you point.",
+      "I will keep this boundary intact.",
     ],
   },
 };
 
 function interruptionToneForCount(interruptCount: number): InterruptionTone {
   if (interruptCount >= 3) return "firm";
-  if (interruptCount >= 2) return "miffed";
+  if (interruptCount >= 2) return "steady";
   return "gentle";
 }
 
@@ -3944,24 +4391,22 @@ function interruptionMoodForCount(
   baseMood: MessageMoodKey,
   interruptCount: number
 ): MessageMoodKey {
-  if (interruptCount >= 3) return "strained";
-  if (interruptCount >= 2 && (baseMood === "joyful" || baseMood === "warm")) {
-    return "guarded";
-  }
-  return baseMood;
+  void baseMood;
+  void interruptCount;
+  return "neutral";
 }
 
 function interruptionLengthBumpForText(text: string): number {
   const wordCount = text.match(/\S+/g)?.length ?? 0;
   if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return 2;
-  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return 1;
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY) return 1;
   return 0;
 }
 
 function interruptionLengthBandForText(text: string): InterruptionLengthBand {
   const wordCount = text.match(/\S+/g)?.length ?? 0;
   if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_FIRM) return "long";
-  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_MIFFED) return "medium";
+  if (wordCount >= INTERRUPTION_LENGTH_WORD_THRESHOLD_STEADY) return "medium";
   return "short";
 }
 
@@ -3977,12 +4422,12 @@ function interruptionCountLead(
 ): string {
   if (effectiveInterruptCount <= 1) return "";
   if (effectiveInterruptCount === 2) {
-    return tone === "gentle" ? "Second interruption, noted. " : "That is twice now. ";
+    return tone === "gentle" ? "Another pause. " : "Pausing again. ";
   }
   if (effectiveInterruptCount === 3) {
-    return lengthBump > 0 ? "Long reply interrupted. " : "Interrupted again. ";
+    return lengthBump > 0 ? "Longer thread paused. " : "Another clean pause. ";
   }
-  return tone === "firm" ? "Interrupted again. " : "Cut off again. ";
+  return tone === "firm" ? "Keeping the boundary. " : "Pausing once more. ";
 }
 
 function buildGeneratedInterruptionOptions(input: {
@@ -4063,9 +4508,14 @@ function interruptionFollowupLine(input: {
 }
 
 function interruptedMidWordSnippet(fullText: string, visibleTokenCount: number): string {
-  const tokens = fullText.match(/\S+\s*/g) ?? [];
+  const displayText = extractStageDirections(fullText)
+    .mainText.replace(/\[([^\]\n]+)\]\(prism-bot:\/\/[^)\n]+\)/gi, "$1")
+    .replace(/\*+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = tokenizeMessageReveal(displayText);
   const visible = tokens.slice(0, Math.max(1, visibleTokenCount)).join("").trimEnd();
-  if (visible.length === 0) return "…";
+  if (visible.length === 0) return "—";
   const lastWordMatch = visible.match(/(\S+)$/);
   if (!lastWordMatch) return `${visible}—`;
   const fullWord = lastWordMatch[1];
@@ -4073,6 +4523,11 @@ function interruptedMidWordSnippet(fullText: string, visibleTokenCount: number):
   const cutoffLength = Math.max(2, Math.floor(fullWord.length * 0.6));
   const prefix = visible.slice(0, visible.length - fullWord.length);
   return `${prefix}${fullWord.slice(0, cutoffLength)}—`;
+}
+
+function clampUnitInterval(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function trimMessagesToActiveTurn(messages: Message[]): Message[] {
@@ -4154,7 +4609,7 @@ function botOpinionBandTitle(band: BotOpinion["band"]): string {
 interface ConversationDetail {
   id: string;
   title: string;
-  mode?: "chat" | "sandbox" | "coffee";
+  mode?: "zen" | "chat" | "sandbox" | "coffee";
   /** Bot locked to this conversation at start. Null = PRISM Default / no custom bot. */
   botId: string | null;
   /** Coffee-only bot lineup frozen when the Coffee Session starts. */
@@ -4167,6 +4622,8 @@ interface ConversationDetail {
   lastBotColor: string | null;
   /** True when the conversation has at least one assistant reply; see ConversationSummary for disambiguation semantics. */
   hasAssistantReply: boolean;
+  /** Zen-only ambient wallpaper metadata; absent on older responses means off. */
+  zenWallpaper?: ZenWallpaperMetadata;
   messages: Message[];
 }
 
@@ -4186,7 +4643,7 @@ interface ChatPostEnvelope {
     fallbackModel: string;
   };
   summaryCompaction?: {
-    mode: "chat" | "sandbox";
+    mode: "zen" | "chat" | "sandbox";
     triggered: boolean;
     inProgress: boolean;
     reason: "milestone" | "mode_exit" | "manual";
@@ -4206,6 +4663,8 @@ interface ChatPostEnvelope {
     jobId: string;
     conversationId: string | null;
   };
+  /** Developer-only backend trace for the floating metrics terminal. */
+  backendEvents?: ChatBackendDebugEvent[];
   /**
    * Per-turn tool-call diagnostics for the developer metrics stream. Empty/omitted on
    * turns where nothing tool-shaped was attempted. Used to surface what the assistant
@@ -4213,6 +4672,32 @@ interface ChatPostEnvelope {
    * and whether the parser silently dropped a tool-shaped reply.
    */
   toolCalls?: ChatToolCallEvent[];
+}
+
+interface ZenInitialStarterCachedReply {
+  savedAt: number;
+  envelope: ChatPostEnvelope;
+  suppressPromise: Promise<void> | null;
+}
+
+function zenInitialStarterCacheKey(userId: string): string {
+  return `${ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY}:${userId}`;
+}
+
+function clearLegacyZenInitialStarterCachedReply(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(zenInitialStarterCacheKey(userId));
+  } catch {
+    // Ignore unavailable storage.
+  }
+}
+
+interface ChatBackendDebugEvent {
+  kind: "route" | "context" | "model" | "memory" | "summary" | "tool";
+  message: string;
+  detail?: string;
+  elapsedMs: number;
 }
 type ChatToolCallEventName = "sendGeneratedImage" | "askQuestion" | "unknown";
 type ChatToolCallEventStatus = "detected" | "acquired" | "busy" | "dropped";
@@ -4241,6 +4726,9 @@ interface BotOpinion {
   repairCount: number;
   updatedAt: string;
 }
+
+type ApiKeySource = "saved" | "server" | "none";
+
 interface UserSettings {
   displayName: string;
   theme: Theme;
@@ -4248,13 +4736,20 @@ interface UserSettings {
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  experimentalDualOllamaEnabled: boolean;
   /**
    * When true (default), assistant bubbles that used the configured copyright
    * lenient local fallback get the striped left-edge treatment.
    */
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   hasOpenAiApiKey: boolean;
+  hasAnthropicApiKey: boolean;
+  hasElevenLabsApiKey: boolean;
+  openAiApiKeySource: ApiKeySource;
+  anthropicApiKeySource: ApiKeySource;
+  elevenLabsApiKeySource: ApiKeySource;
   ollamaModel: string;
   /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
   ollamaAuxiliaryModel: string;
@@ -4269,6 +4764,9 @@ interface UserSettings {
   preferredOnlineModel: string;
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
+  preferredZenWallpaperLocalImageModel: string;
+  preferredZenWallpaperOpenAiImageModel: string;
+  zenWallpaperOpacity: number;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -4283,7 +4781,7 @@ interface UserSettings {
 interface DevChatDebugEvent {
   id: string;
   createdAt: string;
-  kind: "summary" | "memory" | "opinion" | "tool";
+  kind: "summary" | "memory" | "opinion" | "tool" | "backend";
   text: string;
 }
 
@@ -4292,15 +4790,26 @@ function inferDevChatDebugKind(event: DevChatDebugEvent): DevChatDebugEvent["kin
     event.kind === "summary" ||
     event.kind === "memory" ||
     event.kind === "opinion" ||
-    event.kind === "tool"
+    event.kind === "tool" ||
+    event.kind === "backend"
   ) {
     return event.kind;
   }
   const line = event.text.toLowerCase();
+  if (line.includes("backend") || line.includes("/api/") || line.includes("route")) return "backend";
   if (line.includes("tool")) return "tool";
   if (line.includes("summary")) return "summary";
   if (line.includes("memories") || line.includes("memory")) return "memory";
   return "opinion";
+}
+
+function devDebugKindForBackendEvent(
+  kind: ChatBackendDebugEvent["kind"]
+): DevChatDebugEvent["kind"] {
+  if (kind === "memory") return "memory";
+  if (kind === "summary") return "summary";
+  if (kind === "tool") return "tool";
+  return "backend";
 }
 
 /// Compose a single human-readable dev-metrics line for a tool-call diagnostic event.
@@ -4311,8 +4820,15 @@ function formatChatToolCallDebugLine(prefix: string, event: ChatToolCallEvent): 
   if (event.detail && event.detail.length > 0) parts.push(event.detail);
   return parts.join(" — ");
 }
+
+function formatBackendDebugLine(prefix: string, event: ChatBackendDebugEvent): string {
+  const parts = [`${prefix} backend ${event.kind}: ${event.message}`];
+  if (event.detail && event.detail.length > 0) parts.push(event.detail);
+  parts.push(`${event.elapsedMs}ms`);
+  return parts.join(" — ");
+}
 interface SummaryCompactionDebug {
-  mode: "chat" | "sandbox";
+  mode: "zen" | "chat" | "sandbox";
   conversationId: string;
   inProgress: boolean;
   latestSummary: string | null;
@@ -4395,7 +4911,8 @@ interface ModelCatalogEntry {
   isDefault?: boolean;
   localHost?: "primary" | "secondary";
   hostLabel?: string;
-  /** Present for image-only catalog rows (ComfyUI checkpoints). */
+  disabledReason?: string;
+  /** Present for image-only catalog rows (ComfyUI workflows). */
   imageSource?: "ollama" | "comfyui" | "comfyui-workflow" | "comfyui-remote";
 }
 interface ModelCatalog {
@@ -4418,6 +4935,25 @@ interface SecondaryOllamaStatus {
   reachable: boolean;
   modelCount: number;
 }
+interface DualOllamaWorkloadStatus {
+  configured: boolean;
+  enabled: boolean;
+  primaryReachable: boolean;
+  secondaryReachable: boolean;
+  modelParity: boolean;
+  primaryModelCount: number;
+  secondaryModelCount: number;
+  sharedModelIds: string[];
+  missingOnPrimary: string[];
+  missingOnSecondary: string[];
+  reason:
+    | "not_configured"
+    | "primary_unreachable"
+    | "secondary_unreachable"
+    | "empty_catalog"
+    | "model_mismatch"
+    | "ready";
+}
 type SecondaryOllamaUiStatus =
   | "unconfigured"
   | "checking"
@@ -4436,6 +4972,7 @@ interface Bot {
   openai_image_model?: string | null;
   online_enabled?: number | null;
   delete_protected?: number | null;
+  flirt_enabled?: number | null;
   temperature: number;
   max_tokens: number;
   color: string | null;
@@ -4469,6 +5006,7 @@ interface BotExportPayloadV1 {
     openaiImageModel?: string | null;
     onlineEnabled?: boolean;
     deleteProtected?: boolean;
+    flirtEnabled?: boolean;
     chatEnabled?: boolean;
   };
   profile?: BotProfileFields;
@@ -4503,6 +5041,7 @@ interface CommandCenterCommand {
   name: string;
   title: string;
   command: string;
+  aliases: string[];
   arguments: CommandCenterArgument[];
   builtIn: boolean;
   readOnly: boolean;
@@ -4515,6 +5054,19 @@ interface CommandCenterStateV1 {
   preferredModel?: string;
   commands?: unknown;
 }
+
+const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear", "refresh"]);
+const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
+  "help",
+  "compact",
+  "summarize",
+  "clear",
+  "cls",
+  "refresh",
+  "dev",
+  "forget",
+  "forget-all",
+]);
 
 interface BotGroupManifestV1 {
   schema: "prism-bot-group-manifest-v1";
@@ -4529,6 +5081,7 @@ interface ImportBotOptions {
   allowDuplicateHash?: boolean;
   suppressNotice?: boolean;
   suppressPanelReset?: boolean;
+  selectInChat?: boolean;
 }
 
 interface ImportBotResult {
@@ -4603,12 +5156,9 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
     id: "builtin:/help",
     name: "help",
     title: "help",
-    command:
-      "Take the following request from the user and break it down for them in a way that is easy to understand, as if they were a 'layman'. If nothing else follows the command, please tell the user how the PRISM app works, and where to get started.",
-    arguments: [
-      { key: "f", value: "Please be concise" },
-      { key: "v", value: "Please be verbose" },
-    ],
+    command: "Opens a list of available commands and prompts.",
+    aliases: [],
+    arguments: [],
     builtIn: true,
     readOnly: true,
     createdAt: now,
@@ -4616,11 +5166,181 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInCompactCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/compact",
+    name: "compact",
+    title: "compact",
+    command:
+      "Compacts the current saved chat into thread context without clearing the visible transcript.",
+    aliases: ["summarize"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInClearCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/clear",
+    name: "clear",
+    title: "clear",
+    command:
+      "Clears the current chat transcript and saved thread context.",
+    aliases: ["cls"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInRefreshCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/refresh",
+    name: "refresh",
+    title: "refresh",
+    command: "Refreshes the Prism web page.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeCommandAliasList(
+  aliases: unknown,
+  primaryName: string
+): string[] {
+  if (!Array.isArray(aliases)) return [];
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const alias of aliases) {
+    if (typeof alias !== "string") continue;
+    const name = normalizeCommandNameInput(alias);
+    if (!name || name === primaryName || seen.has(name)) continue;
+    seen.add(name);
+    normalized.push(name);
+  }
+  return normalized.slice(0, 8);
+}
+
+function sanitizeCommandAliasesForList(
+  commands: readonly CommandCenterCommand[]
+): CommandCenterCommand[] {
+  const primaryNames = new Set(commands.map((command) => command.name));
+  const claimedAliases = new Set<string>();
+  return commands.map((command) => {
+    const aliases: string[] = [];
+    for (const alias of command.aliases) {
+      if (!alias || alias === command.name) continue;
+      if (primaryNames.has(alias)) continue;
+      if (claimedAliases.has(alias)) continue;
+      if (!command.builtIn && BUILT_IN_COMMAND_RESERVED_NAMES.has(alias)) continue;
+      claimedAliases.add(alias);
+      aliases.push(alias);
+    }
+    return { ...command, aliases };
+  });
+}
+
+function commandInvocationNames(command: CommandCenterCommand): string[] {
+  return [command.name, ...command.aliases].filter(Boolean);
+}
+
+function isCommandCenterOperationalCommand(command: CommandCenterCommand): boolean {
+  return command.builtIn || command.readOnly;
+}
+
+function isCommandCenterPromptShortcut(command: CommandCenterCommand): boolean {
+  return !command.builtIn && !command.readOnly;
+}
+
+function createRuntimeCommandCenterCommand(
+  name: string,
+  command: string,
+  aliases: string[] = []
+): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: `runtime:/${name}`,
+    name,
+    title: name,
+    command,
+    aliases,
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function commandMatchesInvocationName(
+  command: CommandCenterCommand,
+  normalizedInvocationName: string
+): boolean {
+  return commandInvocationNames(command).some(
+    (name) => name.toLowerCase() === normalizedInvocationName.toLowerCase()
+  );
+}
+
+interface LeadingCommandChipMatch {
+  command: CommandCenterCommand;
+  commandStart: number;
+  commandEnd: number;
+}
+
+function resolveLeadingCommandChipMatch(
+  value: string,
+  commands: readonly CommandCenterCommand[]
+): LeadingCommandChipMatch | null {
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? "";
+  const match = /^(\s*)\/([a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(firstLine);
+  if (!match) return null;
+  const normalizedName = normalizeCommandNameInput(match[2] ?? "");
+  if (!normalizedName) return null;
+  const command =
+    commands.find((command) => commandMatchesInvocationName(command, normalizedName)) ??
+    null;
+  if (!command) return null;
+  return {
+    command,
+    commandStart: match[1]?.length ?? 0,
+    commandEnd: match[0].length,
+  };
+}
+
+function clampTextAfterLeadingCommandChip(
+  value: string,
+  commands: readonly CommandCenterCommand[]
+): string {
+  const match = resolveLeadingCommandChipMatch(value, commands);
+  if (!match) return value;
+  if (value.length <= match.commandEnd) return value;
+  const nextChar = value[match.commandEnd] ?? "";
+  return `${value.slice(0, match.commandEnd)}${/\s/u.test(nextChar) ? " " : ""}`;
+}
+
 function normalizeCommandCenterState(raw: unknown): {
   preferredModel: string;
   commands: CommandCenterCommand[];
 } {
   const fallbackHelp = createBuiltInHelpCommand();
+  const builtInCommands = [
+    fallbackHelp,
+    createBuiltInCompactCommand(),
+    createBuiltInClearCommand(),
+    createBuiltInRefreshCommand(),
+  ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
   const preferredModel = normalizeModelChoice(parsed?.preferredModel);
@@ -4648,48 +5368,54 @@ function normalizeCommandCenterState(raw: unknown): {
           ? record.title.trim()
           : normalizedName,
       command: typeof record.command === "string" ? record.command : "",
-      arguments: Array.isArray(record.arguments)
-        ? record.arguments
-            .map((argument): CommandCenterArgument | null => {
-              if (!argument || typeof argument !== "object") return null;
-              const entry = argument as Partial<CommandCenterArgument>;
-              return {
-                key: typeof entry.key === "string" ? entry.key.trim() : "",
-                value: typeof entry.value === "string" ? entry.value.trim() : "",
-              };
-            })
-            .filter((argument): argument is CommandCenterArgument => Boolean(argument))
-        : [],
-      builtIn: record.builtIn === true || normalizedName === "help",
-      readOnly: record.readOnly === true || normalizedName === "help",
+      aliases: normalizeCommandAliasList(
+        (record as Partial<CommandCenterCommand> & { aliases?: unknown }).aliases,
+        normalizedName
+      ),
+      arguments: [],
+      builtIn: record.builtIn === true || BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
+      readOnly: record.readOnly === true || BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
       createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
     });
   }
-  const existingHelp = commands.find((command) => command.name === "help");
-  if (existingHelp) {
-    existingHelp.id = "builtin:/help";
-    existingHelp.title = "help";
-    existingHelp.builtIn = true;
-    existingHelp.readOnly = true;
-    if (!existingHelp.command.trim()) existingHelp.command = fallbackHelp.command;
-    if (existingHelp.arguments.length === 0) existingHelp.arguments = fallbackHelp.arguments;
-  } else {
-    commands.unshift(fallbackHelp);
+  for (const builtIn of builtInCommands) {
+    const existing = commands.find((command) => command.name === builtIn.name);
+    if (existing) {
+      existing.id = builtIn.id;
+      existing.title = builtIn.title;
+      existing.command = builtIn.command;
+      existing.aliases = builtIn.aliases;
+      existing.arguments = builtIn.arguments;
+      existing.builtIn = true;
+      existing.readOnly = true;
+      continue;
+    }
+    commands.push(builtIn);
   }
   return {
     preferredModel,
-    commands,
+    commands: sanitizeCommandAliasesForList([
+      ...builtInCommands,
+      ...commands.filter((command) => !BUILT_IN_COMMAND_RESERVED_NAMES.has(command.name)),
+    ]),
   };
 }
 
 function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[]): CommandCenterCommand {
-  const existing = new Set(existingCommands.map((command) => command.name.trim().toLowerCase()));
+  const existing = new Set(
+    existingCommands.flatMap((command) =>
+      commandInvocationNames(command).map((name) => name.trim().toLowerCase())
+    )
+  );
+  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
+    existing.add(reserved);
+  }
   let index = 1;
-  let nextName = "command";
+  let nextName = "prompt";
   while (existing.has(nextName)) {
     index += 1;
-    nextName = `command-${index}`;
+    nextName = `prompt-${index}`;
   }
   const now = new Date().toISOString();
   const id =
@@ -4701,12 +5427,45 @@ function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[
     name: nextName,
     title: nextName,
     command: "",
+    aliases: [],
     arguments: [],
     builtIn: false,
     readOnly: false,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function normalizeCommandNameInput(value: string): string {
+  const stripped = value.trim().toLowerCase().replace(/^\/+/, "");
+  return stripped.replace(/\s+/g, "-");
+}
+
+function uniqueCommandNameForList(
+  requestedName: string,
+  commands: readonly CommandCenterCommand[],
+  editingCommandId: string
+): string {
+  const base = normalizeCommandNameInput(requestedName) || "prompt";
+  const used = new Set(
+    commands
+      .filter((command) => command.id !== editingCommandId)
+      .flatMap((command) =>
+        commandInvocationNames(command).map((name) => name.trim().toLowerCase())
+      )
+      .filter(Boolean)
+  );
+  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
+    used.add(reserved);
+  }
+  if (!used.has(base)) return base;
+  let index = 2;
+  let candidate = `${base}-${index}`;
+  while (used.has(candidate)) {
+    index += 1;
+    candidate = `${base}-${index}`;
+  }
+  return candidate;
 }
 
 function botImportUtf8ByteLength(text: string): number {
@@ -4725,22 +5484,21 @@ function normalizeImportedBotHash(value: unknown): string | null {
 
 function normalizeImportedMemorySource(
   source: BotExportMemory["source"] | undefined
-): "direct" | "inferred" | "compiled" | "about_you" {
-  return source === "inferred" || source === "compiled" || source === "about_you"
+): "direct" | "inferred" | "compiled" {
+  return source === "inferred" || source === "compiled" || source === "direct"
     ? source
-    : "direct";
+    : "compiled";
 }
 
 function normalizeImportedMemoryCategory(
-  category: BotExportMemory["category"] | undefined,
-  source: "direct" | "inferred" | "compiled" | "about_you"
+  category: BotExportMemory["category"] | undefined
 ): MemoryCategory {
   if (category === "general" || category === "user" || category === "bot_relation") {
     return category;
   }
   // Bot-export payloads often omit category; for imported bot memories, default
   // to "general" so second-person persona lines are not mistaken as "About you."
-  return source === "about_you" ? "user" : "general";
+  return "general";
 }
 
 function createClientBotExportHash(): string {
@@ -4784,6 +5542,12 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
 const AUTO_MODEL_CHOICE = "auto";
+const AUTO_MODEL_SETTINGS_SUBTEXT = "define preferred model in settings";
+const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
+  "ElevenLabs Image & Video - integration pending";
+const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
+const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
+const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -4813,11 +5577,16 @@ function coffeeModelScopeKey(
 }
 
 function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
-  return { local: AUTO_MODEL_CHOICE, openai: AUTO_MODEL_CHOICE };
+  return {
+    local: AUTO_MODEL_CHOICE,
+    openai: AUTO_MODEL_CHOICE,
+    anthropic: AUTO_MODEL_CHOICE,
+  };
 }
 
 const NO_LOCAL_IMAGE_MODEL_CHOICE = "__prism_no_local_image__";
 const ONLINE_MODEL_FALLBACK_ID = "gpt-4o-mini";
+const ANTHROPIC_MODEL_FALLBACK_ID = "claude-sonnet-4-6";
 const BOT_TEMPERATURE_DEFAULT = 0.7;
 const BOT_TEMPERATURE_MIN = 0;
 const BOT_TEMPERATURE_MAX = 1.2;
@@ -4869,20 +5638,28 @@ const BOT_PROFILE_PAGE_COPY: Record<
 > = {
   purpose: {
     label: "Purpose",
-    description: "The one line that explains what this bot is here to be.",
+    description: "One line for what this bot is here to do.",
   },
   personality: {
     label: "Personality",
-    description: "Temperament, style, interests, and boundaries.",
+    description: "Tune style and OCEAN traits.",
   },
   character: {
     label: "Character",
-    description: "Identity, appearance, and optional worldview in one place.",
+    description: "Identity, look, and worldview.",
   },
   facts: {
     label: "Facts",
-    description: "Permanent canon. The bot will always treat these as true.",
+    description: "Permanent canon this bot keeps true.",
   },
+};
+
+const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
+  neutral: "Adaptable default tone.",
+  warm: "Friendly and reassuring.",
+  concise: "Short and direct.",
+  playful: "Light humor when useful.",
+  formal: "Structured and precise.",
 };
 
 function blankBotProfile(): BotProfileFields {
@@ -4943,25 +5720,16 @@ function botProfileCategoryCount(
           profile.core.conscientiousness,
           profile.core.extraversion,
           profile.core.agreeableness,
-          profile.core.emotionalStability,
-          profile.core.humor,
-          profile.core.curiosity,
-          profile.core.directness
+          profile.core.emotionalStability
         )
       );
     case "character":
       return (
         profileTextFilled(
-          profile.identity.age,
-          profile.identity.species,
-          profile.identity.pronouns,
-          profile.identity.background,
           profile.identity.role,
-          profile.worldview.religion,
+          profile.identity.background,
           profile.worldview.values,
-          profile.appearance.description,
-          profile.appearance.style,
-          profile.appearance.presence
+          profile.appearance.description
         )
         + profileScaleFilled(
           profile.worldview.politicalView,
@@ -4995,7 +5763,7 @@ function botProfileCategorySummary(
   if (category === "purpose") {
     return profile.purpose.statement.trim() || defaultBotPurpose(botName) || "Name the bot to seed a purpose";
   }
-  if (count === 0) return "Optional details not set";
+  if (count === 0) return "No details yet";
   return count === 1 ? "1 detail set" : `${count} details set`;
 }
 
@@ -5025,6 +5793,7 @@ function createBotFormHasEnteredData(options: {
   onlineModel: string;
   onlineEnabled: boolean;
   deleteProtected: boolean;
+  flirtEnabled: boolean;
   temperature: number;
   maxTokens: number;
 }): boolean {
@@ -5034,6 +5803,7 @@ function createBotFormHasEnteredData(options: {
   if (options.onlineModel !== AUTO_MODEL_CHOICE) return true;
   if (!options.onlineEnabled) return true;
   if (options.deleteProtected) return true;
+  if (options.flirtEnabled) return true;
   if (options.temperature !== BOT_TEMPERATURE_DEFAULT) return true;
   if (options.maxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS) return true;
   return false;
@@ -5082,10 +5852,46 @@ function normalizeModelChoice(value: string | null | undefined): string {
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
+function normalizeZenWallpaperOpacitySetting(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : DEFAULT_ZEN_WALLPAPER_OPACITY;
+  const clamped = Math.min(
+    MAX_ZEN_WALLPAPER_OPACITY,
+    Math.max(MIN_ZEN_WALLPAPER_OPACITY, normalized)
+  );
+  return Number(clamped.toFixed(2));
+}
+
+function formatZenWallpaperOpacity(value: unknown): string {
+  return `${Math.round(normalizeZenWallpaperOpacitySetting(value) * 100)}%`;
+}
+
+function parseCommandCenterModelChoice(
+  value: string
+): { provider: Provider; modelId: string } | null {
+  const normalized = normalizeModelChoice(value);
+  if (normalized === AUTO_MODEL_CHOICE) return null;
+  const separatorIndex = normalized.indexOf(":");
+  if (separatorIndex <= 0) return null;
+  const providerRaw = normalized.slice(0, separatorIndex).trim().toLowerCase();
+  const modelId = normalized.slice(separatorIndex + 1).trim();
+  if (!modelId) return null;
+  if (!isProvider(providerRaw)) return null;
+  return {
+    provider: providerRaw,
+    modelId,
+  };
+}
+
 /** Row to badge in chat model menus: the concrete id saved in Settings (no badge when Auto). */
 function chatSettingsSavedDefaultModelId(
   settings: UserSettings | null,
-  provider: Provider
+  provider: Provider | "online"
 ): string | null {
   if (!settings) return null;
   const raw =
@@ -5129,30 +5935,6 @@ function modelLabelFromId(id: string): string {
     .join(" ");
 }
 
-/** Human label for the model id `resolveAutoModel` would pick (matches `/api/chat`). */
-function composeAutoOptionMetaLine(
-  catalog: ModelCatalog | null,
-  settings: UserSettings | null,
-  provider: Provider,
-  bot: Bot | null | undefined
-): string {
-  const sliceLocal = catalog?.local ?? [];
-  const sliceOnline = catalog?.online ?? [];
-  const resolved = resolveAutoModel({
-    provider,
-    explicitModelOverride: null,
-    botPreferredModel:
-      provider === "local"
-        ? (bot?.local_model?.trim() || bot?.model?.trim() || null)
-        : (bot?.online_model?.trim() || null),
-    hiddenModelIds: settings?.hiddenBotModelIds ?? [],
-    catalog: { local: sliceLocal, online: sliceOnline },
-  });
-  const list = provider === "local" ? sliceLocal : sliceOnline;
-  const entry = list.find((m) => m.id === resolved.model);
-  return entry?.label ?? modelLabelFromId(resolved.model);
-}
-
 function localModelDuplicateKey(model: ModelCatalogEntry): string {
   const rawId = model.id.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)
     ? model.id.slice(SECONDARY_OLLAMA_MODEL_PREFIX.length)
@@ -5180,6 +5962,48 @@ function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
   );
 }
 
+function normalizeApiKeySource(value: unknown, hasSavedKey: boolean): ApiKeySource {
+  return value === "saved" || value === "server" || value === "none"
+    ? value
+    : hasSavedKey
+      ? "saved"
+      : "none";
+}
+
+function apiKeySourceStatusLabel(providerLabel: string, source: ApiKeySource): string {
+  if (source === "saved") return `${providerLabel} saved`;
+  if (source === "server") return `${providerLabel} server key`;
+  return `${providerLabel} unset`;
+}
+
+function onlineProviderApiKeySource(
+  settings: UserSettings | null,
+  provider: Provider
+): ApiKeySource {
+  if (!settings) return "none";
+  if (provider === "anthropic") return settings.anthropicApiKeySource;
+  if (provider === "openai") return settings.openAiApiKeySource;
+  return "none";
+}
+
+function onlineProviderHasAvailableCredential(
+  settings: UserSettings | null,
+  provider: Provider
+): boolean {
+  return onlineProviderApiKeySource(settings, provider) !== "none";
+}
+
+function onlineProviderCanPreserveModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): boolean {
+  return (
+    onlineProviderHasAvailableCredential(settings, provider) ||
+    (catalog?.online ?? []).some((model) => model.provider === provider)
+  );
+}
+
 function modelOptionsForProvider(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
@@ -5191,8 +6015,22 @@ function modelOptionsForProvider(
       ? preferPrimaryLocalModelEntries(catalog.local)
       : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
   }
-  return catalog?.online.length
-    ? catalog.online
+  const onlineOptions = (catalog?.online ?? []).filter(
+    (model) => model.provider === provider
+  );
+  if (onlineOptions.length > 0) {
+    return onlineOptions;
+  }
+  if (!onlineProviderHasAvailableCredential(settings, provider)) {
+    return [];
+  }
+  return provider === "anthropic"
+    ? [{
+        id: ANTHROPIC_MODEL_FALLBACK_ID,
+        label: "Claude Sonnet 4.6",
+        provider: "anthropic",
+        isDefault: true,
+      }]
     : [{
         id: ONLINE_MODEL_FALLBACK_ID,
         label: "GPT 4o Mini",
@@ -5264,14 +6102,108 @@ function visibleConcreteModelChoiceForProvider(
     : visibleChoice;
 }
 
-function visibleModelChoiceForProvider(
+function defaultOnlineModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null
+): string {
+  const options = onlineModelOptionsForPicker(catalog, settings);
+  return options.find((model) => model.isDefault)?.id ?? options[0]?.id ?? AUTO_MODEL_CHOICE;
+}
+
+function visibleConcreteOnlineModelChoice(
+  catalog: ModelCatalog | null,
   settings: UserSettings | null,
   choice: string | null | undefined
 ): string {
-  return visibleBotCustomizerModelChoice(
+  const visibleChoice = visibleBotCustomizerModelChoice(
     settings,
     normalizeModelChoice(choice)
   );
+  if (visibleChoice === AUTO_MODEL_CHOICE) {
+    return defaultOnlineModelChoice(catalog, settings);
+  }
+  const options = onlineModelOptionsForPicker(catalog, settings);
+  const provider = inferOnlineProviderForModelId(visibleChoice);
+  return options.some((model) => model.id === visibleChoice) ||
+    onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? visibleChoice
+    : defaultOnlineModelChoice(catalog, settings);
+}
+
+function visibleModelChoiceForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
+  if (provider === "local" || visibleChoice === AUTO_MODEL_CHOICE) {
+    return visibleChoice;
+  }
+  return availableModelOptionsForProvider(catalog, settings, provider).some(
+    (model) => model.id === visibleChoice
+  )
+    ? visibleChoice
+    : AUTO_MODEL_CHOICE;
+}
+
+function visiblePreferredOnlineModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
+  if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  const provider = inferOnlineProviderForModelId(visibleChoice);
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? visibleChoice
+    : AUTO_MODEL_CHOICE;
+}
+
+function visibleModelChoicesByProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  choices: Record<Provider, string>
+): Record<Provider, string> {
+  return {
+    local: visibleModelChoiceForProvider(catalog, settings, "local", choices.local),
+    openai: visibleModelChoiceForProvider(catalog, settings, "openai", choices.openai),
+    anthropic: visibleModelChoiceForProvider(
+      catalog,
+      settings,
+      "anthropic",
+      choices.anthropic
+    ),
+  };
+}
+
+function onlineModelOptionsForPicker(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null
+): ModelCatalogEntry[] {
+  return combinedOnlineModelOptions(
+    availableModelOptionsForProvider(catalog, settings, "openai"),
+    availableModelOptionsForProvider(catalog, settings, "anthropic")
+  ).map((model) => ({
+    ...model,
+    hostLabel: model.hostLabel ?? providerDisplayLabel(model.provider),
+  }));
+}
+
+function modelOptionsForResponseMode(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  responseMode: ResponseMode
+): ModelCatalogEntry[] {
+  return responseMode === "local"
+    ? availableModelOptionsForProvider(catalog, settings, "local")
+    : onlineModelOptionsForPicker(catalog, settings);
 }
 
 function allBotCustomizerModelOptions(
@@ -5279,7 +6211,7 @@ function allBotCustomizerModelOptions(
   settings: UserSettings | null
 ): ModelCatalogEntry[] {
   const seen = new Set<string>();
-  return (["local", "openai"] as const)
+  return (["local", "openai", "anthropic"] as const)
     .flatMap((provider) => modelOptionsForProvider(catalog, settings, provider))
     .filter((model) => {
       if (seen.has(model.id)) return false;
@@ -5300,6 +6232,68 @@ function includeSelectedModelOption(
     ...options,
     { id: choice, label: choice, provider },
   ];
+}
+
+function includeSelectedOnlineModelOption(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  options: ModelCatalogEntry[],
+  choice: string
+): ModelCatalogEntry[] {
+  const normalizedChoice = normalizeModelChoice(choice);
+  if (
+    normalizedChoice === AUTO_MODEL_CHOICE ||
+    options.some((model) => model.id === normalizedChoice)
+  ) {
+    return options;
+  }
+  const provider = inferOnlineProviderForModelId(normalizedChoice);
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? includeSelectedModelOption(options, normalizedChoice, provider)
+    : options;
+}
+
+function includeSelectedResponseModeModelOption(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  responseMode: ResponseMode,
+  options: ModelCatalogEntry[],
+  choice: string,
+  provider: Provider
+): ModelCatalogEntry[] {
+  return responseMode === "online"
+    ? includeSelectedOnlineModelOption(catalog, settings, options, choice)
+    : includeSelectedModelOption(options, choice, provider);
+}
+
+function visibleLocalImageModelSelectValue(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  return isComfyUiModelId(trimmed) ? "" : trimmed;
+}
+
+function includeSelectedLocalImageModelOption(
+  options: ModelCatalogEntry[],
+  choice: string | null | undefined
+): ModelCatalogEntry[] {
+  return includeSelectedModelOption(
+    options,
+    visibleLocalImageModelSelectValue(choice),
+    "local"
+  );
+}
+
+function uniqueModelOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  const seen = new Set<string>();
+  return options.filter((model) => {
+    const key = `${model.provider}:${model.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function inferOnlineProviderForModelId(modelId: string): Provider {
+  return modelId.trim().toLowerCase().startsWith("claude-") ? "anthropic" : "openai";
 }
 
 function blendToward(value: number, target: number, amount: number): number {
@@ -5948,11 +6942,13 @@ function memoryTier(memory: UserMemory): MemoryTier {
     ? Math.max(0, Math.min(1, memory.durability as number))
     : 0;
   const durability = Math.max(storedDurability, estimatedDurability);
-  const truthScore = (confidence + certainty) / 2;
   return memory.tier === "long_term" ||
-    truthScore >= 0.95 ||
-    (truthScore >= 0.9 && durability >= 0.5) ||
-    (durability >= 0.72 && truthScore >= 0.78)
+    memoryQualifiesLongTerm({
+      confidence,
+      certainty,
+      durability,
+      source: memory.source ?? "direct",
+    })
     ? "long_term"
     : "short_term";
 }
@@ -6206,6 +7202,7 @@ interface ImageRecord {
   provider?: string;
   model?: string | null;
   localRelPath?: string | null;
+  purpose?: "gallery" | "wallpaper" | string | null;
 }
 
 /** Authenticated WebP thumbnail for a locally stored generated image (`images.id`). */
@@ -6572,11 +7569,15 @@ function resolveRowColor(
 }
 
 function conversationGroupKey(c: ConversationSummary): string {
+  const effectiveBotId = conversationEffectiveBotId(c);
+  return effectiveBotId ? `bot:${effectiveBotId}` : "default";
+}
+
+function conversationEffectiveBotId(c: ConversationSummary): string | null {
   // Group rows by the same "active identity" users see in sidebar tinting:
   // - after at least one assistant reply, follow the last speaking bot
   // - before first reply, fall back to the conversation's locked starter bot
-  const effectiveBotId = c.hasAssistantReply ? c.lastBotId : c.botId;
-  return effectiveBotId ? `bot:${effectiveBotId}` : "default";
+  return c.hasAssistantReply ? c.lastBotId : c.botId;
 }
 
 /** Mirror of `conversationGroupKey` for cases where only the bot id is in
@@ -6647,17 +7648,6 @@ function persistConversationGroupOrder(userId: string, order: string[]): void {
     // Non-fatal: drag ordering still works for the current page session.
   }
 }
-
-function sandboxZenModeStorageKey(userId: string): string {
-  return `prism_sandbox_zen_mode:${userId}`;
-}
-
-/**
- * Sentinel zen-thread key before the server assigns a persisted conversation id
- * (`detail.id === "pending"` compose surface). Matches `sandboxZenMode` exits
- * but not optimistic → committed promotion.
- */
-const SANDBOX_ZEN_COMPOSE_SURFACE_KEY = "__sandbox_zen_compose_surface__";
 
 function reorderConversationGroupKeys(
   currentOrder: string[],
@@ -6849,12 +7839,14 @@ function SlashCommandGlyph(): React.ReactElement {
   );
 }
 
-/** Focus / zen layout toggle (Sandbox): concentric calm mark, matches header icon weight. */
-function ZenFocusGlyph(): React.ReactElement {
+/** Zen Atmosphere toggle: layered horizon mark for generated ambient wallpaper. */
+function AtmosphereGlyph(): React.ReactElement {
   return (
     <svg className={styles.headerIconGlyph} viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <circle cx="8" cy="8" r="1.35" fill="currentColor" stroke="none" />
+      <path d="M2.25 10.9c1.45-.9 2.9-.9 4.35 0 1.2.74 2.4.74 3.6 0 1.18-.72 2.37-.78 3.55-.18" />
+      <path d="M3.35 7.6c1.08-.82 2.16-.82 3.24 0 .95.72 1.9.72 2.86 0 1.05-.8 2.1-.82 3.15-.08" />
+      <path d="M5.1 4.9a3.8 3.8 0 0 1 5.8 0" />
+      <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="0.85" opacity="0.42" />
     </svg>
   );
 }
@@ -9149,7 +10141,14 @@ function EmptyStateIcon({
         className={`${styles.brandIconShell} ${styles.userHeroAvatar} ${styles.emptyStatePrivateHero}`}
         aria-hidden="true"
       >
-        <PrismHeroMark className={styles.brandIcon} />
+        {/* Decorative shell art; keeping native img avoids layout shifts in this icon stack. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/icon.jpg"
+          alt=""
+          aria-hidden="true"
+          className={styles.brandIcon}
+        />
         <PrismTriangleMark className={styles.brandIconLight} />
       </div>
     );
@@ -9188,7 +10187,13 @@ function EmptyStateIcon({
   }
   return (
     <div className={styles.brandIconShell} aria-hidden="true">
-      <PrismHeroMark className={styles.brandIcon} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/icon.jpg"
+        alt=""
+        aria-hidden="true"
+        className={styles.brandIcon}
+      />
       <PrismTriangleMark className={styles.brandIconLight} />
     </div>
   );
@@ -9239,9 +10244,14 @@ const COMPOSE_MENU_MAX_WIDTH_PX = 360;
 /** Minimum popover width when the trigger is very narrow (matches CSS floors). */
 const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;
 const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 300;
+const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
 const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
 /** Slightly above bot menu so both open pickers stack predictably over the rail. */
 const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+/** Matches `.composeBotMenu { max-height: min(420px, …) }` for caret popovers. */
+const COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX = 420;
+/** Minimum space below the caret before the caret popover prefers opening downward. */
+const COMPOSE_CARET_MENU_MIN_OPEN_BELOW_PX = 160;
 const COMPOSE_MENU_PORTAL_THEME_VARS = [
   "--bg",
   "--bg-surface",
@@ -9339,6 +10349,135 @@ function useComposeMenuPortalStyle(
   return menuOpen ? fixedStyle : undefined;
 }
 
+function computeMentionMenuFixedStyle(
+  caretRect: DOMRect,
+  themeSource: Element | null,
+  floorMinWidth: number
+): React.CSSProperties {
+  const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
+  const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+  const gap = 6;
+  const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const minWidth = Math.min(Math.max(caretRect.width || 0, floorMinWidth), maxW);
+  const left = Math.max(pad, Math.min(caretRect.left, vw - maxW - pad));
+  const maxHeightCap = Math.min(
+    COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX,
+    Math.max(0, vh - 2 * pad)
+  );
+  const topIfBelow = caretRect.bottom + gap;
+  const spaceBelow = vh - pad - topIfBelow;
+  const spaceAbove = caretRect.top - pad - gap;
+
+  let top: number;
+  let maxHeight: number;
+
+  if (
+    spaceBelow >= COMPOSE_CARET_MENU_MIN_OPEN_BELOW_PX ||
+    spaceBelow >= spaceAbove
+  ) {
+    top = topIfBelow;
+    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceBelow));
+  } else {
+    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceAbove));
+    top = Math.max(pad, caretRect.top - gap - maxHeight);
+  }
+
+  if (top + maxHeight + pad > vh) {
+    maxHeight = Math.max(80, vh - pad - top);
+  }
+  if (top < pad) {
+    top = pad;
+    maxHeight = Math.min(maxHeightCap, Math.max(80, vh - pad - top));
+  }
+
+  const themeVars: Record<string, string> = {};
+  if (themeSource) {
+    const computedStyle = globalThis.window.getComputedStyle(themeSource);
+    for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
+      const value = computedStyle.getPropertyValue(varName).trim();
+      if (value) {
+        themeVars[varName] = value;
+      }
+    }
+  }
+  return {
+    position: "fixed",
+    left,
+    top,
+    bottom: "auto",
+    minWidth,
+    maxWidth: maxW,
+    maxHeight,
+    overflow: "hidden",
+    zIndex: COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    ...themeVars,
+  } as React.CSSProperties;
+}
+
+function computeCommandMenuFixedStyle(
+  anchorRect: DOMRect,
+  themeSource: Element | null
+): React.CSSProperties {
+  const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
+  const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+  const gap = 8;
+  const availableWidth = Math.max(0, vw - pad * 2);
+  const floorWidth = Math.min(COMPOSE_COMMAND_MENU_MIN_WIDTH_PX, availableWidth);
+  const width = Math.min(
+    Math.max(anchorRect.width || 0, floorWidth),
+    availableWidth
+  );
+  const left = Math.max(pad, Math.min(anchorRect.left, vw - width - pad));
+  const desiredBottom = vh - anchorRect.top + gap;
+  const availableAbove = Math.max(0, anchorRect.top - pad - gap);
+  const maxHeight = Math.min(
+    COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX,
+    Math.max(80, availableAbove)
+  );
+  const bottom = Math.max(
+    pad,
+    Math.min(desiredBottom, Math.max(pad, vh - pad - maxHeight))
+  );
+
+  const themeVars: Record<string, string> = {};
+  if (themeSource) {
+    const computedStyle = globalThis.window.getComputedStyle(themeSource);
+    for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
+      const value = computedStyle.getPropertyValue(varName).trim();
+      if (value) {
+        themeVars[varName] = value;
+      }
+    }
+  }
+
+  return {
+    position: "fixed",
+    left,
+    top: "auto",
+    bottom,
+    width,
+    minWidth: width,
+    maxWidth: width,
+    maxHeight,
+    overflow: "hidden",
+    zIndex: COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    ...themeVars,
+  } as React.CSSProperties;
+}
+
+function getComposerCommandMenuAnchorRect(
+  anchor: Element | null,
+  fallbackRect: DOMRect
+): DOMRect {
+  const rect = anchor?.getBoundingClientRect();
+  if (rect && rect.width > 0 && rect.height > 0) {
+    return new DOMRect(rect.left, rect.top, rect.width, rect.height);
+  }
+  return fallbackRect;
+}
+
 // ── Composer bot picker (custom dropdown) ────────────────────────────
 // Replaces the native <select> in the composer rail so each option can
 // render with its bot's glyph + tinted background. The native <select>
@@ -9396,6 +10535,8 @@ interface ComposerBotPickerProps {
   hueLensAvailable?: boolean;
   hueLensTrackGradient?: string;
   hueLensTrackSegments?: readonly HueLensTrackSegment[];
+  /** Dropdown direction. Header pickers should use "down" to avoid top clipping. */
+  placement?: "up" | "down";
 }
 
 function ComposerBotPicker({
@@ -9413,6 +10554,7 @@ function ComposerBotPicker({
   hueLensAvailable = false,
   hueLensTrackGradient = "",
   hueLensTrackSegments = EMPTY_HUE_LENS_TRACK_SEGMENTS,
+  placement = "up",
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
@@ -9468,7 +10610,9 @@ function ComposerBotPicker({
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
     triggerRef,
-    COMPOSE_MENU_BOT_MIN_WIDTH_PX
+    COMPOSE_MENU_BOT_MIN_WIDTH_PX,
+    COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    placement
   );
 
   const randomizeHueOnOpen = useCallback(() => {
@@ -9586,7 +10730,21 @@ function ComposerBotPicker({
             )}
           </>
         ) : (
-          <span className={styles.composeControlLabel}>Bot</span>
+          <>
+            <span
+              className={styles.composeBotTriggerGlyph}
+              aria-hidden="true"
+            >
+              <BotGlyph
+                name="triangle"
+                size={14}
+                strokeWidth={2.25}
+              />
+            </span>
+            {showName && (
+              <span className={styles.composeBotTriggerName}>Default</span>
+            )}
+          </>
         )}
         <span
           className={styles.composeBotTriggerChevron}
@@ -9671,13 +10829,16 @@ function ComposerBotPicker({
               aria-selected={value === ""}
               onClick={() => pick("")}
             >
-              {/* Empty glyph slot preserves the grid alignment with the
-                  bot rows below; no icon needed because Default has no
-                  brand identity. */}
               <span
                 className={styles.composeBotOptionGlyph}
                 aria-hidden="true"
-              />
+              >
+                <BotGlyph
+                  name="triangle"
+                  size={14}
+                  strokeWidth={2.25}
+                />
+              </span>
               <span className={styles.composeBotOptionName}>Default</span>
             </button>
             {visibleBots.length === 0 && (
@@ -9974,19 +11135,22 @@ function ImageBotDirectoryDropdown({
   );
 }
 
+type ComposerModelPickerProvider = Provider | "online";
+
 interface ComposerModelPickerProps {
   value: string;
   onChange: (nextValue: string) => void;
   options: ModelCatalogEntry[];
-  provider: Provider;
+  provider: ComposerModelPickerProvider;
   disabled?: boolean;
   title?: string;
   ariaLabel: string;
   placement?: "up" | "down";
   minMenuWidthPx?: number;
+  menuClassName?: string;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
   showAutoOption?: boolean;
-  /** Replaces the default Auto subtitle ("Bot default …") when set (e.g. Images panel). */
+  /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
   /**
    * When set, the "Default" badge follows this id (user’s saved Settings choice).
@@ -10005,6 +11169,7 @@ function ComposerModelPicker({
   ariaLabel,
   placement = "up",
   minMenuWidthPx = COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
+  menuClassName,
   showAutoOption = true,
   autoOptionMetaOverride,
   settingsDefaultModelId,
@@ -10013,11 +11178,7 @@ function ComposerModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const autoOptionLabel = "Auto";
-  const autoOptionMeta =
-    provider === "openai"
-      ? "Bot default online model"
-      : "Bot default local model";
-  const autoMetaShown = autoOptionMetaOverride ?? autoOptionMeta;
+  const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
   const selectedModel =
     (value === AUTO_MODEL_CHOICE
       ? null
@@ -10122,7 +11283,9 @@ function ComposerModelPicker({
         createPortal(
           <div
             ref={menuRef}
-            className={`${styles.composeBotMenu} ${styles.composeModelMenu}`}
+            className={`${styles.composeBotMenu} ${styles.composeModelMenu}${
+              menuClassName ? ` ${menuClassName}` : ""
+            }`}
             style={menuPortalStyle}
           >
           <div
@@ -10151,6 +11314,7 @@ function ComposerModelPicker({
             )}
             {options.map((model) => {
               const isSelected = value === model.id;
+              const isUnavailable = Boolean(model.disabledReason);
               const showSettingsDefaultBadge =
                 settingsDefaultModelId !== undefined &&
                 settingsDefaultModelId !== null &&
@@ -10159,24 +11323,31 @@ function ComposerModelPicker({
                 settingsDefaultModelId === undefined && Boolean(model.isDefault);
               return (
                 <button
-                  key={model.id}
+                  key={`${model.provider}:${model.id}`}
                   type="button"
-                  className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                  className={`${styles.composeBotOption} ${styles.composeModelOption} ${
+                    isUnavailable ? styles.composeModelOptionDisabled : ""
+                  }`}
                   role="option"
                   aria-selected={isSelected}
-                  onClick={() => pick(model.id)}
+                  aria-disabled={isUnavailable ? "true" : undefined}
+                  disabled={isUnavailable}
+                  title={model.disabledReason}
+                  onClick={() => {
+                    if (!isUnavailable) pick(model.id);
+                  }}
                 >
                   <span className={styles.composeModelOptionMain}>
                     <span className={styles.composeModelOptionName}>
                       {model.label}
                     </span>
-                    {model.hostLabel && (
+                    {(model.hostLabel || model.disabledReason) && (
                       <span className={styles.composeModelOptionMeta}>
-                        {model.hostLabel}
+                        {model.disabledReason ?? model.hostLabel}
                       </span>
                     )}
                   </span>
-                  {(showSettingsDefaultBadge || showCatalogDefaultBadge) && (
+                  {!isUnavailable && (showSettingsDefaultBadge || showCatalogDefaultBadge) && (
                     <span className={styles.composeModelDefaultBadge}>
                       Default
                     </span>
@@ -10633,6 +11804,9 @@ function ColorGlyphPicker({
   // both together if the popover's footprint ever moves.
   const POPOVER_WIDTH_PX = 320;
   const POPOVER_GAP_FROM_SWATCH_PX = 32;
+  const POPOVER_VIEWPORT_MARGIN_PX = 20;
+  // Matches `.colorGlyphPopover { max-height: calc(100dvh - 96px); }`.
+  const POPOVER_VERTICAL_RESERVE_PX = 96;
 
   // ── Drag state for the color square ───────────────────────────────
   // Pointer drag wiring (mouse / touch / stylus, unified via the
@@ -10852,8 +12026,19 @@ function ColorGlyphPicker({
       const wrapper = wrapperRef.current;
       if (!wrapper) return;
       const rect = wrapper.getBoundingClientRect();
+      const maxPopoverHeight = Math.max(
+        0,
+        window.innerHeight - POPOVER_VERTICAL_RESERVE_PX
+      );
+      const maxTop = Math.max(
+        POPOVER_VIEWPORT_MARGIN_PX,
+        window.innerHeight - maxPopoverHeight - POPOVER_VIEWPORT_MARGIN_PX
+      );
       setPopoverAnchor({
-        top: rect.top,
+        top: Math.min(
+          Math.max(rect.top, POPOVER_VIEWPORT_MARGIN_PX),
+          maxTop
+        ),
         left: rect.left - POPOVER_WIDTH_PX - POPOVER_GAP_FROM_SWATCH_PX,
       });
     }
@@ -11438,6 +12623,8 @@ interface MessageBodyProps {
   revealWordByWord?: boolean;
   /** Chat-mode effect: render each line as a distinct canvas row. */
   renderAsEphemeralLines?: boolean;
+  /** Zen keeps decorative color on user prose only. */
+  suppressDecorativePrismText?: boolean;
   /** Current temporal phase for line-by-line dissolve choreography. */
   chatPhase?: ChatMessageTemporalPhase;
   /** Optional externally-driven token count for deterministic word reveal. */
@@ -11447,6 +12634,12 @@ interface MessageBodyProps {
   /** When set, `prism-bot://…` markdown links render as glyph + colored name. */
   mentionRenderBots?: readonly BotMentionPick[];
   resolvedTheme?: "light" | "dark";
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+  onOpenCommandMention?: (commandId: string) => void;
+  promptShortcut?: PromptShortcutMetadata;
+  promptShortcutExpanded?: boolean;
+  onTogglePromptShortcut?: () => void;
+  onCollapsePromptShortcut?: () => void;
 }
 
 function flattenMarkdownCodeText(node: React.ReactNode): string {
@@ -11456,6 +12649,101 @@ function flattenMarkdownCodeText(node: React.ReactNode): string {
   if (!isValidElement(node)) return "";
   const element = node as React.ReactElement<{ children?: React.ReactNode }>;
   return flattenMarkdownCodeText(element.props.children);
+}
+
+function flattenMarkdownText(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map((item) => flattenMarkdownText(item)).join("");
+  if (!isValidElement(node)) return "";
+  const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+  return flattenMarkdownText(element.props.children);
+}
+
+function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
+  const invocation = promptShortcut.invocation.trim();
+  return invocation || `/${promptShortcut.name}`;
+}
+
+function PromptShortcutMessage({
+  promptShortcut,
+  fullPrompt,
+  expanded,
+  onToggle,
+  onCollapse,
+  onOpenPrompt,
+}: {
+  promptShortcut: PromptShortcutMetadata;
+  fullPrompt: string;
+  expanded: boolean;
+  onToggle?: () => void;
+  onCollapse?: () => void;
+  onOpenPrompt?: (commandId: string) => void;
+}) {
+  const label = promptShortcutLabel(promptShortcut);
+  return (
+    <span
+      className={styles.promptShortcutInline}
+      data-prompt-shortcut-preview="true"
+      data-expanded={expanded ? "true" : undefined}
+    >
+      <button
+        type="button"
+        className={styles.promptShortcutCapsule}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
+      >
+        <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
+        <span>{label.replace(/^\/+/, "")}</span>
+      </button>
+      {expanded && (
+        <span className={styles.promptShortcutPreview} role="group" aria-label="Prompt shortcut preview">
+          <span className={styles.promptShortcutPreviewHeader}>
+            <span className={styles.promptShortcutPreviewTitle}>{label}</span>
+            <span className={styles.promptShortcutPreviewActions}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenPrompt?.(promptShortcut.commandId);
+                }}
+              >
+                Edit prompt
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCollapse?.();
+                }}
+              >
+                Collapse
+              </button>
+            </span>
+          </span>
+          {promptShortcut.passthrough && (
+            <span className={styles.promptShortcutPreviewSection}>
+              <span>User request</span>
+              <span>{promptShortcut.passthrough}</span>
+            </span>
+          )}
+          <span className={styles.promptShortcutPreviewSection}>
+            <span>Prompt sent</span>
+            <code>{fullPrompt.trim() || "(empty prompt)"}</code>
+          </span>
+        </span>
+      )}
+    </span>
+  );
 }
 
 interface MarkdownCodeBlockProps {
@@ -11898,8 +13186,23 @@ function resolveMessageDisplayContent(message: Message): string {
     : message.content;
 }
 
+function splitChatModeRevealTokenForEllipsis(token: string): string[] {
+  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
+  const core = trailingWhitespace ? token.slice(0, -trailingWhitespace.length) : token;
+  if (core.length === 0) return [token];
+  if (isChatModeEllipsisToken(token)) return [token];
+  if (core.endsWith("...") && core.length > 3) {
+    return [core.slice(0, -3), `...${trailingWhitespace}`];
+  }
+  if (core.endsWith("…") && core.length > 1) {
+    return [core.slice(0, -1), `…${trailingWhitespace}`];
+  }
+  return [token];
+}
+
 function tokenizeMessageReveal(text: string): string[] {
-  return text.match(/\S+\s*/g) ?? [];
+  const rawTokens = text.match(/\S+\s*/g) ?? [];
+  return rawTokens.flatMap(splitChatModeRevealTokenForEllipsis);
 }
 
 function resolveRevealWordDelayMsByMood(
@@ -11909,13 +13212,42 @@ function resolveRevealWordDelayMsByMood(
   return CHAT_MODE_MOOD_WORD_REVEAL_MS[normalizedMood] ?? CHAT_MODE_WORD_REVEAL_MS;
 }
 
+function resolveTokenLetterRevealDurationMs(token: string): number {
+  const isEllipsis = isChatModeEllipsisToken(token);
+  const displayToken = formatChatModeTypedTokenDisplay(token, isEllipsis).trimEnd();
+  if (displayToken.length === 0) return 0;
+  if (isEllipsis) {
+    const dotCount = displayToken.match(/\./g)?.length ?? 1;
+    return CHAT_MODE_LETTER_REVEAL_MS + Math.max(0, dotCount - 1) * CHAT_MODE_ELLIPSIS_DOT_STEP_MS;
+  }
+  return (
+    CHAT_MODE_LETTER_REVEAL_MS +
+    Math.max(0, Array.from(displayToken).length - 1) * CHAT_MODE_LETTER_REVEAL_STEP_MS
+  );
+}
+
+function resolveTokenPunctuationPauseMs(token: string): number {
+  if (isChatModeEllipsisToken(token)) return CHAT_MODE_ELLIPSIS_PAUSE_MS;
+  const displayToken = formatChatModeTypedTokenDisplay(token, false)
+    .trimEnd()
+    .replace(/[)"'\]}»”’]+$/u, "");
+  if (displayToken.endsWith(",")) return CHAT_MODE_COMMA_PAUSE_MS;
+  if (displayToken.endsWith(".")) return CHAT_MODE_PERIOD_PAUSE_MS;
+  return 0;
+}
+
 function resolveRevealStepDelayMs(
   previousToken: string,
   moodKey?: NonNullable<Message["moodKey"]>
 ): number {
-  return isChatModeEllipsisToken(previousToken)
-    ? CHAT_MODE_ELLIPSIS_WORD_HOLD_MS
-    : resolveRevealWordDelayMsByMood(moodKey);
+  if (isChatModeEllipsisToken(previousToken)) {
+    return CHAT_MODE_ELLIPSIS_WORD_HOLD_MS;
+  }
+  const minimumDelayMs = resolveRevealWordDelayMsByMood(moodKey);
+  return Math.max(
+    minimumDelayMs,
+    resolveTokenLetterRevealDurationMs(previousToken) + CHAT_MODE_WORD_REVEAL_SETTLE_MS
+  ) + resolveTokenPunctuationPauseMs(previousToken);
 }
 
 function resolveVisibleTokenCountAtElapsedMs(
@@ -12026,7 +13358,87 @@ function findMessageRowById(root: ParentNode, messageId: string): HTMLElement | 
 }
 
 function findChatModeMessageScrollAnchor(row: HTMLElement): HTMLElement {
-  return row.querySelector<HTMLElement>('[data-chat-typing-line="true"]') ?? row;
+  const typingLines = row.querySelectorAll<HTMLElement>('[data-chat-typing-line="true"]');
+  return typingLines[typingLines.length - 1] ?? row;
+}
+
+function resolveChatModeMessageFollowY(row: HTMLElement, scrollRoot: HTMLElement): number {
+  const rootRect = scrollRoot.getBoundingClientRect();
+  const toScrollY = (viewportY: number): number =>
+    viewportY - rootRect.top + scrollRoot.scrollTop;
+  const typingLines = row.querySelectorAll<HTMLElement>('[data-chat-typing-line="true"]');
+  const typingLine = typingLines[typingLines.length - 1] ?? null;
+  if (typingLine) {
+    const rect = typingLine.getBoundingClientRect();
+    return toScrollY(rect.top + rect.height / 2);
+  }
+
+  const markdownChildren = row.querySelectorAll<HTMLElement>(
+    '[data-chat-render-kind="markdown"] > *'
+  );
+  const latestMarkdownChild = markdownChildren[markdownChildren.length - 1] ?? null;
+  const rect = (latestMarkdownChild ?? row).getBoundingClientRect();
+  return toScrollY(rect.bottom);
+}
+
+function normalizeZenAtmosphereHistory(
+  metadata: ZenWallpaperMetadata | null | undefined
+): ZenWallpaperHistoryEntry[] {
+  if (!metadata?.enabled) return [];
+  const byImageId = new Map<string, ZenWallpaperHistoryEntry>();
+  const pushEntry = (entry: ZenWallpaperHistoryEntry | null | undefined): void => {
+    const imageId = entry?.imageId?.trim() ?? "";
+    if (!imageId) return;
+    const rawCount = entry?.generationMessageCount;
+    const generationMessageCount =
+      typeof rawCount === "number" && Number.isFinite(rawCount)
+        ? Math.max(0, Math.floor(rawCount))
+        : null;
+    if (generationMessageCount === null) return;
+    const previous = byImageId.get(imageId);
+    const rawRevealStart = entry?.revealStartMessageCount;
+    const revealStartMessageCount =
+      typeof rawRevealStart === "number" && Number.isFinite(rawRevealStart)
+        ? Math.max(0, Math.floor(rawRevealStart))
+        : previous?.revealStartMessageCount ??
+          generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+    const rawRevealFull = entry?.revealFullMessageCount;
+    const revealFullMessageCount =
+      typeof rawRevealFull === "number" && Number.isFinite(rawRevealFull)
+        ? Math.max(revealStartMessageCount, Math.floor(rawRevealFull))
+        : previous?.revealFullMessageCount ??
+          revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
+    byImageId.set(imageId, {
+      imageId,
+      promptSeed:
+        typeof entry?.promptSeed === "string" && entry.promptSeed.trim()
+          ? entry.promptSeed.trim()
+          : previous?.promptSeed ?? null,
+      generationMessageCount,
+      revealStartMessageCount,
+      revealFullMessageCount,
+      ...(entry?.createdAt || previous?.createdAt
+        ? { createdAt: entry?.createdAt ?? previous?.createdAt }
+        : {}),
+    });
+  };
+
+  for (const entry of metadata.history ?? []) {
+    pushEntry(entry);
+  }
+  if (metadata.imageId && typeof metadata.generationMessageCount === "number") {
+    pushEntry({
+      imageId: metadata.imageId,
+      promptSeed: metadata.promptSeed,
+      generationMessageCount: metadata.generationMessageCount,
+    });
+  }
+
+  return [...byImageId.values()].sort((a, b) => {
+    const countDelta = a.generationMessageCount - b.generationMessageCount;
+    if (countDelta !== 0) return countDelta;
+    return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+  });
 }
 
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
@@ -12051,6 +13463,370 @@ interface ComposerInputProps {
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
+  commandPicks?: readonly CommandCenterCommand[];
+  promptPicks?: readonly CommandCenterCommand[];
+}
+
+type ComposerShortcutScope = "leading" | "inline";
+
+interface ComposerShortcutToken {
+  from: number;
+  to: number;
+  query: string;
+  scope: ComposerShortcutScope;
+}
+
+function normalizeComposerShortcutQuery(value: string): string {
+  return value.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function filterCommandPicksForShortcutQuery(
+  commands: readonly CommandCenterCommand[],
+  query: string
+): CommandCenterCommand[] {
+  const normalizedQuery = normalizeComposerShortcutQuery(query);
+  const seen = new Set<string>();
+  const candidates = commands.filter((command) => {
+    const name = command.name.trim().toLowerCase();
+    if (!name || seen.has(name)) return false;
+    seen.add(name);
+    if (!normalizedQuery) return true;
+    const title = command.title.trim().toLowerCase();
+    const aliases = command.aliases.map((alias) => alias.trim().toLowerCase());
+    return (
+      name.includes(normalizedQuery) ||
+      title.includes(normalizedQuery) ||
+      aliases.some((alias) => alias.includes(normalizedQuery))
+    );
+  });
+  return candidates
+    .sort((a, b) => {
+      if (!normalizedQuery) return 0;
+      const aNames = commandInvocationNames(a).map((name) => name.toLowerCase());
+      const bNames = commandInvocationNames(b).map((name) => name.toLowerCase());
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      const aBest = Math.min(
+        ...aNames.map((name) => {
+          const index = name.indexOf(normalizedQuery);
+          return index < 0 ? Number.POSITIVE_INFINITY : index;
+        })
+      );
+      const bBest = Math.min(
+        ...bNames.map((name) => {
+          const index = name.indexOf(normalizedQuery);
+          return index < 0 ? Number.POSITIVE_INFINITY : index;
+        })
+      );
+      const aStarts = aName.startsWith(normalizedQuery);
+      const bStarts = bName.startsWith(normalizedQuery);
+      if (aStarts !== bStarts) return aStarts ? -1 : 1;
+      if (aBest !== bBest) return aBest - bBest;
+      return aName.localeCompare(bName);
+    })
+    .slice(0, 10);
+}
+
+function leadingSlashShortcutTokenFromLinePrefix(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /^(\s*)\/([a-z0-9-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const from = lineStartOffset + lineStartInText + (match[1]?.length ?? 0);
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "leading",
+  };
+}
+
+function promptShortcutTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /(^|[\s([{])\/([a-z0-9-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const delimiterLength = match[1]?.length ?? 0;
+  const matchIndex = match.index ?? 0;
+  const from = lineStartOffset + lineStartInText + matchIndex + delimiterLength;
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "inline",
+  };
+}
+
+function shortcutTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset: number,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
+  return scope === "leading"
+    ? leadingSlashShortcutTokenFromLinePrefix(textToCaret, lineStartOffset)
+    : promptShortcutTokenFromTextToCaret(textToCaret, lineStartOffset);
+}
+
+function getComposerShortcutFromEditor(
+  editor: Editor,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
+  const fromSel = editor.state.selection.from;
+  if (editorInFenceLikeContext(editor, fromSel)) return null;
+  const $pos = editor.state.doc.resolve(fromSel);
+  if (!$pos.parent.isTextblock) return null;
+  const blockStart = $pos.start();
+  const textToCaret = editor.state.doc.textBetween(blockStart, fromSel, "\n", "\n");
+  const token = shortcutTokenFromTextToCaret(textToCaret, blockStart, scope);
+  if (!token) return null;
+  const codeMark = editor.state.schema.marks.code;
+  if (codeMark && editor.state.doc.rangeHasMark(token.from, token.to, codeMark)) {
+    return null;
+  }
+  return token;
+}
+
+function getComposerShortcutFromTextarea(
+  text: string,
+  caret: number,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
+  return shortcutTokenFromTextToCaret(text.slice(0, caret), 0, scope);
+}
+
+function insertComposerShortcutInEditor(
+  editor: Editor,
+  command: CommandCenterCommand,
+  scope: ComposerShortcutScope
+): boolean {
+  const token = getComposerShortcutFromEditor(editor, scope);
+  if (!token) return false;
+  const replacement = `/${command.name} `;
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: token.from, to: token.to })
+    .insertContentAt(token.from, replacement)
+    .run();
+  return true;
+}
+
+function replaceTextareaComposerShortcut(
+  text: string,
+  caret: number,
+  command: CommandCenterCommand,
+  scope: ComposerShortcutScope
+): { value: string; caret: number } | null {
+  const token = getComposerShortcutFromTextarea(text, caret, scope);
+  if (!token) return null;
+  const replacement = `/${command.name} `;
+  const value = `${text.slice(0, token.from)}${replacement}${text.slice(token.to)}`;
+  return {
+    value,
+    caret: token.from + replacement.length,
+  };
+}
+
+function shouldBlockEditorTextAfterLeadingCommand(
+  editor: Editor,
+  from: number,
+  to: number,
+  commandNames: readonly string[]
+): boolean {
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (!commandRange) return false;
+  return from >= commandRange.to || to > commandRange.to;
+}
+
+function shouldBlockTextareaTextAfterLeadingCommand(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  commands: readonly CommandCenterCommand[]
+): boolean {
+  const match = resolveLeadingCommandChipMatch(text, commands);
+  if (!match) return false;
+  return selectionStart >= match.commandEnd || selectionEnd > match.commandEnd;
+}
+
+function applyTextareaCommandChipDelete(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "backward" | "forward",
+  commands: readonly CommandCenterCommand[]
+): { value: string; caret: number } | null {
+  const match = resolveLeadingCommandChipMatch(text, commands);
+  if (!match) return null;
+
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  const chipFrom = match.commandStart;
+  const chipTo = match.commandEnd + (text[match.commandEnd] === " " ? 1 : 0);
+  let from = chipFrom;
+  let to = chipTo;
+
+  if (start !== end) {
+    if (start >= chipTo || end <= chipFrom) return null;
+    from = Math.min(start, chipFrom);
+    to = Math.max(end, chipTo);
+  } else if (direction === "backward") {
+    if (start <= chipFrom || start > chipTo) return null;
+  } else if (start < chipFrom || start >= chipTo) {
+    return null;
+  }
+
+  return {
+    value: `${text.slice(0, from)}${text.slice(to)}`,
+    caret: from,
+  };
+}
+
+function applyTextareaPromptShortcutChipDelete(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "backward" | "forward",
+  promptNames: readonly string[]
+): { value: string; caret: number } | null {
+  const ranges = resolvePromptShortcutTextRanges(text, { promptNames });
+  if (ranges.length === 0) return null;
+
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  for (const range of ranges) {
+    const chipFrom = range.start;
+    const chipTo = range.end + (text[range.end] === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (start !== end) {
+      if (start >= chipTo || end <= chipFrom) continue;
+      from = Math.min(start, chipFrom);
+      to = Math.max(end, chipTo);
+    } else if (direction === "backward") {
+      if (start <= chipFrom || start > chipTo) continue;
+    } else if (start < chipFrom || start >= chipTo) {
+      continue;
+    }
+
+    return {
+      value: `${text.slice(0, from)}${text.slice(to)}`,
+      caret: from,
+    };
+  }
+
+  return null;
+}
+
+function applyLeadingCommandChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  commandNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (!commandRange) return false;
+
+  const trailingChar =
+    commandRange.to < editor.state.doc.content.size
+      ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
+      : "";
+  const chipFrom = commandRange.from;
+  const chipTo = commandRange.to + (trailingChar === " " ? 1 : 0);
+  let from = chipFrom;
+  let to = chipTo;
+
+  if (!sel.empty) {
+    if (sel.from >= chipTo || sel.to <= chipFrom) return false;
+    from = Math.min(sel.from, chipFrom);
+    to = Math.max(sel.to, chipTo);
+  } else if (direction === "backward") {
+    if (sel.from <= chipFrom || sel.from > chipTo) return false;
+  } else if (sel.from < chipFrom || sel.from >= chipTo) {
+    return false;
+  }
+
+  editor.chain().focus().deleteRange({ from, to }).run();
+  return true;
+}
+
+function applyPromptShortcutChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  promptNames: readonly string[]
+): boolean {
+  const ranges = findPromptShortcutTokenRanges(editor.state.doc, promptNames);
+  if (ranges.length === 0) return false;
+  const sel = editor.state.selection;
+
+  for (const range of ranges) {
+    const trailingChar =
+      range.to < editor.state.doc.content.size
+        ? editor.state.doc.textBetween(range.to, range.to + 1, "\n", "\n")
+        : "";
+    const chipFrom = range.from;
+    const chipTo = range.to + (trailingChar === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (!sel.empty) {
+      if (sel.from >= chipTo || sel.to <= chipFrom) continue;
+      from = Math.min(sel.from, chipFrom);
+      to = Math.max(sel.to, chipTo);
+    } else if (direction === "backward") {
+      if (sel.from <= chipFrom || sel.from > chipTo) continue;
+    } else if (sel.from < chipFrom || sel.from >= chipTo) {
+      continue;
+    }
+
+    editor.chain().focus().deleteRange({ from, to }).run();
+    return true;
+  }
+
+  return false;
+}
+
+function isPlainTextInsertionKey(event: {
+  key: string;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  nativeEvent?: { isComposing?: boolean };
+}): boolean {
+  if (event.nativeEvent?.isComposing) return false;
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  return event.key.length === 1 || event.key === "Enter";
+}
+
+function shouldAcceptComposerShortcutCompletionKey(event: {
+  key: string;
+  shiftKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): boolean {
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+  return event.key === "Tab" || event.key === " " || event.key === "Spacebar";
+}
+
+function getMountedEditorView(editor: Editor | null | undefined): Editor["view"] | null {
+  if (!editor || editor.isDestroyed) return null;
+  try {
+    return editor.view;
+  } catch {
+    return null;
+  }
+}
+
+function getMountedEditorDom(editor: Editor | null | undefined): HTMLElement | null {
+  return (getMountedEditorView(editor)?.dom as HTMLElement | undefined) ?? null;
 }
 
 interface ProseMirrorSelectionState {
@@ -12137,30 +13913,216 @@ function useMobileKeyboardInset(active: boolean): number {
   return active ? inset : 0;
 }
 
+interface ComposerCommandPopoverProps {
+  open: boolean;
+  anchorRect: DOMRect | null;
+  themeSource: Element | null;
+  scope: ComposerShortcutScope;
+  commands: readonly CommandCenterCommand[];
+  highlightIndex: number;
+  onHighlightIndexChange: (next: number) => void;
+  onPickCommand: (command: CommandCenterCommand) => void;
+  excludeInteractionRef?: RefObject<Element | null>;
+  onDismiss?: () => void;
+}
+
+function commandPickDescription(command: CommandCenterCommand): string {
+  const aliasText =
+    command.aliases.length > 0
+      ? `Aliases: ${command.aliases.map((alias) => `/${alias}`).join(", ")}`
+      : "";
+  const title = command.title.trim();
+  if (title && title.toLowerCase() !== command.name.toLowerCase()) {
+    return aliasText ? `${aliasText} · ${title}` : title;
+  }
+  if (aliasText) return aliasText;
+  return command.command.trim().replace(/\s+/g, " ").slice(0, 96);
+}
+
+function ComposerCommandPopover({
+  open,
+  anchorRect,
+  themeSource,
+  scope,
+  commands,
+  highlightIndex,
+  onHighlightIndexChange,
+  onPickCommand,
+  excludeInteractionRef,
+  onDismiss,
+}: ComposerCommandPopoverProps): React.JSX.Element | null {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const portalStyle = useMemo(() => {
+    if (!open || !anchorRect) return null;
+    return computeCommandMenuFixedStyle(anchorRect, themeSource);
+  }, [anchorRect, open, themeSource]);
+  const [viewportNudge, setViewportNudge] = useState({ x: 0, y: 0 });
+  const adjustedStyle = useMemo((): React.CSSProperties | null => {
+    if (!portalStyle) return null;
+    const left = typeof portalStyle.left === "number" ? portalStyle.left : Number(portalStyle.left);
+    const top = typeof portalStyle.top === "number" ? portalStyle.top : Number(portalStyle.top);
+    const bottom =
+      typeof portalStyle.bottom === "number"
+        ? portalStyle.bottom
+        : Number(portalStyle.bottom);
+    const next: React.CSSProperties = { ...portalStyle };
+    if (Number.isFinite(left)) {
+      next.left = left + viewportNudge.x;
+    }
+    if (Number.isFinite(top)) {
+      next.top = top + viewportNudge.y;
+    } else if (Number.isFinite(bottom)) {
+      next.bottom = bottom - viewportNudge.y;
+    }
+    return next;
+  }, [portalStyle, viewportNudge]);
+  const safeHighlight = Math.max(
+    0,
+    Math.min(highlightIndex, Math.max(0, commands.length - 1))
+  );
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRect || !portalStyle) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const r = menu.getBoundingClientRect();
+    const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
+    const vw = globalThis.window.innerWidth;
+    const vh = globalThis.window.innerHeight;
+    let x = 0;
+    let y = 0;
+    if (r.right > vw - pad) x += vw - pad - r.right;
+    if (r.left + x < pad) x = pad - r.left;
+    if (r.bottom > vh - pad) y += vh - pad - r.bottom;
+    if (r.top + y < pad) y = pad - r.top;
+    const frame = window.requestAnimationFrame(() => {
+      setViewportNudge((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, anchorRect, portalStyle, commands.length]);
+
+  useEffect(() => {
+    if (!open || commands.length === 0) return;
+    const row = menuRef.current?.querySelector<HTMLElement>(
+      `[data-command-index="${safeHighlight}"]`
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }, [open, commands.length, safeHighlight, viewportNudge]);
+
+  useEffect(() => {
+    if (!open || !onDismiss) return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target)) return;
+      const shell = excludeInteractionRef?.current;
+      if (shell?.contains(target)) return;
+      onDismiss();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [open, onDismiss, excludeInteractionRef]);
+
+  if (!open || !adjustedStyle || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
+      style={adjustedStyle}
+      role="listbox"
+      aria-label={scope === "leading" ? "Choose a command or prompt" : "Choose a prompt"}
+    >
+      <div className={styles.composeBotListbox}>
+        {commands.length === 0 && (
+          <div className={styles.composeBotNoMatches} role="presentation">
+            {scope === "leading" ? "No commands or prompts match." : "No prompts match."}
+          </div>
+        )}
+        {commands.map((command, index) => {
+          const active = index === safeHighlight;
+          const description = commandPickDescription(command);
+          return (
+            <button
+              key={command.id}
+              type="button"
+              data-command-index={index}
+              role="option"
+              aria-selected={active ? "true" : "false"}
+              className={`${styles.composeBotOption} ${styles.composeCommandOption}`}
+              onMouseEnter={() => onHighlightIndexChange(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onPickCommand(command);
+              }}
+            >
+              <span className={styles.composeCommandSlash} aria-hidden="true">
+                /
+              </span>
+              <span className={styles.composeCommandText}>
+                <span className={styles.composeBotOptionName}>{command.name}</span>
+                {description ? (
+                  <span className={styles.composeCommandMeta}>{description}</span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function resolveTypedLineStartIndexes(lines: string[]): number[] {
   let cursor = 0;
   return lines.map((line) => {
     const headingInfo = parseChatModeHashHeadingLine(line);
     const displayLine = headingInfo?.text ?? line;
-    const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+    const wordTokens = tokenizeMessageReveal(displayLine);
     const lineStartIndex = cursor;
     cursor += wordTokens.length;
     return lineStartIndex;
   });
 }
 
-function MessageBody({
+function MessageBody(props: MessageBodyProps): React.JSX.Element {
+  const fullSource =
+    props.assistantStripPrismToolTail === true
+      ? parseAssistantPrismTools(props.content).displayContent
+      : props.content;
+  if (props.messageRole === "user" && props.promptShortcut) {
+    return (
+      <PromptShortcutMessage
+        promptShortcut={props.promptShortcut}
+        fullPrompt={fullSource}
+        expanded={props.promptShortcutExpanded === true}
+        onToggle={props.onTogglePromptShortcut}
+        onCollapse={props.onCollapsePromptShortcut}
+        onOpenPrompt={props.onOpenCommandMention}
+      />
+    );
+  }
+  return <MarkdownMessageBody {...props} />;
+}
+
+function MarkdownMessageBody({
   content,
   assistantStripPrismToolTail,
   messageRole,
   maxParagraphs,
   revealWordByWord,
   renderAsEphemeralLines,
+  suppressDecorativePrismText,
   chatPhase,
   forcedVisibleTokenCount,
   revealMoodKey,
   mentionRenderBots,
   resolvedTheme,
+  commandMentionsById,
+  onOpenCommandMention,
 }: MessageBodyProps): React.JSX.Element {
   const fullSource =
     assistantStripPrismToolTail === true
@@ -12184,7 +14146,7 @@ function MessageBody({
         : normalizedSource,
     [normalizedSource, renderAsEphemeralLines]
   );
-  const tokens = useMemo(() => chatModeSource.match(/\S+\s*/g) ?? [], [chatModeSource]);
+  const tokens = useMemo(() => tokenizeMessageReveal(chatModeSource), [chatModeSource]);
   const [visibleTokenCount, setVisibleTokenCount] = useState(() =>
     revealWordByWord ? 1 : tokens.length
   );
@@ -12202,50 +14164,52 @@ function MessageBody({
     () => buildCodeBlockRevealPlan(chatModeSource),
     [chatModeSource]
   );
-  const effectiveVisibleTokenCount =
-    !preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined
+  const shouldUseForcedVisibleTokenCount = Boolean(
+    !preferLocalProgressiveReveal &&
+    forcedVisibleTokenCount !== undefined
+  );
+  const clampedForcedVisibleTokenCount =
+    shouldUseForcedVisibleTokenCount && forcedVisibleTokenCount !== undefined
       ? Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length))
-      : visibleTokenCount;
+      : null;
+  const effectiveVisibleTokenCount = clampedForcedVisibleTokenCount ?? visibleTokenCount;
 
   useEffect(() => {
-    const deferVisibleCount = (next: number) => {
-      window.setTimeout(() => {
-        setVisibleTokenCount(next);
-      }, 0);
-    };
-    if (!preferLocalProgressiveReveal && forcedVisibleTokenCount !== undefined) {
-      deferVisibleCount(Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length)));
+    if (clampedForcedVisibleTokenCount !== null) {
+      setVisibleTokenCount(clampedForcedVisibleTokenCount);
       return;
     }
     if ((!revealWordByWord && !preferLocalProgressiveReveal) || tokens.length <= 1) {
-      deferVisibleCount(tokens.length);
+      setVisibleTokenCount(tokens.length);
       return;
     }
-    deferVisibleCount(1);
-    let nextCount = 1;
+    const clampedVisibleTokenCount = Math.max(1, Math.min(visibleTokenCount, tokens.length));
+    if (clampedVisibleTokenCount !== visibleTokenCount) {
+      setVisibleTokenCount(clampedVisibleTokenCount);
+      return;
+    }
+    if (clampedVisibleTokenCount >= tokens.length) return;
     let timer: number | null = null;
-    const scheduleNextReveal = () => {
-      if (nextCount >= tokens.length) return;
-      const priorToken = tokens[nextCount - 1] ?? "";
-      const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
-      timer = window.setTimeout(() => {
-        nextCount += 1;
-        deferVisibleCount(Math.min(nextCount, tokens.length));
-        scheduleNextReveal();
-      }, delayMs);
-    };
-    scheduleNextReveal();
+    const priorToken = tokens[clampedVisibleTokenCount - 1] ?? "";
+    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
+    timer = window.setTimeout(() => {
+      setVisibleTokenCount((current) => Math.min(Math.max(1, current) + 1, tokens.length));
+    }, delayMs);
     return () => {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [
     forcedVisibleTokenCount,
+    clampedForcedVisibleTokenCount,
     preferLocalProgressiveReveal,
     revealMoodKey,
     revealWordByWord,
+    shouldUseForcedVisibleTokenCount,
     tokens,
+    visibleTokenCount,
   ]);
   const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
+  const allowDecorativePrismText = suppressDecorativePrismText !== true;
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
   const shouldProgressiveFenceReveal = Boolean(
     renderAsEphemeralLines &&
@@ -12279,7 +14243,7 @@ function MessageBody({
         {lines.map((line, index) => {
           const headingInfo = parseChatModeHashHeadingLine(line);
           const displayLine = headingInfo?.text ?? line;
-          const wordTokens = displayLine.match(/\S+\s*/g) ?? [];
+          const wordTokens = tokenizeMessageReveal(displayLine);
           const lineNoLetterFade = isChatModeHeadingLikeLine(line);
           const lineIsPullQuoteInline = isChatModePullQuoteInlineLine(line);
           const lineStartIndex = lineStartIndexes[index] ?? 0;
@@ -12333,7 +14297,9 @@ function MessageBody({
               const letterNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade;
               const wordClassName = [
                 styles.chatEphemeralTypedWord,
-                tokenMeta?.style === "rainbow" ? styles.chatEphemeralTypedWordRainbow : "",
+                allowDecorativePrismText && tokenMeta?.style === "rainbow"
+                  ? styles.chatEphemeralTypedWordRainbow
+                  : "",
                 tokenMeta?.isQuote ? styles.chatEphemeralTypedWordQuote : "",
                 tokenMeta?.isItalic ? styles.chatEphemeralTypedWordItalic : "",
                 tokenMeta?.isBold ? styles.chatEphemeralTypedWordBold : "",
@@ -12365,7 +14331,9 @@ function MessageBody({
                               ...(tokenMeta?.isEllipsis
                                 ? { ["--char-step-ms" as string]: `${CHAT_MODE_ELLIPSIS_DOT_STEP_MS}ms` }
                                 : {}),
-                              ...(tokenMeta?.style === "rainbow" && char.trim().length > 0
+                              ...(allowDecorativePrismText &&
+                              tokenMeta?.style === "rainbow" &&
+                              char.trim().length > 0
                                 ? {
                                     color: prismPaletteColorForLetterIndex(charIndex),
                                     WebkitTextFillColor: prismPaletteColorForLetterIndex(charIndex),
@@ -12410,6 +14378,23 @@ function MessageBody({
   const markdownComponents = useMemo((): Components => {
     return {
       a: ({ href, children, ...rest }) => {
+        const commandId = parsePrismCommandMentionHref(href ?? undefined);
+        if (commandId) {
+          const command = commandMentionsById?.get(commandId);
+          const label = flattenMarkdownText(children).trim() || command?.name || "command";
+          return (
+            <button
+              type="button"
+              className={styles.promptShortcutCapsule}
+              onClick={() => onOpenCommandMention?.(commandId)}
+              data-command-id={commandId}
+              aria-label={`Open prompt ${label}`}
+            >
+              <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
+              <span>{label.replace(/^\/+/, "")}</span>
+            </button>
+          );
+        }
         if (resolvedTheme) {
           const chip = renderPrismBotMarkdownAnchor({
             href,
@@ -12514,7 +14499,9 @@ function MessageBody({
     };
   }, [
       codeBlockRevealPlan,
+      commandMentionsById,
       messageRole,
+      onOpenCommandMention,
       preferLocalProgressiveReveal,
       renderAsEphemeralLines,
       renderVisibleTokenCount,
@@ -12562,6 +14549,10 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
+  /** Slash commands shown in the composer autocomplete menu at the first word. */
+  commandPicks?: readonly CommandCenterCommand[];
+  /** User prompt shortcuts shown in the composer autocomplete menu. */
+  promptPicks?: readonly CommandCenterCommand[];
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
 }
@@ -12581,6 +14572,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       hideSubmitButton,
       resolvedTheme,
       mentionBots,
+      commandPicks = [],
+      promptPicks = [],
       disabled = false,
     },
     ref
@@ -12589,22 +14582,42 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const onValueChangeRef = useRef(onValueChange);
     const onFocusRef = useRef(onFocus);
     const editorRef = useRef<Editor | null>(null);
+    const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
     const pendingValueRef = useRef<string | null>(null);
     const pendingValueTimerRef = useRef<number | null>(null);
     const mentionBotsRef = useRef(mentionBots);
+    const commandPicksRef = useRef(commandPicks);
+    const promptPicksRef = useRef(promptPicks);
     const [mentionUi, setMentionUi] = useState<{
       open: boolean;
       caretRect: DOMRect | null;
       filtered: BotMentionPick[];
       highlight: number;
     }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+    const [commandUi, setCommandUi] = useState<{
+      open: boolean;
+      caretRect: DOMRect | null;
+      filtered: CommandCenterCommand[];
+      highlight: number;
+      scope: ComposerShortcutScope;
+    }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
     const mentionUiRef = useRef(mentionUi);
+    const commandUiRef = useRef(commandUi);
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
     useLayoutEffect(() => {
+      commandPicksRef.current = commandPicks;
+    }, [commandPicks]);
+    useLayoutEffect(() => {
+      promptPicksRef.current = promptPicks;
+    }, [promptPicks]);
+    useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
+    useLayoutEffect(() => {
+      commandUiRef.current = commandUi;
+    }, [commandUi]);
 
     const dismissMentionPopover = useCallback(() => {
       const ed = editorRef.current;
@@ -12613,6 +14626,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         applyMentionTabToEditor(ed, mentionBotsRef.current);
       }
       setMentionUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+    }, []);
+
+    const dismissCommandPopover = useCallback(() => {
+      setCommandUi((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
     }, []);
@@ -12632,8 +14651,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         );
         return;
       }
+      setCommandUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
       const filtered = filterBotsForMentionQuery(bots, tok.query);
-      const coords = ed.view.coordsAtPos(tok.to);
+      const view = getMountedEditorView(ed);
+      if (!view) {
+        setMentionUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      const coords = view.coordsAtPos(tok.to);
       const caretRect = new DOMRect(
         coords.left,
         coords.top,
@@ -12657,10 +14686,98 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       });
     }, []);
 
+    const syncCommandPopover = useCallback((ed: Editor) => {
+      const leadingToken =
+        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "leading")
+          : null;
+      const promptToken =
+        !leadingToken && promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "inline")
+          : null;
+      const token = leadingToken ?? promptToken;
+      const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+      const commands = leadingToken
+        ? [...commandPicksRef.current, ...promptPicksRef.current]
+        : promptPicksRef.current;
+      if (!token || !commands.length) {
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      setMentionUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
+      const view = getMountedEditorView(ed);
+      if (!view) {
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        return;
+      }
+      const coords = view.coordsAtPos(token.to);
+      const caretRect = new DOMRect(
+        coords.left,
+        coords.top,
+        1,
+        Math.max(1, coords.bottom - coords.top)
+      );
+      const anchorRect = getComposerCommandMenuAnchorRect(
+        markdownComposerSurfaceRef.current,
+        caretRect
+      );
+      setCommandUi((prev) => {
+        const sameLength = prev.filtered.length === filtered.length;
+        const sameIds =
+          sameLength &&
+          prev.filtered.every((command, i) => command.id === filtered[i]?.id);
+        const highlight = sameIds
+          ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+          : 0;
+        return {
+          open: true,
+          caretRect: anchorRect,
+          filtered,
+          highlight,
+          scope,
+        };
+      });
+    }, []);
+
+    const syncComposerPopovers = useCallback((ed: Editor) => {
+      const leadingToken =
+        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "leading")
+          : null;
+      const promptToken =
+        promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "inline")
+          : null;
+      if (leadingToken || promptToken) {
+        syncCommandPopover(ed);
+        return;
+      }
+      syncMentionPopover(ed);
+      setCommandUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+    }, [syncCommandPopover, syncMentionPopover]);
+
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
       onFocusRef.current = onFocus;
     }, [onFocus, onValueChange]);
+
+    const commandNamesForHighlight = useMemo(
+      () => commandPicks.flatMap((command) => commandInvocationNames(command)),
+      [commandPicks]
+    );
+    const promptNamesForHighlight = useMemo(
+      () => promptPicks.flatMap((command) => commandInvocationNames(command)),
+      [promptPicks]
+    );
 
     const editor = useEditor(
       {
@@ -12675,7 +14792,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             autolink: true,
             defaultProtocol: "https",
           }),
-          PrismDevCommandHighlight,
+          PrismDevCommandHighlight.configure({
+            commandNames: commandNamesForHighlight,
+            promptNames: promptNamesForHighlight,
+          }),
           Placeholder.configure({ placeholder }),
           Markdown.configure({
             markedOptions: {
@@ -12704,25 +14824,39 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           },
           handlePaste: (view, event) => {
             const sel = view.state.selection;
-            if (!sel.empty) return false;
             if (isCollapsedCaretInsidePrismBotLink(view.state, sel.from)) {
               event.preventDefault();
               return true;
             }
-            if (hasLeadingDevCommand(view.state.doc)) {
-              const plain = event.clipboardData?.getData("text/plain");
-              if (typeof plain === "string") {
-                event.preventDefault();
-                view.dispatch(view.state.tr.insertText(plain, sel.from, sel.to));
-                return true;
-              }
+            const activeEditor = editorRef.current;
+            if (
+              activeEditor &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                sel.from,
+                sel.to,
+                commandNamesForHighlight
+              )
+            ) {
+              event.preventDefault();
+              return true;
             }
             return false;
           },
-          handleTextInput: (view, from, to, text) => {
-            if (!hasLeadingDevCommand(view.state.doc)) return false;
-            view.dispatch(view.state.tr.insertText(text, from, to));
-            return true;
+          handleTextInput: (view, from, to) => {
+            const activeEditor = editorRef.current;
+            if (
+              activeEditor &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                from,
+                to,
+                commandNamesForHighlight
+              )
+            ) {
+              return true;
+            }
+            return false;
           },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
@@ -12737,7 +14871,66 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             ) {
               if (applyPrismBotLinkBackspace(activeEditor)) {
                 event.preventDefault();
-                queueMicrotask(() => syncMentionPopover(activeEditor));
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyPromptShortcutChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  promptNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingCommandChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  commandNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+            }
+            if (
+              activeEditor &&
+              event.key === "Delete" &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !(event as globalThis.KeyboardEvent).isComposing
+            ) {
+              if (applyPrismBotLinkBoundaryDelete(activeEditor, "forward")) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyPromptShortcutChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  promptNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingCommandChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  commandNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
             }
@@ -12753,7 +14946,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               const dir = event.key === "ArrowLeft" ? "left" : "right";
               if (applyPrismBotLinkArrowKey(activeEditor, dir)) {
                 event.preventDefault();
-                queueMicrotask(() => syncMentionPopover(activeEditor));
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
             }
@@ -12764,7 +14957,51 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               event.preventDefault();
               return true;
             }
+            if (
+              activeEditor &&
+              (event.key !== "Enter" || event.shiftKey) &&
+              isPlainTextInsertionKey({
+                key: event.key,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                nativeEvent: event as globalThis.KeyboardEvent,
+              }) &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                view.state.selection.from,
+                view.state.selection.to,
+                commandNamesForHighlight
+              )
+            ) {
+              event.preventDefault();
+              return true;
+            }
             if (activeEditor && !event.shiftKey) {
+              if (
+                shouldAcceptComposerShortcutCompletionKey(event) &&
+                commandUiRef.current.open &&
+                commandUiRef.current.filtered.length > 0
+              ) {
+                event.preventDefault();
+                const filtered = commandUiRef.current.filtered;
+                const hi =
+                  ((commandUiRef.current.highlight % filtered.length) + filtered.length) %
+                  filtered.length;
+                if (
+                  insertComposerShortcutInEditor(
+                    activeEditor,
+                    filtered[hi]!,
+                    commandUiRef.current.scope
+                  )
+                ) {
+                  setCommandUi((s) =>
+                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                  );
+                  queueMicrotask(() => syncComposerPopovers(activeEditor));
+                }
+                return true;
+              }
               if (event.key === "Tab") {
                 if (mentionUiRef.current.open) {
                   event.preventDefault();
@@ -12773,15 +15010,36 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                     mentionBotsRef.current,
                     mentionUiRef.current.highlight
                   );
-                  queueMicrotask(() => syncMentionPopover(activeEditor));
+                  queueMicrotask(() => syncComposerPopovers(activeEditor));
                   return true;
                 }
+              }
+              if (event.key === "Escape" && commandUiRef.current.open) {
+                event.preventDefault();
+                setCommandUi((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                return true;
               }
               if (event.key === "Escape" && mentionUiRef.current.open) {
                 event.preventDefault();
                 setMentionUi((s) =>
                   s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                 );
+                return true;
+              }
+              if (
+                (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                commandUiRef.current.open &&
+                commandUiRef.current.filtered.length > 0
+              ) {
+                event.preventDefault();
+                const delta = event.key === "ArrowDown" ? 1 : -1;
+                const len = commandUiRef.current.filtered.length;
+                setCommandUi((s) => ({
+                  ...s,
+                  highlight: (s.highlight + delta + len) % len,
+                }));
                 return true;
               }
               if (
@@ -12838,7 +15096,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
           queueMicrotask(() => {
-            syncMentionPopover(ed);
+            syncComposerPopovers(ed);
           });
           if (pendingValueTimerRef.current !== null) return;
           pendingValueTimerRef.current = window.setTimeout(() => {
@@ -12852,7 +15110,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }, 90);
         },
       },
-      [placeholder, syncMentionPopover]
+      [
+        placeholder,
+        syncComposerPopovers,
+        commandNamesForHighlight,
+        promptNamesForHighlight,
+      ]
     );
 
     const mentionBotsByIdForTipTap = useMemo(() => {
@@ -12870,7 +15133,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
-      const dom = editor.view.dom as HTMLElement;
+      const dom = getMountedEditorDom(editor);
+      if (!dom) return;
       const run = (): void => {
         syncPrismBotMentionMarksInEditorDom(dom, mentionBotsByIdForTipTap, {
           resolvedTheme,
@@ -12890,16 +15154,16 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
       const run = (): void => {
-        syncMentionPopover(editor);
+        syncComposerPopovers(editor);
       };
       editor.on("transaction", run);
       return () => {
         editor.off("transaction", run);
       };
-    }, [editor, syncMentionPopover]);
+    }, [editor, syncComposerPopovers]);
 
     useEffect(() => {
-      const root = editor?.view.dom;
+      const root = getMountedEditorDom(editor);
       if (!root) return;
       root.setAttribute("spellcheck", writingAssistEnabled ? "true" : "false");
       root.setAttribute("autocorrect", writingAssistEnabled ? "on" : "off");
@@ -12950,7 +15214,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       ref,
       () => ({
         focus: (options?: FocusOptions) => {
-          const dom = editor?.view.dom;
+          const dom = getMountedEditorDom(editor);
           if (dom && typeof dom.focus === "function") {
             dom.focus(options);
           } else {
@@ -12958,7 +15222,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }
         },
         blur: () => {
-          const dom = editor?.view.dom as HTMLElement | undefined;
+          const dom = getMountedEditorDom(editor);
           dom?.blur();
         },
         getValue: () => {
@@ -12975,6 +15239,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const handleRichEditorKeyDownCapture = useCallback(
       (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== "Enter") return;
+        if (
+          !event.shiftKey &&
+          commandUiRef.current.open &&
+          commandUiRef.current.filtered.length > 0
+        ) {
+          return;
+        }
 
         const activeEditor = editor;
         const root = event.currentTarget;
@@ -13012,8 +15283,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       [editor]
     );
 
-    const composeFormForTheme = editor?.view.dom?.closest("form") ?? null;
-    const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
+    const composeFormForTheme = getMountedEditorDom(editor)?.closest("form") ?? null;
     return (
       <div
         ref={markdownComposerSurfaceRef}
@@ -13060,7 +15330,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             if (!ed) return;
             if (applyMentionTabToEditor(ed, mentionBotsRef.current)) {
               queueMicrotask(() => {
-                syncMentionPopover(ed);
+                syncComposerPopovers(ed);
               });
             }
           }}
@@ -13072,6 +15342,29 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           ensureContrast={ensureContrast}
           excludeInteractionRef={markdownComposerSurfaceRef}
           onDismiss={dismissMentionPopover}
+        />
+        <ComposerCommandPopover
+          open={commandUi.open}
+          anchorRect={commandUi.caretRect}
+          themeSource={composeFormForTheme}
+          scope={commandUi.scope}
+          commands={commandUi.filtered}
+          highlightIndex={commandUi.highlight}
+          onHighlightIndexChange={(next) =>
+            setCommandUi((s) => ({ ...s, highlight: next }))
+          }
+          onPickCommand={(command) => {
+            const ed = editorRef.current;
+            if (!ed) return;
+            if (insertComposerShortcutInEditor(ed, command, commandUiRef.current.scope)) {
+              setCommandUi((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
+              queueMicrotask(() => syncComposerPopovers(ed));
+            }
+          }}
+          excludeInteractionRef={markdownComposerSurfaceRef}
+          onDismiss={dismissCommandPopover}
         />
       </div>
     );
@@ -13096,6 +15389,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
+    commandPicks = [],
+    promptPicks = [],
   },
   ref
 ): React.JSX.Element {
@@ -13103,6 +15398,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const composeEditorShellRef = useRef<HTMLDivElement | null>(null);
   const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const mentionBotsRef = useRef(mentionBots);
+  const commandPicksRef = useRef(commandPicks);
+  const promptPicksRef = useRef(promptPicks);
   const pendingTextareaCaretRef = useRef<number | null>(null);
   const [taMention, setTaMention] = useState<{
     open: boolean;
@@ -13110,13 +15407,30 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     filtered: BotMentionPick[];
     highlight: number;
   }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+  const [taCommand, setTaCommand] = useState<{
+    open: boolean;
+    caretRect: DOMRect | null;
+    filtered: CommandCenterCommand[];
+    highlight: number;
+    scope: ComposerShortcutScope;
+  }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
   const taMentionRef = useRef(taMention);
+  const taCommandRef = useRef(taCommand);
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
   useLayoutEffect(() => {
+    commandPicksRef.current = commandPicks;
+  }, [commandPicks]);
+  useLayoutEffect(() => {
+    promptPicksRef.current = promptPicks;
+  }, [promptPicks]);
+  useLayoutEffect(() => {
     taMentionRef.current = taMention;
   }, [taMention]);
+  useLayoutEffect(() => {
+    taCommandRef.current = taCommand;
+  }, [taCommand]);
 
   const dismissTaMentionPopover = useCallback(() => {
     setTaMention((s) =>
@@ -13124,7 +15438,62 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     );
   }, []);
 
+  const dismissTaCommandPopover = useCallback(() => {
+    setTaCommand((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
+  }, []);
+
+  const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
+    const caret = el.selectionStart ?? 0;
+    const leadingToken =
+      commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "leading")
+        : null;
+    const promptToken =
+      !leadingToken && promptPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "inline")
+        : null;
+    const token = leadingToken ?? promptToken;
+    const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+    const commands = leadingToken
+      ? [...commandPicksRef.current, ...promptPicksRef.current]
+      : promptPicksRef.current;
+    if (!token || !commands.length) {
+      setTaCommand((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      return false;
+    }
+    setTaMention((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
+    const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
+    const caretRect = getTextareaCaretClientRect(el);
+    const anchorRect = caretRect
+      ? getComposerCommandMenuAnchorRect(composeEditorShellRef.current, caretRect)
+      : null;
+    setTaCommand((prev) => {
+      const sameLength = prev.filtered.length === filtered.length;
+      const sameIds =
+        sameLength &&
+        prev.filtered.every((command, i) => command.id === filtered[i]?.id);
+      const highlight = sameIds
+        ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+        : 0;
+      return {
+        open: true,
+        caretRect: anchorRect,
+        filtered,
+        highlight,
+        scope,
+      };
+    });
+    return true;
+  }, []);
+
   const syncTextareaMention = useCallback((el: HTMLTextAreaElement) => {
+    if (syncTextareaCommand(el)) return;
     const bots = mentionBotsRef.current;
     if (!bots.length) {
       setTaMention((s) =>
@@ -13141,6 +15510,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       );
       return;
     }
+    setTaCommand((s) =>
+      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+    );
     const filtered = filterBotsForMentionQuery(bots, tok.query);
     const caretRect = getTextareaCaretClientRect(el);
     setTaMention((prev) => {
@@ -13214,6 +15586,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
+          commandPicks={commandPicks}
+          promptPicks={promptPicks}
         />
       ) : (
         <>
@@ -13251,7 +15625,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 if (!el) return;
                 const start = el.selectionStart ?? 0;
                 const end = el.selectionEnd ?? 0;
-                if (isCaretInPrismBotMarkdownLockedRegion(el.value, start, end)) {
+                if (
+                  isCaretInPrismBotMarkdownLockedRegion(el.value, start, end) ||
+                  shouldBlockTextareaTextAfterLeadingCommand(
+                    el.value,
+                    start,
+                    end,
+                    commandPicksRef.current
+                  )
+                ) {
                   event.preventDefault();
                 }
               }}
@@ -13267,11 +15649,91 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 ) {
                   const start = el.selectionStart ?? 0;
                   const end = el.selectionEnd ?? 0;
-                  const applied = applyTaggedMentionWordBackspace(el.value, start, end);
+                  const applied =
+                    applyTaggedMentionBoundaryDelete(el.value, start, end, "backward") ??
+                    applyTaggedMentionWordBackspace(el.value, start, end);
                   if (applied) {
                     event.preventDefault();
                     pendingTextareaCaretRef.current = applied.caret;
                     onValueChange(applied.value);
+                    return;
+                  }
+                  const commandApplied = applyTextareaCommandChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "backward",
+                    commandPicksRef.current
+                  );
+                  if (commandApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = commandApplied.caret;
+                    onValueChange(commandApplied.value);
+                    return;
+                  }
+                  const promptApplied = applyTextareaPromptShortcutChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "backward",
+                    promptPicksRef.current.flatMap((command) =>
+                      commandInvocationNames(command)
+                    )
+                  );
+                  if (promptApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = promptApplied.caret;
+                    onValueChange(promptApplied.value);
+                    return;
+                  }
+                }
+                if (
+                  event.key === "Delete" &&
+                  !event.altKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  const start = el.selectionStart ?? 0;
+                  const end = el.selectionEnd ?? 0;
+                  const applied = applyTaggedMentionBoundaryDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward"
+                  );
+                  if (applied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = applied.caret;
+                    onValueChange(applied.value);
+                    return;
+                  }
+                  const commandApplied = applyTextareaCommandChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward",
+                    commandPicksRef.current
+                  );
+                  if (commandApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = commandApplied.caret;
+                    onValueChange(commandApplied.value);
+                    return;
+                  }
+                  const promptApplied = applyTextareaPromptShortcutChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward",
+                    promptPicksRef.current.flatMap((command) =>
+                      commandInvocationNames(command)
+                    )
+                  );
+                  if (promptApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = promptApplied.caret;
+                    onValueChange(promptApplied.value);
                     return;
                   }
                 }
@@ -13307,6 +15769,45 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   event.preventDefault();
                   return;
                 }
+                if (
+                  (event.key !== "Enter" || event.shiftKey) &&
+                  isPlainTextInsertionKey(event) &&
+                  shouldBlockTextareaTextAfterLeadingCommand(
+                    el.value,
+                    el.selectionStart ?? 0,
+                    el.selectionEnd ?? 0,
+                    commandPicksRef.current
+                  )
+                ) {
+                  event.preventDefault();
+                  return;
+                }
+                if (
+                  shouldAcceptComposerShortcutCompletionKey(event) &&
+                  !event.shiftKey &&
+                  taCommandRef.current.open &&
+                  taCommandRef.current.filtered.length > 0
+                ) {
+                  event.preventDefault();
+                  const filtered = taCommandRef.current.filtered;
+                  const hi =
+                    ((taCommandRef.current.highlight % filtered.length) + filtered.length) %
+                    filtered.length;
+                  const next = replaceTextareaComposerShortcut(
+                    el.value,
+                    el.selectionStart ?? 0,
+                    filtered[hi]!,
+                    taCommandRef.current.scope
+                  );
+                  if (next) {
+                    pendingTextareaCaretRef.current = next.caret;
+                    onValueChange(next.value);
+                    setTaCommand((s) =>
+                      s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                    );
+                  }
+                  return;
+                }
                 if (event.key === "Tab" && !event.shiftKey && taMentionRef.current.open) {
                   event.preventDefault();
                   const mention = taMentionRef.current;
@@ -13321,11 +15822,30 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(act.replacement);
                   }
                 }
+                if (event.key === "Escape" && taCommandRef.current.open) {
+                  event.preventDefault();
+                  setTaCommand((s) =>
+                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                  );
+                }
                 if (event.key === "Escape" && taMentionRef.current.open) {
                   event.preventDefault();
                   setTaMention((s) =>
                     s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                   );
+                }
+                if (
+                  (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                  taCommandRef.current.open &&
+                  taCommandRef.current.filtered.length > 0
+                ) {
+                  event.preventDefault();
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  const len = taCommandRef.current.filtered.length;
+                  setTaCommand((s) => ({
+                    ...s,
+                    highlight: (s.highlight + delta + len) % len,
+                  }));
                 }
                 if (
                   (event.key === "ArrowDown" || event.key === "ArrowUp") &&
@@ -13392,6 +15912,35 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             ensureContrast={ensureContrast}
             excludeInteractionRef={composeEditorShellRef}
             onDismiss={dismissTaMentionPopover}
+          />
+          <ComposerCommandPopover
+            open={taCommand.open}
+            anchorRect={taCommand.caretRect}
+            themeSource={composeEditorShellRef.current}
+            scope={taCommand.scope}
+            commands={taCommand.filtered}
+            highlightIndex={taCommand.highlight}
+            onHighlightIndexChange={(next) =>
+              setTaCommand((s) => ({ ...s, highlight: next }))
+            }
+            onPickCommand={(command) => {
+              const el = textareaRef.current;
+              if (!el) return;
+              const next = replaceTextareaComposerShortcut(
+                el.value,
+                el.selectionStart ?? 0,
+                command,
+                taCommandRef.current.scope
+              );
+              if (!next) return;
+              pendingTextareaCaretRef.current = next.caret;
+              onValueChange(next.value);
+              setTaCommand((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
+            }}
+            excludeInteractionRef={composeEditorShellRef}
+            onDismiss={dismissTaCommandPopover}
           />
         </>
       )}
@@ -13633,6 +16182,12 @@ function BotProfileBuilder({
       },
     }));
   };
+  const hasPersonalityAdvanced = Boolean(
+    profile.core.interests.trim() || profile.core.boundaries.trim() || profile.core.quirks.trim()
+  );
+  const hasCharacterAdvanced = Boolean(
+    profile.identity.background.trim() || profile.worldview.values.trim()
+  );
 
   const renderPage = () => {
     switch (activePage) {
@@ -13682,22 +16237,27 @@ function BotProfileBuilder({
       case "personality":
         return (
           <>
-            <label className={styles.botProfileField}>
+            <div className={styles.botProfileSubsection}>
               <span>Communication style</span>
-              <select
-                value={profile.core.communicationStyle}
-                onChange={(event) => updateCore("communicationStyle", event.currentTarget.value as BotVoicePreset)}
-              >
-                {(Object.keys(BOT_VOICE_PRESET_LABELS) as BotVoicePreset[]).map((preset) => (
-                  <option key={preset} value={preset}>
-                    {BOT_VOICE_PRESET_LABELS[preset]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            </div>
+            <div className={styles.botVoicePresetGrid}>
+              {(Object.keys(BOT_VOICE_PRESET_LABELS) as BotVoicePreset[]).map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={styles.botVoicePresetOption}
+                  data-selected={profile.core.communicationStyle === preset ? "true" : undefined}
+                  aria-pressed={profile.core.communicationStyle === preset}
+                  onClick={() => updateCore("communicationStyle", preset)}
+                >
+                  <span>{BOT_VOICE_PRESET_LABELS[preset]}</span>
+                  <small>{BOT_VOICE_PRESET_DESCRIPTIONS[preset]}</small>
+                </button>
+              ))}
+            </div>
             <div className={styles.botProfileSubsection}>
               <span>OCEAN balance</span>
-              <small>Small shifts change the bot&apos;s center of gravity without locking it into a type.</small>
+              <small>Set a vibe without locking the bot into one rigid persona.</small>
             </div>
             <BotProfileScaleControl
               label="Openness"
@@ -13740,37 +16300,42 @@ function BotProfileBuilder({
               onChange={(value) => updateCore("emotionalStability", value)}
             />
             <label className={styles.botProfileField}>
-              <span>Trait notes / flavor text</span>
-              <input
+              <span>Flavor notes (optional)</span>
+              <textarea
                 value={profile.core.traits}
                 onChange={(event) => updateCore("traits", event.currentTarget.value)}
-                placeholder="patient, strange, decisive, gentle..."
+                placeholder="patient, slightly surreal, encouraging..."
               />
             </label>
-            <label className={styles.botProfileField}>
-              <span>What they lean into</span>
-              <input
-                value={profile.core.interests}
-                onChange={(event) => updateCore("interests", event.currentTarget.value)}
-                placeholder="topics, goals, favorite angles..."
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>What they avoid</span>
-              <input
-                value={profile.core.boundaries}
-                onChange={(event) => updateCore("boundaries", event.currentTarget.value)}
-                placeholder="limits, refusals, sensitive areas..."
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>Signature flourish</span>
-              <input
-                value={profile.core.quirks}
-                onChange={(event) => updateCore("quirks", event.currentTarget.value)}
-                placeholder="catchphrases, habits, running jokes..."
-              />
-            </label>
+            <details className={styles.botProfileDetails} open={hasPersonalityAdvanced}>
+              <summary>Advanced personality details</summary>
+              <div className={styles.botProfileDetailsBody}>
+                <label className={styles.botProfileField}>
+                  <span>Leans into</span>
+                  <input
+                    value={profile.core.interests}
+                    onChange={(event) => updateCore("interests", event.currentTarget.value)}
+                    placeholder="topics, goals, favorite angles..."
+                  />
+                </label>
+                <label className={styles.botProfileField}>
+                  <span>Avoids</span>
+                  <input
+                    value={profile.core.boundaries}
+                    onChange={(event) => updateCore("boundaries", event.currentTarget.value)}
+                    placeholder="limits, refusals, sensitive areas..."
+                  />
+                </label>
+                <label className={styles.botProfileField}>
+                  <span>Signature flourish</span>
+                  <input
+                    value={profile.core.quirks}
+                    onChange={(event) => updateCore("quirks", event.currentTarget.value)}
+                    placeholder="catchphrases, habits, running jokes..."
+                  />
+                </label>
+              </div>
+            </details>
           </>
         );
       case "character":
@@ -13778,7 +16343,7 @@ function BotProfileBuilder({
           <>
             <div className={styles.botProfileSubsection}>
               <span>Identity</span>
-              <small>Who or what this bot is.</small>
+              <small>A quick snapshot of who this bot is.</small>
             </div>
             <label className={styles.botProfileField}>
               <span>Identity snapshot</span>
@@ -13788,17 +16353,9 @@ function BotProfileBuilder({
                 placeholder="ageless raven oracle, they/them, former royal cartographer..."
               />
             </label>
-            <label className={styles.botProfileField}>
-              <span>Background</span>
-              <textarea
-                value={profile.identity.background}
-                onChange={(event) => updateTextSection("identity", "background", event.currentTarget.value)}
-                placeholder="where they come from, what shaped them..."
-              />
-            </label>
             <div className={styles.botProfileSubsection}>
               <span>Appearance</span>
-              <small>Useful for avatars, images, and a stronger mental picture.</small>
+              <small>Useful for avatars and generated images.</small>
             </div>
             <label className={styles.botProfileField}>
               <span>Visual description</span>
@@ -13810,7 +16367,7 @@ function BotProfileBuilder({
             </label>
             <div className={styles.botProfileSubsection}>
               <span>Worldview</span>
-              <small>Optional lenses for future debates, polls, and experiments.</small>
+              <small>Optional sliders for how this bot sees the world.</small>
             </div>
             <BotProfileScaleControl
               label="Political perspective"
@@ -13820,14 +16377,43 @@ function BotProfileBuilder({
               rightLabel="Right"
               onChange={(value) => updateWorldviewScale("politicalView", value)}
             />
-            <label className={styles.botProfileField}>
-              <span>Worldview & values</span>
-              <textarea
-                value={profile.worldview.values}
-                onChange={(event) => updateTextSection("worldview", "values", event.currentTarget.value)}
-                placeholder="religion, values, optimism, tradition, taboos, causes..."
-              />
-            </label>
+            <BotProfileScaleControl
+              label="Outlook"
+              value={profile.worldview.optimism}
+              labels={["Skeptical", "Cautious", "Balanced", "Hopeful", "Radiantly optimistic"]}
+              leftLabel="Skeptical"
+              rightLabel="Hopeful"
+              onChange={(value) => updateWorldviewScale("optimism", value)}
+            />
+            <BotProfileScaleControl
+              label="Tradition vs change"
+              value={profile.worldview.tradition}
+              labels={["Change-first", "Open to change", "Balanced", "Tradition-aware", "Tradition-first"]}
+              leftLabel="Change"
+              rightLabel="Tradition"
+              onChange={(value) => updateWorldviewScale("tradition", value)}
+            />
+            <details className={styles.botProfileDetails} open={hasCharacterAdvanced}>
+              <summary>Advanced context</summary>
+              <div className={styles.botProfileDetailsBody}>
+                <label className={styles.botProfileField}>
+                  <span>Background</span>
+                  <textarea
+                    value={profile.identity.background}
+                    onChange={(event) => updateTextSection("identity", "background", event.currentTarget.value)}
+                    placeholder="where they come from, what shaped them..."
+                  />
+                </label>
+                <label className={styles.botProfileField}>
+                  <span>Worldview & values</span>
+                  <textarea
+                    value={profile.worldview.values}
+                    onChange={(event) => updateTextSection("worldview", "values", event.currentTarget.value)}
+                    placeholder="values, beliefs, taboos, causes..."
+                  />
+                </label>
+              </div>
+            </details>
           </>
         );
       case "facts":
@@ -13837,9 +16423,7 @@ function BotProfileBuilder({
               <div className={styles.botProfileSubsection}>
                 <span>Permanent facts</span>
                 <small>
-                  Treated as canon. The bot will not contradict these and the
-                  Memories panel shows them read-only. Leave anything blank you do
-                  not want to invent.
+                  Treated as canon. Leave blank anything you do not want to define.
                 </small>
               </div>
               <label className={`${styles.botProfileField} ${styles.botProfileKnownEntityToggle}`}>
@@ -13865,15 +16449,6 @@ function BotProfileBuilder({
                   </small>
                 </button>
               </label>
-              {profile.facts.customFacts.length < MAX_CUSTOM_FACTS && (
-                <button
-                  type="button"
-                  className={styles.botProfileFactAddButton}
-                  onClick={addCustomFact}
-                >
-                  Add custom fact
-                </button>
-              )}
               {(() => {
                 // AD dates can use the browser date picker. BC dates intentionally
                 // stay year-only so the model sees "256 BC" rather than age 256.
@@ -13891,6 +16466,8 @@ function BotProfileBuilder({
                 const zodiac = dateValue
                   ? westernZodiacFromIsoBirthday(dateValue)
                   : null;
+                const showHistoricalBirthOptions =
+                  isBcBirth || Boolean(profile.facts.birthYear.trim() && !dateValue);
                 return (
                   <div
                     key="birthday"
@@ -13926,36 +16503,6 @@ function BotProfileBuilder({
                           aria-describedby="bot-profile-birthday-hint"
                         />
                       </label>
-                      <label className={styles.botProfileBirthdayControl}>
-                        <span>Year</span>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          maxLength={BOT_BIRTH_YEAR_MAX_DIGITS}
-                          className={styles.botProfileBirthdayYearInput}
-                          value={birthYear}
-                          onChange={(event) =>
-                            updateBirthYear(event.currentTarget.value)
-                          }
-                          placeholder="256"
-                          aria-label="Birth year"
-                        />
-                      </label>
-                      <label className={styles.botProfileBirthdayControl}>
-                        <span>Era</span>
-                        <select
-                          className={styles.botProfileBirthdayEraSelect}
-                          value={birthEra}
-                          onChange={(event) =>
-                            updateBirthEra(event.currentTarget.value as BotBirthEra)
-                          }
-                          aria-label="Birth era"
-                        >
-                          <option value="ad">AD</option>
-                          <option value="bc">BC</option>
-                        </select>
-                      </label>
                       <div className={styles.botProfileBirthdayAgeWrap}>
                         <span
                           className={styles.botProfileBirthdayAgeLabel}
@@ -13974,54 +16521,116 @@ function BotProfileBuilder({
                         />
                       </div>
                     </div>
+                    <details className={styles.botProfileDetails} open={showHistoricalBirthOptions}>
+                      <summary>Historical or year-only birth</summary>
+                      <div className={styles.botProfileDetailsBody}>
+                        <div className={styles.botProfileBirthdayAdvancedRow}>
+                          <label className={styles.botProfileBirthdayControl}>
+                            <span>Year</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={BOT_BIRTH_YEAR_MAX_DIGITS}
+                              className={styles.botProfileBirthdayYearInput}
+                              value={birthYear}
+                              onChange={(event) =>
+                                updateBirthYear(event.currentTarget.value)
+                              }
+                              placeholder="256"
+                              aria-label="Birth year"
+                            />
+                          </label>
+                          <label className={styles.botProfileBirthdayControl}>
+                            <span>Era</span>
+                            <select
+                              className={styles.botProfileBirthdayEraSelect}
+                              value={birthEra}
+                              onChange={(event) =>
+                                updateBirthEra(event.currentTarget.value as BotBirthEra)
+                              }
+                              aria-label="Birth era"
+                            >
+                              <option value="ad">AD</option>
+                              <option value="bc">BC</option>
+                            </select>
+                          </label>
+                        </div>
+                      </div>
+                    </details>
                     <small id="bot-profile-birthday-hint">
-                      BC uses year only; full DOB is disabled to avoid turning
-                      ancient figures into present-day ages.
+                      Use year-only mode for historical or fictional timelines.
                     </small>
                   </div>
                 );
               })()}
             </div>
-            <div
-              className={styles.botProfileCustomFactsScroll}
-              aria-label="Custom fact rows"
-            >
-              {profile.facts.customFacts.map((fact, index) => (
-                <div
-                  key={fact.rowId ?? `custom-fact-${index}`}
-                  className={styles.botProfileFactRow}
-                >
-                  <input
-                    type="text"
-                    className={styles.botProfileFactLabel}
-                    value={fact.label}
-                    onChange={(event) =>
-                      updateCustomFact(index, "label", event.currentTarget.value)
-                    }
-                    placeholder="Label"
-                    aria-label={`Custom fact ${index + 1} label`}
-                  />
-                  <input
-                    type="text"
-                    className={styles.botProfileFactValue}
-                    value={fact.value}
-                    onChange={(event) =>
-                      updateCustomFact(index, "value", event.currentTarget.value)
-                    }
-                    placeholder="Value"
-                    aria-label={`Custom fact ${index + 1} value`}
-                  />
-                  <button
-                    type="button"
-                    className={styles.botProfileFactRemove}
-                    onClick={() => removeCustomFact(index)}
-                    aria-label={`Remove custom fact ${index + 1}`}
+            {profile.facts.customFacts.length === 0 ? (
+              <button
+                type="button"
+                className={styles.botProfileFactAddButton}
+                onClick={addCustomFact}
+              >
+                Add canon note
+              </button>
+            ) : (
+              <details className={styles.botProfileDetails} open>
+                <summary>
+                  Canon notes ({profile.facts.customFacts.length})
+                </summary>
+                <div className={styles.botProfileDetailsBody}>
+                  {profile.facts.customFacts.length < MAX_CUSTOM_FACTS && (
+                    <button
+                      type="button"
+                      className={styles.botProfileFactAddButton}
+                      onClick={addCustomFact}
+                    >
+                      Add another note
+                    </button>
+                  )}
+                  <div
+                    className={styles.botProfileCustomFactsScroll}
+                    aria-label="Custom fact rows"
                   >
-                    ×
-                  </button>
+                    {profile.facts.customFacts.map((fact, index) => (
+                      <div
+                        key={fact.rowId ?? `custom-fact-${index}`}
+                        className={styles.botProfileFactRow}
+                      >
+                        <input
+                          type="text"
+                          className={styles.botProfileFactLabel}
+                          value={fact.label}
+                          onChange={(event) =>
+                            updateCustomFact(index, "label", event.currentTarget.value)
+                          }
+                          placeholder="Label"
+                          aria-label={`Custom fact ${index + 1} label`}
+                        />
+                        <input
+                          type="text"
+                          className={styles.botProfileFactValue}
+                          value={fact.value}
+                          onChange={(event) =>
+                            updateCustomFact(index, "value", event.currentTarget.value)
+                          }
+                          placeholder="Value"
+                          aria-label={`Custom fact ${index + 1} value`}
+                        />
+                        <button
+                          type="button"
+                          className={styles.botProfileFactRemove}
+                          onClick={() => removeCustomFact(index)}
+                          aria-label={`Remove custom fact ${index + 1}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              </details>
+            )}
           </>
         );
       default:
@@ -14030,7 +16639,15 @@ function BotProfileBuilder({
   };
 
   return (
-    <div className={styles.botProfileBuilderBackdrop} role="presentation">
+    <div
+      className={styles.botProfileBuilderBackdrop}
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
+        onClose();
+      }}
+    >
       <section
         className={styles.botProfileBuilder}
         role="dialog"
@@ -14057,7 +16674,7 @@ function BotProfileBuilder({
             >
               <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
               <small>
-                {botProfileCategoryCount(profile, category) > 0 ? "Filled" : "Optional"}
+                {botProfileCategoryCount(profile, category) > 0 ? "Set" : "Optional"}
               </small>
             </button>
           ))}
@@ -14082,21 +16699,105 @@ function HomeContent(): React.JSX.Element {
   const requestedAuthMode = searchParams.get("mode") === "login" ? "login" : "register";
   // Post-auth surface is derived from the URL so refreshes preserve the
   // current mode and browser back/forward walk naturally between Hub,
-  // Chat, Sandbox, and Coffee. Anything unrecognised (missing param,
+  // Chat, Sandbox, Coffee, and Story. Anything unrecognised (missing param,
   // stale values) resolves to the Hub.
   const viewParam = searchParams.get("view");
   const view: View =
     viewParam === "chat" ? "chat"
       : viewParam === "sandbox" ? "sandbox"
         : viewParam === "coffee" ? "coffee"
-          : "hub";
+          : viewParam === "story" ? "story"
+            : "hub";
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] =
     useState<"hidden" | "entering" | "visible" | "fading">("hidden");
+  const [zenHeaderVisible, setZenHeaderVisible] = useState(true);
   const viewSwitchOverlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
+  const zenHeaderAutoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenHeaderAutoHideArmedRef = useRef(false);
   const pendingPrivateExitOnHubRef = useRef(false);
+  const clearZenHeaderAutoHideTimer = useCallback(() => {
+    if (zenHeaderAutoHideTimerRef.current) {
+      clearTimeout(zenHeaderAutoHideTimerRef.current);
+      zenHeaderAutoHideTimerRef.current = null;
+    }
+  }, []);
+  const scheduleZenHeaderAutoHide = useCallback(() => {
+    if (view !== "chat") return;
+    if (!zenHeaderAutoHideArmedRef.current) return;
+    clearZenHeaderAutoHideTimer();
+    zenHeaderAutoHideTimerRef.current = setTimeout(() => {
+      setZenHeaderVisible(false);
+      zenHeaderAutoHideTimerRef.current = null;
+    }, ZEN_HEADER_REVEAL_HOLD_MS);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const revealZenHeaderTemporarily = useCallback(() => {
+    if (view !== "chat") return;
+    setZenHeaderVisible(true);
+    scheduleZenHeaderAutoHide();
+  }, [scheduleZenHeaderAutoHide, view]);
+  const showZenHeaderWhileInteracting = useCallback(() => {
+    if (view !== "chat") return;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const revealZenHeaderForFreshSurface = useCallback(() => {
+    if (view !== "chat") return;
+    zenHeaderAutoHideArmedRef.current = false;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const hideZenHeaderForConversationAction = useCallback(() => {
+    if (view !== "chat") return;
+    zenHeaderAutoHideArmedRef.current = true;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(false);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  const handleZenSurfacePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      if (zenHeaderVisible) return;
+      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
+      revealZenHeaderTemporarily();
+    },
+    [revealZenHeaderTemporarily, zenHeaderVisible]
+  );
+  const handleZenSurfacePointerDownCapture = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType === "mouse") return;
+      if (zenHeaderVisible) return;
+      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
+      revealZenHeaderTemporarily();
+    },
+    [revealZenHeaderTemporarily, zenHeaderVisible]
+  );
+  const handleZenHeaderPointerEnter = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      showZenHeaderWhileInteracting();
+    },
+    [showZenHeaderWhileInteracting]
+  );
+  const handleZenHeaderPointerLeave = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "mouse") return;
+      scheduleZenHeaderAutoHide();
+    },
+    [scheduleZenHeaderAutoHide]
+  );
+  const handleZenHeaderFocusCapture = useCallback(() => {
+    showZenHeaderWhileInteracting();
+  }, [showZenHeaderWhileInteracting]);
+  const handleZenHeaderBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLElement>) => {
+      const nextFocus = event.relatedTarget;
+      if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return;
+      scheduleZenHeaderAutoHide();
+    },
+    [scheduleZenHeaderAutoHide]
+  );
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
       clearTimeout(viewSwitchOverlayHideTimerRef.current);
@@ -14111,9 +16812,16 @@ function HomeContent(): React.JSX.Element {
       viewSwitchOverlayEnterFrameRef.current = null;
     }
   }, []);
+  useEffect(() => {
+    if (view === "chat") return;
+    zenHeaderAutoHideArmedRef.current = false;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
+  useEffect(() => clearZenHeaderAutoHideTimer, [clearZenHeaderAutoHideTimer]);
   const triggerConversationModeExitCompaction = useCallback((
     conversationId: string,
-    sourceMode: "chat" | "sandbox"
+    sourceMode: "zen" | "chat" | "sandbox"
   ) => {
     void api(
       `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
@@ -14134,7 +16842,10 @@ function HomeContent(): React.JSX.Element {
         ? detailIdRef.current
         : selectedIdRef.current;
     if (!activeConversationId) return;
-    triggerConversationModeExitCompaction(activeConversationId, sourceView);
+    triggerConversationModeExitCompaction(
+      activeConversationId,
+      sourceView === "chat" ? "zen" : "sandbox"
+    );
   }, [triggerConversationModeExitCompaction]);
   const navigateToView = useCallback((next: View) => {
     if (next === view) return;
@@ -14185,6 +16896,7 @@ function HomeContent(): React.JSX.Element {
     if (viewSwitchTarget === "chat") return "Opening Zen";
     if (viewSwitchTarget === "sandbox") return "Opening Chat";
     if (viewSwitchTarget === "coffee") return "Opening Coffee";
+    if (viewSwitchTarget === "story") return "Opening Story";
     if (viewSwitchTarget === "hub") return "Returning to Hub";
     return "Switching modes";
   }, [viewSwitchTarget]);
@@ -14247,20 +16959,29 @@ function HomeContent(): React.JSX.Element {
   const [editingOriginalText, setEditingOriginalText] = useState("");
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [composerSendTintActive, setComposerSendTintActive] = useState(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
+  const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
+  const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
+    useState<string | null>(null);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
     prompts: string[];
   } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
     reachable: boolean;
     checkpoints: ModelCatalogEntry[];
+    allCheckpoints?: ModelCatalogEntry[];
   }>({ configured: false, reachable: false, checkpoints: [] });
   const [secondaryOllamaStatus, setSecondaryOllamaStatus] =
     useState<SecondaryOllamaStatus | null>(null);
+  const [dualOllamaWorkloadStatus, setDualOllamaWorkloadStatus] =
+    useState<DualOllamaWorkloadStatus | null>(null);
   const [secondaryOllamaStatusChecking, setSecondaryOllamaStatusChecking] = useState(false);
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
@@ -14270,16 +16991,6 @@ function HomeContent(): React.JSX.Element {
   const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] = useState(false);
   const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] = useState(false);
   const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] = useState<string[]>([]);
-  const [desktopOllamaSetupStatus, setDesktopOllamaSetupStatus] = useState<{
-    cliInstalled: boolean;
-    appInstalled: boolean;
-    serviceReachable: boolean;
-    llama31Installed: boolean;
-    canAutoInstallCli: boolean;
-    installerUrl: string;
-  } | null>(null);
-  const [desktopOllamaInstallBusy, setDesktopOllamaInstallBusy] = useState(false);
-  const [preAuthChecklistStepIndex, setPreAuthChecklistStepIndex] = useState(0);
   const desktopFirstRunAutoSetupAttemptedRef = useRef(false);
   const [preAuthChecklistComplete, setPreAuthChecklistComplete] = useState(false);
   const [desktopFirstRunHealth, setDesktopFirstRunHealth] = useState<{
@@ -14334,12 +17045,20 @@ function HomeContent(): React.JSX.Element {
     id: string;
     text: string;
   } | null>(null);
+  const queuedPromptDrainGenerationRef = useRef(0);
   const [fallbackMessageIds, setFallbackMessageIds] = useState<Set<string>>(() => new Set());
   const [pendingReplyStartedAtMs, setPendingReplyStartedAtMs] = useState<number | null>(null);
   const [pendingReplyNowMs, setPendingReplyNowMs] = useState(() => Date.now());
   const [pendingReplyDenialRisk, setPendingReplyDenialRisk] = useState(false);
   const [pendingReplyStartMessageCount, setPendingReplyStartMessageCount] = useState(0);
   const [sandboxSummaryBusy, setSandboxSummaryBusy] = useState(false);
+  const [manualCompactionStatus, setManualCompactionStatus] = useState<{
+    conversationId: string;
+    mode: "zen" | "chat" | "sandbox";
+    state: "running" | "complete";
+    summary: string | null;
+    summaryAt: string | null;
+  } | null>(null);
   const [sandboxBotStatusBusy, setSandboxBotStatusBusy] = useState(false);
   const [canvasBotSwitchTransitioning, setCanvasBotSwitchTransitioning] = useState(false);
   const [canvasBotSwitchOverlayPhase, setCanvasBotSwitchOverlayPhase] =
@@ -14360,6 +17079,21 @@ function HomeContent(): React.JSX.Element {
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
+  const manualCompactionCancelControllerRef = useRef<AbortController | null>(null);
+  const priorityCommandCancelControllerRef = useRef<AbortController | null>(null);
+  const zenInitialThinkingCancelControllerRef = useRef<AbortController | null>(null);
+  const zenInitialStatusLabelRef = useRef<string | null>(null);
+  const zenInitialStarterRequestRef = useRef<{
+    id: string;
+    controller: AbortController;
+    conversationId: string | null;
+    pendingDetail: ConversationDetail | null;
+    startedNewConversation: boolean;
+    cancelled: boolean;
+    replayWhenReady: boolean;
+  } | null>(null);
+  const zenInitialStarterLiveEnvelopeRef = useRef<ChatPostEnvelope | null>(null);
+  const zenInitialStarterCachedReplyRef = useRef<ZenInitialStarterCachedReply | null>(null);
   const [composerImageJobOrb, setComposerImageJobOrb] = useState<{
     jobId: string;
     conversationId: string;
@@ -14373,6 +17107,12 @@ function HomeContent(): React.JSX.Element {
       pendingImageJobPollTimersRef.current.clear();
     };
   }, []);
+  useEffect(() => {
+    zenInitialStarterCachedReplyRef.current = null;
+    if (user?.id) {
+      clearLegacyZenInitialStarterCachedReply(user.id);
+    }
+  }, [user?.id]);
   const [unreadConversationIds, setUnreadConversationIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -14385,11 +17125,10 @@ function HomeContent(): React.JSX.Element {
     string | null
   >(null);
   const [conversationListScrollTop, setConversationListScrollTop] = useState(0);
-  const [sandboxZenMode, setSandboxZenMode] = useState(false);
-  const sandboxZenExitThreadKeyRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const chatSummaryRefreshMarkerRef = useRef<string | null>(null);
   const sandboxBotStatusRefreshMarkerRef = useRef<string | null>(null);
+  const zenOpenInFlightRef = useRef(false);
   const [chatAutoRestoreSuppressed, setChatAutoRestoreSuppressed] = useState(false);
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
   const detailIdRef = useRef<string | null>(null);
@@ -14450,6 +17189,10 @@ function HomeContent(): React.JSX.Element {
     x: number;
     y: number;
   } | null>(null);
+  const [storyShellContextMenu, setStoryShellContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [contextFocusedMessageId, setContextFocusedMessageId] = useState<string | null>(null);
   const [mobileFocusedMessageId, setMobileFocusedMessageId] = useState<string | null>(null);
   /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
@@ -14459,6 +17202,7 @@ function HomeContent(): React.JSX.Element {
   const canvasToolsContextMenuRef = useRef<HTMLDivElement | null>(null);
   const coffeeShellContextMenuRef = useRef<HTMLDivElement | null>(null);
   const coffeeBotContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const storyShellContextMenuRef = useRef<HTMLDivElement | null>(null);
   const botContextLongPressRef = useRef<{
     pointerId: number;
     botId: string;
@@ -14496,6 +17240,8 @@ function HomeContent(): React.JSX.Element {
   const [devTogglesOpen, setDevTogglesOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsActiveSection, setDevToolsActiveSection] =
+    useState<DevToolsActiveSection>("observe");
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
     useState<DevToolsBotQuantity>(DEV_TOOLS_BOT_QUANTITY_DEFAULT);
   const [devToolsMemorySeedSource, setDevToolsMemorySeedSource] =
@@ -14508,18 +17254,8 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
-  const [devToolsButtonPosition, setDevToolsButtonPosition] =
-    useState<DevToolsPanelPosition>({
-      x: DEV_TOOLS_BUTTON_DEFAULT_X,
-      y: DEV_TOOLS_BUTTON_DEFAULT_Y,
-    });
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const devToolsButtonRef = useRef<HTMLButtonElement | null>(null);
-  const devToolsButtonDragRef = useRef<DevToolsButtonDragState | null>(null);
-  const devToolsButtonHasCustomPositionRef = useRef(false);
-  const devToolsButtonPositionHydratedRef = useRef(false);
-  const devToolsButtonSuppressClickRef = useRef(false);
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
   const closeDevTools = useCallback(() => {
@@ -14548,6 +17284,10 @@ function HomeContent(): React.JSX.Element {
     setCoffeeBotContextMenu(null);
   }, []);
 
+  const closeStoryShellContextMenu = useCallback(() => {
+    setStoryShellContextMenu(null);
+  }, []);
+
   const cancelBotContextLongPress = useCallback((pointerId?: number) => {
     const pending = botContextLongPressRef.current;
     if (!pending) return;
@@ -14562,11 +17302,21 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterPreferredModel, setCommandCenterPreferredModel] =
     useState<string>(AUTO_MODEL_CHOICE);
   const [commandCenterCommands, setCommandCenterCommands] = useState<CommandCenterCommand[]>(
-    () => [createBuiltInHelpCommand()]
+    () => normalizeCommandCenterState(null).commands
+  );
+  const commandCenterCommandById = useMemo(
+    () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
+    [commandCenterCommands]
   );
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
+  const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
+    useState<string | null>(null);
+  const [commandCenterHelpModalOpen, setCommandCenterHelpModalOpen] = useState(false);
+  const [expandedPromptShortcutMessageId, setExpandedPromptShortcutMessageId] =
+    useState<string | null>(null);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
   // bot-square picks in the grid, not from sidebar conversation navigation.
   const [sandboxGridSelectedBotId, setSandboxGridSelectedBotId] =
@@ -14582,6 +17332,7 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
+      anthropic: AUTO_MODEL_CHOICE,
     });
   /** Per-session Coffee header model picks (LOCAL + ONLINE slots). */
   const [coffeeModelChoiceByProvider, setCoffeeModelChoiceByProvider] =
@@ -14614,6 +17365,7 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>({
       local: AUTO_MODEL_CHOICE,
       openai: AUTO_MODEL_CHOICE,
+      anthropic: AUTO_MODEL_CHOICE,
     });
   // Do not sync this from `settings.preferred*ImageModel`: "Auto" in the header means
   // "follow the chain" (picker → bot → account default in Settings → catalog). Copying
@@ -14642,6 +17394,7 @@ function HomeContent(): React.JSX.Element {
   const [botPickerReturnAnimating, setBotPickerReturnAnimating] = useState(false);
   const [emptyStateSearchOpen, setEmptyStateSearchOpen] = useState(false);
   const [emptyStateBotNameFilter, setEmptyStateBotNameFilter] = useState("");
+  const spotlightTypingArmedRef = useRef(false);
   // Sticky "the next new chat is private" intent. Flipped on by the Chat-
   // mode "Private chat" sidebar button and read by buildChatRequestBody so
   // the next send uses the incognito server path. Private chats are
@@ -14668,6 +17421,27 @@ function HomeContent(): React.JSX.Element {
     ImageRecord[]
   >([]);
   const [imageLightbox, setImageLightbox] = useState<ImageRecord | null>(null);
+  const [zenWallpaperBusyConversationId, setZenWallpaperBusyConversationId] =
+    useState<string | null>(null);
+  const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
+  const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
+  const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
+  const zenAtmosphereTimeline = useMemo(
+    () => normalizeZenAtmosphereHistory(detail?.zenWallpaper),
+    [detail?.zenWallpaper]
+  );
+  const zenAtmosphereTimelineKey = useMemo(
+    () =>
+      zenAtmosphereTimeline
+        .map(
+          (entry) =>
+            `${entry.imageId}:${entry.generationMessageCount}:${
+              entry.revealStartMessageCount ?? ""
+            }:${entry.revealFullMessageCount ?? ""}:${entry.createdAt ?? ""}`
+        )
+        .join("|"),
+    [zenAtmosphereTimeline]
+  );
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
     []
@@ -14861,6 +17635,7 @@ function HomeContent(): React.JSX.Element {
   const [newBotOpenAiImageModel, setNewBotOpenAiImageModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOnlineEnabled, setNewBotOnlineEnabled] = useState(true);
   const [newBotDeleteProtected, setNewBotDeleteProtected] = useState(false);
+  const [newBotFlirtEnabled, setNewBotFlirtEnabled] = useState(false);
   const [newBotTemperature, setNewBotTemperature] = useState(BOT_TEMPERATURE_DEFAULT);
   const [newBotMaxTokens, setNewBotMaxTokens] = useState(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
   // Lazy initializers so the very first render already picks a random seed
@@ -14880,10 +17655,10 @@ function HomeContent(): React.JSX.Element {
   const [tutorialProgress, setTutorialProgress] = useState<TutorialProgress>(
     DEFAULT_TUTORIAL_PROGRESS
   );
-  const [resetTutorialsOnNextLaunch, setResetTutorialsOnNextLaunch] = useState(false);
   const [activeTutorialMode, setActiveTutorialMode] = useState<TutorialMode | null>(null);
   const [activeTutorialStepIndex, setActiveTutorialStepIndex] = useState(0);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+  const [factoryResetArmed, setFactoryResetArmed] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [changePasswordNew, setChangePasswordNew] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
@@ -14934,6 +17709,7 @@ function HomeContent(): React.JSX.Element {
     onlineModel: AUTO_MODEL_CHOICE,
     onlineEnabled: true,
     deleteProtected: false,
+    flirtEnabled: false,
     temperature: BOT_TEMPERATURE_DEFAULT,
     maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
   });
@@ -14944,6 +17720,7 @@ function HomeContent(): React.JSX.Element {
     onlineModel: newBotOnlineModel,
     onlineEnabled: newBotOnlineEnabled,
     deleteProtected: newBotDeleteProtected,
+    flirtEnabled: newBotFlirtEnabled,
     temperature: newBotTemperature,
     maxTokens: newBotMaxTokens,
   };
@@ -14996,6 +17773,7 @@ function HomeContent(): React.JSX.Element {
     openAiImageModel: string;
     onlineEnabled: boolean;
     deleteProtected: boolean;
+    flirtEnabled: boolean;
     temperature: number;
     maxTokens: number;
     color: string;
@@ -15006,11 +17784,18 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
-  /** Expanded AskQuestion chip rail only — outside-thread taps collapse chips when set. */
+  const zenAtmosphereScrollFrameRef = useRef<number | null>(null);
+  /** Expanded AskQuestion chip rail; kept as a stable anchor for future rail-local gestures. */
   const askQuestionRailRef = useRef<HTMLDivElement | null>(null);
+  const askQuestionComposerHiddenForReadingKeyRef = useRef<string | null>(null);
+  const starterPromptCenteredMessageIdRef = useRef<string | null>(null);
+  const starterPromptSettlingTimerRef = useRef<number | null>(null);
   const chatLastPinnedUserMessageKeyRef = useRef<string | null>(null);
   const chatLastRestoredConversationIdRef = useRef<string | null>(null);
   const chatProgrammaticScrollUntilMsRef = useRef(0);
+  const chatTouchScrollLastYRef = useRef<number | null>(null);
+  const chatScrollElasticOffsetRef = useRef(0);
+  const chatScrollElasticResetTimerRef = useRef<number | null>(null);
   const chatLastScrollTopByConversationRef = useRef<Map<string, number>>(new Map());
   // Tracks scrollHeight alongside scrollTop so the manual-scroll-up detector
   // can distinguish a real upward gesture from a reflow-induced drop (e.g.
@@ -15018,6 +17803,7 @@ function HomeContent(): React.JSX.Element {
   // bottom of the scroll area moves up by a few pixels on its own).
   const chatLastScrollHeightByConversationRef = useRef<Map<string, number>>(new Map());
   const chatAutoscrollArmedByConversationRef = useRef<Map<string, boolean>>(new Map());
+  const chatAutoscrollUserDisarmedByConversationRef = useRef<Map<string, boolean>>(new Map());
   // True for any conversation where the user interrupted a streaming reply.
   // Survives the brief loop unmount/remount around the "...interrupted again."
   // follow-up so the cut-off text stays where the user paused it. Cleared
@@ -15025,10 +17811,10 @@ function HomeContent(): React.JSX.Element {
   const chatScrollPinnedByConversationRef = useRef<Map<string, boolean>>(new Map());
   const chatMessageFirstSeenAtRef = useRef<Map<string, number>>(new Map());
   const chatCancelledRevealTokenCountByKeyRef = useRef<Map<string, number>>(new Map());
+  const chatCommittedFontLineCountByKeyRef = useRef<Map<string, number>>(new Map());
   const chatInterruptCountByConversationRef = useRef<Map<string, number>>(new Map());
   const chatLastInterruptionLineByConversationRef = useRef<Map<string, string>>(new Map());
   const chatUserMessageFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
-  const chatUserAnchorFadeStartByKeyRef = useRef<Map<string, number>>(new Map());
   const chatMessageOffscreenSinceRef = useRef<Map<string, number>>(new Map());
   const chatExpiredMessageIdsByConversationRef = useRef<Map<string, Set<string>>>(new Map());
   const chatArchiveRevealByConversationRef = useRef<Map<string, boolean>>(new Map());
@@ -15040,6 +17826,7 @@ function HomeContent(): React.JSX.Element {
   const chatArchiveInertiaVelocityByConversationRef = useRef<Map<string, number>>(new Map());
   const chatArchiveInertiaFrameByConversationRef = useRef<Map<string, number>>(new Map());
   const [chatArchiveRevealEpoch, setChatArchiveRevealEpoch] = useState(0);
+  const chatAssistantRevealEligibleKeysRef = useRef<Set<string>>(new Set());
   const chatCompletedRevealKeysRef = useRef<Set<string>>(new Set());
   const [chatEphemeralNowMs, setChatEphemeralNowMs] = useState(() => Date.now());
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
@@ -15067,6 +17854,8 @@ function HomeContent(): React.JSX.Element {
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
   const [devSlashCommandsEnabled, setDevSlashCommandsEnabledState] = useState(false);
   const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
+  const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
+    useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
@@ -15120,6 +17909,19 @@ function HomeContent(): React.JSX.Element {
       // private mode / quota — preference just won't survive reload
     }
   }, []);
+  const persistDevShowCompactedSummaryInChat = useCallback((next: boolean) => {
+    setDevShowCompactedSummaryInChatState(next);
+    if (typeof window === "undefined") return;
+    try {
+      if (next) {
+        window.localStorage.setItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY, "1");
+      } else {
+        window.localStorage.removeItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY);
+      }
+    } catch {
+      // private mode / quota — preference just won't survive reload
+    }
+  }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -15135,16 +17937,48 @@ function HomeContent(): React.JSX.Element {
       setDevDebugComposerEnabledState(
         window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
       );
+      setDevShowCompactedSummaryInChatState(
+        window.localStorage.getItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY) === "1"
+      );
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
       setDevChatMetricsEnabledState(false);
       setDevSlashCommandsEnabledState(false);
       setDevDebugComposerEnabledState(false);
+      setDevShowCompactedSummaryInChatState(false);
     }
   }, []);
   useEffect(() => {
     setDevChatDebugEvents([]);
   }, [detail?.id, view]);
+  const commandCenterOperationalPicks = useMemo(
+    () => commandCenterCommands.filter(isCommandCenterOperationalCommand),
+    [commandCenterCommands]
+  );
+  const commandCenterPromptPicks = useMemo(
+    () => commandCenterCommands.filter(isCommandCenterPromptShortcut),
+    [commandCenterCommands]
+  );
+  const runtimeDevCommandPicks = useMemo(
+    () =>
+      devSlashCommandsEnabled
+        ? [
+            createRuntimeCommandCenterCommand(
+              "forget",
+              "Forget memories for the current bot, or the Zen/default memory bucket."
+            ),
+            createRuntimeCommandCenterCommand(
+              "forget-all",
+              "Hard-reset all bot/default memories, summaries, and recall state."
+            ),
+          ]
+        : [],
+    [devSlashCommandsEnabled]
+  );
+  const composerCommandPicks = useMemo(
+    () => [...commandCenterOperationalPicks, ...runtimeDevCommandPicks],
+    [commandCenterOperationalPicks, runtimeDevCommandPicks]
+  );
   /** Confirms delete-bot from the Bots panel header (alertdialog, not window.confirm). */
   const [panelBotDeleteConfirm, setPanelBotDeleteConfirm] = useState<{
     id: string;
@@ -15237,6 +18071,12 @@ function HomeContent(): React.JSX.Element {
     const timeout = window.setTimeout(() => setDeleteAccountArmed(false), 6000);
     return () => window.clearTimeout(timeout);
   }, [deleteAccountArmed]);
+
+  useEffect(() => {
+    if (!factoryResetArmed) return;
+    const timeout = window.setTimeout(() => setFactoryResetArmed(false), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [factoryResetArmed]);
 
   useEffect(() => {
     setChatOverflowMenuOpen(false);
@@ -15385,44 +18225,40 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
-  const startDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+  const startCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    const button = devToolsButtonRef.current;
-    if (!button) return;
-
-    const rect = button.getBoundingClientRect();
-    devToolsButtonDragRef.current = {
+    const panel = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    coffeePollPanelDragRef.current = {
       pointerId: event.pointerId,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
       startClientX: event.clientX,
       startClientY: event.clientY,
     };
-    devToolsButtonSuppressClickRef.current = false;
-
+    coffeePollPanelSuppressClickRef.current = false;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       // Pointer capture is missing in some test environments.
     }
+    event.preventDefault();
   }, []);
-  const dragDevToolsButton = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = devToolsButtonDragRef.current;
+  const dragCoffeePollPanel = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const button = devToolsButtonRef.current;
-    if (!button) return;
-
+    const panel = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
+    if (!panel) return;
     const dragDistance = Math.hypot(
       event.clientX - dragState.startClientX,
       event.clientY - dragState.startClientY
     );
-    if (dragDistance >= DEV_TOOLS_BUTTON_DRAG_SUPPRESS_CLICK_PX) {
-      devToolsButtonSuppressClickRef.current = true;
-      devToolsButtonHasCustomPositionRef.current = true;
+    if (dragDistance >= COFFEE_POLL_BUBBLE_DRAG_SUPPRESS_CLICK_PX) {
+      coffeePollPanelSuppressClickRef.current = true;
     }
-
-    const rect = button.getBoundingClientRect();
-    const next = clampDevToolsPanelPosition(
+    const rect = panel.getBoundingClientRect();
+    const next = clampCoffeePollPanelPosition(
       event.clientX - dragState.offsetX,
       event.clientY - dragState.offsetY,
       rect.width,
@@ -15430,16 +18266,14 @@ function HomeContent(): React.JSX.Element {
       window.innerWidth,
       window.innerHeight
     );
-    button.style.left = `${next.x}px`;
-    button.style.top = `${next.y}px`;
-    setDevToolsButtonPosition(next);
-    event.preventDefault();
+    panel.style.left = `${next.x}px`;
+    panel.style.top = `${next.y}px`;
+    setCoffeePollPanelPosition(next);
   }, []);
-  const endDevToolsButtonDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const dragState = devToolsButtonDragRef.current;
+  const endCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
-    devToolsButtonDragRef.current = null;
-
+    coffeePollPanelDragRef.current = null;
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
@@ -15471,9 +18305,13 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
+    setOpenAiKey("");
+    setAnthropicKey("");
     setChangePasswordModalOpen(false);
     setChangePasswordNew("");
     setChangePasswordConfirm("");
+    setFactoryResetArmed(false);
+    setDeleteAccountArmed(false);
     setEditingBotId(null);
     closeImportBotModal();
     if (botLibraryCloseTimerRef.current) {
@@ -15531,6 +18369,40 @@ function HomeContent(): React.JSX.Element {
       setMemoryPhysicsSeed((seed) => seed + 1);
     }
   }, []);
+
+  const openCommandCenterCommandEditor = useCallback(
+    (commandId: string) => {
+      openRightPanel("command-center");
+      setCommandCenterSelectedCommandId(commandId);
+      setCommandCenterSpecsCommandId(commandId);
+    },
+    [openRightPanel]
+  );
+
+  const openCommandCenterHelpModal = useCallback(() => {
+    setCommandCenterHelpModalOpen(true);
+    setCommandCenterSpecsCommandId(null);
+    setError(null);
+  }, []);
+
+  const insertCommandCenterInvocation = useCallback((invocation: string) => {
+    const normalized = invocation.trim().startsWith("/")
+      ? invocation.trim()
+      : `/${invocation.trim()}`;
+    if (normalized.length <= 1) return;
+    setDraft(normalized);
+    setComposerSendTintActive(true);
+    setCommandCenterHelpModalOpen(false);
+    setError(null);
+    requestAnimationFrame(() => draftComposerRef.current?.focus());
+  }, []);
+
+  const applyCommandDisplayAliases = useCallback(
+    function <T extends { messages: Message[] }>(conversation: T): T {
+      return conversation;
+    },
+    []
+  );
 
   const apiProxyLooksDown = useCallback((error: unknown): boolean => {
     const text = error instanceof Error ? error.message : String(error ?? "");
@@ -15592,43 +18464,15 @@ function HomeContent(): React.JSX.Element {
   const refreshDesktopFirstRunHealth = useCallback(async () => {
     setDesktopFirstRunChecklistBusy(true);
     try {
-      const [health, ollamaStatusPayload] = await Promise.all([
-        requestApiWithLoopbackFallback<{
-          services?: {
-            qdrant?: string;
-            ollama?: string;
-          };
-        }>("/api/health"),
-        requestApiWithLoopbackFallback<{
-          status?: {
-            cliInstalled?: boolean;
-            appInstalled?: boolean;
-            serviceReachable?: boolean;
-            llama31Installed?: boolean;
-            canAutoInstallCli?: boolean;
-            installerUrl?: string;
-          };
-        }>("/api/setup/ollama-status"),
-      ]);
+      const health = await requestApiWithLoopbackFallback<{
+        services?: {
+          qdrant?: string;
+          ollama?: string;
+        };
+      }>("/api/health");
       setDesktopFirstRunHealth(health);
-      if (ollamaStatusPayload?.status) {
-        setDesktopOllamaSetupStatus({
-          cliInstalled: ollamaStatusPayload.status.cliInstalled === true,
-          appInstalled: ollamaStatusPayload.status.appInstalled === true,
-          serviceReachable: ollamaStatusPayload.status.serviceReachable === true,
-          llama31Installed: ollamaStatusPayload.status.llama31Installed === true,
-          canAutoInstallCli: ollamaStatusPayload.status.canAutoInstallCli === true,
-          installerUrl:
-            typeof ollamaStatusPayload.status.installerUrl === "string"
-              ? ollamaStatusPayload.status.installerUrl
-              : "https://ollama.com/download",
-        });
-      } else {
-        setDesktopOllamaSetupStatus(null);
-      }
     } catch {
       setDesktopFirstRunHealth(null);
-      setDesktopOllamaSetupStatus(null);
     } finally {
       setDesktopFirstRunChecklistBusy(false);
     }
@@ -15660,55 +18504,6 @@ function HomeContent(): React.JSX.Element {
     }
   }, [refreshDesktopFirstRunHealth, requestApiWithLoopbackFallback]);
 
-  const installDesktopOllamaCliAndModel = useCallback(async () => {
-    setDesktopOllamaInstallBusy(true);
-    setError(null);
-    try {
-      const result = await requestApiWithLoopbackFallback<{
-        steps?: string[];
-        status?: {
-          cliInstalled?: boolean;
-          appInstalled?: boolean;
-          serviceReachable?: boolean;
-          llama31Installed?: boolean;
-          canAutoInstallCli?: boolean;
-          installerUrl?: string;
-        };
-        health?: {
-          services?: {
-            qdrant?: string;
-            ollama?: string;
-          };
-        };
-      }>("/api/setup/ollama-install", { method: "POST" });
-      if (result.steps && result.steps.length > 0) {
-        setDesktopFirstRunAutoSetupSteps(result.steps);
-      }
-      if (result.health) {
-        setDesktopFirstRunHealth(result.health);
-      }
-      if (result.status) {
-        setDesktopOllamaSetupStatus({
-          cliInstalled: result.status.cliInstalled === true,
-          appInstalled: result.status.appInstalled === true,
-          serviceReachable: result.status.serviceReachable === true,
-          llama31Installed: result.status.llama31Installed === true,
-          canAutoInstallCli: result.status.canAutoInstallCli === true,
-          installerUrl:
-            typeof result.status.installerUrl === "string"
-              ? result.status.installerUrl
-              : "https://ollama.com/download",
-        });
-      } else {
-        await refreshDesktopFirstRunHealth();
-      }
-    } catch (installError) {
-      setError(installError instanceof Error ? installError.message : "Ollama install failed.");
-    } finally {
-      setDesktopOllamaInstallBusy(false);
-    }
-  }, [refreshDesktopFirstRunHealth, requestApiWithLoopbackFallback]);
-
   const completeDesktopFirstRunChecklist = useCallback(() => {
     try {
       localStorage.setItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY, "done");
@@ -15725,7 +18520,6 @@ function HomeContent(): React.JSX.Element {
   const continueFromPreAuthChecklist = useCallback(() => {
     completeDesktopFirstRunChecklist();
     setPreAuthChecklistComplete(true);
-    setPreAuthChecklistStepIndex(0);
     setError(null);
   }, [completeDesktopFirstRunChecklist]);
 
@@ -15881,67 +18675,6 @@ function HomeContent(): React.JSX.Element {
     resizeObserver.observe(panelNode);
     return () => resizeObserver.disconnect();
   }, [devToolsOpen, viewportHeight, viewportWidth]);
-
-  // Hydrate the dev-tools button position from localStorage on mount. We mark
-  // the position as "custom" before the viewport-anchor effect runs so the
-  // saved spot wins over the default bottom-right anchor.
-  useEffect(() => {
-    const stored = readStoredDevToolsButtonPosition();
-    if (stored) {
-      devToolsButtonHasCustomPositionRef.current = true;
-      setDevToolsButtonPosition(stored);
-    }
-    devToolsButtonPositionHydratedRef.current = true;
-  }, []);
-
-  useEffect(() => {
-    const buttonNode = devToolsButtonRef.current;
-    const rect = buttonNode?.getBoundingClientRect();
-    const buttonWidth = rect?.width ?? DEV_TOOLS_BUTTON_SIZE;
-    const buttonHeight = rect?.height ?? DEV_TOOLS_BUTTON_SIZE;
-
-    setDevToolsButtonPosition((position) => {
-      const anchoredPosition = devToolsButtonHasCustomPositionRef.current
-        ? position
-        : {
-            x: viewportWidth - buttonWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-            y: viewportHeight - buttonHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-          };
-      const next = clampDevToolsPanelPosition(
-        anchoredPosition.x,
-        anchoredPosition.y,
-        buttonWidth,
-        buttonHeight,
-        viewportWidth,
-        viewportHeight
-      );
-      return next.x === position.x && next.y === position.y ? position : next;
-    });
-  }, [viewportHeight, viewportWidth]);
-
-  useEffect(() => {
-    const buttonNode = devToolsButtonRef.current;
-    if (!buttonNode) return;
-    buttonNode.style.left = `${devToolsButtonPosition.x}px`;
-    buttonNode.style.top = `${devToolsButtonPosition.y}px`;
-  }, [devToolsButtonPosition]);
-
-  // Persist the dev-tools button position whenever it changes, but only
-  // after hydration (so we don't overwrite the saved spot with the default
-  // anchor on first paint) and only once the user has actually placed it.
-  useEffect(() => {
-    if (!devToolsButtonPositionHydratedRef.current) return;
-    if (!devToolsButtonHasCustomPositionRef.current) return;
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        PRISM_DEV_TOOLS_BUTTON_POSITION_STORAGE_KEY,
-        JSON.stringify(devToolsButtonPosition)
-      );
-    } catch {
-      // private mode / quota — placement just won't survive reload
-    }
-  }, [devToolsButtonPosition]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -16101,6 +18834,7 @@ function HomeContent(): React.JSX.Element {
     () => (resolvedTheme === "light" ? styles.themeLight : styles.themeDark),
     [resolvedTheme]
   );
+  const settingsModalBackdropClassName = `${styles.settingsAboutModalBackdrop} ${themeClass}`;
 
   useEffect(() => {
     if (panel !== "settings") return;
@@ -16115,7 +18849,7 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearTimeout(timer);
   }, [panel, secondaryOllamaDraftHost]);
 
-  // Images panel reads ComfyUI checkpoints from GET /api/models; refresh when opening the panel
+  // Images panel reads ComfyUI workflows from GET /api/models; refresh when opening the panel
   // or when the ComfyUI URL in Settings changes so the picker stays in sync with the status line.
   useEffect(() => {
     if (panel !== "images") return;
@@ -16164,6 +18898,73 @@ function HomeContent(): React.JSX.Element {
   const privateChatActive = detail?.incognito === true || pendingIncognito;
   const appWidePrivateMode = privateChatActive || imagePrivateMode;
 
+  function isPrivateGeneratedImageHidden(imageIdRaw: string | null | undefined): boolean {
+    const imageId = imageIdRaw?.trim();
+    return Boolean(
+      imageId &&
+        imagePrivateGeneratedIds.includes(imageId) &&
+        !imagePrivateRevealedIds.has(imageId)
+    );
+  }
+
+  function revealPrivateGeneratedImage(imageIdRaw: string | null | undefined): void {
+    const imageId = imageIdRaw?.trim();
+    if (!imageId) return;
+    setImagePrivateRevealedIds((current) => {
+      if (current.has(imageId)) return current;
+      const next = new Set(current);
+      next.add(imageId);
+      return next;
+    });
+  }
+
+  function renderAssistantSentGeneratedImage(
+    sentGeneratedImage: SentGeneratedImagePayload
+  ): React.ReactElement {
+    const privateBlurred = isPrivateGeneratedImageHidden(sentGeneratedImage.imageId);
+    const image = (
+      <>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={apiGeneratedImageThumbUrl(sentGeneratedImage.imageId)}
+          alt={
+            privateBlurred
+              ? "Private generated image hidden"
+              : sentGeneratedImage.prompt
+          }
+          loading="lazy"
+          decoding="async"
+          className={styles.assistantSentImage}
+        />
+        {privateBlurred ? (
+          <span className={styles.assistantSentImagePrivateOverlay} aria-hidden="true">
+            Private image hidden - click to reveal
+          </span>
+        ) : null}
+      </>
+    );
+    return (
+      <figure
+        className={`${styles.assistantSentImageWrap} ${
+          privateBlurred ? styles.assistantSentImageWrapPrivateBlurred : ""
+        }`}
+      >
+        {privateBlurred ? (
+          <button
+            type="button"
+            className={styles.assistantSentImageButton}
+            onClick={() => revealPrivateGeneratedImage(sentGeneratedImage.imageId)}
+            aria-label="Private image hidden. Click to reveal image."
+          >
+            {image}
+          </button>
+        ) : (
+          image
+        )}
+      </figure>
+    );
+  }
+
   const visualBotSelection = useMemo<{
     botId: string | null;
     explicitDefault: boolean;
@@ -16188,8 +18989,11 @@ function HomeContent(): React.JSX.Element {
     }
     if (view === "sandbox") {
       if (detail) {
+        // Sandbox picker controls the "next bot to speak" identity.
+        // Respect that selection immediately (including explicit Default/null)
+        // instead of pinning the shell to the last speaker.
         const conversationVisualBotId =
-          detail.lastBotId ?? detail.botId ?? selectedBotId;
+          selectedBotId ?? null;
         return {
           botId: conversationVisualBotId,
           explicitDefault: conversationVisualBotId === null,
@@ -16247,7 +19051,7 @@ function HomeContent(): React.JSX.Element {
    */
   const effectivePreferredProvider = useMemo<Provider>(() => {
     if (activeBot?.online_enabled === 0) return "local";
-    return settings?.preferredProvider === "openai" ? "openai" : "local";
+    return settings?.preferredProvider ?? "local";
   }, [activeBot, settings?.preferredProvider]);
   /** Chat Images panel: visual bot is often null for Prism-default chats; use conversation locks instead. */
   const chatScopedGalleryBotId = useMemo(() => {
@@ -16358,7 +19162,7 @@ function HomeContent(): React.JSX.Element {
       : 0;
   const imageGenLocalInflight =
     activeImageGenInflightCount > 0 &&
-    (activeImageGenUiContext?.provider ?? effectivePreferredProvider) !== "openai";
+    (activeImageGenUiContext?.provider ?? effectivePreferredProvider) === "local";
 
   useEffect(() => {
     if (activeImageGenInflightCount <= 0) {
@@ -16431,23 +19235,41 @@ function HomeContent(): React.JSX.Element {
     return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
   }, [bots, composeBotAccentId, resolvedTheme]);
 
-  /** Bot whose preferred models inform the "Auto" subtitle in compose model pickers. */
-  const composeBotForAutoModelMeta = useMemo<Bot | null>(() => {
-    if (composeBotAccentId === null) return null;
-    return bots.find((b) => b.id === composeBotAccentId) ?? null;
-  }, [bots, composeBotAccentId]);
+  const nextZenUserMessagePrismColor = useMemo<
+    (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number] | null
+  >(() => {
+    if (view !== "chat") return null;
+    const userMessageCount =
+      detail?.messages.reduce(
+        (count, message) => count + (message.role === "user" ? 1 : 0),
+        0
+      ) ?? 0;
+    return ZEN_USER_MESSAGE_PRISM_PALETTE[
+      userMessageCount % ZEN_USER_MESSAGE_PRISM_PALETTE.length
+    ]!;
+  }, [detail?.messages, view]);
 
   const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!selectedComposeBotAccent && mobileKeyboardInset <= 0) return undefined;
+    if (
+      !selectedComposeBotAccent &&
+      !nextZenUserMessagePrismColor &&
+      mobileKeyboardInset <= 0
+    ) {
+      return undefined;
+    }
     const style = {} as React.CSSProperties & Record<string, string>;
     if (selectedComposeBotAccent) {
       style["--compose-bot-color"] = selectedComposeBotAccent;
+    }
+    if (nextZenUserMessagePrismColor) {
+      style["--compose-user-send-color-bright"] = nextZenUserMessagePrismColor.bright;
+      style["--compose-user-send-color-dark"] = nextZenUserMessagePrismColor.dark;
     }
     if (mobileKeyboardInset > 0) {
       style["--compose-keyboard-inset"] = `${mobileKeyboardInset}px`;
     }
     return style;
-  }, [mobileKeyboardInset, selectedComposeBotAccent]);
+  }, [mobileKeyboardInset, nextZenUserMessagePrismColor, selectedComposeBotAccent]);
 
   const privateChatButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!selectedComposeBotAccent) return undefined;
@@ -16527,22 +19349,34 @@ function HomeContent(): React.JSX.Element {
       color: null,
     };
   }, [detail, activeBot, defaultConversationUsesPrismIdentity]);
+  const onlineChatModelOptions = useMemo(
+    () => onlineModelOptionsForPicker(modelCatalog, settings),
+    [modelCatalog, settings]
+  );
   const headerConversationTitle = useMemo(() => {
     if (view === "sandbox") {
       const sandboxTitle = detail?.title?.trim();
       return sandboxTitle && sandboxTitle.length > 0 ? sandboxTitle : null;
     }
-    const modelProvider: Provider =
-      effectivePreferredProvider === "openai" ? "openai" : "local";
-    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const visibleModelChoice = resolvedChoice.modelChoice;
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
       settings,
-      rawModelChoice
-    );
-    const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      responseMode,
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
-      modelProvider
+      resolvedChoice.provider
     );
     const selectedModel = modelOptions.find((model) => model.id === visibleModelChoice);
     const modelTitle =
@@ -16555,7 +19389,9 @@ function HomeContent(): React.JSX.Element {
     chatModelChoiceByProvider,
     detail?.title,
     modelCatalog,
+    onlineChatModelOptions,
     settings,
+    effectivePreferredProvider,
     view,
   ]);
   const shouldShowHeaderConversationTitle = Boolean(headerConversationTitle);
@@ -16570,16 +19406,51 @@ function HomeContent(): React.JSX.Element {
         id: entry.id,
         label: entry.label,
         provider: "openai" as const,
-        isDefault: entry.id === "dall-e-3",
+        isDefault: "isDefault" in entry ? entry.isDefault : undefined,
       })),
     []
+  );
+  const elevenLabsImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI.map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        provider: "openai" as const,
+        disabledReason: ELEVENLABS_IMAGE_MENU_DISABLED_REASON,
+      })),
+    []
+  );
+  const onlineImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () => [
+      ...openAiImageModelCatalogEntries,
+      ...elevenLabsImageModelCatalogEntries,
+    ],
+    [openAiImageModelCatalogEntries, elevenLabsImageModelCatalogEntries]
+  );
+  const allComfyUiWorkflowCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      uniqueModelOptions(
+        comfyUiModelsPayload.allCheckpoints ?? comfyUiModelsPayload.checkpoints ?? []
+      ),
+    [comfyUiModelsPayload]
   );
   const localImageModelCatalogEntries = useMemo(() => {
     const base = availableModelOptionsForProvider(modelCatalog, settings, "local");
     const ollamaImage = catalogEntriesMatchingLocalImageHeuristic(base);
-    const comfy = comfyUiModelsPayload.checkpoints ?? [];
+    const hiddenComfyUiWorkflowIds = new Set(settings?.hiddenComfyUiWorkflowIds ?? []);
+    const comfy = allComfyUiWorkflowCatalogEntries.filter(
+      (model) => !hiddenComfyUiWorkflowIds.has(model.id)
+    );
     return [...ollamaImage, ...comfy];
-  }, [modelCatalog, settings, comfyUiModelsPayload]);
+  }, [allComfyUiWorkflowCatalogEntries, modelCatalog, settings]);
+  const visibleLocalImageModelIds = useMemo(
+    () => new Set(localImageModelCatalogEntries.map((model) => model.id)),
+    [localImageModelCatalogEntries]
+  );
+  const visibleLocalImageModelIdOrEmpty = (modelId: string | null | undefined): string => {
+    const trimmed = modelId?.trim() ?? "";
+    return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed) ? trimmed : "";
+  };
 
   const hubPreferredLocalOptions = useMemo(
     () =>
@@ -16591,12 +19462,22 @@ function HomeContent(): React.JSX.Element {
     [modelCatalog, settings]
   );
   const hubPreferredOnlineOptions = useMemo(
-    () =>
-      includeSelectedModelOption(
-        availableModelOptionsForProvider(modelCatalog, settings, "openai"),
-        normalizeModelChoice(settings?.preferredOnlineModel),
-        "openai"
-      ),
+    () => {
+      const choice = visiblePreferredOnlineModelChoice(
+        modelCatalog,
+        settings,
+        settings?.preferredOnlineModel
+      );
+      return includeSelectedOnlineModelOption(
+        modelCatalog,
+        settings,
+        uniqueModelOptions([
+          ...availableModelOptionsForProvider(modelCatalog, settings, "openai"),
+          ...availableModelOptionsForProvider(modelCatalog, settings, "anthropic"),
+        ]),
+        choice
+      );
+    },
     [modelCatalog, settings]
   );
   const prismInternalLlmCallOptions = useMemo(
@@ -16617,14 +19498,406 @@ function HomeContent(): React.JSX.Element {
       ),
     [modelCatalog, settings]
   );
+  const renderDefaultsAndFallbacksControls = (variant: "settings" | "modal"): React.ReactNode => {
+    if (!settings) return null;
+    const isModal = variant === "modal";
+    return (
+      <div
+        className={`${styles.settingsModelControls} ${
+          isModal ? styles.settingsModelControlsInModal : ""
+        }`}
+      >
+        <div className={styles.settingsSystemModelRow}>
+          <label>
+            Prism internal LLM
+            <select
+              value={(settings.prismDefaultLlmModel ?? "").trim()}
+              onChange={(event) => {
+                const next = event.target.value.trim();
+                setSettings((previous) =>
+                  previous ? { ...previous, prismDefaultLlmModel: next } : previous
+                );
+              }}
+            >
+              <option value="">
+                Auto - server auxiliary (
+                {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
+              </option>
+              {prismInternalLlmCallOptions.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Image-request LLM
+            <select
+              value={(settings.prismImageToolLlmModel ?? "").trim()}
+              onChange={(event) => {
+                const next = event.target.value.trim();
+                setSettings((previous) =>
+                  previous ? { ...previous, prismImageToolLlmModel: next } : previous
+                );
+                void persistPrismImageToolLlmModelField(next);
+              }}
+            >
+              <option value="">Auto - hub chat model</option>
+              {prismImageToolLlmCallOptions.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className={styles.settingsModelMatrix}>
+          <div className={styles.settingsModelPairHeader} aria-hidden="true">
+            <span>Use case</span>
+            <span>Offline</span>
+            <span>Online</span>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Chat replies</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={normalizeModelChoice(settings.preferredLocalModel)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          preferredLocalModel:
+                            next === AUTO_MODEL_CHOICE ? "" : next,
+                        }
+                      : previous
+                  );
+                }}
+              >
+                <option value={AUTO_MODEL_CHOICE}>Auto - first visible local model</option>
+                {hubPreferredLocalOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                    {model.hostLabel ? ` · ${model.hostLabel}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={visiblePreferredOnlineModelChoice(
+                  modelCatalog,
+                  settings,
+                  settings.preferredOnlineModel
+                )}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          preferredOnlineModel:
+                            next === AUTO_MODEL_CHOICE ? "" : next,
+                        }
+                      : previous
+                  );
+                }}
+              >
+                <option value={AUTO_MODEL_CHOICE}>Auto - first visible online model</option>
+                {hubPreferredOnlineOptions.map((model) => (
+                  <option key={`${model.provider}:${model.id}`} value={model.id}>
+                    {model.label} · {providerDisplayLabel(model.provider)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Image generation</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={visibleLocalImageModelSelectValue(settings.preferredLocalImageModel)}
+                disabled={localImageModelCatalogEntries.length === 0}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous ? { ...previous, preferredLocalImageModel: next } : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredLocalImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - first detected local image model</option>
+                {(
+                  (settings.preferredLocalImageModel?.trim() ?? "").length > 0
+                    ? includeSelectedLocalImageModelOption(
+                        localImageModelCatalogEntries,
+                        settings.preferredLocalImageModel
+                      )
+                    : localImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={
+                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                    ? normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel)
+                    : ""
+                }
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const stored =
+                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  setSettings((previous) =>
+                    previous ? { ...previous, preferredOpenAiImageModel: stored } : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredOpenAiImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - {DEFAULT_OPENAI_IMAGE_MODEL_ID}</option>
+                {(
+                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                    ? includeSelectedModelOption(
+                        openAiImageModelCatalogEntries,
+                        normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel),
+                        "openai"
+                      )
+                    : openAiImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className={styles.settingsModelPairRow}>
+            <div className={styles.settingsModelPairTitle}>
+              <span>Atmosphere wallpaper</span>
+            </div>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <select
+                value={visibleLocalImageModelSelectValue(
+                  settings.preferredZenWallpaperLocalImageModel
+                )}
+                disabled={localImageModelCatalogEntries.length === 0}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, preferredZenWallpaperLocalImageModel: next }
+                      : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredZenWallpaperLocalImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - use image default</option>
+                {(
+                  (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "").length > 0
+                    ? includeSelectedLocalImageModelOption(
+                        localImageModelCatalogEntries,
+                        settings.preferredZenWallpaperLocalImageModel
+                      )
+                    : localImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.settingsModelLane}>
+              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <select
+                value={
+                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
+                    ? normalizeOpenAiImageModelId(
+                        settings.preferredZenWallpaperOpenAiImageModel
+                      )
+                    : ""
+                }
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const stored =
+                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, preferredZenWallpaperOpenAiImageModel: stored }
+                      : previous
+                  );
+                  void persistAccountImageDefaultModelField(
+                    "preferredZenWallpaperOpenAiImageModel",
+                    next
+                  );
+                }}
+              >
+                <option value="">Auto - use image API default</option>
+                {(
+                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
+                    ? includeSelectedModelOption(
+                        openAiImageModelCatalogEntries,
+                        normalizeOpenAiImageModelId(
+                          settings.preferredZenWallpaperOpenAiImageModel
+                        ),
+                        "openai"
+                      )
+                    : openAiImageModelCatalogEntries
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.settingsFallbackControls}>
+          <div className={styles.settingsFallbackTitle}>Copyright fallback</div>
+          <div className={styles.settingsFallbackGrid}>
+            <label>
+              Text chat offline model
+              <select
+                value={settings.lenientLocalFallbackModel ?? ""}
+                onChange={(event) =>
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, lenientLocalFallbackModel: event.target.value }
+                      : previous
+                  )
+                }
+              >
+                <option value="">Disabled</option>
+                {includeSelectedModelOption(
+                  modelOptionsForProvider(modelCatalog, settings, "local"),
+                  settings.lenientLocalFallbackModel ?? "",
+                  "local"
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Images offline model
+              <select
+                value={visibleLocalImageModelSelectValue(
+                  settings.lenientLocalImageFallbackModel
+                )}
+                onChange={(event) =>
+                  setSettings((previous) =>
+                    previous
+                      ? { ...previous, lenientLocalImageFallbackModel: event.target.value }
+                      : previous
+                  )
+                }
+              >
+                <option value="">Disabled</option>
+                {includeSelectedLocalImageModelOption(
+                  localImageModelCatalogEntries,
+                  settings.lenientLocalImageFallbackModel
+                ).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
+          <span className={styles.settingsRangeHeader}>
+            <span>Atmosphere wallpaper opacity</span>
+            <span className={styles.settingsRangeValue}>
+              {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
+            </span>
+          </span>
+          <input
+            type="range"
+            min={MIN_ZEN_WALLPAPER_OPACITY}
+            max={MAX_ZEN_WALLPAPER_OPACITY}
+            step={0.01}
+            value={normalizeZenWallpaperOpacitySetting(settings.zenWallpaperOpacity)}
+            onChange={(event) => {
+              const next = normalizeZenWallpaperOpacitySetting(event.target.value);
+              setSettings((previous) =>
+                previous ? { ...previous, zenWallpaperOpacity: next } : previous
+              );
+              void persistZenWallpaperOpacityField(next);
+            }}
+          />
+        </label>
+
+        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+          <input
+            type="checkbox"
+            checked={settings.fallbackModelMessageStripe !== false}
+            onChange={(event) =>
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, fallbackModelMessageStripe: event.target.checked }
+                  : previous
+              )
+            }
+          />
+          Mark fallback replies
+        </label>
+      </div>
+    );
+  };
   const renderProviderModeToggle = (extraClassName = ""): React.ReactNode => {
     // The toggle simply mirrors `effectivePreferredProvider`, which is
     // already pinned to "local" when the active chat bot is offline-only.
     // We keep the lock indicator + disabled flag tied to that same source
     // of truth so it can never disagree with the model pickers below it.
     const lockedByActiveBot = activeBot?.online_enabled === 0;
-    const isLocal = effectivePreferredProvider === "local";
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
     const providerDisabled = !settings || lockedByActiveBot;
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const lockTitle = lockedByActiveBot
       ? `🔒 Locked to LOCAL — ${activeBot?.name ?? "this bot"} is set to Offline only.`
       : null;
@@ -16644,18 +19917,16 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByActiveBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            void switchProvider(isLocal ? "openai" : "local");
+            void switchProvider(nextResolvedProvider);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : isLocal
-                ? "Response mode: Local. Click to switch to Online."
-                : "Response mode: Online. Click to switch to Local."
+              : `Response mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
+          title={lockTitle ?? `Switch to ${nextModeLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -16679,7 +19950,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {isLocal ? "LOCAL" : "ONLINE"}
+              {responseModeShortLabel(responseMode)}
             </span>
           </span>
         </button>
@@ -16696,7 +19967,22 @@ function HomeContent(): React.JSX.Element {
    *  bodies never disagree with the visible state. */
   const renderCoffeeProviderModeToggle = (): React.ReactNode => {
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
-    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
+    const effectiveCoffeeProvider = lockedByProtectedBot ? "local" : coffeeProvider;
+    const responseMode = responseModeForProvider(effectiveCoffeeProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: effectiveCoffeeProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const providerDisabled = !settings || lockedByProtectedBot;
     const lockTitle = lockedByProtectedBot
       ? "🔒 Locked to LOCAL — at least one seated bot is set to Offline only."
@@ -16717,19 +20003,17 @@ function HomeContent(): React.JSX.Element {
           data-protected={lockedByProtectedBot ? "true" : undefined}
           onClick={() => {
             if (providerDisabled) return;
-            setCoffeeProvider(isLocal ? "openai" : "local");
+            setCoffeeProvider(nextResolvedProvider);
             setCoffeeProviderTouched(true);
           }}
           aria-label={
             lockTitle
               ? `${lockTitle} Toggle disabled.`
-              : isLocal
-                ? "Response mode: Local. Click to switch to Online."
-                : "Response mode: Online. Click to switch to Local."
+              : `Response mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
           }
           aria-pressed={!isLocal}
           aria-disabled={providerDisabled}
-          title={lockTitle ?? (isLocal ? "Switch to Online" : "Switch to Local")}
+          title={lockTitle ?? `Switch to ${nextModeLabel}`}
           disabled={providerDisabled}
         >
           <span
@@ -16753,7 +20037,7 @@ function HomeContent(): React.JSX.Element {
               />
             )}
             <span className={styles.modeThumbLabel}>
-              {isLocal ? "LOCAL" : "ONLINE"}
+              {responseModeShortLabel(responseMode)}
             </span>
           </span>
         </button>
@@ -16763,15 +20047,26 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeHeaderModelPicker = (): React.ReactNode => {
     if (!settings) return null;
     const lockedByProtectedBot = coffeeAnyOfflineProtected;
-    const isLocal = lockedByProtectedBot ? true : coffeeProvider === "local";
-    const modelProvider: Provider = isLocal ? "local" : "openai";
-    const rawModelChoice = coffeeModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
+    const effectiveProvider = lockedByProtectedBot ? "local" : coffeeProvider;
+    const responseMode = responseModeForProvider(effectiveProvider);
+    const isLocal = responseMode === "local";
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectiveProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const modelProvider = resolvedChoice.provider;
+    const visibleModelChoice = resolvedChoice.modelChoice;
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
       settings,
-      rawModelChoice
-    );
-    const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      responseMode,
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
     );
@@ -16779,45 +20074,77 @@ function HomeContent(): React.JSX.Element {
       <ComposerModelPicker
         value={visibleModelChoice}
         onChange={(nextChoice) => {
+          const appliedOnline =
+            responseMode === "online"
+              ? applyOnlineModelChoice({
+                  currentChoices: coffeeModelChoiceByProvider,
+                  nextChoice,
+                  onlineOptions: onlineChatModelOptions,
+                  providerPreference: effectiveProvider,
+                })
+              : null;
           setCoffeeModelChoiceByProvider((previous) => {
-            const next = { ...previous, [modelProvider]: nextChoice };
+            const next =
+              responseMode === "local"
+                ? { ...previous, local: nextChoice }
+                : applyOnlineModelChoice({
+                    currentChoices: previous,
+                    nextChoice,
+                    onlineOptions: onlineChatModelOptions,
+                    providerPreference: effectiveProvider,
+                  }).choices;
             persistCoffeeModelChoicesForScope(next);
             return next;
           });
+          if (appliedOnline) {
+            setCoffeeProvider(appliedOnline.provider);
+            setCoffeeProviderTouched(true);
+          }
         }}
         options={modelOptions}
-        provider={modelProvider}
+        provider={isLocal ? "local" : "online"}
         disabled={coffeeBusy || coffeeAutoBusy}
-        title={`Coffee model (${isLocal ? "LOCAL" : "ONLINE"} — overrides each seated bot)`}
-        ariaLabel={`Coffee session model for ${isLocal ? "local" : "online"} replies`}
+        title={`Coffee model (${responseModeShortLabel(responseMode)} — overrides each seated bot)`}
+        ariaLabel={`Coffee session model for ${
+          isLocal ? "local" : "online"
+        } replies`}
         placement="down"
         minMenuWidthPx={180}
-        autoOptionMetaOverride={
-          modelProvider === "local"
-            ? "Per-bot default local model when Auto"
-            : "Per-bot default online model when Auto"
-        }
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
-          modelProvider
+          isLocal ? "local" : "online"
         )}
       />
     );
   };
-  const renderHeaderModelPicker = (): React.ReactNode => {
-    if (!effectiveChatPresentation) return null;
+  const renderHeaderModelPicker = (
+    options: {
+      modelMenuClassName?: string;
+      modelMenuWidthPx?: number;
+    } = {}
+  ): React.ReactNode => {
     // Use the effective provider so the picker shows local options whenever
     // the active bot is locked offline-only — even if the user's saved
     // global preference is online.
-    const isLocal = effectivePreferredProvider !== "openai";
-    const modelProvider: Provider = isLocal ? "local" : "openai";
-    const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-    const visibleModelChoice = visibleModelChoiceForProvider(
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const isLocal = responseMode === "local";
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const modelProvider = resolvedChoice.provider;
+    const visibleModelChoice = resolvedChoice.modelChoice;
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
       settings,
-      rawModelChoice
-    );
-    const modelOptions = includeSelectedModelOption(
-      availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+      responseMode,
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
     );
@@ -16825,17 +20152,59 @@ function HomeContent(): React.JSX.Element {
     const botDisabled = view === "chat" ? !detail : false;
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     return (
-      <div
-        className={`${styles.chatHeaderModelPicker} ${
-          headerTitleCollapsedForAccordion ? styles.chatHeaderTitleCollapsed : ""
-        }`}
-      >
-        {view === "chat" && bots.length > 0 ? (
+      <div className={styles.chatHeaderModelPicker}>
+        {renderProviderModeToggle(styles.chatHeaderModeToggle)}
+        <ComposerModelPicker
+          value={visibleModelChoice}
+          onChange={(nextChoice) => {
+            const appliedOnline =
+              responseMode === "online"
+                ? applyOnlineModelChoice({
+                    currentChoices: chatModelChoiceByProvider,
+                    nextChoice,
+                    onlineOptions: onlineChatModelOptions,
+                    providerPreference: effectivePreferredProvider,
+                  })
+                : null;
+            setChatModelChoiceByProvider((previous) => {
+              const next =
+                responseMode === "local"
+                  ? { ...previous, local: nextChoice }
+                  : applyOnlineModelChoice({
+                      currentChoices: previous,
+                      nextChoice,
+                      onlineOptions: onlineChatModelOptions,
+                      providerPreference: effectivePreferredProvider,
+                    }).choices;
+              persistChatModelChoicesForActiveScope(next);
+              return next;
+            });
+            if (appliedOnline) {
+              void switchProvider(appliedOnline.provider);
+            }
+          }}
+          options={modelOptions}
+          provider={isLocal ? "local" : "online"}
+          disabled={!settings || pendingReplyVisible}
+          title={`Model for ${responseModeShortLabel(responseMode)} replies`}
+          ariaLabel={`Model for ${
+            isLocal ? "local" : "online"
+          } replies`}
+          placement="down"
+          minMenuWidthPx={options.modelMenuWidthPx ?? 180}
+          menuClassName={options.modelMenuClassName}
+          settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+            settings,
+            isLocal ? "local" : "online"
+          )}
+        />
+        {view === "sandbox" && bots.length > 0 ? (
           <ComposerBotPicker
             value={selectedBotId ?? ""}
-            onChange={(next) => setSelectedBotId(next || null)}
+            onChange={handleComposerBotSelectionChange}
             bots={botPickerBots}
             resolvedTheme={resolvedTheme}
+            placement="down"
             disabled={botDisabled}
             title={
               !detail
@@ -16844,7 +20213,7 @@ function HomeContent(): React.JSX.Element {
             }
             ariaLabel="Bot for the next message"
             showName={botHasCommenced}
-            enableFilters={botHasCommenced}
+            enableFilters={view === "sandbox" || botHasCommenced}
             hueFilterCenter={hueFilterCenter}
             onHueChange={setHueFilterCenter}
             hueLensAvailable={hueLensAvailable}
@@ -16852,34 +20221,6 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackSegments={hueLensTrackSegments}
           />
         ) : null}
-        {renderProviderModeToggle(styles.chatHeaderModeToggle)}
-        <ComposerModelPicker
-          value={visibleModelChoice}
-          onChange={(nextChoice) => {
-            setChatModelChoiceByProvider((previous) => {
-              const next = { ...previous, [modelProvider]: nextChoice };
-              persistChatModelChoicesForActiveScope(next);
-              return next;
-            });
-          }}
-          options={modelOptions}
-          provider={modelProvider}
-          disabled={!settings || pendingReplyVisible}
-          title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
-          ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
-          placement="down"
-          minMenuWidthPx={180}
-          autoOptionMetaOverride={composeAutoOptionMetaLine(
-            modelCatalog,
-            settings,
-            modelProvider,
-            composeBotForAutoModelMeta
-          )}
-          settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-            settings,
-            modelProvider
-          )}
-        />
       </div>
     );
   };
@@ -16891,14 +20232,10 @@ function HomeContent(): React.JSX.Element {
     // on `imagePanelBot` independently when scope === "bot"; for now the
     // chat-context lock covers the common case (user opens Images while
     // chatting with a protected bot).
-    const isLocal = effectivePreferredProvider !== "openai";
+    const isLocal = effectivePreferredProvider === "local";
     const modelProvider: Provider = isLocal ? "local" : "openai";
     const rawChoice = imageGenModelChoiceByProvider[modelProvider];
     const trimmedChoice = rawChoice?.trim() ?? "";
-    const imagesAutoMeta =
-      imagePanelScope === "bot" && imagePanelBot
-        ? `Per-bot checkpoint, then Settings, then catalog (${imagePanelBot.name})`
-        : "Per-bot checkpoint, then Settings, then catalog";
 
     if (modelProvider === "local" && localImageModelCatalogEntries.length === 0) {
       return (
@@ -16936,7 +20273,7 @@ function HomeContent(): React.JSX.Element {
           : trimmedChoice
         : DEFAULT_OPENAI_IMAGE_MODEL_ID;
     const onlineOpts = includeSelectedModelOption(
-      openAiImageModelCatalogEntries,
+      onlineImageModelCatalogEntries,
       normalizeOpenAiImageModelId(openAiSeedForMenu),
       "openai"
     );
@@ -16946,10 +20283,9 @@ function HomeContent(): React.JSX.Element {
         : localImageModelCatalogEntries.some((entry) => entry.id === trimmedChoice)
           ? trimmedChoice
           : localImageModelCatalogEntries[0]?.id ?? AUTO_MODEL_CHOICE;
-    const localOpts = includeSelectedModelOption(
+    const localOpts = includeSelectedLocalImageModelOption(
       localImageModelCatalogEntries,
-      visibleLocalChoice,
-      "local"
+      visibleLocalChoice
     );
 
     const modelOptions = modelProvider === "openai" ? onlineOpts : localOpts;
@@ -16975,14 +20311,13 @@ function HomeContent(): React.JSX.Element {
             void persistPreferredImageModel(modelProvider, nextChoice);
           }}
           options={modelOptions}
-          provider={modelProvider}
+          provider={isLocal ? "local" : "online"}
           disabled={!settings}
           title={`Image model (${isLocal ? "LOCAL" : "ONLINE"})`}
           ariaLabel={`Image generation model for ${isLocal ? "local" : "online"}`}
           placement="down"
           minMenuWidthPx={180}
           showAutoOption
-          autoOptionMetaOverride={imagesAutoMeta}
           settingsDefaultModelId={imageSettingsSavedDefaultModelId(
             settings,
             modelProvider
@@ -17006,7 +20341,10 @@ function HomeContent(): React.JSX.Element {
       return conversations
         .filter((conversation) => {
           if (conversation.incognito) return false;
-          if (view === "sandbox" && conversation.mode === "chat") {
+          if (
+            view === "sandbox" &&
+            (conversation.mode === "zen" || conversation.mode === "chat")
+          ) {
             return false;
           }
           return true;
@@ -17161,6 +20499,61 @@ function HomeContent(): React.JSX.Element {
   }, [commandCenterCommands, commandCenterSelectedCommandId]);
 
   useEffect(() => {
+    if (!commandCenterSpecsCommandId) return;
+    const stillExists = commandCenterCommands.some(
+      (command) => command.id === commandCenterSpecsCommandId
+    );
+    if (!stillExists) setCommandCenterSpecsCommandId(null);
+  }, [commandCenterCommands, commandCenterSpecsCommandId]);
+
+  useEffect(() => {
+    if (!commandCenterSpecsCommandId) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setCommandCenterSpecsCommandId(null);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [commandCenterSpecsCommandId]);
+
+  useEffect(() => {
+    if (!commandCenterHelpModalOpen) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setCommandCenterHelpModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [commandCenterHelpModalOpen]);
+
+  useEffect(() => {
+    if (!expandedPromptShortcutMessageId || typeof document === "undefined") return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-prompt-shortcut-preview='true']")
+      ) {
+        return;
+      }
+      setExpandedPromptShortcutMessageId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setExpandedPromptShortcutMessageId(null);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [expandedPromptShortcutMessageId]);
+
+  useEffect(() => {
     if (!user) return;
     setConversationGroupOrder((previous) => {
       const next = previous.filter((key) => conversationGroupsByKey.has(key));
@@ -17192,108 +20585,17 @@ function HomeContent(): React.JSX.Element {
     }
   }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
-  useEffect(() => {
-    if (!user?.id) {
-      setSandboxZenMode(false);
-      return;
-    }
-    try {
-      if (typeof window === "undefined") return;
-      setSandboxZenMode(
-        window.localStorage.getItem(sandboxZenModeStorageKey(user.id)) === "1"
-      );
-    } catch {
-      setSandboxZenMode(false);
-    }
-  }, [user?.id]);
-
-  const setSandboxZenModePersisted = useCallback((next: boolean): void => {
-    setSandboxZenMode(next);
-    if (!user?.id) return;
-    try {
-      if (next) {
-        window.localStorage.setItem(sandboxZenModeStorageKey(user.id), "1");
-      } else {
-        window.localStorage.removeItem(sandboxZenModeStorageKey(user.id));
-      }
-    } catch {
-      /* non-fatal */
-    }
-  }, [user?.id]);
-
   const chatEphemeralMode = view === "chat";
-  const zenPresentationActive = view === "sandbox" && sandboxZenMode;
-  const effectiveChatPresentation = view === "chat" || zenPresentationActive;
+  const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
-  const chatMentionsEnabled = view !== "chat";
-  /** Autoscroll + dynamic type on chat-like surfaces (includes Sandbox focus layout). */
-  const assistantRevealActive = chatEphemeralMode || zenPresentationActive;
+  const chatMentionsEnabled = true;
+  /** Autoscroll + dynamic type on Zen's chat-like surface. */
+  const assistantRevealActive = chatEphemeralMode;
   /**
    * Word-at-a-time / token-scheduled reveals, fenced-code progressive unveil,
-   * and the tap-to-interrupt typing pill — Chat mode only (not Sandbox zen).
+   * and the tap-to-interrupt typing pill — Zen chat mode only.
    */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
-
-  useEffect(() => {
-    if (zenPresentationActive) {
-      setSidebarOpen(false);
-    }
-  }, [zenPresentationActive]);
-
-  // Focus layout persists in localStorage, but tying it only to Sandbox threads avoids
-  // carrying a chat-like zen affordance across Hub / Chat entries or unrelated threads.
-  useEffect(() => {
-    const zenThreadKey =
-      view === "sandbox"
-        ? (() => {
-            const dId = detail?.id;
-            const sel = selectedId;
-            const persistedConversationId =
-              dId !== undefined && dId !== "pending"
-                ? dId
-                : sel != null && sel !== "pending"
-                  ? sel
-                  : null;
-            if (persistedConversationId !== null) return persistedConversationId;
-            if (dId === "pending") return SANDBOX_ZEN_COMPOSE_SURFACE_KEY;
-            return null;
-          })()
-        : null;
-
-    if (view !== "sandbox") {
-      if (sandboxZenMode) {
-        setSandboxZenModePersisted(false);
-      }
-      sandboxZenExitThreadKeyRef.current = null;
-      return;
-    }
-
-    const prevKey = sandboxZenExitThreadKeyRef.current;
-    sandboxZenExitThreadKeyRef.current = zenThreadKey;
-
-    if (prevKey === null || zenThreadKey === prevKey) {
-      return;
-    }
-
-    const committedComposeDraft =
-      prevKey === SANDBOX_ZEN_COMPOSE_SURFACE_KEY &&
-      zenThreadKey !== null &&
-      zenThreadKey !== SANDBOX_ZEN_COMPOSE_SURFACE_KEY;
-
-    if (committedComposeDraft) {
-      return;
-    }
-
-    if (sandboxZenMode) {
-      setSandboxZenModePersisted(false);
-    }
-  }, [
-    view,
-    detail?.id,
-    selectedId,
-    sandboxZenMode,
-    setSandboxZenModePersisted,
-  ]);
 
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
@@ -17365,10 +20667,6 @@ function HomeContent(): React.JSX.Element {
         chatArchiveLoadTimerByConversationRef.current.delete(detail.id);
       }
       setChatArchiveRevealEpoch((value) => value + 1);
-      setDetail((current) => {
-        if (!current || current.id !== detail.id) return current;
-        return trimConversationToActiveTurn(current);
-      });
     } else {
       // Non-ephemeral surfaces: aborting a send leaves the optimistic `pending-*`
       // user row in memory — strip it so Resend / Edit never POST /rewind with a
@@ -17386,6 +20684,59 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
   }, [chatEphemeralMode, detail?.id]);
+
+  const clearPendingReplyState = useCallback((): void => {
+    setPendingReply(false);
+    setPendingReplyStartedAtMs(null);
+    setPendingReplyDenialRisk(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+  }, []);
+
+  const clearZenInitialStarterSurface = useCallback((): void => {
+    setChatAutoRestoreSuppressed(true);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    setComposerPrimed(false);
+    setStarterComposerRevealed(false);
+    setAskQuestionComposerRevealed(false);
+    setConversationStarterPrompts(null);
+    setChatStartupSummary(null);
+    zenInitialStarterLiveEnvelopeRef.current = null;
+    chatSummaryRefreshMarkerRef.current = null;
+    setError(null);
+  }, []);
+
+  const handleZenInitialThinkingCancel = useCallback(
+    (event?: React.MouseEvent<HTMLButtonElement>): void => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      const starterRequest = zenInitialStarterRequestRef.current;
+      const activeController = pendingReplyAbortControllerRef.current;
+      if (starterRequest && activeController === starterRequest.controller) {
+        starterRequest.cancelled = true;
+        pendingReplyAbortControllerRef.current = null;
+        clearPendingReplyState();
+      } else {
+        zenInitialThinkingCancelControllerRef.current = activeController;
+        stopPendingReply();
+      }
+      clearZenInitialStarterSurface();
+    },
+    [clearPendingReplyState, clearZenInitialStarterSurface, stopPendingReply]
+  );
+  const resolveCommittedChatFontLineCount = useCallback(
+    (temporalKey: string | null, lineCount: number): number => {
+      if (!temporalKey) return lineCount;
+      const committedLineCount = chatCommittedFontLineCountByKeyRef.current.get(temporalKey);
+      return Math.max(lineCount, committedLineCount ?? 0);
+    },
+    []
+  );
   const assistantWordByWordMode = chatAssistantTypingMechanicsActive;
   const chatMessageTemporalById = useMemo(() => {
     const temporal = new Map<string, { phase: ChatMessageTemporalPhase; ageMs: number }>();
@@ -17467,7 +20818,11 @@ function HomeContent(): React.JSX.Element {
         if (!revealArchived) continue;
       }
       const revealGatedAssistant =
-        message.role === "assistant" && message.id === latestAssistantId;
+        message.role === "assistant" &&
+        message.id === latestAssistantId &&
+        chatAssistantRevealEligibleKeysRef.current.has(temporalKey) &&
+        !chatCompletedRevealKeysRef.current.has(temporalKey) &&
+        !chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey);
       const estimatedRevealDoneAt = revealGatedAssistant
         ? firstSeenAt +
           resolveRevealDurationMsForTokens(
@@ -17503,34 +20858,62 @@ function HomeContent(): React.JSX.Element {
     detail?.messages,
     chatArchiveRevealEpoch,
   ]);
-  const latestUserMessageIndex = useMemo<number>(() => {
-    const source = detail?.messages ?? [];
-    for (let i = source.length - 1; i >= 0; i -= 1) {
-      if (source[i]?.role === "user") return i;
-    }
-    return -1;
-  }, [detail?.messages]);
   const chatArchiveLoadingActive =
     Boolean(chatEphemeralMode && detail?.id) &&
     (detail?.id ? chatArchiveLoadingByConversationRef.current.get(detail.id) === true : false);
   const visibleDetailMessages = useMemo(() => {
     const source = detail?.messages ?? [];
     if (!chatEphemeralMode) return source;
-    if (!detail?.id) return source;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    if (revealArchived || latestUserMessageIndex <= 0) return source;
-    // Keep only the active turn in memory until the user requests older
-    // history by scrolling upward.
-    return source.slice(latestUserMessageIndex);
-  }, [
-    chatEphemeralMode,
-    detail?.id,
-    detail?.messages,
-    latestUserMessageIndex,
-    chatArchiveRevealEpoch,
-  ]);
+    return source;
+  }, [chatEphemeralMode, detail?.messages]);
+  const zenUserMessagePrismColorById = useMemo(() => {
+    const colors = new Map<string, (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number]>();
+    if (view !== "chat" || !detail) return colors;
+    let userMessageIndex = 0;
+    for (const message of detail.messages) {
+      if (message.role !== "user") continue;
+      colors.set(
+        message.id,
+        ZEN_USER_MESSAGE_PRISM_PALETTE[
+          userMessageIndex % ZEN_USER_MESSAGE_PRISM_PALETTE.length
+        ]!
+      );
+      userMessageIndex += 1;
+    }
+    return colors;
+  }, [view, detail?.messages]);
+  const zenEraBoundaryLabelByMessageId = useMemo(() => {
+    const labels = new Map<string, string>();
+    if (view !== "chat" || detail?.mode !== "zen") return labels;
+    const source = detail.messages;
+    for (let i = 1; i < source.length; i += 1) {
+      const previousMs = messageCreatedAtMs(source[i - 1]!);
+      const current = source[i]!;
+      const currentMs = messageCreatedAtMs(current);
+      if (previousMs === null || currentMs === null) continue;
+      if (currentMs - previousMs < ZEN_IDLE_ERA_GAP_MS) continue;
+      labels.set(current.id, formatZenEraBoundaryLabel(current));
+    }
+    return labels;
+  }, [view, detail?.mode, detail?.messages]);
+  const zenLatestIdleEraBoundaryMessageCount = useMemo(() => {
+    if (view !== "chat" || detail?.mode !== "zen") return null;
+    const source = detail.messages;
+    for (let i = source.length - 1; i > 0; i -= 1) {
+      const current = source[i]!;
+      if (current.role !== "user") continue;
+      const previousMs = messageCreatedAtMs(source[i - 1]!);
+      const currentMs = messageCreatedAtMs(current);
+      if (previousMs === null || currentMs === null) continue;
+      if (currentMs - previousMs >= ZEN_IDLE_ERA_GAP_MS) return i + 1;
+    }
+    return null;
+  }, [view, detail?.mode, detail?.messages]);
+  const chatStartupSummaryIsDefault =
+    chatStartupSummary === DEFAULT_CHAT_STARTUP_SUMMARY;
   const chatStartupSummaryVisible = Boolean(
     chatStartupSummary &&
+    !chatStartupSummaryIsDefault &&
     !pendingReplyVisible &&
     (!detail || visibleDetailMessages.length === 0)
   );
@@ -17541,6 +20924,24 @@ function HomeContent(): React.JSX.Element {
     }
     return null;
   }, [detail?.messages]);
+  const markLatestAssistantRevealEligible = useCallback(
+    (conversation: ConversationDetail): void => {
+      if (!chatAssistantTypingMechanicsActive || !conversation.id) return;
+      const latestAssistant = (() => {
+        for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+          if (conversation.messages[i]?.role === "assistant") return conversation.messages[i]!;
+        }
+        return null;
+      })();
+      if (!latestAssistant) return;
+      const revealKey = `${conversation.id}:${latestAssistant.id}`;
+      chatAssistantRevealEligibleKeysRef.current.add(revealKey);
+      chatCompletedRevealKeysRef.current.delete(revealKey);
+      chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+      chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+    },
+    [chatAssistantTypingMechanicsActive]
+  );
   const latestUserMessageId = useMemo<string | null>(() => {
     const source = detail?.messages ?? [];
     for (let i = source.length - 1; i >= 0; i -= 1) {
@@ -17559,29 +20960,10 @@ function HomeContent(): React.JSX.Element {
     if (message.role !== "user" || message.id !== latestUserMessageId) return false;
     const fadeKey = `${detail.id}:${message.id}`;
     const fadeStartAt = chatUserMessageFadeStartByKeyRef.current.get(fadeKey);
-    // First render of a newly inserted user row can happen before the
-    // post-send effect seeds this key; keep fade active during that frame
-    // so we never show a "pop in, then fade" flash.
-    if (fadeStartAt === undefined) return true;
+    // Restored Zen messages should never inherit the entrance fade. Without
+    // a seeded timestamp, the latest user row can remain visually dimmed.
+    if (fadeStartAt === undefined) return false;
     return Math.max(0, chatEphemeralNowMs - fadeStartAt) < CHAT_MODE_USER_MESSAGE_FADE_MS;
-  };
-  const resolveLatestUserAnchorFadeOpacity = (message: Message): number | null => {
-    if (!chatEphemeralMode || !detail?.id) return null;
-    if (message.role !== "user" || message.id !== latestUserMessageId) return null;
-    const fadeKey = `${detail.id}:${message.id}`;
-    const fadeStartAt = chatUserAnchorFadeStartByKeyRef.current.get(fadeKey);
-    if (fadeStartAt === undefined) return null;
-    const elapsedMs = Math.max(0, chatEphemeralNowMs - fadeStartAt);
-    const phaseOneProgress = Math.min(1, elapsedMs / CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
-    const phaseOneOpacity =
-      1 - (1 - CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY) * phaseOneProgress;
-    const phaseTwoElapsedMs = Math.max(0, elapsedMs - CHAT_MODE_USER_ANCHOR_FADE_DURATION_MS);
-    const phaseTwoProgress = Math.min(1, phaseTwoElapsedMs / CHAT_MODE_USER_ANCHOR_FADE_CONTINUE_MS);
-    return (
-      phaseOneOpacity -
-      (CHAT_MODE_USER_ANCHOR_FADE_MIN_OPACITY - CHAT_MODE_USER_ANCHOR_FADE_FINAL_OPACITY) *
-        phaseTwoProgress
-    );
   };
   const latestMessageRole =
     detail && detail.messages.length > 0
@@ -17666,6 +21048,7 @@ function HomeContent(): React.JSX.Element {
       chatLastScrollTopByConversationRef.current.delete(conversationId);
       chatLastScrollHeightByConversationRef.current.delete(conversationId);
       chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
+      chatAutoscrollUserDisarmedByConversationRef.current.delete(conversationId);
     },
     [setChatArchiveLoadingForConversation, setChatArchiveRevealForConversation]
   );
@@ -17676,16 +21059,22 @@ function HomeContent(): React.JSX.Element {
   const chatAssistantRevealInProgress = useMemo(() => {
     if (!chatAssistantTypingMechanicsActive || !detail?.id || !latestAssistantMessageId) return false;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
     if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
-    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
-    if (firstSeenAt === undefined) return false;
+    let firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey);
+    if (firstSeenAt === undefined) {
+      firstSeenAt = chatEphemeralNowMs;
+      chatMessageFirstSeenAtRef.current.set(revealKey, firstSeenAt);
+    }
     const latestAssistantMessage =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistantMessage) return false;
-    const latestAssistantMood = resolveMessageMoodKey(latestAssistantMessage);
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistantMessage));
-    const revealDurationMs = resolveRevealDurationMsForTokens(revealTokens, latestAssistantMood);
+    const revealDurationMs = resolveRevealDurationMsForTokens(
+      revealTokens,
+      DEFAULT_MESSAGE_MOOD
+    );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
@@ -17694,140 +21083,261 @@ function HomeContent(): React.JSX.Element {
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
-  const handleTypingIndicatorPress = useCallback((): void => {
-    if (pendingReplyVisible) {
-      stopPendingReply();
-      return;
-    }
+
+  type ActiveAssistantRevealInterruption = {
+    conversationId: string;
+    assistantMessageId: string;
+    revealKey: string;
+    interruptedText: string;
+    interruptionContent: string;
+    patchedDetail: ConversationDetail;
+  };
+
+  function prepareActiveAssistantRevealInterruption(): ActiveAssistantRevealInterruption | null {
     if (
       !chatAssistantTypingMechanicsActive ||
       !chatAssistantRevealInProgress ||
       !detail?.id ||
       !latestAssistantMessageId
-    ) return;
-    // Mid-typing cancel freezes reveal at the current token boundary.
-    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    ) {
+      return null;
+    }
     const latestAssistant =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
-    if (!latestAssistant) return;
+    if (!latestAssistant) return null;
+
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     const interruptedText = resolveMessageDisplayContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
-    const interruptedMood = resolveMessageMoodKey(latestAssistant);
-    const tokenTotal = Math.max(1, revealTokens.length);
-    const firstSeenAt =
-      chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
-    const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
     const visibleTokenCount = Math.min(
-      tokenTotal,
-      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, interruptedMood)
+      Math.max(1, revealTokens.length),
+      resolveVisibleTokenCountAtElapsedMs(
+        revealTokens,
+        Math.max(0, Date.now() - firstSeenAt),
+        latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD
+      )
     );
-    const interruptedSnippet = interruptedMidWordSnippet(
+    const interruptionContent = interruptedMidWordSnippet(
       interruptedText,
       visibleTokenCount
     );
-    chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
-    chatCompletedRevealKeysRef.current.add(revealKey);
-    // Freeze auto-scroll so the cut-off text stays where the user paused
-    // it. The "...interrupted again." follow-up will appear in flow without
-    // the dolly chasing the new content's tail. The pinned flag survives
-    // the loop's brief unmount/remount around the follow-up message.
-    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
-    chatScrollPinnedByConversationRef.current.set(detail.id, true);
-    const nextInterruptCount =
-      (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
-    chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
-    const previousInterruptionLine =
-      chatLastInterruptionLineByConversationRef.current.get(detail.id) ?? "";
-    const followup = interruptionFollowupLine({
-      baseMood: interruptedMood,
-      interruptCount: nextInterruptCount,
-      interruptedText,
-      previousLine: previousInterruptionLine,
-    });
-    chatLastInterruptionLineByConversationRef.current.set(detail.id, followup.line);
-    const interruptionMessageId = `interrupt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const followupMessage: Message = {
-      id: interruptionMessageId,
-      role: "assistant",
-      content: `\n... ${followup.line.trimStart()}`,
-      createdAt: new Date().toISOString(),
-      provider: latestAssistant.provider,
-      model: latestAssistant.model,
-      botName: latestAssistant.botName,
-      botColor: latestAssistant.botColor,
-      botGlyph: latestAssistant.botGlyph,
-      moodKey: followup.mood,
-      moodConfidence: latestAssistant.moodConfidence,
+    const interruptedAssistantIndex = detail.messages.findIndex(
+      (message) => message.id === latestAssistantMessageId
+    );
+    if (interruptedAssistantIndex < 0) return null;
+    const interruptedAssistant = detail.messages[interruptedAssistantIndex];
+    if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return null;
+    const patchedInterruptedAssistant: Message = {
+      ...interruptedAssistant,
+      content: interruptionContent,
+      moodKey: DEFAULT_MESSAGE_MOOD,
+      moodConfidence: undefined,
+      askQuestion: undefined,
+      sentGeneratedImage: undefined,
     };
-    if (chatEphemeralMode) {
-      hardResetChatArchiveStateForConversation(detail.id);
-    }
-    setDetail((current) => {
-      if (!current || current.id !== detail.id) return current;
-      const baseConversation = chatEphemeralMode
-        ? trimConversationToActiveTurn(current)
-        : current;
-      const interruptedConversationMessages = baseConversation.messages;
-      if (interruptedConversationMessages.length === 0) {
-        return current;
-      }
-      const interruptedAssistantIndex = interruptedConversationMessages.findIndex(
-        (message) => message.id === latestAssistantMessageId
-      );
-      if (interruptedAssistantIndex < 0) return current;
-      const interruptedAssistant = interruptedConversationMessages[interruptedAssistantIndex];
-      if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return current;
-      const patchedInterruptedAssistant: Message = {
-        ...interruptedAssistant,
-        content: interruptedSnippet,
-      };
-      return {
-        ...current,
+    return {
+      conversationId: detail.id,
+      assistantMessageId: latestAssistantMessageId,
+      revealKey,
+      interruptedText,
+      interruptionContent,
+      patchedDetail: {
+        ...detail,
         hasAssistantReply: true,
         messages: [
-          ...interruptedConversationMessages.slice(0, interruptedAssistantIndex),
+          ...detail.messages.slice(0, interruptedAssistantIndex),
           patchedInterruptedAssistant,
-          ...interruptedConversationMessages.slice(interruptedAssistantIndex + 1),
+          ...detail.messages.slice(interruptedAssistantIndex + 1),
         ],
-      };
-    });
-    window.setTimeout(() => {
-      setDetail((current) => {
-        if (!current || current.id !== detail.id) return current;
-        const baseConversation = chatEphemeralMode
-          ? trimConversationToActiveTurn(current)
-          : current;
-        // Avoid duplicate insertion if another interruption already appended this id.
-        if (baseConversation.messages.some((message) => message.id === interruptionMessageId)) {
-          return current;
-        }
-        return {
-          ...baseConversation,
-          hasAssistantReply: true,
-          messages: [...baseConversation.messages, followupMessage],
-        };
-      });
-    }, CHAT_MODE_INTERRUPTION_FOLLOWUP_DELAY_MS);
+      },
+    };
+  }
+
+  function applyActiveAssistantRevealInterruption(
+    interruption: ActiveAssistantRevealInterruption
+  ): Promise<void> | null {
+    if (pendingReplyVisible) {
+      setPendingReply(false);
+      setPendingReplyStartedAtMs(null);
+      setPendingReplyDenialRisk(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+      pendingReplyAbortControllerRef.current = null;
+    }
+    chatCommittedFontLineCountByKeyRef.current.set(
+      interruption.revealKey,
+      Math.max(
+        estimateVisualLineCount(interruption.interruptedText),
+        estimateVisualLineCount(interruption.interruptionContent),
+        chatCommittedFontLineCountByKeyRef.current.get(interruption.revealKey) ?? 0
+      )
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.delete(interruption.revealKey);
+    chatCompletedRevealKeysRef.current.add(interruption.revealKey);
+    chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
+    setStarterComposerRevealed(false);
+    setConversationStarterPrompts(null);
+    // Freeze auto-scroll so the pause marker stays where the user interrupted
+    // the reply instead of being chased by the dolly.
+    chatAutoscrollArmedByConversationRef.current.set(interruption.conversationId, false);
+    chatScrollPinnedByConversationRef.current.set(interruption.conversationId, true);
+    const nextInterruptCount =
+      (chatInterruptCountByConversationRef.current.get(interruption.conversationId) ?? 0) + 1;
+    chatInterruptCountByConversationRef.current.set(
+      interruption.conversationId,
+      nextInterruptCount
+    );
+    if (chatEphemeralMode) {
+      hardResetChatArchiveStateForConversation(interruption.conversationId);
+    }
+    setDetail((current) =>
+      current?.id === interruption.conversationId
+        ? interruption.patchedDetail
+        : current
+    );
     setChatEphemeralNowMs(Date.now());
+
+    if (
+      String(interruption.assistantMessageId).startsWith("pending-") ||
+      interruption.conversationId === "pending"
+    ) {
+      return null;
+    }
+    return api<{ ok: true }>(
+      `/api/messages/${encodeURIComponent(interruption.assistantMessageId)}/interrupt`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: interruption.interruptionContent }),
+      }
+    ).then(() => refreshOpenMemoryViews());
+  }
+
+  const handleTypingIndicatorPress = useCallback((): void => {
+    const interruption = prepareActiveAssistantRevealInterruption();
+    if (!interruption) {
+      if (pendingReplyVisible) {
+        stopPendingReply();
+      }
+      return;
+    }
+    const persistPromise = applyActiveAssistantRevealInterruption(interruption);
+    void persistPromise?.catch((err) => {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Prism was interrupted, but the saved thread could not be updated."
+      );
+    });
   }, [
     pendingReplyVisible,
     stopPendingReply,
-    chatEphemeralMode,
     chatAssistantRevealInProgress,
     detail?.id,
     detail?.messages,
-    chatEphemeralNowMs,
     latestAssistantMessageId,
     hardResetChatArchiveStateForConversation,
     chatAssistantTypingMechanicsActive,
+    refreshOpenMemoryViews,
   ]);
+
+  function finishActiveAssistantRevealForCompaction(): void {
+    if (
+      !chatAssistantTypingMechanicsActive ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) {
+      return;
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) return;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
+    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    chatCommittedFontLineCountByKeyRef.current.set(
+      revealKey,
+      Math.max(
+        estimateVisualLineCount(displayContent),
+        chatCommittedFontLineCountByKeyRef.current.get(revealKey) ?? 0
+      )
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+    chatCompletedRevealKeysRef.current.add(revealKey);
+    chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+    setChatEphemeralNowMs(Date.now());
+  }
+
+  function clearReplyWorkForManualCompaction(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    zenInitialThinkingCancelControllerRef.current = null;
+    manualCompactionCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+    stopPendingReply();
+    finishActiveAssistantRevealForCompaction();
+  }
+
+  const handleZenInitialReplyRevealCancel = useCallback(
+    (event?: React.MouseEvent<HTMLButtonElement>): void => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      const fallbackEnvelope =
+        detail && detail.messages.some((message) => message.role === "assistant")
+          ? ({
+              conversation: detail,
+              ...(conversationStarterPrompts?.conversationId === detail.id
+                ? { conversationStarters: conversationStarterPrompts.prompts }
+                : {}),
+            } satisfies ChatPostEnvelope)
+          : null;
+      const envelope = zenInitialStarterLiveEnvelopeRef.current ?? fallbackEnvelope;
+      if (envelope && user?.id) {
+        cacheZenInitialStarterReply(envelope);
+      }
+      clearZenInitialStarterSurface();
+      setChatEphemeralNowMs(Date.now());
+    },
+    [clearZenInitialStarterSurface, conversationStarterPrompts, detail, user?.id]
+  );
+
+  const zenAssistantReplyCount = useMemo(
+    () =>
+      detail?.messages.reduce(
+        (count, message) => count + (message.role === "assistant" ? 1 : 0),
+        0
+      ) ?? 0,
+    [detail?.messages]
+  );
+  const zenInitialThinkingActive =
+    view === "chat" &&
+    pendingReplyVisible &&
+    pendingReplyStartMessageCount === 0 &&
+    detail?.hasAssistantReply !== true;
+  const zenInitialReplyRevealActive =
+    view === "chat" &&
+    chatAssistantRevealInProgress &&
+    pendingReplyStartMessageCount === 0 &&
+    zenAssistantReplyCount <= 1;
+  useEffect(() => {
+    if (zenInitialThinkingActive || zenInitialReplyRevealActive) return;
+    zenInitialStatusLabelRef.current = null;
+  }, [zenInitialReplyRevealActive, zenInitialThinkingActive]);
 
   const replyInFlightSignals =
     pendingReplyVisible || chatAssistantRevealInProgress;
   /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
   const typingIndicatorVisible =
-    pendingReplyVisible ||
-    (chatEphemeralMode && chatAssistantRevealInProgress);
+    (pendingReplyVisible && !zenInitialThinkingActive) ||
+    (chatEphemeralMode &&
+      chatAssistantRevealInProgress &&
+      !zenInitialReplyRevealActive);
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
     const pendingRespondent =
@@ -17892,6 +21402,76 @@ function HomeContent(): React.JSX.Element {
     chatLikeSurface,
     handleTypingIndicatorPress,
   ]);
+  const zenInitialThinkingNode = useMemo(() => {
+    const active = zenInitialThinkingActive || zenInitialReplyRevealActive;
+    if (!active) return null;
+    const compactPhase = zenInitialReplyRevealActive && !zenInitialThinkingActive;
+    if (!zenInitialStatusLabelRef.current) {
+      const outputSalt = [
+        pendingReplyStartedAtMs ?? "no-start",
+        pendingReplyConversationId ?? "new",
+        detail?.id ?? "pending",
+        latestAssistantMessageId ?? "no-assistant",
+        detail?.messages.length ?? 0,
+      ].join(":");
+      zenInitialStatusLabelRef.current = pickStableStatusLabel(
+        ZEN_INITIAL_STATUS_LABELS,
+        outputSalt
+      );
+    }
+    const label = zenInitialStatusLabelRef.current;
+    const onActivate = compactPhase
+      ? handleZenInitialReplyRevealCancel
+      : handleZenInitialThinkingCancel;
+    return (
+      <div
+        className={styles.zenInitialThinkingOverlay}
+        data-phase={compactPhase ? "compact" : "thinking"}
+        role="status"
+        aria-live="polite"
+      >
+        <button
+          type="button"
+          className={styles.zenInitialThinkingButton}
+          onPointerDown={(event) => {
+            if (event.pointerType === "mouse" && event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onActivate();
+          }}
+          onClick={(event) => {
+            if (event.detail !== 0) {
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            onActivate(event);
+          }}
+          aria-label={
+            compactPhase
+              ? "Stop reply"
+              : "Cancel reply and return to the Zen start"
+          }
+          title={compactPhase ? "Stop reply" : "Cancel reply"}
+        >
+          <span className={styles.zenInitialThinkingGlyphHalo} aria-hidden="true">
+            <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+          </span>
+          <span className={styles.zenInitialThinkingLabel}>{label}</span>
+        </button>
+      </div>
+    );
+  }, [
+    handleZenInitialReplyRevealCancel,
+    handleZenInitialThinkingCancel,
+    detail?.id,
+    detail?.messages.length,
+    latestAssistantMessageId,
+    pendingReplyConversationId,
+    pendingReplyStartedAtMs,
+    zenInitialReplyRevealActive,
+    zenInitialThinkingActive,
+  ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
     if (view !== "sandbox") return null;
     const showCompactionSpinner = sandboxSummaryBusy && !pendingReplyVisible;
@@ -17918,37 +21498,109 @@ function HomeContent(): React.JSX.Element {
     pendingReplyVisible,
     selectedComposeBotAccent,
   ]);
-  const devChatDebugEventsNode = useMemo(() => {
-    if (!DEV_TOOLS_ENABLED || !devChatMetricsEnabled || devChatDebugEvents.length === 0) {
+  const manualCompactionIndicatorNode = useMemo(() => {
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    const activeMode: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    if (
+      !manualCompactionStatus ||
+      manualCompactionStatus.conversationId !== activeConversationId ||
+      manualCompactionStatus.mode !== activeMode
+    ) {
       return null;
     }
+    const style = selectedComposeBotAccent
+      ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    const running = manualCompactionStatus.state === "running";
+    const label = running
+      ? "Compacting this chat context"
+      : "Compacted context is ready";
     return (
-      <div className={styles.devChatDebugStream} aria-live="polite">
-        {devChatDebugEvents.map((event) => {
-          const kind = inferDevChatDebugKind(event);
-          return (
-            <div
-              key={event.id}
-              className={`${styles.devChatDebugEvent} ${
-                kind === "summary"
-                ? styles.devChatDebugEventSummary
-                : kind === "memory"
-                  ? styles.devChatDebugEventMemory
-                  : kind === "tool"
-                    ? styles.devChatDebugEventTool
-                    : styles.devChatDebugEventOpinion
-              }`}
-            >
-              <span className={styles.devChatDebugTimestamp}>
-                {new Date(event.createdAt).toLocaleTimeString()}
-              </span>
-              <span>{event.text}</span>
-            </div>
-          );
-        })}
+      <div
+        className={`${styles.askQuestionRecallBubbleDock} ${styles.manualCompactionDock}`}
+        data-compaction-state={manualCompactionStatus.state}
+      >
+        <div
+          className={`${styles.typingIndicator} ${styles.manualCompactionIndicator}`}
+          style={style}
+          role="status"
+          aria-live="polite"
+          aria-label={label}
+        >
+          {running ? (
+            <span className={styles.summarySpinnerWheel} aria-hidden="true" />
+          ) : null}
+          <span>{label}</span>
+        </div>
       </div>
     );
-  }, [devChatMetricsEnabled, devChatDebugEvents]);
+  }, [
+    detail?.id,
+    manualCompactionStatus,
+    selectedComposeBotAccent,
+    selectedId,
+    view,
+  ]);
+  const compactedSummaryDebugNode = useMemo(() => {
+    if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!activeConversationId) return null;
+    const activeMode: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    const summaryFromDebug =
+      summaryDebug?.conversationId === activeConversationId &&
+      summaryDebug.mode === activeMode
+        ? summaryDebug.latestSummary
+        : null;
+    const summaryFromManual =
+      manualCompactionStatus?.conversationId === activeConversationId &&
+      manualCompactionStatus.mode === activeMode
+        ? manualCompactionStatus.summary
+        : null;
+    const hasDebugContext =
+      (
+        summaryDebug?.conversationId === activeConversationId &&
+        summaryDebug.mode === activeMode
+      ) ||
+      (
+        manualCompactionStatus?.conversationId === activeConversationId &&
+        manualCompactionStatus.mode === activeMode
+      );
+    if (!hasDebugContext) return null;
+    const summaryText =
+      (summaryFromDebug ?? summaryFromManual ?? "").trim() ||
+      (
+        manualCompactionStatus?.conversationId === activeConversationId &&
+        manualCompactionStatus.mode === activeMode &&
+        manualCompactionStatus.state === "complete"
+          ? "Compaction completed, but no summary was returned."
+          : "No compacted summary yet."
+      );
+    const summaryAt =
+      summaryDebug?.conversationId === activeConversationId &&
+      summaryDebug.mode === activeMode
+        ? summaryDebug.latestSummaryAt
+        : manualCompactionStatus?.summaryAt ?? null;
+    return (
+      <div className={styles.compactedSummaryDebugBubble} role="note">
+        <div className={styles.compactedSummaryDebugHeader}>
+          <strong>Compacted context</strong>
+          <span>{activeMode}{summaryAt ? ` - ${summaryAt}` : ""}</span>
+        </div>
+        <pre>{summaryText}</pre>
+      </div>
+    );
+  }, [
+    detail?.id,
+    devShowCompactedSummaryInChat,
+    manualCompactionStatus,
+    selectedId,
+    summaryDebug,
+    view,
+  ]);
+  // Metrics now live in the floating developer terminal, not inside the chat transcript.
+  const devChatDebugEventsNode = null;
 
   const clearConversationUnread = useCallback((conversationId: string) => {
     setUnreadConversationIds(previous => {
@@ -18094,6 +21746,22 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSelectedDurationMinutes, setCoffeeSelectedDurationMinutes] =
     useState<CoffeeSessionDurationMinutes>(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
   const [coffeeSelectedPresetId, setCoffeeSelectedPresetId] = useState("");
+  const [coffeeOpeningPollModalOpen, setCoffeeOpeningPollModalOpen] = useState(false);
+  const [coffeeOpeningPollQuestion, setCoffeeOpeningPollQuestion] = useState("");
+  const [coffeeOpeningPollOptions, setCoffeeOpeningPollOptions] = useState<string[]>(() =>
+    buildDefaultCoffeePollOptionDraft()
+  );
+  const [coffeeActivePoll, setCoffeeActivePoll] = useState<CoffeePollState | null>(null);
+  const coffeeActivePollRef = useRef<CoffeePollState | null>(null);
+  const [coffeePollResultsOpen, setCoffeePollResultsOpen] = useState(false);
+  const [coffeePollPanelMinimized, setCoffeePollPanelMinimized] = useState(false);
+  const [coffeePollVoteBusy, setCoffeePollVoteBusy] = useState(false);
+  const [coffeePollPanelPosition, setCoffeePollPanelPosition] =
+    useState<CoffeePollPanelPosition>(COFFEE_POLL_PANEL_DEFAULT_POSITION);
+  const coffeePollPanelRef = useRef<HTMLDivElement | null>(null);
+  const coffeePollBubbleRef = useRef<HTMLButtonElement | null>(null);
+  const coffeePollPanelDragRef = useRef<CoffeePollPanelDragState | null>(null);
+  const coffeePollPanelSuppressClickRef = useRef(false);
   const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
   const [coffeeSettingsDraft, setCoffeeSettingsDraft] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
@@ -18135,6 +21803,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
   /** Mirrors {@link coffeeSessionEndsAtMs} for timers/async paths (state alone can be stale in callbacks). */
   const coffeeSessionEndsAtRef = useRef<number | null>(null);
+  const coffeeSessionStartedAtRef = useRef<number | null>(null);
   const coffeeConversationRef = useRef<CoffeeConversationState | null>(null);
   const assignCoffeeSessionEndsAtMs = (value: number | null) => {
     coffeeSessionEndsAtRef.current = value;
@@ -18144,6 +21813,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSessionClockMs, setCoffeeSessionClockMs] = useState(() => Date.now());
   const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
     useState<CoffeeTurnRhythmState>("idle");
+  const coffeeTurnRhythmStateRef = useRef<CoffeeTurnRhythmState>("idle");
   /** Visible length during `userTableTyping` and `tableTyping` center typewriter (shared RAF). */
   const [coffeeTypewriterLength, setCoffeeTypewriterLength] = useState(0);
   const [coffeePendingSpeakerBotId, setCoffeePendingSpeakerBotId] = useState<string | null>(null);
@@ -18166,19 +21836,60 @@ function HomeContent(): React.JSX.Element {
   /** Matches `randomCoffeeRevealDelayMs` for the current pending assistant line so typewriter finishes with reveal. */
   const coffeeRevealTypingDurationMsRef = useRef(0);
   const coffeeTypewriterRafRef = useRef<number | null>(null);
+  const coffeeCenterMessageScrollRef = useRef<HTMLDivElement | null>(null);
   const coffeeTurnAbortRef = useRef<AbortController | null>(null);
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeeAutoplayPausedRef = useRef(false);
   const coffeeDraftRef = useRef("");
   const coffeeReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeeReplayTypewriterRafRef = useRef<number | null>(null);
+  const coffeeReplayTypewriterLengthRef = useRef(0);
+  const coffeeReplayTypewriterMessageKeyRef = useRef<string | null>(null);
+  const coffeeSynopsisRequestIdsRef = useRef<Set<string>>(new Set());
   const [coffeeReplayActive, setCoffeeReplayActive] = useState(false);
   const [coffeeReplayPlaying, setCoffeeReplayPlaying] = useState(false);
   const [coffeeReplayMessageIndex, setCoffeeReplayMessageIndex] = useState(0);
+  const [coffeeReplayPlaybackVersion, setCoffeeReplayPlaybackVersion] = useState(0);
+  const [coffeeReplayTypewriterLength, setCoffeeReplayTypewriterLength] = useState(0);
+  const [coffeeReplayActionPanelBotId, setCoffeeReplayActionPanelBotId] =
+    useState<string | null>(null);
   const [coffeeSessionSettings, setCoffeeSessionSettings] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
   );
   const coffeeSessionSettingsRef = useRef<CoffeeSessionSettings>(loadCoffeeSettingsFromBrowser());
   const coffeeInterruptionCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [storySessions, setStorySessions] = useState<StorySessionSummary[]>([]);
+  const [storySessionsLoading, setStorySessionsLoading] = useState(false);
+  const [storySelectedSessionId, setStorySelectedSessionId] = useState<string | null>(null);
+  const [storySession, setStorySession] = useState<StorySessionDetail | null>(null);
+  const [storySelectedBotIds, setStorySelectedBotIds] = useState<string[]>([]);
+  const [storyPremise, setStoryPremise] = useState("");
+  const [storySearch, setStorySearch] = useState("");
+  const [storyBusy, setStoryBusy] = useState(false);
+  const [storyError, setStoryError] = useState<string | null>(null);
+  const [storyMapOpen, setStoryMapOpen] = useState(false);
+  const [storyInventoryOpen, setStoryInventoryOpen] = useState(false);
+  const [storyTranscriptOpen, setStoryTranscriptOpen] = useState(false);
+  const [storyDialogCursor, setStoryDialogCursor] = useState<StoryDialogCursor>({
+    sessionId: null,
+    sceneId: null,
+    beatIndex: 0,
+  });
+  const [storySetupPinned, setStorySetupPinned] = useState(false);
+  const [storyProvider, setStoryProvider] = useState<Provider>("local");
+  const [storyProviderTouched, setStoryProviderTouched] = useState(false);
+  const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] =
+    useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  useEffect(() => {
+    if (storyProviderTouched) return;
+    if (isProvider(user?.preferredProvider)) {
+      setStoryProvider(user.preferredProvider);
+      return;
+    }
+    if (isProvider(settings?.preferredProvider)) {
+      setStoryProvider(settings.preferredProvider);
+    }
+  }, [settings?.preferredProvider, storyProviderTouched, user?.preferredProvider]);
   const clearCoffeeTranscriptCloseTimer = (): void => {
     if (coffeeTranscriptCloseTimerRef.current) {
       clearTimeout(coffeeTranscriptCloseTimerRef.current);
@@ -18219,11 +21930,111 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionEndsAtRef.current = coffeeSessionEndsAtMs;
   }, [coffeeSessionEndsAtMs]);
   useEffect(() => {
+    if (!coffeeConversation || coffeeSessionPhase !== "live" || coffeeSessionEndsAtMs == null) {
+      if (coffeeSessionPhase === "selecting" || coffeeSessionPhase === "preview") {
+        coffeeSessionStartedAtRef.current = null;
+      }
+      return;
+    }
+    if (coffeeSessionStartedAtRef.current == null) {
+      coffeeSessionStartedAtRef.current = Date.now();
+    }
+  }, [coffeeConversation, coffeeSessionPhase, coffeeSessionEndsAtMs]);
+  useEffect(() => {
     coffeeConversationRef.current = coffeeConversation;
   }, [coffeeConversation]);
   useEffect(() => {
+    coffeeTurnRhythmStateRef.current = coffeeTurnRhythmState;
+  }, [coffeeTurnRhythmState]);
+  useEffect(() => {
+    coffeeActivePollRef.current = coffeeActivePoll;
+  }, [coffeeActivePoll]);
+  useEffect(() => {
+    if (coffeeActivePoll === null) {
+      setCoffeePollPanelMinimized(false);
+    }
+  }, [coffeeActivePoll]);
+  useEffect(() => {
+    const conversation = coffeeConversation;
+    const poll = coffeeActivePoll;
+    if (!conversation || !poll) return;
+    if (poll.status === "closed" || poll.status === "cancelled") return;
+    if (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") return;
+
+    const refreshPoll = async (): Promise<void> => {
+      try {
+        const response = await api<{ ok: true; poll: CoffeePollState | null }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls/active`
+        );
+        if (response.poll) {
+          setCoffeeActivePoll(response.poll);
+          if (!coffeePollPanelMinimized) {
+            setCoffeePollResultsOpen(true);
+          }
+        } else {
+          setCoffeeActivePoll(null);
+        }
+      } catch {
+        // Poll refresh should never block the table.
+      }
+    };
+
+    const tickPoll = async (): Promise<void> => {
+      const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
+      const sessionRemainingMs =
+        typeof endsAt === "number" && Number.isFinite(endsAt)
+          ? Math.max(0, endsAt - Date.now())
+          : null;
+      try {
+        const response = await api<{ ok: true; poll: CoffeePollState }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls/${encodeURIComponent(
+            poll.id
+          )}/collect`,
+          {
+            method: "POST",
+            body: JSON.stringify({ sessionRemainingMs }),
+          }
+        );
+        setCoffeeActivePoll(response.poll);
+        if (!coffeePollPanelMinimized) {
+          setCoffeePollResultsOpen(true);
+        }
+      } catch {
+        // Poll tick should never block the table.
+      }
+    };
+
+    void refreshPoll();
+    const id = window.setInterval(() => {
+      void tickPoll();
+    }, COFFEE_POLL_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [
+    coffeeConversation,
+    coffeeActivePoll,
+    coffeeSessionPhase,
+    coffeeSessionEndsAtMs,
+    coffeePollPanelMinimized,
+  ]);
+  useEffect(() => {
     coffeeSessionSettingsRef.current = coffeeSessionSettings;
   }, [coffeeSessionSettings]);
+  useEffect(() => {
+    const node = coffeeCenterMessageScrollRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [
+    coffeeConversation?.id,
+    coffeeConversation?.messages.length,
+    coffeePendingRevealConversation?.messages.length,
+    coffeeTurnRhythmState,
+    coffeeTypewriterLength,
+    coffeeReplayActive,
+    coffeeReplayMessageIndex,
+    coffeeReplayTypewriterLength,
+    coffeeUserRevealText,
+    coffeeSessionPhase,
+  ]);
   useEffect(() => {
     persistCoffeeSettingsToBrowser(coffeeSessionSettings);
   }, [coffeeSessionSettings]);
@@ -18233,19 +22044,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     persistCoffeePausedSessionRemainingMsByIdToBrowser(coffeePausedSessionRemainingMsById);
   }, [coffeePausedSessionRemainingMsById]);
-  const markCoffeeSessionPaused = useCallback((conversationId: string, remainingMs: number): void => {
-    const safeRemainingMs = Math.max(1000, Math.round(remainingMs));
-    setCoffeePausedSessionIds((current) => {
-      if (current.has(conversationId)) return current;
-      const next = new Set(current);
-      next.add(conversationId);
-      return next;
-    });
-    setCoffeePausedSessionRemainingMsById((current) => {
-      if (current[conversationId] === safeRemainingMs) return current;
-      return { ...current, [conversationId]: safeRemainingMs };
-    });
-  }, []);
   const markCoffeeSessionResumed = useCallback((conversationId: string): void => {
     setCoffeePausedSessionIds((current) => {
       if (!current.has(conversationId)) return current;
@@ -18296,36 +22094,138 @@ function HomeContent(): React.JSX.Element {
     coffeeDraftRef.current = coffeeDraft;
   }, [coffeeDraft]);
   useEffect(() => {
+    coffeeReplayTypewriterLengthRef.current = coffeeReplayTypewriterLength;
+  }, [coffeeReplayTypewriterLength]);
+  useEffect(() => {
     if (coffeeReplayTimerRef.current) {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
-    if (!coffeeReplayActive || !coffeeReplayPlaying || !coffeeConversation) return;
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    if (!coffeeReplayActive || !coffeeConversation) {
+      coffeeReplayTypewriterMessageKeyRef.current = null;
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
+      return;
+    }
     const messages = coffeeConversation.messages;
-    if (messages.length === 0 || coffeeReplayMessageIndex >= messages.length - 1) {
+    if (messages.length === 0) {
+      coffeeReplayTypewriterMessageKeyRef.current = null;
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
       setCoffeeReplayPlaying(false);
       return;
     }
-    coffeeReplayTimerRef.current = setTimeout(() => {
-      setCoffeeReplayMessageIndex((index) => Math.min(messages.length - 1, index + 1));
-    }, 900);
+    const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, coffeeReplayMessageIndex);
+    const message = messages[clampedIndex];
+    if (!message) return;
+    const messageKey = coffeeReplayMessageKey(message, clampedIndex);
+    const sameMessage = coffeeReplayTypewriterMessageKeyRef.current === messageKey;
+    const fullLength = coffeeReplayDisplayLengthForMessage(message);
+    const currentLength = sameMessage
+      ? Math.min(fullLength, Math.max(0, coffeeReplayTypewriterLengthRef.current))
+      : 0;
+    coffeeReplayTypewriterMessageKeyRef.current = messageKey;
+    if (!coffeeReplayPlaying) {
+      coffeeReplayTypewriterLengthRef.current = currentLength;
+      setCoffeeReplayTypewriterLength(currentLength);
+      return;
+    }
+    const advanceReplay = () => {
+      if (clampedIndex >= messages.length - 1) {
+        setCoffeeReplayPlaying(false);
+        return;
+      }
+      setCoffeeReplayMessageIndex((index) =>
+        Math.min(messages.length - 1, Math.max(clampedIndex + 1, index + 1))
+      );
+    };
+    if (fullLength <= 0) {
+      coffeeReplayTypewriterLengthRef.current = 0;
+      setCoffeeReplayTypewriterLength(0);
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 360);
+      return () => {
+        if (coffeeReplayTimerRef.current) {
+          clearTimeout(coffeeReplayTimerRef.current);
+          coffeeReplayTimerRef.current = null;
+        }
+      };
+    }
+    coffeeReplayTypewriterLengthRef.current = currentLength;
+    setCoffeeReplayTypewriterLength(currentLength);
+    if (currentLength >= fullLength) {
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 420);
+      return () => {
+        if (coffeeReplayTimerRef.current) {
+          clearTimeout(coffeeReplayTimerRef.current);
+          coffeeReplayTimerRef.current = null;
+        }
+      };
+    }
+    const durationMs = Math.max(
+      120,
+      randomCoffeeRevealDelayMs(
+        message.content,
+        message.role === "assistant" ? message.moodKey : undefined
+      )
+    );
+    const elapsedOffsetMs = durationMs * (currentLength / Math.max(1, fullLength));
+    const startMs = performance.now() - elapsedOffsetMs;
+    const step = (now: number) => {
+      const elapsed = now - startMs;
+      const t = Math.min(1, elapsed / durationMs);
+      const nextLen = Math.min(fullLength, Math.ceil(t * fullLength));
+      coffeeReplayTypewriterLengthRef.current = nextLen;
+      setCoffeeReplayTypewriterLength(nextLen);
+      if (t < 1) {
+        coffeeReplayTypewriterRafRef.current = requestAnimationFrame(step);
+        return;
+      }
+      coffeeReplayTypewriterRafRef.current = null;
+      coffeeReplayTimerRef.current = setTimeout(advanceReplay, 420);
+    };
+    coffeeReplayTypewriterRafRef.current = requestAnimationFrame(step);
     return () => {
       if (coffeeReplayTimerRef.current) {
         clearTimeout(coffeeReplayTimerRef.current);
         coffeeReplayTimerRef.current = null;
       }
+      if (coffeeReplayTypewriterRafRef.current != null) {
+        cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+        coffeeReplayTypewriterRafRef.current = null;
+      }
     };
-  }, [coffeeReplayActive, coffeeReplayPlaying, coffeeReplayMessageIndex, coffeeConversation]);
+  }, [
+    coffeeReplayActive,
+    coffeeReplayPlaying,
+    coffeeReplayMessageIndex,
+    coffeeReplayPlaybackVersion,
+    coffeeConversation,
+  ]);
+  useEffect(() => {
+    if (!coffeeReplayActive || !coffeeConversation) return;
+    setCoffeeReplayMessageIndex((index) =>
+      clampCoffeeReplayMessageIndex(coffeeConversation.messages.length, index)
+    );
+  }, [coffeeReplayActive, coffeeConversation]);
+  useEffect(() => {
+    if (!coffeeReplayActive || coffeeReplayPlaying) {
+      setCoffeeReplayActionPanelBotId(null);
+    }
+  }, [coffeeReplayActive, coffeeReplayPlaying]);
   // Per-request provider override (mirrors the Sandbox toggle). The
   // user can flip it inside the Coffee shell without touching their
   // global setting; once they manually toggle, we stop syncing from
   // their saved preference for the rest of the session so a global
   // change made elsewhere doesn't quietly stomp the in-shell choice.
-  const [coffeeProvider, setCoffeeProvider] = useState<"local" | "openai">("local");
+  const [coffeeProvider, setCoffeeProvider] = useState<Provider>("local");
   const [coffeeProviderTouched, setCoffeeProviderTouched] = useState<boolean>(false);
   useEffect(() => {
     if (coffeeProviderTouched) return;
-    if (user?.preferredProvider === "openai" || user?.preferredProvider === "local") {
+    if (isProvider(user?.preferredProvider)) {
       setCoffeeProvider(user.preferredProvider);
     }
   }, [user?.preferredProvider, coffeeProviderTouched]);
@@ -18436,8 +22336,10 @@ function HomeContent(): React.JSX.Element {
           coffeePendingRevealAfterUserRef.current = null;
           if (queued) {
             queueCoffeeRevealFnRef.current(queued);
+          } else {
+            setCoffeeTypewriterLength(charCount);
+            setCoffeeTurnRhythmState("botThinking");
           }
-          setCoffeeUserRevealText("");
         }
       };
       coffeeTypewriterRafRef.current = requestAnimationFrame(step);
@@ -18518,6 +22420,9 @@ function HomeContent(): React.JSX.Element {
       setCoffeeUserRevealText("");
       setCoffeeInterruptedSnippet(null);
       setCoffeeLiveInterruptionCue(null);
+      setCoffeeActivePoll(null);
+      setCoffeePollResultsOpen(false);
+      setCoffeePollPanelMinimized(false);
       if (coffeeCooldownTimerRef.current) {
         clearTimeout(coffeeCooldownTimerRef.current);
         coffeeCooldownTimerRef.current = null;
@@ -18578,12 +22483,17 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!coffeeSelectedGroupId) return;
     setCoffeeCollapsedGroupIds((current) => {
-      if (!current.has(coffeeSelectedGroupId)) return current;
-      const next = new Set(current);
-      next.delete(coffeeSelectedGroupId);
+      const next = new Set(
+        coffeeGroups
+          .map((group) => group.id)
+          .filter((groupId) => groupId !== coffeeSelectedGroupId)
+      );
+      if (current.size === next.size && [...next].every((groupId) => current.has(groupId))) {
+        return current;
+      }
       return next;
     });
-  }, [coffeeSelectedGroupId]);
+  }, [coffeeGroups, coffeeSelectedGroupId]);
 
   const refreshCoffeeGroups = useCallback(async (): Promise<CoffeeGroupState[]> => {
     setCoffeeGroupsLoading(true);
@@ -18616,6 +22526,365 @@ function HomeContent(): React.JSX.Element {
     void refreshCoffeeGroups();
     void refreshCoffeePresets();
   }, [view, refreshCoffeeGroups, refreshCoffeePresets]);
+  const storyBotsLibrary = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
+  const storyBotsById = useMemo(
+    () => new Map(storyBotsLibrary.map((bot) => [bot.id, bot])),
+    [storyBotsLibrary]
+  );
+  const storyFilteredBots = useMemo(() => {
+    const query = storySearch.trim().toLowerCase();
+    if (!query) return storyBotsLibrary;
+    return storyBotsLibrary.filter((bot) => bot.name.toLowerCase().includes(query));
+  }, [storyBotsLibrary, storySearch]);
+  const storySelectedBots = useMemo(
+    () =>
+      storySelectedBotIds
+        .map((botId) => storyBotsById.get(botId))
+        .filter((bot): bot is Bot => Boolean(bot)),
+    [storySelectedBotIds, storyBotsById]
+  );
+  const storySelectionValid =
+    storySelectedBotIds.length >= STORY_BOT_COUNT_MIN &&
+    storySelectedBotIds.length <= STORY_BOT_COUNT_MAX;
+  const storyAnyOfflineProtected = storySelectedBots.some((bot) => bot.online_enabled === 0);
+  const storyEffectiveProvider: Provider = storyAnyOfflineProtected ? "local" : storyProvider;
+  const storyResponseMode = responseModeForProvider(storyEffectiveProvider);
+  const storyBaselineLocalModelOption =
+    modelCatalog?.local.find((model) => model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID) ?? {
+      id: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+      label: modelLabelFromId(REQUIRED_PRIMARY_LOCAL_MODEL_ID),
+      provider: "local" as const,
+      isDefault: true,
+    };
+  const storyResolvedChoice = resolveModelChoiceForResponseMode({
+    responseMode: storyResponseMode,
+    providerPreference: storyEffectiveProvider,
+    choices: visibleModelChoicesByProvider(
+      modelCatalog,
+      settings,
+      storyModelChoiceByProvider
+    ),
+    onlineOptions: onlineChatModelOptions,
+  });
+  const storyModelProvider = storyResolvedChoice.provider;
+  const storyVisibleModelChoice = storyResolvedChoice.modelChoice;
+  const storyEffectiveModelChoice =
+    storyResponseMode === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : storyVisibleModelChoice;
+  const storyModelOptions =
+    storyResponseMode === "local"
+      ? [storyBaselineLocalModelOption]
+      : includeSelectedOnlineModelOption(
+          modelCatalog,
+          settings,
+          onlineChatModelOptions,
+          storyVisibleModelChoice
+        );
+  const storyModelOverride =
+    storyResponseMode === "local"
+      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
+      : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
+        ? storyVisibleModelChoice
+        : undefined;
+  useEffect(() => {
+    if (storyAnyOfflineProtected && storyProvider !== "local") {
+      setStoryProvider("local");
+    }
+  }, [storyAnyOfflineProtected, storyProvider]);
+  const storyCurrentScene = useMemo<StoryScene | null>(() => {
+    if (!storySession?.episode || !storySession.progress) return null;
+    try {
+      return getStoryCurrentScene(storySession.episode, storySession.progress);
+    } catch {
+      return null;
+    }
+  }, [storySession]);
+  const storyCurrentLocation = useMemo<StoryLocation | null>(() => {
+    if (!storySession?.episode || !storyCurrentScene) return null;
+    return getStoryLocation(storySession.episode, storyCurrentScene.locationId) ?? null;
+  }, [storySession?.episode, storyCurrentScene]);
+  const storyDiscoveredLocationIds = useMemo(
+    () => new Set(storySession?.progress?.discoveredLocationIds ?? []),
+    [storySession?.progress?.discoveredLocationIds]
+  );
+  const storyInventoryItems = useMemo<StoryInventoryItem[]>(() => {
+    if (!storySession?.episode || !storySession.progress) return [];
+    return createStoryInventoryViewState(
+      storySession.episode.items,
+      storySession.progress.inventoryItemIds
+    ).collectedItems;
+  }, [storySession]);
+
+  const refreshStorySessions = useCallback(async (): Promise<StorySessionSummary[]> => {
+    setStorySessionsLoading(true);
+    try {
+      const response = await api<{ ok: true; sessions: StorySessionSummary[] }>(
+        "/api/story/sessions"
+      );
+      setStorySessions(response.sessions);
+      return response.sessions;
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to load Story sessions.");
+      return [];
+    } finally {
+      setStorySessionsLoading(false);
+    }
+  }, []);
+  const openStorySession = useCallback(async (sessionId: string): Promise<void> => {
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(sessionId)}`
+      );
+      setStorySetupPinned(false);
+      setStorySelectedSessionId(response.session.id);
+      setStorySession(response.session);
+      setStorySelectedBotIds(response.session.botIds);
+      setStoryProvider(response.session.provider);
+      setStoryProviderTouched(true);
+      setStoryMapOpen(false);
+      setStoryInventoryOpen(false);
+      setStoryTranscriptOpen(false);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to open Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, []);
+  const resetStoryToSetup = useCallback(() => {
+    setStorySetupPinned(true);
+    setStorySelectedSessionId(null);
+    setStorySession(null);
+    setStoryError(null);
+    setStoryMapOpen(false);
+    setStoryInventoryOpen(false);
+    setStoryTranscriptOpen(false);
+    setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
+  }, []);
+  const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
+    if (!storySelectionValid || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        "/api/story/sessions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            botIds: storySelectedBotIds,
+            premise: storyPremise.trim() || undefined,
+            preferredProvider: storyModelProvider,
+            ...(storyModelOverride ? { modelOverride: storyModelOverride } : {}),
+          }),
+        }
+      );
+      setStorySetupPinned(false);
+      setStorySelectedSessionId(response.session.id);
+      setStorySession(response.session);
+      setStoryPremise("");
+      setStoryMapOpen(false);
+      setStoryInventoryOpen(false);
+      setStoryTranscriptOpen(false);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to start Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [
+    storyBusy,
+    storyModelProvider,
+    storyModelOverride,
+    storyPremise,
+    storySelectedBotIds,
+    storySelectionValid,
+    refreshStorySessions,
+  ]);
+  const chooseStoryChoice = useCallback(async (choiceId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/choices`,
+        {
+          method: "POST",
+          body: JSON.stringify({ choiceId }),
+        }
+      );
+      setStorySession(response.session);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to apply Story choice.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
+  const travelStoryLocation = useCallback(async (locationId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/travel`,
+        {
+          method: "POST",
+          body: JSON.stringify({ locationId }),
+        }
+      );
+      setStorySession(response.session);
+      setStoryDialogCursor({
+        sessionId: response.session.id,
+        sceneId: response.session.progress?.currentSceneId ?? null,
+        beatIndex: 0,
+      });
+      setStoryMapOpen(false);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to travel.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
+  const pickupStoryItem = useCallback(async (itemId: string): Promise<void> => {
+    if (!storySession || storyBusy) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      const response = await api<{ ok: true; session: StorySessionDetail }>(
+        `/api/story/sessions/${encodeURIComponent(storySession.id)}/items`,
+        {
+          method: "POST",
+          body: JSON.stringify({ itemId }),
+        }
+      );
+      setStorySession(response.session);
+      void refreshStorySessions();
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to pick up item.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [storyBusy, storySession, refreshStorySessions]);
+  const advanceStoryDialog = useCallback(
+    (sessionId: string, sceneId: string, beatCount: number): void => {
+      setStoryDialogCursor((current) => {
+        const currentBeatIndex =
+          current.sessionId === sessionId && current.sceneId === sceneId
+            ? current.beatIndex
+            : 0;
+        return {
+          sessionId,
+          sceneId,
+          beatIndex: Math.min(currentBeatIndex + 1, Math.max(0, beatCount - 1)),
+        };
+      });
+    },
+    []
+  );
+  const deleteStorySessionById = useCallback(async (session: StorySessionSummary): Promise<void> => {
+    if (storyBusy) return;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(`Delete "${session.title}"? This only removes the saved Story session.`);
+    if (!confirmed) return;
+    setStoryBusy(true);
+    setStoryError(null);
+    try {
+      await api<{ ok: true }>(
+        `/api/story/sessions/${encodeURIComponent(session.id)}`,
+        { method: "DELETE" }
+      );
+      setStorySessions((current) => current.filter((row) => row.id !== session.id));
+      if (storySelectedSessionId === session.id) {
+        resetStoryToSetup();
+      }
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "Failed to delete Story session.");
+    } finally {
+      setStoryBusy(false);
+    }
+  }, [resetStoryToSetup, storyBusy, storySelectedSessionId]);
+  useEffect(() => {
+    if (view !== "story") return;
+    void refreshStorySessions();
+  }, [view, refreshStorySessions]);
+  useEffect(() => {
+    if (
+      view !== "story" ||
+      storySetupPinned ||
+      storySession ||
+      storySelectedSessionId ||
+      storySessionsLoading
+    ) {
+      return;
+    }
+    const candidate =
+      storySessions.find((session) => session.status === "playing") ??
+      storySessions.find((session) => session.status === "generating") ??
+      storySessions[0];
+    if (!candidate) return;
+    void openStorySession(candidate.id);
+  }, [
+    view,
+    storySetupPinned,
+    storySession,
+    storySelectedSessionId,
+    storySessions,
+    storySessionsLoading,
+    openStorySession,
+  ]);
+  useEffect(() => {
+    if (view !== "story" || storySession?.status !== "generating") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await api<{ ok: true; session: StorySessionDetail }>(
+          `/api/story/sessions/${encodeURIComponent(storySession.id)}`
+        );
+        if (cancelled) return;
+        setStorySession(response.session);
+        if (response.session.status !== "generating") {
+          void refreshStorySessions();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStoryError(err instanceof Error ? err.message : "Failed to refresh Story session.");
+        }
+      }
+    };
+    void poll();
+    const timer = setInterval(() => {
+      void poll();
+    }, STORY_SESSION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [view, storySession?.id, storySession?.status, refreshStorySessions]);
   const coffeeSelectedBotIds = useMemo(
     () => coffeeSelectedSeatBotIds.filter((id): id is string => typeof id === "string"),
     [coffeeSelectedSeatBotIds]
@@ -18727,8 +22996,12 @@ function HomeContent(): React.JSX.Element {
       const payload = {
         local: choice.local && choice.local !== AUTO_MODEL_CHOICE ? choice.local : "",
         openai: choice.openai && choice.openai !== AUTO_MODEL_CHOICE ? choice.openai : "",
+        anthropic:
+          choice.anthropic && choice.anthropic !== AUTO_MODEL_CHOICE
+            ? choice.anthropic
+            : "",
       };
-      const dedupeKey = `${groupId}|${payload.local}|${payload.openai}`;
+      const dedupeKey = `${groupId}|${payload.local}|${payload.openai}|${payload.anthropic}`;
       if (lastPersistedCoffeeModelChoiceRef.current === dedupeKey) return;
       lastPersistedCoffeeModelChoiceRef.current = dedupeKey;
       void api(`/api/coffee/groups/${encodeURIComponent(groupId)}`, {
@@ -18805,10 +23078,11 @@ function HomeContent(): React.JSX.Element {
     // and the previous "coffee:none" carry-over so swapping groups never leaks.
     if (groupId) {
       const fromGroup = coffeeGroups.find((g) => g.id === groupId)?.modelChoiceByProvider;
-      if (fromGroup && (fromGroup.local || fromGroup.openai)) {
+      if (fromGroup && (fromGroup.local || fromGroup.openai || fromGroup.anthropic)) {
         stored = {
           local: fromGroup.local ?? AUTO_MODEL_CHOICE,
           openai: fromGroup.openai ?? AUTO_MODEL_CHOICE,
+          anthropic: fromGroup.anthropic ?? AUTO_MODEL_CHOICE,
         };
         coffeeModelChoiceByScopeRef.current.set(nextKey, { ...stored });
       }
@@ -18835,22 +23109,67 @@ function HomeContent(): React.JSX.Element {
     coffeeGroups,
   ]);
 
-  const coffeeSessionModelOverride = useMemo((): string | undefined => {
-    if (!settings) return undefined;
-    const locked = coffeeAnyOfflineProtected;
-    const effectiveProv = locked ? "local" : coffeeProvider;
-    const modelProvider: Provider = effectiveProv === "openai" ? "openai" : "local";
-    const visible = visibleModelChoiceForProvider(
-      settings,
-      coffeeModelChoiceByProvider[modelProvider]
-    );
-    return visible !== AUTO_MODEL_CHOICE ? visible : undefined;
+  const coffeeSessionResolvedChoice = useMemo(() => {
+    const effectiveProvider = coffeeAnyOfflineProtected ? "local" : coffeeProvider;
+    return resolveModelChoiceForResponseMode({
+      responseMode: responseModeForProvider(effectiveProvider),
+      providerPreference: effectiveProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
   }, [
     settings,
     coffeeAnyOfflineProtected,
     coffeeProvider,
     coffeeModelChoiceByProvider,
+    onlineChatModelOptions,
   ]);
+  const coffeeSessionProvider = coffeeSessionResolvedChoice.provider;
+  const coffeeSessionModelOverride =
+    coffeeSessionResolvedChoice.modelChoice !== AUTO_MODEL_CHOICE
+      ? coffeeSessionResolvedChoice.modelChoice
+      : undefined;
+
+  useEffect(() => {
+    if (!coffeeConversation || coffeeSessionPhase !== "finished") return;
+    if (coffeeConversationHasSessionSynopsis(coffeeConversation)) return;
+    const sessionId = coffeeConversation.id;
+    if (coffeeSynopsisRequestIdsRef.current.has(sessionId)) return;
+    coffeeSynopsisRequestIdsRef.current.add(sessionId);
+    let cancelled = false;
+    async function generateSynopsis() {
+      try {
+        const response = await api<{ ok: true; conversation: CoffeeConversationState }>(
+          `/api/coffee/sessions/${encodeURIComponent(sessionId)}/synopsis`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              preferredProvider: coffeeSessionProvider,
+              ...(coffeeSessionModelOverride
+                ? { modelOverride: coffeeSessionModelOverride }
+                : {}),
+            }),
+          }
+        );
+        if (cancelled) return;
+        setCoffeeConversation((current) =>
+          current?.id === sessionId ? response.conversation : current
+        );
+        void refreshConversations();
+      } catch (err) {
+        coffeeSynopsisRequestIdsRef.current.delete(sessionId);
+        console.warn("[coffee] session synopsis failed", err);
+      }
+    }
+    void generateSynopsis();
+    return () => {
+      cancelled = true;
+    };
+  }, [coffeeConversation, coffeeSessionModelOverride, coffeeSessionPhase, coffeeSessionProvider]);
 
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
@@ -18962,6 +23281,12 @@ function HomeContent(): React.JSX.Element {
   }, [hueFilterCenter, viewportWidth]);
   const emptyStateSearchActive =
     emptyStateSearchOpen || normalizedEmptyStateBotNameFilter.length > 0;
+  const zenEmptyHeroVisible =
+    view === "chat" &&
+    (!detail || detail.messages.length === 0) &&
+    !pendingReplyVisible &&
+    !emptyStateSearchActive &&
+    !chatStartupSummaryVisible;
   const emptyStateTypingSearchAvailable =
     view !== "chat" &&
     pickerSourceBots.length > 0 &&
@@ -19071,18 +23396,15 @@ function HomeContent(): React.JSX.Element {
     activeConversationIsEmpty &&
     Boolean(selectedBotId) &&
     (canvasBotSwitchTransitioning || sandboxBotStatusBusy);
-  const showCanvasBotSwitchOverlay = canvasBotSwitchOverlayPhase !== "hidden";
   const showConversationSurfaceLoading =
     conversationSurfaceLoading &&
     (view === "chat" || view === "sandbox");
-  const showMessagesFrameStateLoadingOverlay =
-    showCanvasBotSwitchOverlay || showConversationSurfaceLoading;
-  const messagesFrameStateLoadingLabel = showConversationSurfaceLoading
-    ? "Loading conversation..."
-    : "Switching bot profile...";
-  const messagesFrameStateLoadingKind = showConversationSurfaceLoading
-    ? "conversation"
-    : "bot-switch";
+  // Bot-profile switching keeps running in the background, but we no longer
+  // block the messages frame with the dedicated "Switching bot profile..."
+  // overlay. Keep only the conversation-load gate visible.
+  const showMessagesFrameStateLoadingOverlay = showConversationSurfaceLoading;
+  const messagesFrameStateLoadingLabel = "Loading conversation...";
+  const messagesFrameStateLoadingKind = "conversation";
   // Hero override is drag-only — the Prism triangle replaces a bot glyph
   // only while the user is actively pressing/touching the slider thumb.
   // When a bot is committed, the lens unmounts and the bot accent takes
@@ -19314,20 +23636,11 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!user?.id) {
       setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
-      setResetTutorialsOnNextLaunch(false);
       setActiveTutorialMode(null);
       setActiveTutorialStepIndex(0);
       return;
     }
     try {
-      const resetKey = tutorialResetOnNextLaunchKeyForUser(user.id);
-      const shouldResetOnLaunch = localStorage.getItem(resetKey) === "1";
-      setResetTutorialsOnNextLaunch(shouldResetOnLaunch);
-      if (shouldResetOnLaunch) {
-        localStorage.removeItem(resetKey);
-        setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
-        return;
-      }
       const raw = localStorage.getItem(tutorialStorageKeyForUser(user.id));
       if (!raw) {
         setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
@@ -19338,19 +23651,6 @@ function HomeContent(): React.JSX.Element {
       setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
     }
   }, [user?.id]);
-  useEffect(() => {
-    if (!user?.id) return;
-    try {
-      const key = tutorialResetOnNextLaunchKeyForUser(user.id);
-      if (resetTutorialsOnNextLaunch) {
-        localStorage.setItem(key, "1");
-      } else {
-        localStorage.removeItem(key);
-      }
-    } catch {
-      // Ignore storage write failures; current-session behavior still works.
-    }
-  }, [resetTutorialsOnNextLaunch, user?.id]);
   useEffect(() => {
     if (!user?.id) return;
     try {
@@ -19368,7 +23668,7 @@ function HomeContent(): React.JSX.Element {
       setActiveTutorialMode(null);
       return;
     }
-    const mode = view as TutorialMode;
+    const mode: TutorialMode = view === "chat" ? "zen" : (view as TutorialMode);
     if (!Object.prototype.hasOwnProperty.call(DEFAULT_TUTORIAL_PROGRESS, mode)) {
       return;
     }
@@ -19384,8 +23684,12 @@ function HomeContent(): React.JSX.Element {
   }, [activeTutorialMode, tutorialProgress, user, view]);
   useEffect(() => {
     if (!devToolsOpen) return;
-    void refreshSummaryDebug(view === "chat" ? "chat" : "sandbox");
+    void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
   }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
+  useEffect(() => {
+    if (!devShowCompactedSummaryInChat) return;
+    void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
+  }, [devShowCompactedSummaryInChat, view, detail?.id, selectedId]);
   useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
@@ -19394,11 +23698,63 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!assistantRevealActive) return;
+    if (!replyInFlightSignals) return;
+    if (latestMessageRole !== "assistant") return;
+    if (!detail?.id || !latestAssistantMessageId) return;
+    if (
+      chatScrollPinnedByConversationRef.current.get(detail.id) === true ||
+      chatAutoscrollUserDisarmedByConversationRef.current.get(detail.id) === true
+    ) {
+      return;
+    }
+
+    const alignLatestAssistant = (): void => {
+      const scrollRoot = messagesScrollRef.current;
+      if (!scrollRoot) return;
+      const activeAssistantRow = findMessageRowById(scrollRoot, latestAssistantMessageId);
+      if (!activeAssistantRow) return;
+      const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+      const anchorY = resolveChatModeMessageFollowY(activeAssistantRow, scrollRoot);
+      const targetTop = Math.max(
+        0,
+        Math.min(
+          maxScrollTop,
+          anchorY - scrollRoot.clientHeight * CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO
+        )
+      );
+      if (Math.abs(targetTop - scrollRoot.scrollTop) <= 0.5) return;
+      chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
+      chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
+      scrollRoot.scrollTop = targetTop;
+      chatLastScrollTopByConversationRef.current.set(detail.id, scrollRoot.scrollTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
+    };
+
+    let frame = window.requestAnimationFrame(() => {
+      alignLatestAssistant();
+      frame = window.requestAnimationFrame(alignLatestAssistant);
+    });
+    const settleTimers = [80, 180].map((delayMs) =>
+      window.setTimeout(alignLatestAssistant, delayMs)
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [
+    assistantRevealActive,
+    detail?.id,
+    latestAssistantMessageId,
+    latestMessageRole,
+    replyInFlightSignals,
+  ]);
+
   // Auto-scroll for Chat mode while a reply is streaming or revealing.
-  // Each animation frame ease scrollTop toward the bottom of the content
-  // by a fixed fraction of the remaining distance. That gives a natural
-  // ease-out (steps shrink as we approach), and when new tokens push the
-  // bottom further down the loop catches up automatically.
+  // Each animation frame eases scrollTop toward the active typed line's
+  // centered reading-band position without pinning the user to the bottom
+  // of the thread.
   //
   // The loop self-arms when typing starts so we never depend on a separate
   // deferred arm effect. Manual scroll-up sets `armed=false` via the
@@ -19411,7 +23767,10 @@ function HomeContent(): React.JSX.Element {
 
     // If the user interrupted the previous reply for this conversation,
     // stay frozen until they send a fresh message.
-    if (chatScrollPinnedByConversationRef.current.get(conversationId) === true) {
+    if (
+      chatScrollPinnedByConversationRef.current.get(conversationId) === true ||
+      chatAutoscrollUserDisarmedByConversationRef.current.get(conversationId) === true
+    ) {
       chatAutoscrollArmedByConversationRef.current.set(conversationId, false);
       return;
     }
@@ -19419,8 +23778,8 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.32;
-    const MIN_STEP_PX = 0.6;
+    const EASE_FACTOR = 0.42;
+    const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
     let frame = 0;
@@ -19432,11 +23791,45 @@ function HomeContent(): React.JSX.Element {
       if (chatAutoscrollArmedByConversationRef.current.get(conversationId) === false) return;
 
       const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-      const delta = maxScrollTop - scrollEl.scrollTop;
-      if (delta <= REST_THRESHOLD_PX) return;
+      const activeAssistantRow = latestAssistantMessageId
+        ? findMessageRowById(scrollEl, latestAssistantMessageId)
+        : null;
+      const activeUserRow =
+        !activeAssistantRow && latestUserMessageId
+          ? findMessageRowById(scrollEl, latestUserMessageId)
+          : null;
+      const targetTop = (() => {
+        if (!activeAssistantRow) {
+          if (!activeUserRow) return maxScrollTop;
+          const userAnchorY = resolveChatModeMessageFollowY(activeUserRow, scrollEl);
+          return Math.max(
+            0,
+            Math.min(
+              maxScrollTop,
+              userAnchorY - scrollEl.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+            )
+          );
+        }
+        const anchorY = resolveChatModeMessageFollowY(activeAssistantRow, scrollEl);
+        return Math.max(
+          0,
+          Math.min(
+            maxScrollTop,
+            anchorY - scrollEl.clientHeight * CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO
+          )
+        );
+      })();
+      const delta = targetTop - scrollEl.scrollTop;
+      if (Math.abs(delta) <= REST_THRESHOLD_PX) return;
 
-      const stepPx = Math.max(MIN_STEP_PX, delta * EASE_FACTOR);
-      const nextTop = Math.min(maxScrollTop, scrollEl.scrollTop + stepPx);
+      const stepPx = Math.min(
+        CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX,
+        Math.max(MIN_STEP_PX, Math.abs(delta) * EASE_FACTOR)
+      );
+      const nextTop =
+        delta > 0
+          ? Math.min(targetTop, scrollEl.scrollTop + stepPx)
+          : Math.max(targetTop, scrollEl.scrollTop - stepPx);
       // Tag this write as programmatic so the onScroll handler does not
       // interpret reflow-induced drops as a manual upward scroll.
       chatProgrammaticScrollUntilMsRef.current = Date.now() + 80;
@@ -19447,7 +23840,13 @@ function HomeContent(): React.JSX.Element {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [assistantRevealActive, detail?.id, replyInFlightSignals]);
+  }, [
+    assistantRevealActive,
+    detail?.id,
+    latestAssistantMessageId,
+    latestUserMessageId,
+    replyInFlightSignals,
+  ]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (!latestUserMessageId) return;
@@ -19477,6 +23876,7 @@ function HomeContent(): React.JSX.Element {
     // Fresh user turn clears any prior interruption pin so auto-scroll
     // resumes for the upcoming reply.
     chatScrollPinnedByConversationRef.current.delete(detail.id);
+    chatAutoscrollUserDisarmedByConversationRef.current.delete(detail.id);
     requestAnimationFrame(() => {
       const scrollRoot = messagesScrollRef.current;
       if (!scrollRoot) return;
@@ -19485,8 +23885,11 @@ function HomeContent(): React.JSX.Element {
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const useSmoothQuestionScroll = latestUserMessageAsQuestion && !prefersReducedMotion;
       chatProgrammaticScrollUntilMsRef.current = Date.now() + (useSmoothQuestionScroll ? 900 : 180);
-      const topAnchorOffsetPx = 2;
-      const top = Math.max(0, target.offsetTop - topAnchorOffsetPx);
+      const top = Math.max(
+        0,
+        resolveChatModeMessageFollowY(target, scrollRoot) -
+          scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
+      );
       scrollRoot.scrollTo({ top, behavior: useSmoothQuestionScroll ? "smooth" : "auto" });
       chatLastScrollTopByConversationRef.current.set(detail.id, top);
       chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
@@ -19531,28 +23934,11 @@ function HomeContent(): React.JSX.Element {
     // assistant streaming starts and the pin lock window has elapsed.
     const waitMs = Math.max(0, chatProgrammaticScrollUntilMsRef.current - Date.now());
     const timer = window.setTimeout(() => {
+      if (chatAutoscrollUserDisarmedByConversationRef.current.get(detail.id) === true) return;
       chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
     }, waitMs);
     return () => window.clearTimeout(timer);
   }, [chatEphemeralMode, detail?.id, latestMessageRole, latestAssistantMessageId]);
-  useEffect(() => {
-    if (!chatEphemeralMode || !detail?.id || !latestUserMessageId) return;
-    if (latestMessageRole !== "assistant") return;
-    if (pendingReplyVisible || chatAssistantRevealInProgress) return;
-    const fadeKey = `${detail.id}:${latestUserMessageId}`;
-    if (chatUserAnchorFadeStartByKeyRef.current.has(fadeKey)) return;
-    chatUserAnchorFadeStartByKeyRef.current.set(
-      fadeKey,
-      Date.now() + CHAT_MODE_USER_ANCHOR_FADE_DELAY_MS
-    );
-  }, [
-    chatAssistantRevealInProgress,
-    chatEphemeralMode,
-    detail?.id,
-    latestMessageRole,
-    latestUserMessageId,
-    pendingReplyVisible,
-  ]);
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (chatLastRestoredConversationIdRef.current === detail.id) return;
@@ -19576,16 +23962,21 @@ function HomeContent(): React.JSX.Element {
     requestAnimationFrame(() => {
       const scrollRoot = messagesScrollRef.current;
       if (!scrollRoot) return;
-      const latestUser = [...detail.messages].reverse().find((msg) => msg.role === "user");
-      const latestAssistant = [...detail.messages].reverse().find((msg) => msg.role === "assistant");
-      const targetMessage = latestUser ?? latestAssistant;
+      const targetMessage = detail.messages[detail.messages.length - 1] ?? null;
       if (!targetMessage) return;
       const target = findMessageRowById(scrollRoot, targetMessage.id);
       if (!target) return;
-      target.scrollIntoView({
-        behavior: "auto",
-        block: targetMessage.role === "user" ? "start" : "center",
-      });
+      const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+      const rawTop =
+        targetMessage.role === "assistant"
+          ? resolveChatModeMessageFollowY(target, scrollRoot) -
+            scrollRoot.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+          : resolveChatModeMessageFollowY(target, scrollRoot) -
+            scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO;
+      const top = Math.max(0, Math.min(maxScrollTop, rawTop));
+      scrollRoot.scrollTop = top;
+      chatLastScrollTopByConversationRef.current.set(detail.id, top);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
     });
   }, [
     chatEphemeralMode,
@@ -19598,13 +23989,18 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode || !detail?.id) {
       chatMessageFirstSeenAtRef.current.clear();
       chatCancelledRevealTokenCountByKeyRef.current.clear();
+      chatCommittedFontLineCountByKeyRef.current.clear();
+      chatAssistantRevealEligibleKeysRef.current.clear();
+      chatCompletedRevealKeysRef.current.clear();
       chatInterruptCountByConversationRef.current.clear();
       chatLastInterruptionLineByConversationRef.current.clear();
       chatUserMessageFadeStartByKeyRef.current.clear();
-      chatUserAnchorFadeStartByKeyRef.current.clear();
       chatMessageOffscreenSinceRef.current.clear();
       chatLastScrollTopByConversationRef.current.clear();
       chatLastScrollHeightByConversationRef.current.clear();
+      chatAutoscrollArmedByConversationRef.current.clear();
+      chatAutoscrollUserDisarmedByConversationRef.current.clear();
+      chatScrollPinnedByConversationRef.current.clear();
       chatArchivePullPxByConversationRef.current.clear();
       chatArchiveParagraphQuotaByConversationRef.current.clear();
       for (const timer of chatArchiveLoadTimerByConversationRef.current.values()) {
@@ -19619,24 +24015,56 @@ function HomeContent(): React.JSX.Element {
       chatArchiveInertiaVelocityByConversationRef.current.clear();
       return;
     }
-    // Strict ephemerality is anchored to first render in the active chat view.
-    chatMessageFirstSeenAtRef.current.clear();
-    chatCancelledRevealTokenCountByKeyRef.current.clear();
     chatInterruptCountByConversationRef.current.delete(detail.id);
     chatLastInterruptionLineByConversationRef.current.delete(detail.id);
     const activeConversationPrefix = `${detail.id}:`;
+    for (const temporalKey of chatMessageFirstSeenAtRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatMessageFirstSeenAtRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatCancelledRevealTokenCountByKeyRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatCancelledRevealTokenCountByKeyRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatCommittedFontLineCountByKeyRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatCommittedFontLineCountByKeyRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatAssistantRevealEligibleKeysRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatCompletedRevealKeysRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatCompletedRevealKeysRef.current.delete(temporalKey);
+      }
+    }
     for (const fadeKey of chatUserMessageFadeStartByKeyRef.current.keys()) {
       if (!fadeKey.startsWith(activeConversationPrefix)) {
         chatUserMessageFadeStartByKeyRef.current.delete(fadeKey);
       }
     }
-    for (const fadeKey of chatUserAnchorFadeStartByKeyRef.current.keys()) {
-      if (!fadeKey.startsWith(activeConversationPrefix)) {
-        chatUserAnchorFadeStartByKeyRef.current.delete(fadeKey);
-      }
-    }
     setChatEphemeralNowMs(Date.now());
   }, [chatEphemeralMode, detail?.id]);
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id) return;
+    const activeConversationPrefix = `${detail.id}:`;
+    const activeMessageKeys = new Set(
+      detail.messages.map((message) => `${detail.id}:${message.id}`)
+    );
+    for (const temporalKey of chatCommittedFontLineCountByKeyRef.current.keys()) {
+      if (
+        !temporalKey.startsWith(activeConversationPrefix) ||
+        !activeMessageKeys.has(temporalKey)
+      ) {
+        chatCommittedFontLineCountByKeyRef.current.delete(temporalKey);
+      }
+    }
+  }, [chatEphemeralMode, detail?.id, detail?.messages]);
   useEffect(() => {
     if (!chatAssistantTypingMechanicsActive || !detail?.id) return;
     const timer = window.setInterval(() => {
@@ -19657,6 +24085,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const temporalKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(temporalKey)) return;
     if (chatMessageFirstSeenAtRef.current.has(temporalKey)) return;
     chatMessageFirstSeenAtRef.current.set(temporalKey, Date.now());
   }, [chatAssistantTypingMechanicsActive, detail?.id, latestAssistantMessageId]);
@@ -19673,6 +24102,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (!latestAssistant) return;
     const temporalKey = `${detail.id}:${latestAssistant.id}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(temporalKey)) return;
     if (chatCompletedRevealKeysRef.current.has(temporalKey)) return;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey)) return;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(temporalKey);
@@ -19680,10 +24110,11 @@ function HomeContent(): React.JSX.Element {
     const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      resolveMessageMoodKey(latestAssistant)
+      DEFAULT_MESSAGE_MOOD
     );
     if (chatEphemeralNowMs - firstSeenAt >= revealDurationMs) {
       chatCompletedRevealKeysRef.current.add(temporalKey);
+      chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
     }
   }, [
     chatAssistantTypingMechanicsActive,
@@ -19741,6 +24172,15 @@ function HomeContent(): React.JSX.Element {
         conversationModelChoiceByScopeRef.current.set(nextKey, { ...stored });
       }
     }
+    if (!stored && prevKey === "p:none" && nextKey === "p:pending") {
+      // New-chat sends stage through "no thread" (p:none) before optimistic
+      // pending detail (p:pending). Preserve a header model pick across that
+      // handoff so first-send conversations don't jump back to Auto.
+      stored = conversationModelChoiceByScopeRef.current.get("p:none");
+      if (stored) {
+        conversationModelChoiceByScopeRef.current.set("p:pending", { ...stored });
+      }
+    }
 
     setChatModelChoiceByProvider(
       stored ? { ...stored } : createDefaultChatModelChoiceByProvider()
@@ -19760,11 +24200,11 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
-  // Every entrance into Sandbox or Chat lands on a fresh, empty surface.
-  // Both modes should open clean, with no prior thread rendered until the
-  // user starts (or explicitly opens) a conversation in that mode.
+  // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
+  // clears stale mode state too, then the restore effect below opens the
+  // user's single continuous PRISM conversation.
   // Fires on:
-  //   • Hub → Sandbox / Chat transitions (Hub tile click).
+  //   • Hub → Sandbox / Zen transitions (Hub tile click).
   //   • Direct URL loads at `/?view=sandbox` or `/?view=chat`.
   //   • Cross-mode hops via URL / back-forward nav.
   //
@@ -19788,6 +24228,50 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
   }, [view]);
+
+  useEffect(() => {
+    if (
+      view !== "chat" ||
+      !user ||
+      chatAutoRestoreSuppressed ||
+      zenInitialStarterCachedReplyRef.current ||
+      pendingReplyVisible ||
+      selectedId ||
+      detail
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const openContinuousZen = async () => {
+      if (zenOpenInFlightRef.current) return;
+      zenOpenInFlightRef.current = true;
+      try {
+        setPendingIncognito(false);
+        setSelectedBotId(null);
+        setSandboxGridSelectedBotId(null);
+        setChatBotOverride(undefined);
+        setConversationStarterPrompts(null);
+        const d = await api<{ conversationId: string }>("/api/conversations/zen/open", {
+          method: "POST",
+          body: "{}",
+        });
+        if (cancelled) return;
+        await refreshConversations();
+        if (cancelled) return;
+        await refreshConversation(d.conversationId);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not open Zen.");
+        }
+      } finally {
+        zenOpenInFlightRef.current = false;
+      }
+    };
+    void openContinuousZen();
+    return () => {
+      cancelled = true;
+    };
+  }, [view, user, chatAutoRestoreSuppressed, pendingReplyVisible, selectedId, detail]);
 
   useEffect(() => {
     if (view === "chat") return;
@@ -19817,7 +24301,7 @@ function HomeContent(): React.JSX.Element {
       detail?.id && detail.id !== "pending"
         ? detail.id
         : conversations.find(
-            (conversation) => conversation.mode === "chat" && !conversation.incognito
+            (conversation) => conversation.mode === "zen" && !conversation.incognito
           )?.id ?? null;
     if (!activeConversationId) {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
@@ -19840,12 +24324,12 @@ function HomeContent(): React.JSX.Element {
             `/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`,
             {
               method: "POST",
-              body: JSON.stringify({ action: "run", mode: "chat", reason: "manual" }),
+              body: JSON.stringify({ action: "run", mode: "zen", reason: "manual" }),
             }
           );
         }
         const result = await api<{ summary: string | null }>(
-          `/api/conversations/${encodeURIComponent(activeConversationId)}/summary?mode=chat`
+          `/api/conversations/${encodeURIComponent(activeConversationId)}/summary?mode=zen`
         );
         if (cancelled) return;
         const trimmedSummary = result.summary?.trim() ?? "";
@@ -20056,10 +24540,11 @@ function HomeContent(): React.JSX.Element {
           ? detailIdRef.current
           : selectedIdRef.current;
       if (!activeConversationId) return;
+      const summaryMode = view === "chat" ? "zen" : "sandbox";
       const url = `/api/conversations/${encodeURIComponent(
         activeConversationId
-      )}/summarization-debug?mode=${view}`;
-      const payload = JSON.stringify({ action: "run", mode: view, reason: "mode_exit" });
+      )}/summarization-debug?mode=${summaryMode}`;
+      const payload = JSON.stringify({ action: "run", mode: summaryMode, reason: "mode_exit" });
       navigator.sendBeacon(
         url,
         new Blob([payload], { type: "application/json" })
@@ -20143,7 +24628,7 @@ function HomeContent(): React.JSX.Element {
       if (selectedIdRef.current !== id) {
         return;
       }
-      setDetail(applyExplicitAskQuestionFallback(d.conversation));
+      setDetail(applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)));
       setSessionOpinion(d.opinion ?? null);
       setBotOpinion(d.botOpinion ?? null);
       setSelectedId(id);
@@ -20159,7 +24644,7 @@ function HomeContent(): React.JSX.Element {
       //   - else: no replies yet (edge case from a failed send), fall
       //     back to the locked botId so the dropdown reflects the user's
       //     original intent.
-      const nextPickedBotId = d.conversation.mode === "chat"
+      const nextPickedBotId = d.conversation.mode === "zen" || d.conversation.mode === "chat"
         ? null
         : d.conversation.hasAssistantReply
           ? d.conversation.lastBotId
@@ -20196,6 +24681,16 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }
+
+  async function openZenMode(): Promise<void> {
+    setPendingIncognito(false);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setConversationStarterPrompts(null);
+    navigateToView("chat");
+  }
+
   async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
     if (titleRefreshInFlightRef.current.has(conversationId)) return;
     titleRefreshInFlightRef.current.add(conversationId);
@@ -20245,14 +24740,36 @@ function HomeContent(): React.JSX.Element {
       typeof d.settings.lenientLocalImageFallbackModel === "string"
         ? d.settings.lenientLocalImageFallbackModel
         : "";
+    const hasOpenAiApiKey = d.settings.hasOpenAiApiKey === true;
+    const hasAnthropicApiKey = d.settings.hasAnthropicApiKey === true;
+    const hasElevenLabsApiKey = d.settings.hasElevenLabsApiKey === true;
     setSettings({
       ...d.settings,
       displayName,
       composerWritingAssist: d.settings.composerWritingAssist !== false,
+      experimentalDualOllamaEnabled: d.settings.experimentalDualOllamaEnabled === true,
       fallbackModelMessageStripe: d.settings.fallbackModelMessageStripe !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
         : [],
+      hiddenComfyUiWorkflowIds: Array.isArray(d.settings.hiddenComfyUiWorkflowIds)
+        ? d.settings.hiddenComfyUiWorkflowIds
+        : [],
+      hasOpenAiApiKey,
+      hasAnthropicApiKey,
+      hasElevenLabsApiKey,
+      openAiApiKeySource: normalizeApiKeySource(
+        d.settings.openAiApiKeySource,
+        hasOpenAiApiKey
+      ),
+      anthropicApiKeySource: normalizeApiKeySource(
+        d.settings.anthropicApiKeySource,
+        hasAnthropicApiKey
+      ),
+      elevenLabsApiKeySource: normalizeApiKeySource(
+        d.settings.elevenLabsApiKeySource,
+        hasElevenLabsApiKey
+      ),
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -20271,6 +24788,17 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.preferredOpenAiImageModel === "string"
           ? d.settings.preferredOpenAiImageModel
           : "",
+      preferredZenWallpaperLocalImageModel:
+        typeof d.settings.preferredZenWallpaperLocalImageModel === "string"
+          ? d.settings.preferredZenWallpaperLocalImageModel
+          : "",
+      preferredZenWallpaperOpenAiImageModel:
+        typeof d.settings.preferredZenWallpaperOpenAiImageModel === "string"
+          ? d.settings.preferredZenWallpaperOpenAiImageModel
+          : "",
+      zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
+        d.settings.zenWallpaperOpacity
+      ),
       lenientLocalFallbackModel,
       lenientLocalImageFallbackModel,
       comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
@@ -20330,12 +24858,19 @@ function HomeContent(): React.JSX.Element {
 
   /** Persists image hub defaults from the Defaults modal (immediate save — no main Save click). */
   async function persistAccountImageDefaultModelField(
-    field: "preferredLocalImageModel" | "preferredOpenAiImageModel",
+    field:
+      | "preferredLocalImageModel"
+      | "preferredOpenAiImageModel"
+      | "preferredZenWallpaperLocalImageModel"
+      | "preferredZenWallpaperOpenAiImageModel",
     rawFromSelect: string
   ) {
     if (!settings) return;
+    const isOpenAiField =
+      field === "preferredOpenAiImageModel" ||
+      field === "preferredZenWallpaperOpenAiImageModel";
     const stored =
-      field === "preferredOpenAiImageModel" && rawFromSelect.trim().length > 0
+      isOpenAiField && rawFromSelect.trim().length > 0
         ? normalizeOpenAiImageModelId(rawFromSelect)
         : rawFromSelect.trim();
     try {
@@ -20347,6 +24882,25 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setPanelError(
         err instanceof Error ? err.message : "Could not save this image default."
+      );
+      await refreshSettings();
+    }
+  }
+
+  async function persistZenWallpaperOpacityField(rawOpacity: unknown) {
+    if (!settings) return;
+    const stored = normalizeZenWallpaperOpacitySetting(rawOpacity);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ zenWallpaperOpacity: stored }),
+      });
+      setSettings((prev) =>
+        prev ? { ...prev, zenWallpaperOpacity: stored } : prev
+      );
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Could not save Atmosphere opacity."
       );
       await refreshSettings();
     }
@@ -20378,19 +24932,49 @@ function HomeContent(): React.JSX.Element {
     try {
       const d = await api<{
         catalog: ModelCatalog;
-        comfyUi?: { configured: boolean; reachable: boolean; checkpoints: ModelCatalogEntry[] };
+        comfyUi?: {
+          configured: boolean;
+          reachable: boolean;
+          checkpoints: ModelCatalogEntry[];
+          allCheckpoints?: ModelCatalogEntry[];
+        };
+        hiddenBotModelIds?: string[];
+        hiddenComfyUiWorkflowIds?: string[];
       }>(`/api/models${qs}`);
       setModelCatalog(d.catalog);
+      const hiddenBotModelIds = Array.isArray(d.hiddenBotModelIds)
+        ? d.hiddenBotModelIds
+        : null;
+      const hiddenComfyUiWorkflowIds = Array.isArray(d.hiddenComfyUiWorkflowIds)
+        ? d.hiddenComfyUiWorkflowIds
+        : null;
+      if (hiddenBotModelIds || hiddenComfyUiWorkflowIds) {
+        setSettings((previous) =>
+          previous
+            ? {
+                ...previous,
+                ...(hiddenBotModelIds ? { hiddenBotModelIds } : {}),
+                ...(hiddenComfyUiWorkflowIds ? { hiddenComfyUiWorkflowIds } : {}),
+              }
+            : previous
+        );
+      }
       setComfyUiModelsPayload(
-        d.comfyUi ?? { configured: false, reachable: false, checkpoints: [] }
+        d.comfyUi ?? {
+          configured: false,
+          reachable: false,
+          checkpoints: [],
+          allCheckpoints: [],
+        }
       );
     } catch (err) {
       console.warn("[refreshModels]", err);
-      setModelCatalog(FALLBACK_EMPTY_MODEL_CATALOG);
+      setModelCatalog((previous) => previous ?? FALLBACK_EMPTY_MODEL_CATALOG);
       setComfyUiModelsPayload({
         configured: Boolean(trimmed.length > 0),
         reachable: false,
         checkpoints: [],
+        allCheckpoints: [],
       });
     }
   }
@@ -20400,16 +24984,19 @@ function HomeContent(): React.JSX.Element {
       const statusUrl = hostOverride !== undefined
         ? `/api/settings/secondary-ollama-status?host=${encodeURIComponent(hostOverride)}`
         : "/api/settings/secondary-ollama-status";
-      const d = await api<{ status: SecondaryOllamaStatus }>(
-        statusUrl
-      );
+      const d = await api<{
+        status: SecondaryOllamaStatus;
+        dualWorkload?: DualOllamaWorkloadStatus;
+      }>(statusUrl);
       setSecondaryOllamaStatus(d.status);
+      setDualOllamaWorkloadStatus(d.dualWorkload ?? null);
     } catch {
       setSecondaryOllamaStatus({
         configured: Boolean(hostOverride?.trim()),
         reachable: false,
         modelCount: 0,
       });
+      setDualOllamaWorkloadStatus(null);
     } finally {
       setSecondaryOllamaStatusChecking(false);
     }
@@ -20498,7 +25085,7 @@ function HomeContent(): React.JSX.Element {
       await refreshBotMemories(memoryPanelBot.id);
     }
   }
-  async function refreshSummaryDebug(modeOverride?: "chat" | "sandbox"): Promise<void> {
+  async function refreshSummaryDebug(modeOverride?: "zen" | "sandbox"): Promise<void> {
     const conversationId =
       detailIdRef.current && detailIdRef.current !== "pending"
         ? detailIdRef.current
@@ -20509,7 +25096,7 @@ function HomeContent(): React.JSX.Element {
     }
     const modeForDebug =
       modeOverride ??
-      (view === "chat" ? "chat" : "sandbox");
+      (view === "chat" ? "zen" : "sandbox");
     try {
       const d = await api<{ debug: SummaryCompactionDebug }>(
         `/api/conversations/${encodeURIComponent(
@@ -20542,6 +25129,12 @@ function HomeContent(): React.JSX.Element {
   ): Array<{ kind: DevChatDebugEvent["kind"]; text: string }> {
     const lines: Array<{ kind: DevChatDebugEvent["kind"]; text: string }> = [];
     const prefix = source === "edit" ? "[edit]" : "[send]";
+    for (const event of envelope.backendEvents ?? []) {
+      lines.push({
+        kind: devDebugKindForBackendEvent(event.kind),
+        text: formatBackendDebugLine(prefix, event),
+      });
+    }
     if (envelope.summaryCompaction?.triggered) {
       const summaryPreview = envelope.summaryCompaction.latestSummary?.trim();
       lines.push({
@@ -21007,17 +25600,303 @@ function HomeContent(): React.JSX.Element {
     setActiveTutorialStepIndex(0);
   }
 
-  function setTutorialResetOnNextLaunchEnabled(nextValue: boolean): void {
-    setResetTutorialsOnNextLaunch(nextValue);
-    setPanelNotice(
-      nextValue
-        ? "Tutorials will restart next time you launch Prism."
-        : "Tutorial restart on launch disabled."
-    );
+  function resetAllModeTutorials(): void {
+    setTutorialProgress(DEFAULT_TUTORIAL_PROGRESS);
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+    setPanelNotice("Mode tutorials reset. They will reappear when you enter each mode.");
+  }
+
+  function resetSingleModeTutorial(mode: TutorialMode): void {
+    setTutorialProgress((current) => ({ ...current, [mode]: false }));
+    if (view === mode) {
+      setActiveTutorialMode(mode);
+      setActiveTutorialStepIndex(0);
+    }
+    setPanelNotice(`${mode[0].toUpperCase()}${mode.slice(1)} tutorial reset.`);
+  }
+
+  function resetBrowserFactoryDefaultsForUser(userId: string): void {
+    const commandDefaults = normalizeCommandCenterState(null);
+    const modelDefaults = createDefaultChatModelChoiceByProvider();
+    const coffeeDefaults = normalizeCoffeeSessionSettings(undefined);
+
+    try {
+      window.localStorage.removeItem(tutorialStorageKeyForUser(userId));
+      window.localStorage.removeItem(commandCenterStateStorageKey(userId));
+      window.localStorage.removeItem(botLibraryGroupsStorageKey(userId));
+      window.localStorage.removeItem(conversationGroupOrderStorageKey(userId));
+      window.localStorage.removeItem(zenInitialStarterCacheKey(userId));
+      window.localStorage.removeItem(PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
+    } catch {
+      // Storage cleanup is best effort; in-memory state below still resets the current page.
+    }
+
+    pendingReplyAbortControllerRef.current?.abort();
+    pendingReplyAbortControllerRef.current = null;
+    manualCompactionCancelControllerRef.current?.abort();
+    manualCompactionCancelControllerRef.current = null;
+    priorityCommandCancelControllerRef.current?.abort();
+    priorityCommandCancelControllerRef.current = null;
+    zenInitialThinkingCancelControllerRef.current?.abort();
+    zenInitialThinkingCancelControllerRef.current = null;
+    for (const controllers of imageGenAbortControllersByScopeRef.current.values()) {
+      for (const controller of controllers) {
+        controller.abort();
+      }
+    }
+    imageGenAbortControllersByScopeRef.current.clear();
+    coffeeTurnAbortRef.current?.abort();
+    coffeeContinueAbortRef.current?.abort();
+    coffeeTurnAbortRef.current = null;
+    coffeeContinueAbortRef.current = null;
+    if (coffeeArrivalTimerRef.current) {
+      clearTimeout(coffeeArrivalTimerRef.current);
+      coffeeArrivalTimerRef.current = null;
+    }
+    if (coffeeLoopTimerRef.current) {
+      clearTimeout(coffeeLoopTimerRef.current);
+      coffeeLoopTimerRef.current = null;
+    }
+    if (coffeeCooldownTimerRef.current) {
+      clearTimeout(coffeeCooldownTimerRef.current);
+      coffeeCooldownTimerRef.current = null;
+    }
+    if (coffeeRevealTimerRef.current) {
+      clearTimeout(coffeeRevealTimerRef.current);
+      coffeeRevealTimerRef.current = null;
+    }
+    if (coffeeTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeTypewriterRafRef.current);
+      coffeeTypewriterRafRef.current = null;
+    }
+    if (coffeeReplayTimerRef.current) {
+      clearTimeout(coffeeReplayTimerRef.current);
+      coffeeReplayTimerRef.current = null;
+    }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    coffeeSynopsisRequestIdsRef.current.clear();
+    if (coffeeInterruptionCueTimerRef.current) {
+      clearTimeout(coffeeInterruptionCueTimerRef.current);
+      coffeeInterruptionCueTimerRef.current = null;
+    }
+
+    setTutorialProgress({ ...DEFAULT_TUTORIAL_PROGRESS });
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+    setCommandCenterPreferredModel(commandDefaults.preferredModel);
+    setCommandCenterCommands(commandDefaults.commands);
+    setCommandCenterSelectedCommandId(null);
+    setCommandCenterSpecsCommandId(null);
+    setCommandCenterHelpModalOpen(false);
+    setExpandedPromptShortcutMessageId(null);
+    setConversationGroupOrder([]);
+    setBotLibraryGroups([createFavoritesBotGroup()]);
+    setConversations([]);
+    setSelectedId(null);
+    selectedIdRef.current = null;
+    setDetail(null);
+    detailIdRef.current = null;
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setMemories([]);
+    setBotMemories([]);
+    setSettings(null);
+    setModelCatalog(null);
+    setBots([]);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setCanvasSelectedBotIds(new Set());
+    setCanvasBotMarqueeRect(null);
+    setChatBotOverride(undefined);
+    setDraft("");
+    setError(null);
+    setChatModelChoiceByProvider(modelDefaults);
+    setCoffeeModelChoiceByProvider(modelDefaults);
+    setImageGenModelChoiceByProvider(modelDefaults);
+    setStoryModelChoiceByProvider(modelDefaults);
+    conversationModelChoiceByScopeRef.current.clear();
+    lastConversationModelScopeKeyRef.current = null;
+    chatModelChoiceByProviderWriteRef.current = modelDefaults;
+    coffeeModelChoiceByScopeRef.current.clear();
+    lastCoffeeModelScopeKeyRef.current = null;
+    coffeeModelChoiceByProviderWriteRef.current = modelDefaults;
+
+    setImages([]);
+    setImageBotDirectorySnapshot([]);
+    setImageLightbox(null);
+    setImagePrompt("");
+    setImageGlobalPositiveKeywords([]);
+    setImageGlobalNegativeKeywords([]);
+    setImageBotKeywordsByBotId({});
+    setImagePositiveKeywordDraft("");
+    setImageNegativeKeywordDraft("");
+    setImageKeywordEditorOpen(false);
+    setImageKeywordSelectedTagsByKind({ positive: [], negative: [] });
+    setImageGenerationVariant("letterbox");
+    setImageVariantManualOverride(false);
+    setImageRandomPromptBusy(false);
+    setImagePrivateMode(false);
+    setImagePrivateGeneratedIds([]);
+    setImagePrivateRevealedIds(new Set());
+    setImagePanelScope("all");
+    imagePanelScopeRef.current = "all";
+    setImagePanelBotId(null);
+    imagePanelBotIdRef.current = null;
+    setImageGenInflightByScope({});
+    setImageGenUiContextByScope({});
+    setImageGenWarmupHintVisible(false);
+    setImageReadyNotice(null);
+    setImagesDeleteAllConfirmOpen(false);
+    setImagesDeleteAllBusy(false);
+    zenWallpaperGenerationInFlightRef.current.clear();
+    setZenWallpaperBusyConversationId(null);
+    setZenWallpaperError(null);
+    setZenAtmosphereLayerOpacities({});
+
+    setNewBotName("");
+    setBotProfile(blankBotProfile());
+    setNewBotLocalModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineEnabled(true);
+    setNewBotDeleteProtected(false);
+    setNewBotFlirtEnabled(false);
+    setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
+    setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+    setNewBotColor(randomHex());
+    setNewBotGlyph(randomBotGlyph());
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setEditingBotId(null);
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    editOriginalRef.current = null;
+    createBotAppearanceTouchedRef.current = false;
+
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeGroups([]);
+    setCoffeeSelectedGroupId(null);
+    setCoffeeCollapsedGroupIds(new Set());
+    setCoffeePresets([]);
+    setCoffeeSelectedDurationMinutes(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    setCoffeeSelectedPresetId("");
+    setCoffeeOpeningPollModalOpen(false);
+    setCoffeeOpeningPollQuestion("");
+    setCoffeeOpeningPollOptions(buildDefaultCoffeePollOptionDraft());
+    setCoffeeActivePoll(null);
+    coffeeActivePollRef.current = null;
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeePollVoteBusy(false);
+    setCoffeePollPanelPosition(COFFEE_POLL_PANEL_DEFAULT_POSITION);
+    setCoffeeSettingsModalOpen(false);
+    setCoffeeSessionSettings(coffeeDefaults);
+    coffeeSessionSettingsRef.current = coffeeDefaults;
+    setCoffeeSettingsDraft(coffeeDefaults);
+    setCoffeeGroupNameDraft("");
+    setCoffeePresetNameDraft("");
+    setCoffeeSettingsSaving(false);
+    setCoffeeGroupOverviewRenameBusy(false);
+    setCoffeeAutoTopicToggleBusy(false);
+    setCoffeeSearch("");
+    setCoffeeDraft("");
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeePausedSessionIds(new Set());
+    setCoffeePausedSessionRemainingMsById({});
+    coffeeAutoplayPausedRef.current = false;
+    setCoffeeAutoplayPaused(false);
+    setCoffeeError(null);
+    setCoffeeTranscriptOpen(false);
+    setCoffeeTranscriptClosing(false);
+    setCoffeeSessionPhase("selecting");
+    setCoffeeTurnRhythmState("idle");
+    coffeeTurnRhythmStateRef.current = "idle";
+    setCoffeeTypewriterLength(0);
+    setCoffeePendingSpeakerBotId(null);
+    setCoffeePendingRevealConversation(null);
+    coffeePendingRevealAfterUserRef.current = null;
+    setCoffeeUserRevealText("");
+    setCoffeeInterruptedSnippet(null);
+    setCoffeeLiveInterruptionCue(null);
+    setCoffeePendingArrivalScenario("user-first");
+    setCoffeeStarterTopics([]);
+    setCoffeeArrivedBotIds([]);
+    assignCoffeeSessionEndsAtMs(null);
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeeReplayActive(false);
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
+
+    setStorySessions([]);
+    setStorySelectedSessionId(null);
+    setStorySession(null);
+    setStorySelectedBotIds([]);
+    setStoryPremise("");
+    setStorySearch("");
+    setStoryBusy(false);
+    setStoryError(null);
+    setStoryMapOpen(false);
+    setStoryInventoryOpen(false);
+    setStoryTranscriptOpen(false);
+    setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
+    setStorySetupPinned(false);
+    setStoryProvider("local");
+    setStoryProviderTouched(false);
+  }
+
+  function restoreFactoryDefaults() {
+    setPanelError(null);
+    setPanelNotice(null);
+    setDeleteAccountArmed(false);
+    if (!factoryResetArmed) {
+      setFactoryResetArmed(true);
+      return;
+    }
+    void restoreFactoryDefaultsConfirmed();
+  }
+
+  async function restoreFactoryDefaultsConfirmed() {
+    if (!user?.id) {
+      setPanelError("Sign in before restoring factory defaults.");
+      return;
+    }
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api("/api/account/factory-reset", { method: "POST", body: "{}" });
+      setFactoryResetArmed(false);
+      resetBrowserFactoryDefaultsForUser(user.id);
+      navigateToView("hub");
+      await bootstrap();
+      await refreshAll();
+      setPanelNotice("Factory defaults restored. Tutorials will run again when you enter each mode.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Factory reset failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function deleteAccount() {
     setPanelError(null);
+    setFactoryResetArmed(false);
     if (!deleteAccountArmed) {
       setDeleteAccountArmed(true);
       return;
@@ -21081,8 +25960,9 @@ function HomeContent(): React.JSX.Element {
   // That's the whole point of "play with bot settings and rerun".
   //
   // Mode semantics (kept aligned with the server-side contract):
-  //   - Chat: strict companion lane (single persona, minimal knobs). We only
-  //     send companion preferences + optional incognito state.
+  //   - Chat: companion lane (single persona, minimal knobs). An explicit
+  //     model picker choice still overrides the bot/account default; Auto
+  //     keeps using the server's normal model chain.
   //   - Sandbox: full runtime lane (provider/model/bot controls).
   //   - Private sends intentionally reuse the Chat-mode incognito contract so
   //     they remain ephemeral/no-memory.
@@ -21094,39 +25974,35 @@ function HomeContent(): React.JSX.Element {
       ephemeralMessages?: Message[];
       sessionEnding?: boolean;
       forceNewConversation?: boolean;
+      commandCenterModelChoice?: string;
+      promptShortcut?: PromptShortcutMetadata;
     } = {}
   ): Record<string, unknown> {
-    const isChatMode = view === "chat";
-    const privateForSend = detail?.incognito === true || pendingIncognito;
-    const chatBotIdForSend =
-      chatBotOverride !== undefined
-        ? chatBotOverride
-        : detail?.id !== undefined && detail.id !== "pending"
-          ? detail.botId
-          : (detail?.botId ?? selectedBotId ?? null);
-    const privateBotIdForSend = privateForSend
-      ? chatBotOverride !== undefined
-        ? chatBotOverride
-        : selectedBotId !== null
-          ? selectedBotId
-        : detail?.id !== undefined && detail.id !== "pending"
-          ? detail.botId
-          : (detail?.botId ?? selectedBotId ?? null)
-      : undefined;
-    const mode: "chat" | "sandbox" =
-      isChatMode || privateForSend ? "chat" : "sandbox";
-    // Use the effective provider so a chat with an offline-only bot never
-    // even SENDS "openai" — the API would have downgraded it anyway, but
-    // matching the visible LOCAL lock keeps the request body honest.
-    const providerForSend = effectivePreferredProvider;
-    const modelChoice = providerForSend
-      ? visibleModelChoiceForProvider(
-          settings,
-          chatModelChoiceByProvider[providerForSend]
-        )
-      : AUTO_MODEL_CHOICE;
+    const isZenMode = view === "chat";
+    const privateForSend = false;
+    const mode: "zen" | "sandbox" = isZenMode ? "zen" : "sandbox";
+    const commandCenterModelChoice = parseCommandCenterModelChoice(
+      options.commandCenterModelChoice ?? AUTO_MODEL_CHOICE
+    );
+    // Use the effective response mode so a chat with an offline-only bot never
+    // even SENDS an online provider. In ONLINE mode, resolve the real provider
+    // from the chosen model row (Claude -> Anthropic, GPT -> OpenAI).
+    const resolvedChatChoice = resolveModelChoiceForResponseMode({
+      responseMode: responseModeForProvider(effectivePreferredProvider),
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const providerForSend = commandCenterModelChoice?.provider ?? resolvedChatChoice.provider;
+    const modelChoice = commandCenterModelChoice
+      ? commandCenterModelChoice.modelId
+      : resolvedChatChoice.modelChoice;
     const modelOverride =
-      mode === "sandbox" && modelChoice !== AUTO_MODEL_CHOICE
+      modelChoice !== AUTO_MODEL_CHOICE
         ? modelChoice
         : undefined;
     return {
@@ -21139,7 +26015,7 @@ function HomeContent(): React.JSX.Element {
       ...(options.sessionEnding ? { sessionEnding: true } : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
       mode,
-      ...(mode === "chat"
+      ...(mode === "zen"
         ? {
             companionPreferences: {
               tone: "grounded",
@@ -21150,19 +26026,37 @@ function HomeContent(): React.JSX.Element {
       botId:
         mode === "sandbox"
           ? (selectedBotId ?? undefined)
-          : privateForSend
-            ? privateBotIdForSend
-            : isChatMode
-              ? chatBotIdForSend
-              : undefined,
-      ...(mode === "chat" ? { incognito: privateForSend } : {}),
-      ...(privateForSend
-        ? { ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [] }
-        : {}),
-      preferredProvider:
-        mode === "sandbox" || privateForSend ? providerForSend : undefined,
+          : undefined,
+      preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
+      ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
     };
+  }
+
+  function appendDevChatRouteStart(
+    source: "send" | "edit",
+    body: ReturnType<typeof buildChatRequestBody>
+  ): void {
+    const prefix = source === "edit" ? "[edit]" : "[send]";
+    const messageLength = typeof body.message === "string" ? body.message.length : 0;
+    const modeLabel = body.mode ?? "sandbox";
+    const botLabel =
+      typeof body.botId === "string" && body.botId.length > 0
+        ? body.botId
+        : body.botId === null
+          ? "default"
+          : "unchanged";
+    appendDevChatDebugLines([
+      {
+        kind: "backend",
+        text:
+          `${prefix} route POST /api/chat started — mode=${modeLabel}; ` +
+          `chars=${messageLength}; bot=${botLabel}; ` +
+          `provider=${body.preferredProvider ?? "auto"}; ` +
+          `model=${body.modelOverride ?? "auto"}; ` +
+          `incognito=${body.incognito === true ? "yes" : "no"}`,
+      },
+    ]);
   }
 
   function beginEditMessage(msg: Message): void {
@@ -21170,9 +26064,11 @@ function HomeContent(): React.JSX.Element {
     // Optimistic-only rows are never in SQLite — editing would call /rewind
     // with a fake id after a cancelled send.
     if (String(msg.id).startsWith("pending-")) return;
+    const editableText = msg.promptShortcut?.invocation ?? msg.content;
     setEditingMessageId(msg.id);
-    setEditingOriginalText(msg.content);
-    setDraft(msg.content);
+    setEditingOriginalText(editableText);
+    setDraft(editableText);
+    setComposerSendTintActive(true);
     queueMicrotask(() => draftComposerRef.current?.focus());
   }
 
@@ -21180,6 +26076,18 @@ function HomeContent(): React.JSX.Element {
     setEditingMessageId(null);
     setEditingOriginalText("");
     setDraft("");
+    setComposerSendTintActive(false);
+  }
+
+  function resumeChatModeAutoscrollForOutgoingTurn(
+    conversationId: string | null | undefined
+  ): void {
+    if (!chatEphemeralMode || !conversationId) return;
+    chatScrollPinnedByConversationRef.current.delete(conversationId);
+    chatAutoscrollUserDisarmedByConversationRef.current.delete(conversationId);
+    chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
+    chatLastPinnedUserMessageKeyRef.current = null;
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
   }
 
   async function performMessageEdit(messageId: string, text: string): Promise<void> {
@@ -21190,6 +26098,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
 
+    resumeChatModeAutoscrollForOutgoingTurn(detail.id ?? selectedId);
     setPendingReply(true);
     setPendingReplyStartedAtMs(Date.now());
     setPendingReplyDenialRisk(promptLooksDenialProne(text));
@@ -21220,18 +26129,21 @@ function HomeContent(): React.JSX.Element {
           ...previousDetail,
           messages: [...rewoundMessages, optimisticEditedMessage],
         });
+        const chatBody = buildChatRequestBody(text, {
+          ephemeralMessages: rewoundMessages,
+        });
+        appendDevChatRouteStart("edit", chatBody);
         const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
-          body: JSON.stringify(
-            buildChatRequestBody(text, {
-              ephemeralMessages: rewoundMessages,
-            })
-          ),
+          body: JSON.stringify(chatBody),
         });
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation)
+        );
+        markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: true,
@@ -21259,14 +26171,19 @@ function HomeContent(): React.JSX.Element {
             body: JSON.stringify({ messageId }),
           }
         );
+        const chatBody = buildChatRequestBody(text);
+        appendDevChatRouteStart("edit", chatBody);
         const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
-          body: JSON.stringify(buildChatRequestBody(text)),
+          body: JSON.stringify(chatBody),
         });
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyExplicitAskQuestionFallback(d.conversation);
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation)
+        );
+        markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: true,
@@ -21280,6 +26197,7 @@ function HomeContent(): React.JSX.Element {
       setEditingMessageId(null);
       setEditingOriginalText("");
       setDraft("");
+      setComposerSendTintActive(false);
       await refreshConversations();
       if (
         editedConversation &&
@@ -21305,7 +26223,7 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text);
   }
 
-  /** `/dev …` — local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
+  /** `/dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
   function consumePrismDevComposerCommand(trimmedLine: string): boolean {
     if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
     const parsed = parsePrismDevChatCommand(trimmedLine);
@@ -21328,15 +26246,42 @@ function HomeContent(): React.JSX.Element {
       model: "dev/ui",
     });
 
-    if (!detail) {
-      setError('Open a chat first — then try /dev commands in the composer.');
+    if (parsed.kind === "unknown") {
+      setError(
+        `Unknown dev command "${parsed.token}". Type /dev help for a short list.`,
+      );
       return true;
     }
 
-    if (parsed.kind === "unknown") {
-      setError(
-        `Unknown dev command “${parsed.token}”. Type /dev help for a short list.`,
-      );
+    if (parsed.kind === "panel") {
+      if (!DEV_TOOLS_ENABLED) {
+        setError("Developer tools are not enabled in this build.");
+        return true;
+      }
+      setDevToolsMessage(null);
+      setDevTogglesOpen(false);
+      setDevToolsOpen(true);
+      return true;
+    }
+
+    if (parsed.kind === "close") {
+      closeDevTools();
+      return true;
+    }
+
+    if (parsed.kind === "toggles") {
+      if (!DEV_TOOLS_ENABLED) {
+        setError("Developer tools are not enabled in this build.");
+        return true;
+      }
+      setDevToolsMessage(null);
+      setDevToolsOpen(true);
+      setDevTogglesOpen(true);
+      return true;
+    }
+
+    if (!detail) {
+      setError("Open a chat first - then try /dev help or /dev askquestion in the composer.");
       return true;
     }
 
@@ -21345,8 +26290,11 @@ function HomeContent(): React.JSX.Element {
         ...devAssistShell(),
         content:
           "**Dev commands** (local preview only — nothing is sent to the server)\n\n" +
-          "- `/dev help` — this list\n" +
-          "- `/dev askquestion` — inject a sample AskQuestion chip row",
+          "- `/dev help` - this list\n" +
+          "- `/dev` or `/dev panel` - open Developer Tools\n" +
+          "- `/dev close` - close Developer Tools\n" +
+          "- `/dev toggles` - open Dev toggles\n" +
+          "- `/dev askquestion` - inject a sample AskQuestion chip row",
       };
       setDetail({
         ...detail,
@@ -21381,12 +26329,12 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function clearSummariesFromSlashCommand(): Promise<void> {
-    const modeForSummary: "chat" | "sandbox" = view === "chat" ? "chat" : "sandbox";
+    const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     const fallbackChatConversationId =
-      modeForSummary === "chat"
-        ? conversations.find((conversation) => conversation.mode === "chat" && !conversation.incognito)?.id ?? null
+      modeForSummary === "zen"
+        ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
     const conversationId = activeConversationId ?? fallbackChatConversationId;
     // Clear the visible chat startup summary immediately for responsive feedback.
@@ -21406,19 +26354,158 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function compactCurrentChatFromSlashCommand(commandName: "compact" | "summarize"): Promise<void> {
+    const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (manualCompactionStatus?.state === "running") {
+      setError("This chat is already being compacted.");
+      return;
+    }
+    if (detail?.incognito === true) {
+      setError("Private chats are not saved, so they cannot be compacted.");
+      return;
+    }
+    if (!activeConversationId || activeConversationId === "pending") {
+      setError(`Open a saved chat before using /${commandName}.`);
+      return;
+    }
+    if (pendingReply || chatAssistantRevealInProgress) {
+      clearReplyWorkForManualCompaction();
+    }
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    revealZenHeaderForFreshSurface();
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (modeForSummary === "zen") {
+      setChatStartupSummary(null);
+      chatSummaryRefreshMarkerRef.current = null;
+    }
+    setManualCompactionStatus({
+      conversationId: activeConversationId,
+      mode: modeForSummary,
+      state: "running",
+      summary: null,
+      summaryAt: null,
+    });
+    try {
+      const result = await api<{
+        compacted?: {
+          triggered?: boolean;
+          latestSummary?: string;
+          latestSummaryAt?: string;
+        };
+        debug?: SummaryCompactionDebug;
+      }>(`/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`, {
+        method: "POST",
+        body: JSON.stringify({ action: "run", mode: modeForSummary, reason: "manual" }),
+      });
+      if (result.debug) {
+        setSummaryDebug(result.debug);
+      } else {
+        await refreshSummaryDebug(modeForSummary);
+      }
+      const latestSummary =
+        result.debug?.latestSummary?.trim() ||
+        result.compacted?.latestSummary?.trim() ||
+        null;
+      const latestSummaryAt =
+        result.debug?.latestSummaryAt ??
+        result.compacted?.latestSummaryAt ??
+        null;
+      appendDevChatDebugLines([
+        {
+          kind: "summary",
+          text:
+            `[/${commandName}] compacted current ${modeForSummary} chat` +
+            (latestSummary ? ` - ${latestSummary.length} chars` : ""),
+        },
+      ]);
+      setManualCompactionStatus({
+        conversationId: activeConversationId,
+        mode: modeForSummary,
+        state: "complete",
+        summary: latestSummary,
+        summaryAt: latestSummaryAt,
+      });
+      window.setTimeout(() => {
+        setManualCompactionStatus((current) =>
+          current?.conversationId === activeConversationId && current.state === "complete"
+            ? null
+            : current
+        );
+      }, 1800);
+    } catch (err) {
+      setManualCompactionStatus(null);
+      setError(err instanceof Error ? err.message : "Summary compaction failed.");
+    }
+  }
+
   async function clearConversationFromSlashCommand(): Promise<void> {
+    if (pendingReplyVisible) {
+      setError("Wait for the current reply to finish before clearing this chat.");
+      return;
+    }
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     const fallbackChatConversationId =
       view === "chat"
-        ? conversations.find((conversation) => conversation.mode === "chat" && !conversation.incognito)?.id ?? null
+        ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
     const conversationId = activeConversationId ?? fallbackChatConversationId;
-    if (!conversationId || conversationId === "pending") return;
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (!conversationId || conversationId === "pending" || detail?.incognito === true) {
+      clearAllDisplayedConversationState();
+      setForceNewConversationOnNextSend(false);
+      setComposerPrimed(false);
+      return;
+    }
     try {
-      await api(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-        method: "DELETE",
+      await api<{
+        ok: true;
+        deletedMessages: number;
+        deletedSummaries: number;
+        deletedExports: number;
+      }>(`/api/conversations/${encodeURIComponent(conversationId)}/clear`, {
+        method: "POST",
       });
+      setDetail((current) =>
+        current && current.id === conversationId
+          ? {
+              ...current,
+              title: "New chat",
+              hasAssistantReply: false,
+              lastBotId: null,
+              lastBotColor: null,
+              messages: [],
+            }
+          : current
+      );
+      setSessionOpinion(null);
+      setBotOpinion(null);
+      setChatStartupSummary(null);
+      chatSummaryRefreshMarkerRef.current = null;
+      setSummaryDebug((current) =>
+        current?.conversationId === conversationId ? null : current
+      );
+      setManualCompactionStatus((current) =>
+        current?.conversationId === conversationId ? null : current
+      );
+      hardResetChatArchiveStateForConversation(conversationId);
+      setForceNewConversationOnNextSend(false);
+      setComposerPrimed(false);
       await refreshConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Conversation clear failed.");
@@ -21445,28 +26532,80 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function forgetPlayerMemoryFromSlashCommand(): Promise<void> {
+  function currentSlashMemoryScopeBotId(): string | null {
+    return visualBotSelection.botId ?? activeBot?.id ?? null;
+  }
+
+  async function forgetCurrentBotMemoryFromSlashCommand(): Promise<void> {
+    const botId = currentSlashMemoryScopeBotId();
     try {
       await api<{
         deletedMemories?: number;
-        deletedSummaries?: number;
-        includeAboutYou?: boolean;
-        vectorsCleared?: boolean;
-      }>("/api/dev/clear-session-memory", {
+        scope?: "bot" | "default";
+        botId?: string | null;
+      }>("/api/dev/clear-bot-memory", {
         method: "POST",
-        body: JSON.stringify({ includeAboutYou: true }),
+        body: JSON.stringify({ botId }),
       });
       try {
         await refreshMemories();
+        if (botId && memoryPanelBot?.id === botId) {
+          await refreshBotMemories(botId);
+        } else if (memoryPanelScope === "default") {
+          await refreshDefaultMemories();
+        }
       } catch {
         // Best-effort UI refresh; the server is the source of truth.
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Player memory forget failed.");
+      setError(err instanceof Error ? err.message : "Memory forget failed.");
     }
   }
 
-  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`, `/help`). */
+  /** Built-in operational slash commands that run locally instead of becoming model input. */
+  async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
+    const tokens = trimmedLine
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    if (tokens.length === 0) return false;
+    const normalizedCommand = tokens[0].toLowerCase();
+    if (
+      normalizedCommand !== "/compact" &&
+      normalizedCommand !== "/summarize" &&
+      normalizedCommand !== "/clear" &&
+      normalizedCommand !== "/cls" &&
+      normalizedCommand !== "/refresh" &&
+      normalizedCommand !== "/help"
+    ) {
+      return false;
+    }
+    if (normalizedCommand === "/help") {
+      setDraft("");
+      setComposerSendTintActive(false);
+      setConversationStarterPrompts(null);
+      openCommandCenterHelpModal();
+      return true;
+    }
+    if (tokens.length > 1) {
+      setError(`${normalizedCommand} does not take extra text. Use it by itself.`);
+      return true;
+    }
+    if (normalizedCommand === "/clear" || normalizedCommand === "/cls") {
+      await clearConversationFromSlashCommand();
+      return true;
+    }
+    if (normalizedCommand === "/refresh") {
+      window.location.reload();
+      return true;
+    }
+    await compactCurrentChatFromSlashCommand(
+      normalizedCommand === "/summarize" ? "summarize" : "compact"
+    );
+    return true;
+  }
+
+  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget-all`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
     const tokens = trimmedLine
@@ -21475,80 +26614,37 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (normalizedCommand !== "/forget" && normalizedCommand !== "/help") {
+    if (normalizedCommand !== "/forget" && normalizedCommand !== "/forget-all") {
       return false;
     }
     setError(null);
     setConversationStarterPrompts(null);
     setDraft("");
-    if (normalizedCommand === "/help") {
-      const helpMessage: Message = {
-        id: `dev-slash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        role: "assistant",
-        content:
-          "**Dev slash commands** (local only)\n\n" +
-          "- `/forget` - forgets player-only memory. Clears profile memory and resets summaries, while preserving non-player memories.\n" +
-          "- `/forget all` - hard-resets chat for testing. Wipes the active conversation, every extracted memory, every summary fragment (SQLite + Qdrant), and the UI.\n" +
-          "- `/help` - shows this command list.",
-        createdAt: new Date().toISOString(),
-        provider: "local",
-        model: "dev/slash",
-      };
-      if (detail) {
-        setDetail({
-          ...detail,
-          hasAssistantReply: true,
-          messages: [...detail.messages, helpMessage],
-        });
-      } else {
-        const fallbackBotId = selectedBotId ?? null;
-        setSelectedId(null);
-        setDetail({
-          id: "pending",
-          title: "New chat",
-          botId: fallbackBotId,
-          incognito: false,
-          lastBotId: fallbackBotId,
-          lastBotColor: fallbackBotId
-            ? bots.find((bot) => bot.id === fallbackBotId)?.color ?? null
-            : null,
-          hasAssistantReply: true,
-          messages: [helpMessage],
-        });
-      }
+    setComposerSendTintActive(false);
+    if (tokens.length > 1) {
+      setError(`${normalizedCommand} does not take extra text. Use /forget or /forget-all by itself.`);
       return true;
     }
     if (normalizedCommand === "/forget") {
-      const forgetMode = tokens[1]?.toLowerCase() ?? "";
-      if (tokens.length > 2) {
-        const extras = tokens.slice(2).join(" ");
-        setError(`Unknown /forget option "${extras}". Use /help for supported flags.`);
-        return true;
+      await forgetCurrentBotMemoryFromSlashCommand();
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
       }
-      if (forgetMode.length === 0) {
-        void clearSummariesFromSlashCommand();
-        void forgetPlayerMemoryFromSlashCommand();
-        if (editingMessageId !== null) {
-          setEditingMessageId(null);
-          setEditingOriginalText("");
-        }
-        setForceNewConversationOnNextSend(true);
-        startFreshConversation(false);
-        setComposerPrimed(false);
-        return true;
-      }
-      if (forgetMode !== "all") {
-        setError(`Unknown /forget option "${tokens[1]}". Use /help for supported flags.`);
-        return true;
-      }
-      // `/forget all` should be a hard reset for chat testing, so summary context
-      // is always cleared.
-      void clearSummariesFromSlashCommand();
+      setForceNewConversationOnNextSend(true);
+      startFreshConversation(false);
+      setComposerPrimed(false);
+      return true;
+    }
+    if (normalizedCommand === "/forget-all") {
+      // `/forget-all` is the hard reset for chat testing, so summary context
+      // and every per-user memory artifact are always cleared.
+      await clearSummariesFromSlashCommand();
       // Order matters: nuke the conversation first so its messages stop
       // referencing memories/summaries, then drop every per-user memory
       // artifact so the next chat starts with no recall surface at all.
-      void clearConversationFromSlashCommand();
-      void clearAllSessionMemoryFromSlashCommand();
+      await clearConversationFromSlashCommand();
+      await clearAllSessionMemoryFromSlashCommand();
       // Keep Chat mode from auto-reopening the latest saved thread until the
       // user explicitly starts or opens a conversation again.
       setChatAutoRestoreSuppressed(true);
@@ -21563,6 +26659,71 @@ function HomeContent(): React.JSX.Element {
       return true;
     }
     return false;
+  }
+
+  function resolveCommandCenterPromptShortcuts(rawDraft: string): {
+    kind: "none";
+  } | {
+    kind: "error";
+    error: string;
+  } | {
+    kind: "resolved";
+    promptShortcut: PromptShortcutMetadata | null;
+    prompt: string;
+    modelChoice: string;
+  } {
+    const promptNames = commandCenterPromptPicks.flatMap((command) =>
+      commandInvocationNames(command)
+    );
+    const ranges = resolvePromptShortcutTextRanges(rawDraft, { promptNames });
+    if (ranges.length === 0) return { kind: "none" };
+
+    const commandByInvocation = new Map<string, CommandCenterCommand>();
+    for (const command of commandCenterPromptPicks) {
+      for (const name of commandInvocationNames(command)) {
+        commandByInvocation.set(name.toLowerCase(), command);
+      }
+    }
+
+    let prompt = rawDraft;
+    let firstCommand: CommandCenterCommand | null = null;
+    let firstInvocation = "";
+    for (let index = ranges.length - 1; index >= 0; index -= 1) {
+      const range = ranges[index]!;
+      const command = commandByInvocation.get(range.name.toLowerCase());
+      if (!command) continue;
+      const basePrompt = command.command.trim();
+      if (!basePrompt) {
+        return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
+      }
+      if (index === 0) {
+        firstCommand = command;
+        firstInvocation = rawDraft.slice(range.start, range.end);
+      }
+      prompt = `${prompt.slice(0, range.start)}${basePrompt}${prompt.slice(range.end)}`;
+    }
+
+    if (!firstCommand) return { kind: "none" };
+    const firstRange = ranges[0]!;
+    const exactSingleShortcut =
+      ranges.length === 1 &&
+      rawDraft.slice(0, firstRange.start).trim().length === 0 &&
+      rawDraft.slice(firstRange.end).trim().length === 0;
+    const promptShortcut: PromptShortcutMetadata | null = exactSingleShortcut
+      ? {
+          v: 1,
+          commandId: firstCommand.id,
+          name: firstCommand.name,
+          invocation: firstInvocation,
+          flags: [],
+        }
+      : null;
+    return {
+      kind: "resolved",
+      promptShortcut,
+      prompt,
+      modelChoice: commandCenterPreferredModel,
+    };
   }
 
   function clearPendingImageJobPoll(jobId: string) {
@@ -21671,6 +26832,169 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  async function setZenInitialStarterReplaySuppression(
+    conversationId: string,
+    action: "suppress" | "promote"
+  ): Promise<void> {
+    await api<{ ok: true }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/zen-starter-replay`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }
+    );
+  }
+
+  function cacheZenInitialStarterReply(envelope: ChatPostEnvelope): void {
+    if (!user?.id) return;
+    const conversationId = envelope.conversation.id;
+    const suppressPromise = setZenInitialStarterReplaySuppression(
+      conversationId,
+      "suppress"
+    ).catch((err) => {
+      if (zenInitialStarterCachedReplyRef.current?.envelope.conversation.id === conversationId) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Prism saved the canceled opener, but could not hide it."
+        );
+      }
+    });
+    zenInitialStarterCachedReplyRef.current = {
+      savedAt: Date.now(),
+      envelope,
+      suppressPromise,
+    };
+    clearLegacyZenInitialStarterCachedReply(user.id);
+  }
+
+  function clearZenInitialStarterReplyCache(): void {
+    zenInitialStarterCachedReplyRef.current = null;
+    if (user?.id) {
+      clearLegacyZenInitialStarterCachedReply(user.id);
+    }
+  }
+
+  function commitZenInitialStarterEnvelope(
+    envelope: ChatPostEnvelope,
+    options: { consumeCache: boolean }
+  ): void {
+    const patchedConversation = applyCommandDisplayAliases(
+      applyExplicitAskQuestionFallback(envelope.conversation)
+    );
+    if (options.consumeCache) {
+      clearZenInitialStarterReplyCache();
+    }
+    zenInitialStarterLiveEnvelopeRef.current = {
+      ...envelope,
+      conversation: patchedConversation,
+    };
+    setChatAutoRestoreSuppressed(false);
+    clearPendingReplyState();
+    setPendingReplyStartMessageCount(0);
+    markLatestAssistantRevealEligible(patchedConversation);
+    hardResetChatArchiveStateForConversation(patchedConversation.id);
+    captureFallbackMessageIdFromEnvelope(envelope);
+    setDetail(patchedConversation);
+    setSelectedId(patchedConversation.id);
+    setSessionOpinion(envelope.opinion ?? null);
+    setBotOpinion(envelope.botOpinion ?? null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    setComposerPrimed(false);
+    setStarterComposerRevealed(false);
+    setAskQuestionComposerRevealed(false);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    if (
+      Array.isArray(envelope.conversationStarters) &&
+      envelope.conversationStarters.length >= 3
+    ) {
+      setConversationStarterPrompts({
+        conversationId: patchedConversation.id,
+        prompts: envelope.conversationStarters.slice(0, 3),
+      });
+    } else {
+      setConversationStarterPrompts(null);
+    }
+    wirePendingImageJobFromEnvelope(envelope, {
+      stillViewing: true,
+      activeConversationId: patchedConversation.id,
+    });
+    setChatEphemeralNowMs(Date.now());
+    void refreshConversations();
+    void refreshOpenMemoryViews();
+  }
+
+  function replayCachedZenInitialStarterReply(): boolean {
+    if (!user?.id) return false;
+    const cached = zenInitialStarterCachedReplyRef.current;
+    if (!cached) return false;
+    const conversationId = cached.envelope.conversation.id;
+    setChatAutoRestoreSuppressed(false);
+    setPendingReply(true);
+    setPendingReplyStartedAtMs(Date.now());
+    setPendingReplyDenialRisk(false);
+    setPendingReplyStartMessageCount(0);
+    setPendingReplyConversationId(conversationId);
+    setPendingReplyIsNewConversation(false);
+    setDetail({
+      ...cached.envelope.conversation,
+      hasAssistantReply: false,
+      messages: [],
+    });
+    setSelectedId(conversationId);
+    setStarterComposerRevealed(false);
+    setConversationStarterPrompts(null);
+    setError(null);
+    void (async () => {
+      try {
+        await cached.suppressPromise;
+        await setZenInitialStarterReplaySuppression(conversationId, "promote");
+        if (zenInitialStarterCachedReplyRef.current !== cached) return;
+        commitZenInitialStarterEnvelope(cached.envelope, { consumeCache: true });
+      } catch (err) {
+        if (zenInitialStarterCachedReplyRef.current !== cached) return;
+        clearPendingReplyState();
+        setChatAutoRestoreSuppressed(true);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Prism could not replay the canceled opener."
+        );
+      }
+    })();
+    return true;
+  }
+
+  function armCanceledZenInitialStarterReplay(): boolean {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (!starterRequest?.cancelled) return false;
+    starterRequest.replayWhenReady = true;
+    setChatAutoRestoreSuppressed(false);
+    setPendingReply(true);
+    setPendingReplyStartedAtMs(Date.now());
+    setPendingReplyDenialRisk(false);
+    setPendingReplyStartMessageCount(0);
+    setPendingReplyConversationId(starterRequest.conversationId);
+    setPendingReplyIsNewConversation(starterRequest.startedNewConversation);
+    setDetail(
+      starterRequest.pendingDetail ?? {
+        id: "pending",
+        title: "New chat",
+        botId: null,
+        incognito: false,
+        lastBotId: null,
+        lastBotColor: null,
+        hasAssistantReply: false,
+        messages: [],
+      }
+    );
+    setSelectedId(starterRequest.conversationId);
+    setError(null);
+    return true;
+  }
+
   function clearAllDisplayedConversationState(): void {
     setDetail((current) =>
       current
@@ -21685,13 +27009,19 @@ function HomeContent(): React.JSX.Element {
     );
     setSessionOpinion(null);
     setBotOpinion(null);
+    setChatStartupSummary(null);
+    chatSummaryRefreshMarkerRef.current = null;
+    setSummaryDebug(null);
+    setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
     setAskQuestionComposerRevealed(false);
+    revealZenHeaderForFreshSurface();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
     }
     setDraft("");
+    setComposerSendTintActive(false);
     setComposerPrimed(false);
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
@@ -21739,43 +27069,122 @@ function HomeContent(): React.JSX.Element {
   ) {
     e.preventDefault();
     const rawDraft = options.draftOverride ?? draft;
-    const trimmed = rawDraft.trim();
+    const rawTrimmed = rawDraft.trim();
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      await consumeBuiltInOperationalSlashCommand(rawTrimmed)
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumeGlobalClearCommand(rawTrimmed, "chat")
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      await consumeDevSlashCommand(rawTrimmed)
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumePrismDevComposerCommand(rawTrimmed)
+    ) {
+      setDraft("");
+      setComposerSendTintActive(false);
+      return;
+    }
+    const commandCenterResolution =
+      rawTrimmed.length > 0 && !options.starterPrompt
+        ? resolveCommandCenterPromptShortcuts(rawDraft)
+        : { kind: "none" as const };
+    if (commandCenterResolution.kind === "error") {
+      setError(commandCenterResolution.error);
+      return;
+    }
+    const commandCenterModelChoice =
+      commandCenterResolution.kind === "resolved"
+        ? commandCenterResolution.modelChoice
+        : AUTO_MODEL_CHOICE;
+    const commandCenterPromptShortcut =
+      commandCenterResolution.kind === "resolved"
+        ? commandCenterResolution.promptShortcut
+        : null;
+    const commandCenterSubmitActive =
+      commandCenterResolution.kind === "resolved" &&
+      commandCenterResolution.promptShortcut !== null;
+    const trimmed = (
+      commandCenterResolution.kind === "resolved"
+        ? commandCenterResolution.prompt
+        : rawDraft
+    ).trim();
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
+    let detailForSend = detail;
+    let baselineMessageCount = detailForSend?.messages.length ?? 0;
+    const isInitialZenStarterPrompt =
+      view === "chat" &&
+      isStarterPrompt &&
+      baselineMessageCount === 0 &&
+      detailForSend?.hasAssistantReply !== true;
+    if (isInitialZenStarterPrompt) {
+      if (replayCachedZenInitialStarterReply()) return;
+      if (armCanceledZenInitialStarterReplay()) return;
+    } else if (!isStarterPrompt && view === "chat") {
+      clearZenInitialStarterReplyCache();
+      zenInitialStarterLiveEnvelopeRef.current = null;
+    }
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
-    // `/dev …` bypasses pendingReply — otherwise tooling looks "broken"
-    // while the model is streaming or between turns.
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      consumeGlobalClearCommand(trimmed, "chat")
-    ) {
-      return;
-    }
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      await consumeDevSlashCommand(trimmed)
-    ) {
-      return;
-    }
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      consumePrismDevComposerCommand(trimmed)
-    ) {
-      setDraft("");
-      return;
-    }
     if (!trimmed && !isStarterPrompt) return;
-    if (pendingReply && !canSendTextWhileReplyPending()) {
+    if (
+      commandCenterSubmitActive &&
+      pendingReply &&
+      !canSendTextWhileReplyPending()
+    ) {
+      priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+      stopPendingReply();
+    }
+    if (!isStarterPrompt && trimmed.length > 0 && view === "chat") {
+      const interruption = prepareActiveAssistantRevealInterruption();
+      if (interruption) {
+        const persistPromise = applyActiveAssistantRevealInterruption(interruption);
+        detailForSend = interruption.patchedDetail;
+        baselineMessageCount = detailForSend.messages.length;
+        if (persistPromise) {
+          try {
+            await persistPromise;
+          } catch (err) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Prism was interrupted, but the saved thread could not be updated."
+            );
+            setDraft(rawDraft);
+            setComposerSendTintActive(rawDraft.trim().length > 0);
+            return;
+          }
+        }
+      }
+    }
+    if (
+      pendingReply &&
+      !commandCenterSubmitActive &&
+      !canSendTextWhileReplyPending()
+    ) {
       if (!isStarterPrompt && trimmed.length > 0) {
+        hideZenHeaderForConversationAction();
         setQueuedChatPrompts((previous) => [
           ...previous,
           {
             id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-            text: trimmed,
+            text: rawDraft,
             targetConversationId: pendingReplyConversationId,
           },
         ]);
@@ -21783,6 +27192,7 @@ function HomeContent(): React.JSX.Element {
           appendComposerHistoryEntry(rawDraft);
         }
         setDraft("");
+        setComposerSendTintActive(false);
         setError(null);
       }
       return;
@@ -21795,13 +27205,16 @@ function HomeContent(): React.JSX.Element {
     }
     if (editingMessageId && !isStarterPrompt) {
       const editMessageId = editingMessageId;
+      hideZenHeaderForConversationAction();
       setDraft("");
+      setComposerSendTintActive(false);
       setEditingMessageId(null);
       setEditingOriginalText("");
       draftComposerRef.current?.blur();
       requestMessageEdit(editMessageId, trimmed);
       return;
     }
+    hideZenHeaderForConversationAction();
     // Any typed/chosen follow-up supersedes the starter quick-replies row.
     if (!isStarterPrompt) {
       setConversationStarterPrompts(null);
@@ -21811,19 +27224,24 @@ function HomeContent(): React.JSX.Element {
       chatSummaryRefreshMarkerRef.current = null;
     }
     const requestConversationId = options.queuedConversationId ?? (
-      detail?.id && detail.id !== "pending"
-        ? detail.id
+      detailForSend?.id && detailForSend.id !== "pending"
+        ? detailForSend.id
         : selectedId
+    );
+    const requestStartedNewConversation = requestConversationId === null;
+    resumeChatModeAutoscrollForOutgoingTurn(
+      requestConversationId ??
+        detailForSend?.id ??
+        selectedId ??
+        (requestStartedNewConversation ? "pending" : null)
     );
     const archiveConversationId =
       requestConversationId ??
-      (detail?.id && detail.id !== "pending" ? detail.id : null);
+      (detailForSend?.id && detailForSend.id !== "pending" ? detailForSend.id : null);
     if (view === "chat" && archiveConversationId) {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
-    const requestStartedNewConversation = requestConversationId === null;
-    const baselineMessageCount = detail?.messages.length ?? 0;
     const chatRequestController = new AbortController();
     pendingReplyAbortControllerRef.current = chatRequestController;
     const clearPendingReplyVisuals = () => {
@@ -21846,21 +27264,23 @@ function HomeContent(): React.JSX.Element {
     setPendingReplyIsNewConversation(requestStartedNewConversation);
     setError(null);
 
-    const previousDetail = detail;
+    const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
-    const optimisticIncognito = detail?.incognito === true || pendingIncognito;
+    const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
-      detail?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
+      detailForSend?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
     const optimisticLastBotId =
-      detail?.lastBotId ??
+      detailForSend?.lastBotId ??
       (view === "sandbox" && !optimisticIncognito ? selectedBotId ?? null : optimisticBotId);
     const optimisticLastBotColor =
-      detail?.lastBotColor
+      detailForSend?.lastBotColor
       ?? (optimisticLastBotId
             ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
             : null);
+    let initialZenStarterPendingDetail: ConversationDetail | null =
+      isInitialZenStarterPrompt && detailForSend ? detailForSend : null;
     if (isStarterPrompt && requestStartedNewConversation) {
-      setDetail({
+      const pendingStarterDetail: ConversationDetail = {
         id: "pending",
         title: "New chat",
         botId: optimisticBotId,
@@ -21869,16 +27289,21 @@ function HomeContent(): React.JSX.Element {
         lastBotColor: optimisticLastBotColor,
         hasAssistantReply: false,
         messages: [],
-      });
+      };
+      initialZenStarterPendingDetail = isInitialZenStarterPrompt
+        ? pendingStarterDetail
+        : initialZenStarterPendingDetail;
+      setDetail(pendingStarterDetail);
     } else if (!isStarterPrompt) {
       const optimisticMessage: Message = {
         id: `pending-${Date.now()}`,
         role: "user",
         content: trimmed,
         createdAt: new Date().toISOString(),
+        ...(commandCenterPromptShortcut ? { promptShortcut: commandCenterPromptShortcut } : {}),
       };
       const optimisticTitle =
-        detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
+        detailForSend?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
       // Forward the chat-mode conversation-level settings (bot + privacy)
       // into the optimistic detail so the shell accent + privacy affordances
       // don't flicker between send and server reply. Once the server answers
@@ -21891,40 +27316,84 @@ function HomeContent(): React.JSX.Element {
       // selectedBotId so the sidebar row hints at the next color before
       // the reply lands; the server value overrides on response.
       setDetail({
-        id: detail?.id ?? "pending",
+        id: detailForSend?.id ?? "pending",
         title: optimisticTitle,
         botId: optimisticBotId,
         incognito: optimisticIncognito,
         lastBotId: optimisticLastBotId,
         lastBotColor: optimisticLastBotColor,
+        ...(detailForSend?.zenWallpaper ? { zenWallpaper: detailForSend.zenWallpaper } : {}),
         // hasAssistantReply reflects the PRE-SEND state (whatever detail
         // already had) — the optimistic update only inserts a USER
         // message, not an assistant one. The server's real response
         // flips this to true once the assistant reply is in the db.
-        hasAssistantReply: detail?.hasAssistantReply ?? false,
-        messages: [...(detail?.messages ?? []), optimisticMessage],
+        hasAssistantReply: detailForSend?.hasAssistantReply ?? false,
+        messages: [...(detailForSend?.messages ?? []), optimisticMessage],
       });
+    }
+    const zenInitialStarterRequestId = isInitialZenStarterPrompt
+      ? `zen-starter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      : null;
+    if (zenInitialStarterRequestId) {
+      zenInitialStarterRequestRef.current = {
+        id: zenInitialStarterRequestId,
+        controller: chatRequestController,
+        conversationId: requestConversationId,
+        pendingDetail: initialZenStarterPendingDetail,
+        startedNewConversation: requestStartedNewConversation,
+        cancelled: false,
+        replayWhenReady: false,
+      };
+      zenInitialStarterLiveEnvelopeRef.current = null;
     }
     if (!isStarterPrompt && !editingMessageId) {
       appendComposerHistoryEntry(rawDraft);
     }
     setDraft("");
+    setComposerSendTintActive(false);
     let successfulConversationId: string | null = null;
 
     try {
+      const chatBody = buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
+        starterPrompt: isStarterPrompt,
+        ...(options.starterPromptWarrantsIntro
+          ? { starterPromptWarrantsIntro: true }
+          : {}),
+        ...(forceNewConversation ? { forceNewConversation: true } : {}),
+        ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
+          ? { commandCenterModelChoice }
+          : {}),
+        ...(commandCenterPromptShortcut
+          ? { promptShortcut: commandCenterPromptShortcut }
+          : {}),
+      });
+      appendDevChatRouteStart("send", chatBody);
       const d = await api<ChatPostEnvelope>("/api/chat", {
         method: "POST",
-        body: JSON.stringify(
-          buildChatRequestBody(isStarterPrompt ? "" : trimmed, {
-            starterPrompt: isStarterPrompt,
-            ...(options.starterPromptWarrantsIntro
-              ? { starterPromptWarrantsIntro: true }
-              : {}),
-            ...(forceNewConversation ? { forceNewConversation: true } : {}),
-          })
-        ),
+        body: JSON.stringify(chatBody),
         signal: chatRequestController.signal,
       });
+      if (manualCompactionCancelControllerRef.current === chatRequestController) {
+        return;
+      }
+      if (priorityCommandCancelControllerRef.current === chatRequestController) {
+        return;
+      }
+      const activeInitialStarterRequest = zenInitialStarterRequestId
+        ? zenInitialStarterRequestRef.current
+        : null;
+      if (
+        activeInitialStarterRequest?.id === zenInitialStarterRequestId &&
+        activeInitialStarterRequest.cancelled
+      ) {
+        if (activeInitialStarterRequest.replayWhenReady) {
+          commitZenInitialStarterEnvelope(d, { consumeCache: true });
+        } else {
+          cacheZenInitialStarterReply(d);
+          setChatAutoRestoreSuppressed(true);
+        }
+        return;
+      }
       captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
@@ -21941,10 +27410,20 @@ function HomeContent(): React.JSX.Element {
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
       if (stillViewingRequest) {
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation)
+        );
+        if (isInitialZenStarterPrompt) {
+          zenInitialStarterLiveEnvelopeRef.current = {
+            ...d,
+            conversation: patchedConversation,
+          };
+        }
+        markLatestAssistantRevealEligible(patchedConversation);
         if (view === "chat") {
           hardResetChatArchiveStateForConversation(d.conversation.id);
         }
-        setDetail(applyExplicitAskQuestionFallback(d.conversation));
+        setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
           stillViewing: stillViewingRequest,
           activeConversationId: d.conversation.id,
@@ -21991,11 +27470,13 @@ function HomeContent(): React.JSX.Element {
           Array.isArray(d.conversationStarters) &&
           d.conversationStarters.length >= 3
         ) {
+          setStarterComposerRevealed(false);
           setConversationStarterPrompts({
             conversationId: d.conversation.id,
-            prompts: d.conversationStarters.slice(0, 4),
+            prompts: d.conversationStarters.slice(0, 3),
           });
         } else {
+          setStarterComposerRevealed(false);
           setConversationStarterPrompts(null);
         }
       }
@@ -22069,11 +27550,34 @@ function HomeContent(): React.JSX.Element {
         chatRequestController.signal.aborted ||
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && /abort/i.test(err.message));
+      const requestWasZenInitialThinkingCancelled =
+        zenInitialThinkingCancelControllerRef.current === chatRequestController;
+      const requestWasManualCompactionCancelled =
+        manualCompactionCancelControllerRef.current === chatRequestController;
+      const requestWasPriorityCommandCancelled =
+        priorityCommandCancelControllerRef.current === chatRequestController;
       if (requestWasAborted) {
-        if (stillViewingRequest) {
-          setDetail(previousDetail);
+        if (requestWasManualCompactionCancelled || requestWasPriorityCommandCancelled) {
+          setDraft("");
+          setComposerSendTintActive(false);
+        } else if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
+          setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
-          setDraft(isStarterPrompt ? "" : trimmed);
+          setDraft(
+            isStarterPrompt || requestWasZenInitialThinkingCancelled
+              ? ""
+              : trimmed
+          );
+          setComposerSendTintActive(
+            !isStarterPrompt && !requestWasZenInitialThinkingCancelled && trimmed.length > 0
+          );
+          if (requestWasZenInitialThinkingCancelled) {
+            setSelectedId(null);
+            setConversationStarterPrompts(null);
+            setChatStartupSummary(null);
+            chatSummaryRefreshMarkerRef.current = null;
+            setComposerPrimed(false);
+          }
         }
         setError(null);
         return;
@@ -22085,6 +27589,7 @@ function HomeContent(): React.JSX.Element {
         setDetail(previousDetail);
         setPendingIncognito(previousPendingIncognito);
         setDraft(isStarterPrompt ? "" : trimmed);
+        setComposerSendTintActive(!isStarterPrompt && trimmed.length > 0);
       }
       setError(
         err instanceof Error
@@ -22092,6 +27597,18 @@ function HomeContent(): React.JSX.Element {
           : "Send failed. Verify the provider is reachable and try again."
       );
     } finally {
+      if (manualCompactionCancelControllerRef.current === chatRequestController) {
+        manualCompactionCancelControllerRef.current = null;
+      }
+      if (priorityCommandCancelControllerRef.current === chatRequestController) {
+        priorityCommandCancelControllerRef.current = null;
+      }
+      if (zenInitialThinkingCancelControllerRef.current === chatRequestController) {
+        zenInitialThinkingCancelControllerRef.current = null;
+      }
+      if (zenInitialStarterRequestRef.current?.controller === chatRequestController) {
+        zenInitialStarterRequestRef.current = null;
+      }
       clearPendingReplyVisuals();
       if (successfulConversationId) {
         scheduleNextQueuedPrompt(successfulConversationId);
@@ -22105,16 +27622,165 @@ function HomeContent(): React.JSX.Element {
     /** Secondary line (e.g. AskQuestion “Other” affordance). */
     sublabel?: string;
     action: "send" | "other";
+    otherSource?: "askquestion" | "starter";
     sendValue?: string;
   };
 
+  type AskQuestionInteraction = {
+    askQuestion: NonNullable<Message["askQuestion"]>;
+    assistantMessageId: string;
+    source: "askquestion" | "starter";
+  };
+
+  type ComposerChipRail = {
+    conversationId: string;
+    chips: ComposerChip[];
+    heading: string | null;
+    source: "askquestion" | "starter";
+    collapsed: boolean;
+  };
+
+  function buildAskQuestionChips(
+    askQuestion: NonNullable<Message["askQuestion"]>,
+    source: "askquestion" | "starter" = "askquestion"
+  ): ComposerChip[] {
+    const optionChips = askQuestion.options.map((option, index) => {
+      const cleaned = stripEmojiFromAskQuestionLabel(option.label);
+      const fallback = `Option ${index + 1}`;
+      const label = suggestedReplyLooksInternalChoiceNarration(cleaned)
+        ? fallback
+        : cleaned || fallback;
+      const sendValue = label.trim();
+      return {
+        id: option.id,
+        label,
+        action: "send" as const,
+        // Preserve the authored option text unless a model leaked internal
+        // selection narration such as "the user chose...".
+        sendValue: sendValue || fallback,
+      };
+    });
+    return [
+      ...optionChips,
+      {
+        id: "other",
+        label: "Other",
+        sublabel: "(Explain in chat...)",
+        action: "other",
+        otherSource: source,
+      },
+    ];
+  }
+
+  function buildStarterAskQuestion(msg: Message): NonNullable<Message["askQuestion"]> | null {
+    if (
+      !detail ||
+      !conversationStarterPrompts ||
+      conversationStarterPrompts.conversationId !== detail.id
+    ) {
+      return null;
+    }
+    const latestAssistant = [...detail.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (!latestAssistant || latestAssistant.id !== msg.id) return null;
+    const options = conversationStarterPrompts.prompts
+      .slice(0, 3)
+      .map((prompt, index) => ({
+        id: String.fromCharCode(97 + index),
+        label: prompt.trim(),
+      }))
+      .filter((option) => option.label.length > 0);
+    if (options.length !== 3) return null;
+    return {
+      v: 1,
+      name: "AskQuestion",
+      prompt: "Choose a reply:",
+      options,
+    };
+  }
+
+  function renderComposerChipContent(
+    chip: ComposerChip,
+    options: { splitAskQuestionLabels: boolean } = { splitAskQuestionLabels: false }
+  ): React.ReactNode {
+    if (chip.sublabel) {
+      return (
+        <span className={styles.conversationStarterChipStack}>
+          <span className={styles.conversationStarterChipPrimary}>{chip.label}</span>
+          <span className={styles.conversationStarterChipSub}>{chip.sublabel}</span>
+        </span>
+      );
+    }
+    if (options.splitAskQuestionLabels && chip.action !== "other") {
+      const { title, detail } = splitAskQuestionOptionHeading(chip.label);
+      if (detail) {
+        return (
+          <span className={styles.conversationStarterChipStack}>
+            <span className={styles.conversationStarterChipPrimary}>{title}</span>
+            <span className={styles.conversationStarterChipSub}>{detail}</span>
+          </span>
+        );
+      }
+    }
+    return chip.label;
+  }
+
+  function getAskQuestionInteractionForMessage(msg: Message): AskQuestionInteraction | null {
+    if (!detail || msg.role !== "assistant") return null;
+    const askQuestion = resolveAssistantAskQuestion(msg);
+    if (
+      askQuestion &&
+      askQuestion.name === "AskQuestion" &&
+      askQuestion.options.length === 3
+    ) {
+      const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
+      if (messageIndex < 0) return null;
+      const answerMessage =
+        detail.messages
+          .slice(messageIndex + 1)
+          .find((message) => message.role === "user") ?? null;
+      if (answerMessage) {
+        return null;
+      }
+      if (pendingAskQuestionState?.assistantMessageId !== msg.id) return null;
+      if (pendingAskQuestionWaitingForReveal) return null;
+      return {
+        askQuestion,
+        assistantMessageId: msg.id,
+        source: "askquestion",
+      };
+    }
+
+    if (starterPromptsWaitingForReveal) return null;
+    const starterAskQuestion = buildStarterAskQuestion(msg);
+    if (!starterAskQuestion) return null;
+    return {
+      askQuestion: starterAskQuestion,
+      assistantMessageId: msg.id,
+      source: "starter",
+    };
+  }
+
   function handleComposerChipPick(chip: ComposerChip): void {
     if (chip.action === "other") {
+      if (chip.otherSource === "starter") {
+        setStarterComposerRevealed(true);
+        requestAnimationFrame(() => {
+          draftComposerRef.current?.focus({ preventScroll: true });
+        });
+        return;
+      }
       setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      requestAnimationFrame(() => {
+        draftComposerRef.current?.focus({ preventScroll: true });
+      });
       return;
     }
+    hideZenHeaderForConversationAction();
+    resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     setConversationStarterPrompts(null);
+    setStarterComposerRevealed(false);
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — used so sendMessage can share the submit pathway */
@@ -22194,46 +27860,18 @@ function HomeContent(): React.JSX.Element {
   }
 
   /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
-  function getComposerChipRail(): {
-    conversationId: string;
-    chips: ComposerChip[];
-    heading: string | null;
-    kind: "askquestion" | "starter";
-    collapsed: boolean;
-  } | null {
+  function getComposerChipRail(): ComposerChipRail | null {
     const id = detail?.id;
     if (!detail || id === undefined || id === "pending") return null;
     const qa = pendingAskQuestion;
     if (qa && pendingAskQuestionWaitingForReveal) return null;
     if (qa) {
-      const collapsed = askQuestionComposerRevealed;
-      const optionChips = qa.options.map((option, index) => {
-        const cleaned = stripEmojiFromAskQuestionLabel(option.label);
-        const sendValue = cleaned.trim();
-        const fallback = `Option ${index + 1}`;
-        return {
-          id: option.id,
-          label: cleaned || fallback,
-          action: "send" as const,
-          // Preserve the authored option text on send so model behavior stays
-          // consistent with the AskQuestion payload across providers/models.
-          sendValue: sendValue || cleaned || fallback,
-        };
-      });
       return {
         conversationId: id,
-        chips: [
-          ...optionChips,
-          {
-            id: "other",
-            label: "Other",
-            sublabel: "(Explain in chat...)",
-            action: "other",
-          },
-        ],
+        chips: buildAskQuestionChips(qa, "askquestion"),
         heading: normalizeAskQuestionText(qa.prompt) || null,
-        kind: "askquestion",
-        collapsed,
+        source: "askquestion",
+        collapsed: false,
       };
     }
     if (
@@ -22241,16 +27879,19 @@ function HomeContent(): React.JSX.Element {
       conversationStarterPrompts.conversationId === id &&
       conversationStarterPrompts.prompts.length > 0
     ) {
+      if (starterPromptsWaitingForReveal) return null;
+      const latestAssistant = [...detail.messages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+      const starterAskQuestion = latestAssistant
+        ? buildStarterAskQuestion(latestAssistant)
+        : null;
+      if (!starterAskQuestion) return null;
       return {
         conversationId: id,
-        chips: conversationStarterPrompts.prompts.map((prompt, index) => ({
-          id: `starter-${index}`,
-          label: prompt,
-          action: "send",
-          sendValue: prompt,
-        })),
+        chips: buildAskQuestionChips(starterAskQuestion, "starter"),
         heading: null,
-        kind: "starter",
+        source: "starter",
         collapsed: false,
       };
     }
@@ -22260,8 +27901,11 @@ function HomeContent(): React.JSX.Element {
   function renderComposerChipRail(): React.ReactNode {
     const rail = getComposerChipRail();
     if (!rail) return null;
+    if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
+      return null;
+    }
 
-    if (rail.kind === "askquestion" && rail.collapsed) {
+    if (rail.collapsed) {
       const rawHex = activeBot?.color?.trim();
       const accentHex = rawHex
         ? normalizeAccentForTheme(rawHex, resolvedTheme)
@@ -22292,7 +27936,14 @@ function HomeContent(): React.JSX.Element {
             aria-label="Show suggested replies"
             title="Show suggested replies"
             disabled={pendingReply}
-            onClick={() => setAskQuestionComposerRevealed(false)}
+            onClick={() => {
+              if (rail.source === "starter") {
+                setStarterComposerRevealed(false);
+              } else {
+                askQuestionComposerHiddenForReadingKeyRef.current = null;
+                setAskQuestionComposerRevealed(false);
+              }
+            }}
           >
             ?
           </button>
@@ -22300,13 +27951,10 @@ function HomeContent(): React.JSX.Element {
       );
     }
 
-    const railClassName =
-      rail.kind === "askquestion"
-        ? `${styles.conversationStarterRail} ${styles.askQuestionRail}`
-        : styles.conversationStarterRail;
+    const railClassName = `${styles.conversationStarterRail} ${styles.askQuestionRail}`;
     return (
       <div
-        ref={rail.kind === "askquestion" ? askQuestionRailRef : undefined}
+        ref={askQuestionRailRef}
         role="group"
         aria-label="Suggested replies"
         className={railClassName}
@@ -22330,37 +27978,75 @@ function HomeContent(): React.JSX.Element {
             }
             onClick={() => handleComposerChipPick(chip)}
           >
-            {(() => {
-              if (chip.sublabel) {
-                return (
-                  <span className={styles.conversationStarterChipStack}>
-                    <span className={styles.conversationStarterChipPrimary}>{chip.label}</span>
-                    <span className={styles.conversationStarterChipSub}>{chip.sublabel}</span>
-                  </span>
-                );
-              }
-              if (rail.kind === "askquestion" && chip.action !== "other") {
-                const { title, detail } = splitAskQuestionOptionHeading(chip.label);
-                if (detail) {
-                  return (
-                    <span className={styles.conversationStarterChipStack}>
-                      <span className={styles.conversationStarterChipPrimary}>{title}</span>
-                      <span className={styles.conversationStarterChipSub}>{detail}</span>
-                    </span>
-                  );
-                }
-              }
-              return chip.label;
-            })()}
+            {renderComposerChipContent(chip, {
+              splitAskQuestionLabels: true,
+            })}
           </button>
         ))}
       </div>
     );
   }
 
+  function renderAskQuestionInlineCard(msg: Message): React.ReactNode {
+    if (viewportWidth <= PICKER_MOBILE_BREAKPOINT) return null;
+    const interaction = getAskQuestionInteractionForMessage(msg);
+    if (!interaction) return null;
+
+    const chips = buildAskQuestionChips(interaction.askQuestion, interaction.source);
+    const prompt =
+      interaction.source === "starter"
+        ? ""
+        : askQuestionPromptForInlinePanel(interaction.askQuestion.prompt);
+    const choicesDisabled = pendingReply;
+    return (
+      <div
+        className={styles.askQuestionInlineCard}
+        data-ask-question-panel="true"
+        data-ask-question-assistant-id={interaction.assistantMessageId}
+        data-ask-question-state="unanswered"
+        role="group"
+        aria-label="Suggested replies"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={styles.askQuestionInlineHeader}>
+          <span className={styles.askQuestionInlineEyebrow}>
+            Choose a reply
+          </span>
+        </div>
+        {prompt ? (
+          <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
+        ) : null}
+        <div
+          className={styles.askQuestionInlineChoices}
+          data-choices-disabled={choicesDisabled ? "true" : undefined}
+        >
+          {chips.map((chip, chipIndex) => (
+            <button
+              key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+              type="button"
+              disabled={choicesDisabled}
+              className={`${styles.conversationStarterChip} ${
+                chip.action === "other" ? styles.conversationStarterChipOther : ""
+              }`}
+              data-chip-kind={chip.action}
+              aria-label={
+                chip.action === "other"
+                  ? "Other - explain in chat"
+                  : `Suggested reply: ${chip.sendValue ?? chip.label}`
+              }
+              onClick={() => handleComposerChipPick(chip)}
+            >
+              {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderImageJobOrbDock(): React.ReactNode {
     const rail = getComposerChipRail();
-    if (rail?.kind === "askquestion" && rail.collapsed) return null;
+    if (rail?.collapsed) return null;
     if (!composerImageJobOrb || !detail || detail.id !== composerImageJobOrb.conversationId) {
       return null;
     }
@@ -22419,18 +28105,21 @@ function HomeContent(): React.JSX.Element {
       id: nextQueuedPrompt.id,
       text: nextQueuedPrompt.text,
     });
+    const queuedPromptDrainGeneration = queuedPromptDrainGenerationRef.current;
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — queue drain uses the regular send pipeline */
       },
     } as React.FormEvent<HTMLFormElement>;
     window.setTimeout(() => {
+      if (queuedPromptDrainGenerationRef.current !== queuedPromptDrainGeneration) return;
       void sendMessage(syntheticSubmit, {
         draftOverride: nextQueuedPrompt?.text,
         queuedConversationId,
       });
     }, 210);
     window.setTimeout(() => {
+      if (queuedPromptDrainGenerationRef.current !== queuedPromptDrainGeneration) return;
       setDispatchingQueuedPrompt((current) =>
         current?.id === nextQueuedPrompt?.id ? null : current
       );
@@ -22523,6 +28212,23 @@ function HomeContent(): React.JSX.Element {
     return composerPrimed && isStarterPromptAvailable(value);
   }
 
+  function assistantRevealStillTyping(message: Message | undefined): boolean {
+    if (!chatAssistantTypingMechanicsActive || !detail?.id || !message) return false;
+    const revealKey = `${detail.id}:${message.id}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
+    if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
+    if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return true;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
+    const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(message));
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const visibleTokenCount = Math.min(
+      tokenTotal,
+      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
+    );
+    return visibleTokenCount < tokenTotal;
+  }
+
   const pendingAskQuestionState = detail
     ? getConversationPendingAskQuestionState(detail.messages)
     : undefined;
@@ -22542,17 +28248,19 @@ function HomeContent(): React.JSX.Element {
       (() => {
         if (!pendingAskQuestionAssistantMessage) return false;
         const revealKey = `${detail.id}:${pendingAskQuestionState.assistantMessageId}`;
+        if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
+        if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
+        if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
         const firstSeenAt =
           chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
         const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
         const revealTokens = tokenizeMessageReveal(
           resolveMessageDisplayContent(pendingAskQuestionAssistantMessage)
         );
-        const pendingMood = resolveMessageMoodKey(pendingAskQuestionAssistantMessage);
         const tokenTotal = Math.max(1, revealTokens.length);
         const visibleTokenCount = Math.min(
           tokenTotal,
-          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, pendingMood)
+          resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
         );
         return visibleTokenCount < tokenTotal;
       })()
@@ -22564,11 +28272,118 @@ function HomeContent(): React.JSX.Element {
         .join("|")}`
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
-  const composerHiddenByAskQuestion =
-    askQuestionInteractive &&
-    !askQuestionComposerRevealed;
+  const starterPromptsAvailable =
+    conversationStarterPrompts !== null &&
+    conversationStarterPrompts.conversationId === detail?.id &&
+    conversationStarterPrompts.prompts.length > 0;
+  const starterPromptsLatestAssistantMessage =
+    starterPromptsAvailable && detail
+      ? [...detail.messages].reverse().find((message) => message.role === "assistant")
+      : undefined;
+  const starterPromptsWaitingForReveal =
+    starterPromptsAvailable &&
+    assistantRevealStillTyping(starterPromptsLatestAssistantMessage);
+  const starterPromptsInteractive =
+    starterPromptsAvailable && !starterPromptsWaitingForReveal;
+  const starterPromptCenteredMessageId =
+    starterPromptsAvailable && !starterComposerRevealed
+      ? starterPromptsLatestAssistantMessage?.id ?? null
+      : null;
+  const starterPromptsInteractiveKey = starterPromptsInteractive && conversationStarterPrompts
+    ? `${conversationStarterPrompts.conversationId}:${conversationStarterPrompts.prompts.join("|")}`
+    : null;
+  const choiceChipRailInteractiveKey =
+    pendingAskQuestionInteractiveKey ?? starterPromptsInteractiveKey;
+  const choiceChipRailAnchorMessageId =
+    pendingAskQuestionInteractiveKey !== null
+      ? pendingAskQuestionState?.assistantMessageId ?? null
+      : starterPromptsInteractive
+        ? starterPromptsLatestAssistantMessage?.id ?? null
+        : null;
+  const choiceChipRailComposerRevealed =
+    pendingAskQuestionInteractiveKey !== null
+      ? askQuestionComposerRevealed
+      : starterComposerRevealed;
+  const askQuestionComposerHiddenByChoices =
+    askQuestionInteractive && !askQuestionComposerRevealed;
+  const composerHiddenByChoiceChips =
+    askQuestionComposerHiddenByChoices ||
+    (starterPromptsInteractive && !starterComposerRevealed);
+
+  function eventTargetIsTextEditable(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(
+      target.closest(
+        "input, textarea, select, [contenteditable='true'], [role='textbox'], [data-markdown-cm-host='true']"
+      )
+    );
+  }
+
+  function revealHiddenZenComposerWithText(text: string): void {
+    if (view !== "chat" || !composerHiddenByChoiceChips || text.length === 0) return;
+    if (pendingAskQuestionInteractiveKey !== null) {
+      askQuestionComposerHiddenForReadingKeyRef.current = null;
+      setAskQuestionComposerRevealed(true);
+    } else if (starterPromptsInteractive) {
+      setStarterComposerRevealed(true);
+    } else {
+      return;
+    }
+    resetComposerHistoryCursor();
+    setComposerFocused(true);
+    setComposerSendTintActive(true);
+    setComposerPrimed(false);
+    setDraft((current) => `${current}${text}`);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        draftComposerRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }
 
   useEffect(() => {
+    if (view !== "chat" || !composerHiddenByChoiceChips) return;
+
+    const handleHiddenComposerKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (eventTargetIsTextEditable(event.target)) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        (event.key === " " || event.key === "Enter") &&
+        target?.closest("button, [role='button'], a[href]") !== null
+      ) {
+        return;
+      }
+      if (event.key.length !== 1) return;
+      event.preventDefault();
+      revealHiddenZenComposerWithText(event.key);
+    };
+
+    const handleHiddenComposerPaste = (event: ClipboardEvent): void => {
+      if (event.defaultPrevented) return;
+      if (eventTargetIsTextEditable(event.target)) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (text.length === 0) return;
+      event.preventDefault();
+      revealHiddenZenComposerWithText(text);
+    };
+
+    window.addEventListener("keydown", handleHiddenComposerKeyDown, true);
+    window.addEventListener("paste", handleHiddenComposerPaste, true);
+    return () => {
+      window.removeEventListener("keydown", handleHiddenComposerKeyDown, true);
+      window.removeEventListener("paste", handleHiddenComposerPaste, true);
+    };
+  }, [
+    composerHiddenByChoiceChips,
+    pendingAskQuestionInteractiveKey,
+    starterPromptsInteractive,
+    view,
+  ]);
+
+  useEffect(() => {
+    askQuestionComposerHiddenForReadingKeyRef.current = null;
     if (pendingAskQuestionKey) {
       setAskQuestionComposerRevealed(false);
       return;
@@ -22577,91 +28392,380 @@ function HomeContent(): React.JSX.Element {
   }, [pendingAskQuestionKey]);
 
   useEffect(() => {
-    if (!pendingAskQuestionInteractiveKey) return;
-    if (askQuestionComposerRevealed) return;
+    setStarterComposerRevealed(false);
+  }, [starterPromptsInteractiveKey]);
+
+  useEffect(() => {
+    const previousCenteredId = starterPromptCenteredMessageIdRef.current;
+    if (previousCenteredId === starterPromptCenteredMessageId) return;
+    starterPromptCenteredMessageIdRef.current = starterPromptCenteredMessageId;
+    if (starterPromptSettlingTimerRef.current !== null) {
+      window.clearTimeout(starterPromptSettlingTimerRef.current);
+      starterPromptSettlingTimerRef.current = null;
+    }
+    if (starterPromptCenteredMessageId !== null) {
+      setStarterPromptSettlingMessageId(null);
+      return;
+    }
+    if (previousCenteredId === null) return;
+    setStarterPromptSettlingMessageId(previousCenteredId);
+    starterPromptSettlingTimerRef.current = window.setTimeout(() => {
+      starterPromptSettlingTimerRef.current = null;
+      setStarterPromptSettlingMessageId((current) =>
+        current === previousCenteredId ? null : current
+      );
+    }, 560);
+  }, [starterPromptCenteredMessageId]);
+
+  useEffect(() => {
+    return () => {
+      if (starterPromptSettlingTimerRef.current !== null) {
+        window.clearTimeout(starterPromptSettlingTimerRef.current);
+        starterPromptSettlingTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function centerActiveChoicePanelInMessages(): void {
+    if (!choiceChipRailInteractiveKey || !choiceChipRailAnchorMessageId) return;
+    if (choiceChipRailComposerRevealed) return;
+    if (
+      askQuestionComposerHiddenForReadingKeyRef.current ===
+      choiceChipRailInteractiveKey
+    ) {
+      return;
+    }
     const el = messagesScrollRef.current;
     if (!el) return;
-    let settleTimer: number | null = null;
-    const run = (): void => {
-      const top = Math.max(
-        0,
-        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-      );
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 200;
-      el.scrollTo({
-        top,
-        behavior: "auto",
-      });
-      settleTimer = window.setTimeout(() => {
-        chatProgrammaticScrollUntilMsRef.current = Date.now() + 120;
-        el.scrollTop = Math.max(
-          0,
-          el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-        );
-      }, 120);
-    };
+    const row = findMessageRowById(el, choiceChipRailAnchorMessageId);
+    if (!row) return;
+    const panel =
+      row.querySelector<HTMLElement>('[data-ask-question-panel="true"]') ??
+      findChatModeMessageScrollAnchor(row);
+    const rootRect = el.getBoundingClientRect();
+    const target = view === "chat" ? row : panel;
+    const targetRect = target.getBoundingClientRect();
+    const targetCenterY =
+      targetRect.top - rootRect.top + el.scrollTop + targetRect.height / 2;
+    const railRect = askQuestionRailRef.current?.getBoundingClientRect() ?? null;
+    const railBottomInset = railRect
+      ? Math.max(0, rootRect.bottom - Math.max(rootRect.top, railRect.top))
+      : 0;
+    const topInset = view === "chat"
+      ? Math.min(128, Math.max(64, el.clientHeight * 0.1))
+      : 0;
+    const bottomInset = view === "chat"
+      ? railBottomInset > 0
+        ? Math.max(
+            Math.min(168, Math.max(96, el.clientHeight * 0.15)),
+            railBottomInset + 24
+          )
+        : Math.min(116, Math.max(64, el.clientHeight * 0.1))
+      : railBottomInset;
+    const readableHeight = Math.max(
+      180,
+      el.clientHeight - topInset - bottomInset
+    );
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const targetTop = Math.max(
+      0,
+      Math.min(maxScrollTop, targetCenterY - topInset - readableHeight / 2)
+    );
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
+    el.scrollTo({ top: targetTop, behavior: "auto" });
+    if (detail?.id) {
+      chatLastScrollTopByConversationRef.current.set(detail.id, targetTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
+    }
+  }
+
+  useEffect(() => {
+    if (!choiceChipRailInteractiveKey || choiceChipRailComposerRevealed) return;
+    let settleTimerA: number | null = null;
+    let settleTimerB: number | null = null;
     requestAnimationFrame(() => {
-      requestAnimationFrame(run);
+      requestAnimationFrame(centerActiveChoicePanelInMessages);
     });
+    settleTimerA = window.setTimeout(centerActiveChoicePanelInMessages, 140);
+    settleTimerB = window.setTimeout(centerActiveChoicePanelInMessages, 320);
     return () => {
-      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      if (settleTimerA !== null) window.clearTimeout(settleTimerA);
+      if (settleTimerB !== null) window.clearTimeout(settleTimerB);
     };
   }, [
-    pendingAskQuestionInteractiveKey,
-    askQuestionComposerRevealed,
+    choiceChipRailAnchorMessageId,
+    choiceChipRailComposerRevealed,
+    choiceChipRailInteractiveKey,
+    detail?.id,
   ]);
   const askQuestionTailSpaceActive =
-    pendingAskQuestionInteractiveKey !== null &&
-    !askQuestionComposerRevealed;
-  const askQuestionCollapsedBubbleActive =
-    pendingAskQuestionInteractiveKey !== null && askQuestionComposerRevealed;
-  useEffect(() => {
-    if (!askQuestionTailSpaceActive) return;
+    choiceChipRailInteractiveKey !== null;
+  const askQuestionCollapsedBubbleActive = false;
+
+  function snapAskQuestionComposerToChatBottom(force = false): void {
+    const rail = getComposerChipRail();
+    if (!rail?.collapsed) return;
+    if (!choiceChipRailInteractiveKey || (!force && !choiceChipRailComposerRevealed)) return;
     const el = messagesScrollRef.current;
     if (!el) return;
-    const settle = (): void => {
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 140;
-      el.scrollTop = Math.max(
-        0,
-        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (detail?.id) {
+      chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
+    }
+  }
+
+  function hideAskQuestionComposerForReading(): void {
+    if (!choiceChipRailInteractiveKey || !choiceChipRailComposerRevealed) return;
+    askQuestionComposerHiddenForReadingKeyRef.current = choiceChipRailInteractiveKey;
+    if (pendingAskQuestionInteractiveKey !== null) {
+      setAskQuestionComposerRevealed(false);
+    } else {
+      setStarterComposerRevealed(false);
+    }
+    draftComposerRef.current?.blur();
+  }
+
+  function applyZenAtmosphereLayerOpacities(next: Record<string, number>): void {
+    setZenAtmosphereLayerOpacities((previous) => {
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length === nextKeys.length) {
+        const unchanged = nextKeys.every(
+          (key) => Math.abs((previous[key] ?? 0) - next[key]) < 0.005
+        );
+        if (unchanged) return previous;
+      }
+      return next;
+    });
+  }
+
+  function calculateZenAtmosphereLayerOpacities(
+    scrollRoot: HTMLDivElement
+  ): Record<string, number> {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) return {};
+    const messages = detail?.messages ?? [];
+    const rootRect = scrollRoot.getBoundingClientRect();
+    const messageCountToY = (messageCount: number): number => {
+      const count = Math.max(0, Math.floor(messageCount));
+      if (messages.length === 0) {
+        return count * Math.max(140, scrollRoot.clientHeight * 0.22);
+      }
+      if (count > 0 && count <= messages.length) {
+        const anchorMessage = messages[count - 1];
+        const row = anchorMessage ? findMessageRowById(scrollRoot, anchorMessage.id) : null;
+        if (row) {
+          const anchor = findChatModeMessageScrollAnchor(row);
+          const anchorRect = anchor.getBoundingClientRect();
+          return (
+            anchorRect.top -
+            rootRect.top +
+            scrollRoot.scrollTop +
+            anchorRect.height / 2
+          );
+        }
+      }
+      if (count <= messages.length) {
+        return (count / Math.max(1, messages.length)) * scrollRoot.scrollHeight;
+      }
+      const averageMessageHeight = Math.max(
+        140,
+        scrollRoot.scrollHeight / Math.max(1, messages.length)
       );
+      return scrollRoot.scrollHeight + (count - messages.length) * averageMessageHeight;
     };
-    settle();
-    const t1 = window.setTimeout(settle, 120);
-    const t2 = window.setTimeout(settle, 300);
+    const anchors = zenAtmosphereTimeline
+      .map((entry) => {
+        const revealStartMessageCount =
+          entry.revealStartMessageCount ??
+          entry.generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
+        const revealFullMessageCount = Math.max(
+          revealStartMessageCount,
+          entry.revealFullMessageCount ??
+            revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+        );
+        const startY = messageCountToY(revealStartMessageCount);
+        const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
+        return { ...entry, startY, fullY, revealStartMessageCount, revealFullMessageCount };
+      })
+      .sort((a, b) => {
+        const yDelta = a.startY - b.startY;
+        if (Math.abs(yDelta) > 0.5) return yDelta;
+        return a.revealStartMessageCount - b.revealStartMessageCount;
+      });
+
+    const next: Record<string, number> = {};
+    for (const entry of zenAtmosphereTimeline) {
+      next[entry.imageId] = 0;
+    }
+    const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
+    if (readerY < anchors[0].startY) {
+      return next;
+    }
+    for (let index = 0; index < anchors.length; index += 1) {
+      const current = anchors[index];
+      const previous = anchors[index - 1] ?? null;
+      const upcoming = anchors[index + 1] ?? null;
+      if (readerY >= current.startY && readerY <= current.fullY) {
+        const progress = Math.max(
+          0,
+          Math.min(1, (readerY - current.startY) / Math.max(1, current.fullY - current.startY))
+        );
+        if (previous) next[previous.imageId] = 1 - progress;
+        next[current.imageId] = progress;
+        return next;
+      }
+      if (readerY > current.fullY && (!upcoming || readerY < upcoming.startY)) {
+        next[current.imageId] = 1;
+        return next;
+      }
+    }
+    next[anchors[anchors.length - 1].imageId] = 1;
+    return next;
+  }
+
+  function updateZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
+    if (!scrollRoot) {
+      applyZenAtmosphereLayerOpacities({});
+      return;
+    }
+    applyZenAtmosphereLayerOpacities(
+      calculateZenAtmosphereLayerOpacities(scrollRoot)
+    );
+  }
+
+  function scheduleZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
+    if (zenAtmosphereScrollFrameRef.current !== null) return;
+    zenAtmosphereScrollFrameRef.current = window.requestAnimationFrame(() => {
+      zenAtmosphereScrollFrameRef.current = null;
+      updateZenAtmosphereScrollBlend(scrollRoot ?? messagesScrollRef.current);
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) {
+      applyZenAtmosphereLayerOpacities({});
+      return;
+    }
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    updateZenAtmosphereScrollBlend(scrollRoot);
+    const frame = window.requestAnimationFrame(() => {
+      updateZenAtmosphereScrollBlend(scrollRoot);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, detail?.id, detail?.messages.length, zenAtmosphereTimelineKey]);
+
+  useEffect(() => {
+    return () => {
+      if (zenAtmosphereScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(zenAtmosphereScrollFrameRef.current);
+        zenAtmosphereScrollFrameRef.current = null;
+      }
+      if (chatScrollElasticResetTimerRef.current !== null) {
+        window.clearTimeout(chatScrollElasticResetTimerRef.current);
+        chatScrollElasticResetTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    resetChatModeScrollElastic();
+  }, [chatEphemeralMode, detail?.id, view]);
+
+  useEffect(() => {
+    if (!askQuestionTailSpaceActive) return;
+    if (askQuestionComposerHiddenForReadingKeyRef.current !== null) {
+      return;
+    }
+    centerActiveChoicePanelInMessages();
+    const t1 = window.setTimeout(centerActiveChoicePanelInMessages, 120);
+    const t2 = window.setTimeout(centerActiveChoicePanelInMessages, 300);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
-  }, [askQuestionTailSpaceActive]);
+  }, [askQuestionTailSpaceActive, choiceChipRailAnchorMessageId]);
+
+  function clearChatModeScrollElasticResetTimer(): void {
+    if (chatScrollElasticResetTimerRef.current === null) return;
+    window.clearTimeout(chatScrollElasticResetTimerRef.current);
+    chatScrollElasticResetTimerRef.current = null;
+  }
+
+  function setChatModeScrollElasticOffset(
+    scrollRoot: HTMLDivElement | null,
+    offsetPx: number,
+    pulling: boolean
+  ): void {
+    const nextOffset =
+      Math.abs(offsetPx) < 0.5
+        ? 0
+        : Math.max(
+            -CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX,
+            Math.min(CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX, offsetPx)
+          );
+    chatScrollElasticOffsetRef.current = nextOffset;
+    if (!scrollRoot) return;
+    scrollRoot.style.setProperty("--chat-elastic-offset-y", `${nextOffset.toFixed(2)}px`);
+    if (pulling && nextOffset !== 0) {
+      scrollRoot.dataset.chatElasticPulling = "true";
+    } else {
+      delete scrollRoot.dataset.chatElasticPulling;
+    }
+  }
+
+  function resetChatModeScrollElastic(scrollRoot = messagesScrollRef.current): void {
+    clearChatModeScrollElasticResetTimer();
+    setChatModeScrollElasticOffset(scrollRoot, 0, false);
+  }
 
   useEffect(() => {
-    if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]);
+    if (!zenEmptyHeroVisible) return;
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    scrollRoot.scrollTop = 0;
+    resetChatModeScrollElastic(scrollRoot);
+  }, [zenEmptyHeroVisible]);
 
-  const handleAskQuestionOutsidePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (!pendingAskQuestionInteractiveKey || askQuestionComposerRevealed) return;
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      /* Chip rail is a sibling below `.messages`; exclude it so option picks still work.
-         Clicks anywhere else — including inside the scrollable thread — collapse. */
-      if (askQuestionRailRef.current?.contains(target)) return;
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    },
-    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]
-  );
+  function queueChatModeScrollElasticReset(scrollRoot: HTMLDivElement): void {
+    clearChatModeScrollElasticResetTimer();
+    chatScrollElasticResetTimerRef.current = window.setTimeout(() => {
+      chatScrollElasticResetTimerRef.current = null;
+      setChatModeScrollElasticOffset(scrollRoot, 0, false);
+    }, CHAT_MODE_SCROLL_ELASTIC_RESET_DELAY_MS);
+  }
+
+  function applyChatModeScrollElasticPull(
+    scrollRoot: HTMLDivElement,
+    direction: 1 | -1,
+    gestureDistancePx: number,
+    resistance: number
+  ): void {
+    const currentOffset = chatScrollElasticOffsetRef.current;
+    const currentMagnitude =
+      Math.sign(currentOffset) === direction ? Math.abs(currentOffset) : 0;
+    const remaining = Math.max(
+      0,
+      CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX - currentMagnitude
+    );
+    const nextMagnitude =
+      currentMagnitude + Math.min(remaining, gestureDistancePx * resistance);
+    setChatModeScrollElasticOffset(scrollRoot, direction * nextMagnitude, true);
+    queueChatModeScrollElasticReset(scrollRoot);
+  }
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {
+    if (zenEmptyHeroVisible) {
+      const el = event.currentTarget;
+      if (el.scrollTop !== 0) {
+        el.scrollTop = 0;
+      }
+      resetChatModeScrollElastic(el);
+      return;
+    }
+    scheduleZenAtmosphereScrollBlend(event.currentTarget);
     if (!chatEphemeralMode || !detail?.id) return;
     const el = event.currentTarget;
     const previousScrollTop = chatLastScrollTopByConversationRef.current.get(detail.id);
@@ -22680,40 +28784,121 @@ function HomeContent(): React.JSX.Element {
     // drop is reflow, not a user gesture. Allow a small +2px slack for
     // sub-pixel rounding.
     const probableReflow = heightDrop > 0 && scrollDrop <= heightDrop + 2;
+    const programmaticScrollActive = Date.now() < chatProgrammaticScrollUntilMsRef.current;
     const scrolledUp =
       previousScrollTop !== undefined &&
       scrollDrop > MANUAL_SCROLL_UP_THRESHOLD_PX &&
-      !probableReflow;
-    const userInitiatedScroll = Date.now() > chatProgrammaticScrollUntilMsRef.current;
-    if (scrolledUp && userInitiatedScroll) {
+      !probableReflow &&
+      !programmaticScrollActive;
+    if (scrolledUp) {
+      chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
       chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+      hideAskQuestionComposerForReading();
     }
     chatLastScrollTopByConversationRef.current.set(detail.id, el.scrollTop);
     chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
     if (!scrolledUp) return;
-    const hasArchivedMessages = latestUserMessageIndex > 0;
-    if (!hasArchivedMessages) return;
-    const atTop = el.scrollTop <= CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX;
-    if (!atTop) return;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
-    if (!revealArchived && !loadingArchived) {
-      startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
+  }
+  function disarmChatModeAutoscrollFromUserGesture(): void {
+    if (zenEmptyHeroVisible) return;
+    if (!chatEphemeralMode || !detail?.id) return;
+    chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
+    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
+    hideAskQuestionComposerForReading();
+  }
+  function handleChatModeThreadWheel(event: React.WheelEvent<HTMLDivElement>): void {
+    const el = event.currentTarget;
+    if (zenEmptyHeroVisible) {
+      event.preventDefault();
+      resetChatModeScrollElastic(el);
+      return;
+    }
+    if (!chatEphemeralMode || !detail?.id) return;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const atTop = el.scrollTop <= 0.5;
+    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
+    if (event.deltaY < -1) {
+      disarmChatModeAutoscrollFromUserGesture();
+    }
+    if (atTop && event.deltaY < -1) {
+      event.preventDefault();
+      applyChatModeScrollElasticPull(
+        el,
+        1,
+        Math.abs(event.deltaY),
+        CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE
+      );
+      return;
+    }
+    if (atBottom && event.deltaY > 1) {
+      event.preventDefault();
+      applyChatModeScrollElasticPull(
+        el,
+        -1,
+        event.deltaY,
+        CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE
+      );
+      return;
+    }
+    if (chatScrollElasticOffsetRef.current !== 0) {
+      queueChatModeScrollElasticReset(el);
     }
   }
-  function preventChatModeThreadScroll(
-    event: React.WheelEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
-  ): void {
+  function handleChatModeThreadTouchStart(event: React.TouchEvent<HTMLDivElement>): void {
+    if (zenEmptyHeroVisible) {
+      chatTouchScrollLastYRef.current = null;
+      resetChatModeScrollElastic(event.currentTarget);
+      return;
+    }
+    clearChatModeScrollElasticResetTimer();
+    chatTouchScrollLastYRef.current = event.touches[0]?.clientY ?? null;
+  }
+  function handleChatModeThreadTouchMove(event: React.TouchEvent<HTMLDivElement>): void {
+    const el = event.currentTarget;
+    if (zenEmptyHeroVisible) {
+      event.preventDefault();
+      resetChatModeScrollElastic(el);
+      return;
+    }
     if (!chatEphemeralMode || !detail?.id) return;
-    if (!("deltaY" in event) || event.deltaY >= -0.5) return;
-    if (latestUserMessageIndex <= 0) return;
-    const scrollRoot = messagesScrollRef.current;
-    if (!scrollRoot || scrollRoot.scrollTop > CHAT_MODE_ARCHIVE_REVEAL_SCROLL_THRESHOLD_PX) return;
-    const revealArchived = chatArchiveRevealByConversationRef.current.get(detail.id) === true;
-    const loadingArchived = chatArchiveLoadingByConversationRef.current.get(detail.id) === true;
-    if (revealArchived || loadingArchived) return;
-    event.preventDefault();
-    startChatArchiveLoadForConversation(detail.id, latestUserMessageId);
+    const nextY = event.touches[0]?.clientY ?? null;
+    const previousY = chatTouchScrollLastYRef.current;
+    chatTouchScrollLastYRef.current = nextY;
+    if (nextY === null || previousY === null) return;
+    const touchDeltaY = nextY - previousY;
+    // Swiping down moves the thread upward. That is the user's "pause follow"
+    // gesture while PRISM is typing, so let the scroll surface take over.
+    if (touchDeltaY > 4) {
+      disarmChatModeAutoscrollFromUserGesture();
+    }
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const atTop = el.scrollTop <= 0.5;
+    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
+    if (atTop && touchDeltaY > 1) {
+      applyChatModeScrollElasticPull(
+        el,
+        1,
+        touchDeltaY,
+        CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE
+      );
+      return;
+    }
+    if (atBottom && touchDeltaY < -1) {
+      applyChatModeScrollElasticPull(
+        el,
+        -1,
+        Math.abs(touchDeltaY),
+        CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE
+      );
+      return;
+    }
+    if (chatScrollElasticOffsetRef.current !== 0) {
+      queueChatModeScrollElasticReset(el);
+    }
+  }
+  function handleChatModeThreadTouchEnd(): void {
+    chatTouchScrollLastYRef.current = null;
+    resetChatModeScrollElastic();
   }
 
   function resetComposerHistoryCursor(): void {
@@ -22872,10 +29057,20 @@ function HomeContent(): React.JSX.Element {
   }, [detail]);
 
   function updateComposerDraft(nextDraft: string) {
+    const normalizedNextDraft = clampTextAfterLeadingCommandChip(
+      nextDraft,
+      composerCommandPicks
+    );
     resetComposerHistoryCursor();
+    if (normalizedNextDraft !== draft) {
+      setComposerSendTintActive(true);
+    }
     startDraftTransition(() => {
-      setDraft(nextDraft);
+      setDraft(normalizedNextDraft);
     });
+    if (normalizedNextDraft !== draft) {
+      snapAskQuestionComposerToChatBottom();
+    }
   }
 
   function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -22921,7 +29116,7 @@ function HomeContent(): React.JSX.Element {
 
   function renderComposerWritingAssistAction(): React.ReactNode {
     if (
-      composerHiddenByAskQuestion ||
+      composerHiddenByChoiceChips ||
       settings?.composerWritingAssist === false ||
       draft.trim().length === 0
     ) {
@@ -22946,6 +29141,13 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerFocus() {
     setComposerFocused(true);
+    setComposerSendTintActive(true);
+    snapAskQuestionComposerToChatBottom();
+  }
+
+  function handleComposerPointerDown() {
+    setComposerSendTintActive(true);
+    snapAskQuestionComposerToChatBottom();
   }
 
   function handleComposerBlur(e: React.FocusEvent<HTMLFormElement>) {
@@ -22959,6 +29161,7 @@ function HomeContent(): React.JSX.Element {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
     if (target.closest("[data-debug-composer='true']")) return;
+    setComposerSendTintActive(true);
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
     if (!fromMarkdownEditor && !fromPlainTextarea) return;
@@ -22981,6 +29184,7 @@ function HomeContent(): React.JSX.Element {
           e.preventDefault();
           setComposerPrimed(false);
           setDraft(recalled);
+          setComposerSendTintActive(recalled.trim().length > 0);
         }
       }
       return;
@@ -23006,6 +29210,7 @@ function HomeContent(): React.JSX.Element {
       if (switchingPrivacyMode && !pendingReplyVisible) {
         pulseConversationSurfaceLoading();
       }
+      revealZenHeaderForFreshSurface();
       setConversationStarterPrompts(null);
       setChatStartupSummary(null);
       chatSummaryRefreshMarkerRef.current = null;
@@ -23072,8 +29277,11 @@ function HomeContent(): React.JSX.Element {
     event: React.MouseEvent<HTMLButtonElement>
   ): void {
     event.stopPropagation();
+    if (replayCachedZenInitialStarterReply()) return;
+    if (armCanceledZenInitialStarterReplay()) return;
     if (pendingReply) return;
     if (!isStarterPromptAvailable(draft)) return;
+    setChatAutoRestoreSuppressed(false);
     void sendMessage(
       { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
       { starterPrompt: true, starterPromptWarrantsIntro: true }
@@ -23086,7 +29294,10 @@ function HomeContent(): React.JSX.Element {
     showEmptyStateSearchAfterReturn();
   }
 
-  async function saveSettings(e: React.FormEvent) {
+  async function saveSettings(
+    e: React.FormEvent,
+    options: { closeHostsModalOnSuccess?: boolean } = {}
+  ) {
     e.preventDefault();
     if (!settings) return;
     setBusy(true);
@@ -23097,17 +29308,41 @@ function HomeContent(): React.JSX.Element {
       // Server re-sanitizes via `sanitizeOpenAiKeyInput`, so a paste of
       // `OPENAI_API_KEY=sk-...` (or a quoted variant) is stripped before
       // it ever gets encrypted into the user row.
-      const body: Record<string, unknown> = { ...settings };
+      const preferredOnlineModelChoice = visiblePreferredOnlineModelChoice(
+        modelCatalog,
+        settings,
+        settings.preferredOnlineModel
+      );
+      const body: Record<string, unknown> = {
+        ...settings,
+        preferredOnlineModel:
+          preferredOnlineModelChoice === AUTO_MODEL_CHOICE
+            ? ""
+            : preferredOnlineModelChoice,
+      };
       const trimmedKey = openAiKey.trim();
       if (trimmedKey.length > 0) {
         body.openAiApiKey = trimmedKey;
       }
+      const trimmedAnthropicKey = anthropicKey.trim();
+      if (trimmedAnthropicKey.length > 0) {
+        body.anthropicApiKey = trimmedAnthropicKey;
+      }
+      const trimmedElevenLabsKey = elevenLabsKey.trim();
+      if (trimmedElevenLabsKey.length > 0) {
+        body.elevenLabsApiKey = trimmedElevenLabsKey;
+      }
       await api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
       setOpenAiKey("");
+      setAnthropicKey("");
+      setElevenLabsKey("");
       const { comfyUiHost: savedComfyHost } = await refreshSettings();
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
+      if (options.closeHostsModalOnSuccess) {
+        setSettingsHostsModalOpen(false);
+      }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
     } finally {
@@ -23138,6 +29373,43 @@ function HomeContent(): React.JSX.Element {
       return {
         ...previous,
         hiddenBotModelIds: Array.from(current),
+      };
+    });
+  }
+
+  function setComfyUiWorkflowVisible(modelId: string, visible: boolean) {
+    if (!visible) {
+      setImageGenModelChoiceByProvider((previous) =>
+        previous.local === modelId
+          ? { ...previous, local: AUTO_MODEL_CHOICE }
+          : previous
+      );
+      setNewBotLocalImageModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+    }
+    setSettings((previous) => {
+      if (!previous) return previous;
+      const hidden = new Set(previous.hiddenComfyUiWorkflowIds ?? []);
+      if (visible) {
+        hidden.delete(modelId);
+      } else {
+        hidden.add(modelId);
+      }
+      const clearIfHidden = (value: string | null | undefined): string => {
+        const trimmed = value?.trim() ?? "";
+        return !visible && trimmed === modelId ? "" : trimmed;
+      };
+      return {
+        ...previous,
+        hiddenComfyUiWorkflowIds: Array.from(hidden),
+        preferredLocalImageModel: clearIfHidden(previous.preferredLocalImageModel),
+        preferredZenWallpaperLocalImageModel: clearIfHidden(
+          previous.preferredZenWallpaperLocalImageModel
+        ),
+        lenientLocalImageFallbackModel: clearIfHidden(
+          previous.lenientLocalImageFallbackModel
+        ),
       };
     });
   }
@@ -23192,9 +29464,15 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function clearSavedKey() {
+  async function clearSavedKey(provider: "openai" | "anthropic" | "elevenlabs") {
+    const providerName =
+      provider === "openai"
+        ? "OpenAI"
+        : provider === "anthropic"
+          ? "Anthropic"
+          : "ElevenLabs";
     const confirmed = window.confirm(
-      "Remove the saved OpenAI API key from this account? Chat will fall back to the server default if one is configured."
+      `Remove the saved ${providerName} API key from this account? Chat will fall back to the server default if one is configured.`
     );
     if (!confirmed) return;
     setBusy(true);
@@ -23202,10 +29480,23 @@ function HomeContent(): React.JSX.Element {
     try {
       await api("/api/settings", {
         method: "PATCH",
-        body: JSON.stringify({ openAiApiKey: null }),
+        body: JSON.stringify(
+          provider === "openai"
+            ? { openAiApiKey: null }
+            : provider === "anthropic"
+              ? { anthropicApiKey: null }
+              : { elevenLabsApiKey: null }
+        ),
       });
-      setOpenAiKey("");
-      await refreshSettings();
+      if (provider === "openai") {
+        setOpenAiKey("");
+      } else if (provider === "anthropic") {
+        setAnthropicKey("");
+      } else {
+        setElevenLabsKey("");
+      }
+      const { comfyUiHost } = await refreshSettings();
+      await refreshModels(comfyUiHost);
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Clear failed.");
     } finally {
@@ -23715,6 +30006,33 @@ function HomeContent(): React.JSX.Element {
     };
   }, [coffeeBotContextMenu, closeCoffeeBotContextMenu]);
 
+  useEffect(() => {
+    if (!storyShellContextMenu) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target;
+      if (target instanceof Node && storyShellContextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeStoryShellContextMenu();
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeStoryShellContextMenu();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [storyShellContextMenu, closeStoryShellContextMenu]);
+
   // Keep the dim backdrop visual, but let pointer events hit underlying
   // messages so right-click/tap can immediately retarget the context menu.
   // Dismissal is handled centrally by outside-click capture.
@@ -23795,6 +30113,7 @@ function HomeContent(): React.JSX.Element {
 
   async function exportCoffeeSession(conversation: CoffeeConversationState | null): Promise<void> {
     if (!conversation) return;
+    if (coffeeSessionPhase !== "finished") return;
     const data = await api<{ markdown: string }>(
       `/api/conversations/${encodeURIComponent(conversation.id)}/export`,
       { method: "POST", body: "{}" }
@@ -23936,6 +30255,7 @@ function HomeContent(): React.JSX.Element {
         localImageModel: bot.local_image_model ?? null,
         openaiImageModel: bot.openai_image_model ?? null,
         onlineEnabled: bot.online_enabled === 1,
+        flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
         deleteProtected: bot.delete_protected === 1,
       },
@@ -24202,6 +30522,7 @@ function HomeContent(): React.JSX.Element {
             ? parsedBot.openaiImageModel
             : "",
         onlineEnabled: parsedBot.onlineEnabled !== false,
+        flirtEnabled: parsedBot.flirtEnabled === true,
         chatEnabled: parsedBot.chatEnabled !== false,
         deleteProtected: parsedBot.deleteProtected === true,
         temperature:
@@ -24231,7 +30552,7 @@ function HomeContent(): React.JSX.Element {
     for (const memory of memories) {
       if (!memory || typeof memory.text !== "string" || memory.text.trim().length === 0) continue;
       const source = normalizeImportedMemorySource(memory.source);
-      const category = normalizeImportedMemoryCategory(memory.category, source);
+      const category = normalizeImportedMemoryCategory(memory.category);
       await api("/api/memories/restore", {
         method: "POST",
         body: JSON.stringify({
@@ -24260,7 +30581,9 @@ function HomeContent(): React.JSX.Element {
     await refreshBots();
     await refreshMemories();
     await refreshBotMemories(createdBotId);
-    setSelectedBotId(createdBotId);
+    if (options?.selectInChat !== false) {
+      selectImportedBotInChatMode(createdBotId);
+    }
     if (!options?.suppressNotice) {
       setPanelNotice(
         restored > 0
@@ -24357,6 +30680,7 @@ function HomeContent(): React.JSX.Element {
           allowDuplicateHash,
           suppressNotice: true,
           suppressPanelReset: true,
+          selectInChat: false,
         });
         importedCount += 1;
         restoredTotal += result.restoredMemories;
@@ -24428,6 +30752,9 @@ function HomeContent(): React.JSX.Element {
       summaryParts.push(`${restoredTotal} memories restored`);
     }
     setPanelNotice(`ZIP import complete: ${summaryParts.join(" · ")}.`);
+    if (importedBotIds.length === 1) {
+      selectImportedBotInChatMode(importedBotIds[0]!);
+    }
   }
 
   async function handleBotImportFileSelection(
@@ -24679,6 +31006,7 @@ function HomeContent(): React.JSX.Element {
     cancelPendingEmptyStateSearchOpen();
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
+    spotlightTypingArmedRef.current = false;
   }, [cancelPendingEmptyStateSearchOpen]);
 
   function resetEmptyStateToPrismHome(): void {
@@ -24725,8 +31053,32 @@ function HomeContent(): React.JSX.Element {
     setSandboxGridSelectedBotId(botId);
     setEmptyStateSearchOpen(false);
     setEmptyStateBotNameFilter("");
+    spotlightTypingArmedRef.current = false;
     focusDraftInput();
   }, [cancelPendingEmptyStateSearchOpen, focusDraftInput, selectedBotId]);
+
+  useEffect(() => {
+    if (view !== "sandbox") return;
+    const botId = pendingImportedChatBotSelectionRef.current;
+    if (!botId) return;
+    pendingImportedChatBotSelectionRef.current = null;
+    commitEmptyStateBotSelection(botId);
+  }, [commitEmptyStateBotSelection, view]);
+
+  function selectImportedBotInChatMode(botId: string): void {
+    pendingImportedChatBotSelectionRef.current = null;
+    if (view !== "sandbox") {
+      pendingImportedChatBotSelectionRef.current = botId;
+      navigateToView("sandbox");
+      return;
+    }
+    setConversationStarterPrompts(null);
+    setSelectedId(null);
+    setDetail(null);
+    setChatBotOverride(undefined);
+    setSidebarOpen(false);
+    commitEmptyStateBotSelection(botId);
+  }
 
   const openEmptyStateBotSearchFromTyping = useCallback((typedCharacter: string) => {
     cancelPendingEmptyStateSearchOpen();
@@ -24750,12 +31102,26 @@ function HomeContent(): React.JSX.Element {
     startBotPickerReturnToAll,
   ]);
 
+  const handleComposerBotSelectionChange = useCallback(
+    (next: string) => {
+      const nextBotId = next || null;
+      setSelectedBotId(nextBotId);
+      // In Sandbox, hero + tile highlighting are keyed off the canvas focus
+      // state. Keep it in sync when selection comes from the header dropdown.
+      if (view === "sandbox") {
+        setSandboxGridSelectedBotId(nextBotId);
+      }
+    },
+    [view]
+  );
+
   useEffect(() => {
     if (!emptyStateTypingSearchAvailable) return;
     function handlePageTyping(event: KeyboardEvent) {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const activeElement = document.activeElement;
       if (event.key === "Tab") {
+        if (!emptyStateSearchActive && !spotlightTypingArmedRef.current) return;
         if (
           activeElement instanceof Element &&
           activeElement.closest(
@@ -24824,6 +31190,7 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       if (event.key.length !== 1 || event.key.trim().length === 0) return;
+      if (!emptyStateSearchActive && !spotlightTypingArmedRef.current) return;
       if (!emptyStateSearchActive && !pageHasFocus) return;
       event.preventDefault();
       openEmptyStateBotSearchFromTyping(event.key);
@@ -25182,6 +31549,25 @@ function HomeContent(): React.JSX.Element {
       setCoffeeShellContextMenu(null);
       setBotContextMenu(null);
       setCanvasToolsContextMenu(null);
+      setConversationGroupContextMenu(null);
+    },
+    []
+  );
+
+  const handleStoryShellContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      const clamped = clampContextMenuPosition(
+        event.clientX,
+        event.clientY,
+        CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+        260
+      );
+      setStoryShellContextMenu({ x: clamped.x, y: clamped.y });
+      setCoffeeShellContextMenu(null);
+      setCoffeeBotContextMenu(null);
+      setCanvasToolsContextMenu(null);
+      setBotContextMenu(null);
       setConversationGroupContextMenu(null);
     },
     []
@@ -25683,7 +32069,7 @@ function HomeContent(): React.JSX.Element {
       const sweepResult = await api<ConversationSweepResponse>("/api/conversations/sweep", {
         method: "POST",
         body: JSON.stringify({
-          mode: view === "chat" ? "chat" : "sandbox",
+          mode: "sandbox",
         }),
       });
       const expiresAtMs = sweepResult.undoExpiresAt
@@ -25790,6 +32176,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineEnabled(true);
     setNewBotDeleteProtected(false);
+    setNewBotFlirtEnabled(false);
     setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
     setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
     createBotAppearanceTouchedRef.current = false;
@@ -25809,6 +32196,24 @@ function HomeContent(): React.JSX.Element {
     editOriginalRef.current = null;
   }, []);
 
+  // Opens the Bots panel in global/create context (Default or zoomed-out view).
+  // Always starts from a fresh draft so metadata from the last edited bot
+  // never bleeds into the "new bot" form.
+  function openFreshBotCustomizer(): void {
+    disarmDelete();
+    setPanelError(null);
+    setPanelNotice(null);
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    setEditingBotId(null);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setBotLibraryExpanded(false);
+    setBotLibraryClosing(false);
+    setBotPanelLibraryEnabled(true);
+    resetBotForm();
+    openRightPanel("bots");
+  }
+
   async function createBot() {
     setPanelError(null);
     setPanelNotice(null);
@@ -25819,10 +32224,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       newBotLocalModel
     );
-    const onlineModel = visibleConcreteModelChoiceForProvider(
+    const onlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       newBotOnlineModel
     );
     const localImageStored =
@@ -25843,6 +32247,7 @@ function HomeContent(): React.JSX.Element {
           openaiImageModel: openaiImageStored,
           onlineEnabled: newBotOnlineEnabled,
           deleteProtected: newBotDeleteProtected,
+          flirtEnabled: newBotFlirtEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -25906,6 +32311,7 @@ function HomeContent(): React.JSX.Element {
           openaiImageModel: bot.openai_image_model ?? "",
           onlineEnabled: bot.online_enabled !== 0,
           deleteProtected: bot.delete_protected === 1,
+          flirtEnabled: bot.flirt_enabled === 1,
           temperature: normalizeBotTemperature(bot.temperature),
           maxTokens: normalizeBotMaxTokens(bot.max_tokens),
           color: bot.color,
@@ -25924,6 +32330,115 @@ function HomeContent(): React.JSX.Element {
       setPanelNotice(`${bot.name} cloned.`);
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Clone bot failed.");
+    }
+  }
+
+  function revertEditingBotDraft() {
+    const original = editOriginalRef.current;
+    if (!original || busy) return;
+    const { fields } = parseStoredBotPrompt(original.prompt);
+    setPanelError(null);
+    setPanelNotice(null);
+    setNewBotName(original.name);
+    setBotProfile(fields);
+    setNewBotLocalModel(original.localModel);
+    setNewBotOnlineModel(original.onlineModel);
+    setNewBotLocalImageModel(original.localImageModel);
+    setNewBotOpenAiImageModel(original.openAiImageModel);
+    setNewBotOnlineEnabled(original.onlineEnabled);
+    setNewBotDeleteProtected(original.deleteProtected);
+    setNewBotFlirtEnabled(original.flirtEnabled);
+    setNewBotTemperature(original.temperature);
+    setNewBotMaxTokens(original.maxTokens);
+    setNewBotColor(original.color);
+    setNewBotGlyph(original.glyph);
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setBotModelRoutingPage("chat");
+  }
+
+  async function duplicateCurrentBotDraft() {
+    const copiedName = `${newBotName.trim() || "Untitled bot"} (copy)`;
+    const localModel = visibleConcreteModelChoiceForProvider(
+      modelCatalog,
+      settings,
+      "local",
+      newBotLocalModel
+    );
+    const onlineModel = visibleConcreteOnlineModelChoice(
+      modelCatalog,
+      settings,
+      newBotOnlineModel
+    );
+    const localImageStored =
+      newBotLocalImageModel === AUTO_MODEL_CHOICE ? "" : newBotLocalImageModel.trim();
+    const openaiImageStored =
+      newBotOpenAiImageModel === AUTO_MODEL_CHOICE
+        ? ""
+        : normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+    const copiedPrompt = serializeStoredBotPrompt(botProfile, copiedName);
+
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const result = await api<{ bot?: { id?: string } }>("/api/bots", {
+        method: "POST",
+        body: JSON.stringify({
+          name: copiedName,
+          systemPrompt: copiedPrompt,
+          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
+          localImageModel: localImageStored,
+          openaiImageModel: openaiImageStored,
+          onlineEnabled: newBotOnlineEnabled,
+          deleteProtected: newBotDeleteProtected,
+          flirtEnabled: newBotFlirtEnabled,
+          temperature: newBotTemperature,
+          maxTokens: newBotMaxTokens,
+          color: newBotColor,
+          glyph: newBotGlyph,
+        }),
+      });
+      setNewBotName(copiedName);
+      setNewBotLocalModel(localModel);
+      setNewBotOnlineModel(onlineModel);
+      setNewBotLocalImageModel(
+        localImageStored ? localImageStored : AUTO_MODEL_CHOICE
+      );
+      setNewBotOpenAiImageModel(
+        openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
+      );
+      editOriginalRef.current = {
+        name: copiedName,
+        prompt: copiedPrompt,
+        localModel,
+        onlineModel,
+        localImageModel: localImageStored ? localImageStored : AUTO_MODEL_CHOICE,
+        openAiImageModel: openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE,
+        onlineEnabled: newBotOnlineEnabled,
+        deleteProtected: newBotDeleteProtected,
+        flirtEnabled: newBotFlirtEnabled,
+        temperature: newBotTemperature,
+        maxTokens: newBotMaxTokens,
+        color: newBotColor,
+        glyph: newBotGlyph,
+      };
+      if (result.bot?.id) {
+        setEditingBotId(result.bot.id);
+      }
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      setBotLibraryExpanded(false);
+      setBotLibraryClosing(false);
+      setBotPanelLibraryEnabled(false);
+      setColorWheelOpen(false);
+      setPanelNotice(`${copiedName} duplicated.`);
+      await refreshBots();
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Duplicate bot failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -26114,6 +32629,85 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function setBotsDeleteProtection(
+    targetBots: readonly Bot[],
+    deleteProtected: boolean
+  ): Promise<void> {
+    const uniqueBots = Array.from(
+      new Map(
+        targetBots
+          .filter((bot): bot is Bot => Boolean(bot?.id))
+          .map((bot) => [bot.id, bot])
+      ).values()
+    );
+    if (uniqueBots.length === 0) return;
+
+    setPanelError(null);
+    setPanelNotice(null);
+    disarmDelete();
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    const ids = uniqueBots.map((bot) => bot.id);
+    const idSet = new Set(ids);
+    const previousBots = bots;
+    const previousNewBotDeleteProtected = newBotDeleteProtected;
+    const previousEditOriginal = editOriginalRef.current;
+    const nextDeleteProtectedValue = deleteProtected ? 1 : 0;
+    setBots((list) =>
+      list.map((bot) =>
+        idSet.has(bot.id)
+          ? { ...bot, delete_protected: nextDeleteProtectedValue }
+          : bot
+      )
+    );
+    if (editingBotId && idSet.has(editingBotId)) {
+      setNewBotDeleteProtected(deleteProtected);
+      if (editOriginalRef.current) {
+        editOriginalRef.current = {
+          ...editOriginalRef.current,
+          deleteProtected,
+        };
+      }
+    }
+
+    try {
+      const result = await api<{ updated?: number }>(
+        "/api/bots/selected/delete-protection",
+        {
+          method: "PATCH",
+          body: JSON.stringify({ ids, deleteProtected }),
+        }
+      );
+      await refreshBots();
+      const updated = typeof result.updated === "number" ? result.updated : ids.length;
+      if (updated === 0) {
+        setPanelNotice("No bots updated.");
+      } else if (uniqueBots.length === 1) {
+        setPanelNotice(
+          deleteProtected
+            ? `${uniqueBots[0]!.name} is protected from deletion.`
+            : `${uniqueBots[0]!.name} can be deleted.`
+        );
+      } else {
+        setPanelNotice(
+          deleteProtected
+            ? `Protected ${updated} selected bot${updated === 1 ? "" : "s"} from deletion.`
+            : `Allowed deletion for ${updated} selected bot${updated === 1 ? "" : "s"}.`
+        );
+      }
+    } catch (err) {
+      setBots(previousBots);
+      if (editingBotId && idSet.has(editingBotId)) {
+        setNewBotDeleteProtected(previousNewBotDeleteProtected);
+        editOriginalRef.current = previousEditOriginal;
+      }
+      try { await refreshBots(); } catch { /* best-effort refresh */ }
+      setPanelError(
+        err instanceof Error ? err.message : "Update delete protection failed."
+      );
+    }
+  }
+
   async function devToolsDeleteAllBots() {
     setDevToolsMessage(null);
     setDevToolsBusy(true);
@@ -26122,7 +32716,7 @@ function HomeContent(): React.JSX.Element {
     setBots([]);
     setSelectedBotId(null);
     try {
-      const result = await api<{ deleted?: number }>("/api/bots", {
+      const result = await api<{ deleted?: number }>("/api/bots?includeProtected=1", {
         method: "DELETE",
       });
       await refreshBots();
@@ -26298,7 +32892,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function devToolsRunSummaryNow(modeOverride?: "chat" | "sandbox") {
+  async function devToolsRunSummaryNow(modeOverride?: "zen" | "sandbox") {
     const conversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     if (!conversationId || conversationId === "pending") {
@@ -26306,7 +32900,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const modeForSummary =
-      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+      modeOverride ?? (view === "chat" ? "zen" : "sandbox");
     setDevToolsBusy(true);
     setDevToolsMessage(null);
     try {
@@ -26333,7 +32927,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function devToolsResetSummary(modeOverride?: "chat" | "sandbox") {
+  async function devToolsResetSummary(modeOverride?: "zen" | "sandbox") {
     const conversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     if (!conversationId || conversationId === "pending") {
@@ -26341,7 +32935,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const modeForSummary =
-      modeOverride ?? (view === "chat" ? "chat" : "sandbox");
+      modeOverride ?? (view === "chat" ? "zen" : "sandbox");
     setDevToolsBusy(true);
     setDevToolsMessage(null);
     try {
@@ -26624,14 +33218,14 @@ function HomeContent(): React.JSX.Element {
       "local",
       bot.local_model ?? bot.model
     );
-    const seededOnlineModel = visibleConcreteModelChoiceForProvider(
+    const seededOnlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       bot.online_model
     );
     const seededOnlineEnabled = bot.online_enabled !== 0;
     const seededDeleteProtected = bot.delete_protected === 1;
+    const seededFlirtEnabled = bot.flirt_enabled === 1;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
     const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
     const seededColor = bot.color?.trim() || randomHex(
@@ -26657,6 +33251,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotOpenAiImageModel(seededOpenAiImageModel);
     setNewBotOnlineEnabled(seededOnlineEnabled);
     setNewBotDeleteProtected(seededDeleteProtected);
+    setNewBotFlirtEnabled(seededFlirtEnabled);
     setNewBotTemperature(seededTemperature);
     setNewBotMaxTokens(seededMaxTokens);
     setNewBotColor(seededColor);
@@ -26673,6 +33268,7 @@ function HomeContent(): React.JSX.Element {
       openAiImageModel: seededOpenAiImageModel,
       onlineEnabled: seededOnlineEnabled,
       deleteProtected: seededDeleteProtected,
+      flirtEnabled: seededFlirtEnabled,
       temperature: seededTemperature,
       maxTokens: seededMaxTokens,
       color: seededColor,
@@ -28035,7 +34631,6 @@ function HomeContent(): React.JSX.Element {
   function renderComposeUtilityActions(): React.JSX.Element {
     return (
       <div className={styles.composeUtilityActions}>
-        {view !== "chat" ? renderDevToolsButton() : null}
       </div>
     );
   }
@@ -28050,10 +34645,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       newBotLocalModel
     );
-    const onlineModel = visibleConcreteModelChoiceForProvider(
+    const onlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       newBotOnlineModel
     );
     const localImageStored =
@@ -28077,6 +34671,7 @@ function HomeContent(): React.JSX.Element {
           openaiImageModel: openaiImageStored,
           onlineEnabled: newBotOnlineEnabled,
           deleteProtected: newBotDeleteProtected,
+          flirtEnabled: newBotFlirtEnabled,
           temperature: newBotTemperature,
           maxTokens: newBotMaxTokens,
           color: newBotColor,
@@ -28100,6 +34695,7 @@ function HomeContent(): React.JSX.Element {
         openAiImageModel: openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE,
         onlineEnabled: newBotOnlineEnabled,
         deleteProtected: newBotDeleteProtected,
+        flirtEnabled: newBotFlirtEnabled,
         temperature: newBotTemperature,
         maxTokens: newBotMaxTokens,
         color: newBotColor,
@@ -28154,7 +34750,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  /** Effective checkpoint for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
+  /** Effective image model for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
   function resolveImagesPanelImageModels(): {
     localModelId: string;
     openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
@@ -28171,12 +34767,12 @@ function HomeContent(): React.JSX.Element {
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
         ? ""
-        : headerLocalRaw;
+        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
 
     const localModelId =
       headerLocal ||
-      botLocalImage ||
-      (settings?.preferredLocalImageModel?.trim() ?? "") ||
+      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
       localImageModelCatalogEntries[0]?.id ||
       "";
 
@@ -28195,6 +34791,168 @@ function HomeContent(): React.JSX.Element {
 
     return { localModelId, openAiModelId };
   }
+
+  function zenWallpaperImageGenerationAvailable(): boolean {
+    if (!settings) return false;
+    if (effectivePreferredProvider !== "local") return true;
+    return localImageModelCatalogEntries.length > 0;
+  }
+
+  function resolveZenWallpaperImageModels(): {
+    localModelId: string;
+    openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
+  } {
+    const conversationBot =
+      detail?.botId && bots.length > 0
+        ? bots.find((bot) => bot.id === detail.botId) ?? null
+        : null;
+    const botLocalImage = conversationBot?.local_image_model?.trim() ?? "";
+    const botOpenAiImage = conversationBot?.openai_image_model?.trim() ?? "";
+    const headerLocalRaw = imageGenModelChoiceByProvider.local?.trim() ?? "";
+    const headerLocal =
+      headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
+        ? ""
+        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
+    const localModelId =
+      headerLocal ||
+      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredZenWallpaperLocalImageModel) ||
+      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
+      localImageModelCatalogEntries[0]?.id ||
+      "";
+    const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
+    const headerOpenAi =
+      headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
+        ? ""
+        : normalizeOpenAiImageModelId(headerOpenAiRaw);
+    const openAiModelId = normalizeOpenAiImageModelId(
+      headerOpenAi ||
+        botOpenAiImage ||
+        (settings?.preferredZenWallpaperOpenAiImageModel?.trim() ?? "") ||
+        (settings?.preferredOpenAiImageModel?.trim() ?? "") ||
+        DEFAULT_OPENAI_IMAGE_MODEL_ID
+    );
+    return { localModelId, openAiModelId };
+  }
+
+  function applyZenWallpaperMetadata(
+    conversationId: string,
+    zenWallpaper: ZenWallpaperMetadata
+  ): void {
+    setDetail((current) =>
+      current?.id === conversationId
+        ? { ...current, zenWallpaper }
+        : current
+    );
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, zenWallpaper }
+          : conversation
+      )
+    );
+  }
+
+  async function requestZenWallpaperUpdate(
+    conversationId: string,
+    options: { enabled: boolean; force?: boolean }
+  ): Promise<void> {
+    if (options.enabled && !zenWallpaperImageGenerationAvailable()) {
+      setZenWallpaperError("Configure an image generation model before enabling Atmosphere.");
+      return;
+    }
+    if (zenWallpaperGenerationInFlightRef.current.has(conversationId)) return;
+    zenWallpaperGenerationInFlightRef.current.add(conversationId);
+    setZenWallpaperBusyConversationId(conversationId);
+    setZenWallpaperError(null);
+    try {
+      const { localModelId, openAiModelId } = resolveZenWallpaperImageModels();
+      const body: Record<string, unknown> = {
+        enabled: options.enabled,
+        force: options.force === true,
+      };
+      if (options.enabled) {
+        if (effectivePreferredProvider === "local") {
+          body.preferredProvider = "local";
+          if (localModelId) body.model = localModelId;
+        } else {
+          body.preferredProvider = "openai";
+          body.model = openAiModelId;
+        }
+      }
+      const data = await api<ZenWallpaperApiResponse>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/zen-wallpaper`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        }
+      );
+      applyZenWallpaperMetadata(conversationId, data.zenWallpaper);
+    } catch (err) {
+      setZenWallpaperError(
+        err instanceof Error ? err.message : "Zen Atmosphere failed to update."
+      );
+      setDetail((current) =>
+        current?.id === conversationId && current.zenWallpaper
+          ? {
+              ...current,
+              zenWallpaper: { ...current.zenWallpaper, status: "error" },
+            }
+          : current
+      );
+    } finally {
+      zenWallpaperGenerationInFlightRef.current.delete(conversationId);
+      setZenWallpaperBusyConversationId((current) =>
+        current === conversationId ? null : current
+      );
+    }
+  }
+
+  useEffect(() => {
+    const zenWallpaper = detail?.zenWallpaper;
+    if (view !== "chat") return;
+    if (!detail || detail.mode !== "zen") return;
+    if (!zenWallpaper?.enabled) return;
+    if (zenWallpaper.status === "generating" || zenWallpaper.status === "error") return;
+    if (zenWallpaperBusyConversationId === detail.id) return;
+    if (!zenWallpaperImageGenerationAvailable()) return;
+    const messageCount = detail.messages.length;
+    if (messageCount === 0) return;
+    const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
+    const shouldGenerateInitial = !zenWallpaper.imageId;
+    const shouldGenerateForIdleEra =
+      zenLatestIdleEraBoundaryMessageCount !== null &&
+      lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
+    const preGenerationInterval = Math.max(
+      1,
+      ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL - ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD
+    );
+    const shouldPreGenerateNext =
+      !shouldGenerateInitial &&
+      !shouldGenerateForIdleEra &&
+      messageCount - lastGeneratedAt >= preGenerationInterval;
+    if (!shouldGenerateInitial && !shouldGenerateForIdleEra && !shouldPreGenerateNext) return;
+    void requestZenWallpaperUpdate(detail.id, {
+      enabled: true,
+      force: shouldGenerateForIdleEra || shouldPreGenerateNext,
+    });
+  }, [
+    view,
+    detail?.id,
+    detail?.mode,
+    detail?.messages.length,
+    detail?.zenWallpaper?.enabled,
+    detail?.zenWallpaper?.imageId,
+    detail?.zenWallpaper?.generationMessageCount,
+    detail?.zenWallpaper?.status,
+    zenLatestIdleEraBoundaryMessageCount,
+    zenWallpaperBusyConversationId,
+    settings,
+    effectivePreferredProvider,
+    localImageModelCatalogEntries.length,
+    imageGenModelChoiceByProvider.local,
+    imageGenModelChoiceByProvider.openai,
+  ]);
 
   function addImageKeywordTags(kind: "positive" | "negative", draftTags: string[]): void {
     const normalizedDrafts = draftTags
@@ -28416,11 +35174,11 @@ function HomeContent(): React.JSX.Element {
         body.botId = scopeBotId;
       }
       const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
-      // Match Images panel + chat header: anything other than explicit "openai"
-      // counts as LOCAL for routing (same as `preferredProvider !== "openai"`).
+      // Image generation has only LOCAL/OpenAI lanes. Anthropic chat mode maps
+      // to the OpenAI image lane while keeping chat replies on Anthropic.
       // Uses the EFFECTIVE provider so the body honors the offline-only lock
       // when the active chat bot is protected.
-      if (effectivePreferredProvider === "openai") {
+      if (effectivePreferredProvider !== "local") {
         body.preferredProvider = "openai";
         body.model = openAiModelId;
       } else if (settings) {
@@ -28578,6 +35336,20 @@ function HomeContent(): React.JSX.Element {
           : secondaryOllamaUiStatus === "error"
               ? "Not reachable"
               : "Optional";
+  const dualOllamaWorkloadText =
+    dualOllamaWorkloadStatus?.enabled
+      ? `Dual routing ready · ${dualOllamaWorkloadStatus.primaryModelCount} matched model${
+          dualOllamaWorkloadStatus.primaryModelCount === 1 ? "" : "s"
+        }`
+      : dualOllamaWorkloadStatus?.reason === "model_mismatch"
+        ? "Dual routing paused · model lists do not match exactly"
+        : dualOllamaWorkloadStatus?.reason === "empty_catalog"
+          ? "Dual routing paused · one host has no detected models"
+          : dualOllamaWorkloadStatus?.reason === "secondary_unreachable"
+            ? "Dual routing paused · second host is not reachable"
+            : dualOllamaWorkloadStatus?.reason === "primary_unreachable"
+              ? "Dual routing paused · primary host is not reachable"
+              : "Dual routing waits for a second Ollama host";
 
   const comfyUiUiStatus: SecondaryOllamaUiStatus =
     !comfyUiDraftHost
@@ -28591,11 +35363,11 @@ function HomeContent(): React.JSX.Element {
             : "error";
   const comfyUiStatusText =
     comfyUiUiStatus === "connected"
-      ? `Connected · ${comfyUiStatus?.modelCount ?? 0} checkpoint${
+      ? `Connected · ${comfyUiStatus?.modelCount ?? 0} workflow${
           comfyUiStatus?.modelCount === 1 ? "" : "s"
         }`
       : comfyUiUiStatus === "empty"
-        ? "Connected · no checkpoints"
+        ? "Connected · no workflows"
         : comfyUiUiStatus === "checking"
           ? "Checking..."
           : comfyUiUiStatus === "error"
@@ -28611,7 +35383,8 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.card}>
           <div className={styles.brandLockup}>
             <div className={styles.brandIconShell} aria-hidden="true">
-              <PrismHeroMark className={styles.brandIcon} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icon.jpg" alt="" aria-hidden="true" className={styles.brandIcon} />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <PrismWordmarkWithVersion className={styles.brandWordmark} />
@@ -28637,6 +35410,23 @@ function HomeContent(): React.JSX.Element {
       TutorialMode,
       { title: string; steps: Array<{ heading: string; body: string }> }
     > = {
+      zen: {
+        title: "Zen walkthrough",
+        steps: [
+          {
+            heading: "Stay with PRISM",
+            body: "Zen is one continuous PRISM-only conversation. There are no bot or model pickers here.",
+          },
+          {
+            heading: "Let context breathe",
+            body: "Recent messages stay visible while older continuity is carried through summaries and memory.",
+          },
+          {
+            heading: "Use Atmosphere gently",
+            body: "Turn Atmosphere on from the header when you want the conversation backdrop to evolve.",
+          },
+        ],
+      },
       chat: {
         title: "Chat mode walkthrough",
         steps: [
@@ -28666,8 +35456,8 @@ function HomeContent(): React.JSX.Element {
             body: "Drag to select multiple bots, then right-click to group, export, or manage them together.",
           },
           {
-            heading: "Enter focus layout",
-            body: "Toggle focus layout when you want a cleaner surface for long creative sessions.",
+            heading: "Switch to Zen",
+            body: "Use Zen from the Hub when you want the calmer, ambient conversation surface.",
           },
         ],
       },
@@ -28756,7 +35546,11 @@ function HomeContent(): React.JSX.Element {
     const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
     const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
     const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
-    const openAiConfigured = Boolean(settings?.hasOpenAiApiKey);
+    const onlineKeyConfigured = Boolean(
+      settings &&
+        (settings.openAiApiKeySource !== "none" ||
+          settings.anthropicApiKeySource !== "none")
+    );
     const backupConfigured = Boolean(
       settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim()
     );
@@ -28780,10 +35574,10 @@ function HomeContent(): React.JSX.Element {
         state: qdrantReady ? "done" : "pending",
       },
       {
-        id: "openai",
-        title: "OpenAI key (optional)",
-        subtitle: "Add your key for online models if you want them.",
-        state: openAiConfigured ? "done" : "optional",
+        id: "api-keys",
+        title: "API key (optional)",
+        subtitle: "Add an OpenAI or Anthropic key for online models.",
+        state: onlineKeyConfigured ? "done" : "optional",
       },
       {
         id: "extras",
@@ -28842,7 +35636,7 @@ function HomeContent(): React.JSX.Element {
             <h4>{activeStep.title}</h4>
             <p>{activeStep.subtitle}</p>
             <div className={styles.desktopChecklistStepActions}>
-              {activeStep.id === "openai" || activeStep.id === "extras" ? (
+              {activeStep.id === "api-keys" || activeStep.id === "extras" ? (
                 <button
                   type="button"
                   className={styles.linkButton}
@@ -29035,6 +35829,17 @@ function HomeContent(): React.JSX.Element {
     const commonGroup = isMultiSelectionMenu
       ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
       : null;
+    const multiProtectionTargetsLocked = isMultiSelectionMenu
+      ? multiSelectedBots.every((candidate) => candidate.delete_protected === 1)
+      : false;
+    const nextMultiDeleteProtected = !multiProtectionTargetsLocked;
+    const multiProtectionLabel = nextMultiDeleteProtected
+      ? "Protect selected"
+      : "Allow selected deletion";
+    const nextSingleDeleteProtected = bot.delete_protected !== 1;
+    const singleProtectionLabel = nextSingleDeleteProtected
+      ? "Protect from deletion"
+      : "Allow deletion";
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -29093,6 +35898,25 @@ function HomeContent(): React.JSX.Element {
               role="menuitem"
               onClick={() => {
                 closeBotContextMenu();
+                void setBotsDeleteProtection(multiSelectedBots, nextMultiDeleteProtected);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  <BotGlyph
+                    name={nextMultiDeleteProtected ? "lock" : "key"}
+                    size={14}
+                    strokeWidth={2.05}
+                  />
+                </span>
+                <span>{multiProtectionLabel}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
                 const protectedCount = multiSelectedBots.filter(
                   (candidate) => candidate.delete_protected === 1
                 ).length;
@@ -29144,6 +35968,25 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.contextMenuItemLabel}>
                 <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
                 <span>View memories</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void setBotsDeleteProtection([bot], nextSingleDeleteProtected);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  <BotGlyph
+                    name={nextSingleDeleteProtected ? "lock" : "key"}
+                    size={14}
+                    strokeWidth={2.05}
+                  />
+                </span>
+                <span>{singleProtectionLabel}</span>
               </span>
             </button>
             {bot.delete_protected !== 1 ? (
@@ -29220,45 +36063,27 @@ function HomeContent(): React.JSX.Element {
     const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
     const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
     const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
-    const ollamaCliInstalled = desktopOllamaSetupStatus?.cliInstalled === true;
-    const llama31Installed = desktopOllamaSetupStatus?.llama31Installed === true;
-    const ollamaStepReady = ollamaReady && ollamaCliInstalled && llama31Installed;
-    const setupChecksReady = qdrantReady && ollamaStepReady;
-    const steps = [
-      {
-        id: "ollama",
-        title: "Install and verify Ollama",
-        subtitle: "CLI + service + llama3.1",
-        ready: ollamaStepReady,
-      },
-      {
-        id: "qdrant",
-        title: "Verify memory engine",
-        subtitle: "Qdrant connection check",
-        ready: qdrantReady,
-      },
-      {
-        id: "account",
-        title: "Create your account",
-        subtitle: "Unlock Prism after local checks",
-        ready: setupChecksReady,
-      },
-    ] as const;
-    const activeStepIndex = Math.min(preAuthChecklistStepIndex, steps.length - 1);
-    const activeStep = steps[activeStepIndex];
-    const completedChecks = steps.filter((step) => step.ready).length;
-    const progressPercent = (completedChecks / steps.length) * 100;
+    const setupChecksReady = qdrantReady && ollamaReady;
+    const completedChecks = Number(ollamaReady) + Number(qdrantReady);
+    const totalChecks = 2;
+    const progressPercent = (completedChecks / totalChecks) * 100;
     const progressLabel = setupChecksReady
-      ? "All onboarding checks complete"
+      ? "System checks complete"
       : desktopFirstRunChecklistBusy
         ? "Checking local services..."
-        : `${completedChecks} of ${steps.length} onboarding steps ready`;
+        : `${completedChecks} of ${totalChecks} services ready`;
     return (
       <main className={`${styles.authLayout} ${themeClass}`}>
         <div className={`${styles.card} ${styles.authCard}`}>
           <div className={`${styles.brandLockup} ${styles.authBrandLockup}`}>
             <div className={styles.brandIconShell} aria-hidden="true">
-              <PrismHeroMark className={styles.brandIcon} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.jpg"
+                alt=""
+                aria-hidden="true"
+                className={styles.brandIcon}
+              />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <div className={styles.authBrandTextBlock}>
@@ -29274,7 +36099,7 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.authFormHeader}>
             <h2 className={styles.authHeading}>Let&apos;s get Prism ready</h2>
             <p className={`${styles.muted} ${styles.desktopChecklistIntro}`}>
-              Step-by-step onboarding with progress tracking, like a guided tax flow.
+              Quick local checks first, then account creation.
             </p>
           </div>
           <div className={styles.desktopChecklistProgressRow} aria-live="polite">
@@ -29287,98 +36112,63 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           <ol className={styles.desktopChecklistList}>
-            {steps.map((step, index) => (
-              <li
-                key={step.id}
-                className={styles.desktopChecklistItem}
-                data-active={index === activeStepIndex ? "true" : undefined}
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Local AI engine</span>
+                <span className={styles.desktopChecklistItemHint}>Ollama connection</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={ollamaReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
               >
-                <div className={styles.desktopChecklistItemBody}>
-                  <span className={styles.desktopChecklistItemTitle}>
-                    {step.ready ? "✓ " : ""}
-                    {step.title}
-                  </span>
-                  <span className={styles.desktopChecklistItemHint}>{step.subtitle}</span>
-                </div>
-                <strong
-                  className={styles.desktopChecklistStatus}
-                  data-state={
-                    step.ready
-                      ? "done"
-                      : index === activeStepIndex
-                        ? (desktopFirstRunChecklistBusy ? "checking" : "pending")
-                        : "next"
-                  }
-                >
-                  {step.ready
-                    ? "Done"
-                    : index === activeStepIndex
-                      ? (desktopFirstRunChecklistBusy ? "Checking..." : "In progress")
-                      : "Up next"}
-                </strong>
-              </li>
-            ))}
+                {ollamaReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Memory engine</span>
+                <span className={styles.desktopChecklistItemHint}>Qdrant connection</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={qdrantReady ? "done" : desktopFirstRunChecklistBusy ? "checking" : "pending"}
+              >
+                {qdrantReady ? "Ready" : desktopFirstRunChecklistBusy ? "Checking..." : "Needs setup"}
+              </strong>
+            </li>
+            <li className={styles.desktopChecklistItem}>
+              <div className={styles.desktopChecklistItemBody}>
+                <span className={styles.desktopChecklistItemTitle}>Create your account</span>
+                <span className={styles.desktopChecklistItemHint}>Unlocked after local checks</span>
+              </div>
+              <strong
+                className={styles.desktopChecklistStatus}
+                data-state={setupChecksReady ? "done" : "next"}
+              >
+                {setupChecksReady ? "Ready" : "Up next"}
+              </strong>
+            </li>
           </ol>
-          <section className={styles.desktopChecklistStepCard}>
-            <p className={styles.desktopChecklistStepEyebrow}>
-              Step {activeStepIndex + 1} of {steps.length}
+          <div className={styles.desktopChecklistMeta}>
+            <p className={styles.muted}>
+              Auto-checks every {DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS / 1000} seconds.
             </p>
-            <h4>{activeStep.title}</h4>
-            {activeStep.id === "ollama" ? (
-              <>
-                <p>We need Ollama CLI installed, the Ollama service reachable, and `llama3.1` available.</p>
-                <div className={styles.desktopChecklistStepActions}>
-                  <strong className={styles.desktopChecklistStatus} data-state={ollamaCliInstalled ? "done" : "pending"}>
-                    CLI: {ollamaCliInstalled ? "Installed" : "Missing"}
-                  </strong>
-                  <strong className={styles.desktopChecklistStatus} data-state={ollamaReady ? "done" : "pending"}>
-                    Service: {ollamaReady ? "Reachable" : "Not reachable"}
-                  </strong>
-                  <strong className={styles.desktopChecklistStatus} data-state={llama31Installed ? "done" : "pending"}>
-                    llama3.1: {llama31Installed ? "Installed" : "Missing"}
-                  </strong>
-                </div>
-                <div className={styles.desktopChecklistStepActions}>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() =>
-                      window.open(
-                        desktopOllamaSetupStatus?.installerUrl ?? "https://ollama.com/download",
-                        "_blank",
-                        "noopener,noreferrer"
-                      )
-                    }
-                  >
-                    Download Ollama installer
-                  </button>
-                  {desktopOllamaSetupStatus?.canAutoInstallCli ? (
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() => void installDesktopOllamaCliAndModel()}
-                      disabled={desktopOllamaInstallBusy}
-                    >
-                      {desktopOllamaInstallBusy
-                        ? "Installing Ollama + llama3.1..."
-                        : "Install Ollama CLI + llama3.1 for me"}
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : activeStep.id === "qdrant" ? (
-              <>
-                <p>Prism memory requires Qdrant. Refresh checks or run automatic setup.</p>
-                <div className={styles.desktopChecklistStepActions}>
-                  <strong className={styles.desktopChecklistStatus} data-state={qdrantReady ? "done" : "pending"}>
-                    Qdrant: {qdrantReady ? "Ready" : "Needs setup"}
-                  </strong>
-                </div>
-              </>
-            ) : (
-              <p>Once Ollama and Qdrant are both ready, continue to account creation.</p>
+            {desktopFirstRunAutoSetupSteps.length > 0 && (
+              <p className={styles.muted}>
+                Automation: {desktopFirstRunAutoSetupSteps[desktopFirstRunAutoSetupSteps.length - 1]}
+              </p>
             )}
-            <div className={styles.desktopChecklistStepActions}>
+          </div>
+          <div className={styles.desktopChecklistActions}>
+            <button
+              type="button"
+              className={styles.desktopChecklistPrimaryAction}
+              onClick={continueFromPreAuthChecklist}
+              disabled={!setupChecksReady}
+            >
+              Continue to account creation
+            </button>
+            <div className={styles.desktopChecklistSecondaryActions}>
               <button
                 type="button"
                 className={styles.linkButton}
@@ -29393,58 +36183,18 @@ function HomeContent(): React.JSX.Element {
                 onClick={() => void refreshDesktopFirstRunHealth()}
                 disabled={desktopFirstRunChecklistBusy}
               >
-                {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh checks"}
+                {desktopFirstRunChecklistBusy ? "Checking..." : "Refresh now"}
               </button>
+              {!setupChecksReady && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={continueFromPreAuthChecklist}
+                >
+                  Continue anyway
+                </button>
+              )}
             </div>
-          </section>
-          <div className={styles.desktopChecklistMeta}>
-            <p className={styles.muted}>
-              Auto-checks every {DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS / 1000} seconds.
-            </p>
-            {desktopFirstRunAutoSetupSteps.length > 0 && (
-              <p className={styles.muted}>
-                Automation: {desktopFirstRunAutoSetupSteps[desktopFirstRunAutoSetupSteps.length - 1]}
-              </p>
-            )}
-          </div>
-          <div className={styles.desktopChecklistActions}>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() =>
-                setPreAuthChecklistStepIndex((current) => Math.max(0, current - 1))
-              }
-              disabled={activeStepIndex === 0}
-            >
-              Previous step
-            </button>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() =>
-                setPreAuthChecklistStepIndex((current) => Math.min(steps.length - 1, current + 1))
-              }
-              disabled={activeStepIndex >= steps.length - 1}
-            >
-              Next step
-            </button>
-            <button
-              type="button"
-              className={styles.desktopChecklistPrimaryAction}
-              onClick={continueFromPreAuthChecklist}
-              disabled={!setupChecksReady}
-            >
-              Continue to account creation
-            </button>
-            {!setupChecksReady && (
-              <button
-                type="button"
-                className={styles.linkButton}
-                onClick={continueFromPreAuthChecklist}
-              >
-                Continue anyway
-              </button>
-            )}
           </div>
           {error && <p className={styles.error}>{error}</p>}
         </div>
@@ -29462,7 +36212,13 @@ function HomeContent(): React.JSX.Element {
             {/* Auth lockup keeps the boxed Prism icon in dark mode and swaps to
                 the hollow triangle in light mode for high-contrast parity. */}
             <div className={styles.brandIconShell} aria-hidden="true">
-              <PrismHeroMark className={styles.brandIcon} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.jpg"
+                alt=""
+                aria-hidden="true"
+                className={styles.brandIcon}
+              />
               <PrismTriangleMark className={styles.brandIconLight} />
             </div>
             <div className={styles.authBrandTextBlock}>
@@ -29674,6 +36430,7 @@ function HomeContent(): React.JSX.Element {
         data-glyph-tooltip="Open Spotlight search"
         onClick={(event) => {
           event.stopPropagation();
+          spotlightTypingArmedRef.current = true;
           resetChatHeaderToSpotlight();
         }}
       >
@@ -29855,24 +36612,7 @@ function HomeContent(): React.JSX.Element {
             id={headerButtonId}
             aria-expanded={isExpanded}
             aria-controls={nestedListId}
-            onPointerDown={(event) =>
-              (() => {
-                const tileRect = event.currentTarget.getBoundingClientRect();
-                const pressedChevronZone = event.clientX <= tileRect.left + 22;
-                if (pressedChevronZone) {
-                  disarmDelete();
-                  setExpandedConversationGroupKey((previous) =>
-                    previous === group.key ? null : group.key
-                  );
-                  if (!isExpanded) {
-                    setConversationListScrollTop(0);
-                  }
-                  suppressConversationGroupClickRef.current = true;
-                  return;
-                }
-                beginConversationGroupPointerDrag(event, group.key);
-              })()
-            }
+            onPointerDown={(event) => beginConversationGroupPointerDrag(event, group.key)}
             onPointerMove={updateConversationGroupPointerDrag}
             onPointerUp={endConversationGroupPointerDrag}
             onPointerCancel={endConversationGroupPointerDrag}
@@ -29881,24 +36621,19 @@ function HomeContent(): React.JSX.Element {
               event.stopPropagation();
               openConversationGroupContextMenu(group.key, event.clientX, event.clientY);
             }}
-            onClick={(event) => {
+            onClick={() => {
               if (suppressConversationGroupClickRef.current) {
                 suppressConversationGroupClickRef.current = false;
                 return;
               }
               disarmDelete();
-              if (isExpanded) {
-                performShowAllBotsView(group.botId);
-                return;
+              if (!isExpanded) {
+                setConversationListScrollTop(0);
               }
               setExpandedConversationGroupKey(group.key);
-              setConversationListScrollTop(0);
+              performShowAllBotsView(group.botId);
             }}
-            aria-label={
-              isExpanded
-                ? `Show all bots from ${group.name} conversations`
-                : `Expand ${group.name} conversations`
-            }
+            aria-label={`Select and expand ${group.name} conversations`}
           >
             <span
               className={styles.conversationGroupChevronHitbox}
@@ -30371,12 +37106,20 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderMemoryToasts = () => {
+  const renderMemoryToasts = (
+    variant: "default" | "zen" = "default"
+  ) => {
     if (memoryToasts.length === 0) return null;
     const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
     const overflow = Math.max(0, memoryToasts.length - visible.length);
+    const zenVariant = variant === "zen";
     return (
-      <div className={styles.memoryToastStack} aria-live="polite">
+      <div
+        className={`${styles.memoryToastStack} ${
+          zenVariant ? styles.zenMemoryToastStack : ""
+        }`}
+        aria-live="polite"
+      >
         {visible.map((toast) => (
           <button
             key={toast.id}
@@ -30404,7 +37147,13 @@ function HomeContent(): React.JSX.Element {
             title={toast.kind === "rejected" ? "Tap to dismiss" : "Tap to undo"}
           >
             <span aria-hidden="true">
-              {toast.kind === "created" ? "◆" : toast.kind === "retracted" ? "↺" : "◇"}
+              {zenVariant && toast.kind === "created"
+                ? "✦"
+                : toast.kind === "created"
+                  ? "◆"
+                  : toast.kind === "retracted"
+                    ? "↺"
+                    : "◇"}
             </span>
             <strong>{memoryToastTitle(toast)}</strong>
             <small>{memoryToastDetail(toast)}</small>
@@ -30416,6 +37165,9 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   };
+
+  const renderZenMemoryToasts = () =>
+    view === "chat" ? renderMemoryToasts("zen") : null;
 
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
@@ -30433,14 +37185,17 @@ function HomeContent(): React.JSX.Element {
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
+    const isZenSurface = view === "chat";
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
-    const canBotActions = Boolean(activeBot);
+    const canBotActions = !isZenSurface && Boolean(activeBot);
     const canMemoryActions = true;
-    const canFavoriteActions = Boolean(activeBot);
-    const canExport = Boolean(detail && selectedId);
-    const selectedBotCanDelete = Boolean(activeBot && activeBot.delete_protected !== 1);
-    const canDelete = Boolean((detail && selectedId) || selectedBotCanDelete);
+    const canFavoriteActions = !isZenSurface && Boolean(activeBot);
+    const canExport = !isZenSurface && Boolean(detail && selectedId);
+    const selectedBotCanDelete = Boolean(
+      !isZenSurface && activeBot && activeBot.delete_protected !== 1
+    );
+    const canDelete = Boolean(!isZenSurface && ((detail && selectedId) || selectedBotCanDelete));
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
     const headerActionsDisabled = false;
     const isMobileGear =
@@ -30463,7 +37218,7 @@ function HomeContent(): React.JSX.Element {
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
-    const privateDefaultFocusStyle = privateDefaultHeaderMode
+    const privateDefaultAtmosphereStyle = privateDefaultHeaderMode
       ? ({ color: PRISM_WORDMARK_PALETTE[1] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
@@ -30510,6 +37265,52 @@ function HomeContent(): React.JSX.Element {
       ) : null;
 
     const closeMenu = () => setChatOverflowMenuOpen(false);
+    const zenWallpaper = detail?.zenWallpaper;
+    const showZenAtmosphereButton = view === "chat";
+    const zenAtmosphereHasConversation = Boolean(
+      detail && detail.mode === "zen" && selectedId
+    );
+    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
+    const zenAtmosphereBusy = Boolean(
+      detail &&
+      (zenWallpaperBusyConversationId === detail.id ||
+        zenWallpaper?.status === "generating")
+    );
+    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
+    const zenAtmosphereError =
+      zenWallpaper?.status === "error" && zenWallpaperError
+        ? zenWallpaperError
+        : null;
+    const zenAtmosphereDisabled =
+      headerActionsDisabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation ||
+      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
+    const zenAtmosphereTooltip = !zenAtmosphereHasConversation
+      ? "Send a Zen message before enabling Atmosphere"
+      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
+        ? "Configure an image generation model to enable Atmosphere"
+        : zenAtmosphereBusy
+          ? "Generating Zen Atmosphere"
+          : zenAtmosphereError
+            ? `Atmosphere failed: ${zenAtmosphereError}`
+          : zenAtmosphereEnabled
+            ? "Turn off Zen Atmosphere"
+            : "Generate Zen Atmosphere";
+    const zenAtmosphereState = zenAtmosphereBusy
+      ? "generating"
+      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
+        ? "unavailable"
+        : zenAtmosphereEnabled
+          ? "on"
+          : "off";
+    const toggleZenAtmosphere = () => {
+      if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
+      void requestZenWallpaperUpdate(detail.id, {
+        enabled: !zenAtmosphereEnabled,
+        force: !zenAtmosphereEnabled,
+      });
+    };
 
     const handleSettings = () => {
       closeMenu();
@@ -30666,36 +37467,38 @@ function HomeContent(): React.JSX.Element {
           aria-label="Conversation tools"
           aria-disabled={headerActionsDisabled}
         >
-          {renderMemoryToasts()}
-          <button
-            type="button"
-            className={styles.headerIconButton}
-            onClick={handleToggleFavorite}
-            aria-label={
-              activeBot
-                ? activeBotIsFavorite
-                  ? `Remove ${activeBot.name} from favorites`
-                  : `Add ${activeBot.name} to favorites`
-                : "Favorites unavailable until a bot is selected"
-            }
-            aria-pressed={activeBot ? activeBotIsFavorite : undefined}
-            data-glyph-tooltip={
-              activeBot
-                ? activeBotIsFavorite
-                  ? "Remove from Favorites"
-                  : "Add to Favorites"
-                : "Select a bot to favorite"
-            }
-            disabled={headerActionsDisabled || !canFavoriteActions}
-          >
-            <StarGlyph />
-          </button>
+          {!isZenSurface ? renderMemoryToasts() : null}
+          {!isZenSurface ? (
+            <button
+              type="button"
+              className={styles.headerIconButton}
+              onClick={handleToggleFavorite}
+              aria-label={
+                activeBot
+                  ? activeBotIsFavorite
+                    ? `Remove ${activeBot.name} from favorites`
+                    : `Add ${activeBot.name} to favorites`
+                  : "Favorites unavailable until a bot is selected"
+              }
+              aria-pressed={activeBot ? activeBotIsFavorite : undefined}
+              data-glyph-tooltip={
+                activeBot
+                  ? activeBotIsFavorite
+                    ? "Remove from Favorites"
+                    : "Add to Favorites"
+                  : "Select a bot to favorite"
+              }
+              disabled={headerActionsDisabled || !canFavoriteActions}
+            >
+              <StarGlyph />
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.headerIconButton}
             onClick={handleOpenCommandCenter}
-            aria-label="Open Command Center"
-            data-glyph-tooltip="Command Center"
+            aria-label="Open Prompt Center"
+            data-glyph-tooltip="Prompt Center"
             disabled={headerActionsDisabled}
           >
             <SlashCommandGlyph />
@@ -30725,23 +37528,19 @@ function HomeContent(): React.JSX.Element {
               <BookmarkGlyph />
             </button>
           ) : null}
-          {showToolbarMemoriesButton && view === "sandbox" ? (
+          {showZenAtmosphereButton ? (
             <button
               type="button"
-              className={styles.headerIconButton}
-              onClick={() => setSandboxZenModePersisted(!sandboxZenMode)}
-              aria-label={
-                zenPresentationActive
-                  ? "Exit focus layout"
-                  : "Focus layout — calmer Chat chrome"
-              }
-              aria-pressed={zenPresentationActive}
-              data-glyph-tooltip={
-                zenPresentationActive ? "Exit focus layout" : "Focus layout"
-              }
-              style={privateDefaultFocusStyle}
+              className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
+              onClick={toggleZenAtmosphere}
+              aria-label={zenAtmosphereTooltip}
+              aria-pressed={zenAtmosphereEnabled}
+              data-glyph-tooltip={zenAtmosphereTooltip}
+              data-atmosphere-state={zenAtmosphereState}
+              disabled={zenAtmosphereDisabled}
+              style={privateDefaultAtmosphereStyle}
             >
-              <ZenFocusGlyph />
+              <AtmosphereGlyph />
             </button>
           ) : null}
           {showToolbarMemoriesButton ? (
@@ -30774,7 +37573,7 @@ function HomeContent(): React.JSX.Element {
               </button>
             )
           ) : null}
-          {!showSettingsOnly ? (
+          {!showSettingsOnly && !isZenSurface ? (
             <button
               type="button"
               className={styles.headerIconButton}
@@ -30783,7 +37582,7 @@ function HomeContent(): React.JSX.Element {
                 if (activeBot) {
                   openActiveBotCustomizer();
                 } else {
-                  openRightPanel("bots");
+                  openFreshBotCustomizer();
                 }
               }}
               aria-label={activeBot ? `Edit ${activeBot.name}` : "Open bot customizer"}
@@ -30874,22 +37673,24 @@ function HomeContent(): React.JSX.Element {
             >
               Settings
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.chatOverflowMenuItem}
-              disabled={headerActionsDisabled || !canFavoriteActions}
-              onClick={(event) => {
-                swallowMenuEvent(event);
-                handleToggleFavorite();
-              }}
-            >
-              {activeBot
-                ? activeBotIsFavorite
-                  ? `Remove ${activeBot.name} from Favorites`
-                  : `Add ${activeBot.name} to Favorites`
-                : "Select a bot to favorite"}
-            </button>
+            {!isZenSurface ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.chatOverflowMenuItem}
+                disabled={headerActionsDisabled || !canFavoriteActions}
+                onClick={(event) => {
+                  swallowMenuEvent(event);
+                  handleToggleFavorite();
+                }}
+              >
+                {activeBot
+                  ? activeBotIsFavorite
+                    ? `Remove ${activeBot.name} from Favorites`
+                    : `Add ${activeBot.name} to Favorites`
+                  : "Select a bot to favorite"}
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -30900,21 +37701,25 @@ function HomeContent(): React.JSX.Element {
                 handleOpenCommandCenter();
               }}
             >
-              Command Center
+              Prompt Center
             </button>
-            {showToolbarMemoriesButton && view === "sandbox" ? (
+            {showZenAtmosphereButton ? (
               <button
                 type="button"
                 role="menuitem"
                 className={styles.chatOverflowMenuItem}
+                disabled={zenAtmosphereDisabled}
                 onClick={(event) => {
                   swallowMenuEvent(event);
-                  setSandboxZenModePersisted(!sandboxZenMode);
+                  toggleZenAtmosphere();
                 }}
+                title={zenAtmosphereTooltip}
               >
-                {zenPresentationActive
-                  ? "Exit focus layout"
-                  : "Focus layout"}
+                {zenAtmosphereBusy
+                  ? "Generating Atmosphere"
+                  : zenAtmosphereEnabled
+                    ? "Turn off Atmosphere"
+                    : "Generate Atmosphere"}
               </button>
             ) : null}
             {showToolbarMemoriesButton ? (
@@ -30944,7 +37749,7 @@ function HomeContent(): React.JSX.Element {
                 Edit bot
               </button>
             )}
-            {!showSettingsOnly && (
+            {!showSettingsOnly && !isZenSurface && (
               <button
                 type="button"
                 role="menuitem"
@@ -31072,7 +37877,8 @@ function HomeContent(): React.JSX.Element {
     const showToolbarMemoriesButton = view === "chat" || view === "sandbox";
     const showChatThemeButton = view === "chat" || view === "sandbox";
     const showSandboxHubButton = view === "chat" || view === "sandbox";
-    const canFavoriteActions = Boolean(activeBot);
+    const isZenSurface = view === "chat";
+    const canFavoriteActions = !isZenSurface && Boolean(activeBot);
     const activeBotIsFavorite = Boolean(
       activeBot &&
       botLibraryGroups
@@ -31098,7 +37904,23 @@ function HomeContent(): React.JSX.Element {
     };
 
     const memoriesDisabled = headerActionsDisabled || !canMemoryActions;
-    const zenLabel = zenPresentationActive ? "Exit focus layout" : "Focus layout";
+    const zenWallpaper = detail?.zenWallpaper;
+    const showZenAtmosphereButton = view === "chat";
+    const zenAtmosphereHasConversation = Boolean(
+      detail && detail.mode === "zen" && selectedId
+    );
+    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
+    const zenAtmosphereBusy = Boolean(
+      detail &&
+      (zenWallpaperBusyConversationId === detail.id ||
+        zenWallpaper?.status === "generating")
+    );
+    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
+    const zenAtmosphereDisabled =
+      headerActionsDisabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation ||
+      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
     const editBotsLabel = activeBot ? `Edit ${activeBot.name}` : "Bots";
     const themeLabel =
       effectiveThemeMode === "system"
@@ -31123,49 +37945,51 @@ function HomeContent(): React.JSX.Element {
             <span>Settings</span>
           </span>
         </button>
-        <button
-          type="button"
-          role="menuitem"
-          disabled={!canFavoriteActions}
-          onClick={() =>
-            runAndClose(() => {
-              if (!activeBot) return;
-              const targetBotId = activeBot.id;
-              setBotLibraryGroups((current) => {
-                const normalized = normalizeBotLibraryGroups(current);
-                const now = new Date().toISOString();
-                let found = false;
-                const next = normalized.map((group) => {
-                  if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
-                  found = true;
-                  const hasBot = group.botIds.includes(targetBotId);
-                  return {
-                    ...group,
-                    botIds: hasBot
-                      ? group.botIds.filter((id) => id !== targetBotId)
-                      : [...group.botIds, targetBotId],
-                    updatedAt: now,
-                  };
-                });
-                if (!found) {
-                  const favorites = createFavoritesBotGroup();
-                  next.push({
-                    ...favorites,
-                    botIds: [targetBotId],
-                    updatedAt: now,
+        {!isZenSurface ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canFavoriteActions}
+            onClick={() =>
+              runAndClose(() => {
+                if (!activeBot) return;
+                const targetBotId = activeBot.id;
+                setBotLibraryGroups((current) => {
+                  const normalized = normalizeBotLibraryGroups(current);
+                  const now = new Date().toISOString();
+                  let found = false;
+                  const next = normalized.map((group) => {
+                    if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
+                    found = true;
+                    const hasBot = group.botIds.includes(targetBotId);
+                    return {
+                      ...group,
+                      botIds: hasBot
+                        ? group.botIds.filter((id) => id !== targetBotId)
+                        : [...group.botIds, targetBotId],
+                      updatedAt: now,
+                    };
                   });
-                }
-                return normalizeBotLibraryGroups(next);
-              });
-            })
-          }
-        >
-          {activeBot
-            ? activeBotIsFavorite
-              ? `Remove ${activeBot.name} from Favorites`
-              : `Add ${activeBot.name} to Favorites`
-            : "Select a bot to favorite"}
-        </button>
+                  if (!found) {
+                    const favorites = createFavoritesBotGroup();
+                    next.push({
+                      ...favorites,
+                      botIds: [targetBotId],
+                      updatedAt: now,
+                    });
+                  }
+                  return normalizeBotLibraryGroups(next);
+                });
+              })
+            }
+          >
+            {activeBot
+              ? activeBotIsFavorite
+                ? `Remove ${activeBot.name} from Favorites`
+                : `Add ${activeBot.name} to Favorites`
+              : "Select a bot to favorite"}
+          </button>
+        ) : null}
         <button
           type="button"
           role="menuitem"
@@ -31173,7 +37997,7 @@ function HomeContent(): React.JSX.Element {
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⌘</span>
-            <span>Command Center</span>
+            <span>Prompt Center</span>
           </span>
         </button>
         {showToolbarMemoriesButton ? (
@@ -31199,17 +38023,26 @@ function HomeContent(): React.JSX.Element {
             Memories
           </button>
         ) : null}
-        {showToolbarMemoriesButton && view === "sandbox" ? (
+        {showZenAtmosphereButton ? (
           <button
             type="button"
             role="menuitem"
-            onClick={() =>
+            disabled={zenAtmosphereDisabled}
+            onClick={() => {
+              if (zenAtmosphereDisabled || !detail) return;
               runAndClose(() => {
-                setSandboxZenModePersisted(!sandboxZenMode);
-              })
-            }
+                void requestZenWallpaperUpdate(detail.id, {
+                  enabled: !zenAtmosphereEnabled,
+                  force: !zenAtmosphereEnabled,
+                });
+              });
+            }}
           >
-            {zenLabel}
+            {zenAtmosphereBusy
+              ? "Generating Atmosphere"
+              : zenAtmosphereEnabled
+                ? "Turn off Atmosphere"
+                : "Generate Atmosphere"}
           </button>
         ) : null}
         {showToolbarMemoriesButton ? (
@@ -31236,7 +38069,7 @@ function HomeContent(): React.JSX.Element {
             Images
           </button>
         ) : null}
-        {!showSettingsOnly ? (
+        {!showSettingsOnly && !isZenSurface ? (
           <button
             type="button"
             role="menuitem"
@@ -31247,7 +38080,7 @@ function HomeContent(): React.JSX.Element {
                 if (activeBot) {
                   openActiveBotCustomizer();
                 } else {
-                  openRightPanel("bots");
+                  openFreshBotCustomizer();
                 }
               });
             }}
@@ -31356,7 +38189,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
-          onClick={() => runAndClose(exitCoffeeToHub)}
+          onClick={() => runAndClose(() => void exitCoffeeToHub())}
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
@@ -31427,6 +38260,109 @@ function HomeContent(): React.JSX.Element {
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
             <span>{bot.name}&apos;s memories</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  function renderStoryShellContextMenu(): React.JSX.Element | null {
+    if (!storyShellContextMenu) return null;
+    const activeEpisode = storySession?.episode ?? null;
+    const accentColor =
+      storySelectedBots[0]?.color ??
+      storySession?.botIds
+        .map((botId) => storyBotsById.get(botId)?.color)
+        .find((color): color is string => Boolean(color)) ??
+      PRISM_DEFAULT_ACCENT;
+    const menuStyle = {
+      left: `${storyShellContextMenu.x}px`,
+      top: `${storyShellContextMenu.y}px`,
+      "--bot-color": normalizeAccentForTheme(accentColor, resolvedTheme),
+    } as React.CSSProperties;
+    const runAndClose = (fn: () => void) => {
+      closeStoryShellContextMenu();
+      fn();
+    };
+    const storyToolsDisabled = !activeEpisode || storySession?.status === "generating";
+    return (
+      <div
+        ref={storyShellContextMenuRef}
+        className={`${styles.messageContextMenu} ${styles.botContextMenu} ${styles.canvasToolsContextMenu}`}
+        style={menuStyle}
+        role="menu"
+        aria-label="Story tools"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(resetStoryToSetup)}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">✦</span>
+            <span>New Story</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={storyToolsDisabled}
+          onClick={() => {
+            if (storyToolsDisabled) return;
+            runAndClose(() => {
+              setStoryMapOpen(true);
+              setStoryInventoryOpen(false);
+              setStoryTranscriptOpen(false);
+            });
+          }}
+        >
+          Map
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!activeEpisode}
+          onClick={() => {
+            if (!activeEpisode) return;
+            runAndClose(() => {
+              setStoryInventoryOpen(true);
+              setStoryMapOpen(false);
+              setStoryTranscriptOpen(false);
+            });
+          }}
+        >
+          Inventory
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!storySession}
+          onClick={() => {
+            if (!storySession) return;
+            runAndClose(() => {
+              setStoryTranscriptOpen(true);
+              setStoryMapOpen(false);
+              setStoryInventoryOpen(false);
+            });
+          }}
+        >
+          Transcript
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(() => openRightPanel("settings"))}
+        >
+          Settings
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runAndClose(() => navigateToView("hub"))}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
+            <span>Back to Hub</span>
           </span>
         </button>
       </div>
@@ -31536,47 +38472,6 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderDevToolsButton = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED) return null;
-    const devToolsButtonStyle: React.CSSProperties & Record<"--dev-tools-button-accent", string> = {
-      left: `${devToolsButtonPosition.x}px`,
-      top: `${devToolsButtonPosition.y}px`,
-      "--dev-tools-button-accent": normalizeAccentForTheme(
-        activeBot?.color ?? PRISM_DEFAULT_ACCENT,
-        resolvedTheme
-      ),
-    };
-
-    return (
-      <button
-        ref={devToolsButtonRef}
-        type="button"
-        className={`${styles.headerIconButton} ${styles.devToolsButton}`}
-        data-dev-tools-default={!activeBot ? "true" : undefined}
-        style={devToolsButtonStyle}
-        onPointerDown={startDevToolsButtonDrag}
-        onPointerMove={dragDevToolsButton}
-        onPointerUp={endDevToolsButtonDrag}
-        onPointerCancel={endDevToolsButtonDrag}
-        onClick={() => {
-          if (devToolsButtonSuppressClickRef.current) {
-            devToolsButtonSuppressClickRef.current = false;
-            return;
-          }
-          setDevToolsMessage(null);
-          setDevToolsOpen((open) => {
-            if (open) setDevTogglesOpen(false);
-            return !open;
-          });
-        }}
-        aria-label="Open developer tools"
-        data-glyph-tooltip="Developer tools"
-      >
-        <IconKey />
-      </button>
-    );
-  };
-
   const renderDevTogglesModal = (): React.JSX.Element | null => {
     if (!devTogglesOpen) return null;
     return (
@@ -31622,10 +38517,10 @@ function HomeContent(): React.JSX.Element {
               onChange={(event) => persistDevChatMetricsEnabled(event.currentTarget.checked)}
             />
             <span>
-              <strong>Show developer metrics in chat</strong>
+              <strong>Show developer metrics terminal</strong>
               <small>
-                Shows summary runs, summary text, memory updates, and opinion changes inline between
-                messages while enabled.
+                Streams summary runs, memory updates, backend routes, model calls, and tool diagnostics
+                into the floating developer terminal.
               </small>
             </span>
           </label>
@@ -31636,10 +38531,10 @@ function HomeContent(): React.JSX.Element {
               onChange={(event) => persistDevSlashCommandsEnabled(event.currentTarget.checked)}
             />
             <span>
-              <strong>Enable slash dev commands in chat</strong>
+              <strong>Enable ! dev commands in chat</strong>
               <small>
-                Allows local chat commands like <code>/forget</code>, <code>/forget all</code>,
-                and <code>/help</code> to run in the composer without sending them to the model.
+                Allows local chat commands like <code>/forget</code> and{" "}
+                <code>/forget-all</code> to run in the composer without sending them to the model.
               </small>
             </span>
           </label>
@@ -31654,6 +38549,22 @@ function HomeContent(): React.JSX.Element {
               <small>
                 Adds a debug-only composer above Zen mode&apos;s normal composer. Send echoes text
                 locally as an assistant reply and skips model calls.
+              </small>
+            </span>
+          </label>
+          <label className={styles.devTogglesModalOption}>
+            <input
+              type="checkbox"
+              checked={devShowCompactedSummaryInChat}
+              onChange={(event) =>
+                persistDevShowCompactedSummaryInChat(event.currentTarget.checked)
+              }
+            />
+            <span>
+              <strong>Show compacted summary in chat</strong>
+              <small>
+                Renders the latest thread-compaction payload at the bottom of the current chat
+                so context can be inspected after /compact or /summarize.
               </small>
             </span>
           </label>
@@ -31685,8 +38596,8 @@ function HomeContent(): React.JSX.Element {
     const devToolsHasSavedConversation = Boolean(
       (detail?.id && detail.id !== "pending") || (selectedId && selectedId !== "pending")
     );
-    const devToolsSummaryMode: "chat" | "sandbox" =
-      view === "chat" ? "chat" : "sandbox";
+    const devToolsSummaryMode: "zen" | "sandbox" =
+      view === "chat" ? "zen" : "sandbox";
     const devToolsSummaryPreview = summaryDebug?.latestSummary
       ? summaryDebug.latestSummary.length > 220
         ? `${summaryDebug.latestSummary.slice(0, 217)}...`
@@ -31705,7 +38616,7 @@ function HomeContent(): React.JSX.Element {
           .filter((botId): botId is string => typeof botId === "string")
           .concat(
             coffeeSocialById
-              ? Object.keys(coffeeSocialById).filter(
+              ? Object.keys(coffeeSocialById ?? {}).filter(
                   (botId) =>
                     !coffeeSocialSeatOrder.some((seatBotId) => seatBotId === botId)
                 )
@@ -31715,6 +38626,766 @@ function HomeContent(): React.JSX.Element {
     );
     const formatSocialPercent = (value: number): string =>
       `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+    const activeDevToolsNavItem =
+      DEV_TOOLS_NAV_ITEMS.find((item) => item.id === devToolsActiveSection) ??
+      DEV_TOOLS_NAV_ITEMS[0];
+    const devToolsConversationName =
+      detail?.title?.trim() ||
+      (devToolsHasSavedConversation ? "Saved thread" : "No saved thread");
+    const devToolsMemoryTargetLabel =
+      memoryPanelScope === "bot" && memoryPanelBot
+        ? memoryPanelBot.name
+        : memoryPanelScope === "default"
+          ? "Default Prism"
+          : "All bots";
+    const devToolsTraceCount = devChatDebugEvents.length;
+    const devToolsSectionContent = (() => {
+      switch (devToolsActiveSection) {
+        case "seed":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Quantity</span>
+                  <strong>{resolvedDevToolsBotQuantity.toLocaleString()}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Shared by bot creation, seed chats, density stages, and memory seed actions.
+                </p>
+                <label className={styles.devToolsCountControl}>
+                  <span>Count</span>
+                  <input
+                    type="number"
+                    min={DEV_TOOLS_BOT_QUANTITY_MIN}
+                    max={DEV_TOOLS_BOT_QUANTITY_MAX}
+                    step={1}
+                    value={devToolsBotQuantity}
+                    aria-label="Quantity for developer tools add actions"
+                    onChange={(event) => {
+                      const next = event.currentTarget.value;
+                      setDevToolsBotQuantity(
+                        next === "" ? "" : clampDevToolsBotQuantity(Number(next))
+                      );
+                    }}
+                    disabled={devToolsBusy}
+                  />
+                </label>
+                <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
+                  {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
+                    <button
+                      key={quantity}
+                      type="button"
+                      className={`${styles.devToolsPresetButton} ${
+                        resolvedDevToolsBotQuantity === quantity
+                          ? styles.devToolsPresetButtonActive
+                          : ""
+                      }`}
+                      onClick={() => setDevToolsBotQuantity(quantity)}
+                      disabled={devToolsBusy}
+                    >
+                      {quantity}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Picker density stages</span>
+                  <strong>{bots.length.toLocaleString()} bots</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Stage buttons set the total bot count for the live viewport.
+                </p>
+                <div
+                  className={styles.devToolsStageRail}
+                  aria-label="Bot picker density stages"
+                >
+                  {densityStageTargets.map((stage) => {
+                    const isCurrentTarget = bots.length === stage.targetCount;
+                    return (
+                      <button
+                        key={stage.id}
+                        type="button"
+                        className={`${styles.devToolsStageButton} ${
+                          isCurrentTarget ? styles.devToolsStageButtonActive : ""
+                        }`}
+                        onClick={() => void devToolsSetBotDensityStage(stage.id)}
+                        disabled={devToolsBusy}
+                      >
+                        <span>{stage.label}</span>
+                        <strong>{stage.targetCount}</strong>
+                        <small>{stage.description}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Generate fixtures</span>
+                  <strong>Safe add</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Add randomized bots or seed conversations without leaving the current surface.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddRandomBots()}
+                    disabled={devToolsBusy}
+                  >
+                    Add bots
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddSeedChats()}
+                    disabled={devToolsBusy}
+                  >
+                    Add chats
+                  </button>
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsDangerCard}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Danger zone</span>
+                  <strong>{bots.length.toLocaleString()} bots</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Clears generated and user-created bots, including protected bots.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsDeleteAllBots()}
+                    disabled={devToolsBusy || bots.length === 0}
+                  >
+                    Clear all bots
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "conversation":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Current thread</span>
+                  <strong>{devToolsSummaryMode}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Thread</small>
+                    <strong>{devToolsConversationName}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Connection</small>
+                    <strong>
+                      {devToolsHasSavedConversation
+                        ? sessionOpinion
+                          ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
+                          : "No read"
+                        : "Unsaved"}
+                    </strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Bot opinion</small>
+                    <strong>
+                      {botOpinion
+                        ? `${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%`
+                        : "No read"}
+                    </strong>
+                  </span>
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Connection presets</span>
+                  <strong>{devToolsHasSavedConversation ? "Ready" : "No chat"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Sets the selected chat Connection state and opens the panel for visual checks.
+                </p>
+                <div
+                  className={styles.devToolsConnectionRail}
+                  aria-label="Connection panel presets"
+                >
+                  {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={styles.devToolsPresetButton}
+                      onClick={() => void devToolsSetConnectionPreset(preset)}
+                      disabled={devToolsBusy || !devToolsHasSavedConversation}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Bot relationship</span>
+                  <strong>{activeBot?.name ?? "Default Prism"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Forces long-term relationship states for the active bot or Default Prism.
+                </p>
+                <div
+                  className={styles.devToolsConnectionRail}
+                  aria-label="Bot opinion presets"
+                >
+                  {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={styles.devToolsPresetButton}
+                      onClick={() => void devToolsSetBotOpinionPreset(preset)}
+                      disabled={devToolsBusy}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Summarization</span>
+                  <strong>{summaryDebug?.inProgress ? "Running" : "Idle"}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Latest</small>
+                    <strong>{summaryDebug?.latestSummaryAt ?? "none"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Messages since compact</small>
+                    <strong>{summaryDebug?.messagesSinceLastCompaction ?? 0}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Summary count</small>
+                    <strong>{summaryDebug?.summaryCount ?? 0}</strong>
+                  </span>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Latest payload: <strong>{devToolsSummaryPreview ?? "none"}</strong>
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsRunSummaryNow(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Run summary now
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void refreshSummaryDebug(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Refresh metrics
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsResetSummary(devToolsSummaryMode)}
+                    disabled={devToolsBusy || !devToolsHasSavedConversation}
+                  >
+                    Reset summary state
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "memory":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Memory inventory</span>
+                  <strong>{memories.length.toLocaleString()}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>All memories</small>
+                    <strong>{memories.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Target</small>
+                    <strong>{devToolsMemoryTargetLabel}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Target count</small>
+                    <strong>{botMemories.length}</strong>
+                  </span>
+                </div>
+                {!devToolsMemoryPanelOpen ? (
+                  <p className={styles.devToolsSectionHint}>
+                    Open the Memories panel to target a specific bot; otherwise use all-bot seeding.
+                  </p>
+                ) : null}
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Seed configuration</span>
+                  <strong>{devToolsMemorySeedSource}</strong>
+                </div>
+                <label className={styles.devToolsCountControl}>
+                  <span>Seed type</span>
+                  <select
+                    value={devToolsMemorySeedSource}
+                    onChange={(event) =>
+                      setDevToolsMemorySeedSource(
+                        event.currentTarget.value as DevToolsMemorySeedSource
+                      )
+                    }
+                    disabled={devToolsBusy}
+                  >
+                    <option value="direct">Direct memories</option>
+                    <option value="inferred">Inferred assumptions</option>
+                    <option value="compiled">Compiled assumptions</option>
+                  </select>
+                </label>
+                <label className={styles.devToolsCountControl}>
+                  <span>
+                    Certainty{" "}
+                    <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={devToolsMemoryCertainty}
+                    onChange={(event) =>
+                      setDevToolsMemoryCertainty(
+                        Math.max(0, Math.min(1, Number(event.currentTarget.value)))
+                      )
+                    }
+                    disabled={devToolsBusy || devToolsMemorySeedSource === "direct"}
+                  />
+                </label>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Memory actions</span>
+                  <strong>{resolvedDevToolsBotQuantity.toLocaleString()} each</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Uses the shared quantity from Seed. Targeted seeding follows the currently focused
+                  memory bot.
+                </p>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddBotMemories()}
+                    disabled={devToolsBusy || !memoryPanelBot}
+                  >
+                    Add to target
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsAddAllMemories()}
+                    disabled={devToolsBusy || bots.length === 0}
+                  >
+                    Add across bots
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    onClick={() => void devToolsClearAllMemories()}
+                    disabled={devToolsBusy || memories.length === 0}
+                  >
+                    Clear all memories
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "system":
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Local toggles</span>
+                  <strong>{devSlashCommandsEnabled ? "/dev on" : "/dev off"}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Metrics</small>
+                    <strong>{devChatMetricsEnabled ? "On" : "Off"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Debug composer</small>
+                    <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>JSON import paste</small>
+                    <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+                  </span>
+                </div>
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => setDevTogglesOpen(true)}
+                    aria-haspopup="dialog"
+                    aria-expanded={devTogglesOpen}
+                    aria-controls="dev-toggles-modal"
+                  >
+                    Open toggles
+                  </button>
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Dev memories</span>
+                  <strong>{settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Global rule layer for testing hardcoded behavior before making it permanent.
+                  Applies to every bot, including Prism/default.
+                </p>
+                <p className={styles.devToolsSectionHint}>
+                  Rules text{" "}
+                  <strong>
+                    {(settings?.devMemoriesText?.trim().length ?? 0).toLocaleString()} chars
+                  </strong>
+                </p>
+                <textarea
+                  className={styles.devToolsTextarea}
+                  value={settings?.devMemoriesText ?? ""}
+                  onChange={(event) => {
+                    const nextValue = event.currentTarget.value;
+                    setSettings((previous) =>
+                      previous
+                        ? { ...previous, devMemoriesText: nextValue }
+                        : previous
+                    );
+                  }}
+                  disabled={devToolsBusy || !settings}
+                  rows={6}
+                  placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
+                />
+                <div className={styles.devToolsActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() =>
+                      setSettings((previous) =>
+                        previous
+                          ? { ...previous, devMemoriesEnabled: !previous.devMemoriesEnabled }
+                          : previous
+                      )
+                    }
+                    disabled={devToolsBusy || !settings}
+                  >
+                    {settings?.devMemoriesEnabled ? "Disable dev memories" : "Enable dev memories"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    onClick={() => void devToolsSaveDevMemories()}
+                    disabled={devToolsBusy || !settings}
+                  >
+                    Save dev memories
+                  </button>
+                </div>
+              </section>
+            </div>
+          );
+
+        case "observe":
+        default:
+          return (
+            <div className={styles.devToolsCardGrid}>
+              <section
+                className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
+                aria-labelledby="dev-metrics-terminal-title"
+              >
+                <div className={styles.devMetricsTerminalHeader}>
+                  <div>
+                    <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
+                    <p>
+                      Backend route, model, memory, summary, and tool events for the current chat run.
+                    </p>
+                  </div>
+                  <div className={styles.devMetricsTerminalActions}>
+                    <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
+                      {devChatMetricsEnabled ? "Live" : "Off"}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={() => setDevChatDebugEvents([])}
+                      disabled={devChatDebugEvents.length === 0}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
+                  {!devChatMetricsEnabled ? (
+                    <div className={styles.devMetricsTerminalEmpty}>
+                      Enable “Show developer metrics terminal” in System to stream backend traces here.
+                    </div>
+                  ) : devChatDebugEvents.length === 0 ? (
+                    <div className={styles.devMetricsTerminalEmpty}>
+                      Waiting for the next chat request...
+                    </div>
+                  ) : (
+                    devChatDebugEvents.slice(-80).map((event) => {
+                      const kind = inferDevChatDebugKind(event);
+                      return (
+                        <div
+                          key={event.id}
+                          className={styles.devMetricsTerminalLine}
+                          data-kind={kind}
+                        >
+                          <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
+                          <code>{event.text}</code>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Viewport</span>
+                  <strong>{viewportWidth}px × {viewportHeight}px</strong>
+                </div>
+                <p className={styles.devToolsViewportStatus} aria-live="polite">
+                  <span>
+                    Width <strong>{viewportWidth}px</strong>
+                  </span>
+                  <span>
+                    Height <strong>{viewportHeight}px</strong>
+                  </span>
+                </p>
+              </section>
+
+              <section className={styles.devToolsCard}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Surface snapshot</span>
+                  <strong>{view}</strong>
+                </div>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Bots</small>
+                    <strong>{bots.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Chats</small>
+                    <strong>{visibleConversations.length}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Trace lines</small>
+                    <strong>{devToolsTraceCount}</strong>
+                  </span>
+                </div>
+              </section>
+
+              {view === "coffee" ? (
+                <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                  <div className={styles.devToolsCardHeader}>
+                    <span>Coffee social diagnostics</span>
+                    <strong>
+                      {coffeeSocialById
+                        ? `${Object.keys(coffeeSocialById ?? {}).length} bots`
+                        : "No snapshot"}
+                    </strong>
+                  </div>
+                  <p className={styles.devToolsSectionHint}>
+                    Hidden per-bot metrics for this Coffee conversation. Player-facing UI never shows this.
+                  </p>
+                  {coffeeSocialById ? (
+                    coffeeSocialOrderedBotIds.length > 0 ? (
+                      <div className={styles.devToolsDiagnosticList}>
+                        {coffeeSocialOrderedBotIds.map((botId) => {
+                          const social = coffeeSocialById?.[botId];
+                          if (!social) return null;
+                          const bot = coffeeBotsById.get(botId);
+                          return (
+                            <p key={botId} className={styles.devToolsSectionHint}>
+                              <strong>{bot?.name ?? botId}</strong> · disposition{" "}
+                              <strong>{formatSocialPercent(social.disposition)}</strong> · values friction{" "}
+                              <strong>{formatSocialPercent(social.valuesFriction)}</strong> · restraint{" "}
+                              <strong>{formatSocialPercent(social.restraint)}</strong> · engagement{" "}
+                              <strong>{formatSocialPercent(social.engagement)}</strong> · leave pressure{" "}
+                              <strong>{formatSocialPercent(social.leavePressure)}</strong>
+                            </p>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.devToolsSectionHint}>No seated bots in this snapshot.</p>
+                    )
+                  ) : (
+                    <p className={styles.devToolsSectionHint}>
+                      Start or continue a Coffee turn to populate social diagnostics.
+                    </p>
+                  )}
+                  <div className={styles.devToolsActions}>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={() =>
+                        setCoffeeSeatMoodDevCycleIndex(
+                          (i) => (i + 1) % COFFEE_SEAT_MOOD_DEV_CYCLE.length
+                        )
+                      }
+                    >
+                      Cycle all seat moods
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          );
+      }
+    })();
+    return (
+      <>
+        <div
+          ref={devToolsPanelRef}
+          className={styles.devToolsFloatingPanel}
+          role="dialog"
+          aria-labelledby="dev-tools-title"
+          aria-busy={devToolsBusy ? "true" : undefined}
+          data-section={devToolsActiveSection}
+        >
+          <div
+            className={styles.devToolsHeader}
+            onPointerDown={startDevToolsPanelDrag}
+            onPointerMove={dragDevToolsPanel}
+            onPointerUp={endDevToolsPanelDrag}
+            onPointerCancel={endDevToolsPanelDrag}
+          >
+            <div className={styles.devToolsHeaderCopy}>
+              <span className={styles.devToolsKicker}>Local control center</span>
+              <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+                Developer tools
+              </h2>
+              <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+            </div>
+            <div className={styles.devToolsHeaderMeta}>
+              <span
+                className={styles.devToolsPill}
+                data-tone={devToolsBusy ? "busy" : "ready"}
+              >
+                {devToolsBusy ? "Working" : "Ready"}
+              </span>
+              <span className={styles.devToolsDragHint} aria-hidden="true">
+                drag
+              </span>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={closeDevTools}
+                aria-label="Close developer tools"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
+            <span className={styles.devToolsOverviewItem}>
+              <small>Surface</small>
+              <strong>{view}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Viewport</small>
+              <strong>{viewportWidth}×{viewportHeight}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Bots</small>
+              <strong>{bots.length.toLocaleString()}</strong>
+            </span>
+            <span className={styles.devToolsOverviewItem}>
+              <small>Memories</small>
+              <strong>{memories.length.toLocaleString()}</strong>
+            </span>
+          </div>
+
+          {devToolsMessage ? (
+            <p className={styles.devToolsStatus} role="status">
+              {devToolsMessage}
+            </p>
+          ) : null}
+
+          <div className={styles.devToolsLayout}>
+            <nav className={styles.devToolsNav} aria-label="Developer tool categories">
+              {DEV_TOOLS_NAV_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={styles.devToolsNavButton}
+                  data-active={item.id === devToolsActiveSection ? "true" : undefined}
+                  onClick={() => setDevToolsActiveSection(item.id)}
+                  aria-pressed={item.id === devToolsActiveSection}
+                >
+                  <span>{item.label}</span>
+                  <small>{item.description}</small>
+                </button>
+              ))}
+            </nav>
+
+            <main className={styles.devToolsContent}>
+              <header className={styles.devToolsContentHeader}>
+                <div>
+                  <span className={styles.devToolsKicker}>Category</span>
+                  <h3>{activeDevToolsNavItem.label}</h3>
+                </div>
+                <p>{activeDevToolsNavItem.description}</p>
+              </header>
+              {devToolsSectionContent}
+            </main>
+          </div>
+
+          <footer className={styles.devToolsFooter}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={sendRandomConversationNudge}
+              disabled={pendingReply}
+              data-glyph-tooltip="Send random suggested prompt"
+            >
+              Random prompt
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={closeDevTools}
+            >
+              Close
+            </button>
+          </footer>
+        </div>
+        {renderDevTogglesModal()}
+      </>
+    );
     return (
       <>
         <div
@@ -31742,7 +39413,8 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsSectionTitle}>Dev toggles</span>
             <span className={styles.devToolsToggleSummary}>
               Debug composer: <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong> · Paste
-              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong> · Compact
+              view: <strong>{devShowCompactedSummaryInChat ? "On" : "Off"}</strong>
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
@@ -31761,6 +39433,55 @@ function HomeContent(): React.JSX.Element {
             </button>
           </div>
         </details>
+
+        <section className={styles.devMetricsTerminalSection} aria-labelledby="dev-metrics-terminal-title">
+          <div className={styles.devMetricsTerminalHeader}>
+            <div>
+              <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
+              <p>
+                Backend route, model, memory, summary, and tool events for the current chat run.
+              </p>
+            </div>
+            <div className={styles.devMetricsTerminalActions}>
+              <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
+                {devChatMetricsEnabled ? "Live" : "Off"}
+              </span>
+              <button
+                type="button"
+                className={styles.devToolsAction}
+                onClick={() => setDevChatDebugEvents([])}
+                disabled={devChatDebugEvents.length === 0}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
+            {!devChatMetricsEnabled ? (
+              <div className={styles.devMetricsTerminalEmpty}>
+                Enable “Show developer metrics terminal” in Dev toggles to stream backend traces here.
+              </div>
+            ) : devChatDebugEvents.length === 0 ? (
+              <div className={styles.devMetricsTerminalEmpty}>
+                Waiting for the next chat request...
+              </div>
+            ) : (
+              devChatDebugEvents.slice(-80).map((event) => {
+                const kind = inferDevChatDebugKind(event);
+                return (
+                  <div
+                    key={event.id}
+                    className={styles.devMetricsTerminalLine}
+                    data-kind={kind}
+                  >
+                    <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
+                    <code>{event.text}</code>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
 
         <details className={styles.devToolsSection}>
           <summary className={styles.devToolsSectionSummary}>
@@ -31785,7 +39506,7 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.devToolsSectionTitle}>Coffee social diagnostics</span>
               <span className={styles.devToolsToggleSummary}>
                 {coffeeSocialById
-                  ? <>Bots <strong>{Object.keys(coffeeSocialById).length}</strong></>
+                  ? <>Bots <strong>{Object.keys(coffeeSocialById ?? {}).length}</strong></>
                   : "No social snapshot yet"}
               </span>
             </summary>
@@ -31796,7 +39517,7 @@ function HomeContent(): React.JSX.Element {
               coffeeSocialOrderedBotIds.length > 0 ? (
                 <div className={styles.devToolsSectionHint}>
                   {coffeeSocialOrderedBotIds.map((botId) => {
-                    const social = coffeeSocialById[botId];
+                    const social = coffeeSocialById?.[botId];
                     if (!social) return null;
                     const bot = coffeeBotsById.get(botId);
                     return (
@@ -31949,7 +39670,7 @@ function HomeContent(): React.JSX.Element {
               onClick={() => void devToolsDeleteAllBots()}
               disabled={devToolsBusy || bots.length === 0}
             >
-              Delete all bots
+              Clear all bots
             </button>
           </div>
         </details>
@@ -31960,10 +39681,10 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsToggleSummary}>
               {devToolsHasSavedConversation
                 ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
+                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}%`
                   : "No read yet"
                 : "No saved chat"}
-              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%` : ""}
+              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion!.band)} · ${botOpinion!.score}%` : ""}
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
@@ -31971,7 +39692,7 @@ function HomeContent(): React.JSX.Element {
             <strong>
               {devToolsHasSavedConversation
                 ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}% · ${opinionTrendLabel(sessionOpinion.trend)}`
+                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}% · ${opinionTrendLabel(sessionOpinion!.trend)}`
                   : "No Connection read yet"
                 : "Open a saved chat first"}
             </strong>
@@ -32084,7 +39805,7 @@ function HomeContent(): React.JSX.Element {
             <span className={styles.devToolsToggleSummary}>
               Mode <strong>{devToolsSummaryMode}</strong>
               {summaryDebug ? (
-                <> · in progress: <strong>{summaryDebug.inProgress ? "yes" : "no"}</strong></>
+                <> · in progress: <strong>{summaryDebug!.inProgress ? "yes" : "no"}</strong></>
               ) : null}
             </span>
           </summary>
@@ -32141,7 +39862,7 @@ function HomeContent(): React.JSX.Element {
               All: <strong>{memories.length}</strong>
               {memoryPanelScope === "bot" && memoryPanelBot ? (
                 <>
-                  {" "}· {memoryPanelBot.name}: <strong>{botMemories.length}</strong>
+                  {" "}· {memoryPanelBot!.name}: <strong>{botMemories.length}</strong>
                 </>
               ) : null}
             </p>
@@ -32893,14 +40614,17 @@ function HomeContent(): React.JSX.Element {
         </div>
       )}
 
-      {/* ── Command Center panel ── */}
+      {/* ── Prompt Center panel ── */}
       {panel === "command-center" && (
         <div
-          className={`${styles.panel} ${styles.panelSettings}`}
+          className={`${styles.panel} ${styles.panelPromptCenter}`}
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
-            <h3>Command Center</h3>
+            <div className={styles.panelHeaderTitle}>
+              <span className={styles.panelHeaderKicker}>Prompt Center</span>
+              <h3>Commands</h3>
+            </div>
             <button
               type="button"
               className={styles.panelClose}
@@ -32911,93 +40635,589 @@ function HomeContent(): React.JSX.Element {
               ×
             </button>
           </div>
-          <div style={{ display: "grid", gap: "0.9rem" }}>
-            <section>
-              <h4 style={{ margin: 0, fontSize: "0.92rem" }}>LLM Selection</h4>
-              {(() => {
-                const localModelOptions = modelCatalog?.local ?? [];
-                const onlineModelOptions = modelCatalog?.online ?? [];
-                return (
-              <label style={{ display: "grid", gap: "0.35rem", marginTop: "0.45rem" }}>
-                <span style={{ fontSize: "0.8rem", opacity: 0.85 }}>
-                  Preferred model for command work
-                </span>
-                <select
-                  value={commandCenterPreferredModel}
-                  onChange={(event) =>
-                    setCommandCenterPreferredModel(normalizeModelChoice(event.currentTarget.value))
-                  }
-                >
-                  <option value={AUTO_MODEL_CHOICE}>Auto</option>
-                  {localModelOptions.map((model) => (
-                    <option key={`local:${model.id}`} value={`local:${model.id}`}>
-                      {`LOCAL - ${model.label}`}
-                    </option>
-                  ))}
-                  {onlineModelOptions.map((model) => (
-                    <option key={`openai:${model.id}`} value={`openai:${model.id}`}>
-                      {`ONLINE - ${model.label}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          {(() => {
+            const localModelOptions = modelCatalog?.local ?? [];
+            const onlineModelOptions = modelCatalog?.online ?? [];
+            const selectedCommand =
+              commandCenterCommands.find(
+                (candidate) => candidate.id === commandCenterSelectedCommandId
+              ) ?? null;
+            const builtInCommandCenterCommands = commandCenterCommands.filter(
+              (command) => command.builtIn || command.readOnly
+            );
+            const userPromptCenterCommands = commandCenterCommands.filter(
+              (command) => !command.builtIn && !command.readOnly
+            );
+            const addPrompt = (): void => {
+              const draft = createUserCommandDraft(commandCenterCommands);
+              setCommandCenterCommands((current) =>
+                normalizeCommandCenterState({
+                  schema: "prism-command-center-v1",
+                  preferredModel: commandCenterPreferredModel,
+                  commands: [...current, draft],
+                }).commands
+              );
+              setCommandCenterSelectedCommandId(draft.id);
+            };
+            const renderPromptCenterCommandRow = (
+              command: CommandCenterCommand
+            ): React.ReactNode => {
+              const canDeletePrompt = !command.builtIn && !command.readOnly;
+              const deleteKey = commandCenterPromptDeleteKey(command.id);
+              const deleteArmed = pendingDeleteKey === deleteKey;
+              const deleteButtonClassName = [
+                styles.conversationDelete,
+                styles.promptCenterPromptDelete,
+                deleteArmed ? styles.conversationDeleteArmed : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const deletePrompt = (): void => {
+                setCommandCenterCommands((current) =>
+                  normalizeCommandCenterState({
+                    schema: "prism-command-center-v1",
+                    preferredModel: commandCenterPreferredModel,
+                    commands: current.filter((entry) => entry.id !== command.id),
+                  }).commands
                 );
-              })()}
-            </section>
-            <section>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "0.6rem",
-                }}
-              >
-                <h4 style={{ margin: 0, fontSize: "0.92rem" }}>Commands</h4>
-                <button
-                  type="button"
-                  className={styles.headerIconButton}
-                  aria-label="Add command"
-                  data-glyph-tooltip="Add command"
-                  onClick={() =>
-                    setCommandCenterCommands((current) =>
-                      normalizeCommandCenterState({
-                        schema: "prism-command-center-v1",
-                        preferredModel: commandCenterPreferredModel,
-                        commands: [...current, createUserCommandDraft(current)],
-                      }).commands
-                    )
-                  }
+                setCommandCenterSelectedCommandId((current) =>
+                  current === command.id ? null : current
+                );
+                setCommandCenterSpecsCommandId((current) =>
+                  current === command.id ? null : current
+                );
+              };
+              return (
+                <div
+                  key={command.id}
+                  className={styles.promptCenterPromptRowFrame}
+                  data-deletable={canDeletePrompt ? "true" : undefined}
+                  role="listitem"
                 >
-                  +
-                </button>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                  marginTop: "0.6rem",
-                }}
-              >
-                {commandCenterCommands.map((command) => (
                   <button
-                    key={command.id}
                     type="button"
-                    className={styles.chatOverflowMenuItem}
+                    className={styles.promptCenterPromptRow}
                     data-active={
-                      command.id === commandCenterSelectedCommandId ? "true" : undefined
+                      command.id === commandCenterSelectedCommandId
+                        ? "true"
+                        : undefined
                     }
-                    onClick={() => setCommandCenterSelectedCommandId(command.id)}
+                    data-read-only={command.readOnly ? "true" : undefined}
+                    onClick={() => {
+                      setCommandCenterSelectedCommandId(command.id);
+                      setCommandCenterSpecsCommandId(null);
+                    }}
                   >
-                    /{command.name}
+                    <span className={styles.promptCenterPromptName}>
+                      /{command.name}
+                    </span>
+                    <span className={styles.promptCenterPromptMeta}>
+                      {command.readOnly ? "Built-in" : "Custom"}
+                      {command.aliases.length > 0
+                        ? ` · ${command.aliases.length} aliases`
+                        : ""}
+                    </span>
                   </button>
-                ))}
+                  {canDeletePrompt ? (
+                    <button
+                      type="button"
+                      className={deleteButtonClassName}
+                      data-delete-affordance="true"
+                      aria-label={
+                        deleteArmed
+                          ? `Confirm delete prompt /${command.name}`
+                          : `Delete prompt /${command.name}`
+                      }
+                      data-glyph-tooltip={
+                        deleteArmed ? `Confirm delete /${command.name}` : "Delete prompt"
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (deleteArmed) {
+                          disarmDelete();
+                          deletePrompt();
+                          return;
+                        }
+                        armDelete(deleteKey);
+                      }}
+                    >
+                      {deleteArmed && (
+                        <span className={styles.conversationDeletePrompt}>
+                          Are you sure?
+                        </span>
+                      )}
+                      <span className={styles.conversationDeleteGlyph}>
+                        {deleteArmed ? "✓" : "×"}
+                      </span>
+                    </button>
+                  ) : null}
+                </div>
+              );
+            };
+            return (
+              <div
+                className={styles.promptCenterWorkspace}
+                data-has-selection={selectedCommand ? "true" : undefined}
+              >
+                <aside className={styles.promptCenterSidebar} aria-label="Commands and prompts">
+                  <section className={styles.promptCenterModelCard}>
+                    <span className={styles.promptCenterEyebrow}>Model</span>
+                    <label>
+                      <span>Prompt runs</span>
+                      <select
+                        value={commandCenterPreferredModel}
+                        onChange={(event) =>
+                          setCommandCenterPreferredModel(
+                            normalizeModelChoice(event.currentTarget.value)
+                          )
+                        }
+                      >
+                        <option value={AUTO_MODEL_CHOICE}>Inherit current model</option>
+                        {localModelOptions.map((model) => (
+                          <option key={`local:${model.id}`} value={`local:${model.id}`}>
+                            {`LOCAL - ${model.label}`}
+                          </option>
+                        ))}
+                        {onlineModelOptions.map((model) => (
+                          <option
+                            key={`${model.provider}:${model.id}`}
+                            value={`${model.provider}:${model.id}`}
+                          >
+                            {`${providerDisplayLabel(model.provider)} - ${model.label}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </section>
+                  <section className={styles.promptCenterListSection} data-kind="commands">
+                    <div className={styles.promptCenterListHeader}>
+                      <span>Commands</span>
+                    </div>
+                    <div className={styles.promptCenterPromptList} role="list">
+                      {builtInCommandCenterCommands.map(renderPromptCenterCommandRow)}
+                    </div>
+                  </section>
+                  <section className={styles.promptCenterListSection} data-kind="prompts">
+                    <div className={styles.promptCenterListHeader}>
+                      <span>Prompts</span>
+                      <button type="button" onClick={addPrompt}>
+                        New
+                      </button>
+                    </div>
+                    <div className={styles.promptCenterPromptList} role="list">
+                      {userPromptCenterCommands.length > 0 ? (
+                        userPromptCenterCommands.map(renderPromptCenterCommandRow)
+                      ) : (
+                        <p className={styles.promptCenterListEmpty}>No prompts yet.</p>
+                      )}
+                    </div>
+                  </section>
+                </aside>
+                <section className={styles.promptCenterEditor} aria-label="Prompt details">
+                  {selectedCommand ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.promptCenterMobileBack}
+                        onClick={() => setCommandCenterSelectedCommandId(null)}
+                      >
+                        Back to Prompt Center
+                      </button>
+                      <header className={styles.promptCenterEditorHeader}>
+                        <div>
+                          <span className={styles.promptCenterEyebrow}>
+                            {selectedCommand.readOnly ? "Built-in command" : "Prompt"}
+                          </span>
+                          <h4>/{selectedCommand.name}</h4>
+                        </div>
+                        <span
+                          className={styles.promptCenterStatusBadge}
+                          data-read-only={selectedCommand.readOnly ? "true" : undefined}
+                        >
+                          {selectedCommand.readOnly ? "Read-only" : "Editable"}
+                        </span>
+                      </header>
+                      {selectedCommand.readOnly ? (
+                        <div className={styles.promptCenterReadonlyBody}>
+                          <section className={styles.promptCenterReadonlyBlock}>
+                            <span>Command text</span>
+                            <pre>{selectedCommand.command || "(empty)"}</pre>
+                          </section>
+                          <section className={styles.promptCenterReadonlyBlock}>
+                            <span>Aliases</span>
+                            {selectedCommand.aliases.length > 0 ? (
+                              <div className={styles.promptCenterFlagPreviewList}>
+                                {selectedCommand.aliases.map((alias) => (
+                                  <div key={alias} className={styles.promptCenterFlagPreview}>
+                                    <code>/{alias}</code>
+                                    <span>Alias for /{selectedCommand.name}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p>No aliases configured.</p>
+                            )}
+                          </section>
+                        </div>
+                      ) : (
+                        <div className={styles.promptCenterEditorFields}>
+                          <label className={styles.promptCenterField}>
+                            <span>Shortcut</span>
+                            <input
+                              type="text"
+                              value={
+                                selectedCommand.name.length > 0
+                                  ? `/${selectedCommand.name}`
+                                  : ""
+                              }
+                              onChange={(event) => {
+                                const typed = event.currentTarget.value;
+                                const draftName = normalizeCommandNameInput(typed);
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          name: draftName,
+                                          title:
+                                            entry.title.trim().length === 0
+                                              ? draftName
+                                              : entry.title,
+                                          updatedAt: now,
+                                        }
+                                      : entry
+                                  );
+                                });
+                              }}
+                              onBlur={() => {
+                                setCommandCenterCommands((current) => {
+                                  const existing = current.find(
+                                    (entry) => entry.id === selectedCommand.id
+                                  );
+                                  if (!existing) return current;
+                                  const nextName = uniqueCommandNameForList(
+                                    existing.name,
+                                    current,
+                                    selectedCommand.id
+                                  );
+                                  if (nextName === existing.name) return current;
+                                  const now = new Date().toISOString();
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          name: nextName,
+                                          title:
+                                            entry.title.trim().length === 0
+                                              ? nextName
+                                              : entry.title,
+                                          updatedAt: now,
+                                        }
+                                      : entry
+                                  );
+                                });
+                              }}
+                              placeholder="/prompt-name"
+                              spellCheck={false}
+                            />
+                          </label>
+                          <label className={styles.promptCenterField}>
+                            <span>Prompt text</span>
+                            <textarea
+                              value={selectedCommand.command}
+                              onChange={(event) => {
+                                const nextCommandText = event.currentTarget.value;
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return normalizeCommandCenterState({
+                                    schema: "prism-command-center-v1",
+                                    preferredModel: commandCenterPreferredModel,
+                                    commands: current.map((entry) =>
+                                      entry.id === selectedCommand.id
+                                        ? {
+                                            ...entry,
+                                            command: nextCommandText,
+                                            updatedAt: now,
+                                          }
+                                        : entry
+                                    ),
+                                  }).commands;
+                                });
+                              }}
+                              rows={8}
+                              placeholder="What this prompt should ask the model to do..."
+                              spellCheck={true}
+                            />
+                          </label>
+                          <div className={styles.promptCenterFlagsHeader}>
+                            <span>Aliases</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCommandCenterCommands((current) => {
+                                  const now = new Date().toISOString();
+                                  return current.map((entry) =>
+                                    entry.id === selectedCommand.id
+                                      ? {
+                                          ...entry,
+                                          aliases: ["", ...entry.aliases],
+                                          updatedAt: now,
+                                        }
+                                      : entry
+                                  );
+                                });
+                              }}
+                            >
+                              Add alias
+                            </button>
+                          </div>
+                          <div className={styles.promptCenterFlagList}>
+                            {selectedCommand.aliases.length === 0 && (
+                              <p>No aliases yet.</p>
+                            )}
+                            {selectedCommand.aliases.map((alias, index) => (
+                              <div
+                                key={`${selectedCommand.id}-alias-${index}`}
+                                className={styles.promptCenterFlagRow}
+                              >
+                                <input
+                                  type="text"
+                                  value={alias ? `/${alias}` : ""}
+                                  onChange={(event) => {
+                                    const nextAlias = normalizeCommandNameInput(event.currentTarget.value);
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return current.map((entry) =>
+                                        entry.id === selectedCommand.id
+                                          ? {
+                                              ...entry,
+                                              aliases: entry.aliases.map((item, itemIndex) =>
+                                                itemIndex === index ? nextAlias : item
+                                              ),
+                                              updatedAt: now,
+                                            }
+                                          : entry
+                                      );
+                                    });
+                                  }}
+                                  onBlur={() => {
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return normalizeCommandCenterState({
+                                        schema: "prism-command-center-v1",
+                                        preferredModel: commandCenterPreferredModel,
+                                        commands: current.map((entry) =>
+                                          entry.id === selectedCommand.id
+                                            ? {
+                                                ...entry,
+                                                aliases: normalizeCommandAliasList(
+                                                  entry.aliases,
+                                                  entry.name
+                                                ),
+                                                updatedAt: now,
+                                              }
+                                            : entry
+                                        ),
+                                      }).commands;
+                                    });
+                                  }}
+                                  placeholder="/alias"
+                                  spellCheck={false}
+                                />
+                                <span className={styles.promptCenterAliasHint}>
+                                  Alias for /{selectedCommand.name}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCommandCenterCommands((current) => {
+                                      const now = new Date().toISOString();
+                                      return normalizeCommandCenterState({
+                                        schema: "prism-command-center-v1",
+                                        preferredModel: commandCenterPreferredModel,
+                                        commands: current.map((entry) =>
+                                          entry.id === selectedCommand.id
+                                            ? {
+                                                ...entry,
+                                                aliases: entry.aliases.filter(
+                                                  (_, itemIndex) => itemIndex !== index
+                                                ),
+                                                updatedAt: now,
+                                              }
+                                            : entry
+                                        ),
+                                      }).commands;
+                                    });
+                                  }}
+                                  aria-label={`Remove alias ${index + 1}`}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className={styles.promptCenterDangerRow}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCommandCenterCommands((current) =>
+                                  normalizeCommandCenterState({
+                                    schema: "prism-command-center-v1",
+                                    preferredModel: commandCenterPreferredModel,
+                                    commands: current.filter(
+                                      (entry) => entry.id !== selectedCommand.id
+                                    ),
+                                  }).commands
+                                );
+                                setCommandCenterSelectedCommandId(null);
+                              }}
+                            >
+                              Delete prompt
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className={styles.promptCenterEmptyState}>
+                      <strong>Select a command or prompt</strong>
+                      <p>Choose a built-in command or create a prompt.</p>
+                    </div>
+                  )}
+                </section>
               </div>
-            </section>
-          </div>
+            );
+          })()}
         </div>
       )}
+
+      {commandCenterHelpModalOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className={settingsModalBackdropClassName}
+            role="presentation"
+            onClick={() => setCommandCenterHelpModalOpen(false)}
+          >
+            <div
+              className={styles.commandHelpModal}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Available commands and prompts"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className={styles.commandHelpHeader}>
+                <div>
+                  <span>Help</span>
+                  <h4>Commands &amp; prompts</h4>
+                  <p>At the start, / shows commands and prompts. Inline, / shows prompts.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCommandCenterHelpModalOpen(false)}
+                  aria-label="Close command help"
+                >
+                  ×
+                </button>
+              </header>
+              {(() => {
+                const builtInCommands = commandCenterCommands.filter(
+                  (command) => command.builtIn || command.readOnly
+                );
+                const customPrompts = commandCenterCommands.filter(
+                  (command) => !command.builtIn && !command.readOnly
+                );
+                const devCommands = devSlashCommandsEnabled
+                  ? [
+                      {
+                        invocation: "/forget",
+                        description:
+                          "Forget memories for the current bot, or the Zen/default memory bucket.",
+                      },
+                      {
+                        invocation: "/forget-all",
+                        description:
+                          "Hard-reset all bot/default memories, summaries, and recall state.",
+                      },
+                    ]
+                  : [];
+                const renderCommandHelpRows = (
+                  command: CommandCenterCommand,
+                  kind: "command" | "prompt"
+                ): React.ReactNode[] => {
+                  const description =
+                    command.command.trim() ||
+                    (kind === "command" ? "Runs a built-in command." : "Runs this prompt.");
+                  return commandInvocationNames(command).map((name, index) => (
+                    <button
+                      key={`${command.id}:${name}`}
+                      type="button"
+                      className={styles.commandHelpRow}
+                      onClick={() => insertCommandCenterInvocation(`/${name}`)}
+                    >
+                      <span className={styles.commandHelpSlash}>/{name}</span>
+                      <span className={styles.commandHelpDescription}>
+                        {index === 0 ? description : `Alias for /${command.name}. ${description}`}
+                      </span>
+                    </button>
+                  ));
+                };
+                return (
+                  <div className={styles.commandHelpBody}>
+                    <section className={styles.commandHelpSection}>
+                      <h5>Commands</h5>
+                      <div className={styles.commandHelpList}>
+                        {builtInCommands.flatMap((command) =>
+                          renderCommandHelpRows(command, "command")
+                        )}
+                      </div>
+                    </section>
+                    {devCommands.length > 0 && (
+                      <section className={styles.commandHelpSection}>
+                        <h5>Developer Commands</h5>
+                        <div className={styles.commandHelpList}>
+                          {devCommands.map((command) => (
+                            <button
+                              key={command.invocation}
+                              type="button"
+                              className={styles.commandHelpRow}
+                              onClick={() =>
+                                insertCommandCenterInvocation(command.invocation)
+                              }
+                            >
+                              <span className={styles.commandHelpSlash}>
+                                {command.invocation}
+                              </span>
+                              <span className={styles.commandHelpDescription}>
+                                {command.description}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                    <section className={styles.commandHelpSection}>
+                      <h5>Prompts</h5>
+                      {customPrompts.length > 0 ? (
+                        <div className={styles.commandHelpList}>
+                          {customPrompts.flatMap((command) =>
+                            renderCommandHelpRows(command, "prompt")
+                          )}
+                        </div>
+                      ) : (
+                        <p className={styles.commandHelpEmpty}>
+                          No custom prompts yet.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* ── Settings panel ── */}
       {panel === "settings" && (
@@ -33057,126 +41277,422 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           {settings && (
-            <form className={styles.form} onSubmit={saveSettings}>
+            <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
               {/* Preferred name omitted: bots learn the user’s name organically; avoid a separate “override” field. */}
-              <label>OpenAI API key<input type="password" placeholder={settings.hasOpenAiApiKey ? "Saved (leave blank to keep; type to replace)" : "sk-..."} value={openAiKey} onChange={e => setOpenAiKey(e.target.value)} /></label>
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsHostsModalOpen ? "true" : undefined}
-                onClick={() => setSettingsHostsModalOpen(true)}
-              >
-                <strong>Extra servers</strong>
-                <span>Second Ollama host and ComfyUI URL for local image workflows.</span>
-              </button>
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsDefaultsModalOpen ? "true" : undefined}
-                onClick={() => setSettingsDefaultsModalOpen(true)}
-              >
-                <strong>Defaults &amp; fallbacks</strong>
-                <span>
-                  Preferred offline/online chat models, copyright text fallback, and image defaults.
-                </span>
-              </button>
-              <section className={styles.settingsTutorialCard}>
-                <strong>Mode tutorials</strong>
-                <span>Restart all guided walkthroughs the next time Prism launches.</span>
-                <div className={styles.settingsTutorialActions}>
-                  <label className={styles.checkbox}>
-                    <input
-                      type="checkbox"
-                      checked={resetTutorialsOnNextLaunch}
-                      onChange={(event) =>
-                        setTutorialResetOnNextLaunchEnabled(event.currentTarget.checked)
-                      }
-                    />
-                    Restart tutorials on next launch
-                  </label>
+              <section className={styles.settingsOverview} aria-label="Settings overview">
+                <div>
+                  <span className={styles.settingsEyebrow}>Workspace settings</span>
+                  <h4>Prism Control Room</h4>
+                  <p>
+                    Connections, model routing, memory behavior, and account controls in one place.
+                  </p>
+                </div>
+                <div className={styles.settingsStatusPills} aria-label="Connection status">
+                  <span data-status={settings.openAiApiKeySource !== "none" ? "ready" : "idle"}>
+                    {apiKeySourceStatusLabel("OpenAI", settings.openAiApiKeySource)}
+                  </span>
+                  <span
+                    data-status={settings.anthropicApiKeySource !== "none" ? "ready" : "idle"}
+                  >
+                    {apiKeySourceStatusLabel("Anthropic", settings.anthropicApiKeySource)}
+                  </span>
+                  <span
+                    data-status={settings.elevenLabsApiKeySource !== "none" ? "ready" : "idle"}
+                  >
+                    {apiKeySourceStatusLabel("ElevenLabs", settings.elevenLabsApiKeySource)}
+                  </span>
+                  <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
+                  <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
                 </div>
               </section>
-              {settings.hasOpenAiApiKey && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => void clearSavedKey()}
-                  disabled={busy}
-                >
-                  Clear saved key
-                </button>
-              )}
-              <label className={styles.checkbox}><input type="checkbox" checked={settings.autoMemory} onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)} />Auto memory</label>
-              <label
-                className={styles.checkbox}
-                title="Uses your browser's built-in spell check, grammar hints, and autocorrect when available."
-              >
-                <input
-                  type="checkbox"
-                  checked={settings.composerWritingAssist}
-                  onChange={e =>
-                    setSettings(p => p ? { ...p, composerWritingAssist: e.target.checked } : p)
-                  }
-                />
-                Composer spelling & grammar
-              </label>
-              <button
-                type="button"
-                className={styles.settingsInfoButton}
-                aria-haspopup="dialog"
-                aria-expanded={settingsAboutModalOpen ? "true" : undefined}
-                onClick={() => setSettingsAboutModalOpen(true)}
-              >
-                <strong>App info</strong>
-                <span>What Prism is, how it works, and what you control.</span>
-              </button>
-              <details className={styles.settingsModelDropdown}>
-                <summary>
-                  <span>Bot customizer models</span>
-                  <small>
-                    {settings.hiddenBotModelIds.length === 0
-                      ? "All model choices visible"
-                      : `${settings.hiddenBotModelIds.length} hidden`}
-                  </small>
-                </summary>
-                <div className={styles.settingsModelList}>
-                  {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
-                    const required = isRequiredPrimaryLocalModel(model);
-                    const visible = required || !settings.hiddenBotModelIds.includes(model.id);
-                    return (
-                      <label key={model.id} className={styles.settingsModelToggle}>
+
+              <div className={styles.settingsSectionGrid}>
+                <section className={styles.settingsSection} aria-labelledby="settings-connections-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Connections</span>
+                      <h4 id="settings-connections-title">API Keys &amp; Servers</h4>
+                    </div>
+                    <small>Saved with Settings.</small>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>OpenAI key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasOpenAiApiKey
+                            ? "Saved - type to replace"
+                            : "sk-..."
+                        }
+                        value={openAiKey}
+                        onChange={(event) => setOpenAiKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasOpenAiApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("openai")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>Anthropic key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasAnthropicApiKey
+                            ? "Saved - type to replace"
+                            : "sk-ant-..."
+                        }
+                        value={anthropicKey}
+                        onChange={(event) => setAnthropicKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasAnthropicApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("anthropic")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>ElevenLabs key</span>
+                      <input
+                        type="password"
+                        placeholder={
+                          settings.hasElevenLabsApiKey
+                            ? "Saved - type to replace"
+                            : "xi-..."
+                        }
+                        value={elevenLabsKey}
+                        onChange={(event) => setElevenLabsKey(event.target.value)}
+                        autoComplete="off"
+                      />
+                      {settings.hasElevenLabsApiKey && (
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => void clearSavedKey("elevenlabs")}
+                          disabled={busy}
+                        >
+                          Clear saved key
+                        </button>
+                      )}
+                    </label>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>Second Ollama host</span>
+                      <span
+                        className={styles.settingsHostInputWrap}
+                        data-status={secondaryOllamaUiStatus}
+                      >
                         <input
-                          type="checkbox"
-                          checked={visible}
-                          disabled={required}
-                          onChange={(event) =>
-                            setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
+                          type="text"
+                          placeholder="192.168.1.50:11434"
+                          value={settings.secondaryOllamaHost ?? ""}
+                          onChange={e =>
+                            setSettings(p => (p ? { ...p, secondaryOllamaHost: e.target.value } : p))
                           }
                         />
-                        <span>{model.label}</span>
-                        <small>
-                          {required
-                            ? "Required"
-                            : model.provider === "local"
-                            ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
-                            : "Online"}
-                        </small>
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {secondaryOllamaStatusText}
+                        </span>
+                      </span>
+                    </label>
+                    <div className={styles.settingsHostField}>
+                      <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                        <input
+                          type="checkbox"
+                          checked={settings.experimentalDualOllamaEnabled === true}
+                          onChange={e =>
+                            setSettings(p =>
+                              p ? { ...p, experimentalDualOllamaEnabled: e.target.checked } : p
+                            )
+                          }
+                        />
+                        Experimental dual Ollama routing
                       </label>
-                    );
-                  })}
-                </div>
-              </details>
-              <button type="submit" disabled={busy}>Save</button>
-              <p className={styles.muted} style={{ marginTop: 12 }}>
-                Prism {PRISM_APP_VERSION}
-              </p>
+                      <small className={styles.settingsHostHint}>
+                        Requires both Ollama endpoints to expose the exact same model list. Prism falls back to primary
+                        if parity is missing.
+                        {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
+                      </small>
+                    </div>
+                    <label className={styles.settingsHostField}>
+                      <span className={styles.settingsHostLabel}>ComfyUI server</span>
+                      <span className={styles.settingsHostInputWrap} data-status={comfyUiUiStatus}>
+                        <input
+                          type="text"
+                          placeholder="127.0.0.1:8188"
+                          value={settings.comfyUiHost ?? ""}
+                          onChange={e =>
+                            setSettings(p => (p ? { ...p, comfyUiHost: e.target.value } : p))
+                          }
+                        />
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {comfyUiStatusText}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="settings-models-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Models</span>
+                      <h4 id="settings-models-title">Defaults &amp; Fallbacks</h4>
+                    </div>
+                    <small>Some image choices save immediately.</small>
+                  </header>
+                  {renderDefaultsAndFallbacksControls("settings")}
+                  <details className={styles.settingsModelDropdown}>
+                    <summary>
+                      <span>Bot customizer model list</span>
+                      <small>
+                        {settings.hiddenBotModelIds.length === 0
+                          ? "All visible"
+                          : `${settings.hiddenBotModelIds.length} hidden`}
+                      </small>
+                    </summary>
+                    <div className={styles.settingsModelList}>
+                      {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
+                        const required = isRequiredPrimaryLocalModel(model);
+                        const visible = required || !settings.hiddenBotModelIds.includes(model.id);
+                        return (
+                          <label key={model.id} className={styles.settingsModelToggle}>
+                            <input
+                              type="checkbox"
+                              checked={visible}
+                              disabled={required}
+                              onChange={(event) =>
+                                setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
+                              }
+                            />
+                            <span>{model.label}</span>
+                            <small>
+                              {required
+                                ? "Required"
+                                : model.provider === "local"
+                                ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
+                                : providerDisplayLabel(model.provider)}
+                            </small>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </details>
+                  <details className={styles.settingsModelDropdown}>
+                    <summary>
+                      <span>ComfyUI workflow list</span>
+                      <small>
+                        {allComfyUiWorkflowCatalogEntries.length === 0
+                          ? "No workflows detected"
+                          : settings.hiddenComfyUiWorkflowIds.length === 0
+                            ? "All visible"
+                            : `${settings.hiddenComfyUiWorkflowIds.length} hidden`}
+                      </small>
+                    </summary>
+                    {allComfyUiWorkflowCatalogEntries.length > 0 ? (
+                      <div className={styles.settingsModelList}>
+                        {allComfyUiWorkflowCatalogEntries.map((model) => {
+                          const visible = !settings.hiddenComfyUiWorkflowIds.includes(model.id);
+                          const remotePath = parseComfyUiRemoteWorkflowPath(model.id);
+                          return (
+                            <label key={model.id} className={styles.settingsModelToggle}>
+                              <input
+                                type="checkbox"
+                                checked={visible}
+                                onChange={(event) =>
+                                  setComfyUiWorkflowVisible(
+                                    model.id,
+                                    event.currentTarget.checked
+                                  )
+                                }
+                              />
+                              <span>{model.label}</span>
+                              <small>
+                                {visible ? "Visible in Images" : "Hidden from Images"}
+                                {remotePath ? ` · ${remotePath}` : ""}
+                              </small>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.muted} style={{ margin: "10px 0 0" }}>
+                        Connect ComfyUI and refresh models to choose which workflows appear in Images.
+                      </p>
+                    )}
+                  </details>
+                </section>
+
+                <section className={styles.settingsSection} aria-labelledby="settings-behavior-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Behavior</span>
+                      <h4 id="settings-behavior-title">Memory &amp; Writing</h4>
+                    </div>
+                  </header>
+                  <div className={styles.settingsToggleStack}>
+                    <label className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={settings.autoMemory}
+                        onChange={e => setSettings(p => p ? { ...p, autoMemory: e.target.checked } : p)}
+                      />
+                      Auto memory
+                    </label>
+                    <label className={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={settings.composerWritingAssist}
+                        onChange={e =>
+                          setSettings(p => p ? { ...p, composerWritingAssist: e.target.checked } : p)
+                        }
+                      />
+                      Composer spelling &amp; grammar
+                    </label>
+                  </div>
+                  <div className={styles.settingsTutorialCard}>
+                    <strong>Mode tutorials</strong>
+                    <div className={styles.settingsTutorialActions}>
+                      <button type="button" className={styles.linkButton} onClick={resetAllModeTutorials}>
+                        Reset all
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("chat")}>
+                        Zen
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("sandbox")}>
+                        Chat
+                      </button>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("coffee")}>
+                        Coffee
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section className={styles.settingsSection} aria-labelledby="settings-about-title">
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>About</span>
+                      <h4 id="settings-about-title">Prism {PRISM_APP_VERSION}</h4>
+                    </div>
+                  </header>
+                  <p className={styles.settingsCompactCopy}>
+                    Personal AI workspace with offline-first controls, per-bot personality,
+                    memory management, and optional online model routing.
+                  </p>
+                  <button
+                    type="button"
+                    className={styles.settingsInfoButton}
+                    aria-haspopup="dialog"
+                    aria-expanded={settingsAboutModalOpen ? "true" : undefined}
+                    onClick={() => setSettingsAboutModalOpen(true)}
+                  >
+                    <strong>App details</strong>
+                    <span>Version notes and control model.</span>
+                  </button>
+                </section>
+
+                <section
+                  className={styles.settingsSection}
+                  aria-labelledby="settings-account-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Account</span>
+                      <h4 id="settings-account-title">Data &amp; Security</h4>
+                    </div>
+                  </header>
+                  <p className={styles.settingsCompactCopy}>
+                    Export and import live in the header. Pairing codes are disabled in the standalone app.
+                  </p>
+                  <div className={styles.accountActionsButtonRow}>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={() => void logout()}
+                      disabled={busy}
+                    >
+                      Log out
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={() => {
+                        setPanelError(null);
+                        setChangePasswordNew("");
+                        setChangePasswordConfirm("");
+                        setChangePasswordModalOpen(true);
+                      }}
+                      disabled={busy}
+                    >
+                      Change password
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        styles.dangerButton,
+                        factoryResetArmed ? styles.dangerButtonArmed : "",
+                      ].filter(Boolean).join(" ")}
+                      onClick={restoreFactoryDefaults}
+                      disabled={busy}
+                      title={
+                        factoryResetArmed
+                          ? "Click again to clear all account data and restore first-run defaults."
+                          : "Click once to arm factory reset."
+                      }
+                    >
+                      {factoryResetArmed ? "Confirm restore defaults" : "Restore factory defaults"}
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        styles.dangerButton,
+                        deleteAccountArmed ? styles.dangerButtonArmed : "",
+                      ].filter(Boolean).join(" ")}
+                      onClick={deleteAccount}
+                      disabled={busy}
+                      title={
+                        deleteAccountArmed
+                          ? "Click again to confirm permanent account deletion."
+                          : "Click once to arm account deletion."
+                      }
+                    >
+                      {deleteAccountArmed ? "Confirm delete account" : "Delete account"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+
+              <div className={styles.settingsSaveDock}>
+                <span>Changes to keys, chat defaults, and account behavior use Save.</span>
+                <button type="submit" disabled={busy}>
+                  {busy ? "Saving..." : "Save settings"}
+                </button>
+              </div>
             </form>
           )}
-          {settingsHostsModalOpen && (
+          {settingsHostsModalOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
             <div
-              className={styles.settingsAboutModalBackdrop}
+              className={settingsModalBackdropClassName}
               role="presentation"
               onClick={() => setSettingsHostsModalOpen(false)}
             >
@@ -33184,30 +41700,107 @@ function HomeContent(): React.JSX.Element {
                 className={styles.settingsAboutModal}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Extra servers"
+                aria-label="API keys and servers"
                 onClick={(event) => event.stopPropagation()}
               >
                 <header className={styles.settingsAboutModalHeader}>
                   <div>
                     <span>Connection setup</span>
-                    <h4>Extra servers</h4>
-                    <p>Add optional backup compute hosts for local responses and image workflows.</p>
+                    <h4>API keys &amp; servers</h4>
+                    <p>Add online model keys and optional backup compute hosts.</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setSettingsHostsModalOpen(false)}
-                    aria-label="Close extra servers"
+                    aria-label="Close API keys and servers"
                   >
                     ×
                   </button>
                 </header>
                 <div className={styles.settingsAboutModalBody}>
                   {settings && (
-                    <div className={`${styles.form} ${styles.formInModal}`}>
+                    <form
+                      className={`${styles.form} ${styles.formInModal}`}
+                      onSubmit={(event) => {
+                        void saveSettings(event, { closeHostsModalOnSuccess: true });
+                      }}
+                    >
                       <p className={styles.settingsHostsLead}>
-                        Prism works without these fields. Add them only when you want a fallback Ollama
-                        endpoint or an external ComfyUI image server.
+                        Prism works without these fields. Add keys for online services, or add
+                        hosts for a fallback Ollama endpoint and external ComfyUI image server.
                       </p>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>OpenAI API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasOpenAiApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "sk-..."
+                          }
+                          value={openAiKey}
+                          onChange={(event) => setOpenAiKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasOpenAiApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("openai")}
+                            disabled={busy}
+                          >
+                            Clear saved OpenAI key
+                          </button>
+                        )}
+                      </label>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>Anthropic API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasAnthropicApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "sk-ant-..."
+                          }
+                          value={anthropicKey}
+                          onChange={(event) => setAnthropicKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasAnthropicApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("anthropic")}
+                            disabled={busy}
+                          >
+                            Clear saved Anthropic key
+                          </button>
+                        )}
+                      </label>
+                      <label className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>ElevenLabs API key</span>
+                        <input
+                          type="password"
+                          placeholder={
+                            settings.hasElevenLabsApiKey
+                              ? "Saved (leave blank to keep; type to replace)"
+                              : "xi-..."
+                          }
+                          value={elevenLabsKey}
+                          onChange={(event) => setElevenLabsKey(event.target.value)}
+                          autoComplete="off"
+                        />
+                        {settings.hasElevenLabsApiKey && (
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() => void clearSavedKey("elevenlabs")}
+                            disabled={busy}
+                          >
+                            Clear saved ElevenLabs key
+                          </button>
+                        )}
+                      </label>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>Second Ollama host</span>
                         <span
@@ -33230,6 +41823,25 @@ function HomeContent(): React.JSX.Element {
                           Use host:port only, for example <code>192.168.1.50:11434</code>.
                         </small>
                       </label>
+                      <div className={styles.settingsHostField}>
+                        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                          <input
+                            type="checkbox"
+                            checked={settings.experimentalDualOllamaEnabled === true}
+                            onChange={e =>
+                              setSettings(p =>
+                                p ? { ...p, experimentalDualOllamaEnabled: e.target.checked } : p
+                              )
+                            }
+                          />
+                          Experimental dual Ollama routing
+                        </label>
+                        <small className={styles.settingsHostHint}>
+                          Requires both Ollama endpoints to expose the exact same model list. Prism falls back to
+                          primary if parity is missing.
+                          {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
+                        </small>
+                      </div>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>ComfyUI server</span>
                         <span
@@ -33249,7 +41861,7 @@ function HomeContent(): React.JSX.Element {
                           </span>
                         </span>
                         <small className={styles.settingsHostHint}>
-                          Prism checks this address live and lists detected checkpoints in Images.
+                          Prism checks this address live and lists detected workflows in Images.
                         </small>
                       </label>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
@@ -33261,17 +41873,27 @@ function HomeContent(): React.JSX.Element {
                         <code>8188</code>.
                       </p>
                       <p className={styles.muted} style={{ margin: 0 }}>
-                        Save behavior: use the main <strong>Save</strong> button in Settings when you are done.
+                        Keys are stored on this account after saving.
                       </p>
-                    </div>
+                      {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                      <div className={styles.settingsSaveDock}>
+                        <span>Save keys and server settings.</span>
+                        <button type="submit" disabled={busy}>
+                          {busy ? "Saving..." : "Save settings"}
+                        </button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
-          {settingsDefaultsModalOpen && (
+          {settingsDefaultsModalOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
             <div
-              className={styles.settingsAboutModalBackdrop}
+              className={settingsModalBackdropClassName}
               role="presentation"
               onClick={() => setSettingsDefaultsModalOpen(false)}
             >
@@ -33300,307 +41922,17 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </header>
                 <div className={styles.settingsAboutModalBody}>
-                  {settings && (
-                    <div className={`${styles.form} ${styles.formInModal}`}>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Preferred default Prism LLM (internal calls)
-                          <select
-                            value={(settings.prismDefaultLlmModel ?? "").trim()}
-                            onChange={(event) => {
-                              const next = event.target.value.trim();
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, prismDefaultLlmModel: next }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — server auxiliary (
-                              {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
-                            </option>
-                            {prismInternalLlmCallOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Preferred LLM for in-chat image requests
-                          <select
-                            value={(settings.prismImageToolLlmModel ?? "").trim()}
-                            onChange={(event) => {
-                              const next = event.target.value.trim();
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, prismImageToolLlmModel: next }
-                                  : previous
-                              );
-                              void persistPrismImageToolLlmModelField(next);
-                            }}
-                          >
-                            <option value="">
-                              Auto — use hub chat model (no override)
-                            </option>
-                            {prismImageToolLlmCallOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Preferred offline model (LOCAL hub)
-                          <select
-                            value={normalizeModelChoice(settings.preferredLocalModel)}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredLocalModel:
-                                        next === AUTO_MODEL_CHOICE ? "" : next,
-                                    }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value={AUTO_MODEL_CHOICE}>
-                              Auto — first visible model in your catalog
-                            </option>
-                            {hubPreferredLocalOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                                {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Preferred online model (ONLINE hub)
-                          <select
-                            value={normalizeModelChoice(settings.preferredOnlineModel)}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredOnlineModel:
-                                        next === AUTO_MODEL_CHOICE ? "" : next,
-                                    }
-                                  : previous
-                              );
-                            }}
-                          >
-                            <option value={AUTO_MODEL_CHOICE}>
-                              Auto — first visible model in your catalog
-                            </option>
-                            {hubPreferredOnlineOptions.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Copyright fallback (text chat, local)
-                          <select
-                            value={settings.lenientLocalFallbackModel ?? ""}
-                            onChange={(event) =>
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      lenientLocalFallbackModel: event.target.value,
-                                    }
-                                  : previous
-                              )
-                            }
-                          >
-                            <option value="">Disabled</option>
-                            {includeSelectedModelOption(
-                              modelOptionsForProvider(modelCatalog, settings, "local"),
-                              settings.lenientLocalFallbackModel ?? "",
-                              "local"
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Copyright fallback (images, local)
-                          <select
-                            value={settings.lenientLocalImageFallbackModel ?? ""}
-                            onChange={(event) =>
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      lenientLocalImageFallbackModel: event.target.value,
-                                    }
-                                  : previous
-                              )
-                            }
-                          >
-                            <option value="">Disabled</option>
-                            {includeSelectedModelOption(
-                              localImageModelCatalogEntries,
-                              settings.lenientLocalImageFallbackModel ?? "",
-                              "local"
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <label
-                        className={styles.checkbox}
-                        style={{ display: "block", marginTop: 10 }}
-                        title="When a reply used your lenient local copyright-fallback model, the assistant bubble gets a diagonal striped accent on the left."
-                      >
-                        <input
-                          type="checkbox"
-                          checked={settings.fallbackModelMessageStripe !== false}
-                          onChange={(event) =>
-                            setSettings((previous) =>
-                              previous
-                                ? {
-                                    ...previous,
-                                    fallbackModelMessageStripe: event.target.checked,
-                                  }
-                                : previous
-                            )
-                          }
-                        />
-                        Show checkerboard stripe on copyright-fallback replies
-                      </label>
-                      <div className={styles.settingsDefaultsModalPairRow}>
-                        <label>
-                          Local default image model
-                          <select
-                            value={settings.preferredLocalImageModel?.trim() ?? ""}
-                            disabled={localImageModelCatalogEntries.length === 0}
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, preferredLocalImageModel: next }
-                                  : previous
-                              );
-                              void persistAccountImageDefaultModelField(
-                                "preferredLocalImageModel",
-                                next
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — first detected local image model
-                            </option>
-                            {(
-                              (settings.preferredLocalImageModel?.trim() ?? "").length > 0
-                                ? includeSelectedModelOption(
-                                    localImageModelCatalogEntries,
-                                    settings.preferredLocalImageModel?.trim() ?? "",
-                                    "local"
-                                  )
-                                : localImageModelCatalogEntries
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Online image API model
-                          <select
-                            value={
-                              (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                                ? normalizeOpenAiImageModelId(
-                                    settings.preferredOpenAiImageModel
-                                  )
-                                : ""
-                            }
-                            onChange={(event) => {
-                              const next = event.target.value;
-                              const stored =
-                                next.trim().length > 0
-                                  ? normalizeOpenAiImageModelId(next)
-                                  : "";
-                              setSettings((previous) =>
-                                previous
-                                  ? {
-                                      ...previous,
-                                      preferredOpenAiImageModel: stored,
-                                    }
-                                  : previous
-                              );
-                              void persistAccountImageDefaultModelField(
-                                "preferredOpenAiImageModel",
-                                next
-                              );
-                            }}
-                          >
-                            <option value="">
-                              Auto — {DEFAULT_OPENAI_IMAGE_MODEL_ID} when your key is active
-                            </option>
-                            {(
-                              (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                                ? includeSelectedModelOption(
-                                    openAiImageModelCatalogEntries,
-                                    normalizeOpenAiImageModelId(
-                                      settings.preferredOpenAiImageModel
-                                    ),
-                                    "openai"
-                                  )
-                                : openAiImageModelCatalogEntries
-                            ).map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <p className={styles.muted} style={{ margin: 0 }}>
-                        Auto always pins to the top of each list so Prism can pick the first healthy
-                        model instead of a fixed alphabetical order. The image copyright fallback is
-                        used when the primary image request is blocked for policy reasons (local
-                        retry, or switching from online to local when configured).{" "}
-                        <strong>
-                          The Prism internal LLM (titles, summaries, memory hints, Coffee routing,
-                          image prompt suggestions) uses your choice above, or the server auxiliary
-                          model when set to Auto.
-                        </strong>{" "}
-                        <strong>
-                          In-chat image-request LLM and local/online image defaults save as soon as
-                          you change them.
-                        </strong>{" "}
-                        Chat hub defaults and the Prism internal LLM still use Save on the main Settings screen.
-                      </p>
-                    </div>
-                  )}
+                  {renderDefaultsAndFallbacksControls("modal")}
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
-          {settingsAboutModalOpen && (
+          {settingsAboutModalOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
             <div
-              className={styles.settingsAboutModalBackdrop}
+              className={settingsModalBackdropClassName}
               role="presentation"
               onClick={() => setSettingsAboutModalOpen(false)}
             >
@@ -33650,69 +41982,14 @@ function HomeContent(): React.JSX.Element {
                   </p>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
-          <div className={styles.pairingActions}>
-            <h4>Legacy pairing (disabled)</h4>
-            <p className={styles.muted}>
-              Pairing codes are no longer required in the standalone desktop app.
-            </p>
-            <div className={styles.pairingButtonRow}>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                disabled={true}
-              >
-                Pairing disabled
-              </button>
-            </div>
-          </div>
-          <div className={styles.accountActions}>
-            <h4>Account</h4>
-            <p className={styles.muted}>Sign out, change your password, or permanently delete this account.</p>
-            <div className={styles.accountActionsButtonRow}>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                onClick={() => void logout()}
-                disabled={busy}
-              >
-                Log out
-              </button>
-              <button
-                type="button"
-                className={styles.accountLogoutButton}
-                onClick={() => {
-                  setPanelError(null);
-                  setChangePasswordNew("");
-                  setChangePasswordConfirm("");
-                  setChangePasswordModalOpen(true);
-                }}
-                disabled={busy}
-              >
-                Change password
-              </button>
-              <button
-                type="button"
-                className={[
-                  styles.dangerButton,
-                  deleteAccountArmed ? styles.dangerButtonArmed : "",
-                ].filter(Boolean).join(" ")}
-                onClick={deleteAccount}
-                disabled={busy}
-                title={
-                  deleteAccountArmed
-                    ? "Click again to confirm permanent account deletion."
-                    : "Click once to arm account deletion."
-                }
-              >
-                {deleteAccountArmed ? "Confirm delete account" : "Delete account"}
-              </button>
-            </div>
-          </div>
-          {changePasswordModalOpen && (
+          {changePasswordModalOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
             <div
-              className={styles.settingsAboutModalBackdrop}
+              className={settingsModalBackdropClassName}
               role="presentation"
               onClick={() => {
                 setChangePasswordModalOpen(false);
@@ -33771,14 +42048,9 @@ function HomeContent(): React.JSX.Element {
                   </form>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
-          {/* Scoped to panelError so a chat-send 401 doesn't render a
-              duplicate error on top of the Settings drawer. The legacy
-              in-settings memory list was removed once the dedicated
-              memories panel (with the cinematic directory transitions)
-              became the canonical management surface. */}
-          {panelError && <p className={styles.error} role="alert">{panelError}</p>}
         </div>
       )}
 
@@ -33826,10 +42098,9 @@ function HomeContent(): React.JSX.Element {
           "local",
           newBotLocalModel
         );
-        const visibleOnlineModelChoice = visibleConcreteModelChoiceForProvider(
+        const visibleOnlineModelChoice = visibleConcreteOnlineModelChoice(
           modelCatalog,
           settings,
-          "openai",
           newBotOnlineModel
         );
         const hasEditChanges = editPristine
@@ -33841,6 +42112,7 @@ function HomeContent(): React.JSX.Element {
             || newBotOpenAiImageModel !== editPristine.openAiImageModel
             || newBotOnlineEnabled !== editPristine.onlineEnabled
             || newBotDeleteProtected !== editPristine.deleteProtected
+            || newBotFlirtEnabled !== editPristine.flirtEnabled
             || newBotTemperature !== editPristine.temperature
             || newBotMaxTokens !== editPristine.maxTokens
             || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
@@ -33855,13 +42127,13 @@ function HomeContent(): React.JSX.Element {
           ? (nameIsPresent && hasEditChanges && !busy)
           : (nameIsPresent && !busy);
 
-        // Edit mode locks the label to "Update" from the moment edit
+        // Edit mode locks the label to "Save changes" from the moment edit
         // starts (even before any field changes) so the user's intent
         // reads correctly: you're editing, not creating. The B/W vs.
         // bot-color styling still hinges on hasEditChanges below, so
-        // the inert "Update" button remains visually identical to the
+        // the inert "Save changes" button remains visually identical to the
         // inert "Create bot" button — same chrome, different word.
-        const primaryLabel = editingBotId ? "Update" : "Create bot";
+        const primaryLabel = editingBotId ? "Save changes" : "Create bot";
 
         // Derive the inline --accent / --accent-text / --accent-ink
         // triad from the currently-picked color so the primary button
@@ -33886,10 +42158,14 @@ function HomeContent(): React.JSX.Element {
           visibleLocalModelChoice,
           "local"
         );
-        const onlineModelOptions = includeSelectedModelOption(
-          botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
-          visibleOnlineModelChoice,
-          "openai"
+        const onlineModelOptions = includeSelectedOnlineModelOption(
+          modelCatalog,
+          settings,
+          uniqueModelOptions([
+            ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
+            ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "anthropic"),
+          ]),
+          visibleOnlineModelChoice
         );
         const visibleLocalImageModelChoice = (() => {
           if (newBotLocalImageModel !== AUTO_MODEL_CHOICE && newBotLocalImageModel.trim()) {
@@ -33914,10 +42190,9 @@ function HomeContent(): React.JSX.Element {
           }
           return normalizeOpenAiImageModelId(DEFAULT_OPENAI_IMAGE_MODEL_ID);
         })();
-        const localImageModelOptionsForBot = includeSelectedModelOption(
+        const localImageModelOptionsForBot = includeSelectedLocalImageModelOption(
           localImageModelCatalogEntries,
-          visibleLocalImageModelChoice,
-          "local"
+          visibleLocalImageModelChoice
         );
         const openAiImageModelOptionsForBot = includeSelectedModelOption(
           openAiImageModelCatalogEntries,
@@ -33947,6 +42222,63 @@ function HomeContent(): React.JSX.Element {
             : completedProfileCategories === 0
             ? "Purpose only"
             : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
+        const profileProgressPercent = nameIsPresent
+          ? Math.round(
+              (completedProfileCategories / BOT_PROFILE_BUILDER_PAGE_ORDER.length) * 100
+            )
+          : 0;
+        const botIdentityDisplayName =
+          trimmedName || editingBot?.name?.trim() || "Unnamed bot";
+        const botIdentityStatus = editingBotId
+          ? hasEditChanges
+            ? "Unsaved changes"
+            : "Saved"
+          : nameIsPresent
+            ? "Ready"
+            : "Draft";
+        const botPanelMode = editingBotId ? "edit" : "create";
+        const botPanelTitle = botLibraryExpanded
+          ? "Bot library"
+          : editingBotId
+            ? "Edit bot"
+            : "Create bot";
+        const botPanelSubtitle = botLibraryExpanded
+          ? editingBotId
+            ? `Return to ${botIdentityDisplayName}`
+            : botLibrarySummary
+          : editingBotId
+            ? botIdentityDisplayName
+            : "New custom bot";
+        const botIdentityKicker = editingBotId ? "Editing existing bot" : "New bot";
+        const botIdentityActionHint = editingBotId
+          ? hasEditChanges
+            ? "Review changes, then save this bot."
+            : "Make a change to save this bot."
+          : nameIsPresent
+            ? "Ready to create."
+            : "Start with a name.";
+        const botRoutingSummary =
+          `${botTemperatureLabel(newBotTemperature)} · ${selectedLengthPreset?.label ?? "Custom"}`;
+        const botIdentityProfileSummary = nameIsPresent ? profileSummary : "Name needed";
+        const botIdentityModeMessage = editingBotId
+          ? hasEditChanges
+            ? "Unsaved edits are local until you save."
+            : "You are editing a saved bot."
+          : nameIsPresent
+            ? "This will create a separate new bot."
+            : "Name the bot to unlock the editor.";
+        const botLibraryHandleTitle = botLibraryExpanded
+          ? editingBotId
+            ? "Back to editor"
+            : "Bot Creator"
+          : editingBotId
+            ? "Back to bot library"
+            : "Bot library";
+        const botLibraryHandleSummary = editingBotId
+          ? hasEditChanges
+            ? "Unsaved edits"
+            : botLibrarySummary
+          : botLibrarySummary;
 
         const headerTrashEnabled =
           !busy &&
@@ -33980,6 +42312,8 @@ function HomeContent(): React.JSX.Element {
               botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
             }
             data-editor-only={!botPanelLibraryEnabled ? "true" : undefined}
+            data-bot-editor-mode={botPanelMode}
+            data-bot-editor-dirty={hasEditChanges ? "true" : undefined}
             style={editorPanelStyle}
           >
             <div className={styles.panelHeader}>
@@ -33995,7 +42329,10 @@ function HomeContent(): React.JSX.Element {
                     ←
                   </button>
                 ) : null}
-                <h3>{!botPanelLibraryEnabled ? "Edit Bot" : "Bots"}</h3>
+                <div className={styles.panelHeaderTitleText}>
+                  <h3>{botPanelTitle}</h3>
+                  <small>{botPanelSubtitle}</small>
+                </div>
               </div>
               <div className={styles.panelHeaderActions}>
                 <input
@@ -34122,36 +42459,108 @@ function HomeContent(): React.JSX.Element {
                 className={styles.form}
                 onSubmit={(e) => void submitBotForm(e)}
               >
-              <div className={styles.botNameRow}>
-                <ColorGlyphPicker
-                  color={newBotColor}
-                  glyph={newBotGlyph}
-                  onColorChange={handleNewBotColorChange}
-                  onGlyphChange={handleNewBotGlyphChange}
-                  open={colorWheelOpen}
-                  onToggle={() => setColorWheelOpen(o => !o)}
-                  resolvedTheme={resolvedTheme}
-                />
-                <input ref={botNameInputRef} required placeholder="Bot name" value={newBotName} onChange={e => setNewBotName(e.target.value)} />
-                {!editingBotId ? (
-                <button
-                  type="button"
-                  className={styles.botRandomizeButton}
-                  onClick={applyRandomBotDraft}
-                  aria-label="Randomize bot"
-                  title="Randomize bot"
+              <section
+                className={styles.botIdentityCard}
+                data-mode={botPanelMode}
+                data-dirty={hasEditChanges ? "true" : undefined}
+                aria-label="Bot identity"
+              >
+                <div className={styles.botIdentityPreview}>
+                  <span className={styles.botIdentityGlyph} aria-hidden="true">
+                    <BotGlyph name={newBotGlyph} size={26} strokeWidth={1.8} />
+                  </span>
+                  <div className={styles.botIdentityCopy}>
+                    <span>{botIdentityKicker}</span>
+                    <strong>{botIdentityDisplayName}</strong>
+                    <small>{botIdentityActionHint}</small>
+                  </div>
+                  <span
+                    className={styles.botIdentityStatus}
+                    data-state={
+                      editingBotId
+                        ? hasEditChanges
+                          ? "dirty"
+                          : "saved"
+                        : nameIsPresent
+                          ? "ready"
+                          : "draft"
+                    }
+                  >
+                    {botIdentityStatus}
+                  </span>
+                </div>
+                <div className={styles.botIdentityPillRow} aria-label="Bot setup summary">
+                  <span>{botIdentityProfileSummary}</span>
+                  <span>{newBotOnlineEnabled ? "Online allowed" : "Offline only"}</span>
+                  <span>{botRoutingSummary}</span>
+                </div>
+                <div
+                  className={styles.botIdentityModeStrip}
+                  data-mode={botPanelMode}
+                  data-dirty={hasEditChanges ? "true" : undefined}
                 >
-                  <BotGlyph name="dice" size={20} strokeWidth={1.8} />
-                </button>
-                ) : null}
-              </div>
+                  <span>{botIdentityModeMessage}</span>
+                  {editingBotId ? (
+                    <button
+                      type="button"
+                      onClick={revertEditingBotDraft}
+                      disabled={!hasEditChanges || busy}
+                    >
+                      Revert
+                    </button>
+                  ) : null}
+                </div>
+                <div className={styles.botNameRow}>
+                  <ColorGlyphPicker
+                    color={newBotColor}
+                    glyph={newBotGlyph}
+                    onColorChange={handleNewBotColorChange}
+                    onGlyphChange={handleNewBotGlyphChange}
+                    open={colorWheelOpen}
+                    onToggle={() => setColorWheelOpen(o => !o)}
+                    resolvedTheme={resolvedTheme}
+                  />
+                  <label className={styles.botNameField}>
+                    <span>Bot name</span>
+                    <input
+                      ref={botNameInputRef}
+                      required
+                      placeholder="Name this bot"
+                      value={newBotName}
+                      onChange={e => setNewBotName(e.target.value)}
+                    />
+                  </label>
+                  {!editingBotId ? (
+                  <button
+                    type="button"
+                    className={styles.botRandomizeButton}
+                    onClick={applyRandomBotDraft}
+                    aria-label="Randomize bot"
+                    title="Randomize bot"
+                  >
+                    <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+                  </button>
+                  ) : null}
+                </div>
+              </section>
               <section
                 className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
                 aria-label="Profile Builder"
               >
                 <div className={styles.botParameterHeader}>
+                  <div className={styles.botProfileProgressHeader}>
+                    <span>Profile</span>
+                    <strong>{profileProgressPercent}%</strong>
+                  </div>
+                  <div
+                    className={styles.botProfileProgressTrack}
+                    aria-hidden="true"
+                    style={{
+                      ["--bot-profile-progress" as string]: `${profileProgressPercent}%`,
+                    }}
+                  />
                   <small>
-                    {profileSummary}. These details become hidden context for the model.
+                    {profileSummary}. These details shape how the bot behaves.
                   </small>
                 </div>
                 <div className={styles.botProfileSummaryGrid}>
@@ -34238,6 +42647,23 @@ function HomeContent(): React.JSX.Element {
                         {newBotOnlineEnabled
                           ? "This bot may use its preferred online model."
                           : "This bot will refuse online routing. Flip Allowed to lift the protection."}
+                      </small>
+                    </button>
+                  </label>
+                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                    <span>Flirt &amp; roleplay</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={newBotFlirtEnabled}
+                      data-enabled={newBotFlirtEnabled ? "true" : undefined}
+                      onClick={() => setNewBotFlirtEnabled((enabled) => !enabled)}
+                    >
+                      <strong>{newBotFlirtEnabled ? "Enabled" : "Disabled"}</strong>
+                      <small>
+                        {newBotFlirtEnabled
+                          ? "This bot may flirt or roleplay in-character when invited."
+                          : "This bot will politely reject romantic or sexual advances."}
                       </small>
                     </button>
                   </label>
@@ -34437,8 +42863,9 @@ function HomeContent(): React.JSX.Element {
                                 disabled={!newBotOnlineEnabled}
                               >
                                 {onlineModelOptions.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.label}{model.isDefault ? " (default)" : ""}
+                                  <option key={`${model.provider}:${model.id}`} value={model.id}>
+                                    {model.label} · {providerDisplayLabel(model.provider)}
+                                    {model.isDefault ? " (default)" : ""}
                                   </option>
                                 ))}
                               </select>
@@ -34656,8 +43083,9 @@ function HomeContent(): React.JSX.Element {
                               disabled={!newBotOnlineEnabled}
                             >
                               {onlineModelOptions.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}{model.isDefault ? " (default)" : ""}
+                                <option key={`${model.provider}:${model.id}`} value={model.id}>
+                                  {model.label} · {providerDisplayLabel(model.provider)}
+                                  {model.isDefault ? " (default)" : ""}
                                 </option>
                               ))}
                             </select>
@@ -34754,6 +43182,20 @@ function HomeContent(): React.JSX.Element {
                 </div>
                 )
               )}
+              {editingBotId && editingBot ? (
+                <div className={styles.botEditorActionStrip} aria-label="Edit bot actions">
+                  <span>
+                    {hasEditChanges ? "Save when you are ready." : "No unsaved changes."}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void duplicateCurrentBotDraft()}
+                    disabled={busy || !nameIsPresent}
+                  >
+                    Duplicate
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="submit"
                 disabled={!primaryActive}
@@ -34784,9 +43226,9 @@ function HomeContent(): React.JSX.Element {
                     create-bot form). */}
                 <span className={styles.botLibraryHandleCopy}>
                   <strong>
-                    {botLibraryExpanded ? "Bot Creator" : "Bot library"}
+                    {botLibraryHandleTitle}
                   </strong>
-                  <small>{botLibrarySummary}</small>
+                  <small>{botLibraryHandleSummary}</small>
                 </span>
                 <span className={styles.botLibraryHandleChevron} aria-hidden="true">
                   {botLibraryExpanded ? "↓" : "↑"}
@@ -35154,12 +43596,13 @@ function HomeContent(): React.JSX.Element {
       {/* ── Images panel ── */}
       {panel === "images" && (() => {
         // ONLINE → OpenAI images; LOCAL → Ollama when at least one image-capable
-        // checkpoint appears in the catalog (same heuristic as the header picker).
+        // image model appears in the catalog (same heuristic as the header picker).
         const hasLocalImageModels = localImageModelCatalogEntries.length > 0;
         // Honors the offline-only lock — when the active chat bot is
         // protected, we evaluate "can generate?" against LOCAL only.
+        const imageGenerationUsesOpenAi = effectivePreferredProvider !== "local";
         const canGenerate =
-          effectivePreferredProvider === "openai" ||
+          imageGenerationUsesOpenAi ||
           (effectivePreferredProvider === "local" && hasLocalImageModels);
         const imageKeywordEditorLayout =
           viewportWidth >= IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX &&
@@ -35315,21 +43758,21 @@ function HomeContent(): React.JSX.Element {
             } as React.CSSProperties)
           : undefined;
         const genOverlayPrimary =
-          effectivePreferredProvider === "openai"
+          imageGenerationUsesOpenAi
             ? "Creating image…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "Warming up…"
               : "Generating…";
         const genOverlaySecondary =
-          effectivePreferredProvider === "openai"
+          imageGenerationUsesOpenAi
             ? "Contacting OpenAI…"
             : imageGenLocalInflight && imageGenWarmupHintVisible
               ? "The image engine may still be loading the model into GPU memory — first runs after idle often take 1–5 minutes."
-              : "Working with your prompt and checkpoint…";
+              : "Working with your prompt and image model…";
         const genModelLine = (() => {
           if (!settings) return null;
           const { localModelId, openAiModelId } = resolveImagesPanelImageModels();
-          const useOpenAi = effectivePreferredProvider === "openai";
+          const useOpenAi = imageGenerationUsesOpenAi;
           const headerPick = useOpenAi
             ? imageGenModelChoiceByProvider.openai?.trim() ?? ""
             : imageGenModelChoiceByProvider.local?.trim() ?? "";
@@ -35763,10 +44206,7 @@ function HomeContent(): React.JSX.Element {
                     openAiImageModelCatalogEntries
                   );
                   const thumbModelRaw = img.model?.trim() ?? "";
-                  const privateBlurred =
-                    imagePrivateGeneratedIds.includes(img.id) &&
-                    !imagePrivateRevealedIds.has(img.id) &&
-                    !appWidePrivateMode;
+                  const privateBlurred = isPrivateGeneratedImageHidden(img.id);
                   return (
                     <div
                       key={img.id}
@@ -35796,7 +44236,10 @@ function HomeContent(): React.JSX.Element {
                         }
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={galleryTileImageSrc(img)} alt={img.prompt} />
+                        <img
+                          src={galleryTileImageSrc(img)}
+                          alt={privateBlurred ? "Private generated image hidden" : img.prompt}
+                        />
                         {privateBlurred ? (
                           <span className={styles.imageThumbPrivateBlurOverlay} aria-hidden="true">
                             Private image hidden - click to reveal
@@ -36015,9 +44458,18 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
     setCoffeeReplayActive(false);
     setCoffeeReplayPlaying(false);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
     setCoffeeTurnRhythmState("idle");
   };
   const queueCoffeeReveal = (args: {
@@ -36040,6 +44492,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeSelectedSessionId(args.conversation.id);
       setCoffeePendingRevealConversation(null);
       setCoffeePendingSpeakerBotId(null);
+      setCoffeeUserRevealText("");
       setCoffeeTurnRhythmState(
         coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
       );
@@ -36193,24 +44646,83 @@ function HomeContent(): React.JSX.Element {
   const buildLocalCoffeeStarterTopicSuggestions = (
     seatBotIds: readonly (string | null)[]
   ): string[] => {
-    const names = seatBotIds
-      .map((id) => (typeof id === "string" ? coffeeBotsById.get(id)?.name : null))
-      .filter((name): name is string => Boolean(name && name.trim().length > 0));
-    if (names.length === 0) {
+    const context = seatBotIds
+      .map((id) => (typeof id === "string" ? coffeeBotsById.get(id) : null))
+      .filter((bot): bot is Bot => Boolean(bot))
+      .map((bot) => `${bot.name} ${bot.system_prompt}`)
+      .join(" ")
+      .toLowerCase();
+    if (/\b(power|empire|command|control|strategy)\b/u.test(context) &&
+      /\b(compassion|forgive|forgiveness|mercy|grace|love|service)\b/u.test(context)) {
       return [
-        "Light small talk while everyone settles",
-        "One honest check-in",
-        "A cozy what-are-we-doing thread",
+        "Power without cruelty",
+        "Duty versus forgiveness",
+        "When mercy has limits",
       ];
     }
-    const a = names[0]!;
-    const b = names[1] ?? names[0]!;
-    const c = names[2] ?? a;
+    if (/\b(philosoph|stoic|ethic|wisdom|metaphysic|logic|reason|free will)\b/u.test(context)) {
+      return [
+        "Is free will an illusion?",
+        "The cost of being right",
+        "A rule worth breaking",
+      ];
+    }
+    if (/\b(engineer|debug|code|system|build|logic)\b/u.test(context)) {
+      return [
+        "When systems fight back",
+        "The cost of clean logic",
+        "A bug worth keeping",
+      ];
+    }
+    if (/\b(money|profit|business|restaurant|secret|protect)\b/u.test(context)) {
+      return [
+        "What loyalty costs",
+        "A secret worth protecting",
+        "When profit needs mercy",
+      ];
+    }
+    if (coffeeSessionSettings.tableEnergy === "still") {
+      return [
+        "What silence protects",
+        "The cost of being right",
+        "A truth worth keeping",
+      ];
+    }
     return [
-      `Something ${a} would defend passionately (kindly)`,
-      `One shared curiosity between ${a} and ${b}`,
-      `A tiny story ${c} could unfold slowly`,
+      "The cost of being right",
+      "When kindness backfires",
+      "A rule worth breaking",
     ];
+  };
+  const resetCoffeeOpeningPollDraft = () => {
+    setCoffeeOpeningPollModalOpen(false);
+    setCoffeeOpeningPollQuestion("");
+    setCoffeeOpeningPollOptions(buildDefaultCoffeePollOptionDraft());
+  };
+  const updateCoffeeOpeningPollOption = (index: number, value: string) => {
+    setCoffeeOpeningPollOptions((current) =>
+      current.map((option, optionIndex) => (optionIndex === index ? value : option))
+    );
+  };
+  const addCoffeeOpeningPollOption = () => {
+    setCoffeeOpeningPollOptions((current) => {
+      if (current.length >= COFFEE_POLL_OPTION_COUNT_MAX) return current;
+      return [...current, ""];
+    });
+  };
+  const removeCoffeeOpeningPollOption = (index: number) => {
+    setCoffeeOpeningPollOptions((current) => {
+      if (current.length <= COFFEE_POLL_OPTION_COUNT_MIN) return current;
+      return current.filter((_, optionIndex) => optionIndex !== index);
+    });
+  };
+  const coffeeOpeningPollPayload = (): { question: string; options: string[] } | undefined => {
+    const question = coffeeOpeningPollQuestion.replace(/\s+/g, " ").trim();
+    const options = coffeeOpeningPollOptions
+      .map((option) => option.replace(/\s+/g, " ").trim())
+      .filter((option, index, all) => option.length > 0 && all.indexOf(option) === index);
+    if (!question || options.length < 2) return undefined;
+    return { question, options };
   };
   const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
   const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
@@ -36240,6 +44752,15 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSessionPhase("selecting");
     setCoffeeStarterTopics([]);
     setCoffeePendingArrivalScenario("user-first");
+    resetCoffeeOpeningPollDraft();
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+  };
+  const collapseCoffeeGroupsExcept = (groupId: string) => {
+    setCoffeeCollapsedGroupIds(
+      new Set(coffeeGroups.map((group) => group.id).filter((id) => id !== groupId))
+    );
   };
   const openCoffeeGroup = (group: CoffeeGroupState) => {
     clearCoffeeArrivalTimer();
@@ -36249,6 +44770,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
     setCoffeeSelectedGroupId(group.id);
+    collapseCoffeeGroupsExcept(group.id);
     setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
     setCoffeeSessionSettings(normalizeCoffeeSessionSettings(group.coffeeSettings));
     setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(group.coffeeSettings));
@@ -36264,6 +44786,10 @@ function HomeContent(): React.JSX.Element {
     setCoffeeArrivedBotIds(group.botGroupIds);
     assignCoffeeSessionEndsAtMs(null);
     setCoffeeSessionPhase("selecting");
+    resetCoffeeOpeningPollDraft();
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
   };
   const scheduleCoffeeAutonomousTurn = (
     conversationId: string,
@@ -36294,6 +44820,12 @@ function HomeContent(): React.JSX.Element {
     if (typeof endsAt !== "number" || !Number.isFinite(endsAt)) return null;
     return Math.max(0, endsAt - Date.now());
   };
+  const enterCoffeeLivePhase = () => {
+    if (coffeeSessionStartedAtRef.current == null) {
+      coffeeSessionStartedAtRef.current = Date.now();
+    }
+    setCoffeeSessionPhase("live");
+  };
   const startCoffeeArrivalSequence = (
     conversation: CoffeeConversationState,
     scenario: CoffeeArrivalScenario
@@ -36321,7 +44853,7 @@ function HomeContent(): React.JSX.Element {
       coffeeArrivalTimerRef.current = setTimeout(() => {
         const endsAt = Date.now() + coffeeSessionDurationMs(conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
-        setCoffeeSessionPhase("live");
+        enterCoffeeLivePhase();
         scheduleCoffeeAutonomousTurn(conversation.id, endsAt, true);
       }, COFFEE_ARRIVAL_SETTLE_MS);
     };
@@ -36347,6 +44879,102 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Failed to save the table topic.");
       return false;
+    }
+  };
+  const createCoffeePollTopic = async (
+    conversation: CoffeeConversationState,
+    scenario: CoffeeArrivalScenario
+  ): Promise<boolean> => {
+    const initialPoll = coffeeOpeningPollPayload();
+    if (!initialPoll) {
+      setCoffeeError(
+        `Add a question and at least ${COFFEE_POLL_OPTION_COUNT_MIN} filled choice chips before starting.`
+      );
+      return false;
+    }
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const created = await api<{ ok: true; poll: CoffeePollState }>(
+        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/polls`,
+        { method: "POST", body: JSON.stringify(initialPoll) }
+      );
+      setCoffeeActivePoll(created.poll);
+      setCoffeePollPanelMinimized(false);
+      setCoffeePollResultsOpen(true);
+      const refreshed = await api<{ ok: true; conversation: CoffeeConversationState }>(
+        `/api/conversations/${encodeURIComponent(conversation.id)}`
+      );
+      setCoffeeConversation(refreshed.conversation);
+      setCoffeeStarterTopics([]);
+      resetCoffeeOpeningPollDraft();
+      setCoffeeOpeningPollModalOpen(false);
+      startCoffeeArrivalSequence(refreshed.conversation, scenario);
+      void refreshConversations();
+      return true;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to start the poll topic.");
+      return false;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const castCoffeePlayerPollVote = async (
+    conversationId: string,
+    pollId: string,
+    optionIndex: number
+  ): Promise<CoffeePollState | null> => {
+    if (coffeePollVoteBusy) return null;
+    setCoffeePollVoteBusy(true);
+    setCoffeeError(null);
+    const sessionRemainingMs = (() => {
+      const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
+      if (typeof endsAt !== "number" || !Number.isFinite(endsAt)) return null;
+      return Math.max(0, endsAt - Date.now());
+    })();
+    const votePayload = { optionIndex, sessionRemainingMs };
+    try {
+      const response = await api<{ ok: true; poll: CoffeePollState }>(
+        `/api/coffee/sessions/${encodeURIComponent(conversationId)}/polls/${encodeURIComponent(
+          pollId
+        )}/vote`,
+        {
+          method: "POST",
+          body: JSON.stringify(votePayload),
+        }
+      );
+      setCoffeeActivePoll(response.poll);
+      setCoffeePollPanelMinimized(false);
+      setCoffeePollResultsOpen(true);
+      return response.poll;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (!/route not found/i.test(message)) {
+        setCoffeeError(message || "Failed to save your poll vote.");
+        return null;
+      }
+      try {
+        const fallback = await api<{ ok: true; poll: CoffeePollState }>(
+          `/api/coffee/sessions/${encodeURIComponent(conversationId)}/polls/${encodeURIComponent(
+            pollId
+          )}/collect`,
+          {
+            method: "POST",
+            body: JSON.stringify(votePayload),
+          }
+        );
+        setCoffeeActivePoll(fallback.poll);
+        setCoffeePollPanelMinimized(false);
+        setCoffeePollResultsOpen(true);
+        return fallback.poll;
+      } catch (fallbackErr) {
+        setCoffeeError(
+          fallbackErr instanceof Error ? fallbackErr.message : "Failed to save your poll vote."
+        );
+        return null;
+      }
+    } finally {
+      setCoffeePollVoteBusy(false);
     }
   };
   const createCoffeeSession = async (
@@ -36397,7 +45025,11 @@ function HomeContent(): React.JSX.Element {
       if (!shouldStartArrival) {
         setCoffeeArrivedBotIds(response.conversation.botGroupIds ?? []);
         assignCoffeeSessionEndsAtMs(null);
-        setCoffeeSessionPhase(topicReady ? "live" : "topic");
+        if (topicReady) {
+          enterCoffeeLivePhase();
+        } else {
+          setCoffeeSessionPhase("topic");
+        }
         await refreshConversations();
         return response.conversation;
       }
@@ -36652,6 +45284,7 @@ function HomeContent(): React.JSX.Element {
     if (coffeeBusy || coffeeAutoBusy) return;
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
+    resetCoffeeRhythm();
     abortCoffeeRequests();
     setCoffeeBusy(true);
     setCoffeeError(null);
@@ -36675,8 +45308,20 @@ function HomeContent(): React.JSX.Element {
       setCoffeeArrivedBotIds(groupIds);
       closeCoffeeTranscript();
       assignCoffeeSessionEndsAtMs(null);
-      setCoffeeSessionPhase("preview");
       setCoffeeAutoplayPausedValue(false);
+      setCoffeeActivePoll(null);
+      setCoffeePollResultsOpen(false);
+      setCoffeePollPanelMinimized(false);
+      if (response.conversation.messages.length > 0) {
+        setCoffeeSessionPhase("finished");
+        setCoffeeReplayActive(false);
+        setCoffeeReplayPlaying(false);
+        setCoffeeReplayMessageIndex(0);
+        setCoffeeReplayTypewriterLength(0);
+        setCoffeeReplayActionPanelBotId(null);
+      } else {
+        setCoffeeSessionPhase("preview");
+      }
     } catch (err) {
       setCoffeeError(err instanceof Error ? err.message : "Failed to open Coffee Session.");
     } finally {
@@ -36686,9 +45331,7 @@ function HomeContent(): React.JSX.Element {
   const joinPreviewedCoffeeSession = () => {
     if (!coffeeConversation || coffeeSessionPhase !== "preview") return;
     const conversationStarted = coffeeSessionHasStarted(coffeeConversation);
-    const isPaused = coffeePausedSessionIds.has(coffeeConversation.id);
-    const canResumeSession = isPaused || !conversationStarted;
-    if (!canResumeSession) return;
+    if (conversationStarted) return;
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
@@ -36710,19 +45353,11 @@ function HomeContent(): React.JSX.Element {
       setCoffeeAutoplayPausedValue(false);
       return;
     }
-    const pausedRemainingMs = coffeePausedSessionRemainingMsById[coffeeConversation.id];
-    if (isPaused && !(typeof pausedRemainingMs === "number" && Number.isFinite(pausedRemainingMs))) {
-      setCoffeeError("Could not restore the paused timer for this session.");
-      return;
-    }
-    const remainingMs = isPaused
-      ? Math.max(1000, pausedRemainingMs)
-      : coffeeSessionDurationMs(coffeeConversation);
-    const endsAt = Date.now() + remainingMs;
+    const endsAt = Date.now() + coffeeSessionDurationMs(coffeeConversation);
     markCoffeeSessionResumed(coffeeConversation.id);
     setCoffeeArrivedBotIds(groupIds);
     assignCoffeeSessionEndsAtMs(endsAt);
-    setCoffeeSessionPhase("live");
+    enterCoffeeLivePhase();
     closeCoffeeTranscript();
     setCoffeeAutoplayPausedValue(false);
     scheduleCoffeeAutonomousTurn(coffeeConversation.id, endsAt, true);
@@ -36759,7 +45394,7 @@ function HomeContent(): React.JSX.Element {
       }>(`/api/coffee/sessions/${encodeURIComponent(conversationId)}/continue`, {
         method: "POST",
         body: JSON.stringify({
-          preferredProvider: coffeeProvider,
+          preferredProvider: coffeeSessionProvider,
           userIsComposing: coffeeDraftRef.current.trim().length > 0,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
@@ -36782,11 +45417,9 @@ function HomeContent(): React.JSX.Element {
         includeCooldown: false,
         onReveal: () => {
           if (coffeeAutoplayPausedRef.current) return;
-          // Action-only replies (mainText empty after stripping `*…*`) are
-          // silent gestures, not spoken turns — don't auto-rotate to a
-          // follow-up speaker. The table waits for the user (or a manual
-          // director pick) to break the pause.
-          if (latestAssistantMessageIsActionOnly(response.conversation)) return;
+          // Never hard-stop autoplay on action-only turns; some models emit
+          // short `*gesture*` beats frequently, and pausing here can stall
+          // the whole table indefinitely.
           scheduleCoffeeAutonomousTurn(response.conversation.id, undefined, true);
         },
       });
@@ -36898,7 +45531,7 @@ function HomeContent(): React.JSX.Element {
       };
       const endsAt = coffeeSessionEndsAtMs ?? Date.now() + coffeeSessionDurationMs(nextConversation);
       assignCoffeeSessionEndsAtMs(endsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       queueCoffeeReveal({
         conversation: nextConversation,
         speakerBotId: speaker.id,
@@ -36935,10 +45568,19 @@ function HomeContent(): React.JSX.Element {
       pendingRevealLatestMessage?.role === "assistant" &&
       coffeePendingSpeakerBotId
     ) {
-      const revealTokens = tokenizeMessageReveal(pendingRevealLatestMessage.content);
+      const interruptedMainText = extractStageDirections(
+        clampCoffeeTableText(pendingRevealLatestMessage.content)
+      ).mainText;
+      const revealTokens = tokenizeMessageReveal(interruptedMainText);
+      const totalVisibleChars = Math.max(1, getBotMentionDisplayLength(interruptedMainText));
+      const visibleProgress = clampUnitInterval(
+        coffeeTypewriterLength > 0
+          ? coffeeTypewriterLength / totalVisibleChars
+          : COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS
+      );
       const visibleTokenCount = Math.max(
         1,
-        Math.min(revealTokens.length, Math.floor(revealTokens.length * 0.65))
+        Math.min(revealTokens.length, Math.round(revealTokens.length * visibleProgress))
       );
       playerInterruption = {
         interruptedMessageId: pendingRevealLatestMessage.id,
@@ -36972,7 +45614,7 @@ function HomeContent(): React.JSX.Element {
       activeEndsAt = Date.now() + coffeeSessionDurationMs(activeConversation);
       setCoffeeArrivedBotIds(groupIds);
       assignCoffeeSessionEndsAtMs(activeEndsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       setCoffeeAutoplayPausedValue(false);
     } else if (coffeeSessionPhase === "topic" && activeConversation?.id) {
       if (coffeeCommand.kind === "ok") {
@@ -37029,7 +45671,7 @@ function HomeContent(): React.JSX.Element {
       };
       const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(nextConversation);
       assignCoffeeSessionEndsAtMs(endsAt);
-      setCoffeeSessionPhase("live");
+      enterCoffeeLivePhase();
       queueCoffeeReveal({
         conversation: nextConversation,
         speakerBotId: speaker.id,
@@ -37038,13 +45680,18 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     setCoffeeBusy(true);
-    // Clear composer immediately so the room can show "thinking" feedback
-    // while the backend is still generating the turn.
     setCoffeeDraft("");
-    setCoffeeTurnRhythmState("botThinking");
     setCoffeeError(null);
     const directedSpeakerBotId = findCoffeeDirectedMentionBotId(trimmed);
     setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
+    coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
+      trimmed,
+      undefined
+    );
+    coffeePendingRevealAfterUserRef.current = null;
+    clearCoffeeRhythmTimers();
+    setCoffeeUserRevealText(trimmed);
+    setCoffeeTurnRhythmState("userTableTyping");
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
     try {
@@ -37059,7 +45706,7 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           conversationId: activeConversation.id,
           message: trimmed,
-          preferredProvider: coffeeProvider,
+          preferredProvider: coffeeSessionProvider,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(playerInterruption ? { playerInterruption } : {}),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
@@ -37089,7 +45736,7 @@ function HomeContent(): React.JSX.Element {
       if (coffeeSessionPhase !== "finished") {
         const endsAt = activeEndsAt ?? Date.now() + coffeeSessionDurationMs(response.conversation);
         assignCoffeeSessionEndsAtMs(endsAt);
-        setCoffeeSessionPhase("live");
+        enterCoffeeLivePhase();
         const userLine = extractCoffeeUserLineFromTurnMessages(response.conversation.messages);
         const revealArgs: CoffeePendingRevealQueueArgs = {
           conversation: response.conversation,
@@ -37097,23 +45744,19 @@ function HomeContent(): React.JSX.Element {
           includeCooldown: true,
           onReveal: () => {
             if (coffeeAutoplayPausedRef.current) return;
-            // Action-only replies (`*shrugs*` with no spoken line) are
-            // silent gestures and shouldn't trigger another bot to respond
-            // — let the table breathe until the user speaks again.
-            if (latestAssistantMessageIsActionOnly(response.conversation)) return;
+            // Action-only beats should not freeze the room. Keep the loop
+            // alive so the next bot can respond and carry the discussion.
             const lastWordMul = coffeeSessionSettingsRef.current.givePlayerLastWord ? 1.42 : 1;
             scheduleCoffeeAutonomousTurn(response.conversation.id, undefined, true, lastWordMul);
           },
         };
         if (userLine) {
-          coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
-            userLine,
-            undefined
-          );
-          coffeePendingRevealAfterUserRef.current = revealArgs;
-          clearCoffeeRhythmTimers();
-          setCoffeeUserRevealText(userLine);
-          setCoffeeTurnRhythmState("userTableTyping");
+          setCoffeePendingSpeakerBotId(response.speakerBotId);
+          if (coffeeShouldQueueAssistantRevealAfterUserTyping(coffeeTurnRhythmStateRef.current)) {
+            coffeePendingRevealAfterUserRef.current = revealArgs;
+          } else {
+            queueCoffeeReveal(revealArgs);
+          }
         } else {
           queueCoffeeReveal(revealArgs);
         }
@@ -37121,6 +45764,8 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setCoffeeDraft(trimmed);
+      coffeePendingRevealAfterUserRef.current = null;
+      setCoffeeUserRevealText("");
       setCoffeePendingSpeakerBotId(null);
       setCoffeeError(err instanceof Error ? err.message : "Failed to send.");
     } finally {
@@ -37139,56 +45784,131 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoBusy(false);
     setCoffeeAutoplayPausedValue(false);
     assignCoffeeSessionEndsAtMs(null);
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    coffeeSessionStartedAtRef.current = null;
   };
   const startCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    setCoffeeReplayTypewriterLength(0);
     setCoffeeReplayActive(true);
     setCoffeeReplayPlaying(true);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayActionPanelBotId(null);
     setCoffeeTurnRhythmState("idle");
   };
   const restartCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    setCoffeeReplayTypewriterLength(0);
     setCoffeeReplayActive(true);
     setCoffeeReplayPlaying(true);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayActionPanelBotId(null);
+  };
+  const finishCoffeeReplayRevealAt = (
+    conversation: CoffeeConversationState,
+    index: number
+  ): number => {
+    const nextIndex = clampCoffeeReplayMessageIndex(conversation.messages.length, index);
+    const message = conversation.messages[nextIndex];
+    if (!message) return nextIndex;
+    const fullLength = coffeeReplayDisplayLengthForMessage(message);
+    coffeeReplayTypewriterMessageKeyRef.current = coffeeReplayMessageKey(message, nextIndex);
+    coffeeReplayTypewriterLengthRef.current = fullLength;
+    setCoffeeReplayTypewriterLength(fullLength);
+    return nextIndex;
+  };
+  const seekCoffeeReplay = (index: number, options: { pause?: boolean } = {}) => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    if (options.pause !== false) {
+      setCoffeeReplayPlaying(false);
+    }
+    const nextIndex = finishCoffeeReplayRevealAt(coffeeConversation, index);
+    setCoffeeReplayActive(true);
+    setCoffeeReplayMessageIndex(nextIndex);
+  };
+  const stepCoffeeReplay = (delta: number) => {
+    if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayActive(true);
+    setCoffeeReplayMessageIndex((index) => {
+      const nextIndex = finishCoffeeReplayRevealAt(coffeeConversation, index + delta);
+      return nextIndex;
+    });
   };
   const exitCoffeeReplay = () => {
     if (coffeeReplayTimerRef.current) {
       clearTimeout(coffeeReplayTimerRef.current);
       coffeeReplayTimerRef.current = null;
     }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
     setCoffeeReplayActive(false);
     setCoffeeReplayPlaying(false);
     setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
   };
   const returnToCoffeeStart = () => {
     resetCoffeeToPicker();
   };
-  const exitCoffeeToHub = () => {
+  const coffeeSessionShouldDiscardOnExit = (
+    conversation: CoffeeConversationState | null,
+    phase: CoffeeSessionPhase
+  ): boolean => {
+    if (!conversation || phase === "finished" || phase === "preview") return false;
+    if (phase === "topic" || phase === "arriving") return true;
+    if (phase !== "live") return false;
+    const startedAt = coffeeSessionStartedAtRef.current;
+    if (startedAt == null) return false;
+    return Date.now() - startedAt <= COFFEE_DISCARD_ON_EXIT_WINDOW_MS;
+  };
+  const discardCoffeeConversation = async (sessionId: string) => {
+    markCoffeeSessionResumed(sessionId);
+    try {
+      await deleteConversation(sessionId);
+    } catch (err) {
+      console.warn("[coffee] failed to discard short session", err);
+    }
+  };
+  const exitCoffeeToHub = async () => {
+    const conversation = coffeeConversation;
+    const sessionId = conversation?.id ?? null;
+    const shouldDiscard = coffeeSessionShouldDiscardOnExit(conversation, coffeeSessionPhase);
     stopActiveCoffeeSession();
+    if (sessionId) {
+      if (shouldDiscard) {
+        await discardCoffeeConversation(sessionId);
+      } else {
+        markCoffeeSessionResumed(sessionId);
+      }
+    }
     navigateToView("hub");
   };
-  const exitCoffeeSessionToSelectedView = () => {
+  const exitCoffeeSessionToSelectedView = async () => {
     if (!coffeeConversation) {
       resetCoffeeToPicker();
       return;
     }
+    const conversation = coffeeConversation;
     const groupIds = coffeeConversation.botGroupIds ?? [];
-    const shouldPauseSession =
-      coffeeSessionPhase !== "finished" &&
-      coffeeSessionPhase !== "preview" &&
-      coffeeSessionHasStarted(coffeeConversation);
-    if (shouldPauseSession) {
-      const fallbackRemainingMs = coffeeSessionDurationMs(coffeeConversation);
-      const remainingMs = coffeeSessionEndsAtRef.current
-        ? Math.max(1000, coffeeSessionEndsAtRef.current - Date.now())
-        : fallbackRemainingMs;
-      markCoffeeSessionPaused(coffeeConversation.id, remainingMs);
-    } else {
-      markCoffeeSessionResumed(coffeeConversation.id);
+    const sessionId = coffeeConversation.id;
+    const shouldDiscard = coffeeSessionShouldDiscardOnExit(conversation, coffeeSessionPhase);
+    if (!shouldDiscard) {
+      markCoffeeSessionResumed(sessionId);
     }
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
@@ -37198,39 +45918,37 @@ function HomeContent(): React.JSX.Element {
     setCoffeeAutoBusy(false);
     setCoffeeAutoplayPausedValue(false);
     setCoffeeError(null);
-    setCoffeeSelectedSessionId(coffeeConversation.id);
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeSelectedGroupId(coffeeConversation.coffeeGroupId ?? null);
     setCoffeeSelectedSeatBotIds(
       coffeeConversation.coffeeSeatBotIds ?? coffeeSeatsFromBotIds(groupIds)
     );
     setCoffeeArrivedBotIds(groupIds);
     closeCoffeeTranscript();
     assignCoffeeSessionEndsAtMs(null);
-    setCoffeeSessionPhase("preview");
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeeSessionPhase("selecting");
+    coffeeSessionStartedAtRef.current = null;
+    if (shouldDiscard) {
+      await discardCoffeeConversation(sessionId);
+    }
   };
   const deleteCoffeeSession = async (sessionId: string) => {
     if (coffeeConversation?.id === sessionId || coffeeSelectedSessionId === sessionId) {
       resetCoffeeToPicker();
     }
+    markCoffeeSessionResumed(sessionId);
     await deleteConversation(sessionId);
-  };
-  const toggleCoffeeGroupCollapsed = (groupId: string) => {
-    if (groupId === coffeeSelectedGroupId) return;
-    setCoffeeCollapsedGroupIds((current) => {
-      const next = new Set(current);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
   };
   const renderCoffeeGroupRow = (group: CoffeeGroupState): React.JSX.Element => {
     const groupBots = coffeeGroupBots(group);
     const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
     const isSelectedGroup = group.id === coffeeSelectedGroupId;
     const selected = isSelectedGroup && !coffeeConversation;
-    const collapsed = !isSelectedGroup && coffeeCollapsedGroupIds.has(group.id);
+    const collapsed = coffeeCollapsedGroupIds.has(group.id);
     const sessionListId = `coffee-group-sessions-${group.id}`;
     return (
       <li
@@ -37239,27 +45957,6 @@ function HomeContent(): React.JSX.Element {
         data-current={selected ? "true" : undefined}
         data-collapsed={collapsed ? "true" : undefined}
       >
-        <button
-          type="button"
-          className={styles.coffeeGroupCollapseButton}
-          aria-label={`${collapsed ? "Expand" : "Collapse"} Coffee Group ${group.name} sessions`}
-          aria-expanded={!collapsed}
-          aria-controls={groupSessions.length > 0 ? sessionListId : undefined}
-          disabled={isSelectedGroup}
-          title={
-            isSelectedGroup
-              ? "Current Coffee Group stays expanded"
-              : collapsed
-                ? "Show saved sessions"
-                : "Hide saved sessions"
-          }
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleCoffeeGroupCollapsed(group.id);
-          }}
-        >
-          <span className={styles.coffeeGroupCollapseChevron} aria-hidden="true" />
-        </button>
         <button
           type="button"
           className={styles.coffeeGroupDeleteButton}
@@ -37278,6 +45975,18 @@ function HomeContent(): React.JSX.Element {
           className={styles.coffeeGroupButton}
           style={coffeeGroupVisualStyle(group)}
           aria-current={selected ? "page" : undefined}
+          aria-expanded={groupSessions.length > 0 ? !collapsed : undefined}
+          aria-controls={groupSessions.length > 0 ? sessionListId : undefined}
+          aria-label={
+            groupSessions.length === 0
+              ? `Open Coffee Group ${group.name}`
+              : `Select and expand Coffee Group ${group.name}`
+          }
+          title={
+            groupSessions.length === 0
+              ? "Open this Coffee Group."
+              : "Select this Coffee Group and show its saved sessions."
+          }
           onClick={() => openCoffeeGroup(group)}
         >
           <span className={styles.coffeeSessionDots} aria-hidden="true">
@@ -37923,13 +46632,9 @@ function HomeContent(): React.JSX.Element {
     const conversationActive = coffeeConversation !== null;
     const previewingSession = coffeeSessionPhase === "preview";
     const previewSessionStarted = coffeeSessionHasStarted(coffeeConversation);
-    const previewSessionPaused =
-      previewingSession && coffeeConversation
-        ? coffeePausedSessionIds.has(coffeeConversation.id)
-        : false;
     const previewCanResumeSession =
       previewingSession && coffeeConversation
-        ? previewSessionPaused || !previewSessionStarted
+        ? !previewSessionStarted
         : false;
     const arrivedBotIds = new Set(coffeeArrivedBotIds);
     const directorTapEnabled =
@@ -37939,13 +46644,44 @@ function HomeContent(): React.JSX.Element {
       !coffeeBusy &&
       !coffeeAutoBusy;
     const messages = coffeeConversation?.messages ?? [];
+    const clampedReplayMessageIndex = clampCoffeeReplayMessageIndex(
+      messages.length,
+      coffeeReplayMessageIndex
+    );
+    const replayVisibleThreadMessages =
+      coffeeReplayActive && messages.length > 0
+        ? coffeeReplayVisibleMessages(messages, clampedReplayMessageIndex)
+        : [];
     const replayMessage =
       coffeeReplayActive && messages.length > 0
-        ? messages[Math.min(coffeeReplayMessageIndex, messages.length - 1)]
+        ? messages[clampedReplayMessageIndex]
+        : null;
+    const replayMessageDisplayLength = replayMessage
+      ? coffeeReplayDisplayLengthForMessage(replayMessage)
+      : 0;
+    const replayMessageInProgress =
+      coffeeReplayActive &&
+      replayMessage != null &&
+      replayMessageDisplayLength > 0 &&
+      coffeeReplayTypewriterLength < replayMessageDisplayLength;
+    const replayCompletedThreadMessages =
+      coffeeReplayActive && messages.length > 0
+        ? messages.slice(
+            0,
+            replayMessageInProgress
+              ? clampedReplayMessageIndex
+              : clampedReplayMessageIndex + 1
+          )
+        : [];
+    const tableTimelineMessages =
+      coffeeReplayActive && messages.length > 0 ? replayCompletedThreadMessages : messages;
+    const replaySpeakerBot =
+      replayMessage?.role === "assistant" && replayMessage.botName
+        ? coffeeMentionBotPicks.find((bot) => bot.name === replayMessage.botName) ?? null
         : null;
     const latestReadableMessage = (() => {
-      for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const candidate = messages[index];
+      for (let index = tableTimelineMessages.length - 1; index >= 0; index -= 1) {
+        const candidate = tableTimelineMessages[index];
         if (coffeeMessageHasTableText(candidate)) return candidate;
       }
       return null;
@@ -37953,13 +46689,25 @@ function HomeContent(): React.JSX.Element {
     const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingLatestMessage =
       pendingMessages.length > 0 ? pendingMessages[pendingMessages.length - 1] : null;
-    const tableTypingBot =
+    const liveTableTypingBot =
       coffeeTurnRhythmState === "tableTyping" &&
       pendingLatestMessage?.role === "assistant"
         ? coffeeBotsById.get(coffeePendingSpeakerBotId ?? "")
         : null;
-    const userLineTyping = coffeeTurnRhythmState === "userTableTyping";
-    const centerMessage = replayMessage
+    const replayTypingBot =
+      replayMessageInProgress && replayMessage?.role === "assistant"
+        ? replaySpeakerBot
+        : null;
+    const tableTypingBot = liveTableTypingBot ?? replayTypingBot;
+    const liveUserLineTyping = coffeeTurnRhythmState === "userTableTyping";
+    const replayUserLineTyping = replayMessageInProgress && replayMessage?.role === "user";
+    const userLineTyping = liveUserLineTyping || replayUserLineTyping;
+    const activeTypewriterLength = replayMessageInProgress
+      ? coffeeReplayTypewriterLength
+      : coffeeTypewriterLength;
+    const centerMessage = replayMessageInProgress
+      ? null
+      : replayMessage
       ? coffeeMessageHasTableText(replayMessage)
         ? replayMessage
         : null
@@ -37980,16 +46728,128 @@ function HomeContent(): React.JSX.Element {
       (!userLineTyping && centerMessage?.role === "assistant"
         ? centerMessage.botGlyph
         : null);
-    const tableTypingAssistantFullText =
-      pendingLatestMessage?.role === "assistant"
+    const tableTypingAssistantRawText =
+      liveTableTypingBot && pendingLatestMessage?.role === "assistant"
         ? clampCoffeeTableText(pendingLatestMessage.content)
+        : replayTypingBot && replayMessage?.role === "assistant"
+          ? clampCoffeeTableText(replayMessage.content)
         : "";
-    const userTypingDisplayText = clampCoffeeTableText(coffeeUserRevealText);
-    const centerMessageDisplayText = centerMessage ? clampCoffeeTableText(centerMessage.content) : "";
+    const tableTypingAssistantDisplayText = coffeeTableDisplayText(tableTypingAssistantRawText);
+    const userTypingDisplayText = liveUserLineTyping
+      ? coffeeTableDisplayText(coffeeUserRevealText)
+      : replayUserLineTyping && replayMessage
+        ? coffeeTableDisplayText(replayMessage.content)
+        : coffeeTableDisplayText(coffeeUserRevealText);
+    const centerMessageDisplayText = centerMessage ? coffeeTableDisplayText(centerMessage.content) : "";
+    const synopsisMessages =
+      coffeeSessionPhase === "finished" && !coffeeReplayActive
+        ? messages.filter(
+            (message) =>
+              message.role === "system" &&
+              message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+          )
+        : [];
+    const centerFeedSourceMessages =
+      coffeeSessionPhase === "finished" && !coffeeReplayActive
+        ? synopsisMessages
+        : coffeeReplayActive && messages.length > 0
+          ? replayCompletedThreadMessages
+          : messages;
+    const baseCenterFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
+      .filter((message): message is CoffeeConversationMessage => coffeeMessageHasTableText(message))
+      .slice(-COFFEE_CENTER_FEED_MAX_LINES)
+      .map((message) => {
+        const assistantBot =
+          message.role === "assistant" && message.botName
+            ? coffeeMentionBotPicks.find((bot) => bot.name === message.botName)
+            : undefined;
+        return {
+          id: message.id,
+          role: message.role,
+          speaker:
+            message.role === "assistant"
+              ? (message.botName ?? "Bot")
+              : message.role === "user"
+                ? "You"
+                : "PRISM",
+          text: coffeeTableDisplayText(message.content),
+          botGlyph: message.role === "assistant" ? message.botGlyph : undefined,
+          botId: assistantBot?.id,
+          botTextColor:
+            message.role === "assistant"
+              ? coffeeBotTranscriptTextColor(assistantBot?.color ?? message.botColor, resolvedTheme)
+              : undefined,
+        };
+      });
+    const pendingSubmittedUserLineVisible = coffeePendingSubmittedUserLineVisible({
+      state: coffeeTurnRhythmState,
+      userRevealText: coffeeUserRevealText,
+      sessionFinished: coffeeSessionPhase === "finished",
+    });
+    const interruptedCenterLine: CoffeeCenterFeedLine | null =
+      coffeeInterruptedSnippet &&
+      !centerFeedSourceMessages.some(
+        (message) => message.id === coffeeInterruptedSnippet.sourceMessageId
+      )
+        ? (() => {
+            const interruptedBot = coffeeBotsById.get(coffeeInterruptedSnippet.botId);
+            return {
+              id: `coffee-interrupted-${coffeeInterruptedSnippet.sourceMessageId}`,
+              role: "assistant" as const,
+              speaker: interruptedBot?.name ?? "Bot",
+              text: coffeeTableDisplayText(coffeeInterruptedSnippet.snippet),
+              botGlyph: interruptedBot?.glyph ?? undefined,
+              botId: coffeeInterruptedSnippet.botId,
+              botTextColor: coffeeBotTranscriptTextColor(interruptedBot?.color, resolvedTheme),
+            };
+          })()
+        : null;
+    const centerFeedLines: CoffeeCenterFeedLine[] = [
+      ...baseCenterFeedLines,
+      ...(interruptedCenterLine ? [interruptedCenterLine] : []),
+      ...(pendingSubmittedUserLineVisible
+        ? [
+            {
+              id: "coffee-pending-user-line",
+              role: "user" as const,
+              speaker: "You",
+              text: coffeeTableDisplayText(coffeeUserRevealText),
+            },
+          ]
+        : []),
+    ].slice(-COFFEE_CENTER_FEED_MAX_LINES);
+    const isLiveCenterTranscript =
+      coffeeSessionPhase === "live" || coffeeSessionPhase === "finished";
+    const hideCenterSpeakerChrome =
+      isLiveCenterTranscript &&
+      (centerFeedLines.length > 0 ||
+        tableTypingBot != null ||
+        userLineTyping ||
+        centerMessage != null);
+    const centerFeedSpeakerKey = (line: CoffeeCenterFeedLine): string =>
+      line.role === "assistant" ? (line.botId ?? line.speaker) : line.role;
+    const centerFallbackText =
+      coffeeSessionPhase === "arriving"
+        ? "Bots will arrive one at a time."
+        : coffeeSessionPhase === "topic"
+          ? "Choose a topic to begin."
+          : coffeeSessionPhase === "live"
+            ? "The table is listening."
+            : coffeeSessionPhase === "preview"
+              ? previewCanResumeSession
+                ? "Fresh table. Join when you are ready."
+                : "Reviewing a completed session."
+              : coffeeSessionPhase === "finished" && !coffeeReplayActive
+                ? "Preparing session synopsis..."
+              : coffeeSelectedGroup
+                ? "This group is ready."
+                : "Select bots below, then create a Coffee Group.";
     const showThinkingIndicator =
       !userLineTyping &&
       coffeeTurnRhythmState === "botThinking";
     const thinkingBotId = showThinkingIndicator ? coffeePendingSpeakerBotId : null;
+    const activeTableSpeakerBotId =
+      tableTypingBot?.id ?? thinkingBotId ?? replaySpeakerBot?.id ?? null;
     /**
      * Bots referenced by name in the most recently delivered message (or in the
      * line the user is mid-typing). Powers the small `!` "you've been called on"
@@ -37997,10 +46857,15 @@ function HomeContent(): React.JSX.Element {
      */
     const notifiedBotIds = (() => {
       const out = new Set<string>();
-      if (!conversationActive || coffeeSessionPhase === "finished") return out;
+      if (!conversationActive || (coffeeSessionPhase === "finished" && !coffeeReplayActive)) {
+        return out;
+      }
       const sources: string[] = [];
-      if (userLineTyping && coffeeUserRevealText) sources.push(coffeeUserRevealText);
-      if (tableTypingBot && tableTypingAssistantFullText) sources.push(tableTypingAssistantFullText);
+      if (userLineTyping) {
+        const userSource = liveUserLineTyping ? coffeeUserRevealText : userTypingDisplayText;
+        if (userSource) sources.push(userSource);
+      }
+      if (tableTypingBot && tableTypingAssistantRawText) sources.push(tableTypingAssistantRawText);
       if (centerMessageDisplayText) sources.push(centerMessageDisplayText);
       const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
       for (const source of sources) {
@@ -38027,17 +46892,17 @@ function HomeContent(): React.JSX.Element {
     })();
     const latestSeatActionsByBotId = (() => {
       const out = new Map<string, string[]>();
-      if (!conversationActive || coffeeSessionPhase === "finished") return out;
+      if (!conversationActive) return out;
       const botIdByName = new Map<string, string>(
         coffeeMentionBotPicks.map((bot) => [bot.name, bot.id])
       );
-      for (const message of messages) {
+      for (const message of tableTimelineMessages) {
         if (message.role !== "assistant" || !message.botName) continue;
         const botId = botIdByName.get(message.botName);
         if (!botId) continue;
         const { actions } = extractStageDirections(message.content);
         const actionHistory = actions
-          .map((action) => action.trim())
+          .map((action) => normalizeCoffeeSeatActionBadgeText(action))
           .filter((action) => action.length > 0);
         if (actionHistory.length > 0) {
           const previous = out.get(botId) ?? [];
@@ -38062,23 +46927,23 @@ function HomeContent(): React.JSX.Element {
           previous: string | null;
         }
       >();
-      if (!tableTypingBot || !tableTypingAssistantFullText) return out;
-      const cues = extractStageDirectionCues(tableTypingAssistantFullText);
+      if (!tableTypingBot || !tableTypingAssistantRawText) return out;
+      const cues = extractStageDirectionCues(tableTypingAssistantRawText);
       if (cues.length === 0) return out;
       let activeCueIndex = -1;
       for (let index = 0; index < cues.length; index += 1) {
-        if (coffeeTypewriterLength >= cues[index]!.revealAtDisplayLength) {
+        if (activeTypewriterLength >= cues[index]!.revealAtDisplayLength) {
           activeCueIndex = index;
         }
       }
       if (activeCueIndex >= 0) {
-        const current = cues[activeCueIndex]!.action.trim();
+        const current = normalizeCoffeeSeatActionBadgeText(cues[activeCueIndex]!.action);
         if (current.length > 0) {
-          const previousRaw =
-            activeCueIndex > 0 ? cues[activeCueIndex - 1]!.action.trim() : "";
+          const previousRaw = activeCueIndex > 0 ? cues[activeCueIndex - 1]!.action : "";
+          const previousNormalized = normalizeCoffeeSeatActionBadgeText(previousRaw);
           out.set(tableTypingBot.id, {
             current,
-            previous: previousRaw.length > 0 ? previousRaw : null,
+            previous: previousNormalized.length > 0 ? previousNormalized : null,
           });
         }
       }
@@ -38118,6 +46983,76 @@ function HomeContent(): React.JSX.Element {
       seatIndex,
       layoutIndex,
     }));
+    const coffeePollTotalVotes = coffeeActivePoll
+      ? coffeeActivePoll.votes.filter((vote) => vote.kind === "option").length
+      : 0;
+    const coffeePollTopVoteCount = coffeeActivePoll
+      ? Math.max(0, ...coffeeActivePoll.tallies.map((tally) => tally.voteCount))
+      : 0;
+    const coffeePollWinningOptions = coffeeActivePoll
+      ? coffeeActivePoll.tallies
+          .filter((tally) => tally.voteCount === coffeePollTopVoteCount && coffeePollTopVoteCount > 0)
+          .map((tally) => tally.option)
+      : [];
+    const coffeePollVoteByBotId = new Map(
+      (coffeeActivePoll?.votes ?? [])
+        .filter(
+          (vote) =>
+            vote.botId !== COFFEE_POLL_PLAYER_VOTER_ID && vote.voterKind !== "player"
+        )
+        .map((vote) => [vote.botId, vote])
+    );
+    const coffeePollPlayerVote = coffeeActivePoll?.votes.find(
+      (vote) => vote.voterKind === "player" || vote.botId === COFFEE_POLL_PLAYER_VOTER_ID
+    );
+    const coffeePollPlayerLabel = user?.displayName?.trim() || "You";
+    const coffeePollSessionRemainingMs =
+      coffeeSessionEndsAtMs != null ? Math.max(0, coffeeSessionEndsAtMs - coffeeSessionClockMs) : null;
+    const coffeePollInFinalizeWindow =
+      typeof coffeePollSessionRemainingMs === "number" &&
+      coffeePollSessionRemainingMs <= COFFEE_POLL_FINALIZE_REMAINING_MS;
+    const coffeePollIsBinary =
+      coffeeActivePoll != null && coffeeActivePoll.options.length === COFFEE_POLL_OPTION_COUNT_MIN;
+    const coffeePollInSession =
+      coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live";
+    const coffeePollBubbleVisible =
+      coffeeActivePoll !== null &&
+      coffeePollPanelMinimized &&
+      !coffeePollResultsOpen &&
+      conversationActive &&
+      coffeePollInSession;
+    const minimizeCoffeePollPanel = (): void => {
+      if (!coffeePollInSession) {
+        setCoffeePollPanelMinimized(false);
+        setCoffeePollResultsOpen(false);
+        return;
+      }
+      setCoffeePollPanelMinimized(true);
+      setCoffeePollResultsOpen(false);
+    };
+    const replayActionReviewEnabled =
+      coffeeReplayActive && !coffeeReplayPlaying && coffeeSessionPhase === "finished";
+    const replayActionPanelBot = coffeeReplayActionPanelBotId
+      ? coffeeBotsById.get(coffeeReplayActionPanelBotId) ?? null
+      : null;
+    const replayActionPanelActions = replayActionPanelBot
+      ? collectCoffeeReplayActionsForBot(
+          replayVisibleThreadMessages,
+          replayActionPanelBot.name
+        )
+          .map((action) => ({
+            ...action,
+            action: normalizeCoffeeSeatActionBadgeText(action.action),
+          }))
+          .filter((action) => action.action.length > 0)
+      : [];
+    const handleCoffeeReplayWheel = (event: React.WheelEvent<HTMLElement>): void => {
+      if (!replayActionReviewEnabled || messages.length === 0) return;
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (delta === 0) return;
+      event.preventDefault();
+      stepCoffeeReplay(delta > 0 ? 1 : -1);
+    };
     return (
       <section
         className={styles.coffeeStage}
@@ -38125,8 +47060,10 @@ function HomeContent(): React.JSX.Element {
         data-compact={compactCoffeeStage ? "true" : undefined}
         data-group-ready={coffeeGroupReadyToStart ? "true" : undefined}
         data-preview={previewingSession ? "true" : undefined}
+        data-replay-active={coffeeReplayActive ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
         aria-label="Coffee table"
+        onWheel={handleCoffeeReplayWheel}
       >
         <div className={styles.coffeeStageHeader}>
           <div className={styles.coffeeStageStatus} aria-live="polite">
@@ -38148,93 +47085,160 @@ function HomeContent(): React.JSX.Element {
                     : undefined
                 }
                 data-start-ready={coffeeGroupReadyToStart ? "true" : undefined}
+                data-live-transcript={isLiveCenterTranscript ? "true" : undefined}
               >
-                <span className={styles.coffeeCenterIcon} aria-hidden="true">
-                  {centerBotGlyph ? (
-                    <BotGlyph name={centerBotGlyph} size={16} strokeWidth={2} />
-                  ) : (
-                    "☕"
-                  )}
-                </span>
-                <strong>
-                  {tableTypingBot || userLineTyping || centerMessage
-                    ? centerSpeaker
-                    : "The table is waiting"}
-                </strong>
-                <div className={styles.coffeeCenterMessageScroll}>
-                  <p>
+                {!hideCenterSpeakerChrome ? (
+                  <>
+                    <span className={styles.coffeeCenterIcon} aria-hidden="true">
+                      {centerBotGlyph ? (
+                        <BotGlyph name={centerBotGlyph} size={16} strokeWidth={2} />
+                      ) : (
+                        "☕"
+                      )}
+                    </span>
+                    <strong>
+                      {tableTypingBot || userLineTyping || centerMessage
+                        ? centerSpeaker
+                        : "The table is waiting"}
+                    </strong>
+                  </>
+                ) : null}
+                <div className={styles.coffeeCenterMessageScroll} ref={coffeeCenterMessageScrollRef}>
+                  <div className={styles.coffeeCenterFeed}>
+                    {centerFeedLines.map((line, lineIndex) => {
+                      const previousLine =
+                        lineIndex > 0 ? centerFeedLines[lineIndex - 1] : undefined;
+                      const speakerChanged =
+                        previousLine != null &&
+                        centerFeedSpeakerKey(previousLine) !== centerFeedSpeakerKey(line);
+                      return (
+                        <p
+                          key={line.id}
+                          className={styles.coffeeCenterFeedLine}
+                          data-role={line.role}
+                          data-speaker-break={speakerChanged ? "true" : undefined}
+                          style={
+                            line.botTextColor
+                              ? ({ "--coffee-center-line-color": line.botTextColor } as React.CSSProperties)
+                              : undefined
+                          }
+                        >
+                          {!isLiveCenterTranscript ? (
+                            <span className={styles.coffeeCenterFeedSpeaker}>
+                              {line.speaker}:{" "}
+                            </span>
+                          ) : null}
+                          {renderPlainTextWithBotMentions(line.text, {
+                            keyPrefix: line.id,
+                            botsById: chatEnabledBotMentionMap,
+                            resolvedTheme,
+                            normalizeAccentForTheme,
+                            speakerBotId: line.botId,
+                          })}
+                        </p>
+                      );
+                    })}
                     {tableTypingBot ? (
-                      <span className={styles.coffeeTableTypingLine}>
-                        <span className={styles.coffeeTypewriter} aria-hidden="true">
-                          {revealPlainTextWithBotMentions(
-                            tableTypingAssistantFullText,
-                            coffeeTypewriterLength,
-                            {
-                              keyPrefix: `bot-typing-${tableTypingBot.id}`,
-                              botsById: chatEnabledBotMentionMap,
-                              resolvedTheme,
-                              normalizeAccentForTheme,
-                              speakerBotId: tableTypingBot.id,
-                            }
-                          )}
-                          {coffeeTypewriterLength <
-                          getBotMentionDisplayLength(
-                            extractStageDirections(tableTypingAssistantFullText).mainText
-                          ) ? (
-                            <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
-                              │
-                            </span>
-                          ) : null}
+                      <p
+                        className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}
+                        data-role="assistant"
+                        style={
+                          tableTypingBot.color
+                            ? ({
+                                "--coffee-center-line-color": coffeeBotTranscriptTextColor(
+                                  tableTypingBot.color,
+                                  resolvedTheme
+                                ),
+                              } as React.CSSProperties)
+                            : undefined
+                        }
+                        data-speaker-break={
+                          centerFeedLines.length > 0 &&
+                          centerFeedSpeakerKey(centerFeedLines[centerFeedLines.length - 1]!) !==
+                            tableTypingBot.id
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        {!isLiveCenterTranscript ? (
+                          <span className={styles.coffeeCenterFeedSpeaker}>
+                            {tableTypingBot.name}:{" "}
+                          </span>
+                        ) : null}
+                        <span className={styles.coffeeTableTypingLine}>
+                          <span className={styles.coffeeTypewriter} aria-hidden="true">
+                            {revealPlainTextWithBotMentions(
+                              tableTypingAssistantDisplayText,
+                              activeTypewriterLength,
+                              {
+                                keyPrefix:
+                                  replayMessageInProgress && replayMessage
+                                    ? `replay-bot-typing-${replayMessage.id}`
+                                    : `bot-typing-${tableTypingBot.id}`,
+                                botsById: chatEnabledBotMentionMap,
+                                resolvedTheme,
+                                normalizeAccentForTheme,
+                                speakerBotId: tableTypingBot.id,
+                              }
+                            )}
+                            {activeTypewriterLength <
+                            getBotMentionDisplayLength(tableTypingAssistantDisplayText) ? (
+                              <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
+                                │
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
                         </span>
-                        <span className={styles.srOnly}>{`${tableTypingBot.name} is speaking.`}</span>
-                      </span>
+                      </p>
                     ) : userLineTyping ? (
-                      <span className={styles.coffeeTableTypingLine}>
-                        <span className={styles.coffeeTypewriter} aria-hidden="true">
-                          {revealPlainTextWithBotMentions(
-                            userTypingDisplayText,
-                            coffeeTypewriterLength,
-                            {
-                              keyPrefix: "user-typing",
-                              botsById: chatEnabledBotMentionMap,
-                              resolvedTheme,
-                              normalizeAccentForTheme,
-                            }
-                          )}
-                          {coffeeTypewriterLength <
-                          getBotMentionDisplayLength(
-                            extractStageDirections(userTypingDisplayText).mainText
-                          ) ? (
-                            <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
-                              │
-                            </span>
-                          ) : null}
+                      <p
+                        className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineTyping}`}
+                        data-role="user"
+                        data-speaker-break={
+                          centerFeedLines.length > 0 &&
+                          centerFeedSpeakerKey(centerFeedLines[centerFeedLines.length - 1]!) !==
+                            "user"
+                            ? "true"
+                            : undefined
+                        }
+                      >
+                        {!isLiveCenterTranscript ? (
+                          <span className={styles.coffeeCenterFeedSpeaker}>You: </span>
+                        ) : null}
+                        <span className={styles.coffeeTableTypingLine}>
+                          <span className={styles.coffeeTypewriter} aria-hidden="true">
+                            {revealPlainTextWithBotMentions(
+                              userTypingDisplayText,
+                              activeTypewriterLength,
+                              {
+                                keyPrefix:
+                                  replayMessageInProgress && replayMessage
+                                    ? `replay-user-typing-${replayMessage.id}`
+                                    : "user-typing",
+                                botsById: chatEnabledBotMentionMap,
+                                resolvedTheme,
+                                normalizeAccentForTheme,
+                              }
+                            )}
+                            {activeTypewriterLength <
+                            getBotMentionDisplayLength(
+                              extractStageDirections(userTypingDisplayText).mainText
+                            ) ? (
+                              <span className={styles.coffeeTypewriterCaret} aria-hidden="true">
+                                │
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className={styles.srOnly}>You are speaking.</span>
                         </span>
-                        <span className={styles.srOnly}>You are speaking.</span>
-                      </span>
-                    ) : centerMessage
-                      ? renderPlainTextWithBotMentions(centerMessageDisplayText, {
-                          keyPrefix: centerMessage.id,
-                          botsById: chatEnabledBotMentionMap,
-                          resolvedTheme,
-                          normalizeAccentForTheme,
-                          // Self-name auto-coloring is acceptable here — the
-                          // strong speaker label above already wears the same color.
-                        })
-                      : coffeeSessionPhase === "arriving"
-                        ? "Bots will arrive one at a time."
-                        : coffeeSessionPhase === "topic"
-                          ? "Choose a topic to begin."
-                        : coffeeSessionPhase === "live"
-                          ? "The table is listening."
-                          : coffeeSessionPhase === "preview"
-                            ? previewCanResumeSession
-                              ? "This session is paused. Resume when you are ready."
-                              : "Reviewing a completed session."
-                            : coffeeSelectedGroup
-                              ? "This group is ready."
-                              : "Select bots below, then create a Coffee Group."}
-                  </p>
+                      </p>
+                    ) : centerFeedLines.length === 0 ? (
+                      <p className={`${styles.coffeeCenterFeedLine} ${styles.coffeeCenterFeedLineFallback}`}>
+                        {centerFallbackText}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 {coffeeSessionPhase === "selecting" && !coffeeSelectedGroup && (
                   <button
@@ -38275,9 +47279,7 @@ function HomeContent(): React.JSX.Element {
                       onClick={joinPreviewedCoffeeSession}
                     >
                       {previewCanResumeSession
-                        ? previewSessionPaused
-                          ? "Resume Coffee Session →"
-                          : "Join Coffee Session →"
+                        ? "Join Coffee Session →"
                         : "Review Coffee Session"}
                     </button>
                   </div>
@@ -38286,50 +47288,21 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.coffeeFinishedRecap}>
                     <p className={styles.coffeeFinishedRecapCaption}>
                       {coffeeReplayActive
-                        ? "Replay mode — watching the saved session back."
-                        : "Session ended. Export it, replay it, or open Table talk."}
+                        ? "Replay mode — watching this session back."
+                        : coffeeConversationHasSessionSynopsis(coffeeConversation)
+                          ? "Session ended. Review the synopsis or watch the table back."
+                          : "Session ended. Building the synopsis..."}
                     </p>
-                    <div
-                      className={`${styles.coffeeReplayControls} ${styles.coffeeFinishedRecapControls}`}
-                    >
+                    {!coffeeReplayActive ? (
                       <button
                         type="button"
-                        onClick={exitCoffeeSessionToSelectedView}
-                        title="Exit Coffee Session and stop autonomous replies"
+                        className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                        disabled={messages.length === 0}
+                        onClick={startCoffeeReplay}
                       >
-                        Exit session
+                        View replay
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void exportCoffeeSession(coffeeConversation)}
-                      >
-                        Export
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          coffeeReplayActive
-                            ? setCoffeeReplayPlaying((playing) => !playing)
-                            : startCoffeeReplay()
-                        }
-                      >
-                        {coffeeReplayActive
-                          ? coffeeReplayPlaying
-                            ? "Pause replay"
-                            : "Play replay"
-                          : "Replay"}
-                      </button>
-                      {coffeeReplayActive ? (
-                        <>
-                          <button type="button" onClick={restartCoffeeReplay}>
-                            Restart
-                          </button>
-                          <button type="button" onClick={exitCoffeeReplay}>
-                            Exit replay
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -38356,19 +47329,22 @@ function HomeContent(): React.JSX.Element {
                         {topic}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={styles.coffeeTopicChip}
+                      data-kind="poll"
+                      disabled={coffeeBusy}
+                      onClick={() => setCoffeeOpeningPollModalOpen(true)}
+                    >
+                      Start with a poll
+                    </button>
                   </div>
                 </div>
               ) : null}
             </div>
           </div>
           {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
-            const interruptedSeatSnippet =
-              coffeeInterruptedSnippet?.botId === bot.id
-                ? coffeeInterruptedSnippet
-                : null;
-            const isTableTypingThisSeat =
-              coffeeTurnRhythmState === "tableTyping" &&
-              coffeePendingSpeakerBotId === bot.id;
+            const isTableTypingThisSeat = tableTypingBot?.id === bot.id;
             const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
             const seatLiveActionBadgeText = seatTypingActionState?.current ?? null;
             const seatLastActionHistory = latestSeatActionsByBotId.get(bot.id) ?? [];
@@ -38392,10 +47368,15 @@ function HomeContent(): React.JSX.Element {
                     ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
                   : null;
             const pendingAssistantMood =
-              pendingLatestMessage?.role === "assistant"
+              liveTableTypingBot && pendingLatestMessage?.role === "assistant"
                 ? pendingLatestMessage.moodKey
+                : replayTypingBot && replayMessage?.role === "assistant"
+                  ? replayMessage.moodKey
                 : undefined;
-            const lastBotMood = lastCoffeeAssistantMoodKeyForBotName(messages, bot.name);
+            const lastBotMood = lastCoffeeAssistantMoodKeyForBotName(
+              tableTimelineMessages,
+              bot.name
+            );
             const socialSnapshot = coffeeConversation?.coffeeBotSocialById?.[bot.id];
             const heuristicMood = coffeeSeatSocialHeuristicMood(socialSnapshot);
             const moodDevSlot = COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex];
@@ -38408,9 +47389,10 @@ function HomeContent(): React.JSX.Element {
                   )
                 : moodDevSlot;
             const mouthOpenWhileTyping = isTableTypingThisSeat
-              ? Math.floor(coffeeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
+              ? Math.floor(activeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
                 0
               : false;
+            const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
             const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, mouthOpenWhileTyping);
             const isTopHeadSeat = coffeeSeatIsTopHead(
@@ -38419,6 +47401,7 @@ function HomeContent(): React.JSX.Element {
               layoutIndex,
               seatIndex
             );
+            const seatInteractive = directorTapEnabled || replayActionReviewEnabled;
             const coffeeHeadPlateStyle = isTopHeadSeat
               ? ({
                   ["--coffee-plate-emoji-face-scale-y" as string]:
@@ -38428,10 +47411,12 @@ function HomeContent(): React.JSX.Element {
                         seatCount: visibleCoffeeSeats.length,
                         visibleSeats: coffeeGazeVisibleSeats,
                         headBotId: bot.id,
-                        coffeeTurnRhythmState,
-                        coffeePendingSpeakerBotId,
+                        coffeeTurnRhythmState: tableTypingBot
+                          ? "tableTyping"
+                          : coffeeTurnRhythmState,
+                        coffeePendingSpeakerBotId: tableTypingBot?.id ?? coffeePendingSpeakerBotId,
                         headIsSpeaking: isTableTypingThisSeat,
-                        messages,
+                        messages: tableTimelineMessages,
                         botNameToId: coffeeGazeNameToId,
                       })
                     ),
@@ -38448,9 +47433,24 @@ function HomeContent(): React.JSX.Element {
                 data-seat-count={visibleCoffeeSeats.length}
                 data-prism-mood={prismSeatMood}
                 data-director-enabled={directorTapEnabled ? "true" : undefined}
+                data-replay-review-enabled={replayActionReviewEnabled ? "true" : undefined}
+                data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
+                data-table-dimmed={
+                  activeTableSpeakerBotId != null && activeTableSpeakerBotId !== bot.id
+                    ? "true"
+                    : undefined
+                }
                 style={coffeeSeatVisualStyle(bot, seatIndex, layoutIndex, visibleCoffeeSeats.length)}
-                disabled={!directorTapEnabled}
-                onClick={() => void triggerDirectedCoffeeTurn(bot.id)}
+                disabled={!seatInteractive}
+                onClick={() => {
+                  if (replayActionReviewEnabled) {
+                    setCoffeeReplayActionPanelBotId((current) =>
+                      current === bot.id ? null : bot.id
+                    );
+                    return;
+                  }
+                  void triggerDirectedCoffeeTurn(bot.id);
+                }}
                 onContextMenu={(event) => {
                   if (shouldAllowNativeContextMenu(event.target)) return;
                   event.preventDefault();
@@ -38460,23 +47460,28 @@ function HomeContent(): React.JSX.Element {
                 aria-label={
                   directorTapEnabled
                     ? `Ask ${bot.name} to speak now`
+                    : replayActionReviewEnabled
+                      ? `Show ${bot.name} actions so far`
                     : `${bot.name} at the coffee table`
                 }
                 title={
                   directorTapEnabled
                     ? `Tap to make ${bot.name} speak`
+                    : replayActionReviewEnabled
+                      ? `Show ${bot.name} actions so far`
                     : "Pause autoplay to direct this bot"
                 }
               >
                 <div className={styles.coffeeSeatCluster}>
                   <div className={styles.coffeeSeatPlate} style={coffeeHeadPlateStyle}>
                     <CoffeeSeatPlateEmoji
-                      key={`${coffeeSessionJoinedDock ? "j" : "p"}-${bot.id}`}
-                      enabled={coffeeSessionJoinedDock}
+                      key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
+                      enabled={coffeeSessionJoinedDock || coffeeReplayActive}
                       isTalking={isTableTypingThisSeat}
                       scheduleKey={bot.id}
                       baseText={seatPlateGlyph.text}
                       rotateDeg={seatPlateGlyph.rotateDeg}
+                      voicePreset={seatVoicePreset}
                       className={styles.coffeeSeatPlateEmoji}
                     />
                   </div>
@@ -38490,11 +47495,6 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.coffeeCup} aria-hidden="true" />
                   </div>
                 </div>
-                {interruptedSeatSnippet ? (
-                  <div className={styles.coffeeSeatInterruptedBubble}>
-                    {interruptedSeatSnippet.snippet}
-                  </div>
-                ) : null}
                 {seatActionGhostText ? (
                   <div
                     className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
@@ -38556,6 +47556,39 @@ function HomeContent(): React.JSX.Element {
               </button>
             );
           })}
+          {replayActionReviewEnabled && replayActionPanelBot ? (
+            <aside
+              className={styles.coffeeReplayActionPanel}
+              style={coffeeBotVisualStyle(replayActionPanelBot)}
+              aria-label={`${replayActionPanelBot.name} actions so far`}
+            >
+              <header>
+                <div>
+                  <span>Actions so far</span>
+                  <strong>{replayActionPanelBot.name}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCoffeeReplayActionPanelBotId(null)}
+                  aria-label="Close actions panel"
+                >
+                  ×
+                </button>
+              </header>
+              {replayActionPanelActions.length > 0 ? (
+                <ul>
+                  {replayActionPanelActions.map((action, index) => (
+                    <li key={`${action.messageId ?? action.messageIndex}-${index}`}>
+                      <span>{action.action}</span>
+                      <small>{`Line ${action.messageIndex + 1}`}</small>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No actions yet.</p>
+              )}
+            </aside>
+          ) : null}
         </div>
         {coffeeSessionJoinedDock ? (
           <div className={styles.coffeeAutoplayDock}>
@@ -38604,6 +47637,288 @@ function HomeContent(): React.JSX.Element {
             >
               <CoffeeAutoplayGlyph paused={coffeeAutoplayPaused} dock />
             </button>
+          </div>
+        ) : null}
+        {coffeeActivePoll && coffeePollResultsOpen && conversationActive ? (
+          <div
+            ref={coffeePollPanelRef}
+            className={styles.coffeePollResultsPanel}
+            style={{
+              left: `${coffeePollPanelPosition.x}px`,
+              top: `${coffeePollPanelPosition.y}px`,
+            }}
+          >
+            <div
+              className={styles.coffeePollResultsHeader}
+              onPointerDown={startCoffeePollPanelDrag}
+              onPointerMove={dragCoffeePollPanel}
+              onPointerUp={endCoffeePollPanelDrag}
+              onPointerCancel={endCoffeePollPanelDrag}
+            >
+              <div>
+                <span>Live poll</span>
+                <h4>{coffeeActivePoll.question}</h4>
+              </div>
+              <button
+                type="button"
+                aria-label="Hide Coffee poll results"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={minimizeCoffeePollPanel}
+              >
+                ×
+              </button>
+            </div>
+            <div className={styles.coffeePollResultsBody}>
+              <p className={styles.coffeePollResultsSummary}>
+                {coffeeActivePoll.status === "closed"
+                  ? coffeePollWinningOptions.length > 0
+                    ? `Result: ${coffeePollWinningOptions.join(" / ")}`
+                    : "Poll closed with no votes."
+                  : coffeeActivePoll.status === "collecting" || coffeePollInFinalizeWindow
+                    ? "Last call — any bot still thinking must vote, but minds can still change."
+                    : "Vote anytime — bots choose as they arrive, and your pick can still sway the table."}
+              </p>
+              {coffeeActivePoll.status !== "closed" && coffeeActivePoll.status !== "cancelled" ? (
+                <div className={styles.coffeePollPlayerVoteBlock}>
+                  <div className={styles.coffeePollPlayerVoteHeader}>
+                    <strong>{coffeePollPlayerLabel}</strong>
+                    <small>
+                      {coffeePollPlayerVote?.kind === "option" &&
+                      typeof coffeePollPlayerVote.optionIndex === "number"
+                        ? `Voted: ${coffeeActivePoll.options[coffeePollPlayerVote.optionIndex]}`
+                        : "Pick an option whenever you are ready"}
+                    </small>
+                  </div>
+                  <div
+                    className={styles.coffeePollPlayerOptionRow}
+                    data-binary={coffeePollIsBinary ? "true" : undefined}
+                  >
+                    {coffeeActivePoll.options.map((option, optionIndex) => {
+                      const selected =
+                        coffeePollPlayerVote?.kind === "option" &&
+                        coffeePollPlayerVote.optionIndex === optionIndex;
+                      return (
+                        <button
+                          key={optionIndex}
+                          type="button"
+                          className={styles.coffeePollPlayerOption}
+                          data-selected={selected ? "true" : undefined}
+                          disabled={
+                            coffeePollVoteBusy ||
+                            !coffeeConversation ||
+                            coffeeActivePoll.status === "cancelled"
+                          }
+                          onClick={() => {
+                            if (!coffeeConversation) return;
+                            void castCoffeePlayerPollVote(
+                              coffeeConversation.id,
+                              coffeeActivePoll.id,
+                              optionIndex
+                            );
+                          }}
+                        >
+                          {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                className={styles.coffeePollResultsTallyList}
+                data-binary={coffeePollIsBinary ? "true" : undefined}
+              >
+                {coffeeActivePoll.tallies.map((tally) => {
+                  const pct =
+                    coffeePollTotalVotes > 0
+                      ? Math.round((tally.voteCount / coffeePollTotalVotes) * 100)
+                      : 0;
+                  return (
+                    <div key={tally.optionIndex} className={styles.coffeePollResultsTally}>
+                      <div className={styles.coffeePollResultsTallyTop}>
+                        <span>{tally.option}</span>
+                        <strong>{tally.voteCount}</strong>
+                      </div>
+                      <div className={styles.coffeePollResultsBar} aria-hidden="true">
+                        <span style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className={styles.coffeePollResultsVoteGrid}>
+                <div className={styles.coffeePollResultsVote}>
+                  <span className={styles.coffeePollPlayerDot} aria-hidden="true" />
+                  <div>
+                    <strong>{coffeePollPlayerLabel}</strong>
+                    <small>
+                      {coffeePollPlayerVote?.kind === "option" &&
+                      typeof coffeePollPlayerVote.optionIndex === "number"
+                        ? coffeeActivePoll.options[coffeePollPlayerVote.optionIndex]
+                        : "No vote yet"}
+                    </small>
+                  </div>
+                </div>
+                {(coffeeConversation?.botGroupIds ?? []).map((botId) => {
+                  const bot = coffeeBotsById.get(botId);
+                  const vote = coffeePollVoteByBotId.get(botId);
+                  const picked =
+                    vote?.kind === "option" && typeof vote.optionIndex === "number"
+                      ? coffeeActivePoll.options[vote.optionIndex]
+                      : null;
+                  return (
+                    <div key={botId} className={styles.coffeePollResultsVote}>
+                      <span className={styles.coffeeSessionDot} style={bot ? coffeeBotVisualStyle(bot) : undefined} />
+                      <div>
+                        <strong>{bot?.name ?? "Bot"}</strong>
+                        <small>{picked ?? formatCoffeePollBotVoteLabel(vote, coffeeActivePoll.options)}</small>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {coffeePollBubbleVisible ? (
+          <button
+            ref={coffeePollBubbleRef}
+            type="button"
+            className={styles.coffeePollBubble}
+            aria-label="Open Coffee poll"
+            title="Open Coffee poll"
+            style={{
+              left: `${coffeePollPanelPosition.x}px`,
+              top: `${coffeePollPanelPosition.y}px`,
+            }}
+            onPointerDown={startCoffeePollPanelDrag}
+            onPointerMove={dragCoffeePollPanel}
+            onPointerUp={endCoffeePollPanelDrag}
+            onPointerCancel={endCoffeePollPanelDrag}
+            onClick={() => {
+              if (coffeePollPanelSuppressClickRef.current) {
+                coffeePollPanelSuppressClickRef.current = false;
+                return;
+              }
+              setCoffeePollPanelMinimized(false);
+              setCoffeePollResultsOpen(true);
+            }}
+          >
+            ?
+          </button>
+        ) : null}
+        {coffeeOpeningPollModalOpen && coffeeSessionPhase === "topic" && coffeeConversation ? (
+          <div
+            className={styles.coffeePollModalBackdrop}
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setCoffeeOpeningPollModalOpen(false);
+              }
+            }}
+          >
+            <form
+              className={styles.coffeePollModal}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Start Coffee poll topic"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createCoffeePollTopic(coffeeConversation, coffeePendingArrivalScenario);
+              }}
+            >
+              <header className={styles.coffeePollModalHeader}>
+                <div>
+                  <span>Poll topic</span>
+                  <h4>Ask the table first</h4>
+                  <p>Bots choose as they arrive, then may revise while the table argues.</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close poll topic modal"
+                  onClick={() => setCoffeeOpeningPollModalOpen(false)}
+                >
+                  ×
+                </button>
+              </header>
+              <div className={styles.coffeePollModalBody}>
+                <label>
+                  <span>Question</span>
+                  <input
+                    type="text"
+                    value={coffeeOpeningPollQuestion}
+                    onChange={(event) => setCoffeeOpeningPollQuestion(event.target.value)}
+                    placeholder="What should guide today's table?"
+                    maxLength={180}
+                    autoFocus
+                  />
+                </label>
+                <div className={styles.coffeePollModalOptionSection}>
+                  <span className={styles.coffeePollModalOptionLabel}>Choices</span>
+                  <div className={styles.coffeePollOptionChipList}>
+                    {coffeeOpeningPollOptions.map((option, index) => (
+                      <span
+                        key={index}
+                        className={styles.coffeePollOptionChip}
+                        data-filled={option.trim().length > 0 ? "true" : undefined}
+                      >
+                        <input
+                          type="text"
+                          value={option}
+                          onChange={(event) =>
+                            updateCoffeeOpeningPollOption(index, event.target.value)
+                          }
+                          placeholder={COFFEE_POLL_OPTION_PLACEHOLDERS[index] ?? "Choice"}
+                          maxLength={80}
+                          aria-label={`Poll choice ${index + 1}`}
+                        />
+                        {coffeeOpeningPollOptions.length > COFFEE_POLL_OPTION_COUNT_MIN ? (
+                          <button
+                            type="button"
+                            className={styles.coffeePollOptionChipRemove}
+                            aria-label={`Remove ${COFFEE_POLL_OPTION_PLACEHOLDERS[index] ?? "choice"}`}
+                            onClick={() => removeCoffeeOpeningPollOption(index)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </span>
+                    ))}
+                    {coffeeOpeningPollOptions.length < COFFEE_POLL_OPTION_COUNT_MAX ? (
+                      <button
+                        type="button"
+                        className={styles.coffeePollOptionAddChip}
+                        aria-label="Add poll choice"
+                        onClick={addCoffeeOpeningPollOption}
+                      >
+                        +
+                      </button>
+                    ) : null}
+                  </div>
+                  <small className={styles.coffeePollModalOptionHint}>
+                    Tap + for up to {COFFEE_POLL_OPTION_COUNT_MAX} choices. Only filled chips become
+                    poll options — two choices reads as a binary 50/50 table question.
+                  </small>
+                </div>
+                {!coffeeOpeningPollPayload() ? (
+                  <p className={styles.coffeePollModalHint}>
+                    Add a question and at least {COFFEE_POLL_OPTION_COUNT_MIN} filled choice chips.
+                  </p>
+                ) : null}
+              </div>
+              <footer className={styles.coffeePollModalActions}>
+                <button
+                  type="button"
+                  onClick={() => setCoffeeOpeningPollModalOpen(false)}
+                  disabled={coffeeBusy}
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={coffeeBusy || !coffeeOpeningPollPayload()}>
+                  {coffeeBusy ? "Starting..." : "Start poll topic"}
+                </button>
+              </footer>
+            </form>
           </div>
         ) : null}
       </section>
@@ -38807,15 +48122,14 @@ function HomeContent(): React.JSX.Element {
   const renderCoffeeShell = (): React.JSX.Element => {
     const conversationActive = coffeeConversation !== null;
     /** Live at the table (not merely previewing a saved session from the sidebar). */
-    const coffeeSessionJoined = conversationActive && coffeeSessionPhase !== "preview";
-    const coffeePreviewPaused =
-      coffeeSessionPhase === "preview" &&
-      coffeeConversation != null &&
-      coffeePausedSessionIds.has(coffeeConversation.id);
+    const coffeeSessionJoined =
+      conversationActive &&
+      coffeeSessionPhase !== "preview" &&
+      (coffeeSessionPhase !== "finished" || coffeeReplayActive);
     const coffeePreviewCanResume =
       coffeeSessionPhase === "preview" &&
       coffeeConversation != null &&
-      (coffeePreviewPaused || !coffeeSessionHasStarted(coffeeConversation));
+      !coffeeSessionHasStarted(coffeeConversation);
     /** Picker ("new session") or any loaded conversation — transcript affordance is available. */
     const coffeeTranscriptToggleEnabled =
       conversationActive || coffeeSessionPhase === "selecting";
@@ -38828,7 +48142,7 @@ function HomeContent(): React.JSX.Element {
           ? "Choose 2-5 bots to invite to the PRISM coffee table."
           : coffeeSessionPhase === "preview"
             ? coffeePreviewCanResume
-              ? "Session paused. Resume when you are ready."
+              ? "Fresh table. Join when you are ready."
               : "Reviewing a completed session."
             : coffeeSessionPhase === "topic"
               ? "Pick a shared topic — the session timer starts after you choose."
@@ -38851,12 +48165,19 @@ function HomeContent(): React.JSX.Element {
         coffeeSessionPhase === "topic" ||
         coffeeSessionPhase === "arriving");
     const coffeeComposerVisible = coffeeComposerEnabled;
+    const coffeeFinishedControlsVisible =
+      conversationActive && coffeeSessionPhase === "finished" && coffeeReplayActive;
+    const coffeeFinishedControlMessages = coffeeConversation?.messages ?? [];
+    const coffeeFinishedReplayMessageIndex = clampCoffeeReplayMessageIndex(
+      coffeeFinishedControlMessages.length,
+      coffeeReplayMessageIndex
+    );
     const coffeeComposerPlaceholder =
       coffeeSessionPhase === "finished"
         ? "This Coffee Session has ended."
         : coffeeSessionPhase === "preview"
           ? coffeePreviewCanResume
-            ? "Send a message to resume this table..."
+            ? "Send a message to join this table..."
             : "Review mode — this completed session is read-only."
           : coffeeSessionPhase === "topic"
             ? "Pick a chip above, or type a topic and send…"
@@ -39018,24 +48339,26 @@ function HomeContent(): React.JSX.Element {
                 {renderCoffeeProviderModeToggle()}
                 {renderCoffeeHeaderModelPicker()}
               </div>
-              {coffeeSessionJoined ? (
-                <button
-                  type="button"
-                  className={styles.coffeeExitSessionButton}
-                  onClick={exitCoffeeSessionToSelectedView}
-                  title="Exit Coffee Session and stop autonomous replies"
-                >
-                  Exit session
-                </button>
+              {coffeeSessionJoined && coffeeSessionPhase !== "finished" ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.coffeeExitSessionButton}
+                    onClick={() => void exitCoffeeSessionToSelectedView()}
+                    title="Exit Coffee Session and stop autonomous replies"
+                  >
+                    Exit session
+                  </button>
+                </>
               ) : coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
                 <button
                   type="button"
                   className={styles.coffeeExitSessionButton}
                   disabled={coffeeBusy}
                   onClick={joinPreviewedCoffeeSession}
-                  title={coffeePreviewPaused ? "Resume this Coffee Session" : "Join this Coffee Session"}
+                  title="Join this Coffee Session"
                 >
-                  {coffeePreviewPaused ? "Resume session" : "Join session"}
+                  Join session
                 </button>
               ) : null}
               <button
@@ -39075,7 +48398,7 @@ function HomeContent(): React.JSX.Element {
                     if (activeBot) {
                       openActiveBotCustomizer();
                     } else {
-                      openRightPanel("bots");
+                      openFreshBotCustomizer();
                     }
                   }}
                   aria-label={
@@ -39112,7 +48435,7 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.headerIconButton}
-                onClick={exitCoffeeToHub}
+                onClick={() => void exitCoffeeToHub()}
                 aria-label="Back to Hub"
                 title="Back to Hub"
                 data-glyph-tooltip="Back to Hub"
@@ -39218,6 +48541,151 @@ function HomeContent(): React.JSX.Element {
           </p>
         )}
 
+          {coffeeFinishedControlsVisible && (
+            <section
+              className={`${styles.coffeeComposer} ${styles.coffeeReplayComposerControls}`}
+              aria-label="Coffee replay controls"
+            >
+              <div className={styles.coffeeReplayTimelineRow}>
+                <label className={styles.coffeeReplayScrubber}>
+                  <span className={styles.srOnly}>Replay position</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, coffeeFinishedControlMessages.length - 1)}
+                    value={coffeeFinishedReplayMessageIndex}
+                    disabled={!coffeeReplayActive || coffeeFinishedControlMessages.length <= 1}
+                    onChange={(event) => seekCoffeeReplay(Number(event.currentTarget.value))}
+                  />
+                </label>
+                <span className={styles.coffeeReplayPosition}>
+                  {coffeeFinishedControlMessages.length > 0
+                    ? `${coffeeFinishedReplayMessageIndex + 1} / ${coffeeFinishedControlMessages.length}`
+                    : "0 / 0"}
+                </span>
+              </div>
+              <div className={styles.coffeeReplayControlRail}>
+                <div className={styles.coffeeReplayUtilityControls}>
+                  <button
+                    type="button"
+                    className={styles.coffeeReplayIconButton}
+                    onClick={() => void exitCoffeeSessionToSelectedView()}
+                    aria-label="Exit Coffee Session"
+                    title="Exit Coffee Session"
+                    data-glyph-tooltip="Exit Coffee Session"
+                  >
+                    <LogOut aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.coffeeReplayIconButton}
+                    onClick={() => void exportCoffeeSession(coffeeConversation)}
+                    aria-label="Export Coffee Session"
+                    title="Export Coffee Session"
+                    data-glyph-tooltip="Export Coffee Session"
+                  >
+                    <Download aria-hidden="true" />
+                  </button>
+                </div>
+                <div className={styles.coffeeReplayTransportControls}>
+                  {coffeeReplayActive ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.coffeeReplayIconButton}
+                        onClick={restartCoffeeReplay}
+                        disabled={coffeeFinishedControlMessages.length === 0}
+                        aria-label="Restart replay"
+                        title="Restart replay"
+                        data-glyph-tooltip="Restart replay"
+                      >
+                        <RotateCcw aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.coffeeReplayIconButton}
+                        onClick={() => stepCoffeeReplay(-1)}
+                        disabled={coffeeFinishedReplayMessageIndex <= 0}
+                        aria-label="Previous message"
+                        title="Previous message"
+                        data-glyph-tooltip="Previous message"
+                      >
+                        <SkipBack aria-hidden="true" />
+                      </button>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`${styles.coffeeReplayIconButton} ${styles.coffeeReplayPrimaryButton}`}
+                    onClick={() =>
+                      coffeeReplayActive
+                        ? setCoffeeReplayPlaying((playing) => !playing)
+                        : startCoffeeReplay()
+                    }
+                    disabled={coffeeFinishedControlMessages.length === 0}
+                    aria-label={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                    title={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                    data-glyph-tooltip={
+                      coffeeReplayActive
+                        ? coffeeReplayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Start replay"
+                    }
+                  >
+                    {coffeeReplayActive && coffeeReplayPlaying ? (
+                      <Pause aria-hidden="true" />
+                    ) : (
+                      <Play aria-hidden="true" />
+                    )}
+                  </button>
+                  {coffeeReplayActive ? (
+                    <button
+                      type="button"
+                      className={styles.coffeeReplayIconButton}
+                      onClick={() => stepCoffeeReplay(1)}
+                      disabled={
+                        coffeeFinishedReplayMessageIndex >=
+                        coffeeFinishedControlMessages.length - 1
+                      }
+                      aria-label="Next message"
+                      title="Next message"
+                      data-glyph-tooltip="Next message"
+                    >
+                      <SkipForward aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+                <div className={styles.coffeeReplayUtilityControls} data-align="right">
+                  {coffeeReplayActive ? (
+                    <button
+                      type="button"
+                      className={styles.coffeeReplayIconButton}
+                      onClick={exitCoffeeReplay}
+                      aria-label="Exit replay"
+                      title="Exit replay"
+                      data-glyph-tooltip="Exit replay"
+                    >
+                      <X aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          )}
+
           {coffeeComposerVisible && (
             <form
               ref={coffeeComposerFormRef}
@@ -39282,7 +48750,6 @@ function HomeContent(): React.JSX.Element {
             : null}
         {renderCoffeeGroupSettingsModal()}
 
-        {renderDevToolsButton()}
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
@@ -39296,6 +48763,725 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderStoryProviderModeToggle = (): React.ReactNode => {
+    const lockedByProtectedBot = storyAnyOfflineProtected;
+    const responseMode = responseModeForProvider(storyEffectiveProvider);
+    const isLocal = responseMode === "local";
+    const nextMode = nextResponseMode(responseMode);
+    const nextResolvedProvider = resolveModelChoiceForResponseMode({
+      responseMode: nextMode,
+      providerPreference: storyEffectiveProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        storyModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    }).provider;
+    const activeModeLabel = responseModeDisplayLabel(responseMode);
+    const nextModeLabel = responseModeDisplayLabel(nextMode);
+    const providerDisabled =
+      !settings || storyBusy || storySession?.status === "generating" || lockedByProtectedBot;
+    const lockTitle = lockedByProtectedBot
+      ? "Locked to LOCAL — at least one selected bot is set to Offline only."
+      : !settings
+        ? "Loading settings."
+        : null;
+    return (
+      <div
+        className={`${styles.modeControl} ${
+          providerDisabled ? styles.modeControlLocked : ""
+        } ${styles.chatHeaderModeToggle}`}
+        data-protected={lockedByProtectedBot ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={`${styles.modeToggleTrack} ${
+            providerDisabled ? styles.modeToggleTrackLocked : ""
+          }`}
+          data-response-mode={isLocal ? "local" : "online"}
+          data-protected={lockedByProtectedBot ? "true" : undefined}
+          onClick={() => {
+            if (providerDisabled) return;
+            setStoryProvider(nextResolvedProvider);
+            setStoryProviderTouched(true);
+          }}
+          aria-label={
+            lockTitle
+              ? `${lockTitle} Toggle disabled.`
+              : `Story generation mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
+          }
+          aria-pressed={!isLocal}
+          aria-disabled={providerDisabled}
+          title={lockTitle ?? `Switch Story generation to ${nextModeLabel}`}
+          disabled={providerDisabled}
+        >
+          <span
+            className={`${styles.modeThumb} ${
+              isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
+            }`}
+          >
+            {lockedByProtectedBot ? (
+              <span className={styles.modeThumbLockGlyph} aria-hidden="true">
+                🔒
+              </span>
+            ) : (
+              <span
+                className={`${styles.providerDot} ${
+                  isLocal ? styles.providerDotLocal : styles.providerDotOnline
+                }`}
+                aria-hidden="true"
+              />
+            )}
+            <span className={styles.modeThumbLabel}>{responseModeShortLabel(responseMode)}</span>
+          </span>
+        </button>
+      </div>
+    );
+  };
+
+  const renderStoryGenerationControls = (): React.ReactNode => (
+    <div className={`${styles.chatHeaderModelPicker} ${styles.storyGenerationControls}`}>
+      {renderStoryProviderModeToggle()}
+      <ComposerModelPicker
+        value={storyEffectiveModelChoice}
+        onChange={(nextChoice) => {
+          if (storyResponseMode === "local") return;
+          const applied = applyOnlineModelChoice({
+            currentChoices: storyModelChoiceByProvider,
+            nextChoice,
+            onlineOptions: onlineChatModelOptions,
+            providerPreference: storyEffectiveProvider,
+          });
+          setStoryModelChoiceByProvider((previous) =>
+            applyOnlineModelChoice({
+              currentChoices: previous,
+              nextChoice,
+              onlineOptions: onlineChatModelOptions,
+              providerPreference: storyEffectiveProvider,
+            }).choices
+          );
+          setStoryProvider(applied.provider);
+          setStoryProviderTouched(true);
+        }}
+        options={storyModelOptions}
+        provider={storyResponseMode === "local" ? "local" : "online"}
+        disabled={!settings || storyBusy || storySession?.status === "generating"}
+        title={`Story model (${responseModeShortLabel(storyResponseMode)})`}
+        ariaLabel={`Story generation model for ${
+          storyResponseMode === "local" ? "local" : "online"
+        } episodes`}
+        placement="down"
+        minMenuWidthPx={180}
+        showAutoOption={storyResponseMode !== "local"}
+        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+          settings,
+          storyResponseMode === "local" ? "local" : "online"
+        )}
+      />
+    </div>
+  );
+
+  const renderStorySessionRow = (session: StorySessionSummary): React.JSX.Element => {
+    const active = storySelectedSessionId === session.id;
+    return (
+      <li key={session.id} className={styles.storySessionItem}>
+        <button
+          type="button"
+          className={styles.storySessionButton}
+          data-active={active ? "true" : undefined}
+          onClick={() => void openStorySession(session.id)}
+        >
+          <span className={styles.storySessionTitle}>{session.title}</span>
+          <span className={styles.storySessionMeta}>
+            {storySessionStatusLabel(session.status)}
+            {session.model ? ` · ${session.model}` : ""}
+          </span>
+        </button>
+        <button
+          type="button"
+          className={styles.storySessionDelete}
+          onClick={() => void deleteStorySessionById(session)}
+          aria-label={`Delete ${session.title}`}
+          title={`Delete ${session.title}`}
+          disabled={storyBusy}
+        >
+          <IconTrash />
+        </button>
+      </li>
+    );
+  };
+
+  const renderStorySetup = (): React.JSX.Element => {
+    const selectedCount = storySelectedBotIds.length;
+    const offlineNames = storySelectedBots
+      .filter((bot) => bot.online_enabled === 0)
+      .map((bot) => bot.name);
+    return (
+      <section className={styles.storySetup} aria-label="Create Story session">
+        <div className={styles.storySetupIntro}>
+          <p className={styles.storyEyebrow}>New Story</p>
+          <h2>Choose the NPC cast</h2>
+          <p>
+            Select {STORY_BOT_COUNT_MIN}-{STORY_BOT_COUNT_MAX} chat-enabled bots as NPCs,
+            add an optional premise, then PRISM builds the episode before play starts.
+          </p>
+        </div>
+        <div className={styles.storyThemeBadge}>
+          <span>Theme</span>
+          <strong>{PRISM_DEFAULT_STORY_THEME.label}</strong>
+          <small>Bundled · immutable</small>
+        </div>
+        <div className={styles.storyProviderBar}>
+          <span>
+            Generation
+            {offlineNames.length > 0 ? (
+              <small>Local locked for {offlineNames.join(", ")}</small>
+            ) : null}
+          </span>
+          {renderStoryGenerationControls()}
+        </div>
+        <label className={styles.storySearchBar}>
+          <span aria-hidden="true">⌕</span>
+          <input
+            value={storySearch}
+            onChange={(event) => setStorySearch(event.target.value)}
+            placeholder="Search bots..."
+            aria-label="Search bots for Story Mode"
+          />
+        </label>
+        {storyBotsLibrary.length === 0 ? (
+          <p className={styles.storyEmpty}>
+            No chat-enabled bots are available yet. Create one from the Bots panel.
+          </p>
+        ) : (
+          <ul
+            className={styles.storyBotGrid}
+            role="listbox"
+            aria-label="Bots available for Story Mode"
+          >
+            {storyFilteredBots.map((bot) => {
+              const selected = storySelectedBotIds.includes(bot.id);
+              const disabled = !selected && selectedCount >= STORY_BOT_COUNT_MAX;
+              return (
+                <li key={bot.id}>
+                  <button
+                    type="button"
+                    className={styles.storyBotPill}
+                    data-selected={selected ? "true" : undefined}
+                    disabled={disabled}
+                    style={botAccentStyle(bot.color, resolvedTheme)}
+                    onClick={() => {
+                      setStorySelectedBotIds((current) => {
+                        if (current.includes(bot.id)) {
+                          return current.filter((id) => id !== bot.id);
+                        }
+                        if (current.length >= STORY_BOT_COUNT_MAX) return current;
+                        return [...current, bot.id];
+                      });
+                    }}
+                    aria-selected={selected}
+                  >
+                    <span className={styles.storyBotGlyph} aria-hidden="true">
+                      <BotGlyph name={bot.glyph} />
+                    </span>
+                    <span>
+                      <strong>{bot.name}</strong>
+                      <small>{bot.online_enabled === 0 ? "LOCAL only" : "Chat-enabled"}</small>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <label className={styles.storyPremiseField}>
+          <span>Premise</span>
+          <textarea
+            value={storyPremise}
+            onChange={(event) => setStoryPremise(event.target.value)}
+            placeholder="Blank means surprise me."
+            maxLength={900}
+          />
+        </label>
+        <div className={styles.storySetupFooter}>
+          <span>
+            {selectedCount}/{STORY_BOT_COUNT_MAX} bots · {responseModeShortLabel(storyResponseMode)}
+            {storyModelOverride ? ` · ${storyModelOverride}` : " · Auto model"}
+          </span>
+          <button
+            type="button"
+            className={styles.storyPrimaryButton}
+            disabled={!storySelectionValid || storyBusy}
+            onClick={() => void createStorySessionFromDraft()}
+          >
+            {storyBusy ? "Starting..." : "Generate Episode"}
+          </button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderStoryLoading = (): React.JSX.Element => (
+    <section className={styles.storyStage} aria-label="Generating Story episode">
+      <img
+        src={storyThemeAssetUrl(null, STORY_PROJECTION_FALLBACK_ASSET_ID)}
+        alt=""
+        aria-hidden="true"
+        className={styles.storyProjectedImage}
+      />
+      <div className={styles.storyProjectionMask} aria-hidden="true" />
+      <div className={styles.storyLoadingPanel} role="status" aria-live="polite">
+        <span className={styles.storyLoadingPulse} aria-hidden="true" />
+        <p className={styles.storyEyebrow}>Projecting Episode</p>
+        <h2>{storySession?.title ?? "Story Mode"}</h2>
+        <p>PRISM is generating the full manifest before play begins.</p>
+      </div>
+    </section>
+  );
+
+  const renderStoryFailed = (): React.JSX.Element => (
+    <section className={styles.storySetup} aria-label="Story generation failed">
+      <div className={styles.storySetupIntro}>
+        <p className={styles.storyEyebrow}>Generation Failed</p>
+        <h2>{storySession?.title ?? "Story Mode"}</h2>
+        <p>{storySession?.error ?? storyError ?? "The model did not return a valid Story manifest."}</p>
+      </div>
+      <div className={styles.storyProviderBar}>
+        <span>Retry with</span>
+        {renderStoryGenerationControls()}
+      </div>
+      <div className={styles.storySetupFooter}>
+        <button
+          type="button"
+          className={styles.storySecondaryButton}
+          onClick={() => {
+            setStorySelectedBotIds(storySession?.botIds ?? []);
+            setStoryPremise(storySession?.premise ?? "");
+            resetStoryToSetup();
+          }}
+        >
+          Retry Setup
+        </button>
+      </div>
+    </section>
+  );
+
+  const renderStoryMapPanel = (episode: StoryEpisodeManifest): React.JSX.Element | null => {
+    if (!storyMapOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story map">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Map</p>
+            <h2>Regional Sketch</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryMapOpen(false)}
+            aria-label="Close map"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <div className={styles.storyMapCanvas}>
+          {episode.locations.map((location) => {
+            const discovered = storyDiscoveredLocationIds.has(location.id);
+            const current = location.id === storyCurrentLocation?.id;
+            return (
+              <button
+                key={location.id}
+                type="button"
+                className={styles.storyMapNode}
+                data-discovered={discovered ? "true" : undefined}
+                data-current={current ? "true" : undefined}
+                style={{
+                  left: `${location.x * 100}%`,
+                  top: `${location.y * 100}%`,
+                }}
+                disabled={!discovered || storyBusy || current}
+                onClick={() => void travelStoryLocation(location.id)}
+              >
+                {discovered ? location.name : "???"}
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+    );
+  };
+
+  const renderStoryInventoryPanel = (): React.JSX.Element | null => {
+    if (!storyInventoryOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story inventory">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Inventory</p>
+            <h2>Items</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryInventoryOpen(false)}
+            aria-label="Close inventory"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        {storyInventoryItems.length === 0 ? (
+          <p className={styles.storyEmpty}>No items collected.</p>
+        ) : (
+          <ul className={styles.storyInventoryGrid}>
+            {storyInventoryItems.map((item) => (
+              <li key={item.id} className={styles.storyItemCard}>
+                <span className={styles.storyItemGlyph}>{storyItemGlyph(item)}</span>
+                <strong>{item.name}</strong>
+                <small>{item.description}</small>
+              </li>
+            ))}
+          </ul>
+        )}
+      </aside>
+    );
+  };
+
+  const renderStoryTranscriptPanel = (
+    transcript: readonly StoryTranscriptEntry[]
+  ): React.JSX.Element | null => {
+    if (!storyTranscriptOpen) return null;
+    return (
+      <aside className={styles.storyOverlayPanel} aria-label="Story transcript">
+        <div className={styles.storyOverlayHeader}>
+          <div>
+            <p className={styles.storyEyebrow}>Log</p>
+            <h2>Transcript</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.storyIconButton}
+            onClick={() => setStoryTranscriptOpen(false)}
+            aria-label="Close transcript"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <ol className={styles.storyTranscriptList}>
+          {transcript.map((entry) => (
+            <li key={entry.id} data-kind={entry.kind}>
+              <span>{entry.kind}</span>
+              <p>{entry.text}</p>
+            </li>
+          ))}
+        </ol>
+      </aside>
+    );
+  };
+
+  const renderStoryPlay = (session: StorySessionDetail): React.JSX.Element => {
+    if (!session.episode || !session.progress || !storyCurrentScene) {
+      return renderStoryLoading();
+    }
+    const scene = storyCurrentScene;
+    const dialogBeatIndex =
+      storyDialogCursor.sessionId === session.id && storyDialogCursor.sceneId === scene.id
+        ? storyDialogCursor.beatIndex
+        : 0;
+    const dialogState = createStoryDialogState(scene, dialogBeatIndex);
+    const dialogBeat = dialogState.activeBeat;
+    const speakerBot = dialogBeat.speakerBotId ? storyBotsById.get(dialogBeat.speakerBotId) : null;
+    const hasNpcSpeaker = dialogBeat.actorRole === "npc";
+    const npcPose = dialogBeat.spritePose ?? (hasNpcSpeaker ? "speaking" : "idle");
+    const npcActor = speakerBot
+      ? {
+          bot: speakerBot,
+          displayName: dialogBeat.speakerName || speakerBot.name,
+          expression: storyNpcFaceExpressionForPose(npcPose),
+          pose: npcPose,
+          isSpeaking: hasNpcSpeaker && npcPose === "speaking",
+        }
+      : null;
+    const npcFaceText = npcActor
+      ? storyNpcFaceTextForExpression(npcActor.expression, npcActor.isSpeaking)
+      : "";
+    const npcAccentStyle = npcActor
+      ? botAccentStyle(npcActor.bot.color, resolvedTheme)
+      : undefined;
+    const speakerName = hasNpcSpeaker
+      ? npcActor?.displayName ?? dialogBeat.speakerName ?? "NPC"
+      : scene.title;
+    const backgroundUrl = storyThemeAssetUrl(
+      scene.cutsceneAssetId ?? scene.backgroundAssetId ?? storyCurrentLocation?.backgroundAssetId,
+      STORY_PROJECTION_FALLBACK_ASSET_ID
+    );
+    const spriteUrl = storyThemeAssetUrl(null, STORY_SPRITE_FALLBACK_ASSET_ID);
+    const playerInventoryState = createStoryInventoryViewState(
+      session.episode.items,
+      session.progress.inventoryItemIds,
+      scene.itemIds
+    );
+    const inventory = playerInventoryState.inventoryItemIds;
+    const sceneItems = playerInventoryState.availableSceneItems;
+    const complete = session.status === "complete" || session.progress.status === "complete";
+    const handleDialogAdvance = (): void => {
+      if (!dialogState.canAdvance) return;
+      advanceStoryDialog(session.id, scene.id, dialogState.beatCount);
+    };
+    return (
+      <section className={styles.storyStage} aria-label="Story play scene">
+        <img
+          src={backgroundUrl}
+          alt=""
+          aria-hidden="true"
+          className={styles.storyProjectedImage}
+        />
+        <div className={styles.storyProjectionMask} aria-hidden="true" />
+        <div className={styles.storySceneTopline}>
+          <span>{storyCurrentLocation?.name ?? scene.title}</span>
+          <span>{responseModeShortLabel(responseModeForProvider(session.provider))} {session.model ?? ""}</span>
+        </div>
+        {sceneItems.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            className={styles.storySceneItemButton}
+            style={storySceneItemStyle(index)}
+            onClick={() => void pickupStoryItem(item.id)}
+            disabled={storyBusy}
+            aria-label={`Pick up ${item.name}`}
+            title={`Pick up ${item.name}`}
+          >
+            <span aria-hidden="true">{storyItemGlyph(item)}</span>
+          </button>
+        ))}
+        {npcActor ? (
+          <div
+            className={styles.storySpriteWrap}
+            style={npcAccentStyle}
+            data-speaking={npcActor.isSpeaking ? "true" : undefined}
+            data-pose={npcActor.pose}
+            data-expression={npcActor.expression}
+          >
+            <img src={spriteUrl} alt="" aria-hidden="true" className={styles.storySprite} />
+            <span className={styles.storySpriteFacePlate} aria-hidden="true">
+              <span className={styles.storySpriteBrows}>
+                <i />
+                <i />
+              </span>
+              <span className={styles.storySpriteAsciiFace}>{npcFaceText}</span>
+            </span>
+            <span className={styles.storySpriteChestGlyph} aria-hidden="true">
+              {npcActor.bot.glyph ? <BotGlyph name={npcActor.bot.glyph} size={17} /> : "•"}
+            </span>
+          </div>
+        ) : null}
+        <div
+          className={styles.storyDialogueBox}
+          data-actor-role={hasNpcSpeaker ? "npc" : "scene"}
+          style={npcAccentStyle}
+        >
+          <div
+            className={styles.storyDialogueHeader}
+            data-actor-role={hasNpcSpeaker ? "npc" : "scene"}
+          >
+            <span>{speakerName}</span>
+            <small>{hasNpcSpeaker ? `NPC · ${npcActor?.pose ?? "speaking"}` : "scene"}</small>
+          </div>
+          <div
+            className={styles.storyDialogueTextPanel}
+            data-advanceable={dialogState.canAdvance ? "true" : undefined}
+            role={dialogState.canAdvance ? "button" : undefined}
+            tabIndex={dialogState.canAdvance ? 0 : undefined}
+            onClick={handleDialogAdvance}
+            onKeyDown={(event) => {
+              if (!dialogState.canAdvance) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              handleDialogAdvance();
+            }}
+          >
+            <p aria-live="polite">{dialogBeat.text}</p>
+          </div>
+          <div className={styles.storyDialogueFooter}>
+            {dialogState.beatCount > 1 ? (
+              <span className={styles.storyDialogueProgress}>
+                {dialogState.activeBeatIndex + 1}/{dialogState.beatCount}
+              </span>
+            ) : (
+              <span />
+            )}
+            {dialogState.canAdvance ? (
+              <button
+                type="button"
+                className={styles.storyDialogueAdvanceButton}
+                onClick={handleDialogAdvance}
+              >
+                Continue
+              </button>
+            ) : null}
+          </div>
+          {dialogState.isComplete && complete ? (
+            <div className={styles.storyCompleteActions}>
+              <span>Episode complete</span>
+              <button type="button" onClick={resetStoryToSetup}>
+                New Story
+              </button>
+            </div>
+          ) : dialogState.isComplete ? (
+            <div className={styles.storyChoiceBlock}>
+              <span className={styles.storyChoiceLabel}>Your response</span>
+              <div className={styles.storyChoiceGrid}>
+                {scene.choices.map((choice) => {
+                  const missingItem = storyChoiceMissingItemId(choice, inventory);
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      className={styles.storyChoiceButton}
+                      disabled={storyBusy || Boolean(missingItem)}
+                      onClick={() => void chooseStoryChoice(choice.id)}
+                      title={missingItem ? `Requires ${missingItem}` : undefined}
+                    >
+                      {choice.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        {renderStoryMapPanel(session.episode)}
+        {renderStoryInventoryPanel()}
+        {renderStoryTranscriptPanel(session.transcript)}
+      </section>
+    );
+  };
+
+  const renderStoryShell = (): React.JSX.Element => {
+    const activeEpisode = storySession?.episode ?? null;
+    return (
+      <main
+        className={`${styles.appLayout} ${themeClass} ${styles.storyShell}`}
+        data-accent-active={appShellStyle ? "true" : undefined}
+        style={appShellStyle ?? undefined}
+        onContextMenu={handleStoryShellContextMenu}
+      >
+        <aside className={styles.storySidebar}>
+          <button
+            type="button"
+            className={styles.storyHomeButton}
+            onClick={() => navigateToView("hub")}
+            aria-label="Back to Hub"
+            title="Back to Hub"
+          >
+            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+          </button>
+          <div className={styles.storySidebarHeader}>
+            <span className={styles.sectionLabel}>Stories</span>
+            <button
+              type="button"
+              className={styles.storyNewButton}
+              onClick={resetStoryToSetup}
+              aria-label="New Story"
+            >
+              +
+            </button>
+          </div>
+          <ul className={styles.storySessionList}>
+            {storySessions.map(renderStorySessionRow)}
+            {storySessionsLoading ? (
+              <li className={styles.storySessionEmpty}>Loading Stories...</li>
+            ) : storySessions.length === 0 ? (
+              <li className={styles.storySessionEmpty}>No saved Stories yet.</li>
+            ) : null}
+          </ul>
+        </aside>
+        <section className={styles.storyMain}>
+          <header className={styles.storyHeader}>
+            <div>
+              <p className={styles.storyEyebrow}>Story Mode</p>
+              <h1>{storySession?.title ?? "Start a Story"}</h1>
+              <p>
+                {storySession
+                  ? storySessionStatusLabel(storySession.status)
+                  : `Pick ${STORY_BOT_COUNT_MIN}-${STORY_BOT_COUNT_MAX} bots for a fixed-choice episode.`}
+              </p>
+            </div>
+            <div className={styles.storyHeaderActions}>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryMapOpen((open) => !open)}
+                disabled={!activeEpisode || storySession?.status === "generating"}
+                aria-pressed={storyMapOpen}
+                aria-label="Map"
+                title="Map"
+              >
+                <span aria-hidden="true">⌖</span>
+                <span className={styles.storyActionLabel}>Map</span>
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryInventoryOpen((open) => !open)}
+                disabled={!activeEpisode}
+                aria-pressed={storyInventoryOpen}
+                aria-label="Inventory"
+                title="Inventory"
+              >
+                <span aria-hidden="true">▣</span>
+                <span className={styles.storyActionLabel}>Items</span>
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => setStoryTranscriptOpen((open) => !open)}
+                disabled={!storySession}
+                aria-pressed={storyTranscriptOpen}
+                aria-label="Transcript"
+                title="Transcript"
+              >
+                <MessageBubbleGlyph />
+                <span className={styles.storyActionLabel}>Log</span>
+              </button>
+              <button
+                type="button"
+                className={styles.storyIconButton}
+                onClick={() => navigateToView("hub")}
+                aria-label="Back to Hub"
+                title="Back to Hub"
+              >
+                <HomeGlyph />
+                <span className={styles.storyActionLabel}>Hub</span>
+              </button>
+            </div>
+          </header>
+          {storyError ? (
+            <p className={styles.storyError} role="alert">
+              {storyError}
+            </p>
+          ) : null}
+          {!storySession
+            ? renderStorySetup()
+            : storySession.status === "generating"
+              ? renderStoryLoading()
+              : storySession.status === "failed"
+                ? renderStoryFailed()
+                : renderStoryPlay(storySession)}
+        </section>
+        {renderSharedPanels()}
+        {renderViewSwitchOverlay()}
+        {renderDeleteAllModal()}
+        {renderSelectedBotDeleteModal()}
+        {renderImagesDeleteAllModal()}
+        {renderDevToolsPanel()}
+        {renderStoryShellContextMenu()}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  };
+
   // ── Hub ──
   // Landing screen shown immediately after login. Reuses the auth
   // background verbatim so the visual transition from login to hub feels
@@ -39303,6 +49489,7 @@ function HomeContent(): React.JSX.Element {
   // mode; Chat stays disabled in Phase 1 and lights up once the mode is
   // built out.
   if (view === "coffee") return renderCoffeeShell();
+  if (view === "story") return renderStoryShell();
   if (view === "hub") return (
     <main
       className={`${styles.authLayout} ${themeClass}`}
@@ -39313,7 +49500,13 @@ function HomeContent(): React.JSX.Element {
           {/* Keep lockup behavior aligned with auth: boxed icon in dark mode,
               hollow triangle in light mode. */}
           <div className={styles.brandIconShell}>
-            <PrismHeroMark className={styles.brandIcon} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/icon.jpg"
+              alt=""
+              aria-hidden="true"
+              className={styles.brandIcon}
+            />
             <PrismTriangleMark className={styles.brandIconLight} />
           </div>
           <PrismWordmarkWithVersion className={styles.brandWordmark} />
@@ -39340,7 +49533,6 @@ function HomeContent(): React.JSX.Element {
             >
               <ThemeGlyph mode={effectiveThemeMode} />
             </button>
-            {renderDevToolsButton()}
             <div className={styles.hubUtilityActions}>
               <button
                 type="button"
@@ -39353,7 +49545,7 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.hubNavButton}
-                onClick={() => openRightPanel("bots")}
+                onClick={openFreshBotCustomizer}
               >
                 <BotsGlyph />
                 <span>Bots</span>
@@ -39397,7 +49589,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.hubTile}
-            onClick={() => navigateToView("chat")}
+            onClick={() => void openZenMode()}
           >
             <div className={styles.hubTileGlyph}>
               <GlyphChat size={88} />
@@ -39483,15 +49675,14 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.hubTile}
-            disabled
-            title="Story mode is not available yet."
+            onClick={() => navigateToView("story")}
           >
             <div className={styles.hubTileGlyph}>
               <GlyphStory size={88} />
             </div>
             <div className={styles.hubTileLabel}>Story</div>
             <div className={styles.hubTileTagline}>
-              A door into somewhere else. The shape is still forming.
+              Generated visual-novel episodes with bots, choices, and maps.
             </div>
           </button>
           <button
@@ -39557,7 +49748,6 @@ function HomeContent(): React.JSX.Element {
           </button>
         </div>
       </div>
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDevToolsPanel()}
       {renderViewSwitchOverlay()}
@@ -39570,14 +49760,27 @@ function HomeContent(): React.JSX.Element {
   // (chat pane/messages/composer + shared panels), with the chat-specific
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
-  if (view === "chat") return (
+  if (view === "chat") {
+    const zenAtmosphereBackdropStyle = {
+      "--zen-atmosphere-opacity": String(
+        normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
+      ),
+    } as React.CSSProperties;
+    const zenSplashModelPickerActive = zenEmptyHeroVisible;
+    return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
+      data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
+      data-zen-surface="true"
+      data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
+      data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
+      onPointerMove={handleZenSurfacePointerMove}
+      onPointerDownCapture={handleZenSurfacePointerDownCapture}
       onTouchStart={beginSidebarEdgeSwipe}
       onTouchMove={continueSidebarEdgeSwipe}
       onTouchEnd={endSidebarEdgeSwipe}
@@ -39586,9 +49789,14 @@ function HomeContent(): React.JSX.Element {
       <section
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
-        onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
-        <header className={styles.chatHeader}>
+        <header
+          className={styles.chatHeader}
+          onPointerEnter={handleZenHeaderPointerEnter}
+          onPointerLeave={handleZenHeaderPointerLeave}
+          onFocusCapture={handleZenHeaderFocusCapture}
+          onBlurCapture={handleZenHeaderBlurCapture}
+        >
           <div className={styles.chatHeaderIdentityGroup}>
             <div className={styles.chatHeaderWordmarkColumn}>
               <button
@@ -39620,30 +49828,11 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </button>
             </div>
-            {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
+            {viewportWidth <= PHONE_MENU_BREAKPOINT && !chatLikeSurface
+              ? renderMemoryToasts()
+              : null}
           </div>
-          {view === "chat" ? (
-            renderHeaderModelPicker()
-          ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
-            <h2
-              className={`${styles.chatHeaderTitle} ${
-                headerTitleCollapsedForAccordion
-                  ? styles.chatHeaderTitleCollapsed
-                  : ""
-              }`}
-            >
-              {headerConversationTitle}
-            </h2>
-          ) : (
-            <h2
-              className={`${styles.chatHeaderTitlePlaceholder} ${
-                headerTitleCollapsedForAccordion
-                  ? styles.chatHeaderTitlePlaceholderCollapsed
-                  : ""
-              }`}
-              aria-hidden="true"
-            />
-          )}
+          {zenSplashModelPickerActive ? null : renderHeaderModelPicker()}
           {renderChatOverflowGear()}
           {!chatLikeSurface ? (
             <div className={styles.chatHeaderComposeToolsRow}>
@@ -39664,7 +49853,7 @@ function HomeContent(): React.JSX.Element {
                       {bots.length > 0 && (
                         <ComposerBotPicker
                           value={selectedBotId ?? ""}
-                          onChange={next => setSelectedBotId(next || null)}
+                          onChange={handleComposerBotSelectionChange}
                           bots={botHasCommenced ? bots : filteredBots}
                           resolvedTheme={resolvedTheme}
                           disabled={botDisabled}
@@ -39701,15 +49890,25 @@ function HomeContent(): React.JSX.Element {
                   // Use the effective provider so this picker also reflects
                   // the offline-only lock when the active chat bot is
                   // protected (matches what `renderProviderModeToggle` shows).
-                  const isLocal = effectivePreferredProvider !== "openai";
-                  const modelProvider: Provider = isLocal ? "local" : "openai";
-                  const rawModelChoice = chatModelChoiceByProvider[modelProvider];
-                  const visibleModelChoice = visibleModelChoiceForProvider(
+                  const responseMode = responseModeForProvider(effectivePreferredProvider);
+                  const isLocal = responseMode === "local";
+                  const resolvedChoice = resolveModelChoiceForResponseMode({
+                    responseMode,
+                    providerPreference: effectivePreferredProvider,
+                    choices: visibleModelChoicesByProvider(
+                      modelCatalog,
+                      settings,
+                      chatModelChoiceByProvider
+                    ),
+                    onlineOptions: onlineChatModelOptions,
+                  });
+                  const modelProvider = resolvedChoice.provider;
+                  const visibleModelChoice = resolvedChoice.modelChoice;
+                  const modelOptions = includeSelectedResponseModeModelOption(
+                    modelCatalog,
                     settings,
-                    rawModelChoice
-                  );
-                  const modelOptions = includeSelectedModelOption(
-                    availableModelOptionsForProvider(modelCatalog, settings, modelProvider),
+                    responseMode,
+                    modelOptionsForResponseMode(modelCatalog, settings, responseMode),
                     visibleModelChoice,
                     modelProvider
                   );
@@ -39718,26 +49917,42 @@ function HomeContent(): React.JSX.Element {
                       <ComposerModelPicker
                         value={visibleModelChoice}
                         onChange={(nextChoice) => {
+                          const appliedOnline =
+                            responseMode === "online"
+                              ? applyOnlineModelChoice({
+                                  currentChoices: chatModelChoiceByProvider,
+                                  nextChoice,
+                                  onlineOptions: onlineChatModelOptions,
+                                  providerPreference: effectivePreferredProvider,
+                                })
+                              : null;
                           setChatModelChoiceByProvider((previous) => {
-                            const next = { ...previous, [modelProvider]: nextChoice };
+                            const next =
+                              responseMode === "local"
+                                ? { ...previous, local: nextChoice }
+                                : applyOnlineModelChoice({
+                                    currentChoices: previous,
+                                    nextChoice,
+                                    onlineOptions: onlineChatModelOptions,
+                                    providerPreference: effectivePreferredProvider,
+                                  }).choices;
                             persistChatModelChoicesForActiveScope(next);
                             return next;
                           });
+                          if (appliedOnline) {
+                            void switchProvider(appliedOnline.provider);
+                          }
                         }}
                         options={modelOptions}
-                        provider={modelProvider}
+                        provider={isLocal ? "local" : "online"}
                         disabled={!settings || pendingReply}
-                        title={`Model for ${isLocal ? "LOCAL" : "ONLINE"} replies`}
-                        ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
-                        autoOptionMetaOverride={composeAutoOptionMetaLine(
-                          modelCatalog,
-                          settings,
-                          modelProvider,
-                          composeBotForAutoModelMeta
-                        )}
+                        title={`Model for ${responseModeShortLabel(responseMode)} replies`}
+                        ariaLabel={`Model for ${
+                          isLocal ? "local" : "online"
+                        } replies`}
                         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
                           settings,
-                          modelProvider
+                          isLocal ? "local" : "online"
                         )}
                       />
                       {renderComposeUtilityActions()}
@@ -39748,6 +49963,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           ) : null}
         </header>
+        {renderZenMemoryToasts()}
 
         <div
           className={styles.messagesFrame}
@@ -39758,6 +49974,31 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
+          {zenAtmosphereTimeline.length > 0 ? (
+            <div
+              className={styles.zenAtmosphereBackdrop}
+              style={zenAtmosphereBackdropStyle}
+              aria-hidden="true"
+            >
+              {zenAtmosphereTimeline.map((entry) => {
+                const layerOpacity =
+                  zenAtmosphereLayerOpacities[entry.imageId] ?? 0;
+                return (
+                  <img
+                    key={`${entry.imageId}:${entry.generationMessageCount}`}
+                    src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
+                    alt=""
+                    decoding="async"
+                    style={
+                      {
+                        "--zen-atmosphere-layer-opacity": String(layerOpacity),
+                      } as React.CSSProperties
+                    }
+                  />
+                );
+              })}
+            </div>
+          ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
@@ -39770,14 +50011,18 @@ function HomeContent(): React.JSX.Element {
               <p>{messagesFrameStateLoadingLabel}</p>
             </div>
           ) : null}
+          {zenInitialThinkingNode}
           <div
             className={`${styles.messages} ${
-              !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
+              (!detail || detail.messages.length === 0) && !pendingReplyVisible
+                ? styles.messagesEmptyState
+                : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""} ${
               askQuestionCollapsedBubbleActive ? styles.messagesAskQuestionCollapsedBubbleSpace : ""
             }`}
             ref={messagesScrollRef}
             data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
+            data-zen-empty-hero={zenEmptyHeroVisible ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-drag-selecting={
@@ -39788,8 +50033,11 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
-            onWheelCapture={preventChatModeThreadScroll}
-            onTouchMoveCapture={preventChatModeThreadScroll}
+            onWheelCapture={handleChatModeThreadWheel}
+            onTouchStartCapture={handleChatModeThreadTouchStart}
+            onTouchMoveCapture={handleChatModeThreadTouchMove}
+            onTouchEndCapture={handleChatModeThreadTouchEnd}
+            onTouchCancelCapture={handleChatModeThreadTouchEnd}
           >
           {canvasBotMarqueeRect ? (
             <div
@@ -39825,7 +50073,7 @@ function HomeContent(): React.JSX.Element {
               </div>
             </div>
           ) : null}
-            {!detail && !pendingReplyVisible && (() => {
+            {(!detail || detail.messages.length === 0) && !pendingReplyVisible && (() => {
             // Chat-mode empty state (personal Chat view):
             //   • Same hero + headline flow as Sandbox, but NO tile grid —
             //     choosing a persona uses ComposerBotPicker in the compose
@@ -39836,47 +50084,25 @@ function HomeContent(): React.JSX.Element {
             // changes the hero, title, hint, or shell accent.
             const suppressHeroCopy = false;
             const isPreviewing = false;
-            const heroBot = activeBot;
-            const privateBotName = pendingIncognito ? heroBot?.name?.trim() : "";
-            const title = pendingIncognito
-              ? privateBotName
-                ? `Private chat with ${privateBotName}`
-                : "Private chat"
-              : heroBot?.name?.trim() || "What\u2019s on your mind?";
-            const descriptionPreview = heroBot
-              ? botHeroPreview(heroBot.system_prompt)
-              : "";
-            const selectedBotPromptPreview =
-              !pendingIncognito && selectedBotId !== null && heroBot?.id === selectedBotId
-                ? descriptionPreview
-                : "";
+            const heroBot: Bot | null = null;
+            const privateBotName = "";
+            const title = "Zen with PRISM";
+            const descriptionPreview = "";
+            const selectedBotPromptPreview = "";
             // While the hue lens has zoomed into a color group AND nothing is
             // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
-            const heroLensPlaceholder =
-              hueFilterCenter !== null && !heroBot;
-            const heroStartLabel = pendingIncognito
-              ? privateBotName
-                ? `Tap the symbol above to begin a private chat with ${privateBotName}.`
-                : "Tap the symbol above to begin a private chat."
-              : heroLensPlaceholder
-                ? "Pick a bot from the menu below to begin."
-                : heroBot?.name?.trim()
-                  ? `Tap the symbol above to have ${heroBot.name.trim()} start the conversation.`
-                  : bots.length > 0
-                    ? "Tap the symbol to start, or choose a bot below."
-                    : "Tap the symbol above to create a bot to get started.";
+            const heroLensPlaceholder = false;
+            const heroStartLabel =
+              "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
             const hint = (() => {
-              if (pendingIncognito) return `${heroStartLabel} No memories are saved.`;
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
             })();
-            const emptyStateStyle = heroBot
-              ? botAccentStyle(heroBot.color, resolvedTheme)
-              : undefined;
+            const emptyStateStyle = undefined;
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
@@ -39887,7 +50113,7 @@ function HomeContent(): React.JSX.Element {
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
-                privateHero={privateChatActive}
+                privateHero={false}
                 /* Triangle hero replaces the rainbow brand mark whenever
                    the surface isn't in home mode and there's no bot
                    armed — its currentColor follows --accent, which
@@ -39895,7 +50121,7 @@ function HomeContent(): React.JSX.Element {
                    interface is currently tinted to (lens hue while
                    engaged, theme fg in private). Drag-mode keeps its
                    override regardless. */
-                forceTrianglePreview={lensInteracting}
+                forceTrianglePreview={false}
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -39903,26 +50129,8 @@ function HomeContent(): React.JSX.Element {
               pendingReply ||
               !isStarterPromptAvailable(draft) ||
               heroLensPlaceholder;
-            const heroStartTitle = heroLensPlaceholder
-              ? "Pick a bot from the menu below to begin"
-              : heroBot?.name?.trim()
-                ? `Tap to have ${heroBot.name.trim()} start the conversation`
-                : "Tap to start the conversation";
-            const heroStartAriaLabel = heroLensPlaceholder
-              ? "Pick a bot from the menu below to begin"
-              : heroBot?.name?.trim()
-                ? `Start conversation with ${heroBot.name.trim()}`
-                : "Start conversation";
-            const heroRecentConversations =
-              !pendingIncognito && heroBot?.id
-                ? conversations
-                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
-                    .sort(
-                      (a, b) =>
-                        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-                    )
-                    .slice(0, 8)
-                : [];
+            const heroStartTitle = "Start with PRISM";
+            const heroStartAriaLabel = "Start Zen conversation with PRISM";
             const shouldShowHeroNudge =
               !heroStartDisabled &&
               !emptyStateSearchActive &&
@@ -39955,7 +50163,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
-                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummary ? (
+                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummaryVisible ? (
                   <button
                     type="button"
                     className={[
@@ -39971,6 +50179,20 @@ function HomeContent(): React.JSX.Element {
                     {renderHero()}
                   </button>
                 ) : null}
+                {!emptyStateSearchActive && !chatStartupSummaryVisible ? (
+                  <div className={styles.emptyStateTitleBlock}>
+                    <div className={styles.emptyStateTitle}>{title}</div>
+                    <p className={styles.emptyStateHint}>{hint}</p>
+                    {zenSplashModelPickerActive ? (
+                      <div className={styles.zenSplashModelPicker}>
+                        {renderHeaderModelPicker({
+                          modelMenuClassName: styles.zenSplashModelMenu,
+                          modelMenuWidthPx: 220,
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {/* Personal Chat skips the Sandbox tile grid — ComposerBotPicker lives in the compose strip. */}
               </div>
             );
@@ -39981,7 +50203,7 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map(msg => {
+          {visibleDetailMessages.map((msg) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -40031,7 +50253,7 @@ function HomeContent(): React.JSX.Element {
                   } as React.CSSProperties)
                 : undefined;
             const headingColorStyle =
-              msg.role === "assistant" && !detail?.incognito
+              msg.role === "assistant" && !detail?.incognito && !chatLikeSurface
                 ? (detail?.mode === "sandbox" && msg.botColor
                     ? resolveComplementHeadingColorVars(
                         normalizeAccentForTheme(msg.botColor, resolvedTheme),
@@ -40043,6 +50265,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const zenUserPrismColor = msg.role === "user"
+              ? zenUserMessagePrismColorById.get(msg.id)
+              : undefined;
+            const zenUserPrismColorStyle = zenUserPrismColor
+              ? ({
+                  "--zen-user-prism-color-bright": zenUserPrismColor.bright,
+                  "--zen-user-prism-color-dark": zenUserPrismColor.dark,
+                } as React.CSSProperties)
+              : undefined;
             const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
@@ -40050,25 +50281,26 @@ function HomeContent(): React.JSX.Element {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
-            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
-            const latestUserAnchorFadeStyle =
-              latestUserAnchorFadeOpacity !== null
-                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
-                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const messageRevealEligible =
+              temporalKey !== null &&
+              msg.role === "assistant" &&
+              chatAssistantRevealEligibleKeysRef.current.has(temporalKey);
             const canceledRevealTokenCount =
-              temporalKey !== null
+              messageRevealEligible && temporalKey !== null
                 ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
                 : undefined;
             const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
             const messageRevealAlreadyCompleted =
+              msg.role === "assistant" &&
               temporalKey !== null &&
               !messageRevealCancelled &&
-              chatCompletedRevealKeysRef.current.has(temporalKey);
+              (!messageRevealEligible || chatCompletedRevealKeysRef.current.has(temporalKey));
             const forcedVisibleTokenCount =
               chatAssistantTypingMechanicsActive &&
+              messageRevealEligible &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -40078,7 +50310,6 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
-                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -40089,17 +50320,21 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
                     );
                   })()
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicLineCount = resolveCommittedChatFontLineCount(
+              temporalKey,
+              messageDisplayLineCount
+            );
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
-                      messageDisplayLineCount,
+                      messageDynamicLineCount,
                       msg.role === "user" ? "user" : "assistant"
                     )}px`,
                   } as React.CSSProperties)
@@ -40117,9 +50352,21 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
+            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const starterPromptAlignment =
+              msg.id === starterPromptCenteredMessageId
+                ? "centered"
+                : msg.id === starterPromptSettlingMessageId
+                  ? "settling"
+                  : undefined;
             return (
+              <Fragment key={msg.id}>
+              {zenEraBoundaryLabel ? (
+                <div className={styles.zenEraBoundary} role="note">
+                  <span>{zenEraBoundaryLabel}</span>
+                </div>
+              ) : null}
               <article
-                key={msg.id}
                 className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
@@ -40127,8 +50374,8 @@ function HomeContent(): React.JSX.Element {
                   ...(messageStyle ?? {}),
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
+                  ...(zenUserPrismColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
-                  ...(latestUserAnchorFadeStyle ?? {}),
                   ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
@@ -40142,6 +50389,7 @@ function HomeContent(): React.JSX.Element {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-starter-prompt-align={starterPromptAlignment}
                 data-chat-latest-user-anchor={
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
@@ -40227,23 +50475,16 @@ function HomeContent(): React.JSX.Element {
                     })()}
                   </h4>
                 )}
-                {msg.role === "assistant" && msg.sentGeneratedImage ? (
-                  <figure className={styles.assistantSentImageWrap}>
-                    <img
-                      src={apiGeneratedImageThumbUrl(msg.sentGeneratedImage.imageId)}
-                      alt={msg.sentGeneratedImage.prompt}
-                      loading="lazy"
-                      decoding="async"
-                      className={styles.assistantSentImage}
-                    />
-                  </figure>
-                ) : null}
+                {msg.role === "assistant" && msg.sentGeneratedImage
+                  ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
+                  : null}
                 <MessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
                   messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
+                    messageRevealEligible &&
                     msg.role === "assistant" &&
                     msg.id === latestAssistantMessageId &&
                     !messageRevealAlreadyCompleted
@@ -40251,12 +50492,24 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
-                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
+                  commandMentionsById={commandCenterCommandById}
+                  onOpenCommandMention={openCommandCenterCommandEditor}
+                  promptShortcut={msg.promptShortcut}
+                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  onTogglePromptShortcut={() =>
+                    setExpandedPromptShortcutMessageId((current) =>
+                      current === msg.id ? null : msg.id
+                    )
+                  }
+                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {renderAskQuestionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}
@@ -40318,25 +50571,36 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              </Fragment>
             );
           })}
+          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
-          {typingIndicatorNode}
+          {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
-            <div ref={messagesEndRef} aria-hidden="true" />
+            <div
+              ref={messagesEndRef}
+              className={styles.chatEphemeralLiveEndSpacer}
+              aria-hidden="true"
+            />
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {manualCompactionIndicatorNode}
         </div>
+        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-compose-send-tint={composerSendTintActive ? "true" : undefined}
+          data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
           data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
+          onPointerDownCapture={handleComposerPointerDown}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -40365,7 +50629,7 @@ function HomeContent(): React.JSX.Element {
               {renderComposeUtilityActions()}
             </div>
           ) : null}
-          {!composerHiddenByAskQuestion && editingMessageId && (
+          {!composerHiddenByChoiceChips && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
@@ -40373,7 +50637,7 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
-          {!composerHiddenByAskQuestion ? (
+          {!composerHiddenByChoiceChips ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
                 {devDebugComposerEnabled && (
@@ -40419,6 +50683,8 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandPicks={composerCommandPicks}
+                    promptPicks={commandCenterPromptPicks}
                   />
                 </div>
               </div>
@@ -40439,6 +50705,8 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandPicks={composerCommandPicks}
+                promptPicks={commandCenterPromptPicks}
               />
             )
           ) : null}
@@ -40449,7 +50717,6 @@ function HomeContent(): React.JSX.Element {
         {renderCanvasToolsContextMenu()}
       </section>
 
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
@@ -40473,7 +50740,8 @@ function HomeContent(): React.JSX.Element {
       {renderViewSwitchOverlay()}
       <GlyphTooltipLayer />
     </main>
-  );
+    );
+  }
 
   // ── App shell (Sandbox mode) ──
   // Reached when view !== "hub" and view !== "chat". Any stray ?view=
@@ -40486,7 +50754,7 @@ function HomeContent(): React.JSX.Element {
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
-      data-chat-sidebar-hidden={zenPresentationActive ? "true" : undefined}
+      data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -40494,8 +50762,6 @@ function HomeContent(): React.JSX.Element {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
-      {!zenPresentationActive ? (
-        <>
       {/* Mobile menu toggle — faded out while either drawer is open
           (sidebar on the left, Settings/Bots/Images panel on the right)
           so the fixed hamburger doesn't overlap the profile avatar or
@@ -40596,19 +50862,16 @@ function HomeContent(): React.JSX.Element {
         {view !== "sandbox" && (
           <div className={styles.sidebarFooter}>
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
-            <button type="button" onClick={() => openRightPanel("bots")}>Bots</button>
+            <button type="button" onClick={openFreshBotCustomizer}>Bots</button>
             <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
           </div>
         )}
       </aside>
-        </>
-      ) : null}
 
       {/* Chat */}
       <section
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
-        onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
         <header className={styles.chatHeader}>
           <div className={styles.chatHeaderIdentityGroup}>
@@ -40684,7 +50947,7 @@ function HomeContent(): React.JSX.Element {
             )}
             {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
           </div>
-          {chatLikeSurface ? (
+          {chatLikeSurface || view === "sandbox" ? (
             renderHeaderModelPicker()
           ) : shouldShowHeaderConversationTitle && !chatStartupSummaryVisible ? (
             <h2
@@ -40748,8 +51011,11 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
-            onWheelCapture={preventChatModeThreadScroll}
-            onTouchMoveCapture={preventChatModeThreadScroll}
+            onWheelCapture={handleChatModeThreadWheel}
+            onTouchStartCapture={handleChatModeThreadTouchStart}
+            onTouchMoveCapture={handleChatModeThreadTouchMove}
+            onTouchEndCapture={handleChatModeThreadTouchEnd}
+            onTouchCancelCapture={handleChatModeThreadTouchEnd}
           >
             {canvasBotMarqueeRect ? (
               <div
@@ -40826,7 +51092,11 @@ function HomeContent(): React.JSX.Element {
             const heroRecentConversations =
               !pendingIncognito && heroBot?.id
                 ? conversations
-                    .filter((conversation) => !conversation.incognito && conversation.botId === heroBot.id)
+                    .filter(
+                      (conversation) =>
+                        !conversation.incognito &&
+                        conversationEffectiveBotId(conversation) === heroBot.id
+                    )
                     .sort(
                       (a, b) =>
                         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -40979,10 +51249,7 @@ function HomeContent(): React.JSX.Element {
                           aria-label={`Saved images for ${heroBot.name?.trim() ?? "this bot"}`}
                         >
                           {heroBotMiniLibraryImages.map((img) => {
-                            const privateBlurred =
-                              imagePrivateGeneratedIds.includes(img.id) &&
-                              !imagePrivateRevealedIds.has(img.id) &&
-                              !appWidePrivateMode;
+                            const privateBlurred = isPrivateGeneratedImageHidden(img.id);
                             return (
                               <div
                                 key={img.id}
@@ -41017,7 +51284,11 @@ function HomeContent(): React.JSX.Element {
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={galleryTileImageSrc(img)}
-                                    alt={img.prompt}
+                                    alt={
+                                      privateBlurred
+                                        ? "Private generated image hidden"
+                                        : img.prompt
+                                    }
                                     className={styles.emptyStateMiniLibraryThumbImg}
                                   />
                                   {privateBlurred ? (
@@ -41166,6 +51437,7 @@ function HomeContent(): React.JSX.Element {
                         }
                         const isSelected = sandboxGridSelectedBotId === b.id;
                         const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
+                        const isProtected = b.delete_protected === 1;
                         const rawColor = b.color?.trim();
                         const accent = rawColor
                           ? normalizeAccentForTheme(rawColor, resolvedTheme)
@@ -41177,6 +51449,9 @@ function HomeContent(): React.JSX.Element {
                         // glyphless card, borderless square pixel, compact
                         // gapless pixel grid, then selected-dot pixel grid.
                         let tileClassName = styles.chatBotTile;
+                        if (isProtected) {
+                          tileClassName += ` ${styles.chatBotTileProtected}`;
+                        }
                         if (isSelected) {
                           tileClassName += ` ${styles.chatBotTileSelected}`;
                         }
@@ -41224,9 +51499,10 @@ function HomeContent(): React.JSX.Element {
                             type="button"
                             role="radio"
                             aria-checked={isSelected}
-                            aria-label={b.name}
+                            aria-label={isProtected ? `${b.name}, protected` : b.name}
                             className={tileClassName}
                             data-bot-id={b.id}
+                            data-delete-protected={isProtected ? "true" : undefined}
                             onPointerDown={e => {
                               lastBotPickerPointerTypeRef.current = e.pointerType;
                               startBotContextLongPress(e, b);
@@ -41343,7 +51619,7 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {visibleDetailMessages.map(msg => {
+          {visibleDetailMessages.map((msg) => {
             const status = getMessageStatus(msg);
             const chatTemporal = chatMessageTemporalById.get(msg.id);
             const chatPhase = chatEphemeralMode ? chatTemporal?.phase ?? "visible" : undefined;
@@ -41396,7 +51672,7 @@ function HomeContent(): React.JSX.Element {
               ? ({ "--message-accent": normalizedBotColor } as React.CSSProperties)
               : undefined;
             const headingColorStyle =
-              msg.role === "assistant" && !detail?.incognito
+              msg.role === "assistant" && !detail?.incognito && !chatLikeSurface
                 ? (view === "sandbox" && normalizedBotColor
                     ? resolveComplementHeadingColorVars(normalizedBotColor, resolvedTheme)
                     : resolvePrismHeadingColorVars())
@@ -41405,6 +51681,15 @@ function HomeContent(): React.JSX.Element {
               msg.role === "user" && threadConversationAccentInk
                 ? ({ "--user-msg-tink": threadConversationAccentInk } as React.CSSProperties)
                 : undefined;
+            const zenUserPrismColor = msg.role === "user"
+              ? zenUserMessagePrismColorById.get(msg.id)
+              : undefined;
+            const zenUserPrismColorStyle = zenUserPrismColor
+              ? ({
+                  "--zen-user-prism-color-bright": zenUserPrismColor.bright,
+                  "--zen-user-prism-color-dark": zenUserPrismColor.dark,
+                } as React.CSSProperties)
+              : undefined;
             const privateUserRoleHeader = detail?.incognito === true && msg.role === "user";
             const mobileFocusAccentStyle =
               contextFocusedMessageId === msg.id
@@ -41412,25 +51697,26 @@ function HomeContent(): React.JSX.Element {
                     "--message-context-accent": deriveMobileMessageFocusAccent(msg),
                   } as React.CSSProperties)
                 : undefined;
-            const latestUserAnchorFadeOpacity = resolveLatestUserAnchorFadeOpacity(msg);
-            const latestUserAnchorFadeStyle =
-              latestUserAnchorFadeOpacity !== null
-                ? ({ opacity: latestUserAnchorFadeOpacity } as React.CSSProperties)
-                : undefined;
             const copied = copiedMessageId === msg.id;
             const mobileContextMenu = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
+            const messageRevealEligible =
+              temporalKey !== null &&
+              msg.role === "assistant" &&
+              chatAssistantRevealEligibleKeysRef.current.has(temporalKey);
             const canceledRevealTokenCount =
-              temporalKey !== null
+              messageRevealEligible && temporalKey !== null
                 ? chatCancelledRevealTokenCountByKeyRef.current.get(temporalKey)
                 : undefined;
             const messageRevealCancelled = typeof canceledRevealTokenCount === "number";
             const messageRevealAlreadyCompleted =
+              msg.role === "assistant" &&
               temporalKey !== null &&
               !messageRevealCancelled &&
-              chatCompletedRevealKeysRef.current.has(temporalKey);
+              (!messageRevealEligible || chatCompletedRevealKeysRef.current.has(temporalKey));
             const forcedVisibleTokenCount =
               chatAssistantTypingMechanicsActive &&
+              messageRevealEligible &&
               msg.role === "assistant" &&
               msg.id === latestAssistantMessageId &&
               detail?.id
@@ -41440,7 +51726,6 @@ function HomeContent(): React.JSX.Element {
                       chatMessageFirstSeenAtRef.current.get(`${detail.id}:${msg.id}`) ?? chatEphemeralNowMs;
                     const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
                     const revealTokens = tokenizeMessageReveal(displayContent);
-                    const assistantMood = resolveMessageMoodKey(msg);
                     const tokenTotal = Math.max(1, revealTokens.length);
                     if (messageRevealAlreadyCompleted) return tokenTotal;
                     if (messageRevealCancelled) {
@@ -41451,17 +51736,21 @@ function HomeContent(): React.JSX.Element {
                     }
                     return Math.min(
                       tokenTotal,
-                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, assistantMood)
+                      resolveVisibleTokenCountAtElapsedMs(revealTokens, elapsedMs, DEFAULT_MESSAGE_MOOD)
                     );
                   })()
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicLineCount = resolveCommittedChatFontLineCount(
+              temporalKey,
+              messageDisplayLineCount
+            );
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
-                      messageDisplayLineCount,
+                      messageDynamicLineCount,
                       msg.role === "user" ? "user" : "assistant"
                     )}px`,
                   } as React.CSSProperties)
@@ -41479,9 +51768,21 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
+            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const starterPromptAlignment =
+              msg.id === starterPromptCenteredMessageId
+                ? "centered"
+                : msg.id === starterPromptSettlingMessageId
+                  ? "settling"
+                  : undefined;
             return (
+              <Fragment key={msg.id}>
+              {zenEraBoundaryLabel ? (
+                <div className={styles.zenEraBoundary} role="note">
+                  <span>{zenEraBoundaryLabel}</span>
+                </div>
+              ) : null}
               <article
-                key={msg.id}
                 className={`${styles.message} ${chatPhaseClassName} ${userMessageManifestClassName} ${
                   msg.role === "user" ? styles.messageUser : styles.messageAssistant
                 }`}
@@ -41489,8 +51790,8 @@ function HomeContent(): React.JSX.Element {
                   ...(messageStyle ?? {}),
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
+                  ...(zenUserPrismColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
-                  ...(latestUserAnchorFadeStyle ?? {}),
                   ...messageDynamicTypeStyle,
                 }}
                 data-model-revealed={modelRevealMessageId === msg.id ? "true" : undefined}
@@ -41504,6 +51805,7 @@ function HomeContent(): React.JSX.Element {
                 data-message-id={msg.id}
                 data-chat-phase={chatPhase}
                 data-message-edge={messageEdge}
+                data-starter-prompt-align={starterPromptAlignment}
                 data-chat-latest-user-anchor={
                   chatLikeSurface && msg.id === latestUserMessageId ? "true" : undefined
                 }
@@ -41586,23 +51888,16 @@ function HomeContent(): React.JSX.Element {
                     )}
                   </h4>
                 )}
-                {msg.role === "assistant" && msg.sentGeneratedImage ? (
-                  <figure className={styles.assistantSentImageWrap}>
-                    <img
-                      src={apiGeneratedImageThumbUrl(msg.sentGeneratedImage.imageId)}
-                      alt={msg.sentGeneratedImage.prompt}
-                      loading="lazy"
-                      decoding="async"
-                      className={styles.assistantSentImage}
-                    />
-                  </figure>
-                ) : null}
+                {msg.role === "assistant" && msg.sentGeneratedImage
+                  ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
+                  : null}
                 <MessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
                   messageRole={msg.role}
                   revealWordByWord={
                     assistantWordByWordMode &&
+                    messageRevealEligible &&
                     msg.role === "assistant" &&
                     msg.id === latestAssistantMessageId &&
                     !messageRevealAlreadyCompleted
@@ -41610,12 +51905,24 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
-                  revealMoodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
+                  commandMentionsById={commandCenterCommandById}
+                  onOpenCommandMention={openCommandCenterCommandEditor}
+                  promptShortcut={msg.promptShortcut}
+                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  onTogglePromptShortcut={() =>
+                    setExpandedPromptShortcutMessageId((current) =>
+                      current === msg.id ? null : msg.id
+                    )
+                  }
+                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {renderAskQuestionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}
@@ -41677,27 +51984,38 @@ function HomeContent(): React.JSX.Element {
                   );
                 })()}
               </article>
+              </Fragment>
             );
           })}
+          {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
-          {typingIndicatorNode}
+          {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
           {/* Scroll sentinel: kept at the very end so the scroll effect can
               always bring the latest content into view. */}
-            <div ref={messagesEndRef} aria-hidden="true" />
+            <div
+              ref={messagesEndRef}
+              className={styles.chatEphemeralLiveEndSpacer}
+              aria-hidden="true"
+            />
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {manualCompactionIndicatorNode}
         </div>
+        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
+          data-compose-send-tint={composerSendTintActive ? "true" : undefined}
+          data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
           data-keyboard-lifted={mobileKeyboardInset > 0 ? "true" : undefined}
           style={composeStyle}
           onSubmit={handleComposerSubmit}
+          onPointerDownCapture={handleComposerPointerDown}
           onBlur={handleComposerBlur}
           onKeyDown={handleComposerKeyDown}
         >
@@ -41715,7 +52033,7 @@ function HomeContent(): React.JSX.Element {
               onInteractionChange={setLensInteracting}
             />
           )}
-          {!composerHiddenByAskQuestion && editingMessageId && (
+          {!composerHiddenByChoiceChips && editingMessageId && (
             <div className={styles.composeEditNotice} role="status">
               <span>Editing message. Save sends the revised text.</span>
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
@@ -41723,7 +52041,7 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
-          {!composerHiddenByAskQuestion ? (
+          {!composerHiddenByChoiceChips ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {devDebugComposerEnabled && (
@@ -41769,6 +52087,8 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    commandPicks={composerCommandPicks}
+                    promptPicks={commandCenterPromptPicks}
                   />
                 </div>
               </div>
@@ -41789,6 +52109,8 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                commandPicks={composerCommandPicks}
+                promptPicks={commandCenterPromptPicks}
               />
             )
           ) : null}
@@ -41799,7 +52121,6 @@ function HomeContent(): React.JSX.Element {
         {renderCanvasToolsContextMenu()}
       </section>
 
-      {renderDevToolsButton()}
       {renderSharedPanels()}
       {renderDeleteAllModal()}
       {renderPanelBotDeleteModal()}
