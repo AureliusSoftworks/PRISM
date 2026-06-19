@@ -4728,6 +4728,41 @@ interface BotOpinion {
 }
 
 type ApiKeySource = "saved" | "server" | "none";
+type ApiKeyValidationProvider = "openai" | "anthropic" | "elevenlabs";
+type ApiKeyDraftStatus = "idle" | "checking" | "connected" | "error";
+type ApiKeyVisualStatus =
+  | "idle"
+  | "ready"
+  | "connected"
+  | "checking"
+  | "empty"
+  | "error";
+
+interface ApiKeyDraftValidation {
+  value: string;
+  status: ApiKeyDraftStatus;
+  detail: string | null;
+}
+
+type ApiKeyDraftValidationMap = Record<ApiKeyValidationProvider, ApiKeyDraftValidation>;
+
+interface ApiKeyConnectionDisplay {
+  overviewStatus: ApiKeyVisualStatus;
+  overviewText: string;
+  fieldStatus: ApiKeyVisualStatus;
+  fieldText: string;
+  detail: string | null;
+}
+
+interface ApiKeyStatusResponse {
+  status: {
+    provider: ApiKeyValidationProvider;
+    configured: boolean;
+    reachable: boolean;
+    statusCode?: number | null;
+    detail?: string | null;
+  };
+}
 
 interface UserSettings {
   displayName: string;
@@ -5545,6 +5580,9 @@ const AUTO_MODEL_CHOICE = "auto";
 const AUTO_MODEL_SETTINGS_SUBTEXT = "define preferred model in settings";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
+const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
+const SETTINGS_ANTHROPIC_KEY_FIELD = "anthropicApiKey";
+const SETTINGS_ELEVENLABS_KEY_FIELD = "elevenLabsApiKey";
 const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
@@ -5974,6 +6012,66 @@ function apiKeySourceStatusLabel(providerLabel: string, source: ApiKeySource): s
   if (source === "saved") return `${providerLabel} saved`;
   if (source === "server") return `${providerLabel} server key`;
   return `${providerLabel} unset`;
+}
+
+function createApiKeyDraftValidationMap(): ApiKeyDraftValidationMap {
+  return {
+    openai: { value: "", status: "idle", detail: null },
+    anthropic: { value: "", status: "idle", detail: null },
+    elevenlabs: { value: "", status: "idle", detail: null },
+  };
+}
+
+function apiKeyConnectionDisplay(
+  providerLabel: string,
+  source: ApiKeySource,
+  draft: ApiKeyDraftValidation
+): ApiKeyConnectionDisplay {
+  if (draft.value.length > 0) {
+    if (draft.status === "connected") {
+      return {
+        overviewStatus: "connected",
+        overviewText: `${providerLabel} connected`,
+        fieldStatus: "connected",
+        fieldText: "Connected",
+        detail: draft.detail,
+      };
+    }
+    if (draft.status === "error") {
+      return {
+        overviewStatus: "error",
+        overviewText: `${providerLabel} invalid`,
+        fieldStatus: "error",
+        fieldText: "Invalid",
+        detail: draft.detail,
+      };
+    }
+    return {
+      overviewStatus: "checking",
+      overviewText: `${providerLabel} checking...`,
+      fieldStatus: "checking",
+      fieldText: "Checking...",
+      detail: draft.detail,
+    };
+  }
+
+  if (source !== "none") {
+    return {
+      overviewStatus: "ready",
+      overviewText: apiKeySourceStatusLabel(providerLabel, source),
+      fieldStatus: "connected",
+      fieldText: source === "server" ? "Server key" : "Saved",
+      detail: null,
+    };
+  }
+
+  return {
+    overviewStatus: "idle",
+    overviewText: apiKeySourceStatusLabel(providerLabel, source),
+    fieldStatus: "idle",
+    fieldText: "Optional",
+    detail: null,
+  };
 }
 
 function onlineProviderApiKeySource(
@@ -10537,6 +10635,8 @@ interface ComposerBotPickerProps {
   hueLensTrackSegments?: readonly HueLensTrackSegment[];
   /** Dropdown direction. Header pickers should use "down" to avoid top clipping. */
   placement?: "up" | "down";
+  /** Increment to close floating picker menus from the parent shell. */
+  dismissPopoversSignal?: number;
 }
 
 function ComposerBotPicker({
@@ -10555,6 +10655,7 @@ function ComposerBotPicker({
   hueLensTrackGradient = "",
   hueLensTrackSegments = EMPTY_HUE_LENS_TRACK_SEGMENTS,
   placement = "up",
+  dismissPopoversSignal,
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
@@ -10674,6 +10775,12 @@ function ComposerBotPicker({
     const timeout = window.setTimeout(() => setOpen(false), 0);
     return () => window.clearTimeout(timeout);
   }, [disabled, open]);
+
+  useEffect(() => {
+    if (dismissPopoversSignal === undefined) return;
+    setOpen(false);
+    setBotNameFilter("");
+  }, [dismissPopoversSignal]);
 
   useEffect(() => {
     if (!menuOpen || !hueFocusBotId) return;
@@ -10921,6 +11028,8 @@ interface ImageBotDirectoryDropdownProps {
   /** When set, the trigger reflects this bot (gallery filtered to one bot). */
   selectedBotId: string | null;
   onPick: (botId: string) => void;
+  /** Increment to close the floating menu from the parent shell. */
+  dismissPopoversSignal?: number;
 }
 
 function ImageBotDirectoryDropdown({
@@ -10929,6 +11038,7 @@ function ImageBotDirectoryDropdown({
   resolvedTheme,
   selectedBotId,
   onPick,
+  dismissPopoversSignal,
 }: ImageBotDirectoryDropdownProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -10967,6 +11077,11 @@ function ImageBotDirectoryDropdown({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (dismissPopoversSignal === undefined) return;
+    setOpen(false);
+  }, [dismissPopoversSignal]);
 
   const toggleMenu = (): void => {
     setOpen((prev) => !prev);
@@ -11157,6 +11272,8 @@ interface ComposerModelPickerProps {
    * `null` = never badge a concrete row. Omit to fall back to catalog `isDefault`.
    */
   settingsDefaultModelId?: string | null;
+  /** Increment to close floating picker menus from the parent shell. */
+  dismissPopoversSignal?: number;
 }
 
 function ComposerModelPicker({
@@ -11173,6 +11290,7 @@ function ComposerModelPicker({
   showAutoOption = true,
   autoOptionMetaOverride,
   settingsDefaultModelId,
+  dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -11230,6 +11348,11 @@ function ComposerModelPicker({
     const timeout = window.setTimeout(() => setOpen(false), 0);
     return () => window.clearTimeout(timeout);
   }, [disabled, open]);
+
+  useEffect(() => {
+    if (dismissPopoversSignal === undefined) return;
+    setOpen(false);
+  }, [dismissPopoversSignal]);
 
   const pick = (nextValue: string): void => {
     onChange(nextValue);
@@ -13465,6 +13588,7 @@ interface ComposerInputProps {
   mentionBots: readonly BotMentionPick[];
   commandPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
+  dismissPopoversSignal?: number;
 }
 
 type ComposerShortcutScope = "leading" | "inline";
@@ -14671,6 +14795,8 @@ interface DesktopMarkdownComposerProps {
   promptPicks?: readonly CommandCenterCommand[];
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
+  /** Increment to close composer mention/command popovers from the parent shell. */
+  dismissPopoversSignal?: number;
 }
 
 const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, DesktopMarkdownComposerProps>(
@@ -14691,6 +14817,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       commandPicks = [],
       promptPicks = [],
       disabled = false,
+      dismissPopoversSignal,
     },
     ref
   ): React.JSX.Element {
@@ -14751,6 +14878,16 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
     }, []);
+
+    useEffect(() => {
+      if (dismissPopoversSignal === undefined) return;
+      setMentionUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+      setCommandUi((s) =>
+        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+      );
+    }, [dismissPopoversSignal]);
 
     const syncMentionPopover = useCallback((ed: Editor) => {
       const bots = mentionBotsRef.current;
@@ -15538,6 +15675,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     mentionBots,
     commandPicks = [],
     promptPicks = [],
+    dismissPopoversSignal,
   },
   ref
 ): React.JSX.Element {
@@ -15590,6 +15728,12 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
     );
   }, []);
+
+  useEffect(() => {
+    if (dismissPopoversSignal === undefined) return;
+    dismissTaMentionPopover();
+    dismissTaCommandPopover();
+  }, [dismissPopoversSignal, dismissTaCommandPopover, dismissTaMentionPopover]);
 
   const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
     const caret = el.selectionStart ?? 0;
@@ -15735,6 +15879,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           mentionBots={mentionBots}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
+          dismissPopoversSignal={dismissPopoversSignal}
         />
       ) : (
         <>
@@ -17118,6 +17263,8 @@ function HomeContent(): React.JSX.Element {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
+  const [apiKeyDraftValidation, setApiKeyDraftValidation] =
+    useState<ApiKeyDraftValidationMap>(() => createApiKeyDraftValidationMap());
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
@@ -17133,6 +17280,34 @@ function HomeContent(): React.JSX.Element {
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
+  const setApiKeyDraftValue = useCallback(
+    (provider: ApiKeyValidationProvider, value: string) => {
+      if (provider === "openai") {
+        setOpenAiKey(value);
+      } else if (provider === "anthropic") {
+        setAnthropicKey(value);
+      } else {
+        setElevenLabsKey(value);
+      }
+
+      const trimmed = value.trim();
+      setApiKeyDraftValidation((previous) => {
+        const next: ApiKeyDraftValidation = trimmed
+          ? { value: trimmed, status: "checking", detail: null }
+          : { value: "", status: "idle", detail: null };
+        const current = previous[provider];
+        if (
+          current.value === next.value &&
+          current.status === next.status &&
+          current.detail === next.detail
+        ) {
+          return previous;
+        }
+        return { ...previous, [provider]: next };
+      });
+    },
+    []
+  );
   const [desktopFirstRunChecklistOpen, setDesktopFirstRunChecklistOpen] = useState(false);
   const [desktopFirstRunChecklistStepIndex, setDesktopFirstRunChecklistStepIndex] = useState(0);
   const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] = useState(false);
@@ -17361,8 +17536,91 @@ function HomeContent(): React.JSX.Element {
   const [panel, setPanel] = useState<PanelView>(null);
   const panelRef = useRef<PanelView>(null);
   panelRef.current = panel;
+  const panelPopupCleanupLastPanelRef = useRef<PanelView>(panel);
+  const [composerPopoverDismissSignal, setComposerPopoverDismissSignal] = useState(0);
   const [panelClosing, setPanelClosing] = useState(false);
   const panelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function scheduleApiKeyDraftValidation(
+    provider: ApiKeyValidationProvider,
+    value: string
+  ): () => void {
+    const trimmed = value.trim();
+    if (panel !== "settings" || !trimmed) {
+      setApiKeyDraftValidation((previous) => {
+        const current = previous[provider];
+        if (current.value === "" && current.status === "idle" && current.detail === null) {
+          return previous;
+        }
+        return {
+          ...previous,
+          [provider]: { value: "", status: "idle", detail: null },
+        };
+      });
+      return () => {};
+    }
+
+    setApiKeyDraftValidation((previous) => {
+      const current = previous[provider];
+      if (current.value === trimmed && current.status === "checking") return previous;
+      return {
+        ...previous,
+        [provider]: { value: trimmed, status: "checking", detail: null },
+      };
+    });
+
+    const controller = new AbortController();
+    const timerId = window.setTimeout(() => {
+      void api<ApiKeyStatusResponse>("/api/settings/api-key-status", {
+        method: "POST",
+        body: JSON.stringify({ provider, apiKey: trimmed }),
+        signal: controller.signal,
+      })
+        .then((result) => {
+          setApiKeyDraftValidation((previous) => {
+            if (previous[provider].value !== trimmed) return previous;
+            return {
+              ...previous,
+              [provider]: {
+                value: trimmed,
+                status: result.status.reachable ? "connected" : "error",
+                detail: result.status.detail ?? null,
+              },
+            };
+          });
+        })
+        .catch((err) => {
+          if (isAbortLikeError(err)) return;
+          setApiKeyDraftValidation((previous) => {
+            if (previous[provider].value !== trimmed) return previous;
+            return {
+              ...previous,
+              [provider]: {
+                value: trimmed,
+                status: "error",
+                detail: err instanceof Error ? err.message : "Validation failed.",
+              },
+            };
+          });
+        });
+    }, 260);
+
+    return () => {
+      window.clearTimeout(timerId);
+      controller.abort();
+    };
+  }
+  useEffect(
+    () => scheduleApiKeyDraftValidation("openai", openAiKey),
+    [panel, openAiKey]
+  );
+  useEffect(
+    () => scheduleApiKeyDraftValidation("anthropic", anthropicKey),
+    [panel, anthropicKey]
+  );
+  useEffect(
+    () => scheduleApiKeyDraftValidation("elevenlabs", elevenLabsKey),
+    [panel, elevenLabsKey]
+  );
   selectedIdRef.current = selectedId;
   detailIdRef.current = detail?.id ?? null;
   // Drill-in target for the high-count Prism color dashboard. Null at
@@ -18454,6 +18712,8 @@ function HomeContent(): React.JSX.Element {
     setSettingsDefaultsModalOpen(false);
     setOpenAiKey("");
     setAnthropicKey("");
+    setElevenLabsKey("");
+    setApiKeyDraftValidation(createApiKeyDraftValidationMap());
     setChangePasswordModalOpen(false);
     setChangePasswordNew("");
     setChangePasswordConfirm("");
@@ -18982,6 +19242,27 @@ function HomeContent(): React.JSX.Element {
     [resolvedTheme]
   );
   const settingsModalBackdropClassName = `${styles.settingsAboutModalBackdrop} ${themeClass}`;
+  const openAiKeyDisplay = settings
+    ? apiKeyConnectionDisplay(
+        "OpenAI",
+        settings.openAiApiKeySource,
+        apiKeyDraftValidation.openai
+      )
+    : null;
+  const anthropicKeyDisplay = settings
+    ? apiKeyConnectionDisplay(
+        "Anthropic",
+        settings.anthropicApiKeySource,
+        apiKeyDraftValidation.anthropic
+      )
+    : null;
+  const elevenLabsKeyDisplay = settings
+    ? apiKeyConnectionDisplay(
+        "ElevenLabs",
+        settings.elevenLabsApiKeySource,
+        apiKeyDraftValidation.elevenlabs
+      )
+    : null;
 
   useEffect(() => {
     if (panel !== "settings") return;
@@ -20255,6 +20536,7 @@ function HomeContent(): React.JSX.Element {
         ariaLabel={`Coffee session model for ${
           isLocal ? "local" : "online"
         } replies`}
+        dismissPopoversSignal={composerPopoverDismissSignal}
         placement="down"
         minMenuWidthPx={180}
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
@@ -20337,6 +20619,7 @@ function HomeContent(): React.JSX.Element {
           ariaLabel={`Model for ${
             isLocal ? "local" : "online"
           } replies`}
+          dismissPopoversSignal={composerPopoverDismissSignal}
           placement="down"
           minMenuWidthPx={options.modelMenuWidthPx ?? 180}
           menuClassName={options.modelMenuClassName}
@@ -20366,6 +20649,7 @@ function HomeContent(): React.JSX.Element {
             hueLensAvailable={hueLensAvailable}
             hueLensTrackGradient={hueLensTrackGradient}
             hueLensTrackSegments={hueLensTrackSegments}
+            dismissPopoversSignal={composerPopoverDismissSignal}
           />
         ) : null}
       </div>
@@ -20408,6 +20692,7 @@ function HomeContent(): React.JSX.Element {
             minMenuWidthPx={180}
             showAutoOption={false}
             settingsDefaultModelId={null}
+            dismissPopoversSignal={composerPopoverDismissSignal}
           />
         </div>
       );
@@ -20469,6 +20754,7 @@ function HomeContent(): React.JSX.Element {
             settings,
             modelProvider
           )}
+          dismissPopoversSignal={composerPopoverDismissSignal}
         />
       </div>
     );
@@ -22027,6 +22313,57 @@ function HomeContent(): React.JSX.Element {
   const [storyProviderTouched, setStoryProviderTouched] = useState(false);
   const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] =
     useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  useEffect(() => {
+    const previousPanel = panelPopupCleanupLastPanelRef.current;
+    panelPopupCleanupLastPanelRef.current = panel;
+    if (panel === null || previousPanel === panel) return;
+
+    setComposerPopoverDismissSignal((signal) => signal + 1);
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+    setDesktopFirstRunChecklistOpen(false);
+    setCommandCenterHelpModalOpen(false);
+    setChatOverflowMenuOpen(false);
+    closeDevTools();
+    setMessageContextMenu(null);
+    setContextFocusedMessageId(null);
+    setMobileFocusedMessageId(null);
+    setModelRevealMessageId(null);
+    setBotContextMenu(null);
+    setConversationGroupContextMenu(null);
+    setCanvasToolsContextMenu(null);
+    setCoffeeShellContextMenu(null);
+    setCoffeeBotContextMenu(null);
+    setStoryShellContextMenu(null);
+    const pendingBotContext = botContextLongPressRef.current;
+    if (pendingBotContext) {
+      clearTimeout(pendingBotContext.timer);
+      botContextLongPressRef.current = null;
+    }
+    if (emptyStateSearchOpenTimerRef.current) {
+      clearTimeout(emptyStateSearchOpenTimerRef.current);
+      emptyStateSearchOpenTimerRef.current = null;
+    }
+    setEmptyStateSearchOpen(false);
+    setTouchPreview(null);
+    touchPreviewPointerIdRef.current = null;
+    setExpandedPromptShortcutMessageId(null);
+    setCoffeeOpeningPollModalOpen(false);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    coffeePollPanelDragRef.current = null;
+    setCoffeeSettingsModalOpen(false);
+    if (coffeeTranscriptCloseTimerRef.current) {
+      clearTimeout(coffeeTranscriptCloseTimerRef.current);
+      coffeeTranscriptCloseTimerRef.current = null;
+    }
+    setCoffeeTranscriptClosing(false);
+    setCoffeeTranscriptOpen(false);
+    setCoffeeReplayActionPanelBotId(null);
+    setStoryMapOpen(false);
+    setStoryInventoryOpen(false);
+    setStoryTranscriptOpen(false);
+  }, [closeDevTools, panel]);
   useEffect(() => {
     if (storyProviderTouched) return;
     if (isProvider(user?.preferredProvider)) {
@@ -23811,7 +24148,7 @@ function HomeContent(): React.JSX.Element {
   }, [tutorialProgress, user?.id]);
   useEffect(() => {
     if (!user) return;
-    if (view === "hub") {
+    if (view === "hub" || panel !== null) {
       setActiveTutorialMode(null);
       return;
     }
@@ -23828,7 +24165,7 @@ function HomeContent(): React.JSX.Element {
     }
     setActiveTutorialMode(mode);
     setActiveTutorialStepIndex(0);
-  }, [activeTutorialMode, tutorialProgress, user, view]);
+  }, [activeTutorialMode, panel, tutorialProgress, user, view]);
   useEffect(() => {
     if (!devToolsOpen) return;
     void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
@@ -29441,8 +29778,17 @@ function HomeContent(): React.JSX.Element {
     showEmptyStateSearchAfterReturn();
   }
 
+  function readSettingsFormText(
+    form: HTMLFormElement,
+    fieldName: string,
+    fallback: string
+  ): string {
+    const value = new FormData(form).get(fieldName);
+    return typeof value === "string" ? value : fallback;
+  }
+
   async function saveSettings(
-    e: React.FormEvent,
+    e: React.FormEvent<HTMLFormElement>,
     options: { closeHostsModalOnSuccess?: boolean } = {}
   ) {
     e.preventDefault();
@@ -29467,15 +29813,30 @@ function HomeContent(): React.JSX.Element {
             ? ""
             : preferredOnlineModelChoice,
       };
-      const trimmedKey = openAiKey.trim();
+      const submittedOpenAiKey = readSettingsFormText(
+        e.currentTarget,
+        SETTINGS_OPENAI_KEY_FIELD,
+        openAiKey
+      );
+      const submittedAnthropicKey = readSettingsFormText(
+        e.currentTarget,
+        SETTINGS_ANTHROPIC_KEY_FIELD,
+        anthropicKey
+      );
+      const submittedElevenLabsKey = readSettingsFormText(
+        e.currentTarget,
+        SETTINGS_ELEVENLABS_KEY_FIELD,
+        elevenLabsKey
+      );
+      const trimmedKey = submittedOpenAiKey.trim();
       if (trimmedKey.length > 0) {
         body.openAiApiKey = trimmedKey;
       }
-      const trimmedAnthropicKey = anthropicKey.trim();
+      const trimmedAnthropicKey = submittedAnthropicKey.trim();
       if (trimmedAnthropicKey.length > 0) {
         body.anthropicApiKey = trimmedAnthropicKey;
       }
-      const trimmedElevenLabsKey = elevenLabsKey.trim();
+      const trimmedElevenLabsKey = submittedElevenLabsKey.trim();
       if (trimmedElevenLabsKey.length > 0) {
         body.elevenLabsApiKey = trimmedElevenLabsKey;
       }
@@ -29483,6 +29844,7 @@ function HomeContent(): React.JSX.Element {
       setOpenAiKey("");
       setAnthropicKey("");
       setElevenLabsKey("");
+      setApiKeyDraftValidation(createApiKeyDraftValidationMap());
       const { comfyUiHost: savedComfyHost } = await refreshSettings();
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
@@ -29642,6 +30004,10 @@ function HomeContent(): React.JSX.Element {
       } else {
         setElevenLabsKey("");
       }
+      setApiKeyDraftValidation((previous) => ({
+        ...previous,
+        [provider]: { value: "", status: "idle", detail: null },
+      }));
       const { comfyUiHost } = await refreshSettings();
       await refreshModels(comfyUiHost);
     } catch (err) {
@@ -41435,18 +41801,14 @@ function HomeContent(): React.JSX.Element {
                   </p>
                 </div>
                 <div className={styles.settingsStatusPills} aria-label="Connection status">
-                  <span data-status={settings.openAiApiKeySource !== "none" ? "ready" : "idle"}>
-                    {apiKeySourceStatusLabel("OpenAI", settings.openAiApiKeySource)}
+                  <span data-status={openAiKeyDisplay?.overviewStatus ?? "idle"}>
+                    {openAiKeyDisplay?.overviewText ?? "OpenAI unset"}
                   </span>
-                  <span
-                    data-status={settings.anthropicApiKeySource !== "none" ? "ready" : "idle"}
-                  >
-                    {apiKeySourceStatusLabel("Anthropic", settings.anthropicApiKeySource)}
+                  <span data-status={anthropicKeyDisplay?.overviewStatus ?? "idle"}>
+                    {anthropicKeyDisplay?.overviewText ?? "Anthropic unset"}
                   </span>
-                  <span
-                    data-status={settings.elevenLabsApiKeySource !== "none" ? "ready" : "idle"}
-                  >
-                    {apiKeySourceStatusLabel("ElevenLabs", settings.elevenLabsApiKeySource)}
+                  <span data-status={elevenLabsKeyDisplay?.overviewStatus ?? "idle"}>
+                    {elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset"}
                   </span>
                   <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
                   <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
@@ -41465,17 +41827,27 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.settingsFieldGrid}>
                     <label className={styles.settingsHostField}>
                       <span className={styles.settingsHostLabel}>OpenAI key</span>
-                      <input
-                        type="password"
-                        placeholder={
-                          settings.hasOpenAiApiKey
-                            ? "Saved - type to replace"
-                            : "sk-..."
-                        }
-                        value={openAiKey}
-                        onChange={(event) => setOpenAiKey(event.target.value)}
-                        autoComplete="off"
-                      />
+                      <span
+                        className={styles.settingsHostInputWrap}
+                        data-status={openAiKeyDisplay?.fieldStatus ?? "idle"}
+                        title={openAiKeyDisplay?.detail ?? undefined}
+                      >
+                        <input
+                          type="password"
+                          name={SETTINGS_OPENAI_KEY_FIELD}
+                          placeholder={
+                            settings.hasOpenAiApiKey
+                              ? "Saved - type to replace"
+                              : "sk-..."
+                          }
+                          value={openAiKey}
+                          onChange={(event) => setApiKeyDraftValue("openai", event.target.value)}
+                          autoComplete="off"
+                        />
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {openAiKeyDisplay?.fieldText ?? "Optional"}
+                        </span>
+                      </span>
                       {settings.hasOpenAiApiKey && (
                         <button
                           type="button"
@@ -41489,17 +41861,27 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsHostField}>
                       <span className={styles.settingsHostLabel}>Anthropic key</span>
-                      <input
-                        type="password"
-                        placeholder={
-                          settings.hasAnthropicApiKey
-                            ? "Saved - type to replace"
-                            : "sk-ant-..."
-                        }
-                        value={anthropicKey}
-                        onChange={(event) => setAnthropicKey(event.target.value)}
-                        autoComplete="off"
-                      />
+                      <span
+                        className={styles.settingsHostInputWrap}
+                        data-status={anthropicKeyDisplay?.fieldStatus ?? "idle"}
+                        title={anthropicKeyDisplay?.detail ?? undefined}
+                      >
+                        <input
+                          type="password"
+                          name={SETTINGS_ANTHROPIC_KEY_FIELD}
+                          placeholder={
+                            settings.hasAnthropicApiKey
+                              ? "Saved - type to replace"
+                              : "sk-ant-..."
+                          }
+                          value={anthropicKey}
+                          onChange={(event) => setApiKeyDraftValue("anthropic", event.target.value)}
+                          autoComplete="off"
+                        />
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {anthropicKeyDisplay?.fieldText ?? "Optional"}
+                        </span>
+                      </span>
                       {settings.hasAnthropicApiKey && (
                         <button
                           type="button"
@@ -41513,17 +41895,27 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsHostField}>
                       <span className={styles.settingsHostLabel}>ElevenLabs key</span>
-                      <input
-                        type="password"
-                        placeholder={
-                          settings.hasElevenLabsApiKey
-                            ? "Saved - type to replace"
-                            : "xi-..."
-                        }
-                        value={elevenLabsKey}
-                        onChange={(event) => setElevenLabsKey(event.target.value)}
-                        autoComplete="off"
-                      />
+                      <span
+                        className={styles.settingsHostInputWrap}
+                        data-status={elevenLabsKeyDisplay?.fieldStatus ?? "idle"}
+                        title={elevenLabsKeyDisplay?.detail ?? undefined}
+                      >
+                        <input
+                          type="password"
+                          name={SETTINGS_ELEVENLABS_KEY_FIELD}
+                          placeholder={
+                            settings.hasElevenLabsApiKey
+                              ? "Saved - type to replace"
+                              : "xi-..."
+                          }
+                          value={elevenLabsKey}
+                          onChange={(event) => setApiKeyDraftValue("elevenlabs", event.target.value)}
+                          autoComplete="off"
+                        />
+                        <span className={styles.settingsHostStatus} aria-live="polite">
+                          {elevenLabsKeyDisplay?.fieldText ?? "Optional"}
+                        </span>
+                      </span>
                       {settings.hasElevenLabsApiKey && (
                         <button
                           type="button"
@@ -41878,17 +42270,27 @@ function HomeContent(): React.JSX.Element {
                       </p>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>OpenAI API key</span>
-                        <input
-                          type="password"
-                          placeholder={
-                            settings.hasOpenAiApiKey
-                              ? "Saved (leave blank to keep; type to replace)"
-                              : "sk-..."
-                          }
-                          value={openAiKey}
-                          onChange={(event) => setOpenAiKey(event.target.value)}
-                          autoComplete="off"
-                        />
+                        <span
+                          className={styles.settingsHostInputWrap}
+                          data-status={openAiKeyDisplay?.fieldStatus ?? "idle"}
+                          title={openAiKeyDisplay?.detail ?? undefined}
+                        >
+                          <input
+                            type="password"
+                            name={SETTINGS_OPENAI_KEY_FIELD}
+                            placeholder={
+                              settings.hasOpenAiApiKey
+                                ? "Saved (leave blank to keep; type to replace)"
+                                : "sk-..."
+                            }
+                            value={openAiKey}
+                            onChange={(event) => setApiKeyDraftValue("openai", event.target.value)}
+                            autoComplete="off"
+                          />
+                          <span className={styles.settingsHostStatus} aria-live="polite">
+                            {openAiKeyDisplay?.fieldText ?? "Optional"}
+                          </span>
+                        </span>
                         {settings.hasOpenAiApiKey && (
                           <button
                             type="button"
@@ -41902,17 +42304,27 @@ function HomeContent(): React.JSX.Element {
                       </label>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>Anthropic API key</span>
-                        <input
-                          type="password"
-                          placeholder={
-                            settings.hasAnthropicApiKey
-                              ? "Saved (leave blank to keep; type to replace)"
-                              : "sk-ant-..."
-                          }
-                          value={anthropicKey}
-                          onChange={(event) => setAnthropicKey(event.target.value)}
-                          autoComplete="off"
-                        />
+                        <span
+                          className={styles.settingsHostInputWrap}
+                          data-status={anthropicKeyDisplay?.fieldStatus ?? "idle"}
+                          title={anthropicKeyDisplay?.detail ?? undefined}
+                        >
+                          <input
+                            type="password"
+                            name={SETTINGS_ANTHROPIC_KEY_FIELD}
+                            placeholder={
+                              settings.hasAnthropicApiKey
+                                ? "Saved (leave blank to keep; type to replace)"
+                                : "sk-ant-..."
+                            }
+                            value={anthropicKey}
+                            onChange={(event) => setApiKeyDraftValue("anthropic", event.target.value)}
+                            autoComplete="off"
+                          />
+                          <span className={styles.settingsHostStatus} aria-live="polite">
+                            {anthropicKeyDisplay?.fieldText ?? "Optional"}
+                          </span>
+                        </span>
                         {settings.hasAnthropicApiKey && (
                           <button
                             type="button"
@@ -41926,17 +42338,27 @@ function HomeContent(): React.JSX.Element {
                       </label>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>ElevenLabs API key</span>
-                        <input
-                          type="password"
-                          placeholder={
-                            settings.hasElevenLabsApiKey
-                              ? "Saved (leave blank to keep; type to replace)"
-                              : "xi-..."
-                          }
-                          value={elevenLabsKey}
-                          onChange={(event) => setElevenLabsKey(event.target.value)}
-                          autoComplete="off"
-                        />
+                        <span
+                          className={styles.settingsHostInputWrap}
+                          data-status={elevenLabsKeyDisplay?.fieldStatus ?? "idle"}
+                          title={elevenLabsKeyDisplay?.detail ?? undefined}
+                        >
+                          <input
+                            type="password"
+                            name={SETTINGS_ELEVENLABS_KEY_FIELD}
+                            placeholder={
+                              settings.hasElevenLabsApiKey
+                                ? "Saved (leave blank to keep; type to replace)"
+                                : "xi-..."
+                            }
+                            value={elevenLabsKey}
+                            onChange={(event) => setApiKeyDraftValue("elevenlabs", event.target.value)}
+                            autoComplete="off"
+                          />
+                          <span className={styles.settingsHostStatus} aria-live="polite">
+                            {elevenLabsKeyDisplay?.fieldText ?? "Optional"}
+                          </span>
+                        </span>
                         {settings.hasElevenLabsApiKey && (
                           <button
                             type="button"
@@ -44324,6 +44746,7 @@ function HomeContent(): React.JSX.Element {
                   bots={bots}
                   resolvedTheme={resolvedTheme}
                   selectedBotId={imagePanelScope === "bot" ? imagePanelBotId : null}
+                  dismissPopoversSignal={composerPopoverDismissSignal}
                   onPick={(botId) => {
                     setImagePanelScope("bot");
                     setImagePanelBotId(botId);
@@ -48865,6 +49288,7 @@ function HomeContent(): React.JSX.Element {
                   hideSubmitButton
                   resolvedTheme={resolvedTheme}
                   mentionBots={coffeeMentionBotPicks}
+                  dismissPopoversSignal={composerPopoverDismissSignal}
                   disabled={
                     coffeeBusy ||
                     coffeeTurnRhythmState === "cooldown" ||
@@ -49025,6 +49449,7 @@ function HomeContent(): React.JSX.Element {
           settings,
           storyResponseMode === "local" ? "local" : "online"
         )}
+        dismissPopoversSignal={composerPopoverDismissSignal}
       />
     </div>
   );
@@ -50022,6 +50447,7 @@ function HomeContent(): React.JSX.Element {
                           hueLensAvailable={hueLensAvailable}
                           hueLensTrackGradient={hueLensTrackGradient}
                           hueLensTrackSegments={hueLensTrackSegments}
+                          dismissPopoversSignal={composerPopoverDismissSignal}
                         />
                       )}
                     </>
@@ -50101,6 +50527,7 @@ function HomeContent(): React.JSX.Element {
                           settings,
                           isLocal ? "local" : "online"
                         )}
+                        dismissPopoversSignal={composerPopoverDismissSignal}
                       />
                       {renderComposeUtilityActions()}
                     </>
@@ -50832,6 +51259,7 @@ function HomeContent(): React.JSX.Element {
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
+                    dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
               </div>
@@ -50854,6 +51282,7 @@ function HomeContent(): React.JSX.Element {
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
+                dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
           ) : null}
@@ -52236,6 +52665,7 @@ function HomeContent(): React.JSX.Element {
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
+                    dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
               </div>
@@ -52258,6 +52688,7 @@ function HomeContent(): React.JSX.Element {
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
+                dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
           ) : null}

@@ -12,6 +12,10 @@ import {
 } from "./auth.ts";
 import { buildHealthResponse } from "./health.ts";
 import {
+  validateApiKeyCredential,
+  type ApiKeyValidationProvider,
+} from "./api-key-validation.ts";
+import {
   getOllamaSetupStatus,
   installOllamaCliAndRequiredModel,
   runAutoSetup,
@@ -110,6 +114,9 @@ import {
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
+  sanitizeAnthropicKeyInput,
+  sanitizeElevenLabsKeyInput,
+  sanitizeOpenAiKeyInput,
 } from "./settings.ts";
 import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import {
@@ -521,6 +528,22 @@ function readProvider(value: unknown): ProviderName | undefined {
   return value === "local" || value === "openai" || value === "anthropic"
     ? value
     : undefined;
+}
+
+function readApiKeyValidationProvider(value: unknown): ApiKeyValidationProvider {
+  if (value === "openai" || value === "anthropic" || value === "elevenlabs") {
+    return value;
+  }
+  throw new Error("provider is required.");
+}
+
+function sanitizeApiKeyForProvider(
+  provider: ApiKeyValidationProvider,
+  value: string
+): string {
+  if (provider === "anthropic") return sanitizeAnthropicKeyInput(value);
+  if (provider === "elevenlabs") return sanitizeElevenLabsKeyInput(value);
+  return sanitizeOpenAiKeyInput(value);
 }
 
 function readString(value: unknown, fieldName: string): string {
@@ -3816,6 +3839,38 @@ function buildRoutes(): RouteDefinition[] {
       }
       const status = await checkComfyUiHostStatus(hostToCheck);
       json(ctx.res, 200, { ok: true, status });
+    }),
+    route("POST", "/api/settings/api-key-status", async (ctx) => {
+      requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const provider = readApiKeyValidationProvider(body.provider);
+      if (typeof body.apiKey !== "string") {
+        throw new Error("apiKey is required.");
+      }
+      const sanitized = sanitizeApiKeyForProvider(provider, body.apiKey);
+      if (!sanitized) {
+        json(ctx.res, 200, {
+          ok: true,
+          status: {
+            provider,
+            configured: false,
+            reachable: false,
+            detail: "API key is empty.",
+          },
+        });
+        return;
+      }
+      const validation = await validateApiKeyCredential(provider, sanitized);
+      json(ctx.res, 200, {
+        ok: true,
+        status: {
+          provider,
+          configured: true,
+          reachable: validation.valid,
+          statusCode: validation.status ?? null,
+          detail: validation.detail ?? null,
+        },
+      });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
