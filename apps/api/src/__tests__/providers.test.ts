@@ -150,7 +150,7 @@ describe("buildModelCatalog", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("keeps fallback defaults available when discovery is unavailable", async () => {
+  it("does not advertise online providers without matching API keys", async () => {
     globalThis.fetch = (async () =>
       new Response("offline", { status: 503 })) as typeof fetch;
 
@@ -159,7 +159,20 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.defaults.local);
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
+    assert.deepEqual(catalog.online, []);
+  });
+
+  it("keeps fallback defaults available when keyed discovery is unavailable", async () => {
+    globalThis.fetch = (async () =>
+      new Response("offline", { status: 503 })) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test", undefined, "sk-ant-test");
+
+    assert.ok(catalog.defaults.local);
+    assert.equal(catalog.defaults.online, "gpt-4o-mini");
+    assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.equal(catalog.online[0]?.id, catalog.defaults.online);
+    assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
   });
 
   it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {

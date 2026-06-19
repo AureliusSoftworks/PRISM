@@ -4,6 +4,7 @@ import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
+const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 
 interface PrismDevCommandHighlightOptions {
   /**
@@ -11,6 +12,11 @@ interface PrismDevCommandHighlightOptions {
    * `/cle` plain while the user is still typing toward `/clear`.
    */
   commandNames: readonly string[] | null;
+  /**
+   * User-created prompt shortcuts. These are decorated inline and can have
+   * normal text before or after them.
+   */
+  promptNames: readonly string[] | null;
 }
 
 interface DevCommandHighlightRanges {
@@ -29,6 +35,21 @@ export interface LeadingDevCommandTextRanges {
   argumentEnd?: number;
 }
 
+export interface PromptShortcutTextRange {
+  start: number;
+  end: number;
+  name: string;
+}
+
+function normalizedKnownNames(names: readonly string[] | null | undefined): Set<string> | null {
+  if (!names) return null;
+  return new Set(
+    names
+      .map((name) => name.trim().replace(/^[!/]+/, "").toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 export function resolveLeadingDevCommandTextRanges(
   firstTextBlockText: string,
   options: { commandNames?: readonly string[] | null } = {}
@@ -38,14 +59,8 @@ export function resolveLeadingDevCommandTextRanges(
   const commandMatch = DEV_COMMAND_RE.exec(tail);
   if (!commandMatch) return null;
   const commandName = commandMatch[0].slice(1).toLowerCase();
-  if (options.commandNames) {
-    const known = new Set(
-      options.commandNames
-        .map((name) => name.trim().replace(/^\/+/, "").toLowerCase())
-        .filter(Boolean)
-    );
-    if (!known.has(commandName)) return null;
-  }
+  const known = normalizedKnownNames(options.commandNames);
+  if (known && !known.has(commandName)) return null;
 
   const commandStart = leadingWs;
   const commandEnd = commandStart + commandMatch[0].length;
@@ -132,6 +147,30 @@ export function resolveLeadingDevCommandTextRanges(
   };
 }
 
+export function resolvePromptShortcutTextRanges(
+  text: string,
+  options: { promptNames?: readonly string[] | null } = {}
+): PromptShortcutTextRange[] {
+  const known = normalizedKnownNames(options.promptNames);
+  if (known && known.size === 0) return [];
+  const ranges: PromptShortcutTextRange[] = [];
+  for (const match of text.matchAll(PROMPT_SHORTCUT_RE)) {
+    const raw = match[0] ?? "";
+    const name = (match[2] ?? "").trim().toLowerCase();
+    const matchIndex = match.index ?? -1;
+    if (matchIndex < 0 || !name) continue;
+    if (known && !known.has(name)) continue;
+    const delimiterLength = raw.startsWith("/") ? 0 : 1;
+    const start = matchIndex + delimiterLength;
+    ranges.push({
+      start,
+      end: start + 1 + name.length,
+      name,
+    });
+  }
+  return ranges;
+}
+
 export function hasLeadingDevCommand(doc: ProseMirrorNode): boolean {
   return findLeadingDevCommandRanges(doc) !== null;
 }
@@ -191,11 +230,34 @@ export function findLeadingDevCommandTokenRange(
   return findLeadingDevCommandRanges(doc, commandNames)?.command ?? null;
 }
 
+export function findPromptShortcutTokenRanges(
+  doc: ProseMirrorNode,
+  promptNames?: readonly string[] | null
+): Array<{ from: number; to: number; name: string }> {
+  const ranges: Array<{ from: number; to: number; name: string }> = [];
+  doc.descendants((node: ProseMirrorNode, pos: number) => {
+    if (!node.isTextblock) return true;
+    const textRanges = resolvePromptShortcutTextRanges(node.textContent, {
+      promptNames,
+    });
+    for (const range of textRanges) {
+      ranges.push({
+        from: pos + 1 + range.start,
+        to: pos + 1 + range.end,
+        name: range.name,
+      });
+    }
+    return true;
+  });
+  return ranges;
+}
+
 export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighlightOptions>({
   name: "prismDevCommandHighlight",
   addOptions() {
     return {
       commandNames: null,
+      promptNames: null,
     };
   },
   addProseMirrorPlugins() {
@@ -207,33 +269,57 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
               state.doc,
               this.options.commandNames
             );
-            if (!ranges) return DecorationSet.empty;
-            const decorations: Decoration[] = [
-              Decoration.inline(ranges.command.from, ranges.command.to, {
-                class: "tiptapPrismDevCommandToken",
-              }),
-            ];
-            for (const quotedString of ranges.quotedStrings) {
+            const promptRanges = findPromptShortcutTokenRanges(
+              state.doc,
+              this.options.promptNames
+            );
+            const decorations: Decoration[] = [];
+            if (ranges) {
               decorations.push(
-                Decoration.inline(quotedString.from, quotedString.to, {
-                  class: "tiptapPrismDevCommandQuotedToken",
+                Decoration.inline(ranges.command.from, ranges.command.from + 1, {
+                  class: "tiptapPrismSlashChipPrefix",
+                })
+              );
+              decorations.push(
+                Decoration.inline(ranges.command.from + 1, ranges.command.to, {
+                  class: "tiptapPrismDevCommandToken",
+                })
+              );
+              for (const quotedString of ranges.quotedStrings) {
+                decorations.push(
+                  Decoration.inline(quotedString.from, quotedString.to, {
+                    class: "tiptapPrismDevCommandQuotedToken",
+                  })
+                );
+              }
+              for (const actionToken of ranges.actionTokens) {
+                decorations.push(
+                  Decoration.inline(actionToken.from, actionToken.to, {
+                    class: "tiptapPrismDevCommandActionToken",
+                  })
+                );
+              }
+              if (ranges.argument && ranges.argument.to > ranges.argument.from) {
+                decorations.push(
+                  Decoration.inline(ranges.argument.from, ranges.argument.to, {
+                    class: "tiptapPrismDevCommandArgumentToken",
+                  })
+                );
+              }
+            }
+            for (const promptRange of promptRanges) {
+              decorations.push(
+                Decoration.inline(promptRange.from, promptRange.from + 1, {
+                  class: "tiptapPrismSlashChipPrefix",
+                })
+              );
+              decorations.push(
+                Decoration.inline(promptRange.from + 1, promptRange.to, {
+                  class: "tiptapPrismPromptShortcutToken",
                 })
               );
             }
-            for (const actionToken of ranges.actionTokens) {
-              decorations.push(
-                Decoration.inline(actionToken.from, actionToken.to, {
-                  class: "tiptapPrismDevCommandActionToken",
-                })
-              );
-            }
-            if (ranges.argument && ranges.argument.to > ranges.argument.from) {
-              decorations.push(
-                Decoration.inline(ranges.argument.from, ranges.argument.to, {
-                  class: "tiptapPrismDevCommandArgumentToken",
-                })
-              );
-            }
+            if (decorations.length === 0) return DecorationSet.empty;
             return DecorationSet.create(state.doc, decorations);
           },
         },

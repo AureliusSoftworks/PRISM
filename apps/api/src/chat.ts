@@ -66,6 +66,7 @@ import {
   parseStoredPromptShortcutPayload,
   serializeAssistantToolPayload,
   serializePromptShortcutPayload,
+  stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
@@ -76,8 +77,8 @@ import {
 } from "./image-job-slot.ts";
 import {
   mapZenWallpaperMetadata,
-  pruneZenWallpaperHistoryForRestoreWindow,
-  serializeZenWallpaperHistory,
+  rebaseZenWallpaperMetadataForVisibleWindow,
+  recoverStaleZenWallpaperGenerationStatus,
 } from "./conversations.ts";
 
 const config = getAppConfig();
@@ -2218,6 +2219,130 @@ export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
   return out;
 }
 
+const MENTIONED_BOT_CONTEXT_MAX_BOTS = 5;
+const MENTIONED_BOT_PROFILE_MAX_CHARS = 900;
+const MENTIONED_BOT_MEMORY_MAX_CHARS = 220;
+const MENTIONED_BOT_MEMORY_LIMIT = 4;
+
+interface MentionedBotContextRow {
+  id: string;
+  name: string | null;
+  system_prompt?: string | null;
+}
+
+function getTableColumnNames(db: DatabaseSync, tableName: string): Set<string> {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+      name?: string;
+    }>;
+    return new Set(
+      rows
+        .map((row) => (typeof row.name === "string" ? row.name : ""))
+        .filter((name) => name.length > 0)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function compactMentionedBotContextText(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return clampBoundaryContext(normalized, maxChars);
+}
+
+async function buildMentionedBotPromptContexts(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  message: string;
+  userDisplayName?: string;
+  includeMemories: boolean;
+}): Promise<string[]> {
+  const mentionIds = extractPrismBotMentionIdsFromMessage(args.message).slice(
+    0,
+    MENTIONED_BOT_CONTEXT_MAX_BOTS
+  );
+  if (mentionIds.length === 0) return [];
+
+  const botColumns = getTableColumnNames(args.db, "bots");
+  if (!botColumns.has("id") || !botColumns.has("name") || !botColumns.has("user_id")) {
+    return [];
+  }
+
+  const placeholders = mentionIds.map(() => "?").join(", ");
+  const systemPromptSelect = botColumns.has("system_prompt")
+    ? "system_prompt"
+    : "'' AS system_prompt";
+  const visibilityPredicate = botColumns.has("visibility")
+    ? "(user_id = ? OR visibility = 'public')"
+    : "user_id = ?";
+  const chatEnabledPredicate = botColumns.has("chat_enabled")
+    ? " AND chat_enabled = 1"
+    : "";
+  let rows: MentionedBotContextRow[] = [];
+  try {
+    rows = args.db
+      .prepare(
+        `SELECT id, name, ${systemPromptSelect}
+         FROM bots
+         WHERE id IN (${placeholders})
+           AND ${visibilityPredicate}${chatEnabledPredicate}`
+      )
+      .all(...mentionIds, args.userId) as unknown as MentionedBotContextRow[];
+  } catch {
+    return [];
+  }
+
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const contexts: string[] = [];
+  for (const mentionId of mentionIds) {
+    const row = rowsById.get(mentionId);
+    if (!row) continue;
+    const displayName = row.name?.trim() || "Unnamed bot";
+    const profileExcerpt = compactMentionedBotContextText(
+      stripBotProfileMetaSuffix(row.system_prompt ?? ""),
+      MENTIONED_BOT_PROFILE_MAX_CHARS
+    );
+    const lines = [`- ${displayName} (id: ${row.id})`];
+    if (profileExcerpt) {
+      lines.push(`  Profile excerpt: ${profileExcerpt}`);
+    }
+
+    if (args.includeMemories) {
+      try {
+        const scopedMemories = await retrieveRelevantMemories(
+          args.db,
+          args.userId,
+          args.message,
+          args.userKey,
+          row.id,
+          MENTIONED_BOT_MEMORY_LIMIT
+        );
+        const memoryLines = scopedMemories
+          .filter((memory) => memory.botId === row.id)
+          .map((memory) =>
+            compactMentionedBotContextText(
+              formatMemoryHintForPrompt(memory.text, args.userDisplayName),
+              MENTIONED_BOT_MEMORY_MAX_CHARS
+            )
+          )
+          .filter((line) => line.length > 0);
+        if (memoryLines.length > 0) {
+          lines.push("  Relevant memories in this bot's scope:");
+          lines.push(...memoryLines.map((line) => `  - ${line}`));
+        }
+      } catch {
+        /* best-effort augmentation */
+      }
+    }
+
+    contexts.push(lines.join("\n"));
+  }
+
+  return contexts;
+}
+
 const ASKQUESTION_REQUEST_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
 
@@ -2265,8 +2390,8 @@ function buildInterruptedReplyContinuationHint(
   const responseGuidance = shouldResumeInterruptedReply
     ? [
         "The user's latest message appears to ask for continuation or excuse the interruption.",
-        "Reply naturally to the latest user note in at most one brief clause if needed, then continue the unfinished thought.",
-        "Use a bridge like \"As I was saying,\" and resume from the visible fragment.",
+        "Reply naturally to the latest user note in at most one brief clause if needed, then continue the unfinished thought only if that still fits.",
+        "A bridge phrase is optional; prefer a transition that follows from your newly generated text instead of forcing a canned phrase.",
       ]
     : clearlySwitchesTopic
       ? [
@@ -2282,6 +2407,7 @@ function buildInterruptedReplyContinuationHint(
     "The previous assistant reply was intentionally interrupted by the user's latest message and only the visible fragment remains in history.",
     `Visible interrupted fragment: "${snippetPreview}"`,
     ...responseGuidance,
+    "If the latest user message appears to complete, predict, or answer the unfinished thought, treat that as the user's contribution and do not continue repeating the interrupted text.",
     "Never restore, quote, or summarize hidden text that is not present in the visible fragment; if continuing, continue only from that fragment.",
     "Do not scold the user or claim you cannot know what you were going to say.",
   ].join("\n");
@@ -3393,6 +3519,7 @@ function buildPromptMessages(args: {
   botOpinion?: BotOpinion | null;
   threadSummary?: string | null;
   memoryLines: string[];
+  mentionedBotContexts?: string[];
   memoryClarification?: string | null;
   chatHistory: ChatMessage[];
   userMessage: string;
@@ -3461,6 +3588,16 @@ function buildPromptMessages(args: {
     promptMessages.push({
       role: "system",
       content: `Earlier in this thread (compacted context):\n${args.threadSummary.trim()}`,
+    });
+  }
+  if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
+    promptMessages.push({
+      role: "system",
+      content: [
+        "Prism bot mentions in the latest user message:",
+        "Use this as reference context for mentioned library bots. Stay in the current Prism/persona voice unless the user explicitly asks one of these bots to speak or roleplay.",
+        ...args.mentionedBotContexts,
+      ].join("\n"),
     });
   }
   if (args.memoryLines.length > 0) {
@@ -3609,7 +3746,8 @@ async function handleCompanionChatTurn(args: {
   activeMemoryBotId: string | null;
   isStarterPrompt: boolean;
   retrievalMode: ModeRuntimePlan["retrievalMode"];
-}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  userDisplayName?: string;
+}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
   const {
     db,
     provider,
@@ -3622,6 +3760,7 @@ async function handleCompanionChatTurn(args: {
     retrievalMode,
   } = args;
   let memoryLines: string[] = [];
+  let mentionedBotContexts: string[] = [];
   if (isStarterPrompt && retrievalMode === "cross_thread") {
     memoryLines = retrieveRecentMemoriesForStarter(
       db,
@@ -3639,39 +3778,20 @@ async function handleCompanionChatTurn(args: {
       activeMemoryBotId,
       true
     );
-    const mentionedBotIds = extractPrismBotMentionIdsFromMessage(message);
-    const seenLine = new Set(
-      memoryLines.map((line) => line.trim().toLowerCase()).filter(Boolean)
-    );
-    for (const mentionId of mentionedBotIds) {
-      if (mentionId === activeMemoryBotId) continue;
-      try {
-        const scoped = await retrieveRelevantMemories(
-          db,
-          userId,
-          message,
-          userKey,
-          mentionId,
-          4
-        );
-        for (const mem of scoped) {
-          const t = mem.text.trim();
-          if (!t) continue;
-          const k = t.toLowerCase();
-          if (seenLine.has(k)) continue;
-          seenLine.add(k);
-          memoryLines.push(mem.text);
-        }
-      } catch {
-        /* best-effort augmentation */
-      }
-    }
+    mentionedBotContexts = await buildMentionedBotPromptContexts({
+      db,
+      userId,
+      userKey,
+      message,
+      userDisplayName: args.userDisplayName,
+      includeMemories: retrievalMode === "cross_thread",
+    });
   }
   const threadSummary =
     retrievalMode === "cross_thread"
       ? getLatestThreadSummary(db, userId, activeConversationId, "chat")
       : null;
-  return { threadSummary, memoryLines };
+  return { threadSummary, memoryLines, mentionedBotContexts };
 }
 
 async function handleSandboxTurn(args: {
@@ -3680,16 +3800,29 @@ async function handleSandboxTurn(args: {
   activeConversationId: string;
   isStarterPrompt: boolean;
   retrievalMode: ModeRuntimePlan["retrievalMode"];
-}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  message: string;
+  userKey: Buffer;
+  userDisplayName?: string;
+}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
   const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
   const threadSummary =
     retrievalMode === "thread_only"
       ? getLatestThreadSummary(db, userId, activeConversationId, "sandbox")
       : null;
+  const mentionedBotContexts = !isStarterPrompt
+    ? await buildMentionedBotPromptContexts({
+        db,
+        userId,
+        userKey: args.userKey,
+        message: args.message,
+        userDisplayName: args.userDisplayName,
+        includeMemories: false,
+      })
+    : [];
   if (isStarterPrompt) {
-    return { threadSummary, memoryLines: [] };
+    return { threadSummary, memoryLines: [], mentionedBotContexts };
   }
-  return { threadSummary, memoryLines: [] };
+  return { threadSummary, memoryLines: [], mentionedBotContexts };
 }
 
 async function ensureAboutYouMemory(args: {
@@ -4191,6 +4324,7 @@ export async function processChatMessage(
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
+  let mentionedBotContexts: string[] = [];
   if (!incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
@@ -4205,6 +4339,7 @@ export async function processChatMessage(
             activeMemoryBotId,
             isStarterPrompt,
             retrievalMode,
+            userDisplayName: settings.userDisplayName,
           })
         : await handleSandboxTurn({
             db,
@@ -4212,14 +4347,18 @@ export async function processChatMessage(
             activeConversationId,
             isStarterPrompt,
             retrievalMode,
+            message,
+            userKey,
+            userDisplayName: settings.userDisplayName,
           });
     threadSummary = pipelineResult.threadSummary;
     memoryLines = pipelineResult.memoryLines;
+    mentionedBotContexts = pipelineResult.mentionedBotContexts;
   }
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
   );
 
   const existingSessionOpinion = readSessionOpinion(
@@ -4267,6 +4406,7 @@ export async function processChatMessage(
     botOpinion: existingBotOpinion,
     threadSummary,
     memoryLines,
+    mentionedBotContexts,
     memoryClarification,
     chatHistory: history,
     userMessage: promptUserMessage,
@@ -4943,6 +5083,12 @@ export async function processChatMessage(
   // No bot_id IS NOT NULL filter on the last_bot_* subqueries: Default
   // replies (bot_id NULL) count as "last spoken" too, and the client
   // distinguishes them from "no reply yet" via has_assistant_reply.
+  const activeImageJob = peekActiveImageJobForUser(userId);
+  recoverStaleZenWallpaperGenerationStatus(db, userId, {
+    conversationId: activeConversationId,
+    activeZenWallpaperConversationId:
+      activeImageJob?.source === "zen_wallpaper" ? activeImageJob.conversationId : null,
+  });
   const conversationColumns = db
     .prepare("PRAGMA table_info(conversations)")
     .all() as Array<{ name: string }>;
@@ -5034,10 +5180,13 @@ export async function processChatMessage(
       : messageRows.length;
   const zenWallpaperOut = mapZenWallpaperMetadata(conversationRow);
   if (conversationModeOut === "zen") {
-    zenWallpaperOut.history = pruneZenWallpaperHistoryForRestoreWindow(
-      serializeZenWallpaperHistory(zenWallpaperOut.history),
-      totalMessageCount,
-      ZEN_RESTORE_MESSAGE_LIMIT
+    Object.assign(
+      zenWallpaperOut,
+      rebaseZenWallpaperMetadataForVisibleWindow(
+        zenWallpaperOut,
+        totalMessageCount,
+        messageRows.length
+      )
     );
   }
 

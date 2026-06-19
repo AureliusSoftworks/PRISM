@@ -8845,6 +8845,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   will-change: transform;
 }
 
+.chatBotTileProtected:is(.chatBotTileSelected, .chatBotTileMarqueeSelected)::before {
+  content: "";
+  position: absolute;
+  inset: clamp(7px, calc(var(--tile-size, 40px) * 0.18), 30px);
+  --protected-selection-fill: color-mix(
+    in srgb,
+    var(--bot-color, var(--accent-ink)) 62%,
+    currentColor 38%
+  );
+  pointer-events: none;
+  z-index: 1;
+  border-radius: min(12px, calc(var(--tile-size, 40px) * 0.14));
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    var(--protected-selection-fill) 6px 8px,
+    transparent 8px 14px
+  );
+  opacity: 0.36;
+}
+
+.chatBotTileProtected.chatBotTileSelected::before {
+  opacity: 0.2;
+}
+
 .chatBotPickerSingle .chatBotTile {
   grid-template-rows: auto auto;
   align-content: center;
@@ -8986,6 +9011,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   grid-area: auto;
   align-self: start;
   margin-bottom: 0;
+  position: relative;
+  z-index: 2;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -9099,6 +9126,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   grid-area: 1 / 1;
   display: grid;
   place-items: center;
+  position: relative;
+  z-index: 2;
   transition: opacity 0.18s ease;
 }
 
@@ -9249,6 +9278,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transparent
   );
   box-shadow: none;
+}
+
+.chatBotTileSolidSwatch.chatBotTileProtected:is(
+  .chatBotTileSelected,
+  .chatBotTileMarqueeSelected
+)::before,
+.chatBotPickerPixelGrid
+  .chatBotTileProtected:is(.chatBotTileSelected, .chatBotTileMarqueeSelected)::before {
+  inset: 2px;
+  border-radius: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    var(--protected-selection-fill) 3px 4px,
+    transparent 4px 7px
+  );
+  opacity: 0.48;
 }
 
 /* Fifth density state: hundreds of bots collapse into a flat pixel grid.
@@ -10238,9 +10284,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"]
   .messages.messagesAskQuestionTailSpace[data-chat-ephemeral="true"]
+  .messageAssistant[data-starter-prompt-align="centered"] {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.appLayout[data-zen-surface="true"]
+  .messages.messagesAskQuestionTailSpace[data-chat-ephemeral="true"]
   .messageAssistant[data-starter-prompt-align="centered"]
   .chatEphemeralMarkdownBody {
-  transform: translateY(calc(-1 * clamp(64px, 8dvh, 144px)));
+  transform: translateY(calc(-1 * clamp(10px, 2.4dvh, 36px)));
 }
 
 .messages[data-chat-ephemeral="true"]
@@ -14030,6 +14084,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   max-width: min(100%, 920px);
 }
 
+.appLayout[data-zen-surface="true"]
+  .messages.messagesAskQuestionTailSpace[data-chat-ephemeral="true"]
+  .messageAssistant[data-starter-prompt-align="centered"]
+  .askQuestionInlineCard {
+  justify-self: center;
+  width: min(100%, 760px);
+  margin: clamp(14px, 2dvh, 22px) auto 0;
+  text-align: left;
+}
+
 .askQuestionInlineHeader {
   display: flex;
   align-items: center;
@@ -14274,6 +14338,122 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+.zenMemoryToastStack {
+  position: fixed;
+  left: 50%;
+  top: clamp(82px, 12dvh, 138px);
+  z-index: 872;
+  width: min(520px, calc(100vw - 32px));
+  justify-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+}
+
+.zenMemoryToastStack .memoryLearnedNotice {
+  width: min(100%, 520px);
+  min-height: 54px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 11px;
+  padding: 12px 16px 13px;
+  border-radius: 20px;
+  border-color: color-mix(in srgb, var(--accent) 42%, #ffffff 16%);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 72%, var(--accent) 10%),
+      color-mix(in srgb, var(--bg-deep) 72%, transparent)
+    );
+  color: color-mix(in srgb, var(--fg) 92%, #ffffff 8%);
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.3),
+    0 0 44px color-mix(in srgb, var(--accent) 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  animation: zenMemoryLearnedIn 6.8s ease both;
+}
+
+.themeLight .zenMemoryToastStack .memoryLearnedNotice {
+  border-color: color-mix(in srgb, var(--accent) 36%, #ffffff 36%);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #fffaf2 82%, var(--accent) 8%),
+      color-mix(in srgb, #fffaf2 68%, transparent)
+    );
+  color: color-mix(in srgb, var(--fg) 90%, #15120f 10%);
+  box-shadow:
+    0 18px 54px rgba(84, 62, 34, 0.16),
+    0 0 36px color-mix(in srgb, var(--accent) 15%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
+}
+
+.zenMemoryToastStack .memoryLearnedNotice[data-memory-toast-kind="retracted"],
+.zenMemoryToastStack .memoryLearnedNotice[data-memory-toast-kind="rejected"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 32%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 76%, var(--fg-muted) 6%),
+      color-mix(in srgb, var(--bg-deep) 72%, transparent)
+    );
+}
+
+.zenMemoryToastStack .memoryLearnedNotice > span {
+  grid-row: 1 / span 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: color-mix(in srgb, var(--accent-ink) 82%, #ffffff 18%);
+  font-size: 16px;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.zenMemoryToastStack .memoryLearnedNotice strong {
+  font-size: 12px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.zenMemoryToastStack .memoryLearnedNotice small {
+  display: -webkit-box;
+  color: color-mix(in srgb, var(--fg-muted) 84%, var(--fg));
+  font-size: 12px;
+  line-height: 1.34;
+  white-space: normal;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.zenMemoryToastStack .memoryToastOverflow {
+  justify-self: center;
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+@keyframes zenMemoryLearnedIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  9%,
+  84% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+}
+
 .chatHeaderActions .memoryToastStack {
   flex: 0 0 auto;
   width: auto;
@@ -14503,16 +14683,48 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-style: italic;
 }
 
+.markdownRichEditorHost :global(.tiptapPrismSlashChipPrefix) {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-size: 0;
+  letter-spacing: 0;
+  line-height: 0;
+}
+
 .markdownRichEditorHost :global(.tiptapPrismDevCommandToken) {
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 28%, var(--line));
-  border-left-color: color-mix(in srgb, #ff4d6d 46%, var(--accent-ink));
+  background-image: repeating-linear-gradient(
+    90deg,
+    #ff5f6d 0ch,
+    #ff5f6d 1ch,
+    #ffc371 1ch,
+    #ffc371 2ch,
+    #9be15d 2ch,
+    #9be15d 3ch,
+    #5d9fff 3ch,
+    #5d9fff 4ch,
+    #c77dff 4ch,
+    #c77dff 5ch
+  );
+  background-size: 5ch 100%;
+  background-repeat: repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  animation: devCommandRainbowShift 2.8s linear infinite;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPromptShortcutToken) {
+  border: 1px solid color-mix(in srgb, #2fd3e3 34%, var(--line));
+  border-left-color: color-mix(in srgb, #2fd3e3 62%, var(--accent-ink));
   border-radius: 999px;
   padding: 1px 7px;
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, #ff4d6d 10%, transparent),
-      color-mix(in srgb, #2fd3e3 7%, transparent)
+      color-mix(in srgb, #2fd3e3 12%, transparent),
+      color-mix(in srgb, var(--accent-ink) 6%, transparent)
     ),
     color-mix(in srgb, var(--bg-elevated) 72%, transparent);
   color: var(--fg);
@@ -14538,6 +14750,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
   -webkit-text-fill-color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
   font-weight: 750;
+}
+
+@keyframes devCommandRainbowShift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 10ch 0;
+  }
 }
 
 .compose[data-compose-ready="true"] .markdownComposerSurface {

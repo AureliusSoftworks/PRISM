@@ -222,25 +222,35 @@ export function deleteBots(
  * Behaviour mirrors {@link deleteBot} applied in bulk:
  *   - Runs inside an IMMEDIATE transaction so either every bot is gone
  *     or the database is untouched.
- *   - Skips protected bots entirely.
+ *   - Skips protected bots unless `includeProtected` is explicitly true.
  *   - Nulls out `bot_id` on the user's past messages and conversations
  *     for deleted bots first, so historical threads keep their content and
  *     fall back to the generic "Assistant" label via the chat read path's
  *     LEFT JOIN.
  *   - Deletes bot-scoped memories for the deleted bots. Global/default
- *     memories with `bot_id IS NULL` and protected-bot memories are preserved.
+ *     memories with `bot_id IS NULL` are preserved.
  *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every
  *     statement so other users' bots (including public bots they don't
  *     own) are never touched.
  *   - Returns the count of bots removed (0 if the user had none).
  *
- * Intended for the user-facing Bots panel press-and-hold "delete all" flow.
+ * Intended for the user-facing Bots panel press-and-hold "delete all" flow;
+ * Developer Tools can opt into deleting protected bots for fixture cleanup.
  */
-export function deleteAllBots(db: DatabaseSync, userId: string): number {
+export function deleteAllBots(
+  db: DatabaseSync,
+  userId: string,
+  options: { includeProtected?: boolean } = {}
+): number {
+  const includeProtected = options.includeProtected === true;
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const botIds = db
-      .prepare("SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0")
+      .prepare(
+        includeProtected
+          ? "SELECT id FROM bots WHERE user_id = ?"
+          : "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0"
+      )
       .all(userId) as Array<{ id: string }>;
 
     if (botIds.length === 0) {
@@ -268,6 +278,40 @@ export function deleteAllBots(db: DatabaseSync, userId: string): number {
     ).run(userId, ...ids);
     db.exec("COMMIT");
     return ids.length;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function setSelectedBotsDeleteProtection(
+  db: DatabaseSync,
+  userId: string,
+  selectedBotIds: string[],
+  deleteProtected: boolean
+): { updated: number } {
+  const uniqueIds = Array.from(
+    new Set(
+      selectedBotIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    )
+  );
+  if (!uniqueIds.length) {
+    return { updated: 0 };
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const result = db.prepare(
+      `UPDATE bots
+       SET delete_protected = ?, updated_at = ?
+       WHERE user_id = ? AND id IN (${placeholders})`
+    ).run(deleteProtected ? 1 : 0, new Date().toISOString(), userId, ...uniqueIds);
+    db.exec("COMMIT");
+    return { updated: Number(result.changes ?? 0) };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;

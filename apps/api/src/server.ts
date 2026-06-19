@@ -14,7 +14,12 @@ import { buildHealthResponse } from "./health.ts";
 import { runAutoSetup } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import { processChatMessage, readBotOpinion, refreshConversationTitle, upsertBotOpinion } from "./chat.ts";
-import { pollImageJobForUser, releaseImageSlot, tryAcquireImageSlot } from "./image-job-slot.ts";
+import {
+  peekActiveImageJobForUser,
+  pollImageJobForUser,
+  releaseImageSlot,
+  tryAcquireImageSlot,
+} from "./image-job-slot.ts";
 import {
   collectCoffeePollVotes,
   createCoffeePoll,
@@ -40,6 +45,7 @@ import {
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
+  deleteMemoriesForBotScope,
   deleteMemoryById,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
@@ -62,6 +68,8 @@ import {
   normalizeZenWallpaperStatus,
   pruneZenWallpaperHistoryForMessageCount,
   pruneZenWallpaperHistoryForRestoreWindow,
+  rebaseZenWallpaperMetadataForVisibleWindow,
+  recoverStaleZenWallpaperGenerationStatus,
   rewindConversation,
   serializeZenWallpaperHistory,
   setZenStarterConversationSuppression,
@@ -88,6 +96,7 @@ import {
   deleteSelectedBots,
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
+  setSelectedBotsDeleteProtection,
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
@@ -166,6 +175,7 @@ import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
+import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
 import { deleteVectorsForUser } from "./qdrant.ts";
 const config = getAppConfig();
 const db = createDatabase();
@@ -668,6 +678,22 @@ async function deleteUserAccount(userId: string): Promise<void> {
   }
 }
 
+async function restoreUserFactoryDefaults(userId: string): Promise<void> {
+  restoreFactoryDefaultsInDatabase(db, userId);
+
+  try {
+    removeGeneratedImagesDirectoryForUser(userId);
+  } catch {
+    // Best-effort filesystem cleanup after SQLite removes image rows.
+  }
+
+  try {
+    await deleteVectorsForUser(userId);
+  } catch {
+    // Qdrant cleanup is best-effort; account data is already reset in SQLite.
+  }
+}
+
 async function purgeInactiveAccounts(): Promise<void> {
   const cutoffIso = getInactiveAccountCutoff().toISOString();
   const inactiveUsers = db
@@ -854,7 +880,37 @@ function zenWallpaperResponseForConversation(conversationId: string): ReturnType
         zen_wallpaper_history: string | null;
       }
     | undefined;
-  return mapZenWallpaperMetadata(row ?? {});
+  const metadata = mapZenWallpaperMetadata(row ?? {});
+  const totalMessageCount = (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
+      .get(conversationId) as { n?: number } | undefined
+  )?.n ?? 0;
+  return rebaseZenWallpaperMetadataForVisibleWindow(
+    metadata,
+    totalMessageCount,
+    Math.min(totalMessageCount, ZEN_RESTORE_MESSAGE_LIMIT)
+  );
+}
+
+function recoverStaleZenWallpaperStatusForRequest(
+  userId: string,
+  conversationId?: string
+): void {
+  const activeJob = peekActiveImageJobForUser(userId);
+  recoverStaleZenWallpaperGenerationStatus(db, userId, {
+    conversationId,
+    activeZenWallpaperConversationId:
+      activeJob?.source === "zen_wallpaper" ? activeJob.conversationId : null,
+  });
+}
+
+function apiKeySource(
+  userCiphertext: string | null,
+  serverKey?: string
+): "saved" | "server" | "none" {
+  if (userCiphertext) return "saved";
+  return serverKey ? "server" : "none";
 }
 
 type ImageInsertPersistence = {
@@ -1082,6 +1138,11 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       await deleteUserAccount(userId);
       clearCookie(ctx.res, config.sessionCookieName);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/account/factory-reset", async (ctx) => {
+      const userId = requireAuth(ctx);
+      await restoreUserFactoryDefaults(userId);
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/auth/me", async (ctx) => {
@@ -1327,6 +1388,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
+      recoverStaleZenWallpaperStatusForRequest(userId, conversationId);
       // Same last_bot_* + has_assistant_reply triple as the list
       // endpoint so the ConversationDetail payload stays in lockstep —
       // client consumers can read either GET shape and resolve row tint
@@ -1537,10 +1599,13 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const zenWallpaperOut = mapZenWallpaperMetadata(conversation);
       if (conversationModeOut === "zen") {
-        zenWallpaperOut.history = pruneZenWallpaperHistoryForRestoreWindow(
-          serializeZenWallpaperHistory(zenWallpaperOut.history),
-          totalMessageCount,
-          ZEN_RESTORE_MESSAGE_LIMIT
+        Object.assign(
+          zenWallpaperOut,
+          rebaseZenWallpaperMetadataForVisibleWindow(
+            zenWallpaperOut,
+            totalMessageCount,
+            messageRows.length
+          )
         );
       }
       json(ctx.res, 200, {
@@ -1583,6 +1648,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/conversations/:id/zen-wallpaper", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
+      recoverStaleZenWallpaperStatusForRequest(userId, conversationId);
       const body = ctx.body as Record<string, unknown>;
       const enabled = body.enabled !== false;
       const force = body.force === true;
@@ -3295,6 +3361,26 @@ function buildRoutes(): RouteDefinition[] {
         .run(userId);
       json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
     }),
+    route("POST", "/api/dev/clear-bot-memory", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const requestedBotId = readOptionalString(body.botId);
+      if (requestedBotId) {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(requestedBotId, userId) as { id?: string } | undefined;
+        if (!bot?.id) {
+          throw new Error("Bot not found.");
+        }
+      }
+      const deletedMemories = deleteMemoriesForBotScope(db, userId, requestedBotId);
+      json(ctx.res, 200, {
+        ok: true,
+        scope: requestedBotId ? "bot" : "default",
+        botId: requestedBotId,
+        deletedMemories,
+      });
+    }),
     // Hard-reset per-user memory artifacts: extracted memory facts, SQLite
     // summary rows (both thread-scoped and global), and matching Qdrant
     // vectors. Powers dev slash commands:
@@ -3567,6 +3653,18 @@ function buildRoutes(): RouteDefinition[] {
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
+          openAiApiKeySource: apiKeySource(
+            user.openai_key_ciphertext,
+            config.openAiApiKey
+          ),
+          anthropicApiKeySource: apiKeySource(
+            user.anthropic_key_ciphertext,
+            config.anthropicApiKey
+          ),
+          elevenLabsApiKeySource: apiKeySource(
+            user.elevenlabs_key_ciphertext,
+            config.elevenLabsApiKey
+          ),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
           ollamaModel: config.ollamaModel,
@@ -4522,6 +4620,25 @@ function buildRoutes(): RouteDefinition[] {
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
+    route("PATCH", "/api/bots/selected/delete-protection", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const idsRaw = body.ids;
+      if (!Array.isArray(idsRaw)) {
+        throw new Error("Selected bot ids are required.");
+      }
+      if (typeof body.deleteProtected !== "boolean") {
+        throw new Error("Delete protection must be a boolean.");
+      }
+      const ids = idsRaw.filter((id): id is string => typeof id === "string");
+      const result = setSelectedBotsDeleteProtection(
+        db,
+        userId,
+        ids,
+        body.deleteProtected
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
     route("PATCH", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -4666,7 +4783,10 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, 200, { ok: true, deleted });
         return;
       }
-      const deleted = deleteAllBots(db, userId);
+      const includeProtected =
+        ctx.query.get("includeProtected") === "1" ||
+        ctx.query.get("includeProtected") === "true";
+      const deleted = deleteAllBots(db, userId, { includeProtected });
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("POST", "/api/conversations/:id/export", async (ctx) => {
@@ -4977,7 +5097,9 @@ const server = createServer(async (req, res) => {
     const pathname = url.pathname;
     const method = req.method ?? "GET";
     const body =
-      method === "POST" || method === "PATCH" ? await readJsonBody(req) : {};
+      method === "POST" || method === "PATCH" || method === "DELETE"
+        ? await readJsonBody(req)
+        : {};
     const matchingRoute = routes.find(
       (candidate) => candidate.method === method && candidate.pattern.test(pathname)
     );

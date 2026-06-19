@@ -252,6 +252,225 @@ export function mapZenWallpaperMetadata(row: {
   };
 }
 
+const ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT = 4;
+const ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT = 12;
+
+function normalizeMessageCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.floor(value))
+    : 0;
+}
+
+type ZenWallpaperWindowEntry = ZenWallpaperHistoryEntry & {
+  revealStartMessageCount: number;
+  revealFullMessageCount: number;
+};
+
+function prepareZenWallpaperWindowEntry(
+  entry: ZenWallpaperHistoryEntry,
+  args: {
+    totalMessageCount: number;
+    currentImageId: string | null;
+  }
+): ZenWallpaperWindowEntry {
+  const generationMessageCount = Math.min(
+    normalizeMessageCount(entry.generationMessageCount),
+    args.totalMessageCount
+  );
+  const hasExplicitReveal =
+    entry.revealStartMessageCount !== undefined ||
+    entry.revealFullMessageCount !== undefined;
+  const isLegacyCurrentImage =
+    entry.imageId === args.currentImageId && !hasExplicitReveal;
+  const wasGeneratedBeyondCurrentThread =
+    normalizeMessageCount(entry.generationMessageCount) >
+    args.totalMessageCount;
+  const defaultRevealStart =
+    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
+      ? generationMessageCount
+      : generationMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT;
+  const revealStartMessageCount =
+    entry.revealStartMessageCount !== undefined
+      ? normalizeMessageCount(entry.revealStartMessageCount)
+      : defaultRevealStart;
+  const defaultRevealFull =
+    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
+      ? revealStartMessageCount
+      : revealStartMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT;
+  const revealFullMessageCount =
+    entry.revealFullMessageCount !== undefined
+      ? Math.max(
+          revealStartMessageCount,
+          normalizeMessageCount(entry.revealFullMessageCount)
+        )
+      : defaultRevealFull;
+  return {
+    ...entry,
+    generationMessageCount,
+    revealStartMessageCount,
+    revealFullMessageCount,
+  };
+}
+
+function compareZenWallpaperWindowEntries(
+  a: ZenWallpaperWindowEntry,
+  b: ZenWallpaperWindowEntry
+): number {
+  const fullDelta = a.revealFullMessageCount - b.revealFullMessageCount;
+  if (fullDelta !== 0) return fullDelta;
+  const generationDelta = a.generationMessageCount - b.generationMessageCount;
+  if (generationDelta !== 0) return generationDelta;
+  return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+}
+
+/**
+ * Stored Zen wallpaper timelines use absolute message counts, but Zen detail
+ * responses only hydrate the latest restore window. Rebase the metadata to the
+ * visible message slice so the browser can anchor backdrop reveals to DOM rows
+ * that actually exist, while leaving the persisted timeline unchanged.
+ */
+export function rebaseZenWallpaperMetadataForVisibleWindow(
+  metadata: ZenWallpaperMetadata,
+  totalMessageCountRaw: number,
+  visibleMessageCountRaw: number
+): ZenWallpaperMetadata {
+  const totalMessageCount = normalizeMessageCount(totalMessageCountRaw);
+  const visibleMessageCount = Math.min(
+    totalMessageCount,
+    normalizeMessageCount(visibleMessageCountRaw)
+  );
+  const windowStartMessageCount = Math.max(
+    0,
+    totalMessageCount - visibleMessageCount
+  );
+  const rebaseCount = (count: number): number =>
+    Math.max(0, normalizeMessageCount(count) - windowStartMessageCount);
+  const currentImageId = metadata.imageId?.trim() || null;
+  const currentGenerationMessageCount =
+    metadata.generationMessageCount === null
+      ? null
+      : Math.min(normalizeMessageCount(metadata.generationMessageCount), totalMessageCount);
+
+  let history = normalizeZenWallpaperHistory(metadata.history);
+  if (currentImageId && currentGenerationMessageCount !== null) {
+    const hasCurrentImageEntry = history.some(
+      (entry) =>
+        entry.imageId === currentImageId ||
+        entry.generationMessageCount === currentGenerationMessageCount
+    );
+    if (!hasCurrentImageEntry) {
+      history = normalizeZenWallpaperHistory([
+        ...history,
+        {
+          imageId: currentImageId,
+          promptSeed: metadata.promptSeed,
+          generationMessageCount: currentGenerationMessageCount,
+          revealStartMessageCount: currentGenerationMessageCount,
+          revealFullMessageCount: currentGenerationMessageCount,
+        },
+      ]);
+    }
+  }
+
+  const preparedEntries = history.map((entry) =>
+    prepareZenWallpaperWindowEntry(entry, {
+      totalMessageCount,
+      currentImageId,
+    })
+  );
+  const selectedByImageId = new Map<string, ZenWallpaperWindowEntry>();
+  let baselineEntry: ZenWallpaperWindowEntry | null = null;
+
+  for (const entry of preparedEntries) {
+    if (entry.revealFullMessageCount < windowStartMessageCount) {
+      if (
+        !baselineEntry ||
+        compareZenWallpaperWindowEntries(baselineEntry, entry) < 0
+      ) {
+        baselineEntry = entry;
+      }
+      continue;
+    }
+    if (
+      entry.revealStartMessageCount <= totalMessageCount &&
+      entry.revealFullMessageCount >= windowStartMessageCount
+    ) {
+      selectedByImageId.set(entry.imageId, entry);
+    }
+  }
+
+  if (baselineEntry && !selectedByImageId.has(baselineEntry.imageId)) {
+    selectedByImageId.set(baselineEntry.imageId, baselineEntry);
+  }
+  if (
+    selectedByImageId.size === 0 &&
+    currentImageId &&
+    currentGenerationMessageCount !== null
+  ) {
+    selectedByImageId.set(currentImageId, {
+      imageId: currentImageId,
+      promptSeed: metadata.promptSeed,
+      generationMessageCount: currentGenerationMessageCount,
+      revealStartMessageCount: currentGenerationMessageCount,
+      revealFullMessageCount: currentGenerationMessageCount,
+    });
+  }
+
+  const rebasedHistory = normalizeZenWallpaperHistory(
+    [...selectedByImageId.values()].map((entry) => ({
+      imageId: entry.imageId,
+      promptSeed: entry.promptSeed,
+      generationMessageCount: rebaseCount(entry.generationMessageCount),
+      revealStartMessageCount: rebaseCount(entry.revealStartMessageCount),
+      revealFullMessageCount: Math.max(
+        rebaseCount(entry.revealStartMessageCount),
+        rebaseCount(entry.revealFullMessageCount)
+      ),
+      ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
+    }))
+  );
+
+  return {
+    ...metadata,
+    generationMessageCount:
+      currentGenerationMessageCount === null
+        ? null
+        : rebaseCount(currentGenerationMessageCount),
+    history: rebasedHistory,
+  };
+}
+
+export function recoverStaleZenWallpaperGenerationStatus(
+  db: DatabaseSync,
+  userId: string,
+  options: {
+    conversationId?: string;
+    activeZenWallpaperConversationId?: string | null;
+  } = {}
+): void {
+  if (
+    options.activeZenWallpaperConversationId &&
+    (!options.conversationId ||
+      options.activeZenWallpaperConversationId === options.conversationId)
+  ) {
+    return;
+  }
+  const conversationClause = options.conversationId ? " AND id = ?" : "";
+  const params = options.conversationId
+    ? [userId, options.conversationId]
+    : [userId];
+  db.prepare(
+    `UPDATE conversations
+        SET zen_wallpaper_status = CASE
+          WHEN zen_wallpaper_image_id IS NOT NULL THEN 'ready'
+          ELSE 'idle'
+        END
+      WHERE user_id = ?
+        AND zen_wallpaper_status = 'generating'
+        ${conversationClause}`
+  ).run(...params);
+}
+
 export function deleteCoffeePollsForConversations(
   db: DatabaseSync,
   userId: string,

@@ -133,8 +133,9 @@ import {
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   findLeadingDevCommandTokenRange,
-  hasLeadingDevCommand,
+  findPromptShortcutTokenRanges,
   PrismDevCommandHighlight,
+  resolvePromptShortcutTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
@@ -266,7 +267,7 @@ const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
-const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 200;
+const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 244;
 /** Single-row "delete group chats" menu — keep in sync with clamp padding. */
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 220;
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
@@ -4725,6 +4726,9 @@ interface BotOpinion {
   repairCount: number;
   updatedAt: string;
 }
+
+type ApiKeySource = "saved" | "server" | "none";
+
 interface UserSettings {
   displayName: string;
   theme: Theme;
@@ -4743,6 +4747,9 @@ interface UserSettings {
   hasOpenAiApiKey: boolean;
   hasAnthropicApiKey: boolean;
   hasElevenLabsApiKey: boolean;
+  openAiApiKeySource: ApiKeySource;
+  anthropicApiKeySource: ApiKeySource;
+  elevenLabsApiKeySource: ApiKeySource;
   ollamaModel: string;
   /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
   ollamaAuxiliaryModel: string;
@@ -5048,8 +5055,18 @@ interface CommandCenterStateV1 {
   commands?: unknown;
 }
 
-const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear"]);
-const BUILT_IN_COMMAND_RESERVED_NAMES = new Set(["help", "compact", "summarize", "clear", "cls"]);
+const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear", "refresh"]);
+const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
+  "help",
+  "compact",
+  "summarize",
+  "clear",
+  "cls",
+  "refresh",
+  "dev",
+  "forget",
+  "forget-all",
+]);
 
 interface BotGroupManifestV1 {
   schema: "prism-bot-group-manifest-v1";
@@ -5183,6 +5200,22 @@ function createBuiltInClearCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInRefreshCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/refresh",
+    name: "refresh",
+    title: "refresh",
+    command: "Refreshes the Prism web page.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -5223,13 +5256,78 @@ function commandInvocationNames(command: CommandCenterCommand): string[] {
   return [command.name, ...command.aliases].filter(Boolean);
 }
 
-function commandMatchesSlashName(
+function isCommandCenterOperationalCommand(command: CommandCenterCommand): boolean {
+  return command.builtIn || command.readOnly;
+}
+
+function isCommandCenterPromptShortcut(command: CommandCenterCommand): boolean {
+  return !command.builtIn && !command.readOnly;
+}
+
+function createRuntimeCommandCenterCommand(
+  name: string,
+  command: string,
+  aliases: string[] = []
+): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: `runtime:/${name}`,
+    name,
+    title: name,
+    command,
+    aliases,
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function commandMatchesInvocationName(
   command: CommandCenterCommand,
-  normalizedSlashName: string
+  normalizedInvocationName: string
 ): boolean {
   return commandInvocationNames(command).some(
-    (name) => name.toLowerCase() === normalizedSlashName.toLowerCase()
+    (name) => name.toLowerCase() === normalizedInvocationName.toLowerCase()
   );
+}
+
+interface LeadingCommandChipMatch {
+  command: CommandCenterCommand;
+  commandStart: number;
+  commandEnd: number;
+}
+
+function resolveLeadingCommandChipMatch(
+  value: string,
+  commands: readonly CommandCenterCommand[]
+): LeadingCommandChipMatch | null {
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? "";
+  const match = /^(\s*)\/([a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(firstLine);
+  if (!match) return null;
+  const normalizedName = normalizeCommandNameInput(match[2] ?? "");
+  if (!normalizedName) return null;
+  const command =
+    commands.find((command) => commandMatchesInvocationName(command, normalizedName)) ??
+    null;
+  if (!command) return null;
+  return {
+    command,
+    commandStart: match[1]?.length ?? 0,
+    commandEnd: match[0].length,
+  };
+}
+
+function clampTextAfterLeadingCommandChip(
+  value: string,
+  commands: readonly CommandCenterCommand[]
+): string {
+  const match = resolveLeadingCommandChipMatch(value, commands);
+  if (!match) return value;
+  if (value.length <= match.commandEnd) return value;
+  const nextChar = value[match.commandEnd] ?? "";
+  return `${value.slice(0, match.commandEnd)}${/\s/u.test(nextChar) ? " " : ""}`;
 }
 
 function normalizeCommandCenterState(raw: unknown): {
@@ -5241,6 +5339,7 @@ function normalizeCommandCenterState(raw: unknown): {
     fallbackHelp,
     createBuiltInCompactCommand(),
     createBuiltInClearCommand(),
+    createBuiltInRefreshCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -5863,6 +5962,48 @@ function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
   );
 }
 
+function normalizeApiKeySource(value: unknown, hasSavedKey: boolean): ApiKeySource {
+  return value === "saved" || value === "server" || value === "none"
+    ? value
+    : hasSavedKey
+      ? "saved"
+      : "none";
+}
+
+function apiKeySourceStatusLabel(providerLabel: string, source: ApiKeySource): string {
+  if (source === "saved") return `${providerLabel} saved`;
+  if (source === "server") return `${providerLabel} server key`;
+  return `${providerLabel} unset`;
+}
+
+function onlineProviderApiKeySource(
+  settings: UserSettings | null,
+  provider: Provider
+): ApiKeySource {
+  if (!settings) return "none";
+  if (provider === "anthropic") return settings.anthropicApiKeySource;
+  if (provider === "openai") return settings.openAiApiKeySource;
+  return "none";
+}
+
+function onlineProviderHasAvailableCredential(
+  settings: UserSettings | null,
+  provider: Provider
+): boolean {
+  return onlineProviderApiKeySource(settings, provider) !== "none";
+}
+
+function onlineProviderCanPreserveModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): boolean {
+  return (
+    onlineProviderHasAvailableCredential(settings, provider) ||
+    (catalog?.online ?? []).some((model) => model.provider === provider)
+  );
+}
+
 function modelOptionsForProvider(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
@@ -5879,6 +6020,9 @@ function modelOptionsForProvider(
   );
   if (onlineOptions.length > 0) {
     return onlineOptions;
+  }
+  if (!onlineProviderHasAvailableCredential(settings, provider)) {
+    return [];
   }
   return provider === "anthropic"
     ? [{
@@ -5958,24 +6102,84 @@ function visibleConcreteModelChoiceForProvider(
     : visibleChoice;
 }
 
-function visibleModelChoiceForProvider(
+function defaultOnlineModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null
+): string {
+  const options = onlineModelOptionsForPicker(catalog, settings);
+  return options.find((model) => model.isDefault)?.id ?? options[0]?.id ?? AUTO_MODEL_CHOICE;
+}
+
+function visibleConcreteOnlineModelChoice(
+  catalog: ModelCatalog | null,
   settings: UserSettings | null,
   choice: string | null | undefined
 ): string {
-  return visibleBotCustomizerModelChoice(
+  const visibleChoice = visibleBotCustomizerModelChoice(
     settings,
     normalizeModelChoice(choice)
   );
+  if (visibleChoice === AUTO_MODEL_CHOICE) {
+    return defaultOnlineModelChoice(catalog, settings);
+  }
+  const options = onlineModelOptionsForPicker(catalog, settings);
+  const provider = inferOnlineProviderForModelId(visibleChoice);
+  return options.some((model) => model.id === visibleChoice) ||
+    onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? visibleChoice
+    : defaultOnlineModelChoice(catalog, settings);
+}
+
+function visibleModelChoiceForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
+  if (provider === "local" || visibleChoice === AUTO_MODEL_CHOICE) {
+    return visibleChoice;
+  }
+  return availableModelOptionsForProvider(catalog, settings, provider).some(
+    (model) => model.id === visibleChoice
+  )
+    ? visibleChoice
+    : AUTO_MODEL_CHOICE;
+}
+
+function visiblePreferredOnlineModelChoice(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = visibleBotCustomizerModelChoice(
+    settings,
+    normalizeModelChoice(choice)
+  );
+  if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  const provider = inferOnlineProviderForModelId(visibleChoice);
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? visibleChoice
+    : AUTO_MODEL_CHOICE;
 }
 
 function visibleModelChoicesByProvider(
+  catalog: ModelCatalog | null,
   settings: UserSettings | null,
   choices: Record<Provider, string>
 ): Record<Provider, string> {
   return {
-    local: visibleModelChoiceForProvider(settings, choices.local),
-    openai: visibleModelChoiceForProvider(settings, choices.openai),
-    anthropic: visibleModelChoiceForProvider(settings, choices.anthropic),
+    local: visibleModelChoiceForProvider(catalog, settings, "local", choices.local),
+    openai: visibleModelChoiceForProvider(catalog, settings, "openai", choices.openai),
+    anthropic: visibleModelChoiceForProvider(
+      catalog,
+      settings,
+      "anthropic",
+      choices.anthropic
+    ),
   };
 }
 
@@ -6028,6 +6232,38 @@ function includeSelectedModelOption(
     ...options,
     { id: choice, label: choice, provider },
   ];
+}
+
+function includeSelectedOnlineModelOption(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  options: ModelCatalogEntry[],
+  choice: string
+): ModelCatalogEntry[] {
+  const normalizedChoice = normalizeModelChoice(choice);
+  if (
+    normalizedChoice === AUTO_MODEL_CHOICE ||
+    options.some((model) => model.id === normalizedChoice)
+  ) {
+    return options;
+  }
+  const provider = inferOnlineProviderForModelId(normalizedChoice);
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    ? includeSelectedModelOption(options, normalizedChoice, provider)
+    : options;
+}
+
+function includeSelectedResponseModeModelOption(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  responseMode: ResponseMode,
+  options: ModelCatalogEntry[],
+  choice: string,
+  provider: Provider
+): ModelCatalogEntry[] {
+  return responseMode === "online"
+    ? includeSelectedOnlineModelOption(catalog, settings, options, choice)
+    : includeSelectedModelOption(options, choice, provider);
 }
 
 function visibleLocalImageModelSelectValue(value: string | null | undefined): string {
@@ -13228,23 +13464,27 @@ interface ComposerInputProps {
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
   commandPicks?: readonly CommandCenterCommand[];
+  promptPicks?: readonly CommandCenterCommand[];
 }
 
-interface SlashCommandToken {
+type ComposerShortcutScope = "leading" | "inline";
+
+interface ComposerShortcutToken {
   from: number;
   to: number;
   query: string;
+  scope: ComposerShortcutScope;
 }
 
-function normalizeSlashCommandQuery(value: string): string {
+function normalizeComposerShortcutQuery(value: string): string {
   return value.trim().replace(/^\/+/, "").toLowerCase();
 }
 
-function filterCommandPicksForSlashQuery(
+function filterCommandPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
   query: string
 ): CommandCenterCommand[] {
-  const normalizedQuery = normalizeSlashCommandQuery(query);
+  const normalizedQuery = normalizeComposerShortcutQuery(query);
   const seen = new Set<string>();
   const candidates = commands.filter((command) => {
     const name = command.name.trim().toLowerCase();
@@ -13287,10 +13527,10 @@ function filterCommandPicksForSlashQuery(
     .slice(0, 10);
 }
 
-function slashCommandTokenFromLinePrefix(
+function leadingSlashShortcutTokenFromLinePrefix(
   textToCaret: string,
   lineStartOffset = 0
-): SlashCommandToken | null {
+): ComposerShortcutToken | null {
   const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
   const lineToCaret = textToCaret.slice(lineStartInText);
   const match = /^(\s*)\/([a-z0-9-]*)$/iu.exec(lineToCaret);
@@ -13300,17 +13540,50 @@ function slashCommandTokenFromLinePrefix(
     from,
     to: lineStartOffset + textToCaret.length,
     query: match[2] ?? "",
+    scope: "leading",
   };
 }
 
-function getSlashCommandFromEditor(editor: Editor): SlashCommandToken | null {
+function promptShortcutTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /(^|[\s([{])\/([a-z0-9-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const delimiterLength = match[1]?.length ?? 0;
+  const matchIndex = match.index ?? 0;
+  const from = lineStartOffset + lineStartInText + matchIndex + delimiterLength;
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "inline",
+  };
+}
+
+function shortcutTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset: number,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
+  return scope === "leading"
+    ? leadingSlashShortcutTokenFromLinePrefix(textToCaret, lineStartOffset)
+    : promptShortcutTokenFromTextToCaret(textToCaret, lineStartOffset);
+}
+
+function getComposerShortcutFromEditor(
+  editor: Editor,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
   const fromSel = editor.state.selection.from;
   if (editorInFenceLikeContext(editor, fromSel)) return null;
   const $pos = editor.state.doc.resolve(fromSel);
   if (!$pos.parent.isTextblock) return null;
   const blockStart = $pos.start();
   const textToCaret = editor.state.doc.textBetween(blockStart, fromSel, "\n", "\n");
-  const token = slashCommandTokenFromLinePrefix(textToCaret, blockStart);
+  const token = shortcutTokenFromTextToCaret(textToCaret, blockStart, scope);
   if (!token) return null;
   const codeMark = editor.state.schema.marks.code;
   if (codeMark && editor.state.doc.rangeHasMark(token.from, token.to, codeMark)) {
@@ -13319,18 +13592,20 @@ function getSlashCommandFromEditor(editor: Editor): SlashCommandToken | null {
   return token;
 }
 
-function getSlashCommandFromTextarea(
+function getComposerShortcutFromTextarea(
   text: string,
-  caret: number
-): SlashCommandToken | null {
-  return slashCommandTokenFromLinePrefix(text.slice(0, caret), 0);
+  caret: number,
+  scope: ComposerShortcutScope
+): ComposerShortcutToken | null {
+  return shortcutTokenFromTextToCaret(text.slice(0, caret), 0, scope);
 }
 
-function insertSlashCommandInEditor(
+function insertComposerShortcutInEditor(
   editor: Editor,
-  command: CommandCenterCommand
+  command: CommandCenterCommand,
+  scope: ComposerShortcutScope
 ): boolean {
-  const token = getSlashCommandFromEditor(editor);
+  const token = getComposerShortcutFromEditor(editor, scope);
   if (!token) return false;
   const replacement = `/${command.name} `;
   editor
@@ -13342,12 +13617,13 @@ function insertSlashCommandInEditor(
   return true;
 }
 
-function replaceTextareaSlashCommand(
+function replaceTextareaComposerShortcut(
   text: string,
   caret: number,
-  command: CommandCenterCommand
+  command: CommandCenterCommand,
+  scope: ComposerShortcutScope
 ): { value: string; caret: number } | null {
-  const token = getSlashCommandFromTextarea(text, caret);
+  const token = getComposerShortcutFromTextarea(text, caret, scope);
   if (!token) return null;
   const replacement = `/${command.name} `;
   const value = `${text.slice(0, token.from)}${replacement}${text.slice(token.to)}`;
@@ -13357,7 +13633,179 @@ function replaceTextareaSlashCommand(
   };
 }
 
-function shouldAcceptSlashCommandCompletionKey(event: {
+function shouldBlockEditorTextAfterLeadingCommand(
+  editor: Editor,
+  from: number,
+  to: number,
+  commandNames: readonly string[]
+): boolean {
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (!commandRange) return false;
+  return from >= commandRange.to || to > commandRange.to;
+}
+
+function shouldBlockTextareaTextAfterLeadingCommand(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  commands: readonly CommandCenterCommand[]
+): boolean {
+  const match = resolveLeadingCommandChipMatch(text, commands);
+  if (!match) return false;
+  return selectionStart >= match.commandEnd || selectionEnd > match.commandEnd;
+}
+
+function applyTextareaCommandChipDelete(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "backward" | "forward",
+  commands: readonly CommandCenterCommand[]
+): { value: string; caret: number } | null {
+  const match = resolveLeadingCommandChipMatch(text, commands);
+  if (!match) return null;
+
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  const chipFrom = match.commandStart;
+  const chipTo = match.commandEnd + (text[match.commandEnd] === " " ? 1 : 0);
+  let from = chipFrom;
+  let to = chipTo;
+
+  if (start !== end) {
+    if (start >= chipTo || end <= chipFrom) return null;
+    from = Math.min(start, chipFrom);
+    to = Math.max(end, chipTo);
+  } else if (direction === "backward") {
+    if (start <= chipFrom || start > chipTo) return null;
+  } else if (start < chipFrom || start >= chipTo) {
+    return null;
+  }
+
+  return {
+    value: `${text.slice(0, from)}${text.slice(to)}`,
+    caret: from,
+  };
+}
+
+function applyTextareaPromptShortcutChipDelete(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "backward" | "forward",
+  promptNames: readonly string[]
+): { value: string; caret: number } | null {
+  const ranges = resolvePromptShortcutTextRanges(text, { promptNames });
+  if (ranges.length === 0) return null;
+
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  for (const range of ranges) {
+    const chipFrom = range.start;
+    const chipTo = range.end + (text[range.end] === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (start !== end) {
+      if (start >= chipTo || end <= chipFrom) continue;
+      from = Math.min(start, chipFrom);
+      to = Math.max(end, chipTo);
+    } else if (direction === "backward") {
+      if (start <= chipFrom || start > chipTo) continue;
+    } else if (start < chipFrom || start >= chipTo) {
+      continue;
+    }
+
+    return {
+      value: `${text.slice(0, from)}${text.slice(to)}`,
+      caret: from,
+    };
+  }
+
+  return null;
+}
+
+function applyLeadingCommandChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  commandNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (!commandRange) return false;
+
+  const trailingChar =
+    commandRange.to < editor.state.doc.content.size
+      ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
+      : "";
+  const chipFrom = commandRange.from;
+  const chipTo = commandRange.to + (trailingChar === " " ? 1 : 0);
+  let from = chipFrom;
+  let to = chipTo;
+
+  if (!sel.empty) {
+    if (sel.from >= chipTo || sel.to <= chipFrom) return false;
+    from = Math.min(sel.from, chipFrom);
+    to = Math.max(sel.to, chipTo);
+  } else if (direction === "backward") {
+    if (sel.from <= chipFrom || sel.from > chipTo) return false;
+  } else if (sel.from < chipFrom || sel.from >= chipTo) {
+    return false;
+  }
+
+  editor.chain().focus().deleteRange({ from, to }).run();
+  return true;
+}
+
+function applyPromptShortcutChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  promptNames: readonly string[]
+): boolean {
+  const ranges = findPromptShortcutTokenRanges(editor.state.doc, promptNames);
+  if (ranges.length === 0) return false;
+  const sel = editor.state.selection;
+
+  for (const range of ranges) {
+    const trailingChar =
+      range.to < editor.state.doc.content.size
+        ? editor.state.doc.textBetween(range.to, range.to + 1, "\n", "\n")
+        : "";
+    const chipFrom = range.from;
+    const chipTo = range.to + (trailingChar === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (!sel.empty) {
+      if (sel.from >= chipTo || sel.to <= chipFrom) continue;
+      from = Math.min(sel.from, chipFrom);
+      to = Math.max(sel.to, chipTo);
+    } else if (direction === "backward") {
+      if (sel.from <= chipFrom || sel.from > chipTo) continue;
+    } else if (sel.from < chipFrom || sel.from >= chipTo) {
+      continue;
+    }
+
+    editor.chain().focus().deleteRange({ from, to }).run();
+    return true;
+  }
+
+  return false;
+}
+
+function isPlainTextInsertionKey(event: {
+  key: string;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  nativeEvent?: { isComposing?: boolean };
+}): boolean {
+  if (event.nativeEvent?.isComposing) return false;
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  return event.key.length === 1 || event.key === "Enter";
+}
+
+function shouldAcceptComposerShortcutCompletionKey(event: {
   key: string;
   shiftKey: boolean;
   altKey: boolean;
@@ -13366,43 +13814,6 @@ function shouldAcceptSlashCommandCompletionKey(event: {
 }): boolean {
   if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
   return event.key === "Tab" || event.key === " " || event.key === "Spacebar";
-}
-
-function applyLeadingDevCommandBoundaryDelete(
-  editor: Editor,
-  direction: "backward" | "forward",
-  commandNames: readonly string[]
-): boolean {
-  const sel = editor.state.selection;
-  if (!sel.empty) return false;
-  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
-  if (!commandRange) return false;
-
-  const caret = sel.from;
-  let from = commandRange.from;
-  let to = commandRange.to;
-  if (direction === "backward") {
-    const nextChar =
-      commandRange.to < editor.state.doc.content.size
-        ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
-        : "";
-    if (caret === commandRange.to + 1 && nextChar === " ") {
-      to += 1;
-    } else if (caret !== commandRange.to) {
-      return false;
-    }
-  } else if (caret !== commandRange.from) {
-    return false;
-  } else {
-    const nextChar =
-      commandRange.to < editor.state.doc.content.size
-        ? editor.state.doc.textBetween(commandRange.to, commandRange.to + 1, "\n", "\n")
-        : "";
-    if (nextChar === " ") to += 1;
-  }
-
-  editor.chain().focus().deleteRange({ from, to }).run();
-  return true;
 }
 
 function getMountedEditorView(editor: Editor | null | undefined): Editor["view"] | null {
@@ -13506,6 +13917,7 @@ interface ComposerCommandPopoverProps {
   open: boolean;
   anchorRect: DOMRect | null;
   themeSource: Element | null;
+  scope: ComposerShortcutScope;
   commands: readonly CommandCenterCommand[];
   highlightIndex: number;
   onHighlightIndexChange: (next: number) => void;
@@ -13531,6 +13943,7 @@ function ComposerCommandPopover({
   open,
   anchorRect,
   themeSource,
+  scope,
   commands,
   highlightIndex,
   onHighlightIndexChange,
@@ -13620,12 +14033,12 @@ function ComposerCommandPopover({
       className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
       style={adjustedStyle}
       role="listbox"
-      aria-label="Choose a command"
+      aria-label={scope === "leading" ? "Choose a command or prompt" : "Choose a prompt"}
     >
       <div className={styles.composeBotListbox}>
         {commands.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
-            No commands match.
+            {scope === "leading" ? "No commands or prompts match." : "No prompts match."}
           </div>
         )}
         {commands.map((command, index) => {
@@ -13645,7 +14058,9 @@ function ComposerCommandPopover({
                 onPickCommand(command);
               }}
             >
-              <span className={styles.composeCommandSlash} aria-hidden="true">/</span>
+              <span className={styles.composeCommandSlash} aria-hidden="true">
+                /
+              </span>
               <span className={styles.composeCommandText}>
                 <span className={styles.composeBotOptionName}>{command.name}</span>
                 {description ? (
@@ -14134,8 +14549,10 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
-  /** Slash commands shown in the composer autocomplete menu. */
+  /** Slash commands shown in the composer autocomplete menu at the first word. */
   commandPicks?: readonly CommandCenterCommand[];
+  /** User prompt shortcuts shown in the composer autocomplete menu. */
+  promptPicks?: readonly CommandCenterCommand[];
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
 }
@@ -14156,6 +14573,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       resolvedTheme,
       mentionBots,
       commandPicks = [],
+      promptPicks = [],
       disabled = false,
     },
     ref
@@ -14169,6 +14587,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const pendingValueTimerRef = useRef<number | null>(null);
     const mentionBotsRef = useRef(mentionBots);
     const commandPicksRef = useRef(commandPicks);
+    const promptPicksRef = useRef(promptPicks);
     const [mentionUi, setMentionUi] = useState<{
       open: boolean;
       caretRect: DOMRect | null;
@@ -14180,7 +14599,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       caretRect: DOMRect | null;
       filtered: CommandCenterCommand[];
       highlight: number;
-    }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+      scope: ComposerShortcutScope;
+    }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
     const mentionUiRef = useRef(mentionUi);
     const commandUiRef = useRef(commandUi);
     useLayoutEffect(() => {
@@ -14189,6 +14609,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useLayoutEffect(() => {
       commandPicksRef.current = commandPicks;
     }, [commandPicks]);
+    useLayoutEffect(() => {
+      promptPicksRef.current = promptPicks;
+    }, [promptPicks]);
     useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
@@ -14264,15 +14687,20 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }, []);
 
     const syncCommandPopover = useCallback((ed: Editor) => {
-      const commands = commandPicksRef.current;
-      if (!commands.length) {
-        setCommandUi((s) =>
-          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
-        );
-        return;
-      }
-      const tok = getSlashCommandFromEditor(ed);
-      if (!tok) {
+      const leadingToken =
+        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "leading")
+          : null;
+      const promptToken =
+        !leadingToken && promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "inline")
+          : null;
+      const token = leadingToken ?? promptToken;
+      const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+      const commands = leadingToken
+        ? [...commandPicksRef.current, ...promptPicksRef.current]
+        : promptPicksRef.current;
+      if (!token || !commands.length) {
         setCommandUi((s) =>
           s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
         );
@@ -14281,7 +14709,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       setMentionUi((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
-      const filtered = filterCommandPicksForSlashQuery(commands, tok.query);
+      const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
       const view = getMountedEditorView(ed);
       if (!view) {
         setCommandUi((s) =>
@@ -14289,7 +14717,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         );
         return;
       }
-      const coords = view.coordsAtPos(tok.to);
+      const coords = view.coordsAtPos(token.to);
       const caretRect = new DOMRect(
         coords.left,
         coords.top,
@@ -14313,13 +14741,21 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           caretRect: anchorRect,
           filtered,
           highlight,
+          scope,
         };
       });
     }, []);
 
     const syncComposerPopovers = useCallback((ed: Editor) => {
-      const slashToken = getSlashCommandFromEditor(ed);
-      if (slashToken && commandPicksRef.current.length > 0) {
+      const leadingToken =
+        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "leading")
+          : null;
+      const promptToken =
+        promptPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "inline")
+          : null;
+      if (leadingToken || promptToken) {
         syncCommandPopover(ed);
         return;
       }
@@ -14338,6 +14774,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       () => commandPicks.flatMap((command) => commandInvocationNames(command)),
       [commandPicks]
     );
+    const promptNamesForHighlight = useMemo(
+      () => promptPicks.flatMap((command) => commandInvocationNames(command)),
+      [promptPicks]
+    );
 
     const editor = useEditor(
       {
@@ -14354,6 +14794,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }),
           PrismDevCommandHighlight.configure({
             commandNames: commandNamesForHighlight,
+            promptNames: promptNamesForHighlight,
           }),
           Placeholder.configure({ placeholder }),
           Markdown.configure({
@@ -14383,25 +14824,39 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           },
           handlePaste: (view, event) => {
             const sel = view.state.selection;
-            if (!sel.empty) return false;
             if (isCollapsedCaretInsidePrismBotLink(view.state, sel.from)) {
               event.preventDefault();
               return true;
             }
-            if (hasLeadingDevCommand(view.state.doc)) {
-              const plain = event.clipboardData?.getData("text/plain");
-              if (typeof plain === "string") {
-                event.preventDefault();
-                view.dispatch(view.state.tr.insertText(plain, sel.from, sel.to));
-                return true;
-              }
+            const activeEditor = editorRef.current;
+            if (
+              activeEditor &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                sel.from,
+                sel.to,
+                commandNamesForHighlight
+              )
+            ) {
+              event.preventDefault();
+              return true;
             }
             return false;
           },
-          handleTextInput: (view, from, to, text) => {
-            if (!hasLeadingDevCommand(view.state.doc)) return false;
-            view.dispatch(view.state.tr.insertText(text, from, to));
-            return true;
+          handleTextInput: (view, from, to) => {
+            const activeEditor = editorRef.current;
+            if (
+              activeEditor &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                from,
+                to,
+                commandNamesForHighlight
+              )
+            ) {
+              return true;
+            }
+            return false;
           },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
@@ -14420,7 +14875,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 return true;
               }
               if (
-                applyLeadingDevCommandBoundaryDelete(
+                applyPromptShortcutChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  promptNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingCommandChipBoundaryDelete(
                   activeEditor,
                   "backward",
                   commandNamesForHighlight
@@ -14446,7 +14912,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 return true;
               }
               if (
-                applyLeadingDevCommandBoundaryDelete(
+                applyPromptShortcutChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  promptNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingCommandChipBoundaryDelete(
                   activeEditor,
                   "forward",
                   commandNamesForHighlight
@@ -14480,9 +14957,29 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               event.preventDefault();
               return true;
             }
+            if (
+              activeEditor &&
+              (event.key !== "Enter" || event.shiftKey) &&
+              isPlainTextInsertionKey({
+                key: event.key,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                nativeEvent: event as globalThis.KeyboardEvent,
+              }) &&
+              shouldBlockEditorTextAfterLeadingCommand(
+                activeEditor,
+                view.state.selection.from,
+                view.state.selection.to,
+                commandNamesForHighlight
+              )
+            ) {
+              event.preventDefault();
+              return true;
+            }
             if (activeEditor && !event.shiftKey) {
               if (
-                shouldAcceptSlashCommandCompletionKey(event) &&
+                shouldAcceptComposerShortcutCompletionKey(event) &&
                 commandUiRef.current.open &&
                 commandUiRef.current.filtered.length > 0
               ) {
@@ -14491,7 +14988,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 const hi =
                   ((commandUiRef.current.highlight % filtered.length) + filtered.length) %
                   filtered.length;
-                if (insertSlashCommandInEditor(activeEditor, filtered[hi]!)) {
+                if (
+                  insertComposerShortcutInEditor(
+                    activeEditor,
+                    filtered[hi]!,
+                    commandUiRef.current.scope
+                  )
+                ) {
                   setCommandUi((s) =>
                     s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                   );
@@ -14607,7 +15110,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }, 90);
         },
       },
-      [placeholder, syncComposerPopovers, commandNamesForHighlight]
+      [
+        placeholder,
+        syncComposerPopovers,
+        commandNamesForHighlight,
+        promptNamesForHighlight,
+      ]
     );
 
     const mentionBotsByIdForTipTap = useMemo(() => {
@@ -14839,6 +15347,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           open={commandUi.open}
           anchorRect={commandUi.caretRect}
           themeSource={composeFormForTheme}
+          scope={commandUi.scope}
           commands={commandUi.filtered}
           highlightIndex={commandUi.highlight}
           onHighlightIndexChange={(next) =>
@@ -14847,7 +15356,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           onPickCommand={(command) => {
             const ed = editorRef.current;
             if (!ed) return;
-            if (insertSlashCommandInEditor(ed, command)) {
+            if (insertComposerShortcutInEditor(ed, command, commandUiRef.current.scope)) {
               setCommandUi((s) =>
                 s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
               );
@@ -14881,6 +15390,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     resolvedTheme,
     mentionBots,
     commandPicks = [],
+    promptPicks = [],
   },
   ref
 ): React.JSX.Element {
@@ -14889,6 +15399,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const mentionBotsRef = useRef(mentionBots);
   const commandPicksRef = useRef(commandPicks);
+  const promptPicksRef = useRef(promptPicks);
   const pendingTextareaCaretRef = useRef<number | null>(null);
   const [taMention, setTaMention] = useState<{
     open: boolean;
@@ -14901,7 +15412,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     caretRect: DOMRect | null;
     filtered: CommandCenterCommand[];
     highlight: number;
-  }>({ open: false, caretRect: null, filtered: [], highlight: 0 });
+    scope: ComposerShortcutScope;
+  }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
   const taMentionRef = useRef(taMention);
   const taCommandRef = useRef(taCommand);
   useLayoutEffect(() => {
@@ -14910,6 +15422,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   useLayoutEffect(() => {
     commandPicksRef.current = commandPicks;
   }, [commandPicks]);
+  useLayoutEffect(() => {
+    promptPicksRef.current = promptPicks;
+  }, [promptPicks]);
   useLayoutEffect(() => {
     taMentionRef.current = taMention;
   }, [taMention]);
@@ -14930,16 +15445,21 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   }, []);
 
   const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
-    const commands = commandPicksRef.current;
-    if (!commands.length) {
-      setTaCommand((s) =>
-        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
-      );
-      return false;
-    }
     const caret = el.selectionStart ?? 0;
-    const tok = getSlashCommandFromTextarea(el.value, caret);
-    if (!tok) {
+    const leadingToken =
+      commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "leading")
+        : null;
+    const promptToken =
+      !leadingToken && promptPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "inline")
+        : null;
+    const token = leadingToken ?? promptToken;
+    const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+    const commands = leadingToken
+      ? [...commandPicksRef.current, ...promptPicksRef.current]
+      : promptPicksRef.current;
+    if (!token || !commands.length) {
       setTaCommand((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
@@ -14948,7 +15468,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     setTaMention((s) =>
       s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
     );
-    const filtered = filterCommandPicksForSlashQuery(commands, tok.query);
+    const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
     const caretRect = getTextareaCaretClientRect(el);
     const anchorRect = caretRect
       ? getComposerCommandMenuAnchorRect(composeEditorShellRef.current, caretRect)
@@ -14966,6 +15486,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
         caretRect: anchorRect,
         filtered,
         highlight,
+        scope,
       };
     });
     return true;
@@ -15066,6 +15587,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
           commandPicks={commandPicks}
+          promptPicks={promptPicks}
         />
       ) : (
         <>
@@ -15103,7 +15625,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 if (!el) return;
                 const start = el.selectionStart ?? 0;
                 const end = el.selectionEnd ?? 0;
-                if (isCaretInPrismBotMarkdownLockedRegion(el.value, start, end)) {
+                if (
+                  isCaretInPrismBotMarkdownLockedRegion(el.value, start, end) ||
+                  shouldBlockTextareaTextAfterLeadingCommand(
+                    el.value,
+                    start,
+                    end,
+                    commandPicksRef.current
+                  )
+                ) {
                   event.preventDefault();
                 }
               }}
@@ -15128,6 +15658,34 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(applied.value);
                     return;
                   }
+                  const commandApplied = applyTextareaCommandChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "backward",
+                    commandPicksRef.current
+                  );
+                  if (commandApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = commandApplied.caret;
+                    onValueChange(commandApplied.value);
+                    return;
+                  }
+                  const promptApplied = applyTextareaPromptShortcutChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "backward",
+                    promptPicksRef.current.flatMap((command) =>
+                      commandInvocationNames(command)
+                    )
+                  );
+                  if (promptApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = promptApplied.caret;
+                    onValueChange(promptApplied.value);
+                    return;
+                  }
                 }
                 if (
                   event.key === "Delete" &&
@@ -15148,6 +15706,34 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     event.preventDefault();
                     pendingTextareaCaretRef.current = applied.caret;
                     onValueChange(applied.value);
+                    return;
+                  }
+                  const commandApplied = applyTextareaCommandChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward",
+                    commandPicksRef.current
+                  );
+                  if (commandApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = commandApplied.caret;
+                    onValueChange(commandApplied.value);
+                    return;
+                  }
+                  const promptApplied = applyTextareaPromptShortcutChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward",
+                    promptPicksRef.current.flatMap((command) =>
+                      commandInvocationNames(command)
+                    )
+                  );
+                  if (promptApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = promptApplied.caret;
+                    onValueChange(promptApplied.value);
                     return;
                   }
                 }
@@ -15184,7 +15770,20 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   return;
                 }
                 if (
-                  shouldAcceptSlashCommandCompletionKey(event) &&
+                  (event.key !== "Enter" || event.shiftKey) &&
+                  isPlainTextInsertionKey(event) &&
+                  shouldBlockTextareaTextAfterLeadingCommand(
+                    el.value,
+                    el.selectionStart ?? 0,
+                    el.selectionEnd ?? 0,
+                    commandPicksRef.current
+                  )
+                ) {
+                  event.preventDefault();
+                  return;
+                }
+                if (
+                  shouldAcceptComposerShortcutCompletionKey(event) &&
                   !event.shiftKey &&
                   taCommandRef.current.open &&
                   taCommandRef.current.filtered.length > 0
@@ -15194,10 +15793,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   const hi =
                     ((taCommandRef.current.highlight % filtered.length) + filtered.length) %
                     filtered.length;
-                  const next = replaceTextareaSlashCommand(
+                  const next = replaceTextareaComposerShortcut(
                     el.value,
                     el.selectionStart ?? 0,
-                    filtered[hi]!
+                    filtered[hi]!,
+                    taCommandRef.current.scope
                   );
                   if (next) {
                     pendingTextareaCaretRef.current = next.caret;
@@ -15317,6 +15917,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             open={taCommand.open}
             anchorRect={taCommand.caretRect}
             themeSource={composeEditorShellRef.current}
+            scope={taCommand.scope}
             commands={taCommand.filtered}
             highlightIndex={taCommand.highlight}
             onHighlightIndexChange={(next) =>
@@ -15325,10 +15926,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             onPickCommand={(command) => {
               const el = textareaRef.current;
               if (!el) return;
-              const next = replaceTextareaSlashCommand(
+              const next = replaceTextareaComposerShortcut(
                 el.value,
                 el.selectionStart ?? 0,
-                command
+                command,
+                taCommandRef.current.scope
               );
               if (!next) return;
               pendingTextareaCaretRef.current = next.caret;
@@ -16443,6 +17045,7 @@ function HomeContent(): React.JSX.Element {
     id: string;
     text: string;
   } | null>(null);
+  const queuedPromptDrainGenerationRef = useRef(0);
   const [fallbackMessageIds, setFallbackMessageIds] = useState<Set<string>>(() => new Set());
   const [pendingReplyStartedAtMs, setPendingReplyStartedAtMs] = useState<number | null>(null);
   const [pendingReplyNowMs, setPendingReplyNowMs] = useState(() => Date.now());
@@ -16476,6 +17079,8 @@ function HomeContent(): React.JSX.Element {
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
+  const manualCompactionCancelControllerRef = useRef<AbortController | null>(null);
+  const priorityCommandCancelControllerRef = useRef<AbortController | null>(null);
   const zenInitialThinkingCancelControllerRef = useRef<AbortController | null>(null);
   const zenInitialStatusLabelRef = useRef<string | null>(null);
   const zenInitialStarterRequestRef = useRef<{
@@ -16697,7 +17302,7 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterPreferredModel, setCommandCenterPreferredModel] =
     useState<string>(AUTO_MODEL_CHOICE);
   const [commandCenterCommands, setCommandCenterCommands] = useState<CommandCenterCommand[]>(
-    () => [createBuiltInHelpCommand()]
+    () => normalizeCommandCenterState(null).commands
   );
   const commandCenterCommandById = useMemo(
     () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
@@ -17053,6 +17658,7 @@ function HomeContent(): React.JSX.Element {
   const [activeTutorialMode, setActiveTutorialMode] = useState<TutorialMode | null>(null);
   const [activeTutorialStepIndex, setActiveTutorialStepIndex] = useState(0);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+  const [factoryResetArmed, setFactoryResetArmed] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [changePasswordNew, setChangePasswordNew] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
@@ -17345,6 +17951,34 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     setDevChatDebugEvents([]);
   }, [detail?.id, view]);
+  const commandCenterOperationalPicks = useMemo(
+    () => commandCenterCommands.filter(isCommandCenterOperationalCommand),
+    [commandCenterCommands]
+  );
+  const commandCenterPromptPicks = useMemo(
+    () => commandCenterCommands.filter(isCommandCenterPromptShortcut),
+    [commandCenterCommands]
+  );
+  const runtimeDevCommandPicks = useMemo(
+    () =>
+      devSlashCommandsEnabled
+        ? [
+            createRuntimeCommandCenterCommand(
+              "forget",
+              "Forget memories for the current bot, or the Zen/default memory bucket."
+            ),
+            createRuntimeCommandCenterCommand(
+              "forget-all",
+              "Hard-reset all bot/default memories, summaries, and recall state."
+            ),
+          ]
+        : [],
+    [devSlashCommandsEnabled]
+  );
+  const composerCommandPicks = useMemo(
+    () => [...commandCenterOperationalPicks, ...runtimeDevCommandPicks],
+    [commandCenterOperationalPicks, runtimeDevCommandPicks]
+  );
   /** Confirms delete-bot from the Bots panel header (alertdialog, not window.confirm). */
   const [panelBotDeleteConfirm, setPanelBotDeleteConfirm] = useState<{
     id: string;
@@ -17437,6 +18071,12 @@ function HomeContent(): React.JSX.Element {
     const timeout = window.setTimeout(() => setDeleteAccountArmed(false), 6000);
     return () => window.clearTimeout(timeout);
   }, [deleteAccountArmed]);
+
+  useEffect(() => {
+    if (!factoryResetArmed) return;
+    const timeout = window.setTimeout(() => setFactoryResetArmed(false), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [factoryResetArmed]);
 
   useEffect(() => {
     setChatOverflowMenuOpen(false);
@@ -17670,6 +18310,8 @@ function HomeContent(): React.JSX.Element {
     setChangePasswordModalOpen(false);
     setChangePasswordNew("");
     setChangePasswordConfirm("");
+    setFactoryResetArmed(false);
+    setDeleteAccountArmed(false);
     setEditingBotId(null);
     closeImportBotModal();
     if (botLibraryCloseTimerRef.current) {
@@ -18720,11 +19362,18 @@ function HomeContent(): React.JSX.Element {
     const resolvedChoice = resolveModelChoiceForResponseMode({
       responseMode,
       providerPreference: effectivePreferredProvider,
-      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     });
     const visibleModelChoice = resolvedChoice.modelChoice;
-    const modelOptions = includeSelectedModelOption(
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      responseMode,
       modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       resolvedChoice.provider
@@ -18814,14 +19463,19 @@ function HomeContent(): React.JSX.Element {
   );
   const hubPreferredOnlineOptions = useMemo(
     () => {
-      const choice = normalizeModelChoice(settings?.preferredOnlineModel);
-      return includeSelectedModelOption(
+      const choice = visiblePreferredOnlineModelChoice(
+        modelCatalog,
+        settings,
+        settings?.preferredOnlineModel
+      );
+      return includeSelectedOnlineModelOption(
+        modelCatalog,
+        settings,
         uniqueModelOptions([
           ...availableModelOptionsForProvider(modelCatalog, settings, "openai"),
           ...availableModelOptionsForProvider(modelCatalog, settings, "anthropic"),
         ]),
-        choice,
-        inferOnlineProviderForModelId(choice)
+        choice
       );
     },
     [modelCatalog, settings]
@@ -18940,7 +19594,11 @@ function HomeContent(): React.JSX.Element {
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
               <select
-                value={normalizeModelChoice(settings.preferredOnlineModel)}
+                value={visiblePreferredOnlineModelChoice(
+                  modelCatalog,
+                  settings,
+                  settings.preferredOnlineModel
+                )}
                 onChange={(event) => {
                   const next = event.target.value;
                   setSettings((previous) =>
@@ -19230,7 +19888,11 @@ function HomeContent(): React.JSX.Element {
     const nextResolvedProvider = resolveModelChoiceForResponseMode({
       responseMode: nextMode,
       providerPreference: effectivePreferredProvider,
-      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     }).provider;
     const providerDisabled = !settings || lockedByActiveBot;
@@ -19312,7 +19974,11 @@ function HomeContent(): React.JSX.Element {
     const nextResolvedProvider = resolveModelChoiceForResponseMode({
       responseMode: nextMode,
       providerPreference: effectiveCoffeeProvider,
-      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     }).provider;
     const activeModeLabel = responseModeDisplayLabel(responseMode);
@@ -19387,12 +20053,19 @@ function HomeContent(): React.JSX.Element {
     const resolvedChoice = resolveModelChoiceForResponseMode({
       responseMode,
       providerPreference: effectiveProvider,
-      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     });
     const modelProvider = resolvedChoice.provider;
     const visibleModelChoice = resolvedChoice.modelChoice;
-    const modelOptions = includeSelectedModelOption(
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      responseMode,
       modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
@@ -19458,12 +20131,19 @@ function HomeContent(): React.JSX.Element {
     const resolvedChoice = resolveModelChoiceForResponseMode({
       responseMode,
       providerPreference: effectivePreferredProvider,
-      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     });
     const modelProvider = resolvedChoice.provider;
     const visibleModelChoice = resolvedChoice.modelChoice;
-    const modelOptions = includeSelectedModelOption(
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      responseMode,
       modelOptionsForResponseMode(modelCatalog, settings, responseMode),
       visibleModelChoice,
       modelProvider
@@ -19908,7 +20588,7 @@ function HomeContent(): React.JSX.Element {
   const chatEphemeralMode = view === "chat";
   const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
-  const chatMentionsEnabled = view !== "chat";
+  const chatMentionsEnabled = true;
   /** Autoscroll + dynamic type on Zen's chat-like surface. */
   const assistantRevealActive = chatEphemeralMode;
   /**
@@ -20561,6 +21241,49 @@ function HomeContent(): React.JSX.Element {
     refreshOpenMemoryViews,
   ]);
 
+  function finishActiveAssistantRevealForCompaction(): void {
+    if (
+      !chatAssistantTypingMechanicsActive ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) {
+      return;
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) return;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
+    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    chatCommittedFontLineCountByKeyRef.current.set(
+      revealKey,
+      Math.max(
+        estimateVisualLineCount(displayContent),
+        chatCommittedFontLineCountByKeyRef.current.get(revealKey) ?? 0
+      )
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+    chatCompletedRevealKeysRef.current.add(revealKey);
+    chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+    setChatEphemeralNowMs(Date.now());
+  }
+
+  function clearReplyWorkForManualCompaction(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    zenInitialThinkingCancelControllerRef.current = null;
+    manualCompactionCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+    stopPendingReply();
+    finishActiveAssistantRevealForCompaction();
+  }
+
   const handleZenInitialReplyRevealCancel = useCallback(
     (event?: React.MouseEvent<HTMLButtonElement>): void => {
       event?.preventDefault();
@@ -20835,8 +21558,25 @@ function HomeContent(): React.JSX.Element {
       manualCompactionStatus.mode === activeMode
         ? manualCompactionStatus.summary
         : null;
-    const summaryText = (summaryFromDebug ?? summaryFromManual ?? "").trim();
-    if (!summaryText) return null;
+    const hasDebugContext =
+      (
+        summaryDebug?.conversationId === activeConversationId &&
+        summaryDebug.mode === activeMode
+      ) ||
+      (
+        manualCompactionStatus?.conversationId === activeConversationId &&
+        manualCompactionStatus.mode === activeMode
+      );
+    if (!hasDebugContext) return null;
+    const summaryText =
+      (summaryFromDebug ?? summaryFromManual ?? "").trim() ||
+      (
+        manualCompactionStatus?.conversationId === activeConversationId &&
+        manualCompactionStatus.mode === activeMode &&
+        manualCompactionStatus.state === "complete"
+          ? "Compaction completed, but no summary was returned."
+          : "No compacted summary yet."
+      );
     const summaryAt =
       summaryDebug?.conversationId === activeConversationId &&
       summaryDebug.mode === activeMode
@@ -21827,7 +22567,11 @@ function HomeContent(): React.JSX.Element {
   const storyResolvedChoice = resolveModelChoiceForResponseMode({
     responseMode: storyResponseMode,
     providerPreference: storyEffectiveProvider,
-    choices: visibleModelChoicesByProvider(settings, storyModelChoiceByProvider),
+    choices: visibleModelChoicesByProvider(
+      modelCatalog,
+      settings,
+      storyModelChoiceByProvider
+    ),
     onlineOptions: onlineChatModelOptions,
   });
   const storyModelProvider = storyResolvedChoice.provider;
@@ -21837,10 +22581,11 @@ function HomeContent(): React.JSX.Element {
   const storyModelOptions =
     storyResponseMode === "local"
       ? [storyBaselineLocalModelOption]
-      : includeSelectedModelOption(
+      : includeSelectedOnlineModelOption(
+          modelCatalog,
+          settings,
           onlineChatModelOptions,
-          storyVisibleModelChoice,
-          storyModelProvider
+          storyVisibleModelChoice
         );
   const storyModelOverride =
     storyResponseMode === "local"
@@ -22369,7 +23114,11 @@ function HomeContent(): React.JSX.Element {
     return resolveModelChoiceForResponseMode({
       responseMode: responseModeForProvider(effectiveProvider),
       providerPreference: effectiveProvider,
-      choices: visibleModelChoicesByProvider(settings, coffeeModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        coffeeModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     });
   }, [
@@ -23991,6 +24740,9 @@ function HomeContent(): React.JSX.Element {
       typeof d.settings.lenientLocalImageFallbackModel === "string"
         ? d.settings.lenientLocalImageFallbackModel
         : "";
+    const hasOpenAiApiKey = d.settings.hasOpenAiApiKey === true;
+    const hasAnthropicApiKey = d.settings.hasAnthropicApiKey === true;
+    const hasElevenLabsApiKey = d.settings.hasElevenLabsApiKey === true;
     setSettings({
       ...d.settings,
       displayName,
@@ -24003,9 +24755,21 @@ function HomeContent(): React.JSX.Element {
       hiddenComfyUiWorkflowIds: Array.isArray(d.settings.hiddenComfyUiWorkflowIds)
         ? d.settings.hiddenComfyUiWorkflowIds
         : [],
-      hasOpenAiApiKey: d.settings.hasOpenAiApiKey === true,
-      hasAnthropicApiKey: d.settings.hasAnthropicApiKey === true,
-      hasElevenLabsApiKey: d.settings.hasElevenLabsApiKey === true,
+      hasOpenAiApiKey,
+      hasAnthropicApiKey,
+      hasElevenLabsApiKey,
+      openAiApiKeySource: normalizeApiKeySource(
+        d.settings.openAiApiKeySource,
+        hasOpenAiApiKey
+      ),
+      anthropicApiKeySource: normalizeApiKeySource(
+        d.settings.anthropicApiKeySource,
+        hasAnthropicApiKey
+      ),
+      elevenLabsApiKeySource: normalizeApiKeySource(
+        d.settings.elevenLabsApiKeySource,
+        hasElevenLabsApiKey
+      ),
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -24852,8 +25616,287 @@ function HomeContent(): React.JSX.Element {
     setPanelNotice(`${mode[0].toUpperCase()}${mode.slice(1)} tutorial reset.`);
   }
 
+  function resetBrowserFactoryDefaultsForUser(userId: string): void {
+    const commandDefaults = normalizeCommandCenterState(null);
+    const modelDefaults = createDefaultChatModelChoiceByProvider();
+    const coffeeDefaults = normalizeCoffeeSessionSettings(undefined);
+
+    try {
+      window.localStorage.removeItem(tutorialStorageKeyForUser(userId));
+      window.localStorage.removeItem(commandCenterStateStorageKey(userId));
+      window.localStorage.removeItem(botLibraryGroupsStorageKey(userId));
+      window.localStorage.removeItem(conversationGroupOrderStorageKey(userId));
+      window.localStorage.removeItem(zenInitialStarterCacheKey(userId));
+      window.localStorage.removeItem(PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_IDS_STORAGE_KEY);
+      window.localStorage.removeItem(PRISM_COFFEE_PAUSED_SESSION_REMAINING_MS_STORAGE_KEY);
+    } catch {
+      // Storage cleanup is best effort; in-memory state below still resets the current page.
+    }
+
+    pendingReplyAbortControllerRef.current?.abort();
+    pendingReplyAbortControllerRef.current = null;
+    manualCompactionCancelControllerRef.current?.abort();
+    manualCompactionCancelControllerRef.current = null;
+    priorityCommandCancelControllerRef.current?.abort();
+    priorityCommandCancelControllerRef.current = null;
+    zenInitialThinkingCancelControllerRef.current?.abort();
+    zenInitialThinkingCancelControllerRef.current = null;
+    for (const controllers of imageGenAbortControllersByScopeRef.current.values()) {
+      for (const controller of controllers) {
+        controller.abort();
+      }
+    }
+    imageGenAbortControllersByScopeRef.current.clear();
+    coffeeTurnAbortRef.current?.abort();
+    coffeeContinueAbortRef.current?.abort();
+    coffeeTurnAbortRef.current = null;
+    coffeeContinueAbortRef.current = null;
+    if (coffeeArrivalTimerRef.current) {
+      clearTimeout(coffeeArrivalTimerRef.current);
+      coffeeArrivalTimerRef.current = null;
+    }
+    if (coffeeLoopTimerRef.current) {
+      clearTimeout(coffeeLoopTimerRef.current);
+      coffeeLoopTimerRef.current = null;
+    }
+    if (coffeeCooldownTimerRef.current) {
+      clearTimeout(coffeeCooldownTimerRef.current);
+      coffeeCooldownTimerRef.current = null;
+    }
+    if (coffeeRevealTimerRef.current) {
+      clearTimeout(coffeeRevealTimerRef.current);
+      coffeeRevealTimerRef.current = null;
+    }
+    if (coffeeTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeTypewriterRafRef.current);
+      coffeeTypewriterRafRef.current = null;
+    }
+    if (coffeeReplayTimerRef.current) {
+      clearTimeout(coffeeReplayTimerRef.current);
+      coffeeReplayTimerRef.current = null;
+    }
+    if (coffeeReplayTypewriterRafRef.current != null) {
+      cancelAnimationFrame(coffeeReplayTypewriterRafRef.current);
+      coffeeReplayTypewriterRafRef.current = null;
+    }
+    coffeeReplayTypewriterLengthRef.current = 0;
+    coffeeReplayTypewriterMessageKeyRef.current = null;
+    coffeeSynopsisRequestIdsRef.current.clear();
+    if (coffeeInterruptionCueTimerRef.current) {
+      clearTimeout(coffeeInterruptionCueTimerRef.current);
+      coffeeInterruptionCueTimerRef.current = null;
+    }
+
+    setTutorialProgress({ ...DEFAULT_TUTORIAL_PROGRESS });
+    setActiveTutorialMode(null);
+    setActiveTutorialStepIndex(0);
+    setCommandCenterPreferredModel(commandDefaults.preferredModel);
+    setCommandCenterCommands(commandDefaults.commands);
+    setCommandCenterSelectedCommandId(null);
+    setCommandCenterSpecsCommandId(null);
+    setCommandCenterHelpModalOpen(false);
+    setExpandedPromptShortcutMessageId(null);
+    setConversationGroupOrder([]);
+    setBotLibraryGroups([createFavoritesBotGroup()]);
+    setConversations([]);
+    setSelectedId(null);
+    selectedIdRef.current = null;
+    setDetail(null);
+    detailIdRef.current = null;
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setMemories([]);
+    setBotMemories([]);
+    setSettings(null);
+    setModelCatalog(null);
+    setBots([]);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setCanvasSelectedBotIds(new Set());
+    setCanvasBotMarqueeRect(null);
+    setChatBotOverride(undefined);
+    setDraft("");
+    setError(null);
+    setChatModelChoiceByProvider(modelDefaults);
+    setCoffeeModelChoiceByProvider(modelDefaults);
+    setImageGenModelChoiceByProvider(modelDefaults);
+    setStoryModelChoiceByProvider(modelDefaults);
+    conversationModelChoiceByScopeRef.current.clear();
+    lastConversationModelScopeKeyRef.current = null;
+    chatModelChoiceByProviderWriteRef.current = modelDefaults;
+    coffeeModelChoiceByScopeRef.current.clear();
+    lastCoffeeModelScopeKeyRef.current = null;
+    coffeeModelChoiceByProviderWriteRef.current = modelDefaults;
+
+    setImages([]);
+    setImageBotDirectorySnapshot([]);
+    setImageLightbox(null);
+    setImagePrompt("");
+    setImageGlobalPositiveKeywords([]);
+    setImageGlobalNegativeKeywords([]);
+    setImageBotKeywordsByBotId({});
+    setImagePositiveKeywordDraft("");
+    setImageNegativeKeywordDraft("");
+    setImageKeywordEditorOpen(false);
+    setImageKeywordSelectedTagsByKind({ positive: [], negative: [] });
+    setImageGenerationVariant("letterbox");
+    setImageVariantManualOverride(false);
+    setImageRandomPromptBusy(false);
+    setImagePrivateMode(false);
+    setImagePrivateGeneratedIds([]);
+    setImagePrivateRevealedIds(new Set());
+    setImagePanelScope("all");
+    imagePanelScopeRef.current = "all";
+    setImagePanelBotId(null);
+    imagePanelBotIdRef.current = null;
+    setImageGenInflightByScope({});
+    setImageGenUiContextByScope({});
+    setImageGenWarmupHintVisible(false);
+    setImageReadyNotice(null);
+    setImagesDeleteAllConfirmOpen(false);
+    setImagesDeleteAllBusy(false);
+    zenWallpaperGenerationInFlightRef.current.clear();
+    setZenWallpaperBusyConversationId(null);
+    setZenWallpaperError(null);
+    setZenAtmosphereLayerOpacities({});
+
+    setNewBotName("");
+    setBotProfile(blankBotProfile());
+    setNewBotLocalModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineEnabled(true);
+    setNewBotDeleteProtected(false);
+    setNewBotFlirtEnabled(false);
+    setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
+    setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+    setNewBotColor(randomHex());
+    setNewBotGlyph(randomBotGlyph());
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setEditingBotId(null);
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    editOriginalRef.current = null;
+    createBotAppearanceTouchedRef.current = false;
+
+    setCoffeeConversation(null);
+    setCoffeeSelectedSessionId(null);
+    setCoffeeGroups([]);
+    setCoffeeSelectedGroupId(null);
+    setCoffeeCollapsedGroupIds(new Set());
+    setCoffeePresets([]);
+    setCoffeeSelectedDurationMinutes(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    setCoffeeSelectedPresetId("");
+    setCoffeeOpeningPollModalOpen(false);
+    setCoffeeOpeningPollQuestion("");
+    setCoffeeOpeningPollOptions(buildDefaultCoffeePollOptionDraft());
+    setCoffeeActivePoll(null);
+    coffeeActivePollRef.current = null;
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeePollVoteBusy(false);
+    setCoffeePollPanelPosition(COFFEE_POLL_PANEL_DEFAULT_POSITION);
+    setCoffeeSettingsModalOpen(false);
+    setCoffeeSessionSettings(coffeeDefaults);
+    coffeeSessionSettingsRef.current = coffeeDefaults;
+    setCoffeeSettingsDraft(coffeeDefaults);
+    setCoffeeGroupNameDraft("");
+    setCoffeePresetNameDraft("");
+    setCoffeeSettingsSaving(false);
+    setCoffeeGroupOverviewRenameBusy(false);
+    setCoffeeAutoTopicToggleBusy(false);
+    setCoffeeSearch("");
+    setCoffeeDraft("");
+    setCoffeeBusy(false);
+    setCoffeeAutoBusy(false);
+    setCoffeePausedSessionIds(new Set());
+    setCoffeePausedSessionRemainingMsById({});
+    coffeeAutoplayPausedRef.current = false;
+    setCoffeeAutoplayPaused(false);
+    setCoffeeError(null);
+    setCoffeeTranscriptOpen(false);
+    setCoffeeTranscriptClosing(false);
+    setCoffeeSessionPhase("selecting");
+    setCoffeeTurnRhythmState("idle");
+    coffeeTurnRhythmStateRef.current = "idle";
+    setCoffeeTypewriterLength(0);
+    setCoffeePendingSpeakerBotId(null);
+    setCoffeePendingRevealConversation(null);
+    coffeePendingRevealAfterUserRef.current = null;
+    setCoffeeUserRevealText("");
+    setCoffeeInterruptedSnippet(null);
+    setCoffeeLiveInterruptionCue(null);
+    setCoffeePendingArrivalScenario("user-first");
+    setCoffeeStarterTopics([]);
+    setCoffeeArrivedBotIds([]);
+    assignCoffeeSessionEndsAtMs(null);
+    setCoffeeActivePoll(null);
+    setCoffeePollResultsOpen(false);
+    setCoffeePollPanelMinimized(false);
+    setCoffeeReplayActive(false);
+    setCoffeeReplayPlaying(false);
+    setCoffeeReplayMessageIndex(0);
+    setCoffeeReplayPlaybackVersion((version) => version + 1);
+    setCoffeeReplayTypewriterLength(0);
+    setCoffeeReplayActionPanelBotId(null);
+
+    setStorySessions([]);
+    setStorySelectedSessionId(null);
+    setStorySession(null);
+    setStorySelectedBotIds([]);
+    setStoryPremise("");
+    setStorySearch("");
+    setStoryBusy(false);
+    setStoryError(null);
+    setStoryMapOpen(false);
+    setStoryInventoryOpen(false);
+    setStoryTranscriptOpen(false);
+    setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
+    setStorySetupPinned(false);
+    setStoryProvider("local");
+    setStoryProviderTouched(false);
+  }
+
+  function restoreFactoryDefaults() {
+    setPanelError(null);
+    setPanelNotice(null);
+    setDeleteAccountArmed(false);
+    if (!factoryResetArmed) {
+      setFactoryResetArmed(true);
+      return;
+    }
+    void restoreFactoryDefaultsConfirmed();
+  }
+
+  async function restoreFactoryDefaultsConfirmed() {
+    if (!user?.id) {
+      setPanelError("Sign in before restoring factory defaults.");
+      return;
+    }
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api("/api/account/factory-reset", { method: "POST", body: "{}" });
+      setFactoryResetArmed(false);
+      resetBrowserFactoryDefaultsForUser(user.id);
+      navigateToView("hub");
+      await bootstrap();
+      await refreshAll();
+      setPanelNotice("Factory defaults restored. Tutorials will run again when you enter each mode.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Factory reset failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function deleteAccount() {
     setPanelError(null);
+    setFactoryResetArmed(false);
     if (!deleteAccountArmed) {
       setDeleteAccountArmed(true);
       return;
@@ -24947,7 +25990,11 @@ function HomeContent(): React.JSX.Element {
     const resolvedChatChoice = resolveModelChoiceForResponseMode({
       responseMode: responseModeForProvider(effectivePreferredProvider),
       providerPreference: effectivePreferredProvider,
-      choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     });
     const providerForSend = commandCenterModelChoice?.provider ?? resolvedChatChoice.provider;
@@ -25176,7 +26223,7 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text);
   }
 
-  /** `/dev …` — local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
+  /** `/dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
   function consumePrismDevComposerCommand(trimmedLine: string): boolean {
     if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
     const parsed = parsePrismDevChatCommand(trimmedLine);
@@ -25201,7 +26248,7 @@ function HomeContent(): React.JSX.Element {
 
     if (parsed.kind === "unknown") {
       setError(
-        `Unknown dev command “${parsed.token}”. Type /dev help for a short list.`,
+        `Unknown dev command "${parsed.token}". Type /dev help for a short list.`,
       );
       return true;
     }
@@ -25234,7 +26281,7 @@ function HomeContent(): React.JSX.Element {
     }
 
     if (!detail) {
-      setError('Open a chat first — then try /dev help or /dev askquestion in the composer.');
+      setError("Open a chat first - then try /dev help or /dev askquestion in the composer.");
       return true;
     }
 
@@ -25243,11 +26290,11 @@ function HomeContent(): React.JSX.Element {
         ...devAssistShell(),
         content:
           "**Dev commands** (local preview only — nothing is sent to the server)\n\n" +
-          "- `/dev help` — this list\n" +
-          "- `/dev` or `/dev panel` — open Developer Tools\n" +
-          "- `/dev close` — close Developer Tools\n" +
-          "- `/dev toggles` — open Dev toggles\n" +
-          "- `/dev askquestion` — inject a sample AskQuestion chip row",
+          "- `/dev help` - this list\n" +
+          "- `/dev` or `/dev panel` - open Developer Tools\n" +
+          "- `/dev close` - close Developer Tools\n" +
+          "- `/dev toggles` - open Dev toggles\n" +
+          "- `/dev askquestion` - inject a sample AskQuestion chip row",
       };
       setDetail({
         ...detail,
@@ -25311,10 +26358,6 @@ function HomeContent(): React.JSX.Element {
     const modeForSummary: "zen" | "sandbox" = view === "chat" ? "zen" : "sandbox";
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    if (pendingReplyVisible) {
-      setError("Wait for the current reply to finish before compacting this chat.");
-      return;
-    }
     if (manualCompactionStatus?.state === "running") {
       setError("This chat is already being compacted.");
       return;
@@ -25326,6 +26369,9 @@ function HomeContent(): React.JSX.Element {
     if (!activeConversationId || activeConversationId === "pending") {
       setError(`Open a saved chat before using /${commandName}.`);
       return;
+    }
+    if (pendingReply || chatAssistantRevealInProgress) {
+      clearReplyWorkForManualCompaction();
     }
     setError(null);
     setConversationStarterPrompts(null);
@@ -25486,24 +26532,33 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function forgetPlayerMemoryFromSlashCommand(): Promise<void> {
+  function currentSlashMemoryScopeBotId(): string | null {
+    return visualBotSelection.botId ?? activeBot?.id ?? null;
+  }
+
+  async function forgetCurrentBotMemoryFromSlashCommand(): Promise<void> {
+    const botId = currentSlashMemoryScopeBotId();
     try {
       await api<{
         deletedMemories?: number;
-        deletedSummaries?: number;
-        includeAboutYou?: boolean;
-        vectorsCleared?: boolean;
-      }>("/api/dev/clear-session-memory", {
+        scope?: "bot" | "default";
+        botId?: string | null;
+      }>("/api/dev/clear-bot-memory", {
         method: "POST",
-        body: JSON.stringify({ includeAboutYou: true }),
+        body: JSON.stringify({ botId }),
       });
       try {
         await refreshMemories();
+        if (botId && memoryPanelBot?.id === botId) {
+          await refreshBotMemories(botId);
+        } else if (memoryPanelScope === "default") {
+          await refreshDefaultMemories();
+        }
       } catch {
         // Best-effort UI refresh; the server is the source of truth.
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Player memory forget failed.");
+      setError(err instanceof Error ? err.message : "Memory forget failed.");
     }
   }
 
@@ -25520,6 +26575,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/summarize" &&
       normalizedCommand !== "/clear" &&
       normalizedCommand !== "/cls" &&
+      normalizedCommand !== "/refresh" &&
       normalizedCommand !== "/help"
     ) {
       return false;
@@ -25539,13 +26595,17 @@ function HomeContent(): React.JSX.Element {
       await clearConversationFromSlashCommand();
       return true;
     }
+    if (normalizedCommand === "/refresh") {
+      window.location.reload();
+      return true;
+    }
     await compactCurrentChatFromSlashCommand(
       normalizedCommand === "/summarize" ? "summarize" : "compact"
     );
     return true;
   }
 
-  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget all`). */
+  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget-all`). */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!devSlashCommandsEnabled) return false;
     const tokens = trimmedLine
@@ -25554,44 +26614,37 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (normalizedCommand !== "/forget") {
+    if (normalizedCommand !== "/forget" && normalizedCommand !== "/forget-all") {
       return false;
     }
     setError(null);
     setConversationStarterPrompts(null);
     setDraft("");
     setComposerSendTintActive(false);
+    if (tokens.length > 1) {
+      setError(`${normalizedCommand} does not take extra text. Use /forget or /forget-all by itself.`);
+      return true;
+    }
     if (normalizedCommand === "/forget") {
-      const forgetMode = tokens[1]?.toLowerCase() ?? "";
-      if (tokens.length > 2) {
-        const extras = tokens.slice(2).join(" ");
-        setError(`Unknown /forget option "${extras}". Use /help for supported options.`);
-        return true;
+      await forgetCurrentBotMemoryFromSlashCommand();
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
       }
-      if (forgetMode.length === 0) {
-        void clearSummariesFromSlashCommand();
-        void forgetPlayerMemoryFromSlashCommand();
-        if (editingMessageId !== null) {
-          setEditingMessageId(null);
-          setEditingOriginalText("");
-        }
-        setForceNewConversationOnNextSend(true);
-        startFreshConversation(false);
-        setComposerPrimed(false);
-        return true;
-      }
-      if (forgetMode !== "all") {
-        setError(`Unknown /forget option "${tokens[1]}". Use /help for supported options.`);
-        return true;
-      }
-      // `/forget all` should be a hard reset for chat testing, so summary context
-      // is always cleared.
-      void clearSummariesFromSlashCommand();
+      setForceNewConversationOnNextSend(true);
+      startFreshConversation(false);
+      setComposerPrimed(false);
+      return true;
+    }
+    if (normalizedCommand === "/forget-all") {
+      // `/forget-all` is the hard reset for chat testing, so summary context
+      // and every per-user memory artifact are always cleared.
+      await clearSummariesFromSlashCommand();
       // Order matters: nuke the conversation first so its messages stop
       // referencing memories/summaries, then drop every per-user memory
       // artifact so the next chat starts with no recall surface at all.
-      void clearConversationFromSlashCommand();
-      void clearAllSessionMemoryFromSlashCommand();
+      await clearConversationFromSlashCommand();
+      await clearAllSessionMemoryFromSlashCommand();
       // Keep Chat mode from auto-reopening the latest saved thread until the
       // user explicitly starts or opens a conversation again.
       setChatAutoRestoreSuppressed(true);
@@ -25608,79 +26661,66 @@ function HomeContent(): React.JSX.Element {
     return false;
   }
 
-  function resolveCommandCenterSlashCommand(trimmedLine: string): {
+  function resolveCommandCenterPromptShortcuts(rawDraft: string): {
     kind: "none";
   } | {
     kind: "error";
     error: string;
   } | {
     kind: "resolved";
-    commandId: string;
-    commandName: string;
-    promptShortcut: PromptShortcutMetadata;
+    promptShortcut: PromptShortcutMetadata | null;
     prompt: string;
     modelChoice: string;
   } {
-    const tokens = trimmedLine
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0);
-    if (tokens.length === 0) return { kind: "none" };
-    const firstToken = tokens[0];
-    if (!firstToken.startsWith("/")) return { kind: "none" };
-    const normalizedSlashName = normalizeCommandNameInput(firstToken);
-    if (!normalizedSlashName) return { kind: "none" };
-    const command = commandCenterCommands.find((candidate) =>
-      commandMatchesSlashName(candidate, normalizedSlashName)
+    const promptNames = commandCenterPromptPicks.flatMap((command) =>
+      commandInvocationNames(command)
     );
-    if (!command) {
-      const normalizedPrefix = normalizedSlashName.toLowerCase();
-      const matchesKnownCommandPrefix = commandCenterCommands.some((candidate) =>
-        commandInvocationNames(candidate).some((name) =>
-          name.toLowerCase().startsWith(normalizedPrefix)
-        )
-      );
-      if (matchesKnownCommandPrefix) {
-        return { kind: "none" };
+    const ranges = resolvePromptShortcutTextRanges(rawDraft, { promptNames });
+    if (ranges.length === 0) return { kind: "none" };
+
+    const commandByInvocation = new Map<string, CommandCenterCommand>();
+    for (const command of commandCenterPromptPicks) {
+      for (const name of commandInvocationNames(command)) {
+        commandByInvocation.set(name.toLowerCase(), command);
       }
-      if (
-        normalizedSlashName === "clear" ||
-        normalizedSlashName === "forget" ||
-        normalizedSlashName === "dev"
-      ) {
-        return { kind: "none" };
+    }
+
+    let prompt = rawDraft;
+    let firstCommand: CommandCenterCommand | null = null;
+    let firstInvocation = "";
+    for (let index = ranges.length - 1; index >= 0; index -= 1) {
+      const range = ranges[index]!;
+      const command = commandByInvocation.get(range.name.toLowerCase());
+      if (!command) continue;
+      const basePrompt = command.command.trim();
+      if (!basePrompt) {
+        return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
-      const availableCommands = commandCenterCommands.flatMap((candidate) =>
-        commandInvocationNames(candidate).map((name) => `/${name}`)
-      );
-      const availableText =
-        availableCommands.length > 0 ? availableCommands.join(", ") : "(none configured)";
-      return {
-        kind: "error",
-        error: `Unknown command "/${normalizedSlashName}". Available commands: ${availableText}`,
-      };
+      if (index === 0) {
+        firstCommand = command;
+        firstInvocation = rawDraft.slice(range.start, range.end);
+      }
+      prompt = `${prompt.slice(0, range.start)}${basePrompt}${prompt.slice(range.end)}`;
     }
-    const basePrompt = command.command.trim();
-    if (!basePrompt) {
-      return { kind: "error", error: `/${command.name} has no command text configured yet.` };
-    }
-    let prompt = basePrompt;
-    const passthrough = tokens.slice(1).join(" ").trim();
-    if (passthrough.length > 0) {
-      prompt += `\n\nUser request:\n${passthrough}`;
-    }
+
+    if (!firstCommand) return { kind: "none" };
+    const firstRange = ranges[0]!;
+    const exactSingleShortcut =
+      ranges.length === 1 &&
+      rawDraft.slice(0, firstRange.start).trim().length === 0 &&
+      rawDraft.slice(firstRange.end).trim().length === 0;
+    const promptShortcut: PromptShortcutMetadata | null = exactSingleShortcut
+      ? {
+          v: 1,
+          commandId: firstCommand.id,
+          name: firstCommand.name,
+          invocation: firstInvocation,
+          flags: [],
+        }
+      : null;
     return {
       kind: "resolved",
-      commandId: command.id,
-      commandName: command.name,
-      promptShortcut: {
-        v: 1,
-        commandId: command.id,
-        name: command.name,
-        invocation: trimmedLine,
-        flags: [],
-        ...(passthrough.length > 0 ? { passthrough } : {}),
-      },
+      promptShortcut,
       prompt,
       modelChoice: commandCenterPreferredModel,
     };
@@ -26037,9 +27077,32 @@ function HomeContent(): React.JSX.Element {
     ) {
       return;
     }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumeGlobalClearCommand(rawTrimmed, "chat")
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      await consumeDevSlashCommand(rawTrimmed)
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      consumePrismDevComposerCommand(rawTrimmed)
+    ) {
+      setDraft("");
+      setComposerSendTintActive(false);
+      return;
+    }
     const commandCenterResolution =
       rawTrimmed.length > 0 && !options.starterPrompt
-        ? resolveCommandCenterSlashCommand(rawTrimmed)
+        ? resolveCommandCenterPromptShortcuts(rawDraft)
         : { kind: "none" as const };
     if (commandCenterResolution.kind === "error") {
       setError(commandCenterResolution.error);
@@ -26053,6 +27116,9 @@ function HomeContent(): React.JSX.Element {
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.promptShortcut
         : null;
+    const commandCenterSubmitActive =
+      commandCenterResolution.kind === "resolved" &&
+      commandCenterResolution.promptShortcut !== null;
     const trimmed = (
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.prompt
@@ -26076,32 +27142,15 @@ function HomeContent(): React.JSX.Element {
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
-    // `/dev …` bypasses pendingReply — otherwise tooling looks "broken"
-    // while the model is streaming or between turns.
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      consumeGlobalClearCommand(trimmed, "chat")
-    ) {
-      return;
-    }
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      await consumeDevSlashCommand(trimmed)
-    ) {
-      return;
-    }
-    if (
-      trimmed.length > 0 &&
-      !options.starterPrompt &&
-      consumePrismDevComposerCommand(trimmed)
-    ) {
-      setDraft("");
-      setComposerSendTintActive(false);
-      return;
-    }
     if (!trimmed && !isStarterPrompt) return;
+    if (
+      commandCenterSubmitActive &&
+      pendingReply &&
+      !canSendTextWhileReplyPending()
+    ) {
+      priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+      stopPendingReply();
+    }
     if (!isStarterPrompt && trimmed.length > 0 && view === "chat") {
       const interruption = prepareActiveAssistantRevealInterruption();
       if (interruption) {
@@ -26124,7 +27173,11 @@ function HomeContent(): React.JSX.Element {
         }
       }
     }
-    if (pendingReply && !canSendTextWhileReplyPending()) {
+    if (
+      pendingReply &&
+      !commandCenterSubmitActive &&
+      !canSendTextWhileReplyPending()
+    ) {
       if (!isStarterPrompt && trimmed.length > 0) {
         hideZenHeaderForConversationAction();
         setQueuedChatPrompts((previous) => [
@@ -26320,6 +27373,12 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify(chatBody),
         signal: chatRequestController.signal,
       });
+      if (manualCompactionCancelControllerRef.current === chatRequestController) {
+        return;
+      }
+      if (priorityCommandCancelControllerRef.current === chatRequestController) {
+        return;
+      }
       const activeInitialStarterRequest = zenInitialStarterRequestId
         ? zenInitialStarterRequestRef.current
         : null;
@@ -26493,8 +27552,15 @@ function HomeContent(): React.JSX.Element {
         (err instanceof Error && /abort/i.test(err.message));
       const requestWasZenInitialThinkingCancelled =
         zenInitialThinkingCancelControllerRef.current === chatRequestController;
+      const requestWasManualCompactionCancelled =
+        manualCompactionCancelControllerRef.current === chatRequestController;
+      const requestWasPriorityCommandCancelled =
+        priorityCommandCancelControllerRef.current === chatRequestController;
       if (requestWasAborted) {
-        if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
+        if (requestWasManualCompactionCancelled || requestWasPriorityCommandCancelled) {
+          setDraft("");
+          setComposerSendTintActive(false);
+        } else if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
           setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
           setDraft(
@@ -26531,6 +27597,12 @@ function HomeContent(): React.JSX.Element {
           : "Send failed. Verify the provider is reachable and try again."
       );
     } finally {
+      if (manualCompactionCancelControllerRef.current === chatRequestController) {
+        manualCompactionCancelControllerRef.current = null;
+      }
+      if (priorityCommandCancelControllerRef.current === chatRequestController) {
+        priorityCommandCancelControllerRef.current = null;
+      }
       if (zenInitialThinkingCancelControllerRef.current === chatRequestController) {
         zenInitialThinkingCancelControllerRef.current = null;
       }
@@ -26695,17 +27767,13 @@ function HomeContent(): React.JSX.Element {
       if (chip.otherSource === "starter") {
         setStarterComposerRevealed(true);
         requestAnimationFrame(() => {
-          snapAskQuestionComposerToChatBottom(true);
-          draftComposerRef.current?.focus();
+          draftComposerRef.current?.focus({ preventScroll: true });
         });
         return;
       }
-      setConversationStarterPrompts(null);
-      askQuestionComposerHiddenForReadingKeyRef.current = null;
       setAskQuestionComposerRevealed(true);
       requestAnimationFrame(() => {
-        snapAskQuestionComposerToChatBottom(true);
-        draftComposerRef.current?.focus();
+        draftComposerRef.current?.focus({ preventScroll: true });
       });
       return;
     }
@@ -26798,13 +27866,12 @@ function HomeContent(): React.JSX.Element {
     const qa = pendingAskQuestion;
     if (qa && pendingAskQuestionWaitingForReveal) return null;
     if (qa) {
-      const collapsed = askQuestionComposerRevealed;
       return {
         conversationId: id,
         chips: buildAskQuestionChips(qa, "askquestion"),
         heading: normalizeAskQuestionText(qa.prompt) || null,
         source: "askquestion",
-        collapsed,
+        collapsed: false,
       };
     }
     if (
@@ -26825,7 +27892,7 @@ function HomeContent(): React.JSX.Element {
         chips: buildAskQuestionChips(starterAskQuestion, "starter"),
         heading: null,
         source: "starter",
-        collapsed: starterComposerRevealed,
+        collapsed: false,
       };
     }
     return null;
@@ -26931,63 +27998,48 @@ function HomeContent(): React.JSX.Element {
         ? ""
         : askQuestionPromptForInlinePanel(interaction.askQuestion.prompt);
     const choicesDisabled = pendingReply;
-    const otherSelected =
-      (interaction.source === "starter"
-        ? starterComposerRevealed
-        : askQuestionComposerRevealed &&
-          pendingAskQuestionState?.assistantMessageId === interaction.assistantMessageId);
-    const choicesVisible = !otherSelected;
-
     return (
       <div
         className={styles.askQuestionInlineCard}
         data-ask-question-panel="true"
         data-ask-question-assistant-id={interaction.assistantMessageId}
-        data-ask-question-state={otherSelected ? "other-selected" : "unanswered"}
+        data-ask-question-state="unanswered"
         role="group"
         aria-label="Suggested replies"
         onClick={(event) => event.stopPropagation()}
       >
         <div className={styles.askQuestionInlineHeader}>
           <span className={styles.askQuestionInlineEyebrow}>
-            {otherSelected ? "Other selected" : "Choose a reply"}
+            Choose a reply
           </span>
         </div>
         {prompt ? (
           <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
         ) : null}
-        {otherSelected ? (
-          <div className={styles.askQuestionInlineAnswer}>
-            <span>Selected reply</span>
-            <p>Other - write your answer below.</p>
-          </div>
-        ) : null}
-        {choicesVisible ? (
-          <div
-            className={styles.askQuestionInlineChoices}
-            data-choices-disabled={choicesDisabled ? "true" : undefined}
-          >
-            {chips.map((chip, chipIndex) => (
-              <button
-                key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
-                type="button"
-                disabled={choicesDisabled}
-                className={`${styles.conversationStarterChip} ${
-                  chip.action === "other" ? styles.conversationStarterChipOther : ""
-                }`}
-                data-chip-kind={chip.action}
-                aria-label={
-                  chip.action === "other"
-                    ? "Other - explain in chat"
-                    : `Suggested reply: ${chip.sendValue ?? chip.label}`
-                }
-                onClick={() => handleComposerChipPick(chip)}
-              >
-                {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <div
+          className={styles.askQuestionInlineChoices}
+          data-choices-disabled={choicesDisabled ? "true" : undefined}
+        >
+          {chips.map((chip, chipIndex) => (
+            <button
+              key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+              type="button"
+              disabled={choicesDisabled}
+              className={`${styles.conversationStarterChip} ${
+                chip.action === "other" ? styles.conversationStarterChipOther : ""
+              }`}
+              data-chip-kind={chip.action}
+              aria-label={
+                chip.action === "other"
+                  ? "Other - explain in chat"
+                  : `Suggested reply: ${chip.sendValue ?? chip.label}`
+              }
+              onClick={() => handleComposerChipPick(chip)}
+            >
+              {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -27053,18 +28105,21 @@ function HomeContent(): React.JSX.Element {
       id: nextQueuedPrompt.id,
       text: nextQueuedPrompt.text,
     });
+    const queuedPromptDrainGeneration = queuedPromptDrainGenerationRef.current;
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — queue drain uses the regular send pipeline */
       },
     } as React.FormEvent<HTMLFormElement>;
     window.setTimeout(() => {
+      if (queuedPromptDrainGenerationRef.current !== queuedPromptDrainGeneration) return;
       void sendMessage(syntheticSubmit, {
         draftOverride: nextQueuedPrompt?.text,
         queuedConversationId,
       });
     }, 210);
     window.setTimeout(() => {
+      if (queuedPromptDrainGenerationRef.current !== queuedPromptDrainGeneration) return;
       setDispatchingQueuedPrompt((current) =>
         current?.id === nextQueuedPrompt?.id ? null : current
       );
@@ -27217,7 +28272,6 @@ function HomeContent(): React.JSX.Element {
         .join("|")}`
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
-  const askQuestionUsesMobileRail = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const starterPromptsAvailable =
     conversationStarterPrompts !== null &&
     conversationStarterPrompts.conversationId === detail?.id &&
@@ -27255,6 +28309,78 @@ function HomeContent(): React.JSX.Element {
   const composerHiddenByChoiceChips =
     askQuestionComposerHiddenByChoices ||
     (starterPromptsInteractive && !starterComposerRevealed);
+
+  function eventTargetIsTextEditable(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(
+      target.closest(
+        "input, textarea, select, [contenteditable='true'], [role='textbox'], [data-markdown-cm-host='true']"
+      )
+    );
+  }
+
+  function revealHiddenZenComposerWithText(text: string): void {
+    if (view !== "chat" || !composerHiddenByChoiceChips || text.length === 0) return;
+    if (pendingAskQuestionInteractiveKey !== null) {
+      askQuestionComposerHiddenForReadingKeyRef.current = null;
+      setAskQuestionComposerRevealed(true);
+    } else if (starterPromptsInteractive) {
+      setStarterComposerRevealed(true);
+    } else {
+      return;
+    }
+    resetComposerHistoryCursor();
+    setComposerFocused(true);
+    setComposerSendTintActive(true);
+    setComposerPrimed(false);
+    setDraft((current) => `${current}${text}`);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        draftComposerRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }
+
+  useEffect(() => {
+    if (view !== "chat" || !composerHiddenByChoiceChips) return;
+
+    const handleHiddenComposerKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (eventTargetIsTextEditable(event.target)) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        (event.key === " " || event.key === "Enter") &&
+        target?.closest("button, [role='button'], a[href]") !== null
+      ) {
+        return;
+      }
+      if (event.key.length !== 1) return;
+      event.preventDefault();
+      revealHiddenZenComposerWithText(event.key);
+    };
+
+    const handleHiddenComposerPaste = (event: ClipboardEvent): void => {
+      if (event.defaultPrevented) return;
+      if (eventTargetIsTextEditable(event.target)) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (text.length === 0) return;
+      event.preventDefault();
+      revealHiddenZenComposerWithText(text);
+    };
+
+    window.addEventListener("keydown", handleHiddenComposerKeyDown, true);
+    window.addEventListener("paste", handleHiddenComposerPaste, true);
+    return () => {
+      window.removeEventListener("keydown", handleHiddenComposerKeyDown, true);
+      window.removeEventListener("paste", handleHiddenComposerPaste, true);
+    };
+  }, [
+    composerHiddenByChoiceChips,
+    pendingAskQuestionInteractiveKey,
+    starterPromptsInteractive,
+    view,
+  ]);
 
   useEffect(() => {
     askQuestionComposerHiddenForReadingKeyRef.current = null;
@@ -27317,13 +28443,33 @@ function HomeContent(): React.JSX.Element {
       row.querySelector<HTMLElement>('[data-ask-question-panel="true"]') ??
       findChatModeMessageScrollAnchor(row);
     const rootRect = el.getBoundingClientRect();
-    const panelRect = panel.getBoundingClientRect();
-    const panelCenterY =
-      panelRect.top - rootRect.top + el.scrollTop + panelRect.height / 2;
+    const target = view === "chat" ? row : panel;
+    const targetRect = target.getBoundingClientRect();
+    const targetCenterY =
+      targetRect.top - rootRect.top + el.scrollTop + targetRect.height / 2;
+    const railRect = askQuestionRailRef.current?.getBoundingClientRect() ?? null;
+    const railBottomInset = railRect
+      ? Math.max(0, rootRect.bottom - Math.max(rootRect.top, railRect.top))
+      : 0;
+    const topInset = view === "chat"
+      ? Math.min(128, Math.max(64, el.clientHeight * 0.1))
+      : 0;
+    const bottomInset = view === "chat"
+      ? railBottomInset > 0
+        ? Math.max(
+            Math.min(168, Math.max(96, el.clientHeight * 0.15)),
+            railBottomInset + 24
+          )
+        : Math.min(116, Math.max(64, el.clientHeight * 0.1))
+      : railBottomInset;
+    const readableHeight = Math.max(
+      180,
+      el.clientHeight - topInset - bottomInset
+    );
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     const targetTop = Math.max(
       0,
-      Math.min(maxScrollTop, panelCenterY - el.clientHeight / 2)
+      Math.min(maxScrollTop, targetCenterY - topInset - readableHeight / 2)
     );
     chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
     el.scrollTo({ top: targetTop, behavior: "auto" });
@@ -27353,15 +28499,12 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
   ]);
   const askQuestionTailSpaceActive =
-    askQuestionUsesMobileRail &&
-    choiceChipRailInteractiveKey !== null &&
-    !choiceChipRailComposerRevealed;
-  const askQuestionCollapsedBubbleActive =
-    askQuestionUsesMobileRail &&
-    choiceChipRailInteractiveKey !== null &&
-    choiceChipRailComposerRevealed;
+    choiceChipRailInteractiveKey !== null;
+  const askQuestionCollapsedBubbleActive = false;
 
   function snapAskQuestionComposerToChatBottom(force = false): void {
+    const rail = getComposerChipRail();
+    if (!rail?.collapsed) return;
     if (!choiceChipRailInteractiveKey || (!force && !choiceChipRailComposerRevealed)) return;
     const el = messagesScrollRef.current;
     if (!el) return;
@@ -27914,14 +29057,18 @@ function HomeContent(): React.JSX.Element {
   }, [detail]);
 
   function updateComposerDraft(nextDraft: string) {
+    const normalizedNextDraft = clampTextAfterLeadingCommandChip(
+      nextDraft,
+      composerCommandPicks
+    );
     resetComposerHistoryCursor();
-    if (nextDraft !== draft) {
+    if (normalizedNextDraft !== draft) {
       setComposerSendTintActive(true);
     }
     startDraftTransition(() => {
-      setDraft(nextDraft);
+      setDraft(normalizedNextDraft);
     });
-    if (nextDraft !== draft) {
+    if (normalizedNextDraft !== draft) {
       snapAskQuestionComposerToChatBottom();
     }
   }
@@ -28147,7 +29294,10 @@ function HomeContent(): React.JSX.Element {
     showEmptyStateSearchAfterReturn();
   }
 
-  async function saveSettings(e: React.FormEvent) {
+  async function saveSettings(
+    e: React.FormEvent,
+    options: { closeHostsModalOnSuccess?: boolean } = {}
+  ) {
     e.preventDefault();
     if (!settings) return;
     setBusy(true);
@@ -28158,7 +29308,18 @@ function HomeContent(): React.JSX.Element {
       // Server re-sanitizes via `sanitizeOpenAiKeyInput`, so a paste of
       // `OPENAI_API_KEY=sk-...` (or a quoted variant) is stripped before
       // it ever gets encrypted into the user row.
-      const body: Record<string, unknown> = { ...settings };
+      const preferredOnlineModelChoice = visiblePreferredOnlineModelChoice(
+        modelCatalog,
+        settings,
+        settings.preferredOnlineModel
+      );
+      const body: Record<string, unknown> = {
+        ...settings,
+        preferredOnlineModel:
+          preferredOnlineModelChoice === AUTO_MODEL_CHOICE
+            ? ""
+            : preferredOnlineModelChoice,
+      };
       const trimmedKey = openAiKey.trim();
       if (trimmedKey.length > 0) {
         body.openAiApiKey = trimmedKey;
@@ -28179,6 +29340,9 @@ function HomeContent(): React.JSX.Element {
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
+      if (options.closeHostsModalOnSuccess) {
+        setSettingsHostsModalOpen(false);
+      }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
     } finally {
@@ -28331,7 +29495,8 @@ function HomeContent(): React.JSX.Element {
       } else {
         setElevenLabsKey("");
       }
-      await refreshSettings();
+      const { comfyUiHost } = await refreshSettings();
+      await refreshModels(comfyUiHost);
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Clear failed.");
     } finally {
@@ -31059,10 +32224,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       newBotLocalModel
     );
-    const onlineModel = visibleConcreteModelChoiceForProvider(
+    const onlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       newBotOnlineModel
     );
     const localImageStored =
@@ -31202,10 +32366,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       newBotLocalModel
     );
-    const onlineModel = visibleConcreteModelChoiceForProvider(
+    const onlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       newBotOnlineModel
     );
     const localImageStored =
@@ -31466,6 +32629,85 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function setBotsDeleteProtection(
+    targetBots: readonly Bot[],
+    deleteProtected: boolean
+  ): Promise<void> {
+    const uniqueBots = Array.from(
+      new Map(
+        targetBots
+          .filter((bot): bot is Bot => Boolean(bot?.id))
+          .map((bot) => [bot.id, bot])
+      ).values()
+    );
+    if (uniqueBots.length === 0) return;
+
+    setPanelError(null);
+    setPanelNotice(null);
+    disarmDelete();
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    const ids = uniqueBots.map((bot) => bot.id);
+    const idSet = new Set(ids);
+    const previousBots = bots;
+    const previousNewBotDeleteProtected = newBotDeleteProtected;
+    const previousEditOriginal = editOriginalRef.current;
+    const nextDeleteProtectedValue = deleteProtected ? 1 : 0;
+    setBots((list) =>
+      list.map((bot) =>
+        idSet.has(bot.id)
+          ? { ...bot, delete_protected: nextDeleteProtectedValue }
+          : bot
+      )
+    );
+    if (editingBotId && idSet.has(editingBotId)) {
+      setNewBotDeleteProtected(deleteProtected);
+      if (editOriginalRef.current) {
+        editOriginalRef.current = {
+          ...editOriginalRef.current,
+          deleteProtected,
+        };
+      }
+    }
+
+    try {
+      const result = await api<{ updated?: number }>(
+        "/api/bots/selected/delete-protection",
+        {
+          method: "PATCH",
+          body: JSON.stringify({ ids, deleteProtected }),
+        }
+      );
+      await refreshBots();
+      const updated = typeof result.updated === "number" ? result.updated : ids.length;
+      if (updated === 0) {
+        setPanelNotice("No bots updated.");
+      } else if (uniqueBots.length === 1) {
+        setPanelNotice(
+          deleteProtected
+            ? `${uniqueBots[0]!.name} is protected from deletion.`
+            : `${uniqueBots[0]!.name} can be deleted.`
+        );
+      } else {
+        setPanelNotice(
+          deleteProtected
+            ? `Protected ${updated} selected bot${updated === 1 ? "" : "s"} from deletion.`
+            : `Allowed deletion for ${updated} selected bot${updated === 1 ? "" : "s"}.`
+        );
+      }
+    } catch (err) {
+      setBots(previousBots);
+      if (editingBotId && idSet.has(editingBotId)) {
+        setNewBotDeleteProtected(previousNewBotDeleteProtected);
+        editOriginalRef.current = previousEditOriginal;
+      }
+      try { await refreshBots(); } catch { /* best-effort refresh */ }
+      setPanelError(
+        err instanceof Error ? err.message : "Update delete protection failed."
+      );
+    }
+  }
+
   async function devToolsDeleteAllBots() {
     setDevToolsMessage(null);
     setDevToolsBusy(true);
@@ -31474,7 +32716,7 @@ function HomeContent(): React.JSX.Element {
     setBots([]);
     setSelectedBotId(null);
     try {
-      const result = await api<{ deleted?: number }>("/api/bots", {
+      const result = await api<{ deleted?: number }>("/api/bots?includeProtected=1", {
         method: "DELETE",
       });
       await refreshBots();
@@ -31976,10 +33218,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       bot.local_model ?? bot.model
     );
-    const seededOnlineModel = visibleConcreteModelChoiceForProvider(
+    const seededOnlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       bot.online_model
     );
     const seededOnlineEnabled = bot.online_enabled !== 0;
@@ -33404,10 +34645,9 @@ function HomeContent(): React.JSX.Element {
       "local",
       newBotLocalModel
     );
-    const onlineModel = visibleConcreteModelChoiceForProvider(
+    const onlineModel = visibleConcreteOnlineModelChoice(
       modelCatalog,
       settings,
-      "openai",
       newBotOnlineModel
     );
     const localImageStored =
@@ -34307,7 +35547,9 @@ function HomeContent(): React.JSX.Element {
     const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
     const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
     const onlineKeyConfigured = Boolean(
-      settings?.hasOpenAiApiKey || settings?.hasAnthropicApiKey
+      settings &&
+        (settings.openAiApiKeySource !== "none" ||
+          settings.anthropicApiKeySource !== "none")
     );
     const backupConfigured = Boolean(
       settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim()
@@ -34587,6 +35829,17 @@ function HomeContent(): React.JSX.Element {
     const commonGroup = isMultiSelectionMenu
       ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
       : null;
+    const multiProtectionTargetsLocked = isMultiSelectionMenu
+      ? multiSelectedBots.every((candidate) => candidate.delete_protected === 1)
+      : false;
+    const nextMultiDeleteProtected = !multiProtectionTargetsLocked;
+    const multiProtectionLabel = nextMultiDeleteProtected
+      ? "Protect selected"
+      : "Allow selected deletion";
+    const nextSingleDeleteProtected = bot.delete_protected !== 1;
+    const singleProtectionLabel = nextSingleDeleteProtected
+      ? "Protect from deletion"
+      : "Allow deletion";
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -34645,6 +35898,25 @@ function HomeContent(): React.JSX.Element {
               role="menuitem"
               onClick={() => {
                 closeBotContextMenu();
+                void setBotsDeleteProtection(multiSelectedBots, nextMultiDeleteProtected);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  <BotGlyph
+                    name={nextMultiDeleteProtected ? "lock" : "key"}
+                    size={14}
+                    strokeWidth={2.05}
+                  />
+                </span>
+                <span>{multiProtectionLabel}</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
                 const protectedCount = multiSelectedBots.filter(
                   (candidate) => candidate.delete_protected === 1
                 ).length;
@@ -34696,6 +35968,25 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.contextMenuItemLabel}>
                 <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
                 <span>View memories</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void setBotsDeleteProtection([bot], nextSingleDeleteProtected);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  <BotGlyph
+                    name={nextSingleDeleteProtected ? "lock" : "key"}
+                    size={14}
+                    strokeWidth={2.05}
+                  />
+                </span>
+                <span>{singleProtectionLabel}</span>
               </span>
             </button>
             {bot.delete_protected !== 1 ? (
@@ -35815,12 +37106,20 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderMemoryToasts = () => {
+  const renderMemoryToasts = (
+    variant: "default" | "zen" = "default"
+  ) => {
     if (memoryToasts.length === 0) return null;
     const visible = memoryToasts.slice(0, MEMORY_TOAST_VISIBLE_LIMIT);
     const overflow = Math.max(0, memoryToasts.length - visible.length);
+    const zenVariant = variant === "zen";
     return (
-      <div className={styles.memoryToastStack} aria-live="polite">
+      <div
+        className={`${styles.memoryToastStack} ${
+          zenVariant ? styles.zenMemoryToastStack : ""
+        }`}
+        aria-live="polite"
+      >
         {visible.map((toast) => (
           <button
             key={toast.id}
@@ -35848,7 +37147,13 @@ function HomeContent(): React.JSX.Element {
             title={toast.kind === "rejected" ? "Tap to dismiss" : "Tap to undo"}
           >
             <span aria-hidden="true">
-              {toast.kind === "created" ? "◆" : toast.kind === "retracted" ? "↺" : "◇"}
+              {zenVariant && toast.kind === "created"
+                ? "✦"
+                : toast.kind === "created"
+                  ? "◆"
+                  : toast.kind === "retracted"
+                    ? "↺"
+                    : "◇"}
             </span>
             <strong>{memoryToastTitle(toast)}</strong>
             <small>{memoryToastDetail(toast)}</small>
@@ -35860,6 +37165,9 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   };
+
+  const renderZenMemoryToasts = () =>
+    view === "chat" ? renderMemoryToasts("zen") : null;
 
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
@@ -36159,7 +37467,7 @@ function HomeContent(): React.JSX.Element {
           aria-label="Conversation tools"
           aria-disabled={headerActionsDisabled}
         >
-          {renderMemoryToasts()}
+          {!isZenSurface ? renderMemoryToasts() : null}
           {!isZenSurface ? (
             <button
               type="button"
@@ -37223,10 +38531,10 @@ function HomeContent(): React.JSX.Element {
               onChange={(event) => persistDevSlashCommandsEnabled(event.currentTarget.checked)}
             />
             <span>
-              <strong>Enable slash dev commands in chat</strong>
+              <strong>Enable ! dev commands in chat</strong>
               <small>
                 Allows local chat commands like <code>/forget</code> and{" "}
-                <code>/forget all</code> to run in the composer without sending them to the model.
+                <code>/forget-all</code> to run in the composer without sending them to the model.
               </small>
             </span>
           </label>
@@ -37448,7 +38756,7 @@ function HomeContent(): React.JSX.Element {
                   <strong>{bots.length.toLocaleString()} bots</strong>
                 </div>
                 <p className={styles.devToolsSectionHint}>
-                  Clears generated and user-created bots that are not protected.
+                  Clears generated and user-created bots, including protected bots.
                 </p>
                 <div className={styles.devToolsActions}>
                   <button
@@ -37457,7 +38765,7 @@ function HomeContent(): React.JSX.Element {
                     onClick={() => void devToolsDeleteAllBots()}
                     disabled={devToolsBusy || bots.length === 0}
                   >
-                    Delete all bots
+                    Clear all bots
                   </button>
                 </div>
               </section>
@@ -38362,7 +39670,7 @@ function HomeContent(): React.JSX.Element {
               onClick={() => void devToolsDeleteAllBots()}
               disabled={devToolsBusy || bots.length === 0}
             >
-              Delete all bots
+              Clear all bots
             </button>
           </div>
         </details>
@@ -39803,7 +41111,7 @@ function HomeContent(): React.JSX.Element {
                 <div>
                   <span>Help</span>
                   <h4>Commands &amp; prompts</h4>
-                  <p>Choose a slash entry to place it in the composer.</p>
+                  <p>At the start, / shows commands and prompts. Inline, / shows prompts.</p>
                 </div>
                 <button
                   type="button"
@@ -39825,12 +41133,12 @@ function HomeContent(): React.JSX.Element {
                       {
                         invocation: "/forget",
                         description:
-                          "Forget player-only memory and reset summaries for a fresh next turn.",
+                          "Forget memories for the current bot, or the Zen/default memory bucket.",
                       },
                       {
-                        invocation: "/forget all",
+                        invocation: "/forget-all",
                         description:
-                          "Hard-reset the active chat, memory artifacts, summaries, and recall state.",
+                          "Hard-reset all bot/default memories, summaries, and recall state.",
                       },
                     ]
                   : [];
@@ -39980,14 +41288,18 @@ function HomeContent(): React.JSX.Element {
                   </p>
                 </div>
                 <div className={styles.settingsStatusPills} aria-label="Connection status">
-                  <span data-status={settings.hasOpenAiApiKey ? "ready" : "idle"}>
-                    OpenAI {settings.hasOpenAiApiKey ? "saved" : "unset"}
+                  <span data-status={settings.openAiApiKeySource !== "none" ? "ready" : "idle"}>
+                    {apiKeySourceStatusLabel("OpenAI", settings.openAiApiKeySource)}
                   </span>
-                  <span data-status={settings.hasAnthropicApiKey ? "ready" : "idle"}>
-                    Anthropic {settings.hasAnthropicApiKey ? "saved" : "unset"}
+                  <span
+                    data-status={settings.anthropicApiKeySource !== "none" ? "ready" : "idle"}
+                  >
+                    {apiKeySourceStatusLabel("Anthropic", settings.anthropicApiKeySource)}
                   </span>
-                  <span data-status={settings.hasElevenLabsApiKey ? "ready" : "idle"}>
-                    ElevenLabs {settings.hasElevenLabsApiKey ? "saved" : "unset"}
+                  <span
+                    data-status={settings.elevenLabsApiKeySource !== "none" ? "ready" : "idle"}
+                  >
+                    {apiKeySourceStatusLabel("ElevenLabs", settings.elevenLabsApiKeySource)}
                   </span>
                   <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
                   <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
@@ -40334,6 +41646,22 @@ function HomeContent(): React.JSX.Element {
                       type="button"
                       className={[
                         styles.dangerButton,
+                        factoryResetArmed ? styles.dangerButtonArmed : "",
+                      ].filter(Boolean).join(" ")}
+                      onClick={restoreFactoryDefaults}
+                      disabled={busy}
+                      title={
+                        factoryResetArmed
+                          ? "Click again to clear all account data and restore first-run defaults."
+                          : "Click once to arm factory reset."
+                      }
+                    >
+                      {factoryResetArmed ? "Confirm restore defaults" : "Restore factory defaults"}
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        styles.dangerButton,
                         deleteAccountArmed ? styles.dangerButtonArmed : "",
                       ].filter(Boolean).join(" ")}
                       onClick={deleteAccount}
@@ -40391,7 +41719,12 @@ function HomeContent(): React.JSX.Element {
                 </header>
                 <div className={styles.settingsAboutModalBody}>
                   {settings && (
-                    <div className={`${styles.form} ${styles.formInModal}`}>
+                    <form
+                      className={`${styles.form} ${styles.formInModal}`}
+                      onSubmit={(event) => {
+                        void saveSettings(event, { closeHostsModalOnSuccess: true });
+                      }}
+                    >
                       <p className={styles.settingsHostsLead}>
                         Prism works without these fields. Add keys for online services, or add
                         hosts for a fallback Ollama endpoint and external ComfyUI image server.
@@ -40540,9 +41873,16 @@ function HomeContent(): React.JSX.Element {
                         <code>8188</code>.
                       </p>
                       <p className={styles.muted} style={{ margin: 0 }}>
-                        Save behavior: use the main <strong>Save</strong> button in Settings when you are done.
+                        Keys are stored on this account after saving.
                       </p>
-                    </div>
+                      {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                      <div className={styles.settingsSaveDock}>
+                        <span>Save keys and server settings.</span>
+                        <button type="submit" disabled={busy}>
+                          {busy ? "Saving..." : "Save settings"}
+                        </button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </div>
@@ -40758,10 +42098,9 @@ function HomeContent(): React.JSX.Element {
           "local",
           newBotLocalModel
         );
-        const visibleOnlineModelChoice = visibleConcreteModelChoiceForProvider(
+        const visibleOnlineModelChoice = visibleConcreteOnlineModelChoice(
           modelCatalog,
           settings,
-          "openai",
           newBotOnlineModel
         );
         const hasEditChanges = editPristine
@@ -40819,13 +42158,14 @@ function HomeContent(): React.JSX.Element {
           visibleLocalModelChoice,
           "local"
         );
-        const onlineModelOptions = includeSelectedModelOption(
+        const onlineModelOptions = includeSelectedOnlineModelOption(
+          modelCatalog,
+          settings,
           uniqueModelOptions([
             ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "openai"),
             ...botCustomizerModelOptionsForProvider(modelCatalog, settings, "anthropic"),
           ]),
-          visibleOnlineModelChoice,
-          inferOnlineProviderForModelId(visibleOnlineModelChoice)
+          visibleOnlineModelChoice
         );
         const visibleLocalImageModelChoice = (() => {
           if (newBotLocalImageModel !== AUTO_MODEL_CHOICE && newBotLocalImageModel.trim()) {
@@ -47431,7 +48771,11 @@ function HomeContent(): React.JSX.Element {
     const nextResolvedProvider = resolveModelChoiceForResponseMode({
       responseMode: nextMode,
       providerPreference: storyEffectiveProvider,
-      choices: visibleModelChoicesByProvider(settings, storyModelChoiceByProvider),
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        storyModelChoiceByProvider
+      ),
       onlineOptions: onlineChatModelOptions,
     }).provider;
     const activeModeLabel = responseModeDisplayLabel(responseMode);
@@ -48484,7 +49828,9 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </button>
             </div>
-            {viewportWidth <= PHONE_MENU_BREAKPOINT ? renderMemoryToasts() : null}
+            {viewportWidth <= PHONE_MENU_BREAKPOINT && !chatLikeSurface
+              ? renderMemoryToasts()
+              : null}
           </div>
           {zenSplashModelPickerActive ? null : renderHeaderModelPicker()}
           {renderChatOverflowGear()}
@@ -48549,12 +49895,19 @@ function HomeContent(): React.JSX.Element {
                   const resolvedChoice = resolveModelChoiceForResponseMode({
                     responseMode,
                     providerPreference: effectivePreferredProvider,
-                    choices: visibleModelChoicesByProvider(settings, chatModelChoiceByProvider),
+                    choices: visibleModelChoicesByProvider(
+                      modelCatalog,
+                      settings,
+                      chatModelChoiceByProvider
+                    ),
                     onlineOptions: onlineChatModelOptions,
                   });
                   const modelProvider = resolvedChoice.provider;
                   const visibleModelChoice = resolvedChoice.modelChoice;
-                  const modelOptions = includeSelectedModelOption(
+                  const modelOptions = includeSelectedResponseModeModelOption(
+                    modelCatalog,
+                    settings,
+                    responseMode,
                     modelOptionsForResponseMode(modelCatalog, settings, responseMode),
                     visibleModelChoice,
                     modelProvider
@@ -48610,6 +49963,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           ) : null}
         </header>
+        {renderZenMemoryToasts()}
 
         <div
           className={styles.messagesFrame}
@@ -49329,7 +50683,8 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
-                    commandPicks={commandCenterCommands}
+                    commandPicks={composerCommandPicks}
+                    promptPicks={commandCenterPromptPicks}
                   />
                 </div>
               </div>
@@ -49350,7 +50705,8 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
-                commandPicks={commandCenterCommands}
+                commandPicks={composerCommandPicks}
+                promptPicks={commandCenterPromptPicks}
               />
             )
           ) : null}
@@ -50081,6 +51437,7 @@ function HomeContent(): React.JSX.Element {
                         }
                         const isSelected = sandboxGridSelectedBotId === b.id;
                         const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
+                        const isProtected = b.delete_protected === 1;
                         const rawColor = b.color?.trim();
                         const accent = rawColor
                           ? normalizeAccentForTheme(rawColor, resolvedTheme)
@@ -50092,6 +51449,9 @@ function HomeContent(): React.JSX.Element {
                         // glyphless card, borderless square pixel, compact
                         // gapless pixel grid, then selected-dot pixel grid.
                         let tileClassName = styles.chatBotTile;
+                        if (isProtected) {
+                          tileClassName += ` ${styles.chatBotTileProtected}`;
+                        }
                         if (isSelected) {
                           tileClassName += ` ${styles.chatBotTileSelected}`;
                         }
@@ -50139,9 +51499,10 @@ function HomeContent(): React.JSX.Element {
                             type="button"
                             role="radio"
                             aria-checked={isSelected}
-                            aria-label={b.name}
+                            aria-label={isProtected ? `${b.name}, protected` : b.name}
                             className={tileClassName}
                             data-bot-id={b.id}
+                            data-delete-protected={isProtected ? "true" : undefined}
                             onPointerDown={e => {
                               lastBotPickerPointerTypeRef.current = e.pointerType;
                               startBotContextLongPress(e, b);
@@ -50726,7 +52087,8 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
-                    commandPicks={commandCenterCommands}
+                    commandPicks={composerCommandPicks}
+                    promptPicks={commandCenterPromptPicks}
                   />
                 </div>
               </div>
@@ -50747,7 +52109,8 @@ function HomeContent(): React.JSX.Element {
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
-                commandPicks={commandCenterCommands}
+                commandPicks={composerCommandPicks}
+                promptPicks={commandCenterPromptPicks}
               />
             )
           ) : null}

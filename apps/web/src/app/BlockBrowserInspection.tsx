@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
+import {
+  shouldBlockBrowserKeyboardShortcut,
+  shouldBlockBrowserWheelShortcut,
+} from "./browserShortcutGuards";
 
 /**
- * Soft barrier against opening browser DevTools / Inspect via shortcuts or the
- * context menu. Determined users can still bypass (menu bar, remote debugging,
+ * Soft barrier against browser-chrome shortcuts in the production kiosk
+ * surface. Determined users can still bypass (menu bar, remote debugging,
  * etc.). Does not run in development or when NEXT_PUBLIC_ALLOW_BROWSER_DEVTOOLS=1.
  */
 export function BlockBrowserInspection(): null {
@@ -19,46 +23,52 @@ export function BlockBrowserInspection(): null {
       e.preventDefault();
     };
 
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(
+        target.closest(
+          "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']"
+        )
+      );
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-
-      const { key, ctrlKey, shiftKey, metaKey, altKey } = e;
-      const k = key.length === 1 ? key.toUpperCase() : key;
-
-      if (k === "F12") {
+      if (
+        shouldBlockBrowserKeyboardShortcut({
+          key: e.key,
+          code: e.code,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+          defaultPrevented: e.defaultPrevented,
+          targetIsEditable: isEditableTarget(e.target),
+        })
+      ) {
         e.preventDefault();
-        return;
       }
+    };
 
-      // Chromium / Edge / Firefox: Ctrl+Shift+I / J / C / K
-      if (ctrlKey && shiftKey && ["I", "J", "C", "K"].includes(k)) {
+    const onWheel = (e: WheelEvent) => {
+      if (
+        shouldBlockBrowserWheelShortcut({
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          defaultPrevented: e.defaultPrevented,
+        })
+      ) {
         e.preventDefault();
-        return;
-      }
-
-      // macOS Chromium: Cmd+Option+I / J / C
-      if (metaKey && altKey && ["I", "J", "C"].includes(k)) {
-        e.preventDefault();
-        return;
-      }
-
-      // View source
-      if (ctrlKey && k === "U") {
-        e.preventDefault();
-        return;
-      }
-      if (metaKey && altKey && k === "U") {
-        e.preventDefault();
-        return;
       }
     };
 
     document.addEventListener("contextmenu", onContextMenu, { capture: true });
     document.addEventListener("keydown", onKeyDown, { capture: true });
+    document.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
     return () => {
       document.removeEventListener("contextmenu", onContextMenu, { capture: true });
       document.removeEventListener("keydown", onKeyDown, { capture: true });
+      document.removeEventListener("wheel", onWheel, { capture: true });
     };
   }, [enabled]);
 

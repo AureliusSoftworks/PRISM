@@ -672,16 +672,20 @@ export async function buildModelCatalog(
     uniqueModelIdsByLabel(discoveredSecondaryLocal),
     localIds
   );
-  const onlineIds = uniqueModelIds([
-    OPENAI_DEFAULT_MODEL,
-    ...discoveredOpenAi,
-    ...OPENAI_FALLBACK_MODELS,
-  ]);
-  const anthropicIds = uniqueModelIds([
-    ANTHROPIC_DEFAULT_MODEL,
-    ...discoveredAnthropic,
-    ...ANTHROPIC_FALLBACK_MODELS,
-  ]);
+  const onlineIds = openAiApiKey
+    ? uniqueModelIds([
+        OPENAI_DEFAULT_MODEL,
+        ...discoveredOpenAi,
+        ...OPENAI_FALLBACK_MODELS,
+      ])
+    : [];
+  const anthropicIds = anthropicApiKey
+    ? uniqueModelIds([
+        ANTHROPIC_DEFAULT_MODEL,
+        ...discoveredAnthropic,
+        ...ANTHROPIC_FALLBACK_MODELS,
+      ])
+    : [];
   return {
     local: [
       ...localIds.map((id) =>

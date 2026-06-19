@@ -37,6 +37,12 @@ function createChatTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -56,9 +62,12 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT 'user-1',
       name TEXT NOT NULL,
+      system_prompt TEXT NOT NULL DEFAULT '',
       color TEXT,
       glyph TEXT,
-      delete_protected INTEGER NOT NULL DEFAULT 0
+      chat_enabled INTEGER NOT NULL DEFAULT 1,
+      delete_protected INTEGER NOT NULL DEFAULT 0,
+      visibility TEXT NOT NULL DEFAULT 'private'
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -2078,7 +2087,9 @@ describe("processChatMessage AskQuestion tool", () => {
       .join("\n");
     assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
     assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
-    assert.match(promptText, /As I was saying/i);
+    assert.match(promptText, /continue the unfinished thought only if that still fits/i);
+    assert.match(promptText, /bridge phrase is optional/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
   });
 
   it("keeps interruption context but prioritizes topic switches", async () => {
@@ -2176,6 +2187,104 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
     assert.match(promptText, /switch topics or replace the interrupted request/i);
     assert.match(promptText, /Prioritize the new request/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("tells the model not to repeat interrupted text the user completed", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-user-completed";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Joke",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me a cliche joke.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Why did the chicken cross the ro—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Exactly. You spared us both the suspense." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "To get to the other side.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "Why did the chicken/i);
+    assert.match(promptText, /appears to complete, predict, or answer the unfinished thought/i);
+    assert.match(promptText, /do not continue repeating the interrupted text/i);
     assert.doesNotMatch(promptText, /As I was saying/i);
   });
 
@@ -3503,6 +3612,69 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
     const text =
       "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
     assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+describe("processChatMessage bot mentions", () => {
+  it("adds mentioned library bot profile context to the model prompt", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "bot-mentor",
+      "Mentor Bot",
+      "A patient mentor who asks crisp follow-up questions.",
+      "#4f8cff",
+      "spark"
+    );
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Mentor Bot gives me a useful reference point here.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Can you compare this with [Mentor Bot](prism-bot://bot-mentor)?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const mentionContext = bodies
+      .flatMap((body) => body.messages ?? [])
+      .find((message) =>
+        message.content.startsWith("Prism bot mentions in the latest user message:")
+      );
+    assert.ok(mentionContext);
+    assert.match(mentionContext.content, /Mentor Bot/);
+    assert.match(mentionContext.content, /patient mentor/i);
+    assert.match(mentionContext.content, /Stay in the current Prism\/persona voice/i);
   });
 });
 
