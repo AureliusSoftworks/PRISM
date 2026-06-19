@@ -496,7 +496,7 @@ describe("setZenStarterConversationSuppression", () => {
     assert.equal(restored.archived_at, null);
   });
 
-  it("rejects Zen conversations that already have a user turn", () => {
+  it("archives and promotes continued Zen conversations", () => {
     const db = createTestDb();
     seedStarterOnlyZenConversation(db, {
       id: "zen-1",
@@ -504,10 +504,31 @@ describe("setZenStarterConversationSuppression", () => {
       includeUserMessage: true,
     });
 
-    assert.throws(
-      () => setZenStarterConversationSuppression(db, "user-1", "zen-1", true),
-      /Only uncontinued Zen starter conversations/
+    const suppressed = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      true
     );
+
+    assert.deepEqual(suppressed, { conversationId: "zen-1", suppressed: true });
+    const archived = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.ok(archived.archived_at, "continued Zen chat should be suppressible");
+
+    const promoted = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      false
+    );
+
+    assert.deepEqual(promoted, { conversationId: "zen-1", suppressed: false });
+    const restored = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.equal(restored.archived_at, null);
   });
 });
 
