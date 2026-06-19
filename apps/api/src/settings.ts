@@ -28,6 +28,24 @@ export type Provider = "local" | "openai" | "anthropic";
 export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
+export const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = 12 * 60 * 60 * 1000;
+export const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
+export const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
+export const DEFAULT_ZEN_FRESH_START_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+export const MIN_ZEN_FRESH_START_GAP_MS = DEFAULT_ZEN_SESSION_IDLE_GAP_MS;
+export const MAX_ZEN_FRESH_START_GAP_MS = 90 * 24 * 60 * 60 * 1000;
+export const DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES = 30;
+export const MIN_ZEN_RECENT_CONTEXT_MESSAGES = 10;
+export const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
+export const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
+export const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 5;
+export const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
+export const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
+export const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
+export const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
+export const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
+export const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
+export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -62,6 +80,12 @@ export interface CurrentSettings {
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number | null;
+  zenSessionIdleGapMs: number | null;
+  zenFreshStartGapMs: number | null;
+  zenRecentContextMessages: number | null;
+  zenWallpaperRegenMessageInterval: number | null;
+  zenWallpaperRevealDelayMessageCount: number | null;
+  zenWallpaperRevealSpanMessageCount: number | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -94,6 +118,12 @@ export interface NextSettings {
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number;
+  zenSessionIdleGapMs: number;
+  zenFreshStartGapMs: number;
+  zenRecentContextMessages: number;
+  zenWallpaperRegenMessageInterval: number;
+  zenWallpaperRevealDelayMessageCount: number;
+  zenWallpaperRevealSpanMessageCount: number;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
@@ -351,6 +381,93 @@ export function normalizeZenWallpaperOpacity(
   return Number(clamped.toFixed(2));
 }
 
+function normalizeNumberSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const fallbackNumber =
+    typeof fallback === "number" && Number.isFinite(fallback) ? fallback : min;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallbackNumber;
+  return Math.min(max, Math.max(min, Math.round(normalized)));
+}
+
+export function normalizeZenSessionIdleGapMs(
+  value: unknown,
+  fallback = DEFAULT_ZEN_SESSION_IDLE_GAP_MS
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_SESSION_IDLE_GAP_MS,
+    MAX_ZEN_SESSION_IDLE_GAP_MS
+  );
+}
+
+export function normalizeZenFreshStartGapMs(
+  value: unknown,
+  fallback = DEFAULT_ZEN_FRESH_START_GAP_MS,
+  idleGapMs = DEFAULT_ZEN_SESSION_IDLE_GAP_MS
+): number {
+  const minimum = Math.max(MIN_ZEN_FRESH_START_GAP_MS, normalizeZenSessionIdleGapMs(idleGapMs));
+  return normalizeNumberSetting(value, Math.max(fallback, minimum), minimum, MAX_ZEN_FRESH_START_GAP_MS);
+}
+
+export function normalizeZenRecentContextMessages(
+  value: unknown,
+  fallback = DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_RECENT_CONTEXT_MESSAGES,
+    MAX_ZEN_RECENT_CONTEXT_MESSAGES
+  );
+}
+
+export function normalizeZenWallpaperRegenMessageInterval(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL
+  );
+}
+
+export function normalizeZenWallpaperRevealDelayMessageCount(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
+  );
+}
+
+export function normalizeZenWallpaperRevealSpanMessageCount(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
+  );
+}
+
 function readDisplayName(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
@@ -502,6 +619,72 @@ export function resolveNextSettings(
           body.zenWallpaperOpacity,
           currentZenWallpaperOpacity
         );
+  const currentZenSessionIdleGapMs = normalizeZenSessionIdleGapMs(
+    current.zenSessionIdleGapMs
+  );
+  const zenSessionIdleGapMs =
+    body.zenSessionIdleGapMs === undefined
+      ? currentZenSessionIdleGapMs
+      : normalizeZenSessionIdleGapMs(
+          body.zenSessionIdleGapMs,
+          currentZenSessionIdleGapMs
+        );
+  const currentZenFreshStartGapMs = normalizeZenFreshStartGapMs(
+    current.zenFreshStartGapMs,
+    DEFAULT_ZEN_FRESH_START_GAP_MS,
+    zenSessionIdleGapMs
+  );
+  const zenFreshStartGapMs =
+    body.zenFreshStartGapMs === undefined
+      ? currentZenFreshStartGapMs
+      : normalizeZenFreshStartGapMs(
+          body.zenFreshStartGapMs,
+          currentZenFreshStartGapMs,
+          zenSessionIdleGapMs
+        );
+  const currentZenRecentContextMessages = normalizeZenRecentContextMessages(
+    current.zenRecentContextMessages
+  );
+  const zenRecentContextMessages =
+    body.zenRecentContextMessages === undefined
+      ? currentZenRecentContextMessages
+      : normalizeZenRecentContextMessages(
+          body.zenRecentContextMessages,
+          currentZenRecentContextMessages
+        );
+  const currentZenWallpaperRegenMessageInterval =
+    normalizeZenWallpaperRegenMessageInterval(
+      current.zenWallpaperRegenMessageInterval
+    );
+  const zenWallpaperRegenMessageInterval =
+    body.zenWallpaperRegenMessageInterval === undefined
+      ? currentZenWallpaperRegenMessageInterval
+      : normalizeZenWallpaperRegenMessageInterval(
+          body.zenWallpaperRegenMessageInterval,
+          currentZenWallpaperRegenMessageInterval
+        );
+  const currentZenWallpaperRevealDelayMessageCount =
+    normalizeZenWallpaperRevealDelayMessageCount(
+      current.zenWallpaperRevealDelayMessageCount
+    );
+  const zenWallpaperRevealDelayMessageCount =
+    body.zenWallpaperRevealDelayMessageCount === undefined
+      ? currentZenWallpaperRevealDelayMessageCount
+      : normalizeZenWallpaperRevealDelayMessageCount(
+          body.zenWallpaperRevealDelayMessageCount,
+          currentZenWallpaperRevealDelayMessageCount
+        );
+  const currentZenWallpaperRevealSpanMessageCount =
+    normalizeZenWallpaperRevealSpanMessageCount(
+      current.zenWallpaperRevealSpanMessageCount
+    );
+  const zenWallpaperRevealSpanMessageCount =
+    body.zenWallpaperRevealSpanMessageCount === undefined
+      ? currentZenWallpaperRevealSpanMessageCount
+      : normalizeZenWallpaperRevealSpanMessageCount(
+          body.zenWallpaperRevealSpanMessageCount,
+          currentZenWallpaperRevealSpanMessageCount
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -575,6 +758,12 @@ export function resolveNextSettings(
     preferredZenWallpaperLocalImageModel,
     preferredZenWallpaperOpenAiImageModel,
     zenWallpaperOpacity,
+    zenSessionIdleGapMs,
+    zenFreshStartGapMs,
+    zenRecentContextMessages,
+    zenWallpaperRegenMessageInterval,
+    zenWallpaperRevealDelayMessageCount,
+    zenWallpaperRevealSpanMessageCount,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,

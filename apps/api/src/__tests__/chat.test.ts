@@ -288,6 +288,8 @@ describe("processChatMessage starter prompts", () => {
       starterBody?.messages?.[1]?.content ?? "",
       /Functionally simple/
     );
+    assert.match(starterBody?.messages?.[1]?.content ?? "", /AskQuestion/);
+    assert.match(starterBody?.messages?.[1]?.content ?? "", /sendGeneratedImage/);
 
     const inferBody = bodies[1];
     assert.equal(inferBody?.messages?.[0]?.role, "system");
@@ -3612,6 +3614,116 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
     const text =
       "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
     assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+describe("processChatMessage session resume context", () => {
+  it("adds Zen resume context to the model prompt without storing it as a message", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Resume-aware reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Where were we?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        sessionResumeContext: {
+          summary: "We were shaping Prism into a living, continuous conversation.",
+          previousActiveAt: "2026-06-18T20:00:00.000Z",
+          resumedAt: "2026-06-19T09:00:00.000Z",
+          gapMs: 13 * 60 * 60 * 1000,
+          source: "dev",
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Zen session resume context:/);
+    assert.match(promptText, /about 13 hours/);
+    assert.match(promptText, /living, continuous conversation/);
+    assert.equal(result.conversation.messages.length, 2);
+    const storedResumeRows = db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE content LIKE '%Zen session resume context%'")
+      .get() as { n: number };
+    assert.equal(storedResumeRows.n, 0);
+  });
+
+  it("does not add resume context to Sandbox prompts", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Sandbox reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Keep testing.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        sessionResumeContext: {
+          summary: "This should not be included outside Zen.",
+          gapMs: 13 * 60 * 60 * 1000,
+          source: "dev",
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.doesNotMatch(promptText, /Zen session resume context:/);
+    assert.doesNotMatch(promptText, /outside Zen/);
   });
 });
 

@@ -2772,6 +2772,42 @@
   align-items: start;
 }
 
+.settingsScopeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settingsScopeButton {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--bg));
+  color: var(--fg);
+  padding: 14px;
+  min-height: 118px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  text-align: left;
+}
+
+.settingsScopeButton strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.settingsScopeButton span {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.settingsScopeButton:hover:not(:disabled),
+.settingsScopeButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent-ink) 9%, var(--bg-surface));
+}
+
 .settingsSection {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2897,10 +2933,22 @@
   min-width: 132px;
 }
 
+.settingsDockActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settingsDockActions button {
+  min-width: 132px;
+}
+
 @media (max-width: 980px) {
   .settingsOverview,
   .settingsSectionGrid,
-  .settingsFieldGrid {
+  .settingsFieldGrid,
+  .settingsScopeGrid {
     grid-template-columns: 1fr;
   }
 
@@ -2921,6 +2969,14 @@
   .settingsDockRow {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .settingsDockActions {
+    justify-content: stretch;
+  }
+
+  .settingsDockActions button {
+    flex: 1 1 180px;
   }
 
   .settingsDockRow button {
@@ -10120,6 +10176,64 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-align: center;
 }
 
+.zenSessionBreak {
+  width: min(760px, calc(100% - 28px));
+  margin: clamp(44px, 8dvh, 96px) auto clamp(180px, 28dvh, 280px);
+  display: grid;
+  gap: clamp(230px, 34dvh, 390px);
+  color: var(--fg);
+  scroll-margin-block: clamp(56px, 10dvh, 92px);
+}
+
+.zenSessionBreakRule {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: color-mix(in srgb, var(--fg-muted) 88%, var(--fg) 12%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.zenSessionBreakRule::before,
+.zenSessionBreakRule::after {
+  content: "";
+  height: 1px;
+  flex: 1 1 auto;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--fg-muted) 34%, transparent)
+  );
+}
+
+.zenSessionBreakRule::after {
+  background: linear-gradient(
+    to left,
+    transparent,
+    color-mix(in srgb, var(--fg-muted) 34%, transparent)
+  );
+}
+
+.zenSessionBreakRule span {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.zenSessionBreakScrollAnchor {
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+}
+
 @keyframes messageIn {
   from {
     opacity: 0;
@@ -12518,6 +12632,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+.compactedSummaryDebugDock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  z-index: 9;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  padding: 0 clamp(14px, 4vw, 36px);
+}
+
 .compactedSummaryDebugBubble {
   justify-self: stretch;
   width: min(100%, 820px);
@@ -12534,6 +12660,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent),
     0 12px 28px color-mix(in srgb, #000000 14%, transparent);
   overflow: hidden;
+}
+
+.compactedSummaryDebugDock .compactedSummaryDebugBubble {
+  max-width: min(760px, calc(100vw - 32px));
+  max-height: min(34dvh, 300px);
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.compactedSummaryDebugBubble[data-empty="true"] {
+  opacity: 0.82;
 }
 
 .compactedSummaryDebugHeader {
@@ -12566,6 +12704,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   word-break: break-word;
   color: var(--fg);
   font: 12px/1.45 var(--font-mono);
+}
+
+.compactedSummaryDebugDetails {
+  min-height: 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
+}
+
+.compactedSummaryDebugDetails > span {
+  display: block;
+  padding: 8px 10px 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.compactedSummaryDebugDetails pre {
+  max-height: 150px;
+  color: color-mix(in srgb, var(--fg) 86%, var(--fg-muted));
 }
 
 @keyframes typingPulse {
@@ -12674,6 +12831,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   right: 0;
   bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   z-index: 10;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .compactedSummaryDebugDock {
+  position: fixed;
+  bottom: calc(128px + env(safe-area-inset-bottom, 0px));
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {

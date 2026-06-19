@@ -64,6 +64,7 @@ type ThreadSummaryDebug = {
   conversationId: string;
   inProgress: boolean;
   latestSummary: string | null;
+  latestDisplaySummary: string | null;
   latestSummaryAt: string | null;
   summaryCount: number;
   totalMessages: number;
@@ -916,6 +917,12 @@ export function getThreadCompactionDebug(
     latestSummary:
       latestDecoded && latestDecoded.kind === SUMMARY_KIND_THREAD_COMPACT
         ? latestDecoded.summary
+        : null,
+    latestDisplaySummary:
+      latestDecoded && latestDecoded.kind === SUMMARY_KIND_THREAD_COMPACT
+        ? requestedMode === "zen"
+          ? latestDecoded.displaySummary ?? latestDecoded.summary
+          : latestDecoded.summary
         : null,
     latestSummaryAt: latest?.created_at ?? null,
     summaryCount: matchingRows.length,
