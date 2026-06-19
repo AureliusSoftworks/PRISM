@@ -1156,17 +1156,10 @@ export function setZenStarterConversationSuppression(
       `SELECT c.id,
               c.conversation_mode,
               c.incognito,
-              c.archived_at,
-              COUNT(m.id) AS message_count,
-              SUM(CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END) AS assistant_count,
-              SUM(CASE WHEN m.id IS NOT NULL AND m.role <> 'assistant' THEN 1 ELSE 0 END) AS non_assistant_count
+              c.archived_at
          FROM conversations c
-         LEFT JOIN messages m
-           ON m.conversation_id = c.id
-          AND m.user_id = c.user_id
         WHERE c.id = ?
-          AND c.user_id = ?
-        GROUP BY c.id`
+          AND c.user_id = ?`
     )
     .get(conversationId, userId) as
     | {
@@ -1174,9 +1167,6 @@ export function setZenStarterConversationSuppression(
         conversation_mode?: string | null;
         incognito?: number | null;
         archived_at?: string | null;
-        message_count?: number | null;
-        assistant_count?: number | null;
-        non_assistant_count?: number | null;
       }
     | undefined;
   if (!conversation?.id) {
@@ -1186,18 +1176,10 @@ export function setZenStarterConversationSuppression(
     conversation.conversation_mode !== "zen" &&
     conversation.conversation_mode !== "chat"
   ) {
-    throw new Error("Only Zen starter conversations can be suppressed.");
+    throw new Error("Only saved Zen conversations can be suppressed.");
   }
-  const messageCount = Number(conversation.message_count ?? 0);
-  const assistantCount = Number(conversation.assistant_count ?? 0);
-  const nonAssistantCount = Number(conversation.non_assistant_count ?? 0);
-  if (
-    conversation.incognito === 1 ||
-    messageCount !== 1 ||
-    assistantCount !== 1 ||
-    nonAssistantCount !== 0
-  ) {
-    throw new Error("Only uncontinued Zen starter conversations can be suppressed.");
+  if (conversation.incognito === 1) {
+    throw new Error("Only saved Zen conversations can be suppressed.");
   }
   const nextArchivedAt = suppressed ? (conversation.archived_at ?? new Date().toISOString()) : null;
   db.prepare(

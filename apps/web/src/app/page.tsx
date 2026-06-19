@@ -18,7 +18,7 @@ import {
   useTransition,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6509,7 +6509,7 @@ function anthropicTextModelLabelFromId(id: string): string | null {
   const normalized = id.trim().toLowerCase();
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
-  if (latest) return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+  if (latest) return `Claude ${titleCaseModelToken(latest[3]!)} ${latest[1]}.${latest[2]}`;
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
@@ -14271,6 +14271,7 @@ interface ComposerInputProps {
   value: string;
   placeholder: string;
   writingAssistEnabled: boolean;
+  generatingRandomPrompt?: boolean;
   submitDisabled: boolean;
   submitLabel: React.ReactNode;
   submitAriaLabel: string;
@@ -15493,6 +15494,8 @@ interface DesktopMarkdownComposerProps {
   commandPicks?: readonly CommandCenterCommand[];
   /** User prompt shortcuts shown in the composer autocomplete menu. */
   promptPicks?: readonly CommandCenterCommand[];
+  /** True while the dice button is generating a context-aware prompt. */
+  generatingRandomPrompt?: boolean;
   /** When true, the editor is locked (read-only) and visually muted. */
   disabled?: boolean;
   /** Increment to close composer mention/command popovers from the parent shell. */
@@ -15516,6 +15519,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       mentionBots,
       commandPicks = [],
       promptPicks = [],
+      generatingRandomPrompt = false,
       disabled = false,
       dismissPopoversSignal,
     },
@@ -16268,14 +16272,22 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     );
 
     const composeFormForTheme = getMountedEditorDom(editor)?.closest("form") ?? null;
+    const randomPromptStatusText = "Finding a question that fits this conversation...";
     return (
       <div
         ref={markdownComposerSurfaceRef}
         className={styles.markdownComposerSurface}
         data-disabled={disabled ? "true" : undefined}
+        data-random-prompt-busy={generatingRandomPrompt ? "true" : undefined}
         aria-disabled={disabled ? "true" : undefined}
+        aria-busy={generatingRandomPrompt ? "true" : undefined}
       >
         <div className={styles.markdownComposerMain}>
+          {generatingRandomPrompt ? (
+            <div className={styles.composerRandomPromptStatus} role="status" aria-live="polite">
+              {randomPromptStatusText}
+            </div>
+          ) : null}
           <div
             className={`${styles.markdownComposerInputRow} ${hideSubmitButton ? styles.markdownComposerInputRowSingle : ""}`}
           >
@@ -16363,6 +16375,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     value,
     placeholder,
     writingAssistEnabled,
+    generatingRandomPrompt = false,
     submitDisabled,
     submitLabel,
     submitAriaLabel,
@@ -16401,6 +16414,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
   const taMentionRef = useRef(taMention);
   const taCommandRef = useRef(taCommand);
+  const randomPromptStatusText = "Finding a question that fits this conversation...";
+  const effectivePlaceholder = generatingRandomPrompt
+    ? "A context-aware question will appear here..."
+    : placeholder;
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
@@ -16561,12 +16578,18 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   );
 
   return (
-    <div ref={composeEditorShellRef} className={styles.composeEditorShell} data-markdown-enabled={enabled ? "true" : undefined}>
+    <div
+      ref={composeEditorShellRef}
+      className={styles.composeEditorShell}
+      data-markdown-enabled={enabled ? "true" : undefined}
+      data-random-prompt-busy={generatingRandomPrompt ? "true" : undefined}
+      aria-busy={generatingRandomPrompt ? "true" : undefined}
+    >
       {enabled ? (
         <DesktopMarkdownComposer
           ref={wysiwygRef}
           value={value}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
           onFocus={onFocus}
@@ -16579,6 +16602,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           mentionBots={mentionBots}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
+          generatingRandomPrompt={generatingRandomPrompt}
+          disabled={generatingRandomPrompt}
           dismissPopoversSignal={dismissPopoversSignal}
         />
       ) : (
@@ -16586,9 +16611,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           <div
             className={`${styles.composeInner} ${hideSubmitButton ? styles.composeInnerSingle : ""}`}
           >
+            {generatingRandomPrompt ? (
+              <div className={styles.composerRandomPromptStatus} role="status" aria-live="polite">
+                {randomPromptStatusText}
+              </div>
+            ) : null}
             <textarea
               ref={textareaRef}
               value={value}
+              disabled={generatingRandomPrompt}
               onChange={(event) => {
                 onChange(event);
                 queueMicrotask(() => {
@@ -16854,7 +16885,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }
               }}
               onFocus={onFocus}
-              placeholder={placeholder}
+              placeholder={effectivePlaceholder}
               spellCheck={writingAssistEnabled}
               autoCorrect={writingAssistEnabled ? "on" : "off"}
               autoCapitalize={writingAssistEnabled ? "sentences" : "none"}
@@ -19006,6 +19037,8 @@ function HomeContent(): React.JSX.Element {
   const chatAssistantRevealEligibleKeysRef = useRef<Set<string>>(new Set());
   const chatCompletedRevealKeysRef = useRef<Set<string>>(new Set());
   const [chatEphemeralNowMs, setChatEphemeralNowMs] = useState(() => Date.now());
+  const [chatReplyRunwayConversationId, setChatReplyRunwayConversationId] =
+    useState<string | null>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">("dark");
   const botPickerReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botPickerReturnEndAtRef = useRef(0);
@@ -22836,6 +22869,22 @@ function HomeContent(): React.JSX.Element {
 
   const replyInFlightSignals =
     pendingReplyVisible || chatAssistantRevealInProgress;
+  useEffect(() => {
+    if (!chatEphemeralMode || !detail?.id) {
+      setChatReplyRunwayConversationId(null);
+      return;
+    }
+    if (replyInFlightSignals) {
+      setChatReplyRunwayConversationId(detail.id);
+      return;
+    }
+    if (latestMessageRole === "user") {
+      setChatReplyRunwayConversationId(null);
+    }
+  }, [chatEphemeralMode, detail?.id, latestMessageRole, replyInFlightSignals]);
+  const replyRunwayActive =
+    chatLikeSurface &&
+    (replyInFlightSignals || chatReplyRunwayConversationId === detail?.id);
   /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
   const typingIndicatorVisible =
     (pendingReplyVisible && !zenInitialThinkingActive) ||
@@ -29655,6 +29704,17 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  function handleComposerChipPointerDown(
+    event: React.PointerEvent<HTMLButtonElement>,
+    chip: ComposerChip
+  ): void {
+    if (chip.action !== "other") return;
+    if (pendingReply) return;
+    event.preventDefault();
+    event.stopPropagation();
+    revealChoiceComposerForOther(chip.otherSource, { flushRender: true });
+  }
+
   function handleComposerChipPick(chip: ComposerChip): void {
     if (chip.action === "other") {
       revealChoiceComposerForOther(chip.otherSource);
@@ -29881,6 +29941,23 @@ function HomeContent(): React.JSX.Element {
       );
     }
 
+    if (choiceChipRailComposerRevealed) {
+      const prompt =
+        rail.heading ??
+        (rail.source === "starter" ? "Choose a reply:" : "Choose a reply");
+      return (
+        <div
+          ref={askQuestionRailRef}
+          className={styles.askQuestionCollapsedPromptDock}
+          data-ask-question-collapsed-prompt="true"
+          role="status"
+          aria-live="polite"
+        >
+          <p className={styles.askQuestionCollapsedPromptText}>{prompt}</p>
+        </div>
+      );
+    }
+
     const railClassName = `${styles.conversationStarterRail} ${styles.askQuestionRail}`;
     return (
       <div
@@ -29906,6 +29983,7 @@ function HomeContent(): React.JSX.Element {
                 ? "Other — explain in chat"
                 : `Suggested reply: ${chip.sendValue ?? chip.label}`
             }
+            onPointerDown={(event) => handleComposerChipPointerDown(event, chip)}
             onClick={() => handleComposerChipPick(chip)}
           >
             {renderComposerChipContent(chip, {
@@ -29964,6 +30042,7 @@ function HomeContent(): React.JSX.Element {
                   ? "Other - explain in chat"
                   : `Suggested reply: ${chip.sendValue ?? chip.label}`
               }
+              onPointerDown={(event) => handleComposerChipPointerDown(event, chip)}
               onClick={() => handleComposerChipPick(chip)}
             >
               {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
@@ -30256,31 +30335,50 @@ function HomeContent(): React.JSX.Element {
     return () => window.cancelAnimationFrame(frame);
   }, [composerHiddenByChoiceChips]);
 
-  function queueChoiceComposerFocusAfterReveal(): void {
+  function focusRevealedChoiceComposer(): void {
+    draftComposerRef.current?.focus({ preventScroll: true });
+  }
+
+  function queueChoiceComposerFocusAfterReveal(
+    options: { immediate?: boolean } = {}
+  ): void {
     choiceComposerFocusAfterRevealRef.current = true;
+    if (options.immediate) {
+      focusRevealedChoiceComposer();
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (!choiceComposerFocusAfterRevealRef.current) return;
         choiceComposerFocusAfterRevealRef.current = false;
-        draftComposerRef.current?.focus({ preventScroll: true });
+        focusRevealedChoiceComposer();
       });
     });
   }
 
-  function revealChoiceComposerForOther(source: "askquestion" | "starter" | undefined): void {
+  function revealChoiceComposerForOther(
+    source: "askquestion" | "starter" | undefined,
+    options: { flushRender?: boolean } = {}
+  ): void {
     hideZenHeaderForConversationAction();
     resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     askQuestionComposerHiddenForReadingKeyRef.current = null;
-    if (source === "starter") {
-      setStarterComposerRevealed(true);
+    const reveal = (): void => {
+      if (source === "starter") {
+        setStarterComposerRevealed(true);
+      } else {
+        setAskQuestionComposerRevealed(true);
+      }
+      resetComposerHistoryCursor();
+      setComposerFocused(true);
+      setComposerSendTintActive(true);
+      setComposerPrimed(false);
+    };
+    if (options.flushRender) {
+      flushSync(reveal);
     } else {
-      setAskQuestionComposerRevealed(true);
+      reveal();
     }
-    resetComposerHistoryCursor();
-    setComposerFocused(true);
-    setComposerSendTintActive(true);
-    setComposerPrimed(false);
-    queueChoiceComposerFocusAfterReveal();
+    queueChoiceComposerFocusAfterReveal({ immediate: options.flushRender === true });
   }
 
   function eventTargetIsTextEditable(target: EventTarget | null): boolean {
@@ -30471,8 +30569,12 @@ function HomeContent(): React.JSX.Element {
     choiceChipRailInteractiveKey,
     detail?.id,
   ]);
+  const askQuestionPromptDockSpaceActive =
+    choiceChipRailInteractiveKey !== null &&
+    choiceChipRailComposerRevealed &&
+    viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const askQuestionTailSpaceActive =
-    choiceChipRailInteractiveKey !== null;
+    choiceChipRailInteractiveKey !== null && !askQuestionPromptDockSpaceActive;
   const askQuestionCollapsedBubbleActive = false;
 
   function snapAskQuestionComposerToChatBottom(force = false): void {
@@ -43561,12 +43663,24 @@ function HomeContent(): React.JSX.Element {
               </button>
               <button
                 type="button"
-                className={styles.panelClose}
-                onClick={closePanel}
-                aria-label="Close panel"
-                data-glyph-tooltip="Close panel"
+                className={settingsScope === "chooser" ? styles.panelClose : styles.panelBack}
+                onClick={
+                  settingsScope === "chooser"
+                    ? closePanel
+                    : () => setSettingsScope("chooser")
+                }
+                aria-label={
+                  settingsScope === "chooser"
+                    ? "Close panel"
+                    : "Back to settings menu"
+                }
+                data-glyph-tooltip={
+                  settingsScope === "chooser"
+                    ? "Close panel"
+                    : "Back to settings menu"
+                }
               >
-                ×
+                {settingsScope === "chooser" ? "×" : "←"}
               </button>
             </div>
           </div>
@@ -43602,6 +43716,96 @@ function HomeContent(): React.JSX.Element {
                 <button
                   type="button"
                   className={styles.settingsScopeButton}
+                  disabled
+                  title="Coffee Mode settings are not available yet."
+                >
+                  <strong>Coffee Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Story Mode settings are not available yet."
+                >
+                  <strong>Story Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Arena Mode settings are not available yet."
+                >
+                  <strong>Arena Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Polling Mode settings are not available yet."
+                >
+                  <strong>Polling Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Feed Mode settings are not available yet."
+                >
+                  <strong>Feed Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Games Mode settings are not available yet."
+                >
+                  <strong>Games Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Gym Mode settings are not available yet."
+                >
+                  <strong>Gym Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Slate Mode settings are not available yet."
+                >
+                  <strong>Slate Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Pseudo Mode settings are not available yet."
+                >
+                  <strong>Pseudo Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
+                  disabled
+                  title="Surf Mode settings are not available yet."
+                >
+                  <strong>Surf Mode Settings</strong>
+                  <span>Coming soon.</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.settingsScopeButton}
                   onClick={() => setSettingsScope("system")}
                 >
                   <strong>System Settings</strong>
@@ -43624,13 +43828,6 @@ function HomeContent(): React.JSX.Element {
                   <h4>Session &amp; Atmosphere</h4>
                   <p>Current session break: {formatZenDuration(zenSessionIdleGapMs)} idle. Fresh start: {formatZenDuration(zenFreshStartGapMs, "fresh")}.</p>
                 </div>
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={() => setSettingsScope("chooser")}
-                >
-                  Back
-                </button>
               </section>
 
               <div className={styles.settingsSectionGrid}>
@@ -52859,6 +53056,8 @@ function HomeContent(): React.JSX.Element {
                 ? styles.messagesEmptyState
                 : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""} ${
+              askQuestionPromptDockSpaceActive ? styles.messagesAskQuestionPromptDockSpace : ""
+            } ${
               askQuestionCollapsedBubbleActive ? styles.messagesAskQuestionCollapsedBubbleSpace : ""
             }`}
             ref={messagesScrollRef}
@@ -52866,6 +53065,7 @@ function HomeContent(): React.JSX.Element {
             data-zen-empty-hero={zenEmptyHeroVisible ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
+            data-reply-runway-active={replyRunwayActive ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
@@ -53518,6 +53718,7 @@ function HomeContent(): React.JSX.Element {
                     value={draft}
                     placeholder="Say something..."
                     writingAssistEnabled={settings?.composerWritingAssist !== false}
+                    generatingRandomPrompt={composerRandomPromptBusy}
                     submitDisabled={composerSubmitDisabled(draft)}
                     submitLabel={composerSubmitLabel(draft)}
                     submitAriaLabel={composerSubmitAriaLabel(draft)}
@@ -53541,6 +53742,7 @@ function HomeContent(): React.JSX.Element {
                 value={draft}
                 placeholder="Say something..."
                 writingAssistEnabled={settings?.composerWritingAssist !== false}
+                generatingRandomPrompt={composerRandomPromptBusy}
                 submitDisabled={composerSubmitDisabled(draft)}
                 submitLabel={composerSubmitLabel(draft)}
                 submitAriaLabel={composerSubmitAriaLabel(draft)}
@@ -53844,12 +54046,15 @@ function HomeContent(): React.JSX.Element {
             className={`${styles.messages} ${
               !detail && !pendingReplyVisible ? styles.messagesEmptyState : ""
             } ${askQuestionTailSpaceActive ? styles.messagesAskQuestionTailSpace : ""} ${
+              askQuestionPromptDockSpaceActive ? styles.messagesAskQuestionPromptDockSpace : ""
+            } ${
               askQuestionCollapsedBubbleActive ? styles.messagesAskQuestionCollapsedBubbleSpace : ""
             }`}
             ref={messagesScrollRef}
             data-chat-ephemeral={chatLikeSurface ? "true" : undefined}
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
+            data-reply-runway-active={replyRunwayActive ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
@@ -54928,6 +55133,7 @@ function HomeContent(): React.JSX.Element {
                     value={draft}
                     placeholder="Say something..."
                     writingAssistEnabled={settings?.composerWritingAssist !== false}
+                    generatingRandomPrompt={composerRandomPromptBusy}
                     submitDisabled={composerSubmitDisabled(draft)}
                     submitLabel={composerSubmitLabel(draft)}
                     submitAriaLabel={composerSubmitAriaLabel(draft)}
@@ -54951,6 +55157,7 @@ function HomeContent(): React.JSX.Element {
                 value={draft}
                 placeholder="Ask anything..."
                 writingAssistEnabled={settings?.composerWritingAssist !== false}
+                generatingRandomPrompt={composerRandomPromptBusy}
                 submitDisabled={composerSubmitDisabled(draft)}
                 submitLabel={composerSubmitLabel(draft)}
                 submitAriaLabel={composerSubmitAriaLabel(draft)}

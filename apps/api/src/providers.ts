@@ -150,6 +150,7 @@ const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
   "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-3-5-haiku-latest",
   "claude-sonnet-4-5-20250929",
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
@@ -389,7 +390,7 @@ function anthropicModelLabelFromId(id: string): string | null {
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
   if (latest) {
-    return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+    return `Claude ${titleCaseModelToken(latest[3]!)} ${latest[1]}.${latest[2]}`;
   }
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/

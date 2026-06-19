@@ -26,6 +26,7 @@ describe("default online model visibility", () => {
       { id: "claude-sonnet-4-6", provider: "anthropic" as const },
       { id: "claude-opus-4-8", provider: "anthropic" as const },
       { id: "claude-3-5-sonnet-latest", provider: "anthropic" as const },
+      { id: "claude-3-5-haiku-latest", provider: "anthropic" as const },
     ]) {
       assert.equal(isCommonOnlineChatModel(model), true, model.id);
     }

@@ -180,6 +180,10 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro"));
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "claude-3-5-haiku-latest")?.label,
+      "Claude Haiku 3.5"
+    );
   });
 
   it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {

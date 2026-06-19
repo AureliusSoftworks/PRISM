@@ -2808,6 +2808,18 @@
   background: color-mix(in srgb, var(--accent-ink) 9%, var(--bg-surface));
 }
 
+.settingsScopeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg));
+  box-shadow: none;
+}
+
+.settingsScopeButton:disabled strong,
+.settingsScopeButton:disabled span {
+  color: color-mix(in srgb, var(--fg-muted) 82%, var(--bg-surface));
+}
+
 .settingsSection {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -7464,10 +7476,13 @@
   transform: none !important;
 }
 
-.messages[data-chat-ephemeral="true"][data-replying-live="true"] {
-  /* Live replies need enough tail room for the actively typed line to sit
-     in the clear reading band instead of the lower atmosphere fade. */
+.messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
+  /* Keep enough tail room for the latest reply to sit in the clear reading
+     band, even after typing visuals have just finished. */
   padding-bottom: max(70dvh, calc(env(safe-area-inset-bottom) + 112px));
+}
+
+.messages[data-chat-ephemeral="true"][data-replying-live="true"] {
   /* Per-frame scrollTop writes drive the live follow-scroll. Browser-level
      smooth scrolling fights those tiny eases, so disable it during reply. */
   scroll-behavior: auto;
@@ -7504,7 +7519,7 @@
   pointer-events: none;
 }
 
-.messages[data-chat-ephemeral="true"][data-replying-live="true"]
+.messages[data-chat-ephemeral="true"][data-reply-runway-active="true"]
   .chatEphemeralLiveEndSpacer {
   height: max(42dvh, 280px);
 }
@@ -7518,6 +7533,12 @@
 .messages.messagesAskQuestionTailSpace {
   padding-bottom: max(360px, 78dvh);
   scroll-padding-bottom: max(360px, 78dvh);
+  transition: none;
+}
+
+.messages.messagesAskQuestionPromptDockSpace {
+  padding-bottom: max(172px, calc(env(safe-area-inset-bottom, 0px) + 148px));
+  scroll-padding-bottom: max(172px, calc(env(safe-area-inset-bottom, 0px) + 148px));
   transition: none;
 }
 
@@ -12825,7 +12846,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Chip rails + AskQuestion recall orb: viewport-fixed above the compose strip (z-index 6).
    Raising messagesFrame previously stacked the full-screen thread layer on top and hid the composer. */
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail,
-.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock,
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionCollapsedPromptDock {
   position: fixed;
   left: 0;
   right: 0;
@@ -12840,6 +12862,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
   padding-bottom: 0;
+}
+
+.appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionCollapsedPromptDock {
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock.imageJobOrbDock {
@@ -13457,15 +13483,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--compose-send-ink-muted) 82%, var(--fg-muted));
 }
 
-/* While the bot is streaming, give the messages pane enough tail padding
-   that the followed line can settle in the clear reading band instead of
-   being pinned just above the pill. */
-.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+/* While the latest reply is active, keep enough tail padding that the
+   followed line can settle in the clear reading band instead of being pinned
+   just above the pill. */
+.appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
   padding-bottom: max(70dvh, 156px);
-  scroll-behavior: auto;
 }
 
-.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+.appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
   padding-bottom: max(70dvh, var(--zen-prose-runway-bottom), 156px);
   scroll-padding-bottom: max(70dvh, var(--zen-prose-runway-bottom));
 }
@@ -14107,6 +14132,55 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .conversationStarterRail.askQuestionRail {
     grid-template-columns: 1fr;
     row-gap: 10px;
+  }
+}
+
+.askQuestionCollapsedPromptDock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  pointer-events: none;
+  padding: 0 clamp(16px, 4vw, 28px);
+  animation: askQuestionPromptDockIn 0.16s ease-out both;
+}
+
+.askQuestionCollapsedPromptText {
+  margin: 0;
+  width: min(640px, 100%);
+  border: 1px solid color-mix(in srgb, var(--askq-chip-border) 72%, transparent);
+  border-radius: 14px 14px 14px 7px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--askq-chip-bg) 92%, transparent),
+      color-mix(in srgb, var(--bg-surface) 86%, var(--askq-rail-tone) 14%)
+    );
+  color: var(--askq-chip-text);
+  padding: 10px 12px;
+  font-size: 0.86rem;
+  font-weight: 620;
+  line-height: 1.35;
+  text-align: left;
+  box-shadow:
+    0 10px 28px -20px color-mix(in srgb, #000 70%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--askq-chip-inset) 78%, transparent);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+
+@keyframes askQuestionPromptDockIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -14930,6 +15004,86 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+.composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
+.composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea {
+  border-color: transparent;
+  background:
+    linear-gradient(
+      115deg,
+      color-mix(in srgb, #ff4d6d 18%, var(--bg)) 0%,
+      color-mix(in srgb, #ff9f1c 15%, var(--bg)) 15%,
+      color-mix(in srgb, #f4f86a 12%, var(--bg)) 30%,
+      color-mix(in srgb, #36f0b2 15%, var(--bg)) 45%,
+      color-mix(in srgb, #2fd3e3 17%, var(--bg)) 60%,
+      color-mix(in srgb, #7b5cff 17%, var(--bg)) 78%,
+      color-mix(in srgb, #ff4dcb 18%, var(--bg)) 100%
+    ) padding-box,
+    linear-gradient(
+      90deg,
+      #ff4d6d,
+      #ff9f1c,
+      #f4f86a,
+      #36f0b2,
+      #2fd3e3,
+      #7b5cff,
+      #ff4dcb,
+      #ff4d6d
+    ) border-box;
+  background-size: 260% 100%, 260% 100%;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
+    0 0 26px -14px color-mix(in srgb, #2fd3e3 70%, transparent),
+    0 0 36px -20px color-mix(in srgb, #ff4dcb 70%, transparent);
+  animation: composerRandomRainbowFlow 1.7s linear infinite;
+}
+
+.composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea {
+  color: var(--fg-muted);
+  cursor: wait;
+}
+
+.composerRandomPromptStatus {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--fg) 82%, var(--accent-ink) 18%);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.composeInner .composerRandomPromptStatus {
+  grid-column: 1 / -1;
+  padding: 0 6px;
+  margin: 0 0 -2px;
+}
+
+.composerRandomPromptStatus::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background:
+    conic-gradient(
+      from 0deg,
+      #ff4d6d,
+      #ff9f1c,
+      #f4f86a,
+      #36f0b2,
+      #2fd3e3,
+      #7b5cff,
+      #ff4dcb,
+      #ff4d6d
+    );
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, #ffffff 10%, transparent),
+    0 0 14px color-mix(in srgb, #2fd3e3 54%, transparent);
+  animation: composerRandomStatusSpin 1.3s linear infinite;
+}
+
 .markdownSideToolbar {
   display: flex;
   flex-direction: column;
@@ -15122,6 +15276,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
   to {
     background-position: 0 0, 10ch 0;
+  }
+}
+
+@keyframes composerRandomRainbowFlow {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 260% 0, 260% 0;
+  }
+}
+
+@keyframes composerRandomRainbowFlowSingle {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 260% 0;
+  }
+}
+
+@keyframes composerRandomStatusSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
+  .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea,
+  .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
+  .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled,
+  .composerRandomPromptStatus::before {
+    animation: none;
   }
 }
 
@@ -15443,6 +15631,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: saturate(0);
   opacity: 0.44;
   cursor: not-allowed;
+}
+
+.composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
+.composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled {
+  border-color: transparent;
+  background:
+    linear-gradient(
+      90deg,
+      #ff4d6d,
+      #ff9f1c,
+      #f4f86a,
+      #36f0b2,
+      #2fd3e3,
+      #7b5cff,
+      #ff4dcb,
+      #ff4d6d
+    );
+  background-size: 260% 100%;
+  color: #111111;
+  filter: none;
+  opacity: 0.92;
+  cursor: wait;
+  box-shadow:
+    var(--shadow-sm),
+    0 0 26px -14px color-mix(in srgb, #2fd3e3 74%, transparent);
+  animation: composerRandomRainbowFlowSingle 1.7s linear infinite;
 }
 
 .composeModelControl {
@@ -28159,7 +28373,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 112px));
   }
 
-  .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
     padding-bottom: max(46dvh, calc(env(safe-area-inset-bottom) + 112px));
   }
 
@@ -29261,11 +29475,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     scroll-margin-block: clamp(28px, 8dvh, 76px);
   }
 
-  .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
     padding-bottom: max(70dvh, calc(env(safe-area-inset-bottom) + 96px));
   }
 
-  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
+  .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
     padding-bottom: max(
       70dvh,
       var(--zen-prose-runway-bottom),
