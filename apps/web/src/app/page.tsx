@@ -79,6 +79,7 @@ import {
   ageFromIsoBirthday,
   classifyMemoryCategoryFromText,
   defaultBotPurpose,
+  isAllowedOpenAiImageModelId,
   listBotProfileFacts,
   parseAssistantPrismTools,
   parseStoredBotPrompt,
@@ -88,9 +89,9 @@ import {
   stripPurposeStatementPrefixes,
   westernZodiacFromIsoBirthday,
   catalogEntriesMatchingLocalImageHeuristic,
-  DEFAULT_OPENAI_IMAGE_MODEL_ID,
   ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
   isComfyUiModelId,
+  isElevenLabsImageModelId,
   normalizeOpenAiImageModelId,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   parseComfyUiRemoteWorkflowPath,
@@ -6028,27 +6029,118 @@ function imageSettingsSavedDefaultModelId(
   }
   const trimmed = settings.preferredOpenAiImageModel?.trim() ?? "";
   if (trimmed.length === 0) return null;
-  return normalizeOpenAiImageModelId(trimmed);
+  return isAllowedOpenAiImageModelId(trimmed) || isElevenLabsImageModelId(trimmed)
+    ? trimmed
+    : null;
 }
 
 const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 const REQUIRED_PRIMARY_LOCAL_MODEL_ID = "llama3.2";
 
+function titleCaseModelToken(token: string): string {
+  const lower = token.toLowerCase();
+  const known: Record<string, string> = {
+    api: "API",
+    b: "B",
+    chatgpt: "ChatGPT",
+    code: "Code",
+    codellama: "Code Llama",
+    codex: "Codex",
+    deepseek: "DeepSeek",
+    distill: "Distill",
+    flux: "FLUX",
+    gemma: "Gemma",
+    gpt: "GPT",
+    instruct: "Instruct",
+    llama: "Llama",
+    llava: "LLaVA",
+    mini: "Mini",
+    mistral: "Mistral",
+    mixtral: "Mixtral",
+    nano: "Nano",
+    opus: "Opus",
+    phi: "Phi",
+    pro: "Pro",
+    qwen: "Qwen",
+    r1: "R1",
+    search: "Search",
+    sonnet: "Sonnet",
+    tinyllama: "TinyLlama",
+    vl: "VL",
+  };
+  if (known[lower]) return known[lower];
+  if (/^\d+(?:\.\d+)?b$/i.test(token)) return token.toUpperCase();
+  if (/^o\d/.test(lower)) return lower;
+  const alphaNumber = token.match(/^([a-z]+)(\d+(?:\.\d+)?)$/i);
+  if (alphaNumber) return `${titleCaseModelToken(alphaNumber[1]!)} ${alphaNumber[2]}`;
+  return token.toUpperCase() === token
+    ? token
+    : `${token.slice(0, 1).toUpperCase()}${token.slice(1)}`;
+}
+
+function modelSnapshotSuffix(datePart: string | undefined): string {
+  if (!datePart) return "";
+  const isoDate = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) return ` (${isoDate[1]}-${isoDate[2]}-${isoDate[3]})`;
+  const compactDate = datePart.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactDate) return ` (${compactDate[1]}-${compactDate[2]}-${compactDate[3]})`;
+  return ` (${datePart})`;
+}
+
+function openAiTextModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "chatgpt-4o-latest") return "ChatGPT-4o";
+  const oSeries = normalized.match(/^(o\d)(?:-(mini))?$/);
+  if (oSeries) return [oSeries[1], oSeries[2] ? "Mini" : ""].filter(Boolean).join(" ");
+  const codex = normalized.match(/^gpt-(\d+(?:\.\d+)?)-codex(?:-(max|mini))?$/);
+  if (codex) {
+    return [`GPT-${codex[1]}`, "Codex", codex[2] ? titleCaseModelToken(codex[2]) : ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+  const search = normalized.match(/^gpt-(\d+(?:\.\d+)?)-search-api(?:-(\d{4}-\d{2}-\d{2}))?$/);
+  if (search) return `GPT-${search[1]} Search${modelSnapshotSuffix(search[2])}`;
+  const chatLatest = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
+  if (chatLatest) return `GPT-${chatLatest[1]}`;
+  const versioned = normalized.match(
+    /^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano|pro))?(?:-(\d{4}-\d{2}-\d{2}))?$/
+  );
+  if (versioned) {
+    return [`GPT-${versioned[1]}`, versioned[2] ? titleCaseModelToken(versioned[2]) : ""]
+      .filter(Boolean)
+      .join(" ") + modelSnapshotSuffix(versioned[3]);
+  }
+  return null;
+}
+
+function anthropicTextModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized.startsWith("claude-")) return null;
+  const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
+  if (latest) return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+  const named = normalized.match(
+    /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
+  );
+  if (named) {
+    const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
+    return `Claude ${titleCaseModelToken(named[1]!)} ${version}${modelSnapshotSuffix(named[4])}`;
+  }
+  return null;
+}
+
 function modelLabelFromId(id: string): string {
+  const providerLabel = openAiTextModelLabelFromId(id) ?? anthropicTextModelLabelFromId(id);
+  if (providerLabel) return providerLabel;
   const parts = id
+    .replace(SECONDARY_OLLAMA_MODEL_PREFIX, "")
     .split(/[-_:]/)
     .filter(Boolean)
     .filter((part, index, allParts) =>
       !(index === allParts.length - 1 && part.toLowerCase() === "latest")
     );
   const displayParts = parts.length > 0 ? parts : [id];
-  return displayParts
-    .map((part) =>
-      part.toUpperCase() === part
-        ? part
-        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
-    )
-    .join(" ");
+  return displayParts.map(titleCaseModelToken).join(" ");
 }
 
 function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
@@ -20138,6 +20230,13 @@ function HomeContent(): React.JSX.Element {
       ),
     [openAiImageModelCatalogEntries, settings?.hiddenBotModelIds]
   );
+  const availableOpenAiImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      apiKeySourceAvailable(settings?.openAiApiKeySource)
+        ? visibleOpenAiImageModelCatalogEntries
+        : [],
+    [settings?.openAiApiKeySource, visibleOpenAiImageModelCatalogEntries]
+  );
   const visibleElevenLabsImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () =>
       filterVisibleModelOptions(
@@ -20148,20 +20247,26 @@ function HomeContent(): React.JSX.Element {
   );
   const onlineImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () => [
-      ...(apiKeySourceAvailable(settings?.openAiApiKeySource)
-        ? visibleOpenAiImageModelCatalogEntries
-        : []),
+      ...availableOpenAiImageModelCatalogEntries,
       ...(apiKeySourceAvailable(settings?.elevenLabsApiKeySource)
         ? visibleElevenLabsImageModelCatalogEntries
         : []),
     ],
     [
+      availableOpenAiImageModelCatalogEntries,
       settings?.elevenLabsApiKeySource,
-      settings?.openAiApiKeySource,
       visibleElevenLabsImageModelCatalogEntries,
-      visibleOpenAiImageModelCatalogEntries,
     ]
   );
+  const runnableOnlineImageModelCatalogEntries = useMemo(
+    () => onlineImageModelCatalogEntries.filter((model) => !model.disabledReason),
+    [onlineImageModelCatalogEntries]
+  );
+  const firstRunnableOnlineImageModelId =
+    runnableOnlineImageModelCatalogEntries[0]?.id ?? "";
+  const hasVisibleOnlineImageModels = onlineImageModelCatalogEntries.length > 0;
+  const hasRunnableOnlineImageModels =
+    runnableOnlineImageModelCatalogEntries.length > 0;
   const allComfyUiWorkflowCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () =>
       uniqueModelOptions(
@@ -20189,8 +20294,8 @@ function HomeContent(): React.JSX.Element {
     return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed) ? trimmed : "";
   };
   const visibleOpenAiImageModelIds = useMemo(
-    () => new Set(visibleOpenAiImageModelCatalogEntries.map((model) => model.id)),
-    [visibleOpenAiImageModelCatalogEntries]
+    () => new Set(availableOpenAiImageModelCatalogEntries.map((model) => model.id)),
+    [availableOpenAiImageModelCatalogEntries]
   );
   const visibleOpenAiImageModelIdOrEmpty = (
     modelId: string | null | undefined
@@ -20199,6 +20304,23 @@ function HomeContent(): React.JSX.Element {
     if (!trimmed) return "";
     const normalized = normalizeOpenAiImageModelId(trimmed);
     return visibleOpenAiImageModelIds.has(normalized) ? normalized : "";
+  };
+  const visibleOnlineImageModelIds = useMemo(
+    () => new Set(onlineImageModelCatalogEntries.map((model) => model.id)),
+    [onlineImageModelCatalogEntries]
+  );
+  const visibleOnlineImageModelIdOrEmpty = (
+    modelId: string | null | undefined
+  ): string => {
+    const trimmed = modelId?.trim() ?? "";
+    if (!trimmed) return "";
+    if (visibleOnlineImageModelIds.has(trimmed)) return trimmed;
+    return visibleOpenAiImageModelIdOrEmpty(trimmed);
+  };
+  const normalizeOnlineImageModelPreference = (modelId: string): string => {
+    const trimmed = modelId.trim();
+    if (!trimmed || trimmed === AUTO_MODEL_CHOICE) return "";
+    return visibleOnlineImageModelIdOrEmpty(trimmed);
   };
   const settingsModelGroups = useMemo(
     () =>
@@ -20441,10 +20563,9 @@ function HomeContent(): React.JSX.Element {
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
               <ComposerModelPicker
-                value={visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel)}
+                value={visibleOnlineImageModelIdOrEmpty(settings.preferredOpenAiImageModel)}
                 onChange={(next) => {
-                  const stored =
-                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  const stored = normalizeOnlineImageModelPreference(next);
                   setSettings((previous) =>
                     previous ? { ...previous, preferredOpenAiImageModel: stored } : previous
                   );
@@ -20454,21 +20575,35 @@ function HomeContent(): React.JSX.Element {
                   );
                 }}
                 options={
-                  visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel)
+                  visibleOnlineImageModelIdOrEmpty(settings.preferredOpenAiImageModel)
                     ? includeSelectedModelOption(
-                        visibleOpenAiImageModelCatalogEntries,
-                        visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel),
+                        onlineImageModelCatalogEntries,
+                        visibleOnlineImageModelIdOrEmpty(settings.preferredOpenAiImageModel),
                         "openai"
                       )
-                    : visibleOpenAiImageModelCatalogEntries
+                    : onlineImageModelCatalogEntries
                 }
-                provider="openai"
+                provider="online"
+                disabled={!hasVisibleOnlineImageModels}
+                title={
+                  hasRunnableOnlineImageModels
+                    ? "Auto uses the first available online image model."
+                    : hasVisibleOnlineImageModels
+                      ? "Online image models are visible, but no runnable model is available yet."
+                    : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                }
                 ariaLabel="Default online image model"
                 formName={SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
                 autoOptionValue=""
-                autoOptionMetaOverride={DEFAULT_OPENAI_IMAGE_MODEL_ID}
+                autoOptionMetaOverride={
+                  hasRunnableOnlineImageModels
+                    ? "first available online image model"
+                    : hasVisibleOnlineImageModels
+                      ? "no runnable online image model"
+                    : "add online image key to enable"
+                }
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -20519,12 +20654,11 @@ function HomeContent(): React.JSX.Element {
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
               <ComposerModelPicker
-                value={visibleOpenAiImageModelIdOrEmpty(
+                value={visibleOnlineImageModelIdOrEmpty(
                   settings.preferredZenWallpaperOpenAiImageModel
                 )}
                 onChange={(next) => {
-                  const stored =
-                    next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
+                  const stored = normalizeOnlineImageModelPreference(next);
                   setSettings((previous) =>
                     previous
                       ? { ...previous, preferredZenWallpaperOpenAiImageModel: stored }
@@ -20536,25 +20670,39 @@ function HomeContent(): React.JSX.Element {
                   );
                 }}
                 options={
-                  visibleOpenAiImageModelIdOrEmpty(
+                  visibleOnlineImageModelIdOrEmpty(
                     settings.preferredZenWallpaperOpenAiImageModel
                   )
                     ? includeSelectedModelOption(
-                        visibleOpenAiImageModelCatalogEntries,
-                        visibleOpenAiImageModelIdOrEmpty(
+                        onlineImageModelCatalogEntries,
+                        visibleOnlineImageModelIdOrEmpty(
                           settings.preferredZenWallpaperOpenAiImageModel
                         ),
                         "openai"
                       )
-                    : visibleOpenAiImageModelCatalogEntries
+                    : onlineImageModelCatalogEntries
                 }
-                provider="openai"
+                provider="online"
+                disabled={!hasVisibleOnlineImageModels}
+                title={
+                  hasRunnableOnlineImageModels
+                    ? "Auto uses the first available online image model."
+                    : hasVisibleOnlineImageModels
+                      ? "Online image models are visible, but no runnable model is available yet."
+                    : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                }
                 ariaLabel="Atmosphere wallpaper online image model"
                 formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
                 autoOptionValue=""
-                autoOptionMetaOverride="use image API default"
+                autoOptionMetaOverride={
+                  hasRunnableOnlineImageModels
+                    ? "first available online image model"
+                    : hasVisibleOnlineImageModels
+                      ? "no runnable online image model"
+                    : "add online image key to enable"
+                }
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -21072,12 +21220,12 @@ function HomeContent(): React.JSX.Element {
     const openAiSeedForMenu =
       modelProvider === "openai"
         ? trimmedChoice === AUTO_MODEL_CHOICE || trimmedChoice === ""
-          ? DEFAULT_OPENAI_IMAGE_MODEL_ID
+          ? firstRunnableOnlineImageModelId
           : trimmedChoice
-        : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+        : firstRunnableOnlineImageModelId;
     const visibleOpenAiSeedForMenu =
-      visibleOpenAiImageModelIdOrEmpty(openAiSeedForMenu) ||
-      visibleOpenAiImageModelCatalogEntries[0]?.id ||
+      visibleOnlineImageModelIdOrEmpty(openAiSeedForMenu) ||
+      firstRunnableOnlineImageModelId ||
       "";
     const onlineOpts = includeSelectedModelOption(
       onlineImageModelCatalogEntries,
@@ -21100,7 +21248,7 @@ function HomeContent(): React.JSX.Element {
       modelProvider === "openai"
         ? trimmedChoice === AUTO_MODEL_CHOICE || trimmedChoice === ""
           ? AUTO_MODEL_CHOICE
-          : visibleOpenAiImageModelIdOrEmpty(trimmedChoice) || AUTO_MODEL_CHOICE
+          : visibleOnlineImageModelIdOrEmpty(trimmedChoice) || AUTO_MODEL_CHOICE
         : visibleLocalChoice;
 
     return (
@@ -21119,8 +21267,19 @@ function HomeContent(): React.JSX.Element {
           }}
           options={modelOptions}
           provider={isLocal ? "local" : "online"}
-          disabled={!settings}
-          title={`Image model (${isLocal ? "LOCAL" : "ONLINE"})`}
+          disabled={
+            !settings ||
+            (!isLocal && !hasVisibleOnlineImageModels)
+          }
+          title={
+            isLocal
+              ? "Image model (LOCAL)"
+              : hasRunnableOnlineImageModels
+                ? "Image model (ONLINE)"
+                : hasVisibleOnlineImageModels
+                  ? "Online image models are visible, but no runnable model is available yet."
+                  : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+          }
           ariaLabel={`Image generation model for ${isLocal ? "local" : "online"}`}
           placement="down"
           minMenuWidthPx={180}
@@ -25676,7 +25835,7 @@ function HomeContent(): React.JSX.Element {
       modelId === AUTO_MODEL_CHOICE
         ? ""
         : provider === "openai"
-          ? normalizeOpenAiImageModelId(modelId)
+          ? normalizeOnlineImageModelPreference(modelId)
           : modelId.trim();
     try {
       await api("/api/settings", {
@@ -25717,7 +25876,7 @@ function HomeContent(): React.JSX.Element {
       field === "preferredZenWallpaperOpenAiImageModel";
     const stored =
       isOpenAiField && rawFromSelect.trim().length > 0
-        ? normalizeOpenAiImageModelId(rawFromSelect)
+        ? normalizeOnlineImageModelPreference(rawFromSelect)
         : rawFromSelect.trim();
     try {
       await api("/api/settings", {
@@ -30334,12 +30493,12 @@ function HomeContent(): React.JSX.Element {
         preferredLocalImageModel,
         preferredOpenAiImageModel:
           preferredOpenAiImageModelRaw.length > 0
-            ? normalizeOpenAiImageModelId(preferredOpenAiImageModelRaw)
+            ? normalizeOnlineImageModelPreference(preferredOpenAiImageModelRaw)
             : "",
         preferredZenWallpaperLocalImageModel,
         preferredZenWallpaperOpenAiImageModel:
           preferredZenWallpaperOpenAiImageModelRaw.length > 0
-            ? normalizeOpenAiImageModelId(preferredZenWallpaperOpenAiImageModelRaw)
+            ? normalizeOnlineImageModelPreference(preferredZenWallpaperOpenAiImageModelRaw)
             : "",
         lenientLocalFallbackModel,
         lenientLocalImageFallbackModel,
@@ -33366,7 +33525,7 @@ function HomeContent(): React.JSX.Element {
     const openaiImageStored =
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
-        : normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+        : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
     try {
       await api("/api/bots", {
         method: "POST",
@@ -33508,7 +33667,7 @@ function HomeContent(): React.JSX.Element {
     const openaiImageStored =
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
-        : normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+        : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
     const copiedPrompt = serializeStoredBotPrompt(botProfile, copiedName);
 
     setBusy(true);
@@ -35787,7 +35946,7 @@ function HomeContent(): React.JSX.Element {
     const openaiImageStored =
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
-        : normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+        : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -35885,7 +36044,7 @@ function HomeContent(): React.JSX.Element {
   /** Effective image model for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
   function resolveImagesPanelImageModels(): {
     localModelId: string;
-    openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
+    openAiModelId: string;
   } {
     const scopeBotId = imagesPanelAttributionBotId;
     const scopeBot =
@@ -35913,27 +36072,35 @@ function HomeContent(): React.JSX.Element {
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
         : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
+    const fallbackOpenAiImageModel =
+      visibleOpenAiImageModelIdOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
 
-    const openAiModelId = normalizeOpenAiImageModelId(
-      headerOpenAi ||
-        visibleOpenAiImageModelIdOrEmpty(botOpenAiImage) ||
-        visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
-        visibleOpenAiImageModelCatalogEntries[0]?.id ||
-        DEFAULT_OPENAI_IMAGE_MODEL_ID
-    );
+    const openAiModelCandidates: Array<
+      ReturnType<typeof normalizeOpenAiImageModelId> | ""
+    > = [
+      headerOpenAi,
+      visibleOpenAiImageModelIdOrEmpty(botOpenAiImage),
+      visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel),
+      fallbackOpenAiImageModel,
+    ];
+    const openAiModelId =
+      openAiModelCandidates.find(
+        (modelId): modelId is ReturnType<typeof normalizeOpenAiImageModelId> =>
+          modelId !== ""
+      ) ?? "";
 
     return { localModelId, openAiModelId };
   }
 
   function zenWallpaperImageGenerationAvailable(): boolean {
     if (!settings) return false;
-    if (effectivePreferredProvider !== "local") return true;
+    if (effectivePreferredProvider !== "local") return hasRunnableOnlineImageModels;
     return localImageModelCatalogEntries.length > 0;
   }
 
   function resolveZenWallpaperImageModels(): {
     localModelId: string;
-    openAiModelId: ReturnType<typeof normalizeOpenAiImageModelId>;
+    openAiModelId: string;
   } {
     const conversationBot =
       detail?.botId && bots.length > 0
@@ -35958,14 +36125,22 @@ function HomeContent(): React.JSX.Element {
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
         : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
-    const openAiModelId = normalizeOpenAiImageModelId(
-      headerOpenAi ||
-        visibleOpenAiImageModelIdOrEmpty(botOpenAiImage) ||
-        visibleOpenAiImageModelIdOrEmpty(settings?.preferredZenWallpaperOpenAiImageModel) ||
-        visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
-        visibleOpenAiImageModelCatalogEntries[0]?.id ||
-        DEFAULT_OPENAI_IMAGE_MODEL_ID
-    );
+    const fallbackOpenAiImageModel =
+      visibleOpenAiImageModelIdOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
+    const openAiModelCandidates: Array<
+      ReturnType<typeof normalizeOpenAiImageModelId> | ""
+    > = [
+      headerOpenAi,
+      visibleOpenAiImageModelIdOrEmpty(botOpenAiImage),
+      visibleOpenAiImageModelIdOrEmpty(settings?.preferredZenWallpaperOpenAiImageModel),
+      visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel),
+      fallbackOpenAiImageModel,
+    ];
+    const openAiModelId =
+      openAiModelCandidates.find(
+        (modelId): modelId is ReturnType<typeof normalizeOpenAiImageModelId> =>
+          modelId !== ""
+      ) ?? "";
     return { localModelId, openAiModelId };
   }
 
@@ -36011,6 +36186,9 @@ function HomeContent(): React.JSX.Element {
           if (localModelId) body.model = localModelId;
         } else {
           body.preferredProvider = "openai";
+          if (!openAiModelId) {
+            throw new Error("Add an OpenAI key in Settings to enable online image models.");
+          }
           body.model = openAiModelId;
         }
       }
@@ -36314,6 +36492,9 @@ function HomeContent(): React.JSX.Element {
       // when the active chat bot is protected.
       if (effectivePreferredProvider !== "local") {
         body.preferredProvider = "openai";
+        if (!openAiModelId) {
+          throw new Error("Add an OpenAI key in Settings to enable online image models.");
+        }
         body.model = openAiModelId;
       } else if (settings) {
         body.preferredProvider = "local";
@@ -43529,14 +43710,15 @@ function HomeContent(): React.JSX.Element {
           return localImageModelCatalogEntries[0]?.id ?? AUTO_MODEL_CHOICE;
         })();
         const visibleOpenAiImageModelChoice = (() => {
+          if (!hasVisibleOnlineImageModels) return AUTO_MODEL_CHOICE;
           if (newBotOpenAiImageModel !== AUTO_MODEL_CHOICE && newBotOpenAiImageModel.trim()) {
-            const visible = visibleOpenAiImageModelIdOrEmpty(newBotOpenAiImageModel);
+            const visible = visibleOnlineImageModelIdOrEmpty(newBotOpenAiImageModel);
             if (visible) return visible;
           }
           return (
-            visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
-            visibleOpenAiImageModelCatalogEntries[0]?.id ||
-            normalizeOpenAiImageModelId(DEFAULT_OPENAI_IMAGE_MODEL_ID)
+            visibleOnlineImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
+            firstRunnableOnlineImageModelId ||
+            AUTO_MODEL_CHOICE
           );
         })();
         const localImageModelOptionsForBot = includeSelectedLocalImageModelOption(
@@ -43544,7 +43726,7 @@ function HomeContent(): React.JSX.Element {
           visibleLocalImageModelChoice
         );
         const openAiImageModelOptionsForBot = includeSelectedModelOption(
-          visibleOpenAiImageModelCatalogEntries,
+          onlineImageModelCatalogEntries,
           visibleOpenAiImageModelChoice,
           "openai"
         );
@@ -44258,16 +44440,29 @@ function HomeContent(): React.JSX.Element {
                             >
                               <span>Preferred online image model</span>
                               <ComposerModelPicker
-                                value={newBotOpenAiImageModel}
+                                value={visibleOpenAiImageModelChoice}
                                 onChange={setNewBotOpenAiImageModel}
                                 options={openAiImageModelOptionsForBot}
                                 provider="openai"
                                 ariaLabel="Preferred online image model for this bot"
-                                disabled={!newBotOnlineEnabled}
+                                disabled={!newBotOnlineEnabled || !hasVisibleOnlineImageModels}
+                                title={
+                                  hasRunnableOnlineImageModels
+                                    ? "Preferred online image model for this bot"
+                                    : hasVisibleOnlineImageModels
+                                      ? "Online image models are visible, but no runnable model is available yet."
+                                      : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                                }
                                 placement="down"
                                 minMenuWidthPx={260}
                                 autoOptionLabel="Account default"
-                                autoOptionMetaOverride="Settings"
+                                autoOptionMetaOverride={
+                                  hasRunnableOnlineImageModels
+                                    ? "Settings"
+                                    : hasVisibleOnlineImageModels
+                                      ? "no runnable online image model"
+                                      : "add online image key to enable"
+                                }
                                 settingsDefaultModelId={imageSettingsSavedDefaultModelId(
                                   settings,
                                   "openai"
@@ -44275,9 +44470,13 @@ function HomeContent(): React.JSX.Element {
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                               />
                               <small>
-                                {newBotOnlineEnabled
-                                  ? "OpenAI image models when this bot is in scope."
-                                  : "Disabled while online capability is off."}
+                                {!newBotOnlineEnabled
+                                  ? "Disabled while online capability is off."
+                                  : !hasVisibleOnlineImageModels
+                                    ? "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                                    : !hasRunnableOnlineImageModels
+                                      ? "Online image models are visible, but no runnable model is available yet."
+                                    : "Online image models when this bot is in scope."}
                               </small>
                             </div>
                           </div>
@@ -44488,28 +44687,41 @@ function HomeContent(): React.JSX.Element {
                           <div
                             className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                             onMouseEnter={(event) => showFieldHelp(
-                              "OpenAI image models when this bot is in scope.",
+                              "Online image models when this bot is in scope.",
                               event.currentTarget
                             )}
                             onMouseLeave={hideFieldHelp}
                             onFocus={(event) => showFieldHelp(
-                              "OpenAI image models when this bot is in scope.",
+                              "Online image models when this bot is in scope.",
                               event.currentTarget
                             )}
                             onBlur={hideFieldHelp}
                           >
                             <span>Preferred online image model</span>
                             <ComposerModelPicker
-                              value={newBotOpenAiImageModel}
+                              value={visibleOpenAiImageModelChoice}
                               onChange={setNewBotOpenAiImageModel}
                               options={openAiImageModelOptionsForBot}
                               provider="openai"
                               ariaLabel="Preferred online image model for this bot"
-                              disabled={!newBotOnlineEnabled}
+                              disabled={!newBotOnlineEnabled || !hasVisibleOnlineImageModels}
+                              title={
+                                hasRunnableOnlineImageModels
+                                  ? "Preferred online image model for this bot"
+                                  : hasVisibleOnlineImageModels
+                                    ? "Online image models are visible, but no runnable model is available yet."
+                                    : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                              }
                               placement="down"
                               minMenuWidthPx={260}
                               autoOptionLabel="Account default"
-                              autoOptionMetaOverride="Settings"
+                              autoOptionMetaOverride={
+                                hasRunnableOnlineImageModels
+                                  ? "Settings"
+                                  : hasVisibleOnlineImageModels
+                                    ? "no runnable online image model"
+                                    : "add online image key to enable"
+                              }
                               settingsDefaultModelId={imageSettingsSavedDefaultModelId(
                                 settings,
                                 "openai"
@@ -44517,9 +44729,13 @@ function HomeContent(): React.JSX.Element {
                               dismissPopoversSignal={composerPopoverDismissSignal}
                             />
                             <small>
-                              {newBotOnlineEnabled
-                                ? "Uses your OpenAI key from Settings when online images run."
-                                : "Disabled while online capability is off."}
+                              {!newBotOnlineEnabled
+                                ? "Disabled while online capability is off."
+                                : !hasVisibleOnlineImageModels
+                                  ? "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                                  : !hasRunnableOnlineImageModels
+                                    ? "Online image models are visible, but no runnable model is available yet."
+                                  : "Uses your online image key from Settings when online images run."}
                             </small>
                           </div>
                         </div>
@@ -44956,9 +45172,9 @@ function HomeContent(): React.JSX.Element {
         // Honors the offline-only lock — when the active chat bot is
         // protected, we evaluate "can generate?" against LOCAL only.
         const imageGenerationUsesOpenAi = effectivePreferredProvider !== "local";
-        const canGenerate =
-          imageGenerationUsesOpenAi ||
-          (effectivePreferredProvider === "local" && hasLocalImageModels);
+        const canGenerate = imageGenerationUsesOpenAi
+          ? hasRunnableOnlineImageModels
+          : hasLocalImageModels;
         const imageKeywordEditorLayout =
           viewportWidth >= IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX &&
           viewportHeight >= 760
@@ -45136,7 +45352,7 @@ function HomeContent(): React.JSX.Element {
           const id = useOpenAi ? openAiModelId : localModelId;
           if (!id) return null;
           const entries = useOpenAi
-            ? visibleOpenAiImageModelCatalogEntries
+            ? availableOpenAiImageModelCatalogEntries
             : localImageModelCatalogEntries;
           const label = entries.find((e) => e.id === id)?.label ?? id;
           return viaAuto ? `Using ${label} · Auto` : `Using ${label}`;

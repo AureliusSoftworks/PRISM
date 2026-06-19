@@ -295,21 +295,130 @@ function truncateForDisplay(value: string): string {
   return `${value.slice(0, OPENAI_ERROR_MESSAGE_MAX_CHARS)}...`;
 }
 
-function modelLabelFromId(id: string): string {
+function titleCaseModelToken(token: string): string {
+  const lower = token.toLowerCase();
+  const known: Record<string, string> = {
+    api: "API",
+    b: "B",
+    chatgpt: "ChatGPT",
+    code: "Code",
+    codellama: "Code Llama",
+    codex: "Codex",
+    deepseek: "DeepSeek",
+    distill: "Distill",
+    gemma: "Gemma",
+    gpt: "GPT",
+    instruct: "Instruct",
+    llama: "Llama",
+    llava: "LLaVA",
+    mini: "Mini",
+    mistral: "Mistral",
+    mixtral: "Mixtral",
+    nano: "Nano",
+    opus: "Opus",
+    phi: "Phi",
+    pro: "Pro",
+    qwen: "Qwen",
+    r1: "R1",
+    search: "Search",
+    sonnet: "Sonnet",
+    tinyllama: "TinyLlama",
+    vl: "VL",
+  };
+  if (known[lower]) return known[lower];
+  if (/^\d+(?:\.\d+)?b$/i.test(token)) return token.toUpperCase();
+  if (/^o\d/.test(lower)) return lower;
+  if (/^[a-z]+\d+(?:\.\d+)?$/i.test(token)) {
+    const match = token.match(/^([a-z]+)(\d+(?:\.\d+)?)$/i);
+    if (match) return `${titleCaseModelToken(match[1]!)} ${match[2]}`;
+  }
+  return token.toUpperCase() === token
+    ? token
+    : `${token.slice(0, 1).toUpperCase()}${token.slice(1)}`;
+}
+
+function formatOpenAiSnapshotSuffix(datePart: string | undefined): string {
+  if (!datePart) return "";
+  const isoDate = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) return ` (${isoDate[1]}-${isoDate[2]}-${isoDate[3]})`;
+  const compactDate = datePart.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactDate) return ` (${compactDate[1]}-${compactDate[2]}-${compactDate[3]})`;
+  return ` (${datePart})`;
+}
+
+function openAiModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "chatgpt-4o-latest") return "ChatGPT-4o";
+  const oSeries = normalized.match(/^(o\d)(?:-(mini))?$/);
+  if (oSeries) {
+    return [oSeries[1], oSeries[2] ? "Mini" : ""].filter(Boolean).join(" ");
+  }
+  const codex = normalized.match(/^gpt-(\d+(?:\.\d+)?)-codex(?:-(max|mini))?$/);
+  if (codex) {
+    return [
+      `GPT-${codex[1]}`,
+      "Codex",
+      codex[2] ? titleCaseModelToken(codex[2]) : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  const search = normalized.match(/^gpt-(\d+(?:\.\d+)?)-search-api(?:-(\d{4}-\d{2}-\d{2}))?$/);
+  if (search) {
+    return `GPT-${search[1]} Search${formatOpenAiSnapshotSuffix(search[2])}`;
+  }
+  const chatLatest = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
+  if (chatLatest) return `GPT-${chatLatest[1]}`;
+  const versioned = normalized.match(
+    /^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano|pro))?(?:-(\d{4}-\d{2}-\d{2}))?$/
+  );
+  if (versioned) {
+    return [
+      `GPT-${versioned[1]}`,
+      versioned[2] ? titleCaseModelToken(versioned[2]) : "",
+    ]
+      .filter(Boolean)
+      .join(" ") + formatOpenAiSnapshotSuffix(versioned[3]);
+  }
+  return null;
+}
+
+function anthropicModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized.startsWith("claude-")) return null;
+  const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
+  if (latest) {
+    return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+  }
+  const named = normalized.match(
+    /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
+  );
+  if (named) {
+    const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
+    return `Claude ${titleCaseModelToken(named[1]!)} ${version}${formatOpenAiSnapshotSuffix(named[4])}`;
+  }
+  return null;
+}
+
+function modelLabelFromId(id: string, provider?: ProviderName): string {
+  const providerLabel =
+    provider === "openai"
+      ? openAiModelLabelFromId(id)
+      : provider === "anthropic"
+        ? anthropicModelLabelFromId(id)
+        : null;
+  if (providerLabel) return providerLabel;
+
   const parts = id
+    .replace(SECONDARY_OLLAMA_MODEL_PREFIX, "")
     .split(/[-_:]/)
     .filter(Boolean)
     .filter((part, index, allParts) =>
       !(index === allParts.length - 1 && part.toLowerCase() === "latest")
     );
   const displayParts = parts.length > 0 ? parts : [id];
-  return displayParts
-    .map((part) =>
-      part.toUpperCase() === part
-        ? part
-        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
-    )
-    .join(" ");
+  return displayParts.map(titleCaseModelToken).join(" ");
 }
 
 function uniqueModelIds(ids: string[]): string[] {
@@ -346,6 +455,32 @@ function encodeSecondaryOllamaModelId(id: string): string {
   return `${SECONDARY_OLLAMA_MODEL_PREFIX}${id.trim()}`;
 }
 
+function openAiChatVariantBaseId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  const match = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
+  return match ? `gpt-${match[1]}` : null;
+}
+
+function preferOpenAiChatVariants(ids: string[]): string[] {
+  const chatVariantByBase = new Map<string, string>();
+  for (const rawId of ids) {
+    const id = rawId.trim();
+    const baseId = openAiChatVariantBaseId(id);
+    if (baseId) chatVariantByBase.set(baseId, id);
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const rawId of ids) {
+    const id = rawId.trim();
+    if (!id) continue;
+    const replacement = chatVariantByBase.get(id.toLowerCase()) ?? id;
+    if (seen.has(replacement)) continue;
+    seen.add(replacement);
+    result.push(replacement);
+  }
+  return result;
+}
+
 export function parseSecondaryOllamaModelId(id: string): string | null {
   const trimmed = id.trim();
   if (!trimmed.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)) {
@@ -367,7 +502,7 @@ function toCatalogEntry(
 ): ModelCatalogEntry {
   return {
     id,
-    label: options.label ?? modelLabelFromId(id),
+    label: options.label ?? modelLabelFromId(id, provider),
     provider,
     isDefault: id === defaultId || undefined,
     ...(options.localHost ? { localHost: options.localHost } : {}),
@@ -707,11 +842,13 @@ export async function buildModelCatalog(
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
   const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
   const onlineIds = openAiApiKey
-    ? uniqueModelIds([
-        OPENAI_DEFAULT_MODEL,
-        ...discoveredOpenAi,
-        ...OPENAI_FALLBACK_MODELS,
-      ])
+    ? preferOpenAiChatVariants(
+        uniqueModelIds([
+          OPENAI_DEFAULT_MODEL,
+          ...discoveredOpenAi,
+          ...OPENAI_FALLBACK_MODELS,
+        ])
+      )
     : [];
   const anthropicIds = anthropicApiKey
     ? uniqueModelIds([
@@ -730,7 +867,7 @@ export async function buildModelCatalog(
       ),
       ...secondaryLocalIds.map((id) =>
         toCatalogEntry(encodeSecondaryOllamaModelId(id), "local", config.ollamaModel, {
-          label: `${modelLabelFromId(id)} (Second host)`,
+          label: `${modelLabelFromId(id, "local")} (Second host)`,
           localHost: "secondary",
           hostLabel: "Second host",
         })

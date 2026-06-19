@@ -154,7 +154,7 @@ describe("resolveAutoModel", () => {
 });
 
 describe("sanitizeHiddenModelIds", () => {
-  it("never persists required local models as hidden", () => {
+  it("keeps the required chat fallback visible but allows non-chat support models to hide", () => {
     assert.deepEqual(
       sanitizeHiddenModelIds([
         REQUIRED_LOCAL_MODELS.chat,
@@ -163,7 +163,7 @@ describe("sanitizeHiddenModelIds", () => {
         "gpt-4o-mini",
         "  ",
       ]),
-      ["gpt-4o-mini"]
+      [REQUIRED_LOCAL_MODELS.embedding, "gpt-4o-mini"]
     );
   });
 });

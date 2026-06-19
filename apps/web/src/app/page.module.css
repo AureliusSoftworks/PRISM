@@ -19229,7 +19229,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .settingsModelProviderDropdown[data-model-provider="ollama"] {
-  --settings-model-provider-accent: #111827;
+  --settings-model-provider-accent: var(--line);
+  background: var(--bg);
+  box-shadow: none;
 }
 
 .settingsModelProviderDropdown[data-model-provider="openai"] {
@@ -19242,10 +19244,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
   --settings-model-provider-accent: #777169;
-}
-
-.themeDark .settingsModelProviderDropdown[data-model-provider="ollama"] {
-  --settings-model-provider-accent: #f8fafc;
 }
 
 .themeDark .settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
