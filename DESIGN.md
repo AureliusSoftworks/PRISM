@@ -184,9 +184,11 @@ All services use `restart: unless-stopped` for headless boot recovery.
 ## Clients and distribution (current)
 
 Shipping posture today is **direct downloads** (GitHub Releases) plus **Prism on
-iPhone as a PWA** served by the server — not an App Store–first model. Native
-**Prism.app** on macOS is the paid shell that pairs to your server; the server
-remains the source of truth for accounts, memory, provider rules, and tenancy.
+iPhone as a PWA** served by the server - not an App Store-first model.
+Official desktop builds are free to download and use. Optional $5/month
+Patreon support funds development but does not unlock core features, affect
+LOCAL/ONLINE behavior, or create runtime access checks. The server remains the
+source of truth for accounts, memory, provider rules, and tenancy.
 
 The native client must not reimplement chat, memory, provider routing, or
 tenancy rules on-device. Those invariants stay in `apps/api`.

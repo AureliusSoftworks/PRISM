@@ -22,18 +22,16 @@ binary download.
 2. User opens the server URL on their iPhone in **Safari** (Add to Home Screen
    only works from Safari, not Chrome or Firefox on iOS).
 3. User completes the standard pairing flow in the browser: enters the
-   pairing code shown by the server and the license code from
-   [distribution-model.md](distribution-model.md).
+   pairing code shown by the server.
 4. Once paired, the user taps the Safari Share sheet and selects
    **"Add to Home Screen"**. iOS adds a springboard icon for Prism.
 5. Tapping the home-screen icon launches Prism in a chromeless, fullscreen,
    kiosk-style window — no Safari address bar, no tab strip. Visually
    indistinguishable from a native app for everyday use.
 
-The pairing token and license-code state are stored by the server and
-authenticated through the `prism_client_access` cookie (the same gate the Mac
-client uses), so the home-screen launcher resumes the paired session without
-re-pairing.
+The pairing token is stored by the server and authenticated through the
+`prism_client_access` cookie (the same local session gate the Mac client uses),
+so the home-screen launcher resumes the paired session without re-pairing.
 
 ### Web manifest requirements
 
@@ -84,12 +82,11 @@ Android/Chromium browsers and the meta tags cover iOS Safari:
   the home screen. Without it, iOS falls back to a screenshot of the page,
   which looks unfinished.
 
-### License code in the PWA flow
+### Support in the PWA flow
 
-The license-code prompt for the PWA is rendered by the web shell during
-pairing, not by a native onboarding screen. Once accepted, the server stores
-the license entitlement against the paired client identity; subsequent
-home-screen launches re-use the stored entitlement.
+The PWA flow does not include payment, support, or purchase steps. Optional
+$5/month Patreon support remains outside the runtime and must not affect local
+pairing, session access, or feature availability.
 
 ### What this replaces
 

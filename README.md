@@ -128,7 +128,8 @@ npm run dev
 
 ## Desktop Releases
 
-Prism ships as a standalone desktop app per OS from GitHub Releases under:
+Prism official desktop builds are free to download and use. Releases ship as
+standalone desktop apps per OS from GitHub Releases under:
 
 - `desktop/v<version>`
 
@@ -146,9 +147,9 @@ Full process: [`docs/release-process.md`](docs/release-process.md)
 
 Prism distribution is direct (indie model):
 
-- Desktop app for macOS/Windows/Linux
+- Free official desktop app for macOS/Windows/Linux
 - iPhone via PWA ("Add to Home Screen" in Safari)
-- License-code based activation model
+- Optional $5/month Patreon support, with no tiers or paid feature locks
 
 Details: [`docs/distribution-model.md`](docs/distribution-model.md)
 
@@ -187,6 +188,7 @@ prism reset --force
 - iPhone (PWA) path: [`docs/prism-ios-client.md`](docs/prism-ios-client.md)
 - Licensing and brand: [`docs/licensing-and-brand.md`](docs/licensing-and-brand.md)
 - Distribution strategy: [`docs/distribution-model.md`](docs/distribution-model.md)
+- Product-worthy launch checklist: [`docs/product-worthy-launch.md`](docs/product-worthy-launch.md)
 - Desktop runtime layout: [`docs/desktop-runtime-layout.md`](docs/desktop-runtime-layout.md)
 
 ---
@@ -197,4 +199,3 @@ prism reset --force
 - `main` = tagged releases only
 
 Each release is a merge from `dev` -> `main` with a matching `CHANGELOG.md` entry and semver tag.
-

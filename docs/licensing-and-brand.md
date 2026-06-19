@@ -1,72 +1,70 @@
 # Prism Licensing And Brand Model
 
-Prism should separate source transparency from the paid official Apple client.
-The goal is to make the server auditable and community-friendly without giving
-up the business model for the official frontend.
+Prism's current public posture is simple: official desktop builds are free to
+download and use, and people can optionally support development through one
+`$5/month` Patreon lane.
 
-## Recommended Licensing Split
+This is not a full legal policy. Before public launch, the exact license file,
+trademark notice, contributor terms, brand-use rules, and any store terms should
+be reviewed by a qualified attorney.
 
-| Component | Recommended stance | Rationale |
+## Current Positioning
+
+| Area | Current stance | Rationale |
 | --- | --- | --- |
-| Prism Server | Open source, likely AGPLv3 | The server is the trust anchor and contains the local-first data/runtime guarantees. AGPLv3 preserves reciprocity for networked modifications. |
-| Existing web UI | Ship with the server unless later split | It is currently part of the self-hosted server experience and useful for setup/admin. |
-| Official Prism macOS client (and future desktop clients) | Proprietary paid download | Polished native shell distributed from GitHub Releases (not the App Store–first model). |
+| Official Prism desktop builds | Free to download and use | Reduces friction and matches the local-first trust story. |
+| Optional support | One `$5/month` Patreon lane | Funds development without creating tiers, paid gates, or access checks. |
 | Prism name, logos, icons, marketing copy | Protected brand assets | Forks and third-party clients should not appear official or reuse protected branding. |
+| Source/license status | Not final until a `LICENSE` exists | Avoids making final license claims before the legal surface is real. |
 
-This is not a full legal policy. Before public launch, the exact license files,
-trademark notice, contributor terms, and App Store EULA should be reviewed by a
-qualified attorney.
+## Support Boundary
 
-## Why Not Fully Open Source Everything
+Support must stay separate from runtime access.
 
-A true open-source license cannot reliably stop someone from building or
-shipping a custom frontend that avoids paying for the official app. Open-source
-licenses generally allow modification, redistribution, and commercial use.
+- Do not add purchase checks, paid feature locks, or supporter-only core
+  features.
+- Do not link Patreon accounts inside Prism during this phase.
+- Do not add telemetry or outbound support verification to LOCAL mode.
+- If the app later adds a support entry point, make it a quiet Settings/About
+  link labeled `Support Prism` that opens Patreon externally.
 
-If preventing competing frontends is more important than open-source status, the
-project would need a source-available license instead. That is a valid strategy,
-but it should not be described as open source.
+## Source And License Boundary
 
-## Why Not Block Third-Party Clients
+Until a real `LICENSE` file is added, public copy should avoid specific
+source-license labels for the active product. It is safe to say:
 
-Avoid server-side checks that only permit the official frontend.
+```text
+Prism official builds are free to download and use. The final source license
+and brand-use policy are still being prepared.
+```
 
-Reasons:
-
-- The server is local and source-visible, so lockout checks are easy to remove.
-- DRM-style checks undermine the local-first trust story.
-- They create support burden for legitimate self-hosted setups.
-- They conflict with the product's privacy and user-agency posture.
-
-The better moat is the official client experience: native polish, secure storage, pairing flow, updates, support, and brand trust.
+If the project later adopts a public source license, update this file, root
+copy, release copy, and contributor guidance together.
 
 ## Brand Boundary
 
-Allowed for community forks:
+Allowed for community discussion:
 
-- Use the open-source server code under its license.
-- Build experimental or personal clients.
-- Refer factually to compatibility with Prism Server, subject to brand rules.
+- Refer factually to compatibility with Prism.
+- Share feedback, bug reports, setup notes, and non-official experiments.
 
 Not allowed without permission:
 
 - Calling a fork or third-party client "Prism" in a way that implies official
   status.
-- Reusing official Prism icons, store artwork, screenshots, or marketing
-  copy.
-- Representing a third-party client as the official paid Prism client.
+- Reusing official Prism icons, store artwork, screenshots, or marketing copy.
+- Representing a third-party client as the official Prism app.
 
 ## Distribution Copy
 
 README and release pages should use clear language aligned with the current
-indie model (GitHub Releases for server + paid client; iPhone via PWA):
+indie model:
 
 ```text
-Prism Server is open source and available from GitHub Releases.
-The Prism client (macOS today; more platforms planned) is distributed from
-GitHub Releases and activates with a license code. Prism on iPhone is a
-Progressive Web App served by your Prism Server — no App Store download.
+Prism official desktop builds are free to download and use from GitHub
+Releases. Optional $5/month Patreon support helps fund development but does
+not unlock core features, affect local/private mode, or create access checks.
+Prism on iPhone is a Progressive Web App served by your Prism desktop app.
 ```
 
-That keeps expectations clear for users, contributors, and future third-party
-developers.
+That keeps expectations clear for users, supporters, and future contributors.

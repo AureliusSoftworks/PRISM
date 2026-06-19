@@ -64,7 +64,7 @@ Before publishing any draft:
 - install and launch each desktop artifact on a clean environment
 - verify local API/web startup and first-run dependency checks
 - verify release notes
-- verify entitlement/licensing flow for paid desktop path
+- verify free-download/support copy and installer readiness
 
 Publish is an explicit human decision after these checks.
 
@@ -77,6 +77,6 @@ Use this order on `main` after merging `dev`:
 3. Wait for matrix packaging and artifact uploads to finish
 4. Smoke-test each platform artifact
 5. Publish draft when validated
-6. Post release links to distribution channels (Patreon/storefront)
+6. Post release links to download channels and the optional Patreon support page
 
 Do not merge, tag, publish, or trigger store upload without explicit human confirmation in chat.

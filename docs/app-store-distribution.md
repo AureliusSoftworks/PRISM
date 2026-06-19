@@ -1,8 +1,8 @@
 # Prism App Store Distribution
 
-> **Status: Historical.** This document captures the App Store distribution
-> plan that was active before Prism pivoted to indie / Patreon / direct-download
-> distribution. The current model is documented in
+> **Status: Historical.** This document captures an App Store distribution
+> plan that was active before Prism pivoted to free direct downloads with
+> optional $5/month Patreon support. The current model is documented in
 > [distribution-model.md](distribution-model.md) and supersedes everything
 > below. This file is retained for archive in case App Store distribution is
 > revisited; the iPhone shipping path is now a Progressive Web App (see
@@ -10,11 +10,11 @@
 > Mac client ships as a Developer ID signed and notarized DMG, not a Mac App
 > Store binary.
 
-Prism's Apple distribution model is a two-binary product:
+The old Apple distribution model was a two-binary product:
 
-- **Prism Server**: the open-source local runtime that runs on Mac, Windows, or
+- **Prism Server**: the local runtime that runs on Mac, Windows, or
   Linux.
-- **Prism iOS/Mac**: the official paid native companion client distributed
+- **Prism iOS/Mac**: the official native companion client distributed
   through the App Store.
 
 The server owns the user's data and AI runtime. The native app connects to that
@@ -51,9 +51,9 @@ Responsibilities:
 - Keep the existing web app available as the desktop/admin UI.
 - Explain clearly that user data lives on the user's server.
 
-Initial packaging stance:
+Historical packaging stance:
 
-- GitHub source remains public for auditability and community contribution.
+- GitHub source remains visible for auditability and community contribution.
 - GitHub Releases provide server downloads and release notes.
 - A signed/notarized desktop launcher is preferred before pursuing Mac App
   Store server distribution.
@@ -70,7 +70,7 @@ Initial packaging stance:
 
 ## Prism iOS/Mac
 
-Prism iOS/Mac is the official paid frontend. The near-term iOS implementation
+Prism iOS/Mac was the planned official frontend. The near-term iOS implementation
 is a hybrid client: native pairing/session ownership first, then the existing
 mobile-friendly Prism interface in a controlled `WKWebView`.
 
@@ -137,36 +137,34 @@ Submission checklist:
 
 ## Licensing And Commercial Model
 
-> **Superseded.** The current licensing model is JetBrains-style (one-time
-> purchase = current version on all platforms; monthly subscription =
-> always-current on all platforms with ongoing updates; cancellation keeps the
-> last entitled version). See
-> [distribution-model.md#licensing-model-jetbrains-style](distribution-model.md#licensing-model-jetbrains-style)
-> for details. The text below is the original App-Store-era plan.
+> **Superseded.** The current model is free official desktop downloads with one
+> optional `$5/month` Patreon support lane. There are no tiers, paid feature locks,
+> purchase checks, or runtime support verification. See
+> [distribution-model.md#support-model](distribution-model.md#support-model)
+> for the active model. The text below is the original App-Store-era plan.
 
-Prism should be transparent about what is open and what is paid.
+Prism should be transparent about what is free, what is legally licensed, and
+what is protected brand material.
 
-Recommended split:
+Historical split:
 
-- **Prism Server**: true open-source license. AGPLv3 is the default candidate if
-  strong reciprocity is desired for networked modifications.
-- **Official Prism iOS/Mac**: proprietary paid App Store app.
+- **Prism Server**: source-visible local runtime, pending final license.
+- **Official Prism iOS/Mac**: App Store companion app.
 - **Prism name, logo, icon, and App Store assets**: protected by trademark and
   brand guidelines.
 - **Community clients**: not blocked at the protocol layer, but they cannot
   present themselves as official Prism or use protected branding.
 
 Avoid DRM-style server checks that only allow the official frontend. In a
-local-first open server, those checks are brittle, hostile to trust, and easy to
-patch out. The durable moat should be polish, App Store convenience, support,
-brand trust, and a great official client.
+local-first product, those checks are brittle and hostile to trust. The durable
+moat should be polish, support, brand trust, and a great official client.
 
 ## README Placement
 
-The root README should eventually carry two prominent links:
+The root README should carry two prominent links:
 
-- Download Prism Server from GitHub Releases.
-- Get the official Prism iOS/Mac client from the App Store.
+- Download Prism Desktop from GitHub Releases.
+- Optionally support Prism for `$5/month` on Patreon.
 
-Until the App Store app exists, the README should describe this as the planned
-distribution model and link to this document plus the mobile API contract.
+If App Store distribution is revisited, this file must be rewritten against the
+active free-download/support model before it becomes guidance again.

@@ -10,32 +10,38 @@ or release doc disagrees with this file, this file wins.
 
 ```mermaid
 flowchart LR
-  Patreon["Patreon subscription"] --> licenseCode["License code"]
-  OneTime["One-time purchase store"] --> licenseCode
-  licenseCode --> macDesktop["Prism Desktop macOS"]
-  licenseCode --> winDesktop["Prism Desktop Windows"]
-  licenseCode --> linuxDesktop["Prism Desktop Linux"]
+  GitHub["GitHub Releases"] --> macDesktop["Prism Desktop macOS"]
+  GitHub --> winDesktop["Prism Desktop Windows"]
+  GitHub --> linuxDesktop["Prism Desktop Linux"]
+  Patreon["Optional $5/month Patreon support"] -. funds development .-> GitHub
   macDesktop --> bundledRuntime["Bundled local runtime"]
   winDesktop --> bundledRuntime
   linuxDesktop --> bundledRuntime
+  bundledRuntime --> PWA["iPhone PWA served by Prism"]
 ```
 
 - Desktop distribution is direct: no App Store, no Mac App Store, no TestFlight.
 - GitHub Releases is the primary delivery channel.
-- Steam (and similar stores) is an additional lane for the same desktop artifacts.
+- Official desktop builds are free to download and use.
+- Optional support is a single $5/month Patreon lane.
+- Support is not a product tier and does not unlock core features.
+- Steam and similar stores may become additional lanes for the same official
+  desktop artifacts, but the GitHub release remains the baseline free download.
 - iPhone remains a separate PWA path served by Prism.
 
-## What Users Buy
+## What Users Get
 
-Users buy access to **Prism Desktop**.
+Users download **Prism Desktop** directly.
 
 Each desktop build includes:
+
 - UI shell
 - local API runtime
 - local data and memory plumbing
-- first-run dependency helpers (for example Ollama/model pulls)
+- first-run dependency helpers, such as Ollama/model pulls
 
-Users should not install or run a separate server app.
+Users should not install or run a separate server app for the normal desktop
+experience.
 
 ## Per-Platform Delivery
 
@@ -46,28 +52,43 @@ Users should not install or run a separate server app.
 | Linux | `Prism-Desktop-v<version>-linux-x64.AppImage` | `desktop/v<version>` | Unsigned initially |
 | iPhone | PWA via Safari -> Add to Home Screen | N/A | Not applicable |
 
-## Licensing Model (JetBrains-style)
+## Support Model
 
-Two purchase paths, one entitlement concept.
+Prism's first commercial model is optional support, not access control.
 
-### One-time purchase
+- One Patreon support option: `$5/month`.
+- No tiers, paid feature locks, purchase screens, or supporter-only core
+  functionality.
+- No Patreon account linking in the product for this phase.
+- No telemetry or outbound support checks from the local runtime.
+- A future in-app entry point should be quiet: a Settings/About link labeled
+  `Support Prism` that opens Patreon externally.
 
-- Pays once, receives a license code.
-- Unlocks the purchased Prism Desktop version across supported desktop platforms.
-- Future versions require another one-time purchase or a subscription.
+The product should remain usable, private, and clear for people who never
+support financially. The support ask should feel like helping the project
+continue, not like buying permission to use Prism.
 
-### Subscription (Patreon)
+## Launch Readiness
 
-- Pays monthly, receives (or keeps) a license code.
-- Unlocks always-current Prism Desktop builds while active.
-- On cancellation, user keeps the last entitled version.
+Do not broadly promote Prism until the product-worthy checklist is satisfied:
 
-### License posture
+- Mac, Windows, and Linux installers are smoke-tested.
+- First-run setup is understandable for non-developers.
+- GitHub Releases and the README explain the free download path clearly.
+- LOCAL mode and privacy guarantees are verified.
+- Support copy is ready, restrained, and non-intrusive.
 
-- Lightweight verification and honest-user friendly behavior.
-- No aggressive DRM, hardware fingerprinting, or always-online lock-in.
-- Piracy resistance relies primarily on product quality and support.
+The detailed launch checklist lives in
+[`product-worthy-launch.md`](product-worthy-launch.md).
+
+## Legal And Brand Posture
+
+This repository currently should not make final source-license claims until a
+real `LICENSE`, trademark notice, contributor policy, and brand-use policy are
+present. Public copy can say that official builds are free to download and use,
+and that source availability/licensing details are pending.
 
 ## Historical Note
 
-Legacy split server/client docs are archival only and are non-canonical.
+Legacy split server/client and paid-access docs are archival only and are
+non-canonical.

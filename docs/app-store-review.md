@@ -19,7 +19,7 @@ Required positioning:
 - Prism is a private AI client for a user-controlled Prism Server.
 - Prism Server is required for normal use.
 - The server may run on Mac, Windows, or Linux.
-- The official Apple client is the paid, polished native frontend.
+- The official Apple client is the polished native frontend.
 - User chat data and memory live on the user's server unless the user configures
   optional online provider features.
 
