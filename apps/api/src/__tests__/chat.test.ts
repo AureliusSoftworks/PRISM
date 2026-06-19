@@ -120,6 +120,21 @@ function createChatTestDb(): DatabaseSync {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, bot_scope_key)
     );
+    CREATE TABLE prism_mood_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      annoyance REAL NOT NULL DEFAULT 0.12,
+      warmth REAL NOT NULL DEFAULT 0.62,
+      engagement REAL NOT NULL DEFAULT 0.62,
+      restraint REAL NOT NULL DEFAULT 0.68,
+      recent_deltas TEXT NOT NULL DEFAULT '[]',
+      frozen INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, mode)
+    );
   `);
   return db;
 }
@@ -696,10 +711,14 @@ describe("processChatMessage starter prompts", () => {
     );
 
     const starterBody = bodies[0];
+    const starterIdentityBlock = starterBody?.messages?.[0]?.content ?? "";
     const starterUserInstruction = starterBody?.messages?.filter((m) => m.role === "user").pop();
+    assert.doesNotMatch(starterIdentityBlock, /reflective evening check-ins/i);
     assert.match(starterUserInstruction?.content ?? "", /Ask exactly ONE direct question/i);
     const memoryBlock = starterBody?.messages?.find((msg) =>
-      msg.content.startsWith("User memory hints about the human user:\n")
+      msg.content.startsWith(
+        "User memory hints about the human user (conversation context only; do not rewrite persona identity):\n"
+      )
     );
     assert.ok(memoryBlock);
     assert.match(memoryBlock?.content ?? "", /Jared prefers reflective evening check-ins/i);
@@ -2288,6 +2307,171 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.match(promptText, /appears to complete, predict, or answer the unfinished thought/i);
     assert.match(promptText, /do not continue repeating the interrupted text/i);
     assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("persists Zen interruption mood and lets warm repair turns recover it", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("I can shift with you.");
+
+    const interrupted = await processChatMessage(
+      db,
+      "user-1",
+      "Wait, pause that thought. I need a different angle.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        prismInterruption: {
+          kind: "assistant_reveal",
+          assistantMessageId: "assistant-visible-fragment",
+          visibleTokenCount: 38,
+          totalTokenCount: 72,
+          interruptionCount: 2,
+        },
+      }
+    );
+
+    assert.ok(interrupted.prismMood);
+    assert.equal(interrupted.prismMood?.mode, "zen");
+    assert.ok((interrupted.prismMood?.annoyance ?? 0) > 0.12);
+    assert.equal(interrupted.prismMood?.recentDeltas[0]?.kind, "interruption");
+    const row = db
+      .prepare(
+        "SELECT mood_key, annoyance, recent_deltas FROM prism_mood_state WHERE user_id = ? AND conversation_id = ? AND mode = ?"
+      )
+      .get("user-1", interrupted.conversation.id, "zen") as
+      | { mood_key: string; annoyance: number; recent_deltas: string }
+      | undefined;
+    assert.ok(row);
+    assert.ok(row.annoyance > 0.12);
+
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, that was abrupt. Thank you for staying with me.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      interrupted.conversation.id
+    );
+
+    assert.ok(repaired.prismMood);
+    assert.ok(
+      (repaired.prismMood?.annoyance ?? 1) <
+        (interrupted.prismMood?.annoyance ?? 0)
+    );
+    assert.ok(
+      (repaired.prismMood?.warmth ?? 0) >=
+        (interrupted.prismMood?.warmth ?? 1)
+    );
+    assert.equal(repaired.prismMood?.recentDeltas[0]?.kind, "positive_turn");
+  });
+
+  it("keeps relationship and mood context out of the persona identity block", async () => {
+    const db = createChatTestDb();
+    const userKey = CHAT_TEST_USER_KEY;
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-1",
+      "user-1",
+      "Leaf Bot",
+      "You are Leaf Bot. You are curious and warm.",
+      "#7fbf7f",
+      "leaf"
+    );
+    db.prepare(
+      `INSERT INTO bot_opinions (
+        user_id, bot_scope_key, bot_id, score, band, boundary_level, trend,
+        last_reason, recent_reasons, repair_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      "bot-1",
+      "bot-1",
+      24,
+      "strained",
+      "gentle",
+      "down",
+      "The user was curt in a prior turn.",
+      JSON.stringify(["The user was curt in a prior turn."]),
+      0,
+      "2026-01-01T00:00:00.000Z"
+    );
+    type ChatPayload = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.messages?.[0]?.content.includes("memory validation critic")) {
+        return new Response(
+          JSON.stringify({ message: { content: JSON.stringify({ results: [] }) } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Let us make that quieter and more useful." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Can we make tonight's check-in gentler?",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        devMemoriesEnabled: true,
+        devMemoriesText: "The test user likes slower pacing.",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const generationBody = chatPayloads[0];
+    assert.ok(generationBody);
+    const messages = generationBody.messages ?? [];
+    const identityBlock = messages[0]?.content ?? "";
+    const promptText = messages
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n\n");
+    assert.match(identityBlock, /You are Leaf Bot/i);
+    assert.doesNotMatch(identityBlock, /slower pacing/i);
+    assert.doesNotMatch(identityBlock, /Conversation relationship context/i);
+    assert.doesNotMatch(identityBlock, /Current Prism mood context/i);
+    assert.match(promptText, /Developer conversation context \(not persona identity\)/);
+    assert.match(
+      promptText,
+      /Conversation relationship context for this turn \(not persona identity\)/
+    );
+    assert.match(promptText, /Current Prism mood context for this turn \(not persona identity\)/);
+    assert.doesNotMatch(promptText, /across every bot persona/i);
   });
 
   it("skips AskQuestion payload when options are not synthesized", async () => {

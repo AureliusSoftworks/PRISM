@@ -6336,6 +6336,133 @@
   color: var(--danger);
 }
 
+.devMoodVisual {
+  position: fixed;
+  z-index: 85;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 28px));
+  pointer-events: auto;
+}
+
+.devMoodFaceButton {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(16, 19, 26, 0.82);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  touch-action: none;
+  backdrop-filter: blur(16px);
+}
+
+.devMoodFaceButton:active {
+  cursor: grabbing;
+}
+
+.devMoodFaceButton:hover,
+.devMoodFaceButton:focus-visible {
+  border-color: rgba(255, 255, 255, 0.38);
+  outline: none;
+}
+
+.devMoodFaceButton .messageMoodBadge {
+  transform: scale(1.08);
+}
+
+.devMoodPanel {
+  width: min(340px, calc(100vw - 28px));
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(14, 17, 23, 0.92);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.devMoodPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.devMoodPanelHeader > div {
+  display: grid;
+  gap: 3px;
+}
+
+.devMoodPanelHeader strong {
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.devMoodGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.devMoodGrid span {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.devMoodGrid small,
+.devMoodDeltaList p,
+.devMoodNote {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.devMoodGrid small {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.devMoodGrid strong {
+  font-size: 0.96rem;
+}
+
+.devMoodNote {
+  margin: 12px 0;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.devMoodActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.devMoodDeltaList {
+  display: grid;
+  gap: 6px;
+  max-height: 130px;
+  overflow: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.devMoodDeltaList p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.devMoodDeltaList strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .devToolsStatus {
   margin: 10px 0 0;
   font-size: 12.5px;

@@ -1,4 +1,30 @@
 export {
+  applyPrismMoodInterruption,
+  applyPrismMoodPositiveTurn,
+  clampPrismMoodValue,
+  coffeeSocialSnapshotToPrismMoodState,
+  createDefaultPrismMoodState,
+  debugPatchPrismMood,
+  decayPrismMood,
+  derivePrismMoodConfidence,
+  derivePrismMoodKey,
+  interruptionProgressWeight,
+  prismMoodDeclineReason,
+  resetPrismMood,
+  sanitizePrismMoodState,
+  shouldPrismMoodDeclineResponse,
+  type CoffeeSocialLikeSnapshot,
+  type PrismMoodDebugPatch,
+  type PrismMoodDelta,
+  type PrismMoodDeltaKind,
+  type PrismMoodInterruptionInput,
+  type PrismMoodKey,
+  type PrismMoodMode,
+  type PrismMoodSnapshot,
+  type PrismMoodState,
+} from "./mood.js";
+
+export {
   BOT_FACT_KEY_LABELS,
   BOT_FACT_KEY_ORDER,
   BOT_FACT_KEY_PLACEHOLDERS,
@@ -207,6 +233,7 @@ export {
 import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
 import type { PromptShortcutMetadata } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
+import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
@@ -471,6 +498,12 @@ export interface Conversation {
    */
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   /**
+   * Normalized Prism mood/relationship state for this conversation surface.
+   * Coffee adapts its per-seat social state into this shape; Zen persists it
+   * directly so developer diagnostics and prompt shaping share one vocabulary.
+   */
+  prismMood?: PrismMoodSnapshot;
+  /**
    * Coffee-only — table feel / reply length / focus knobs for this session.
    * Omitted for non-coffee rows.
    */
@@ -675,6 +708,8 @@ export interface ChatRequestPayload {
   ephemeralMessages?: ChatMessage[];
   /** Optional signal to trigger end-of-session rolling compaction. */
   sessionEnding?: boolean;
+  /** Optional metadata when the latest Zen send interrupted Prism. */
+  prismInterruption?: PrismMoodInterruptionInput;
 }
 
 /**
@@ -687,7 +722,7 @@ export interface StarterChatExtras {
 
 export type OpinionBand = "guarded" | "warming" | "trusting";
 export type OpinionTrend = "up" | "down" | "steady";
-export type BotMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
+export type BotMoodKey = PrismMoodKey;
 
 export interface SessionOpinion {
   score: number;
@@ -715,6 +750,7 @@ export interface BotOpinion {
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
+  prismMood?: PrismMoodSnapshot;
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
   summaryCompaction?: {

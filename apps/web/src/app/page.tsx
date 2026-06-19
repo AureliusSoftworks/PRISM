@@ -83,6 +83,7 @@ import {
   listBotProfileFacts,
   parseAssistantPrismTools,
   parseStoredBotPrompt,
+  prismMoodDeclineReason,
   randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
@@ -106,6 +107,7 @@ import {
   STORY_BOT_COUNT_MIN,
   getStoryCurrentScene,
   getStoryLocation,
+  coffeeSocialSnapshotToPrismMoodState,
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
@@ -116,6 +118,8 @@ import {
   type BotVoicePreset,
   type BotMoodKey,
   type ComfyUiWorkflowRegistration,
+  type PrismMoodInterruptionInput,
+  type PrismMoodSnapshot,
   type PromptShortcutMetadata,
   type SentGeneratedImagePayload,
   type StoryEpisodeManifest,
@@ -557,6 +561,12 @@ const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
 const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
+/** When set, shows the draggable Prism mood developer visual. */
+const PRISM_DEV_MOOD_VISUAL_STORAGE_KEY = "prism_dev_mood_visual";
+/** Local position for the draggable Prism mood developer visual. */
+const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY = "prism_dev_mood_visual_position_v1";
+const DEV_MOOD_VISUAL_DEFAULT_X = 22;
+const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
 /** Local marker for the next/active Zen session boundary. */
 const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -584,6 +594,15 @@ type DevToolsPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
+};
+type DevMoodVisualPosition = { x: number; y: number };
+type DevMoodVisualDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
 };
 type CoffeePollPanelPosition = { x: number; y: number };
 type CoffeePollPanelDragState = {
@@ -4819,6 +4838,8 @@ interface ConversationDetail {
   hasAssistantReply: boolean;
   /** Zen-only ambient wallpaper metadata; absent on older responses means off. */
   zenWallpaper?: ZenWallpaperMetadata;
+  /** Normalized Prism mood state for developer diagnostics and mood-aware UX. */
+  prismMood?: PrismMoodSnapshot;
   messages: Message[];
 }
 
@@ -4847,6 +4868,7 @@ interface ChatPostEnvelope {
   };
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
+  prismMood?: PrismMoodSnapshot;
   memoryLearned?: {
     created?: MemoryEventPayload[];
     retracted?: MemoryEventPayload[];
@@ -8095,6 +8117,37 @@ function normalizeAssistantMoodKey(
     return moodKey;
   }
   return DEFAULT_MESSAGE_MOOD;
+}
+
+function coffeeSocialByIdToPrismMood(
+  socialById: Record<string, CoffeeBotSocialSnapshot> | null | undefined
+): PrismMoodSnapshot | null {
+  const snapshots = Object.values(socialById ?? {});
+  if (snapshots.length === 0) return null;
+  const aggregate = snapshots.reduce(
+    (acc, social) => ({
+      disposition: acc.disposition + social.disposition,
+      valuesFriction: acc.valuesFriction + social.valuesFriction,
+      restraint: acc.restraint + social.restraint,
+      engagement: acc.engagement + social.engagement,
+      leavePressure: acc.leavePressure + social.leavePressure,
+    }),
+    {
+      disposition: 0,
+      valuesFriction: 0,
+      restraint: 0,
+      engagement: 0,
+      leavePressure: 0,
+    }
+  );
+  const count = snapshots.length;
+  return coffeeSocialSnapshotToPrismMoodState({
+    disposition: aggregate.disposition / count,
+    valuesFriction: aggregate.valuesFriction / count,
+    restraint: aggregate.restraint / count,
+    engagement: aggregate.engagement / count,
+    leavePressure: aggregate.leavePressure / count,
+  });
 }
 
 function messageHasCustomBotIdentity(message: Message): boolean {
@@ -18523,6 +18576,21 @@ function HomeContent(): React.JSX.Element {
     });
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
+  const [devMoodVisualEnabled, setDevMoodVisualEnabled] = useState(false);
+  const [devMoodVisualOpen, setDevMoodVisualOpen] = useState(false);
+  const [devMoodDebugBusy, setDevMoodDebugBusy] = useState(false);
+  const [devMoodDebugSnapshot, setDevMoodDebugSnapshot] = useState<{
+    conversationId: string;
+    mood: PrismMoodSnapshot;
+  } | null>(null);
+  const [devMoodVisualPosition, setDevMoodVisualPosition] =
+    useState<DevMoodVisualPosition>({
+      x: DEV_MOOD_VISUAL_DEFAULT_X,
+      y: DEV_MOOD_VISUAL_DEFAULT_Y,
+    });
+  const devMoodVisualRef = useRef<HTMLDivElement | null>(null);
+  const devMoodVisualDragRef = useRef<DevMoodVisualDragState | null>(null);
+  const devMoodVisualSuppressClickRef = useRef(false);
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
   const closeDevTools = useCallback(() => {
@@ -19403,11 +19471,82 @@ function HomeContent(): React.JSX.Element {
     const wrench = chatOverflowGearButtonRef.current;
     if (!wrench) return;
     // Only restore focus if it was inside the accordion subtree — otherwise we'd
-    // yank focus from wherever the user explicitly moved it (e.g. an opened panel).
+      // yank focus from wherever the user explicitly moved it (e.g. an opened panel).
     const accordionRoot = chatOverflowMenuRef.current;
     const active = document.activeElement;
     if (accordionRoot?.contains(active)) wrench.focus();
   }, [chatOverflowMenuOpen]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED) return;
+    try {
+      setDevMoodVisualEnabled(
+        window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_STORAGE_KEY) === "1"
+      );
+      const raw = window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          typeof (parsed as { x?: unknown }).x === "number" &&
+          typeof (parsed as { y?: unknown }).y === "number"
+        ) {
+          const position = parsed as DevMoodVisualPosition;
+          setDevMoodVisualPosition(
+            clampDevToolsPanelPosition(
+              position.x,
+              position.y,
+              280,
+              220,
+              window.innerWidth,
+              window.innerHeight
+            )
+          );
+        }
+      }
+    } catch {
+      // Local dev affordance only.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED) return;
+    try {
+      window.localStorage.setItem(
+        PRISM_DEV_MOOD_VISUAL_STORAGE_KEY,
+        devMoodVisualEnabled ? "1" : "0"
+      );
+    } catch {
+      // Local dev affordance only.
+    }
+  }, [devMoodVisualEnabled]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED) return;
+    try {
+      window.localStorage.setItem(
+        PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY,
+        JSON.stringify(devMoodVisualPosition)
+      );
+    } catch {
+      // Local dev affordance only.
+    }
+  }, [devMoodVisualPosition]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    setDevMoodVisualPosition((current) =>
+      clampDevToolsPanelPosition(
+        current.x,
+        current.y,
+        devMoodVisualRef.current?.offsetWidth ?? 280,
+        devMoodVisualRef.current?.offsetHeight ?? 220,
+        viewportWidth,
+        viewportHeight
+      )
+    );
+  }, [devMoodVisualEnabled, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     if (!sidebarDrawerMode) return;
@@ -19509,6 +19648,65 @@ function HomeContent(): React.JSX.Element {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
       // Safe no-op for environments without pointer capture support.
+    }
+  }, []);
+  const startDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    const panel = devMoodVisualRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    devMoodVisualDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      moved: false,
+    };
+    devMoodVisualSuppressClickRef.current = false;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is missing in some test environments.
+    }
+  }, []);
+  const dragDevMoodVisual = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const dragState = devMoodVisualDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const panel = devMoodVisualRef.current;
+    if (!panel) return;
+    const dx = Math.abs(event.clientX - dragState.startClientX);
+    const dy = Math.abs(event.clientY - dragState.startClientY);
+    if (dx > 3 || dy > 3) {
+      dragState.moved = true;
+      devMoodVisualSuppressClickRef.current = true;
+    }
+    const rect = panel.getBoundingClientRect();
+    setDevMoodVisualPosition(
+      clampDevToolsPanelPosition(
+        event.clientX - dragState.offsetX,
+        event.clientY - dragState.offsetY,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight
+      )
+    );
+  }, []);
+  const endDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const dragState = devMoodVisualDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    devMoodVisualDragRef.current = null;
+    devMoodVisualSuppressClickRef.current = dragState.moved;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Safe no-op for environments without pointer capture support.
+    }
+    if (dragState.moved) {
+      window.setTimeout(() => {
+        devMoodVisualSuppressClickRef.current = false;
+      }, 0);
     }
   }, []);
   const startCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
@@ -22722,6 +22920,8 @@ function HomeContent(): React.JSX.Element {
     conversationId: string;
     assistantMessageId: string;
     revealKey: string;
+    visibleTokenCount: number;
+    totalTokenCount: number;
     interruptedText: string;
     interruptionContent: string;
     patchedDetail: ConversationDetail;
@@ -22774,6 +22974,8 @@ function HomeContent(): React.JSX.Element {
       conversationId: detail.id,
       assistantMessageId: latestAssistantMessageId,
       revealKey,
+      visibleTokenCount,
+      totalTokenCount: revealTokens.length,
       interruptedText,
       interruptionContent,
       patchedDetail: {
@@ -27792,6 +27994,7 @@ function HomeContent(): React.JSX.Element {
       forceNewConversation?: boolean;
       commandCenterModelChoice?: string;
       promptShortcut?: PromptShortcutMetadata;
+      prismInterruption?: PrismMoodInterruptionInput;
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
@@ -27829,6 +28032,7 @@ function HomeContent(): React.JSX.Element {
         ? { starterPromptWarrantsIntro: true }
         : {}),
       ...(options.sessionEnding ? { sessionEnding: true } : {}),
+      ...(options.prismInterruption ? { prismInterruption: options.prismInterruption } : {}),
       ...(mode === "zen" && options.sessionResumeContext
         ? { sessionResumeContext: options.sessionResumeContext }
         : {}),
@@ -29129,6 +29333,7 @@ function HomeContent(): React.JSX.Element {
     }
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
     if (!trimmed && !isStarterPrompt) return;
+    let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
     if (
       commandCenterSubmitActive &&
       pendingReply &&
@@ -29140,6 +29345,12 @@ function HomeContent(): React.JSX.Element {
     if (!isStarterPrompt && trimmed.length > 0 && view === "chat") {
       const interruption = prepareActiveAssistantRevealInterruption();
       if (interruption) {
+        prismInterruptionForSend = {
+          kind: "assistant_reveal",
+          assistantMessageId: interruption.assistantMessageId,
+          visibleTokenCount: interruption.visibleTokenCount,
+          totalTokenCount: interruption.totalTokenCount,
+        };
         const persistPromise = applyActiveAssistantRevealInterruption(interruption);
         detailForSend = interruption.patchedDetail;
         baselineMessageCount = detailForSend.messages.length;
@@ -29159,9 +29370,22 @@ function HomeContent(): React.JSX.Element {
         }
       }
     }
+    const zenImmediateInterruptPendingReply =
+      !isStarterPrompt &&
+      trimmed.length > 0 &&
+      view === "chat" &&
+      pendingReply &&
+      !canSendTextWhileReplyPending() &&
+      !commandCenterSubmitActive;
+    if (zenImmediateInterruptPendingReply) {
+      prismInterruptionForSend ??= { kind: "pending_reply" };
+      priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+      stopPendingReply();
+    }
     if (
       pendingReply &&
       !commandCenterSubmitActive &&
+      !zenImmediateInterruptPendingReply &&
       !canSendTextWhileReplyPending()
     ) {
       if (!isStarterPrompt && trimmed.length > 0) {
@@ -29274,6 +29498,7 @@ function HomeContent(): React.JSX.Element {
         lastBotId: optimisticLastBotId,
         lastBotColor: optimisticLastBotColor,
         hasAssistantReply: false,
+        ...(detailForSend?.prismMood ? { prismMood: detailForSend.prismMood } : {}),
         messages: [],
       };
       initialZenStarterPendingDetail = isInitialZenStarterPrompt
@@ -29309,6 +29534,7 @@ function HomeContent(): React.JSX.Element {
         lastBotId: optimisticLastBotId,
         lastBotColor: optimisticLastBotColor,
         ...(detailForSend?.zenWallpaper ? { zenWallpaper: detailForSend.zenWallpaper } : {}),
+        ...(detailForSend?.prismMood ? { prismMood: detailForSend.prismMood } : {}),
         // hasAssistantReply reflects the PRE-SEND state (whatever detail
         // already had) — the optimistic update only inserts a USER
         // message, not an assistant one. The server's real response
@@ -29382,6 +29608,9 @@ function HomeContent(): React.JSX.Element {
           : {}),
         ...(sessionResumeContextForSend
           ? { sessionResumeContext: sessionResumeContextForSend }
+          : {}),
+        ...(prismInterruptionForSend
+          ? { prismInterruption: prismInterruptionForSend }
           : {}),
       });
       appendDevChatRouteStart("send", chatBody);
@@ -30008,7 +30237,7 @@ function HomeContent(): React.JSX.Element {
             style={bubbleStyle}
             aria-label="Show suggested replies"
             title="Show suggested replies"
-            disabled={pendingReply}
+            disabled={pendingReply && view !== "chat"}
             onClick={() => {
               if (rail.source === "starter") {
                 setStarterComposerRevealed(false);
@@ -30056,7 +30285,7 @@ function HomeContent(): React.JSX.Element {
           <button
             key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
             type="button"
-            disabled={pendingReply}
+            disabled={pendingReply && view !== "chat"}
             className={`${styles.conversationStarterChip} ${
               chip.action === "other" ? styles.conversationStarterChipOther : ""
             }`}
@@ -30273,7 +30502,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function sendRandomConversationNudge(): Promise<void> {
-    if (pendingReply && !canSendTextWhileReplyPending()) return;
+    if (pendingReply && !canSendTextWhileReplyPending() && view !== "chat") return;
     if (composerRandomPromptBusy) return;
     const rail =
       detail?.id && detail.id !== "pending"
@@ -30400,11 +30629,18 @@ function HomeContent(): React.JSX.Element {
     pendingAskQuestionInteractiveKey !== null
       ? askQuestionComposerRevealed
       : starterComposerRevealed;
-  const askQuestionComposerHiddenByChoices =
-    askQuestionInteractive && !askQuestionComposerRevealed;
+  const activeChoiceComposerSource: "askquestion" | "starter" | null =
+    pendingAskQuestionInteractiveKey !== null
+      ? "askquestion"
+      : starterPromptsInteractive
+        ? "starter"
+        : null;
   const composerHiddenByChoiceChips =
-    askQuestionComposerHiddenByChoices ||
-    (starterPromptsInteractive && !starterComposerRevealed);
+    activeChoiceComposerSource === "askquestion"
+      ? !askQuestionComposerRevealed
+      : activeChoiceComposerSource === "starter"
+        ? !starterComposerRevealed
+        : false;
 
   useLayoutEffect(() => {
     if (!choiceComposerFocusAfterRevealRef.current || composerHiddenByChoiceChips) {
@@ -30446,7 +30682,8 @@ function HomeContent(): React.JSX.Element {
     resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     askQuestionComposerHiddenForReadingKeyRef.current = null;
     const reveal = (): void => {
-      if (source === "starter") {
+      const sourceToReveal = activeChoiceComposerSource ?? source ?? "askquestion";
+      if (sourceToReveal === "starter") {
         setStarterComposerRevealed(true);
       } else {
         setAskQuestionComposerRevealed(true);
@@ -31109,6 +31346,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (editingMessageId) return "Save edit";
     if (pendingReply && !canSendTextWhileReplyPending() && value.trim().length > 0) {
+      if (view === "chat") return "Send";
       const queuedCountAfterClick = queuedChatPrompts.length + 1;
       return queuedCountAfterClick > 1 ? `Queue (${queuedCountAfterClick})` : "Queue";
     }
@@ -31123,6 +31361,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (editingMessageId) return "Save edited message";
     if (pendingReply && !canSendTextWhileReplyPending() && value.trim().length > 0) {
+      if (view === "chat") return "Send and interrupt current reply";
       const queuedCountAfterClick = queuedChatPrompts.length + 1;
       return queuedCountAfterClick > 1
         ? `Queue message in position ${queuedCountAfterClick}`
@@ -31133,7 +31372,10 @@ function HomeContent(): React.JSX.Element {
 
   function composerSubmitDisabled(value: string): boolean {
     if (composerSubmitUsesRandomNudge(value)) {
-      return composerRandomPromptBusy || (pendingReply && !canSendTextWhileReplyPending());
+      return (
+        composerRandomPromptBusy ||
+        (pendingReply && !canSendTextWhileReplyPending() && view !== "chat")
+      );
     }
     return (
       value.trim().length === 0 ||
@@ -35327,6 +35569,66 @@ function HomeContent(): React.JSX.Element {
       );
     } finally {
       setDevToolsBusy(false);
+    }
+  }
+
+  async function devMoodDebugPatch(
+    patch: {
+      action?: "nudge" | "reset";
+      annoyanceDelta?: number;
+      warmthDelta?: number;
+      engagementDelta?: number;
+      restraintDelta?: number;
+      freeze?: boolean;
+      reason?: string;
+    },
+    label: string
+  ) {
+    const conversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : view === "coffee" && coffeeConversation?.id
+          ? coffeeConversation.id
+          : selectedId;
+    if (!conversationId || conversationId === "pending") {
+      setDevToolsMessage("Open a saved thread first to inspect Prism mood.");
+      return;
+    }
+    const mode =
+      view === "coffee"
+        ? "coffee"
+        : detail?.mode === "sandbox" || view === "sandbox"
+          ? "sandbox"
+          : "zen";
+    setDevMoodDebugBusy(true);
+    setDevToolsMessage(null);
+    try {
+      const result = await api<{ prismMood?: PrismMoodSnapshot }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/mood-debug`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: patch.action ?? "nudge",
+            mode,
+            ...patch,
+          }),
+        }
+      );
+      if (result.prismMood) {
+        setDevMoodDebugSnapshot({ conversationId, mood: result.prismMood });
+        setDetail((current) =>
+          current?.id === conversationId
+            ? { ...current, prismMood: result.prismMood }
+            : current
+        );
+      }
+      setDevToolsMessage(label);
+    } catch (err) {
+      setDevToolsMessage(
+        err instanceof Error ? err.message : "Mood debug update failed."
+      );
+    } finally {
+      setDevMoodDebugBusy(false);
     }
   }
 
@@ -41031,6 +41333,19 @@ function HomeContent(): React.JSX.Element {
               </small>
             </span>
           </label>
+          <label className={styles.devTogglesModalOption}>
+            <input
+              type="checkbox"
+              checked={devMoodVisualEnabled}
+              onChange={(event) => setDevMoodVisualEnabled(event.currentTarget.checked)}
+            />
+            <span>
+              <strong>Show Prism mood visual</strong>
+              <small>
+                Displays a draggable mood face with mood diagnostics and debug controls.
+              </small>
+            </span>
+          </label>
           <div className={styles.deleteAllModalActions}>
             <button
               type="button"
@@ -41041,6 +41356,196 @@ function HomeContent(): React.JSX.Element {
             </button>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderDevMoodVisual = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return null;
+    const coffeeMood =
+      view === "coffee"
+        ? coffeeSocialByIdToPrismMood(coffeeConversation?.coffeeBotSocialById)
+        : null;
+    const debugConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : view === "coffee" && coffeeConversation?.id
+          ? coffeeConversation.id
+          : selectedId;
+    const debugMood =
+      devMoodDebugSnapshot?.conversationId === debugConversationId
+        ? devMoodDebugSnapshot.mood
+        : null;
+    const mood = detail?.prismMood ?? debugMood ?? coffeeMood;
+    const moodKey = normalizeAssistantMoodKey(mood?.moodKey);
+    const percent = (value: number | undefined): string =>
+      `${Math.round(Math.max(0, Math.min(1, value ?? 0)) * 100)}%`;
+    const declineReason = mood ? prismMoodDeclineReason(mood) : null;
+    const recentDeltas = mood?.recentDeltas ?? [];
+    const debugControlsDisabled =
+      devMoodDebugBusy || !debugConversationId || debugConversationId === "pending";
+    return (
+      <div
+        ref={devMoodVisualRef}
+        className={styles.devMoodVisual}
+        data-open={devMoodVisualOpen ? "true" : undefined}
+        data-mood={moodKey}
+        style={{
+          left: `${devMoodVisualPosition.x}px`,
+          top: `${devMoodVisualPosition.y}px`,
+        }}
+      >
+        <button
+          type="button"
+          className={styles.devMoodFaceButton}
+          onPointerDown={startDevMoodVisualDrag}
+          onPointerMove={dragDevMoodVisual}
+          onPointerUp={endDevMoodVisualDrag}
+          onPointerCancel={endDevMoodVisualDrag}
+          onClick={() => {
+            if (devMoodVisualSuppressClickRef.current) return;
+            setDevMoodVisualOpen((open) => !open);
+          }}
+          aria-label="Open Prism mood details"
+          title="Prism mood"
+        >
+          <MessageMoodFace moodKey={moodKey} variant="prism" />
+        </button>
+        {devMoodVisualOpen ? (
+          <div className={styles.devMoodPanel} role="dialog" aria-label="Prism mood details">
+            <div className={styles.devMoodPanelHeader}>
+              <div>
+                <span className={styles.devToolsKicker}>Prism mood</span>
+                <strong>{messageMoodLabel(moodKey)}</strong>
+              </div>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={() => setDevMoodVisualOpen(false)}
+                aria-label="Close Prism mood details"
+              >
+                ×
+              </button>
+            </div>
+            {mood ? (
+              <>
+                <div className={styles.devMoodGrid}>
+                  <span>
+                    <small>Confidence</small>
+                    <strong>{percent(mood.confidence)}</strong>
+                  </span>
+                  <span>
+                    <small>Annoyance</small>
+                    <strong>{percent(mood.annoyance)}</strong>
+                  </span>
+                  <span>
+                    <small>Warmth</small>
+                    <strong>{percent(mood.warmth)}</strong>
+                  </span>
+                  <span>
+                    <small>Engagement</small>
+                    <strong>{percent(mood.engagement)}</strong>
+                  </span>
+                  <span>
+                    <small>Restraint</small>
+                    <strong>{percent(mood.restraint)}</strong>
+                  </span>
+                  <span>
+                    <small>Frozen</small>
+                    <strong>{mood.frozen ? "Yes" : "No"}</strong>
+                  </span>
+                </div>
+                <p className={styles.devMoodNote}>
+                  {declineReason ?? "Prism is available to answer normally."}
+                </p>
+                <div className={styles.devMoodActions}>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    disabled={debugControlsDisabled}
+                    onClick={() =>
+                      void devMoodDebugPatch(
+                        {
+                          annoyanceDelta: -0.12,
+                          warmthDelta: 0.08,
+                          engagementDelta: 0.04,
+                          restraintDelta: 0.04,
+                          reason: "Developer Tools simulated a warmer turn.",
+                        },
+                        "Mood nudged warmer."
+                      )
+                    }
+                  >
+                    Warmer
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    disabled={debugControlsDisabled}
+                    onClick={() =>
+                      void devMoodDebugPatch(
+                        {
+                          annoyanceDelta: 0.14,
+                          warmthDelta: -0.06,
+                          engagementDelta: -0.03,
+                          restraintDelta: -0.03,
+                          reason: "Developer Tools simulated an interruption.",
+                        },
+                        "Mood nudged guarded."
+                      )
+                    }
+                  >
+                    Annoy
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.devToolsAction}
+                    disabled={debugControlsDisabled}
+                    onClick={() =>
+                      void devMoodDebugPatch(
+                        {
+                          freeze: !mood.frozen,
+                          reason: mood.frozen
+                            ? "Developer Tools unfroze mood decay."
+                            : "Developer Tools froze mood decay.",
+                        },
+                        mood.frozen ? "Mood unfrozen." : "Mood frozen."
+                      )
+                    }
+                  >
+                    {mood.frozen ? "Unfreeze" : "Freeze"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
+                    disabled={debugControlsDisabled}
+                    onClick={() =>
+                      void devMoodDebugPatch(
+                        { action: "reset", reason: "Developer Tools reset mood." },
+                        "Mood reset."
+                      )
+                    }
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div className={styles.devMoodDeltaList}>
+                  {recentDeltas.length > 0 ? (
+                    recentDeltas.slice(0, 4).map((delta, index) => (
+                      <p key={`${delta.at}-${delta.kind}-${index}`}>
+                        <strong>{delta.kind}</strong> · {delta.reason}
+                      </p>
+                    ))
+                  ) : (
+                    <p>No mood deltas yet.</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className={styles.devMoodNote}>No mood snapshot yet.</p>
+            )}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -41832,7 +42337,7 @@ function HomeContent(): React.JSX.Element {
               type="button"
               className={styles.deleteAllModalCancel}
               onClick={sendRandomConversationNudge}
-              disabled={pendingReply}
+              disabled={pendingReply && view !== "chat"}
               data-glyph-tooltip="Send random suggested prompt"
             >
               Random prompt
@@ -42410,7 +42915,7 @@ function HomeContent(): React.JSX.Element {
             type="button"
             className={styles.deleteAllModalCancel}
             onClick={sendRandomConversationNudge}
-            disabled={pendingReply}
+            disabled={pendingReply && view !== "chat"}
             data-glyph-tooltip="Send random suggested prompt"
           >
             Random prompt
@@ -51874,6 +52379,7 @@ function HomeContent(): React.JSX.Element {
         {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
         {renderDevToolsPanel()}
+        {renderDevMoodVisual()}
         {renderCoffeeShellContextMenu()}
         {renderCoffeeBotContextMenu()}
         <GlyphTooltipLayer />
@@ -52595,6 +53101,7 @@ function HomeContent(): React.JSX.Element {
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
         {renderDevToolsPanel()}
+        {renderDevMoodVisual()}
         {renderStoryShellContextMenu()}
         <GlyphTooltipLayer />
       </main>
@@ -52869,6 +53376,7 @@ function HomeContent(): React.JSX.Element {
       </div>
       {renderSharedPanels()}
       {renderDevToolsPanel()}
+      {renderDevMoodVisual()}
       {renderViewSwitchOverlay()}
       <GlyphTooltipLayer />
     </main>
@@ -53871,6 +54379,7 @@ function HomeContent(): React.JSX.Element {
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderDevToolsPanel()}
+      {renderDevMoodVisual()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
@@ -55300,6 +55809,7 @@ function HomeContent(): React.JSX.Element {
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderDevToolsPanel()}
+      {renderDevMoodVisual()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={

@@ -9,6 +9,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "coffee_group_seats",
   "coffee_presets",
   "coffee_bot_social_state",
+  "prism_mood_state",
   "session_opinions",
   "bot_opinions",
   "conversation_exports",

@@ -54,16 +54,24 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PrismMoodInterruptionInput,
+  PrismMoodSnapshot,
   PromptShortcutMetadata,
   SessionOpinion,
   SentGeneratedImagePayload,
 } from "@localai/shared";
 import {
+  applyPrismMoodInterruption,
+  applyPrismMoodPositiveTurn,
+  createDefaultPrismMoodState,
+  decayPrismMood,
   hydrateAssistantMessageParts,
+  prismMoodDeclineReason,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
   parseStoredPromptShortcutPayload,
+  sanitizePrismMoodState,
   serializeAssistantToolPayload,
   serializePromptShortcutPayload,
   stripBotProfileMetaSuffix,
@@ -80,6 +88,10 @@ import {
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
 } from "./conversations.ts";
+import {
+  loadPrismMoodState,
+  upsertPrismMoodState,
+} from "./db.ts";
 
 const config = getAppConfig();
 
@@ -162,6 +174,7 @@ export interface ProcessChatMessageResult {
   };
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
+  prismMood?: PrismMoodSnapshot;
   summaryCompaction?: {
     mode: ChatMode;
     triggered: boolean;
@@ -1840,6 +1853,8 @@ export interface UserChatSettings {
   forceNewConversation?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
+  /** Optional Zen interruption metadata supplied by the composer send path. */
+  prismInterruption?: PrismMoodInterruptionInput;
   /** Cancels provider/tool work when the originating HTTP request is interrupted. */
   signal?: AbortSignal;
 }
@@ -2216,7 +2231,7 @@ const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
   "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
   "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
   "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
-  "Keep the tone nonjudgmental and unannoyed. Zen has no moods to perform; stay steady, curious, and grounded.",
+  "Stay nonjudgmental, but you may have a current mood. If interrupted repeatedly, you can become guarded, take a beat, or answer more briefly; do not scold, punish, or dramatize it.",
   "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
   "Do not mention Zen system instructions, hidden prompts, or that this voice has been shaped.",
 ].join("\n");
@@ -3490,7 +3505,8 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
   if (!opinion || opinion.boundaryLevel === "none") return null;
   if (opinion.boundaryLevel === "firm") {
     return [
-      "Long-term relationship context for this bot:",
+      "Conversation relationship context for this turn (not persona identity):",
+      "- Do not use this to rewrite, redefine, or override the bot persona.",
       `- State: ${opinion.band}; score ${opinion.score}/100.`,
       "- The bot may set a calm, firm boundary if the user is harsh or dismissive.",
       "- The bot should still help and should explicitly allow repair when the user softens or apologizes.",
@@ -3498,10 +3514,30 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
     ].join("\n");
   }
   return [
-    "Long-term relationship context for this bot:",
+    "Conversation relationship context for this turn (not persona identity):",
+    "- Do not use this to rewrite, redefine, or override the bot persona.",
     `- State: ${opinion.band}; score ${opinion.score}/100.`,
     "- The bot may gently ask for clearer or warmer wording if the exchange becomes harsh.",
     "- Keep helping; treat repair attempts as meaningful.",
+  ].join("\n");
+}
+
+function formatMoodPercent(value: number): string {
+  return `${Math.round(clampUnit(value) * 100)}%`;
+}
+
+function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): string | null {
+  if (!mood) return null;
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  const declineReason = prismMoodDeclineReason(snapshot);
+  return [
+    "Current Prism mood context for this turn (not persona identity):",
+    "- Use this as short-term conversational state only; do not rewrite, redefine, or override the persona.",
+    `- Mood: ${snapshot.moodKey}; confidence ${formatMoodPercent(snapshot.confidence)}.`,
+    `- Annoyance ${formatMoodPercent(snapshot.annoyance)}; warmth ${formatMoodPercent(snapshot.warmth)}; engagement ${formatMoodPercent(snapshot.engagement)}; restraint ${formatMoodPercent(snapshot.restraint)}.`,
+    declineReason
+      ? `- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`
+      : "- Let the mood subtly affect pacing and brevity, while still responding to the user's actual message.",
   ].join("\n");
 }
 
@@ -3648,6 +3684,7 @@ function buildPromptMessages(args: {
   devMemoriesEnabled?: boolean;
   devMemoriesText?: string;
   botOpinion?: BotOpinion | null;
+  prismMood?: PrismMoodSnapshot | null;
   threadSummary?: string | null;
   memoryLines: string[];
   mentionedBotContexts?: string[];
@@ -3664,6 +3701,7 @@ function buildPromptMessages(args: {
   const trimmedBot = args.botSystemPrompt?.trim();
   const trimmedDisplayName = args.userDisplayName?.trim() ?? "";
   const relationshipContext = botOpinionPromptContext(args.botOpinion ?? null);
+  const moodContext = prismMoodPromptContext(args.prismMood ?? null);
   const toolsBlock =
     trimmedBot &&
     trimmedBot.length > 0
@@ -3685,8 +3723,8 @@ function buildPromptMessages(args: {
       promptMessages.push({
         role: "system",
         content: [
-          "Developer memory layer (global hard-rule simulation):",
-          "Treat these as active rules for this turn across every bot persona, including Prism/default.",
+          "Developer conversation context (not persona identity):",
+          "Treat these as turn-specific test instructions. Do not rewrite, redefine, or override the bot persona.",
           devMemoriesText,
         ].join("\n"),
       });
@@ -3694,6 +3732,9 @@ function buildPromptMessages(args: {
   }
   if (relationshipContext) {
     promptMessages.push({ role: "system", content: relationshipContext });
+  }
+  if (moodContext) {
+    promptMessages.push({ role: "system", content: moodContext });
   }
   if (args.askQuestionMode === "explicit") {
     promptMessages.push({
@@ -3739,7 +3780,7 @@ function buildPromptMessages(args: {
     if (promptSafeMemoryLines.length > 0) {
       promptMessages.push({
         role: "system",
-        content: `User memory hints about the human user:\n${promptSafeMemoryLines
+        content: `User memory hints about the human user (conversation context only; do not rewrite persona identity):\n${promptSafeMemoryLines
           .map((line) => `- ${line}`)
           .join("\n")}`,
       });
@@ -4091,6 +4132,7 @@ export async function processChatMessage(
       devMemoriesEnabled: settings.devMemoriesEnabled,
       devMemoriesText: settings.devMemoriesText,
       botOpinion: null,
+      prismMood: null,
       threadSummary: null,
       memoryLines: [],
       memoryClarification: null,
@@ -4573,6 +4615,28 @@ export async function processChatMessage(
     activeBotId
   );
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
+  const turnEvaluation = isStarterPrompt
+    ? undefined
+    : evaluateUserTurnOpinion(message);
+  const repairSignal = isStarterPrompt
+    ? false
+    : hasRepairSignal(normalizeOpinionText(message));
+  let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
+    createDefaultPrismMoodState(mode, now);
+  prismMood = isStarterPrompt
+    ? sanitizePrismMoodState(prismMood, mode, now)
+    : decayPrismMood(prismMood, now);
+  if (!isStarterPrompt && isZenMode(mode) && settings.prismInterruption) {
+    prismMood = applyPrismMoodInterruption(prismMood, settings.prismInterruption, now);
+  }
+  if (!isStarterPrompt && turnEvaluation && turnEvaluation.delta > 0) {
+    prismMood = applyPrismMoodPositiveTurn(
+      prismMood,
+      Math.min(1, Math.max(0.2, turnEvaluation.delta / 8)),
+      now
+    );
+  }
+  prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
   let memoryClarification: string | null = null;
   const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
   if (
@@ -4609,6 +4673,7 @@ export async function processChatMessage(
     devMemoriesEnabled: settings.devMemoriesEnabled,
     devMemoriesText: settings.devMemoriesText,
     botOpinion: existingBotOpinion,
+    prismMood,
     threadSummary,
     memoryLines,
     mentionedBotContexts,
@@ -4753,12 +4818,6 @@ export async function processChatMessage(
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
-  const turnEvaluation = isStarterPrompt
-    ? undefined
-    : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt
-    ? false
-    : hasRepairSignal(normalizeOpinionText(message));
   const assistantMood = evaluateAssistantMood({
     assistantContent: assistantDisplay,
     toneDelta: turnEvaluation?.delta,
@@ -5452,6 +5511,7 @@ export async function processChatMessage(
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
     ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),
@@ -5468,6 +5528,7 @@ export async function processChatMessage(
     ...(fallbackInvocation ? { fallbackInvocation } : {}),
     opinion,
     ...(botOpinion ? { botOpinion } : {}),
+    prismMood,
     ...(summaryCompaction ? { summaryCompaction } : {}),
     ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted
