@@ -9465,6 +9465,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messages[data-chat-ephemeral="true"] .message .markdownBody {
   color: color-mix(in srgb, var(--fg) 92%, transparent);
   text-shadow: none;
+  transition: font-size 220ms cubic-bezier(0.2, 0.72, 0.24, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messages[data-chat-ephemeral="true"] .message p,
+  .messages[data-chat-ephemeral="true"] .message .markdownBody {
+    transition: none;
+  }
 }
 
 .messages[data-chat-ephemeral="true"] .messageUser h4 {
@@ -9485,7 +9493,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .chatEphemeralLine {
   display: block;
   white-space: pre-wrap;
-  font-size: var(--chat-line-dynamic-font-size, inherit);
 }
 
 .chatEphemeralLineHeading1,
@@ -11013,6 +11020,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: 0;
   right: 0;
   z-index: 6;
+}
+
+@media (min-width: 721px) {
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeader,
+  .appLayout[data-chat-sidebar-hidden="true"] .compose,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
+    transition:
+      transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 160ms ease;
+    will-change: transform, opacity;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"][data-chat-header-chrome="hidden"]
+    .chatHeader:not(:focus-within) {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(0, calc(-100% - 18px), 0);
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"][data-chat-composer-chrome="hidden"]
+    .compose:not(:focus-within),
+  .appLayout[data-chat-sidebar-hidden="true"][data-chat-composer-chrome="hidden"]
+    .messagesFrame > .conversationStarterRail,
+  .appLayout[data-chat-sidebar-hidden="true"][data-chat-composer-chrome="hidden"]
+    .messagesFrame > .askQuestionRecallBubbleDock {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(0, calc(100% + 18px), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appLayout[data-chat-sidebar-hidden="true"] .chatHeader,
+  .appLayout[data-chat-sidebar-hidden="true"] .compose,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .conversationStarterRail,
+  .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
+    transition: none;
+  }
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame {

@@ -3303,6 +3303,8 @@ const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.8;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
+const CHAT_MODE_HEADER_REVEAL_RATIO = 0.3;
+const CHAT_MODE_COMPOSER_REVEAL_RATIO = 0.34;
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
@@ -3331,20 +3333,17 @@ const CHAT_MODE_PULL_QUOTE_MARKER_PATTERN = /^\s*\[!pull\]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN = /^\s*pull\s+quote\s*[:\-–—]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN =
   /^\s*(?:\*\*|__)?\s*pull\s+quote\s*[:\-–—]/i;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 11;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 32;
-const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18;
-const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 40;
-const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
-const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
-const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
-// Curve is inverted in `resolveChatModeMessageFontSizePx`: high progress
-// (long messages) maps toward the min, short messages stay near the max.
-// Lower exponent = steeper early descent (mid-length messages drop faster
-// toward the smaller min), but stays under 1 so the per-line jumps near
-// the long end remain small enough that streaming reflow does not jolt
-// the auto-scroll target.
-const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
+const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = 32;
+const CHAT_MODE_MESSAGE_FONT_BANDS: ReadonlyArray<{
+  maxVisualLines: number;
+  fontSizePx: number;
+}> = [
+  { maxVisualLines: 2, fontSizePx: 32 },
+  { maxVisualLines: 5, fontSizePx: 28 },
+  { maxVisualLines: 9, fontSizePx: 24 },
+  { maxVisualLines: 15, fontSizePx: 21 },
+  { maxVisualLines: Number.POSITIVE_INFINITY, fontSizePx: 19 },
+];
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
 const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
   joyful: 95,
@@ -12515,30 +12514,12 @@ function resolveRevealDurationMsForTokens(
   return total;
 }
 
-function resolveChatModeMessageFontSizePx(
-  lineCount: number,
-  role: "assistant" | "user" = "assistant"
-): number {
+function resolveChatModeMessageFontSizePx(lineCount: number): number {
   if (lineCount <= 0) return CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
-  const minPx =
-    role === "user"
-      ? CHAT_MODE_USER_MESSAGE_FONT_MIN_PX
-      : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
-  const maxPx =
-    role === "user"
-      ? CHAT_MODE_USER_MESSAGE_FONT_MAX_PX
-      : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX;
-  const clampedLineCount = Math.min(
-    CHAT_MODE_MESSAGE_FONT_MAX_LINES,
-    Math.max(CHAT_MODE_MESSAGE_FONT_MIN_LINES, lineCount)
+  const band = CHAT_MODE_MESSAGE_FONT_BANDS.find(
+    (candidate) => lineCount <= candidate.maxVisualLines
   );
-  const range = CHAT_MODE_MESSAGE_FONT_MAX_LINES - CHAT_MODE_MESSAGE_FONT_MIN_LINES;
-  if (range <= 0) return CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
-  const progress = (clampedLineCount - CHAT_MODE_MESSAGE_FONT_MIN_LINES) / range;
-  const curvedProgress = Math.pow(progress, CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT);
-  const sizeRange = maxPx - minPx;
-  const px = maxPx - curvedProgress * sizeRange;
-  return Math.round(px * 10) / 10;
+  return band?.fontSizePx ?? CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
 }
 
 function splitEphemeralDisplayLines(text: string): string[] {
@@ -12838,7 +12819,6 @@ function MessageBody({
   );
   const typedLineRendererNode = useTypedLineRenderer ? (() => {
     const lines = splitEphemeralDisplayLines(renderedSource);
-    const finalLines = splitEphemeralDisplayLines(chatModeSource);
     const lineStartIndexes = resolveTypedLineStartIndexes(lines);
     return (
       <div
@@ -12861,39 +12841,31 @@ function MessageBody({
             revealWordByWord &&
             latestVisibleTokenIndex >= lineStartIndex &&
             latestVisibleTokenIndex < lineEndIndex;
-          const hasLineContent = line.trim().length > 0;
-          const finalLine = finalLines[index] ?? line;
-          const lineDynamicFontPx = hasLineContent
-            ? resolveChatModeMessageFontSizePx(estimateVisualLineCount(finalLine), "assistant")
-            : null;
           return (
-          <span
-            key={`line:${index}`}
-            className={`${styles.chatEphemeralLine} ${
-              lineIsPullQuoteInline ? styles.chatEphemeralLinePullQuote : ""
-            } ${
-              headingInfo?.level === 1
-                ? styles.chatEphemeralLineHeading1
-                : headingInfo?.level === 2
-                  ? styles.chatEphemeralLineHeading2
-                  : headingInfo?.level === 3
-                    ? styles.chatEphemeralLineHeading3
-                    : headingInfo?.level === 4
-                      ? styles.chatEphemeralLineHeading4
-                      : headingInfo?.level === 5
-                        ? styles.chatEphemeralLineHeading5
-                    : ""
-            }`}
-            style={
-              {
-                ["--line-index" as string]: index,
-                ...(lineDynamicFontPx !== null
-                  ? { ["--chat-line-dynamic-font-size" as string]: `${lineDynamicFontPx}px` }
-                  : {}),
-              } as React.CSSProperties
-            }
-            data-chat-typing-line={lineIsTypingAnchor ? "true" : undefined}
-          >
+            <span
+              key={`line:${index}`}
+              className={`${styles.chatEphemeralLine} ${
+                lineIsPullQuoteInline ? styles.chatEphemeralLinePullQuote : ""
+              } ${
+                headingInfo?.level === 1
+                  ? styles.chatEphemeralLineHeading1
+                  : headingInfo?.level === 2
+                    ? styles.chatEphemeralLineHeading2
+                    : headingInfo?.level === 3
+                      ? styles.chatEphemeralLineHeading3
+                      : headingInfo?.level === 4
+                        ? styles.chatEphemeralLineHeading4
+                        : headingInfo?.level === 5
+                          ? styles.chatEphemeralLineHeading5
+                      : ""
+              }`}
+              style={
+                {
+                  ["--line-index" as string]: index,
+                } as React.CSSProperties
+              }
+              data-chat-typing-line={lineIsTypingAnchor ? "true" : undefined}
+            >
             {wordTokens.length === 0 ? " " : wordTokens.map((token, tokenIndex) => {
               const globalTokenIndex = lineStartIndex + tokenIndex;
               if (globalTokenIndex >= visibleLimit) return null;
@@ -14934,6 +14906,11 @@ function HomeContent(): React.JSX.Element {
   const [editingOriginalText, setEditingOriginalText] = useState("");
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [chatHeaderChromeVisible, setChatHeaderChromeVisible] = useState(true);
+  const [chatComposerChromeVisible, setChatComposerChromeVisible] = useState(true);
+  const chatHeaderChromeVisibleRef = useRef(true);
+  const chatComposerChromeVisibleRef = useRef(true);
+  const chatChromeAutoHiddenRef = useRef(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
@@ -18077,6 +18054,143 @@ function HomeContent(): React.JSX.Element {
    * and the tap-to-interrupt typing pill — Chat mode only (not Sandbox zen).
    */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
+  const chatComposerChromePinned =
+    composerFocused ||
+    draft.trim().length > 0 ||
+    editingMessageId !== null ||
+    composerCleanupBusy ||
+    mobileKeyboardInset > 0;
+  const chatHeaderChromePinned = chatOverflowMenuOpen;
+
+  const setChatHeaderChromeVisibleState = useCallback((visible: boolean) => {
+    if (chatHeaderChromeVisibleRef.current === visible) return;
+    chatHeaderChromeVisibleRef.current = visible;
+    setChatHeaderChromeVisible(visible);
+  }, []);
+
+  const setChatComposerChromeVisibleState = useCallback((visible: boolean) => {
+    if (chatComposerChromeVisibleRef.current === visible) return;
+    chatComposerChromeVisibleRef.current = visible;
+    setChatComposerChromeVisible(visible);
+  }, []);
+
+  const revealChatHeaderChrome = useCallback(() => {
+    setChatHeaderChromeVisibleState(true);
+  }, [setChatHeaderChromeVisibleState]);
+
+  const revealChatComposerChrome = useCallback(() => {
+    setChatComposerChromeVisibleState(true);
+  }, [setChatComposerChromeVisibleState]);
+
+  const hideChatChromeAfterThreadScroll = useCallback(() => {
+    if (!effectiveChatPresentation) return;
+    chatChromeAutoHiddenRef.current = true;
+    if (!chatHeaderChromePinned) {
+      setChatHeaderChromeVisibleState(false);
+    }
+    if (!chatComposerChromePinned) {
+      setChatComposerChromeVisibleState(false);
+    }
+  }, [
+    chatComposerChromePinned,
+    chatHeaderChromePinned,
+    effectiveChatPresentation,
+    setChatComposerChromeVisibleState,
+    setChatHeaderChromeVisibleState,
+  ]);
+
+  useEffect(() => {
+    if (!effectiveChatPresentation) {
+      chatChromeAutoHiddenRef.current = false;
+      setChatHeaderChromeVisibleState(true);
+      setChatComposerChromeVisibleState(true);
+      return;
+    }
+    if (chatHeaderChromePinned) {
+      setChatHeaderChromeVisibleState(true);
+    }
+    if (chatComposerChromePinned) {
+      setChatComposerChromeVisibleState(true);
+    }
+  }, [
+    chatComposerChromePinned,
+    chatHeaderChromePinned,
+    effectiveChatPresentation,
+    setChatComposerChromeVisibleState,
+    setChatHeaderChromeVisibleState,
+  ]);
+
+  useEffect(() => {
+    if (!effectiveChatPresentation) return;
+    chatChromeAutoHiddenRef.current = false;
+    setChatHeaderChromeVisibleState(true);
+    setChatComposerChromeVisibleState(true);
+  }, [
+    detail?.id,
+    effectiveChatPresentation,
+    setChatComposerChromeVisibleState,
+    setChatHeaderChromeVisibleState,
+  ]);
+
+  useEffect(() => {
+    if (!effectiveChatPresentation) return;
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (event.pointerType && event.pointerType !== "mouse") return;
+      const viewportHeight =
+        window.innerHeight || document.documentElement.clientHeight;
+      if (viewportHeight <= 0) return;
+
+      const headerInRevealZone =
+        event.clientY <= viewportHeight * CHAT_MODE_HEADER_REVEAL_RATIO;
+      const composerInRevealZone =
+        event.clientY >= viewportHeight * (1 - CHAT_MODE_COMPOSER_REVEAL_RATIO);
+
+      if (!chatChromeAutoHiddenRef.current) {
+        if (headerInRevealZone) {
+          setChatHeaderChromeVisibleState(true);
+        }
+        if (composerInRevealZone || chatComposerChromePinned) {
+          setChatComposerChromeVisibleState(true);
+        }
+        return;
+      }
+
+      const headerVisible =
+        chatHeaderChromePinned ||
+        headerInRevealZone;
+      const composerVisible =
+        chatComposerChromePinned ||
+        composerInRevealZone;
+
+      setChatHeaderChromeVisibleState(headerVisible);
+      setChatComposerChromeVisibleState(composerVisible);
+    };
+
+    const handleViewportLeave = (event: MouseEvent): void => {
+      if (event.relatedTarget !== null) return;
+      if (!chatChromeAutoHiddenRef.current) return;
+      if (!chatHeaderChromePinned) {
+        setChatHeaderChromeVisibleState(false);
+      }
+      if (!chatComposerChromePinned) {
+        setChatComposerChromeVisibleState(false);
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.documentElement.addEventListener("mouseleave", handleViewportLeave);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      document.documentElement.removeEventListener("mouseleave", handleViewportLeave);
+    };
+  }, [
+    chatComposerChromePinned,
+    chatHeaderChromePinned,
+    effectiveChatPresentation,
+    setChatComposerChromeVisibleState,
+    setChatHeaderChromeVisibleState,
+  ]);
 
   useEffect(() => {
     if (zenPresentationActive) {
@@ -18431,6 +18545,66 @@ function HomeContent(): React.JSX.Element {
     detail && detail.messages.length > 0
       ? detail.messages[detail.messages.length - 1]?.role
       : null;
+  const activeChatExchangeDynamicType = useMemo(() => {
+    if (!assistantRevealActive || !detail?.id || latestUserMessageIndex < 0) {
+      return null;
+    }
+
+    const activeMessages = detail.messages.slice(latestUserMessageIndex);
+    if (activeMessages.length === 0) return null;
+
+    let visualLineCount = 0;
+    for (const message of activeMessages) {
+      const displayContent = resolveMessageDisplayContent(message);
+      const sizingContent =
+        chatAssistantTypingMechanicsActive &&
+        message.role === "assistant" &&
+        message.id === latestAssistantMessageId
+          ? (() => {
+              const revealKey = `${detail.id}:${message.id}`;
+              const revealTokens = tokenizeMessageReveal(displayContent);
+              const tokenTotal = Math.max(1, revealTokens.length);
+              const cancelledTokenCount =
+                chatCancelledRevealTokenCountByKeyRef.current.get(revealKey);
+              const revealCompleted =
+                chatCompletedRevealKeysRef.current.has(revealKey);
+              if (typeof cancelledTokenCount === "number") {
+                return revealTokens
+                  .slice(0, Math.min(tokenTotal, Math.max(1, cancelledTokenCount)))
+                  .join("");
+              }
+              if (revealCompleted) return displayContent;
+
+              const firstSeenAt =
+                chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
+              const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
+              const visibleTokenCount = Math.min(
+                tokenTotal,
+                resolveVisibleTokenCountAtElapsedMs(
+                  revealTokens,
+                  elapsedMs,
+                  resolveMessageMoodKey(message)
+                )
+              );
+              return revealTokens.slice(0, visibleTokenCount).join("");
+            })()
+          : displayContent;
+      visualLineCount += estimateVisualLineCount(sizingContent);
+    }
+
+    return {
+      fontSizePx: resolveChatModeMessageFontSizePx(visualLineCount),
+      messageIds: new Set(activeMessages.map((message) => message.id)),
+    };
+  }, [
+    assistantRevealActive,
+    chatAssistantTypingMechanicsActive,
+    chatEphemeralNowMs,
+    detail?.id,
+    detail?.messages,
+    latestAssistantMessageId,
+    latestUserMessageIndex,
+  ]);
   const setChatArchiveRevealForConversation = useCallback(
     (conversationId: string, reveal: boolean): void => {
       const current =
@@ -24415,6 +24589,12 @@ function HomeContent(): React.JSX.Element {
       scrollDrop > MANUAL_SCROLL_UP_THRESHOLD_PX &&
       !probableReflow;
     const userInitiatedScroll = Date.now() > chatProgrammaticScrollUntilMsRef.current;
+    const scrollMoved =
+      previousScrollTop !== undefined &&
+      Math.abs(el.scrollTop - previousScrollTop) > 1;
+    if (scrollMoved && userInitiatedScroll) {
+      hideChatChromeAfterThreadScroll();
+    }
     if (scrolledUp && userInitiatedScroll) {
       chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
     }
@@ -24602,6 +24782,7 @@ function HomeContent(): React.JSX.Element {
   }, [detail]);
 
   function updateComposerDraft(nextDraft: string) {
+    revealChatComposerChrome();
     resetComposerHistoryCursor();
     startDraftTransition(() => {
       setDraft(nextDraft);
@@ -24675,6 +24856,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleComposerFocus() {
+    revealChatComposerChrome();
     setComposerFocused(true);
   }
 
@@ -24692,6 +24874,7 @@ function HomeContent(): React.JSX.Element {
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
     if (!fromMarkdownEditor && !fromPlainTextarea) return;
+    revealChatComposerChrome();
 
     if (
       e.key === "ArrowUp" &&
@@ -44019,12 +44202,16 @@ function HomeContent(): React.JSX.Element {
   // (chat pane/messages/composer + shared panels), with the chat-specific
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
+  const chatHeaderChromeState = chatHeaderChromeVisible ? "visible" : "hidden";
+  const chatComposerChromeState = chatComposerChromeVisible ? "visible" : "hidden";
   if (view === "chat") return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-chat-sidebar-hidden="true"
+      data-chat-header-chrome={chatHeaderChromeState}
+      data-chat-composer-chrome={chatComposerChromeState}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -44037,7 +44224,11 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
         onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
-        <header className={styles.chatHeader}>
+        <header
+          className={styles.chatHeader}
+          onPointerEnter={revealChatHeaderChrome}
+          onFocusCapture={revealChatHeaderChrome}
+        >
           <div className={styles.chatHeaderIdentityGroup}>
             <div className={styles.chatHeaderWordmarkColumn}>
               <button
@@ -44552,13 +44743,14 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicFontSizePx =
+              activeChatExchangeDynamicType?.messageIds.has(msg.id)
+                ? activeChatExchangeDynamicType.fontSizePx
+                : resolveChatModeMessageFontSizePx(messageDisplayLineCount);
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
-                    "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
-                      messageDisplayLineCount,
-                      msg.role === "user" ? "user" : "assistant"
-                    )}px`,
+                    "--message-dynamic-font-size": `${messageDynamicFontSizePx}px`,
                   } as React.CSSProperties)
                 : undefined;
             const assistantMoodKey =
@@ -44789,6 +44981,8 @@ function HomeContent(): React.JSX.Element {
           style={composeStyle}
           onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
+          onFocusCapture={revealChatComposerChrome}
+          onPointerEnter={revealChatComposerChrome}
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
@@ -44940,6 +45134,8 @@ function HomeContent(): React.JSX.Element {
       data-private-active={privateChatActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-chat-sidebar-hidden={zenPresentationActive ? "true" : undefined}
+      data-chat-header-chrome={zenPresentationActive ? chatHeaderChromeState : undefined}
+      data-chat-composer-chrome={zenPresentationActive ? chatComposerChromeState : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -45063,7 +45259,11 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
         onPointerDownCapture={handleAskQuestionOutsidePointerDown}
       >
-        <header className={styles.chatHeader}>
+        <header
+          className={styles.chatHeader}
+          onPointerEnter={revealChatHeaderChrome}
+          onFocusCapture={revealChatHeaderChrome}
+        >
           <div className={styles.chatHeaderIdentityGroup}>
             {headerIdentity ? (
               <button
@@ -45915,13 +46115,14 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const messageDisplayContent = resolveMessageDisplayContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
+            const messageDynamicFontSizePx =
+              activeChatExchangeDynamicType?.messageIds.has(msg.id)
+                ? activeChatExchangeDynamicType.fontSizePx
+                : resolveChatModeMessageFontSizePx(messageDisplayLineCount);
             const messageDynamicTypeStyle =
               assistantRevealActive
                 ? ({
-                    "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
-                      messageDisplayLineCount,
-                      msg.role === "user" ? "user" : "assistant"
-                    )}px`,
+                    "--message-dynamic-font-size": `${messageDynamicFontSizePx}px`,
                   } as React.CSSProperties)
                 : undefined;
             const assistantMoodKey =
@@ -46151,6 +46352,8 @@ function HomeContent(): React.JSX.Element {
           style={composeStyle}
           onSubmit={handleComposerSubmit}
           onBlur={handleComposerBlur}
+          onFocusCapture={revealChatComposerChrome}
+          onPointerEnter={revealChatComposerChrome}
           onKeyDown={handleComposerKeyDown}
         >
           {error && <p className={`${styles.error} ${styles.composeError}`} role="alert">{error}</p>}
