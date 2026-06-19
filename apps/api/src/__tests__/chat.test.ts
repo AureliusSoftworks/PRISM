@@ -1876,6 +1876,309 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
+  it("treats selected AskQuestion options as prose instead of forcing continuation", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-askquestion-prose-answer";
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which path?",
+      options: [
+        { id: "a", label: "Left" },
+        { id: "b", label: "Pause" },
+        { id: "c", label: "Right" },
+      ],
+    };
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "AskQuestion Answer",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Give me a fork.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Pick a path.",
+      "local",
+      "test-model",
+      null,
+      JSON.stringify({ v: 1, askQuestion: askPayload }),
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Plain prose after the choice." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Left",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Left/);
+    assert.doesNotMatch(promptText, /Continue the active AskQuestion flow/i);
+    assert.doesNotMatch(promptText, /follow-up multiple-choice/i);
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Plain prose after the choice.");
+    assert.equal(lastAssistant?.askQuestion, undefined);
+  });
+
+  it("nudges the model to resume an interrupted Zen reply after an excuse", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-resume";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "No worries. As I was saying, the outer loop coordinates without owning every detail." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "sorry, had to take a call",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /As I was saying/i);
+  });
+
+  it("keeps interruption context but prioritizes topic switches", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-topic-switch";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Sure, let's switch topics." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "actually, can we switch topics and talk about CSS?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /switch topics or replace the interrupted request/i);
+    assert.match(promptText, /Prioritize the new request/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
   it("skips AskQuestion payload when options are not synthesized", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request) =>

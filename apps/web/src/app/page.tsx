@@ -4086,6 +4086,77 @@ const GENERATING_PHRASE_BUILDERS = [
   (name: string) => `${name} is reflecting`,
 ] as const;
 
+const ZEN_INITIAL_STATUS_LABELS = [
+  "Thinking...",
+  "Composing...",
+  "Gathering...",
+  "Tuning in...",
+  "Shaping...",
+  "Reflecting...",
+  "Considering...",
+  "Listening...",
+  "Orienting...",
+  "Framing...",
+  "Sketching...",
+  "Mapping...",
+  "Tracing...",
+  "Reading...",
+  "Parsing...",
+  "Sorting...",
+  "Weighing...",
+  "Balancing...",
+  "Calibrating...",
+  "Distilling...",
+  "Synthesizing...",
+  "Connecting...",
+  "Threading...",
+  "Arranging...",
+  "Braiding...",
+  "Polishing...",
+  "Sharpening...",
+  "Forming...",
+  "Drafting...",
+  "Mulling...",
+  "Noticing...",
+  "Sensing...",
+  "Searching...",
+  "Finding...",
+  "Surfacing...",
+  "Reaching...",
+  "Unfolding...",
+  "Settling...",
+  "Aligning...",
+  "Focusing...",
+  "Scanning...",
+  "Decoding...",
+  "Combing...",
+  "Sifting...",
+  "Gathering context...",
+  "Taking shape...",
+  "Warming up...",
+  "Zeroing in...",
+  "Feeling through...",
+  "Holding the thread...",
+  "Making sense...",
+  "Reading the room...",
+  "Following the line...",
+  "Replying...",
+  "Writing...",
+  "Revealing...",
+  "Answering...",
+  "Continuing...",
+  "Speaking...",
+  "Rendering...",
+] as const;
+
+function pickStableStatusLabel(
+  labels: readonly string[],
+  salt: string
+): string {
+  if (labels.length === 0) return "";
+  return labels[hashToUnsignedInt(salt) % labels.length] ?? labels[0] ?? "";
+}
+
 const FALLBACK_PROCESSING_HINT_DELAY_MS = 3800;
 const FALLBACK_PROCESSING_TICK_MS = 300;
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
@@ -16070,6 +16141,12 @@ function HomeContent(): React.JSX.Element {
     clearZenHeaderAutoHideTimer();
     setZenHeaderVisible(true);
   }, [clearZenHeaderAutoHideTimer, view]);
+  const revealZenHeaderForFreshSurface = useCallback(() => {
+    if (view !== "chat") return;
+    zenHeaderAutoHideArmedRef.current = false;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, view]);
   const hideZenHeaderForConversationAction = useCallback(() => {
     if (view !== "chat") return;
     zenHeaderAutoHideArmedRef.current = true;
@@ -16285,8 +16362,6 @@ function HomeContent(): React.JSX.Element {
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
     useState<string | null>(null);
-  const [askQuestionChangingAnswerAssistantId, setAskQuestionChangingAnswerAssistantId] =
-    useState<string | null>(null);
   const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
     conversationId: string;
     prompts: string[];
@@ -16402,6 +16477,7 @@ function HomeContent(): React.JSX.Element {
     useState(false);
   const pendingReplyAbortControllerRef = useRef<AbortController | null>(null);
   const zenInitialThinkingCancelControllerRef = useRef<AbortController | null>(null);
+  const zenInitialStatusLabelRef = useRef<string | null>(null);
   const zenInitialStarterRequestRef = useRef<{
     id: string;
     controller: AbortController;
@@ -20327,49 +20403,29 @@ function HomeContent(): React.JSX.Element {
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
-  const handleTypingIndicatorPress = useCallback((): void => {
-    const canCutVisibleAssistant =
-      chatAssistantTypingMechanicsActive &&
-      chatAssistantRevealInProgress &&
-      detail?.id &&
-      latestAssistantMessageId;
-    if (!canCutVisibleAssistant) {
-      if (pendingReplyVisible) {
-        stopPendingReply();
-      }
-      return;
-    }
-    if (!detail?.id || !latestAssistantMessageId) {
-      if (pendingReplyVisible) {
-        stopPendingReply();
-      }
-      return;
+
+  type ActiveAssistantRevealInterruption = {
+    conversationId: string;
+    assistantMessageId: string;
+    revealKey: string;
+    interruptedText: string;
+    interruptionContent: string;
+    patchedDetail: ConversationDetail;
+  };
+
+  function prepareActiveAssistantRevealInterruption(): ActiveAssistantRevealInterruption | null {
+    if (
+      !chatAssistantTypingMechanicsActive ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) {
+      return null;
     }
     const latestAssistant =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
-    if (!latestAssistant) {
-      if (pendingReplyVisible) {
-        stopPendingReply();
-      }
-      return;
-    }
-    if (pendingReplyVisible) {
-      setPendingReply(false);
-      setPendingReplyStartedAtMs(null);
-      setPendingReplyDenialRisk(false);
-      setPendingReplyConversationId(null);
-      setPendingReplyIsNewConversation(false);
-      pendingReplyAbortControllerRef.current = null;
-    }
-    if (
-      !chatAssistantTypingMechanicsActive ||
-      !chatAssistantRevealInProgress
-    ) {
-      stopPendingReply();
-      return;
-    }
-    // Mid-typing interruption keeps only the words that had actually become
-    // visible, then breaks the current word like a natural spoken cutoff.
+    if (!latestAssistant) return null;
+
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     const interruptedText = resolveMessageDisplayContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
@@ -20386,81 +20442,116 @@ function HomeContent(): React.JSX.Element {
       interruptedText,
       visibleTokenCount
     );
-    chatCommittedFontLineCountByKeyRef.current.set(
+    const interruptedAssistantIndex = detail.messages.findIndex(
+      (message) => message.id === latestAssistantMessageId
+    );
+    if (interruptedAssistantIndex < 0) return null;
+    const interruptedAssistant = detail.messages[interruptedAssistantIndex];
+    if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return null;
+    const patchedInterruptedAssistant: Message = {
+      ...interruptedAssistant,
+      content: interruptionContent,
+      moodKey: DEFAULT_MESSAGE_MOOD,
+      moodConfidence: undefined,
+      askQuestion: undefined,
+      sentGeneratedImage: undefined,
+    };
+    return {
+      conversationId: detail.id,
+      assistantMessageId: latestAssistantMessageId,
       revealKey,
+      interruptedText,
+      interruptionContent,
+      patchedDetail: {
+        ...detail,
+        hasAssistantReply: true,
+        messages: [
+          ...detail.messages.slice(0, interruptedAssistantIndex),
+          patchedInterruptedAssistant,
+          ...detail.messages.slice(interruptedAssistantIndex + 1),
+        ],
+      },
+    };
+  }
+
+  function applyActiveAssistantRevealInterruption(
+    interruption: ActiveAssistantRevealInterruption
+  ): Promise<void> | null {
+    if (pendingReplyVisible) {
+      setPendingReply(false);
+      setPendingReplyStartedAtMs(null);
+      setPendingReplyDenialRisk(false);
+      setPendingReplyConversationId(null);
+      setPendingReplyIsNewConversation(false);
+      pendingReplyAbortControllerRef.current = null;
+    }
+    chatCommittedFontLineCountByKeyRef.current.set(
+      interruption.revealKey,
       Math.max(
-        estimateVisualLineCount(interruptedText),
-        estimateVisualLineCount(interruptionContent),
-        chatCommittedFontLineCountByKeyRef.current.get(revealKey) ?? 0
+        estimateVisualLineCount(interruption.interruptedText),
+        estimateVisualLineCount(interruption.interruptionContent),
+        chatCommittedFontLineCountByKeyRef.current.get(interruption.revealKey) ?? 0
       )
     );
-    chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
-    chatCompletedRevealKeysRef.current.add(revealKey);
-    chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+    chatCancelledRevealTokenCountByKeyRef.current.delete(interruption.revealKey);
+    chatCompletedRevealKeysRef.current.add(interruption.revealKey);
+    chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
     setStarterComposerRevealed(false);
     setConversationStarterPrompts(null);
     // Freeze auto-scroll so the pause marker stays where the user interrupted
     // the reply instead of being chased by the dolly.
-    chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
-    chatScrollPinnedByConversationRef.current.set(detail.id, true);
+    chatAutoscrollArmedByConversationRef.current.set(interruption.conversationId, false);
+    chatScrollPinnedByConversationRef.current.set(interruption.conversationId, true);
     const nextInterruptCount =
-      (chatInterruptCountByConversationRef.current.get(detail.id) ?? 0) + 1;
-    chatInterruptCountByConversationRef.current.set(detail.id, nextInterruptCount);
+      (chatInterruptCountByConversationRef.current.get(interruption.conversationId) ?? 0) + 1;
+    chatInterruptCountByConversationRef.current.set(
+      interruption.conversationId,
+      nextInterruptCount
+    );
     if (chatEphemeralMode) {
-      hardResetChatArchiveStateForConversation(detail.id);
+      hardResetChatArchiveStateForConversation(interruption.conversationId);
     }
-    setDetail((current) => {
-      if (!current || current.id !== detail.id) return current;
-      const interruptedConversationMessages = current.messages;
-      if (interruptedConversationMessages.length === 0) {
-        return current;
-      }
-      const interruptedAssistantIndex = interruptedConversationMessages.findIndex(
-        (message) => message.id === latestAssistantMessageId
-      );
-      if (interruptedAssistantIndex < 0) return current;
-      const interruptedAssistant = interruptedConversationMessages[interruptedAssistantIndex];
-      if (!interruptedAssistant || interruptedAssistant.role !== "assistant") return current;
-      const patchedInterruptedAssistant: Message = {
-        ...interruptedAssistant,
-        content: interruptionContent,
-        moodKey: DEFAULT_MESSAGE_MOOD,
-        moodConfidence: undefined,
-        askQuestion: undefined,
-        sentGeneratedImage: undefined,
-      };
-      return {
-        ...current,
-        hasAssistantReply: true,
-        messages: [
-          ...interruptedConversationMessages.slice(0, interruptedAssistantIndex),
-          patchedInterruptedAssistant,
-          ...interruptedConversationMessages.slice(interruptedAssistantIndex + 1),
-        ],
-      };
-    });
-    if (!String(latestAssistantMessageId).startsWith("pending-") && detail.id !== "pending") {
-      void api<{ ok: true }>(
-        `/api/messages/${encodeURIComponent(latestAssistantMessageId)}/interrupt`,
-        {
-          method: "POST",
-          body: JSON.stringify({ content: interruptionContent }),
-        }
-      )
-        .then(() => refreshOpenMemoryViews())
-        .catch((err) => {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Prism was interrupted, but the saved thread could not be updated."
-          );
-        });
-    }
+    setDetail((current) =>
+      current?.id === interruption.conversationId
+        ? interruption.patchedDetail
+        : current
+    );
     setChatEphemeralNowMs(Date.now());
+
+    if (
+      String(interruption.assistantMessageId).startsWith("pending-") ||
+      interruption.conversationId === "pending"
+    ) {
+      return null;
+    }
+    return api<{ ok: true }>(
+      `/api/messages/${encodeURIComponent(interruption.assistantMessageId)}/interrupt`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: interruption.interruptionContent }),
+      }
+    ).then(() => refreshOpenMemoryViews());
+  }
+
+  const handleTypingIndicatorPress = useCallback((): void => {
+    const interruption = prepareActiveAssistantRevealInterruption();
+    if (!interruption) {
+      if (pendingReplyVisible) {
+        stopPendingReply();
+      }
+      return;
+    }
+    const persistPromise = applyActiveAssistantRevealInterruption(interruption);
+    void persistPromise?.catch((err) => {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Prism was interrupted, but the saved thread could not be updated."
+      );
+    });
   }, [
     pendingReplyVisible,
     stopPendingReply,
-    chatEphemeralMode,
     chatAssistantRevealInProgress,
     detail?.id,
     detail?.messages,
@@ -20511,6 +20602,10 @@ function HomeContent(): React.JSX.Element {
     chatAssistantRevealInProgress &&
     pendingReplyStartMessageCount === 0 &&
     zenAssistantReplyCount <= 1;
+  useEffect(() => {
+    if (zenInitialThinkingActive || zenInitialReplyRevealActive) return;
+    zenInitialStatusLabelRef.current = null;
+  }, [zenInitialReplyRevealActive, zenInitialThinkingActive]);
 
   const replyInFlightSignals =
     pendingReplyVisible || chatAssistantRevealInProgress;
@@ -20588,7 +20683,20 @@ function HomeContent(): React.JSX.Element {
     const active = zenInitialThinkingActive || zenInitialReplyRevealActive;
     if (!active) return null;
     const compactPhase = zenInitialReplyRevealActive && !zenInitialThinkingActive;
-    const label = "Thinking...";
+    if (!zenInitialStatusLabelRef.current) {
+      const outputSalt = [
+        pendingReplyStartedAtMs ?? "no-start",
+        pendingReplyConversationId ?? "new",
+        detail?.id ?? "pending",
+        latestAssistantMessageId ?? "no-assistant",
+        detail?.messages.length ?? 0,
+      ].join(":");
+      zenInitialStatusLabelRef.current = pickStableStatusLabel(
+        ZEN_INITIAL_STATUS_LABELS,
+        outputSalt
+      );
+    }
+    const label = zenInitialStatusLabelRef.current;
     const onActivate = compactPhase
       ? handleZenInitialReplyRevealCancel
       : handleZenInitialThinkingCancel;
@@ -20633,6 +20741,11 @@ function HomeContent(): React.JSX.Element {
   }, [
     handleZenInitialReplyRevealCancel,
     handleZenInitialThinkingCancel,
+    detail?.id,
+    detail?.messages.length,
+    latestAssistantMessageId,
+    pendingReplyConversationId,
+    pendingReplyStartedAtMs,
     zenInitialReplyRevealActive,
     zenInitialThinkingActive,
   ]);
@@ -20681,8 +20794,10 @@ function HomeContent(): React.JSX.Element {
       ? "Compacting this chat context"
       : "Compacted context is ready";
     return (
-      <div className={styles.manualCompactionRow}>
-        <hr className={styles.manualCompactionDivider} aria-hidden="true" />
+      <div
+        className={`${styles.askQuestionRecallBubbleDock} ${styles.manualCompactionDock}`}
+        data-compaction-state={manualCompactionStatus.state}
+      >
         <div
           className={`${styles.typingIndicator} ${styles.manualCompactionIndicator}`}
           style={style}
@@ -25216,6 +25331,7 @@ function HomeContent(): React.JSX.Element {
     setConversationStarterPrompts(null);
     setDraft("");
     setComposerSendTintActive(false);
+    revealZenHeaderForFreshSurface();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -25859,6 +25975,7 @@ function HomeContent(): React.JSX.Element {
     setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
     setAskQuestionComposerRevealed(false);
+    revealZenHeaderForFreshSurface();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -25944,12 +26061,13 @@ function HomeContent(): React.JSX.Element {
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
-    const baselineMessageCount = detail?.messages.length ?? 0;
+    let detailForSend = detail;
+    let baselineMessageCount = detailForSend?.messages.length ?? 0;
     const isInitialZenStarterPrompt =
       view === "chat" &&
       isStarterPrompt &&
       baselineMessageCount === 0 &&
-      detail?.hasAssistantReply !== true;
+      detailForSend?.hasAssistantReply !== true;
     if (isInitialZenStarterPrompt) {
       if (replayCachedZenInitialStarterReply()) return;
       if (armCanceledZenInitialStarterReplay()) return;
@@ -25984,6 +26102,28 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (!trimmed && !isStarterPrompt) return;
+    if (!isStarterPrompt && trimmed.length > 0 && view === "chat") {
+      const interruption = prepareActiveAssistantRevealInterruption();
+      if (interruption) {
+        const persistPromise = applyActiveAssistantRevealInterruption(interruption);
+        detailForSend = interruption.patchedDetail;
+        baselineMessageCount = detailForSend.messages.length;
+        if (persistPromise) {
+          try {
+            await persistPromise;
+          } catch (err) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Prism was interrupted, but the saved thread could not be updated."
+            );
+            setDraft(rawDraft);
+            setComposerSendTintActive(rawDraft.trim().length > 0);
+            return;
+          }
+        }
+      }
+    }
     if (pendingReply && !canSendTextWhileReplyPending()) {
       if (!isStarterPrompt && trimmed.length > 0) {
         hideZenHeaderForConversationAction();
@@ -26031,20 +26171,20 @@ function HomeContent(): React.JSX.Element {
       chatSummaryRefreshMarkerRef.current = null;
     }
     const requestConversationId = options.queuedConversationId ?? (
-      detail?.id && detail.id !== "pending"
-        ? detail.id
+      detailForSend?.id && detailForSend.id !== "pending"
+        ? detailForSend.id
         : selectedId
     );
     const requestStartedNewConversation = requestConversationId === null;
     resumeChatModeAutoscrollForOutgoingTurn(
       requestConversationId ??
-        detail?.id ??
+        detailForSend?.id ??
         selectedId ??
         (requestStartedNewConversation ? "pending" : null)
     );
     const archiveConversationId =
       requestConversationId ??
-      (detail?.id && detail.id !== "pending" ? detail.id : null);
+      (detailForSend?.id && detailForSend.id !== "pending" ? detailForSend.id : null);
     if (view === "chat" && archiveConversationId) {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
@@ -26071,21 +26211,21 @@ function HomeContent(): React.JSX.Element {
     setPendingReplyIsNewConversation(requestStartedNewConversation);
     setError(null);
 
-    const previousDetail = detail;
+    const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
-    const optimisticIncognito = detail?.incognito === true || pendingIncognito;
+    const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
-      detail?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
+      detailForSend?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
     const optimisticLastBotId =
-      detail?.lastBotId ??
+      detailForSend?.lastBotId ??
       (view === "sandbox" && !optimisticIncognito ? selectedBotId ?? null : optimisticBotId);
     const optimisticLastBotColor =
-      detail?.lastBotColor
+      detailForSend?.lastBotColor
       ?? (optimisticLastBotId
             ? bots.find(b => b.id === optimisticLastBotId)?.color ?? null
             : null);
     let initialZenStarterPendingDetail: ConversationDetail | null =
-      isInitialZenStarterPrompt && detail ? detail : null;
+      isInitialZenStarterPrompt && detailForSend ? detailForSend : null;
     if (isStarterPrompt && requestStartedNewConversation) {
       const pendingStarterDetail: ConversationDetail = {
         id: "pending",
@@ -26110,7 +26250,7 @@ function HomeContent(): React.JSX.Element {
         ...(commandCenterPromptShortcut ? { promptShortcut: commandCenterPromptShortcut } : {}),
       };
       const optimisticTitle =
-        detail?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
+        detailForSend?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
       // Forward the chat-mode conversation-level settings (bot + privacy)
       // into the optimistic detail so the shell accent + privacy affordances
       // don't flicker between send and server reply. Once the server answers
@@ -26123,19 +26263,19 @@ function HomeContent(): React.JSX.Element {
       // selectedBotId so the sidebar row hints at the next color before
       // the reply lands; the server value overrides on response.
       setDetail({
-        id: detail?.id ?? "pending",
+        id: detailForSend?.id ?? "pending",
         title: optimisticTitle,
         botId: optimisticBotId,
         incognito: optimisticIncognito,
         lastBotId: optimisticLastBotId,
         lastBotColor: optimisticLastBotColor,
-        ...(detail?.zenWallpaper ? { zenWallpaper: detail.zenWallpaper } : {}),
+        ...(detailForSend?.zenWallpaper ? { zenWallpaper: detailForSend.zenWallpaper } : {}),
         // hasAssistantReply reflects the PRE-SEND state (whatever detail
         // already had) — the optimistic update only inserts a USER
         // message, not an assistant one. The server's real response
         // flips this to true once the assistant reply is in the db.
-        hasAssistantReply: detail?.hasAssistantReply ?? false,
-        messages: [...(detail?.messages ?? []), optimisticMessage],
+        hasAssistantReply: detailForSend?.hasAssistantReply ?? false,
+        messages: [...(detailForSend?.messages ?? []), optimisticMessage],
       });
     }
     const zenInitialStarterRequestId = isInitialZenStarterPrompt
@@ -26418,8 +26558,6 @@ function HomeContent(): React.JSX.Element {
     askQuestion: NonNullable<Message["askQuestion"]>;
     assistantMessageId: string;
     source: "askquestion" | "starter";
-    status: "unanswered" | "answered";
-    answerMessage: Message | null;
   };
 
   type ComposerChipRail = {
@@ -26531,13 +26669,7 @@ function HomeContent(): React.JSX.Element {
           .slice(messageIndex + 1)
           .find((message) => message.role === "user") ?? null;
       if (answerMessage) {
-        return {
-          askQuestion,
-          assistantMessageId: msg.id,
-          source: "askquestion",
-          status: "answered",
-          answerMessage,
-        };
+        return null;
       }
       if (pendingAskQuestionState?.assistantMessageId !== msg.id) return null;
       if (pendingAskQuestionWaitingForReveal) return null;
@@ -26545,8 +26677,6 @@ function HomeContent(): React.JSX.Element {
         askQuestion,
         assistantMessageId: msg.id,
         source: "askquestion",
-        status: "unanswered",
-        answerMessage: null,
       };
     }
 
@@ -26557,25 +26687,10 @@ function HomeContent(): React.JSX.Element {
       askQuestion: starterAskQuestion,
       assistantMessageId: msg.id,
       source: "starter",
-      status: "unanswered",
-      answerMessage: null,
     };
   }
 
-  function handleComposerChipPick(
-    chip: ComposerChip,
-    options: { replaceMessageId?: string } = {}
-  ): void {
-    if (options.replaceMessageId && chip.action === "other") {
-      const answerMessage = detail?.messages.find(
-        (message) => message.id === options.replaceMessageId
-      );
-      if (answerMessage) {
-        setAskQuestionChangingAnswerAssistantId(null);
-        beginEditMessage(answerMessage);
-      }
-      return;
-    }
+  function handleComposerChipPick(chip: ComposerChip): void {
     if (chip.action === "other") {
       if (chip.otherSource === "starter") {
         setStarterComposerRevealed(true);
@@ -26598,11 +26713,6 @@ function HomeContent(): React.JSX.Element {
     resumeChatModeAutoscrollForOutgoingTurn(detail?.id ?? selectedId);
     setConversationStarterPrompts(null);
     setStarterComposerRevealed(false);
-    if (options.replaceMessageId) {
-      setAskQuestionChangingAnswerAssistantId(null);
-      void performMessageEdit(options.replaceMessageId, chip.sendValue ?? chip.label);
-      return;
-    }
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op — used so sendMessage can share the submit pathway */
@@ -26820,66 +26930,33 @@ function HomeContent(): React.JSX.Element {
       interaction.source === "starter"
         ? ""
         : askQuestionPromptForInlinePanel(interaction.askQuestion.prompt);
-    const answered = interaction.status === "answered";
-    const answerMessage = interaction.answerMessage;
-    const canChangeAnsweredAskQuestion = view !== "chat";
-    const answerEditable =
-      canChangeAnsweredAskQuestion &&
-      answerMessage !== null &&
-      !String(answerMessage.id).startsWith("pending-");
-    const changing =
-      answered &&
-      answerEditable &&
-      askQuestionChangingAnswerAssistantId === interaction.assistantMessageId;
-    const choicesDisabled = pendingReply || (answered && !changing);
-    const answerText = answerMessage?.content.trim() ?? "";
+    const choicesDisabled = pendingReply;
     const otherSelected =
-      !answered &&
       (interaction.source === "starter"
         ? starterComposerRevealed
         : askQuestionComposerRevealed &&
           pendingAskQuestionState?.assistantMessageId === interaction.assistantMessageId);
-    const choicesVisible = !otherSelected && (!answered || changing);
+    const choicesVisible = !otherSelected;
 
     return (
       <div
         className={styles.askQuestionInlineCard}
-        data-ask-question-state={answered ? "answered" : otherSelected ? "other-selected" : "unanswered"}
-        data-ask-question-changing={changing ? "true" : undefined}
+        data-ask-question-panel="true"
+        data-ask-question-assistant-id={interaction.assistantMessageId}
+        data-ask-question-state={otherSelected ? "other-selected" : "unanswered"}
         role="group"
-        aria-label={answered ? "Answered suggested replies" : "Suggested replies"}
+        aria-label="Suggested replies"
         onClick={(event) => event.stopPropagation()}
       >
         <div className={styles.askQuestionInlineHeader}>
           <span className={styles.askQuestionInlineEyebrow}>
-            {answered ? "Answered" : otherSelected ? "Other selected" : "Choose a reply"}
+            {otherSelected ? "Other selected" : "Choose a reply"}
           </span>
-          {answered && canChangeAnsweredAskQuestion ? (
-            <button
-              type="button"
-              className={styles.askQuestionInlineChangeButton}
-              disabled={pendingReply || !answerEditable}
-              onClick={() => {
-                setAskQuestionChangingAnswerAssistantId((current) =>
-                  current === interaction.assistantMessageId
-                    ? null
-                    : interaction.assistantMessageId
-                );
-              }}
-            >
-              {changing ? "Cancel" : "Change answer"}
-            </button>
-          ) : null}
         </div>
         {prompt ? (
           <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
         ) : null}
-        {answered ? (
-          <div className={styles.askQuestionInlineAnswer}>
-            <span>Your answer</span>
-            <p>{answerText || "No text recorded."}</p>
-          </div>
-        ) : otherSelected ? (
+        {otherSelected ? (
           <div className={styles.askQuestionInlineAnswer}>
             <span>Selected reply</span>
             <p>Other - write your answer below.</p>
@@ -26901,19 +26978,10 @@ function HomeContent(): React.JSX.Element {
                 data-chip-kind={chip.action}
                 aria-label={
                   chip.action === "other"
-                    ? changing
-                      ? "Other - edit your answer in chat"
-                      : "Other - explain in chat"
+                    ? "Other - explain in chat"
                     : `Suggested reply: ${chip.sendValue ?? chip.label}`
                 }
-                onClick={() =>
-                  handleComposerChipPick(
-                    chip,
-                    changing && answerMessage
-                      ? { replaceMessageId: answerMessage.id }
-                      : {}
-                  )
-                }
+                onClick={() => handleComposerChipPick(chip)}
               >
                 {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
               </button>
@@ -27150,14 +27218,6 @@ function HomeContent(): React.JSX.Element {
     : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
   const askQuestionUsesMobileRail = viewportWidth <= PICKER_MOBILE_BREAKPOINT;
-  const askQuestionChangeChoicesVisible =
-    askQuestionChangingAnswerAssistantId !== null &&
-    detail?.messages.some(
-      (message) =>
-        message.id === askQuestionChangingAnswerAssistantId &&
-        message.role === "assistant" &&
-        resolveAssistantAskQuestion(message) !== undefined
-    ) === true;
   const starterPromptsAvailable =
     conversationStarterPrompts !== null &&
     conversationStarterPrompts.conversationId === detail?.id &&
@@ -27180,13 +27240,18 @@ function HomeContent(): React.JSX.Element {
     : null;
   const choiceChipRailInteractiveKey =
     pendingAskQuestionInteractiveKey ?? starterPromptsInteractiveKey;
+  const choiceChipRailAnchorMessageId =
+    pendingAskQuestionInteractiveKey !== null
+      ? pendingAskQuestionState?.assistantMessageId ?? null
+      : starterPromptsInteractive
+        ? starterPromptsLatestAssistantMessage?.id ?? null
+        : null;
   const choiceChipRailComposerRevealed =
     pendingAskQuestionInteractiveKey !== null
       ? askQuestionComposerRevealed
       : starterComposerRevealed;
   const askQuestionComposerHiddenByChoices =
-    (askQuestionInteractive && !askQuestionComposerRevealed) ||
-    askQuestionChangeChoicesVisible;
+    askQuestionInteractive && !askQuestionComposerRevealed;
   const composerHiddenByChoiceChips =
     askQuestionComposerHiddenByChoices ||
     (starterPromptsInteractive && !starterComposerRevealed);
@@ -27235,8 +27300,8 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    if (!choiceChipRailInteractiveKey) return;
+  function centerActiveChoicePanelInMessages(): void {
+    if (!choiceChipRailInteractiveKey || !choiceChipRailAnchorMessageId) return;
     if (choiceChipRailComposerRevealed) return;
     if (
       askQuestionComposerHiddenForReadingKeyRef.current ===
@@ -27246,34 +27311,46 @@ function HomeContent(): React.JSX.Element {
     }
     const el = messagesScrollRef.current;
     if (!el) return;
-    let settleTimer: number | null = null;
-    const run = (): void => {
-      const top = Math.max(
-        0,
-        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-      );
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 200;
-      el.scrollTo({
-        top,
-        behavior: "auto",
-      });
-      settleTimer = window.setTimeout(() => {
-        chatProgrammaticScrollUntilMsRef.current = Date.now() + 120;
-        el.scrollTop = Math.max(
-          0,
-          el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-        );
-      }, 120);
-    };
+    const row = findMessageRowById(el, choiceChipRailAnchorMessageId);
+    if (!row) return;
+    const panel =
+      row.querySelector<HTMLElement>('[data-ask-question-panel="true"]') ??
+      findChatModeMessageScrollAnchor(row);
+    const rootRect = el.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const panelCenterY =
+      panelRect.top - rootRect.top + el.scrollTop + panelRect.height / 2;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const targetTop = Math.max(
+      0,
+      Math.min(maxScrollTop, panelCenterY - el.clientHeight / 2)
+    );
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + 180;
+    el.scrollTo({ top: targetTop, behavior: "auto" });
+    if (detail?.id) {
+      chatLastScrollTopByConversationRef.current.set(detail.id, targetTop);
+      chatLastScrollHeightByConversationRef.current.set(detail.id, el.scrollHeight);
+    }
+  }
+
+  useEffect(() => {
+    if (!choiceChipRailInteractiveKey || choiceChipRailComposerRevealed) return;
+    let settleTimerA: number | null = null;
+    let settleTimerB: number | null = null;
     requestAnimationFrame(() => {
-      requestAnimationFrame(run);
+      requestAnimationFrame(centerActiveChoicePanelInMessages);
     });
+    settleTimerA = window.setTimeout(centerActiveChoicePanelInMessages, 140);
+    settleTimerB = window.setTimeout(centerActiveChoicePanelInMessages, 320);
     return () => {
-      if (settleTimer !== null) window.clearTimeout(settleTimer);
+      if (settleTimerA !== null) window.clearTimeout(settleTimerA);
+      if (settleTimerB !== null) window.clearTimeout(settleTimerB);
     };
   }, [
-    choiceChipRailInteractiveKey,
+    choiceChipRailAnchorMessageId,
     choiceChipRailComposerRevealed,
+    choiceChipRailInteractiveKey,
+    detail?.id,
   ]);
   const askQuestionTailSpaceActive =
     askQuestionUsesMobileRail &&
@@ -27459,23 +27536,14 @@ function HomeContent(): React.JSX.Element {
     if (askQuestionComposerHiddenForReadingKeyRef.current !== null) {
       return;
     }
-    const el = messagesScrollRef.current;
-    if (!el) return;
-    const settle = (): void => {
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 140;
-      el.scrollTop = Math.max(
-        0,
-        el.scrollHeight - el.clientHeight * CHAT_MODE_ASSISTANT_AUTOSCROLL_TARGET_RATIO
-      );
-    };
-    settle();
-    const t1 = window.setTimeout(settle, 120);
-    const t2 = window.setTimeout(settle, 300);
+    centerActiveChoicePanelInMessages();
+    const t1 = window.setTimeout(centerActiveChoicePanelInMessages, 120);
+    const t2 = window.setTimeout(centerActiveChoicePanelInMessages, 300);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
-  }, [askQuestionTailSpaceActive]);
+  }, [askQuestionTailSpaceActive, choiceChipRailAnchorMessageId]);
 
   function clearChatModeScrollElasticResetTimer(): void {
     if (chatScrollElasticResetTimerRef.current === null) return;
@@ -27995,9 +28063,7 @@ function HomeContent(): React.JSX.Element {
       if (switchingPrivacyMode && !pendingReplyVisible) {
         pulseConversationSurfaceLoading();
       }
-      zenHeaderAutoHideArmedRef.current = false;
-      clearZenHeaderAutoHideTimer();
-      setZenHeaderVisible(true);
+      revealZenHeaderForFreshSurface();
       setConversationStarterPrompts(null);
       setChatStartupSummary(null);
       chatSummaryRefreshMarkerRef.current = null;
@@ -49154,7 +49220,6 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
-          {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
@@ -49167,6 +49232,7 @@ function HomeContent(): React.JSX.Element {
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {manualCompactionIndicatorNode}
         </div>
         {chatLikeSurface ? typingIndicatorNode : null}
 
@@ -50560,7 +50626,6 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
-          {manualCompactionIndicatorNode}
           {compactedSummaryDebugNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
@@ -50575,6 +50640,7 @@ function HomeContent(): React.JSX.Element {
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
+          {manualCompactionIndicatorNode}
         </div>
         {chatLikeSurface ? typingIndicatorNode : null}
 

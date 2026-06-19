@@ -2225,62 +2225,66 @@ function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
   return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
 }
 
-function latestAssistantAskQuestionFromHistory(
-  chatHistory: ChatMessage[]
-): AskQuestionPayload | undefined {
-  for (let i = chatHistory.length - 1; i >= 0; i -= 1) {
-    const message = chatHistory[i];
-    if (message?.role !== "assistant") continue;
-    const ask = message.askQuestion;
-    if (
-      ask?.name === "AskQuestion" &&
-      Array.isArray(ask.options) &&
-      ask.options.length === 3
-    ) {
-      return ask;
-    }
-    // Only continue an AskQuestion sequence when the latest assistant turn
-    // itself carried AskQuestion metadata.
-    return undefined;
-  }
-  return undefined;
+const INTERRUPTED_ASSISTANT_CUTOFF_PATTERN = /—\s*$/u;
+const INTERRUPTED_REPLY_CONTINUE_PATTERN =
+  /\b(?:continue|go on|carry on|keep going|finish(?: your thought)?|resume|pick (?:it|that|this)?\s*back up|where were you|what were you saying|as you were|go ahead)\b/i;
+const INTERRUPTED_REPLY_EXCUSE_PATTERN =
+  /\b(?:sorry|apolog(?:y|ies|ize)|my bad|oops|whoops|interrupted|cut you off|didn['’]?t mean|did not mean|had to|needed to|got (?:a|the)?\s*(?:call|text|message)|doorbell|door|phone|boss|meeting|kid|back now|i['’]?m back|im back|brb|misclick|accidentally)\b/i;
+const INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN =
+  /\b(?:instead|new topic|different topic|switch topics|forget that|never mind|nevermind|actually,?\s+(?:can|could|please)?\s*(?:we|you)?\s*(?:talk|switch|do|help))\b/i;
+
+function userMessageSuggestsInterruptedReplyResume(userMessage: string): boolean {
+  const trimmed = userMessage.replace(/\s+/g, " ").trim();
+  if (!trimmed || trimmed.length > 280) return false;
+  if (INTERRUPTED_REPLY_CONTINUE_PATTERN.test(trimmed)) return true;
+  if (INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN.test(trimmed)) return false;
+  return INTERRUPTED_REPLY_EXCUSE_PATTERN.test(trimmed);
 }
 
-function userMessageAnswersAskQuestionOption(
-  userMessage: string,
-  askQuestion: AskQuestionPayload
-): boolean {
-  const trimmed = userMessage.trim();
-  if (!trimmed) return false;
-
-  const directChoice = trimmed.match(
-    /^(?:option|choice|answer)?\s*([A-Ca-c1-3])(?:[)\].:-]|\s|$)/i
-  );
-  if (directChoice?.[1]) {
-    return true;
-  }
-
-  const normalizedUser = normalizeAskQuestionComparisonText(
-    trimmed.replace(
-      /^(?:option|choice|answer)?\s*(?:[A-Ca-c1-3])[)\].:-]?\s*/i,
-      ""
-    )
-  );
-  if (!normalizedUser) return false;
-
-  return askQuestion.options.some((option) => {
-    const normalizedOption = normalizeAskQuestionComparisonText(option.label);
-    return normalizedOption.length > 0 && normalizedOption === normalizedUser;
-  });
-}
-
-function shouldContinueAskQuestionFromPriorTurn(
+function buildInterruptedReplyContinuationHint(
   chatHistory: ChatMessage[],
   userMessage: string
-): boolean {
-  const latestAskQuestion = latestAssistantAskQuestionFromHistory(chatHistory);
-  if (!latestAskQuestion) return false;
-  return userMessageAnswersAskQuestionOption(userMessage, latestAskQuestion);
+): string | null {
+  const previousMessage = [...chatHistory]
+    .reverse()
+    .find((item) => item.role === "assistant" || item.role === "user");
+  if (!previousMessage || previousMessage.role !== "assistant") return null;
+  const interruptedContent = previousMessage.content.trim();
+  if (!INTERRUPTED_ASSISTANT_CUTOFF_PATTERN.test(interruptedContent)) return null;
+  const interruptedSnippet = interruptedContent
+    .replace(INTERRUPTED_ASSISTANT_CUTOFF_PATTERN, "")
+    .trim();
+  if (interruptedSnippet.length < 8) return null;
+  const snippetPreview = truncateToolCallPreview(interruptedSnippet, 260);
+  const normalizedUserMessage = userMessage.replace(/\s+/g, " ").trim();
+  const shouldResumeInterruptedReply =
+    userMessageSuggestsInterruptedReplyResume(normalizedUserMessage);
+  const clearlySwitchesTopic =
+    normalizedUserMessage.length > 0 &&
+    INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN.test(normalizedUserMessage);
+  const responseGuidance = shouldResumeInterruptedReply
+    ? [
+        "The user's latest message appears to ask for continuation or excuse the interruption.",
+        "Reply naturally to the latest user note in at most one brief clause if needed, then continue the unfinished thought.",
+        "Use a bridge like \"As I was saying,\" and resume from the visible fragment.",
+      ]
+    : clearlySwitchesTopic
+      ? [
+          "The user's latest message appears to switch topics or replace the interrupted request.",
+          "Prioritize the new request and do not continue the interrupted thought unless a tiny acknowledgment would make the turn feel natural.",
+        ]
+      : [
+          "Treat the user's latest message as the interruption itself.",
+          "Choose whether to continue the interrupted thought or pivot to the new request based on what the latest user message asks for.",
+          "If continuing, briefly acknowledge the interruption and resume from the visible fragment.",
+        ];
+  return [
+    "The previous assistant reply was intentionally interrupted by the user's latest message and only the visible fragment remains in history.",
+    `Visible interrupted fragment: "${snippetPreview}"`,
+    ...responseGuidance,
+    "Never restore, quote, or summarize hidden text that is not present in the visible fragment; if continuing, continue only from that fragment.",
+    "Do not scold the user or claim you cannot know what you were going to say.",
+  ].join("\n");
 }
 
 function assistantLikelyIntendedAskQuestion(displayContent: string): boolean {
@@ -3392,6 +3396,7 @@ function buildPromptMessages(args: {
   memoryClarification?: string | null;
   chatHistory: ChatMessage[];
   userMessage: string;
+  mode: ChatMode;
   askQuestionMode: "off" | "explicit" | "continuation";
   /** Prism single-slot image job hint (busy / in-flight status). */
   imageSlotSystemHint?: string | null;
@@ -3474,6 +3479,15 @@ function buildPromptMessages(args: {
   const hint = args.imageSlotSystemHint?.trim();
   if (hint && hint.length > 0) {
     promptMessages.push({ role: "system", content: hint });
+  }
+  const interruptedContinuationHint = isZenMode(args.mode)
+    ? buildInterruptedReplyContinuationHint(args.chatHistory, args.userMessage)
+    : null;
+  if (interruptedContinuationHint) {
+    promptMessages.push({
+      role: "system",
+      content: interruptedContinuationHint,
+    });
   }
   const transcriptMentionsPrismBot =
     args.userMessage.includes("prism-bot://") ||
@@ -3783,16 +3797,10 @@ export async function processChatMessage(
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
-    const continueAskQuestion =
-      !isStarterPrompt &&
-      !explicitAskQuestionRequest &&
-      shouldContinueAskQuestionFromPriorTurn(history, message);
-    const forceAskQuestion = explicitAskQuestionRequest || continueAskQuestion;
-    const askQuestionMode: "off" | "explicit" | "continuation" = forceAskQuestion
-      ? explicitAskQuestionRequest
-        ? "explicit"
-        : "continuation"
-      : "off";
+    // A selected AskQuestion option is now treated as ordinary prose.
+    // Only an explicit user request should start another AskQuestion turn.
+    const askQuestionMode: "off" | "explicit" | "continuation" =
+      explicitAskQuestionRequest ? "explicit" : "off";
     const promptMessages = buildPromptMessages({
       botSystemPrompt: effectiveBotSystemPrompt,
       userDisplayName: settings.userDisplayName,
@@ -3805,6 +3813,7 @@ export async function processChatMessage(
       memoryClarification: null,
       chatHistory: history,
       userMessage: promptUserMessage,
+      mode,
       askQuestionMode,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
@@ -3873,9 +3882,9 @@ export async function processChatMessage(
     }
     throwIfChatRequestCancelled(settings.signal);
     const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-    const shouldBackfillAskQuestion =
-      forceAskQuestion ||
-      assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
+      const shouldBackfillAskQuestion =
+        explicitAskQuestionRequest ||
+        assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
     const askQuestionRaw =
       parsedAssistant.askQuestion ??
       (shouldBackfillAskQuestion
@@ -4175,16 +4184,10 @@ export async function processChatMessage(
     .all(activeConversationId, userId, historyCutoff, historyCutoff, RECENT_WINDOW_SIZE) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
   const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
-  const continueAskQuestion =
-    !isStarterPrompt &&
-    !explicitAskQuestionRequest &&
-    shouldContinueAskQuestionFromPriorTurn(history, message);
-  const forceAskQuestion = explicitAskQuestionRequest || continueAskQuestion;
-  const askQuestionMode: "off" | "explicit" | "continuation" = forceAskQuestion
-    ? explicitAskQuestionRequest
-      ? "explicit"
-      : "continuation"
-    : "off";
+  // A selected AskQuestion option is now treated as ordinary prose.
+  // Only an explicit user request should start another AskQuestion turn.
+  const askQuestionMode: "off" | "explicit" | "continuation" =
+    explicitAskQuestionRequest ? "explicit" : "off";
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
@@ -4267,6 +4270,7 @@ export async function processChatMessage(
     memoryClarification,
     chatHistory: history,
     userMessage: promptUserMessage,
+    mode,
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
@@ -4341,7 +4345,7 @@ export async function processChatMessage(
   throwIfChatRequestCancelled(settings.signal);
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
-    forceAskQuestion ||
+    explicitAskQuestionRequest ||
     assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
   const askQuestionRaw =
     parsedAssistant.askQuestion ??
