@@ -4059,6 +4059,111 @@ describe("buildAssistantToolCallEvents", () => {
   });
 });
 
+describe("processChatMessage Zen cancellation cleanup", () => {
+  it("removes a persisted first user message when the request is cancelled before a reply", async () => {
+    const db = createChatTestDb();
+    const controller = new AbortController();
+    let markProviderFetchStarted: () => void = () => {};
+    const providerFetchStarted = new Promise<void>((resolve) => {
+      markProviderFetchStarted = resolve;
+    });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      markProviderFetchStarted();
+      const signal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        const rejectAbort = () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted) {
+          rejectAbort();
+          return;
+        }
+        signal?.addEventListener("abort", rejectAbort, { once: true });
+      });
+    }) as typeof fetch;
+
+    const pending = processChatMessage(
+      db,
+      "user-1",
+      "Please start then cancel.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        signal: controller.signal,
+      }
+    );
+
+    await providerFetchStarted;
+    controller.abort();
+    await assert.rejects(pending, /abort|cancel/i);
+
+    const messageCount = db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+      .get("user-1") as { n: number };
+    assert.equal(messageCount.n, 0);
+    const conversationCount = db
+      .prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?")
+      .get("user-1") as { n: number };
+    assert.equal(conversationCount.n, 0);
+  });
+
+  it("does not reuse a stale Zen conversation that has user text but no assistant reply", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Fresh reply");
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run("stale-zen", "user-1", "Cancelled start", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)"
+    ).run("stale-user", "stale-zen", "user-1", "This was cancelled.", now);
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fresh start",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      "stale-zen"
+    );
+
+    assert.notEqual(result.conversation.id, "stale-zen");
+    assert.deepEqual(
+      result.conversation.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.content),
+      ["Fresh start"]
+    );
+    const staleRows = db
+      .prepare("SELECT content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all("stale-zen") as Array<{ content: string }>;
+    assert.deepEqual(
+      staleRows.map((row) => row.content),
+      ["This was cancelled."]
+    );
+  });
+});
+
 describe("bot judgment memories", () => {
   it("stores validated inferred bot-scoped judgment memories from assistant replies", async () => {
     const db = createChatTestDb();

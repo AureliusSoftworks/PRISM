@@ -172,6 +172,9 @@ describe("buildModelCatalog", () => {
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.equal(catalog.online[0]?.id, catalog.defaults.online);
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
   });
 
@@ -196,6 +199,10 @@ describe("buildModelCatalog", () => {
           JSON.stringify({
             data: [
               { id: "gpt-4o" },
+              { id: "gpt-5.1" },
+              { id: "gpt-5.4-mini" },
+              { id: "chatgpt-4o-latest" },
+              { id: "o5-mini" },
               { id: "text-embedding-3-small" },
               { id: "dall-e-3" },
               { id: "o3-mini" },
@@ -217,7 +224,11 @@ describe("buildModelCatalog", () => {
     const gemma = catalog.local.find((model) => model.id === "gemma3:latest");
     assert.equal(gemma?.label, "Gemma3");
     assert.ok(catalog.online.some((model) => model.id === "gpt-4o"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.1"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.4-mini"));
+    assert.ok(catalog.online.some((model) => model.id === "chatgpt-4o-latest"));
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
+    assert.ok(catalog.online.some((model) => model.id === "o5-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
   });
@@ -250,7 +261,7 @@ describe("buildModelCatalog", () => {
     );
   });
 
-  it("merges secondary Ollama host models while preferring primary duplicate names", async () => {
+  it("merges secondary Ollama host models while preserving duplicate names per host", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
@@ -284,7 +295,8 @@ describe("buildModelCatalog", () => {
     const secondaryLlama = catalog.local.find(
       (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}llama3.2`
     );
-    assert.equal(secondaryLlama, undefined);
+    assert.equal(secondaryLlama?.label, "Llama3.2 (Second host)");
+    assert.equal(secondaryLlama?.localHost, "secondary");
     assert.ok(catalog.local.some((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`));
   });
 });
@@ -706,6 +718,7 @@ describe("checkLocalModelHostStatus", () => {
 describe("openAiModelUsesFixedDefaultTemperature", () => {
   it("returns true for reasoning-style models (temperature must be omitted)", () => {
     assert.equal(openAiModelUsesFixedDefaultTemperature("o3-mini"), true);
+    assert.equal(openAiModelUsesFixedDefaultTemperature("o5-mini"), true);
     assert.equal(openAiModelUsesFixedDefaultTemperature("gpt-5-nano"), true);
   });
 
@@ -718,6 +731,7 @@ describe("openAiModelUsesMaxCompletionTokens", () => {
   it("returns true for reasoning-style model ids that require max_completion_tokens", () => {
     assert.equal(openAiModelUsesMaxCompletionTokens("o3-mini"), true);
     assert.equal(openAiModelUsesMaxCompletionTokens("O4-mini"), true);
+    assert.equal(openAiModelUsesMaxCompletionTokens("O5-mini"), true);
     assert.equal(openAiModelUsesMaxCompletionTokens("gpt-5-nano"), true);
   });
 

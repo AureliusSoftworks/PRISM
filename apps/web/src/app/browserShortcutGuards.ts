@@ -33,6 +33,7 @@ const BROWSER_NAVIGATION_KEYS = new Set([
   "BrowserForward",
   "BrowserHome",
   "BrowserRefresh",
+  "Refresh",
   "BrowserSearch",
   "LaunchApplication1",
   "LaunchApplication2",
@@ -64,13 +65,23 @@ function normalizeShortcutKey(key: string): string {
   return key;
 }
 
+function normalizeShortcutCode(code: string): string {
+  if (/^Key[A-Z]$/u.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/u.test(code)) return code.slice(5);
+  return code;
+}
+
 function isNumberTabShortcut(key: string): boolean {
   return /^[1-9]$/u.test(key);
 }
 
-function isZoomShortcut(event: BrowserShortcutKeyEvent, key: string): boolean {
+function isZoomShortcut(
+  event: BrowserShortcutKeyEvent,
+  key: string,
+  codeKey: string
+): boolean {
   if (!event.ctrlKey && !event.metaKey) return false;
-  return ZOOM_KEYS.has(key) || ZOOM_CODES.has(event.code ?? "");
+  return ZOOM_KEYS.has(key) || ZOOM_KEYS.has(codeKey) || ZOOM_CODES.has(event.code ?? "");
 }
 
 export function shouldBlockBrowserKeyboardShortcut(
@@ -80,27 +91,47 @@ export function shouldBlockBrowserKeyboardShortcut(
 
   const key = normalizeShortcutKey(event.key);
   const code = event.code ?? "";
+  const codeKey = normalizeShortcutCode(code);
   const ctrlOrMeta = event.ctrlKey || event.metaKey;
 
-  if (FUNCTION_BROWSER_KEYS.has(key)) return true;
-  if (BROWSER_NAVIGATION_KEYS.has(key) || BROWSER_NAVIGATION_KEYS.has(code)) {
+  if (FUNCTION_BROWSER_KEYS.has(key) || FUNCTION_BROWSER_KEYS.has(codeKey)) return true;
+  if (
+    BROWSER_NAVIGATION_KEYS.has(key) ||
+    BROWSER_NAVIGATION_KEYS.has(code) ||
+    BROWSER_NAVIGATION_KEYS.has(codeKey)
+  ) {
     return true;
   }
 
   if (!event.targetIsEditable && key === "Backspace") return true;
-  if (isZoomShortcut(event, key)) return true;
+  if (isZoomShortcut(event, key, codeKey)) return true;
 
-  if (event.ctrlKey && event.shiftKey && DEVTOOLS_CTRL_SHIFT_KEYS.has(key)) {
+  if (
+    event.ctrlKey &&
+    event.shiftKey &&
+    (DEVTOOLS_CTRL_SHIFT_KEYS.has(key) || DEVTOOLS_CTRL_SHIFT_KEYS.has(codeKey))
+  ) {
     return true;
   }
 
-  if (event.metaKey && event.altKey && DEVTOOLS_META_ALT_KEYS.has(key)) {
+  if (
+    event.metaKey &&
+    event.altKey &&
+    (DEVTOOLS_META_ALT_KEYS.has(key) || DEVTOOLS_META_ALT_KEYS.has(codeKey))
+  ) {
     return true;
   }
 
-  if (ctrlOrMeta && CTRL_OR_META_BROWSER_KEYS.has(key)) return true;
-  if (ctrlOrMeta && CTRL_OR_META_TAB_KEYS.has(key)) return true;
-  if (ctrlOrMeta && isNumberTabShortcut(key)) return true;
+  if (
+    ctrlOrMeta &&
+    (CTRL_OR_META_BROWSER_KEYS.has(key) || CTRL_OR_META_BROWSER_KEYS.has(codeKey))
+  ) {
+    return true;
+  }
+  if (ctrlOrMeta && (CTRL_OR_META_TAB_KEYS.has(key) || CTRL_OR_META_TAB_KEYS.has(codeKey))) {
+    return true;
+  }
+  if (ctrlOrMeta && (isNumberTabShortcut(key) || isNumberTabShortcut(codeKey))) return true;
 
   if (ctrlOrMeta && event.shiftKey && key === "Delete") return true;
 

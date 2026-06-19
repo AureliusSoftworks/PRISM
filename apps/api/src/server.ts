@@ -1,4 +1,6 @@
+import { utimesSync } from "node:fs";
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
@@ -354,6 +356,38 @@ function requireLoopback(ctx: RequestContext): void {
   if (!isLoopbackRequest(ctx)) {
     throw new Error("Local pairing codes can only be generated on this Mac.");
   }
+}
+
+function requireLocalDeveloperRequest(ctx: RequestContext): void {
+  if (!isLoopbackRequest(ctx)) {
+    throw new Error("Developer server commands can only be requested from this computer.");
+  }
+}
+
+function isNodeWatchMode(): boolean {
+  return process.execArgv.some(
+    (arg) =>
+      arg === "--watch" ||
+      arg.startsWith("--watch=") ||
+      arg === "--watch-path" ||
+      arg.startsWith("--watch-path=")
+  );
+}
+
+function scheduleApiWatchRestart(): boolean {
+  if (!isNodeWatchMode()) {
+    return false;
+  }
+  setTimeout(() => {
+    try {
+      const serverEntryPath = fileURLToPath(import.meta.url);
+      const now = new Date();
+      utimesSync(serverEntryPath, now, now);
+    } catch (error) {
+      console.error("Failed to trigger Prism API watch restart.", error);
+    }
+  }, 150).unref();
+  return true;
 }
 
 function getOrCreateLocalOwnerUser(): string {
@@ -1387,12 +1421,25 @@ function buildRoutes(): RouteDefinition[] {
       const existing = db
         .prepare(
           `SELECT id, conversation_mode
-             FROM conversations
-            WHERE user_id = ?
-              AND COALESCE(incognito, 0) = 0
-              AND archived_at IS NULL
-              AND conversation_mode IN ('zen', 'chat')
-            ORDER BY updated_at DESC
+             FROM conversations c
+            WHERE c.user_id = ?
+              AND COALESCE(c.incognito, 0) = 0
+              AND c.archived_at IS NULL
+              AND c.conversation_mode IN ('zen', 'chat')
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM messages m_any
+                   WHERE m_any.conversation_id = c.id
+                     AND m_any.user_id = c.user_id
+                )
+                OR EXISTS (
+                  SELECT 1 FROM messages m_assistant
+                   WHERE m_assistant.conversation_id = c.id
+                     AND m_assistant.user_id = c.user_id
+                     AND m_assistant.role = 'assistant'
+                )
+              )
+            ORDER BY c.updated_at DESC
             LIMIT 1`
         )
         .get(userId) as
@@ -3473,6 +3520,23 @@ function buildRoutes(): RouteDefinition[] {
         vectorsCleared,
       });
     }),
+    route("POST", "/api/dev/restart", async (ctx) => {
+      requireAuth(ctx);
+      requireLocalDeveloperRequest(ctx);
+      const scheduled = scheduleApiWatchRestart();
+      if (!scheduled) {
+        json(ctx.res, 409, {
+          ok: false,
+          error: "Prism API restart requires Node watch mode.",
+        });
+        return;
+      }
+      json(ctx.res, 202, {
+        ok: true,
+        restarting: true,
+        mode: "watch",
+      });
+    }),
     route("POST", "/api/memories/restore", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -4015,7 +4079,24 @@ function buildRoutes(): RouteDefinition[] {
         elevenLabsTag,
         userId
       );
-      json(ctx.res, 200, { ok: true });
+      json(ctx.res, 200, {
+        ok: true,
+        settings: {
+          displayName: next.displayName,
+          hasOpenAiApiKey: Boolean(openAiCipher),
+          hasAnthropicApiKey: Boolean(anthropicCipher),
+          hasElevenLabsApiKey: Boolean(elevenLabsCipher),
+          openAiApiKeySource: apiKeySource(openAiCipher, config.openAiApiKey),
+          anthropicApiKeySource: apiKeySource(
+            anthropicCipher,
+            config.anthropicApiKey
+          ),
+          elevenLabsApiKeySource: apiKeySource(
+            elevenLabsCipher,
+            config.elevenLabsApiKey
+          ),
+        },
+      });
     }),
     route("GET", "/api/backup/export", async (ctx) => {
       const userId = requireAuth(ctx);
