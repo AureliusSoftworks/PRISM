@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
-import { createDatabase } from "./db.ts";
+import {
+  createDatabase,
+  loadPrismMoodState,
+  upsertPrismMoodState,
+} from "./db.ts";
 import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
@@ -159,6 +163,10 @@ import {
   normalizePromptShortcutMetadata,
   parseStoredPromptShortcutPayload,
   parseStoredComfyUiWorkflows,
+  debugPatchPrismMood,
+  resetPrismMood,
+  type PrismMoodInterruptionInput,
+  type PrismMoodMode,
   type BotOpinion,
   type BotOpinionBoundaryLevel,
   type ChatMessage,
@@ -618,6 +626,33 @@ function readOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function readPrismMoodMode(value: unknown): PrismMoodMode {
+  if (value === "chat") return "zen";
+  return value === "coffee" || value === "sandbox" || value === "zen" ? value : "zen";
+}
+
+function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind === "pending_reply" ? "pending_reply" : "assistant_reveal";
+  return {
+    kind,
+    ...(typeof record.assistantMessageId === "string" && record.assistantMessageId.trim().length > 0
+      ? { assistantMessageId: record.assistantMessageId.trim() }
+      : {}),
+    ...(typeof record.visibleTokenCount === "number" && Number.isFinite(record.visibleTokenCount)
+      ? { visibleTokenCount: Math.max(1, Math.floor(record.visibleTokenCount)) }
+      : {}),
+    ...(typeof record.totalTokenCount === "number" && Number.isFinite(record.totalTokenCount)
+      ? { totalTokenCount: Math.max(1, Math.floor(record.totalTokenCount)) }
+      : {}),
+  };
+}
+
+function devMoodDebugAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" || process.env.PRISM_DEV_TOOLS === "1";
 }
 
 function readComposerCleanupText(value: unknown): string {
@@ -1810,6 +1845,10 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
       const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
+      const prismMoodOut =
+        conversationModeOut === "coffee"
+          ? null
+          : loadPrismMoodState(db, userId, conversation.id, conversationModeOut);
       const coffeeSettingsOut =
         conversationModeOut === "coffee"
           ? parseStoredCoffeeSessionSettings(conversation.coffee_settings)
@@ -1854,6 +1893,7 @@ function buildRoutes(): RouteDefinition[] {
           lastBotColor: conversation.last_bot_color ?? null,
           hasAssistantReply: conversation.has_assistant_reply === 1,
           ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+          ...(prismMoodOut ? { prismMood: prismMoodOut } : {}),
           createdAt: conversation.created_at,
           updatedAt: conversation.updated_at,
           messages,
@@ -2607,6 +2647,46 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ok: true, botOpinion });
     }),
+    route("POST", "/api/conversations/:id/mood-debug", async (ctx) => {
+      if (!devMoodDebugAllowed()) {
+        throw new HttpError(403, "Mood debug controls are disabled.");
+      }
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const mode = readPrismMoodMode(body.mode ?? conversation.conversation_mode);
+      const now = new Date().toISOString();
+      const current = loadPrismMoodState(db, userId, conversation.id, mode) ??
+        resetPrismMood(mode, now);
+      const action = typeof body.action === "string" ? body.action : "nudge";
+      const mood =
+        action === "reset"
+          ? resetPrismMood(mode, now)
+          : debugPatchPrismMood(
+              current,
+              {
+                annoyanceDelta:
+                  typeof body.annoyanceDelta === "number" ? body.annoyanceDelta : 0,
+                warmthDelta: typeof body.warmthDelta === "number" ? body.warmthDelta : 0,
+                engagementDelta:
+                  typeof body.engagementDelta === "number" ? body.engagementDelta : 0,
+                restraintDelta:
+                  typeof body.restraintDelta === "number" ? body.restraintDelta : 0,
+                reason: readOptionalString(body.reason) ?? "Developer Tools nudged mood.",
+                ...(typeof body.freeze === "boolean" ? { freeze: body.freeze } : {}),
+              },
+              now
+            );
+      const persisted = upsertPrismMoodState(db, userId, conversation.id, mood);
+      json(ctx.res, 200, { ok: true, prismMood: persisted });
+    }),
     route("POST", "/api/composer/cleanup", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -2881,6 +2961,8 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen"
           ? normalizeSessionResumeContext(body.sessionResumeContext)
           : null;
+      const prismInterruption =
+        mode === "zen" ? readPrismInterruption(body.prismInterruption) : undefined;
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
@@ -3016,6 +3098,7 @@ function buildRoutes(): RouteDefinition[] {
             sessionEnding,
             sessionResumeContext,
             forceNewConversation,
+            prismInterruption,
             signal: chatAbort.signal,
             ...(promptShortcut ? { promptShortcut } : {}),
           },
@@ -3040,6 +3123,7 @@ function buildRoutes(): RouteDefinition[] {
         memoryLearned,
         opinion,
         botOpinion,
+        prismMood,
         summaryCompaction,
         pendingImageJob,
         toolCalls,
@@ -3051,6 +3135,7 @@ function buildRoutes(): RouteDefinition[] {
         ...(fallbackInvocation ? { fallbackInvocation } : {}),
         ...(opinion ? { opinion } : {}),
         ...(botOpinion ? { botOpinion } : {}),
+        ...(prismMood ? { prismMood } : {}),
         ...(summaryCompaction ? { summaryCompaction } : {}),
         ...(memoryLearned ? { memoryLearned } : {}),
         ...(conversationStarters ? { conversationStarters } : {}),

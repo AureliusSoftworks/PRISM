@@ -8,8 +8,13 @@ import type {
   Conversation,
   MemoryCategory,
   MemoryTier,
+  PrismMoodMode,
+  PrismMoodSnapshot,
   UserMemory,
   UserProfile,
+} from "@localai/shared";
+import {
+  sanitizePrismMoodState,
 } from "@localai/shared";
 
 export interface DbUserRecord {
@@ -66,6 +71,19 @@ interface DbCoffeeBotSocialRow {
   restraint: number;
   engagement: number;
   leave_pressure: number;
+}
+
+interface DbPrismMoodRow {
+  mode: string;
+  mood_key: string;
+  confidence: number;
+  annoyance: number;
+  warmth: number;
+  engagement: number;
+  restraint: number;
+  recent_deltas: string;
+  frozen: number;
+  updated_at: string;
 }
 
 export function resolveDbPath(): string {
@@ -351,6 +369,23 @@ export function createDatabase(): DatabaseSync {
       leave_pressure REAL NOT NULL DEFAULT 0.1,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS prism_mood_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      annoyance REAL NOT NULL DEFAULT 0.12,
+      warmth REAL NOT NULL DEFAULT 0.62,
+      engagement REAL NOT NULL DEFAULT 0.62,
+      restraint REAL NOT NULL DEFAULT 0.68,
+      recent_deltas TEXT NOT NULL DEFAULT '[]',
+      frozen INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, mode),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
@@ -1100,6 +1135,9 @@ export function createDatabase(): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
   );
   db.exec(
@@ -1301,4 +1339,87 @@ export function upsertCoffeeBotSocialState(
       updatedAt
     );
   }
+}
+
+function parsePrismMoodDeltas(raw: string | null | undefined): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function loadPrismMoodState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: PrismMoodMode
+): PrismMoodSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT mode, mood_key, confidence, annoyance, warmth, engagement, restraint,
+              recent_deltas, frozen, updated_at
+         FROM prism_mood_state
+        WHERE user_id = ? AND conversation_id = ? AND mode = ?
+        LIMIT 1`
+    )
+    .get(userId, conversationId, mode) as DbPrismMoodRow | undefined;
+  if (!row) return null;
+  return sanitizePrismMoodState(
+    {
+      mode: row.mode,
+      moodKey: row.mood_key,
+      confidence: row.confidence,
+      annoyance: row.annoyance,
+      warmth: row.warmth,
+      engagement: row.engagement,
+      restraint: row.restraint,
+      lastUpdatedAt: row.updated_at,
+      recentDeltas: parsePrismMoodDeltas(row.recent_deltas),
+      frozen: row.frozen === 1,
+    },
+    mode,
+    row.updated_at
+  );
+}
+
+export function upsertPrismMoodState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  state: PrismMoodSnapshot
+): PrismMoodSnapshot {
+  const mood = sanitizePrismMoodState(state, state.mode, state.lastUpdatedAt);
+  db.prepare(
+    `INSERT INTO prism_mood_state (
+      user_id, conversation_id, mode, mood_key, confidence, annoyance, warmth,
+      engagement, restraint, recent_deltas, frozen, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, conversation_id, mode) DO UPDATE SET
+      mood_key = excluded.mood_key,
+      confidence = excluded.confidence,
+      annoyance = excluded.annoyance,
+      warmth = excluded.warmth,
+      engagement = excluded.engagement,
+      restraint = excluded.restraint,
+      recent_deltas = excluded.recent_deltas,
+      frozen = excluded.frozen,
+      updated_at = excluded.updated_at`
+  ).run(
+    userId,
+    conversationId,
+    mood.mode,
+    mood.moodKey,
+    mood.confidence,
+    mood.annoyance,
+    mood.warmth,
+    mood.engagement,
+    mood.restraint,
+    JSON.stringify(mood.recentDeltas),
+    mood.frozen === true ? 1 : 0,
+    mood.lastUpdatedAt
+  );
+  return mood;
 }
