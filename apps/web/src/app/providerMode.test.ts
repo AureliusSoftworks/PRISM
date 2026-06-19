@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   applyOnlineModelChoice,
   combinedOnlineModelOptions,
+  filterVisibleModelOptions,
   filterVisibleOnlineModelOptions,
   inferOnlineProviderForModelChoice,
   nextResponseMode,
@@ -20,6 +21,11 @@ const openAiModels: ProviderModeModelOption[] = [
 const anthropicModels: ProviderModeModelOption[] = [
   { id: "claude-sonnet-4-6", provider: "anthropic" },
   { id: "claude-opus-4-1", provider: "anthropic" },
+];
+
+const localModels: ProviderModeModelOption[] = [
+  { id: "llama3.2", provider: "local" },
+  { id: "mistral:latest", provider: "local" },
 ];
 
 describe("provider mode helpers", () => {
@@ -85,6 +91,21 @@ describe("provider mode helpers", () => {
       ["claude-sonnet-4-6", "claude-opus-4-1"]
     );
     assert.equal(inferOnlineProviderForModelChoice("auto", visible), "anthropic");
+  });
+
+  it("filters hidden model ids across local and online option lists", () => {
+    const visible = filterVisibleModelOptions(
+      [...localModels, ...openAiModels, ...anthropicModels],
+      ["mistral:latest", "gpt-4o", "claude-opus-4-1"]
+    );
+    assert.deepEqual(
+      visible.map((model) => `${model.provider}:${model.id}`),
+      [
+        "local:llama3.2",
+        "openai:gpt-4o-mini",
+        "anthropic:claude-sonnet-4-6",
+      ]
+    );
   });
 
   it("resolves legacy state with both online provider slots populated", () => {

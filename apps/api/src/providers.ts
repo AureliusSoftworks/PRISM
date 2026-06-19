@@ -106,6 +106,45 @@ const OPENAI_FALLBACK_MODELS = [
   "gpt-4o",
   "gpt-4.1-mini",
   "gpt-4.1",
+  "gpt-4.1-nano",
+  "gpt-5",
+  "gpt-5-2025-08-07",
+  "gpt-5-chat-latest",
+  "gpt-5-codex",
+  "gpt-5-mini",
+  "gpt-5-mini-2025-08-07",
+  "gpt-5-nano",
+  "gpt-5-nano-2025-08-07",
+  "gpt-5-pro",
+  "gpt-5-pro-2025-10-06",
+  "gpt-5-search-api",
+  "gpt-5-search-api-2025-10-14",
+  "gpt-5.1",
+  "gpt-5.1-2025-11-13",
+  "gpt-5.1-chat-latest",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+  "gpt-5.2",
+  "gpt-5.2-2025-12-11",
+  "gpt-5.2-chat-latest",
+  "gpt-5.2-codex",
+  "gpt-5.2-pro",
+  "gpt-5.2-pro-2025-12-11",
+  "gpt-5.3-chat-latest",
+  "gpt-5.3-codex",
+  "gpt-5.4",
+  "gpt-5.4-2026-03-05",
+  "gpt-5.4-mini",
+  "gpt-5.4-mini-2026-03-17",
+  "gpt-5.4-nano",
+  "gpt-5.4-nano-2026-03-17",
+  "gpt-5.4-pro",
+  "gpt-5.4-pro-2026-03-05",
+  "gpt-5.5",
+  "gpt-5.5-2026-04-23",
+  "gpt-5.5-pro",
+  "gpt-5.5-pro-2026-04-23",
 ] as const;
 const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
@@ -115,9 +154,11 @@ const ANTHROPIC_FALLBACK_MODELS = [
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
   "gpt-",
+  "chatgpt-",
   "o1",
   "o3",
   "o4",
+  "o5",
 ] as const;
 const ANTHROPIC_API_VERSION = "2023-06-01";
 const ANTHROPIC_CHAT_MODEL_PREFIXES = ["claude-"] as const;
@@ -132,7 +173,8 @@ function openAiReasoningStyleChatApi(modelId: string): boolean {
   if (
     normalized.startsWith("o1") ||
     normalized.startsWith("o3") ||
-    normalized.startsWith("o4")
+    normalized.startsWith("o4") ||
+    normalized.startsWith("o5")
   ) {
     return true;
   }
@@ -298,11 +340,6 @@ function uniqueModelIdsByLabel(ids: string[]): string[] {
     result.push(trimmed);
   }
   return result;
-}
-
-function removeModelIdsWithLabels(ids: string[], excludedIds: string[]): string[] {
-  const excludedLabels = new Set(excludedIds.map(modelLabelKey));
-  return ids.filter((id) => !excludedLabels.has(modelLabelKey(id)));
 }
 
 function encodeSecondaryOllamaModelId(id: string): string {
@@ -668,10 +705,7 @@ export async function buildModelCatalog(
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const secondaryLocalIds = removeModelIdsWithLabels(
-    uniqueModelIdsByLabel(discoveredSecondaryLocal),
-    localIds
-  );
+  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
   const onlineIds = openAiApiKey
     ? uniqueModelIds([
         OPENAI_DEFAULT_MODEL,

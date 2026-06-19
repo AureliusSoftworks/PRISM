@@ -1856,6 +1856,53 @@ function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
   }
 }
 
+function isChatRequestCancelledError(
+  error: unknown,
+  signal: AbortSignal | undefined
+): boolean {
+  if (signal?.aborted) return true;
+  const errorName =
+    typeof error === "object" && error !== null && "name" in error
+      ? String((error as { name?: unknown }).name)
+      : "";
+  if (errorName === "AbortError") return true;
+  return error instanceof Error && error.message === "Chat request was cancelled.";
+}
+
+function rollbackCancelledPersistedTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  userMessageId: string | null;
+  deleteConversationIfEmpty: boolean;
+}): void {
+  const {
+    db,
+    userId,
+    conversationId,
+    userMessageId,
+    deleteConversationIfEmpty,
+  } = args;
+  if (userMessageId) {
+    db.prepare(
+      "DELETE FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'user'"
+    ).run(userMessageId, conversationId, userId);
+  }
+  if (!deleteConversationIfEmpty) return;
+  const remainingMessages = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+      )
+      .get(conversationId, userId) as { n: number }
+  ).n;
+  if (remainingMessages > 0) return;
+  db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(
+    conversationId,
+    userId
+  );
+}
+
 function isZenMode(mode: ChatMode): boolean {
   return mode === "zen" || mode === "chat";
 }
@@ -4232,15 +4279,29 @@ export async function processChatMessage(
   }
 
   let activeConversationId = conversationId;
+  let createdConversationForTurn = false;
   if (isZenMode(mode) && settings.forceNewConversation !== true) {
     const latestChatConversation = db
       .prepare(
-        `SELECT id
-           FROM conversations
-          WHERE user_id = ?
-            AND COALESCE(incognito, 0) = 0
-            AND conversation_mode IN ('zen', 'chat')
-          ORDER BY updated_at DESC
+        `SELECT c.id
+           FROM conversations c
+          WHERE c.user_id = ?
+            AND COALESCE(c.incognito, 0) = 0
+            AND c.conversation_mode IN ('zen', 'chat')
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM messages m_any
+                 WHERE m_any.conversation_id = c.id
+                   AND m_any.user_id = c.user_id
+              )
+              OR EXISTS (
+                SELECT 1 FROM messages m_assistant
+                 WHERE m_assistant.conversation_id = c.id
+                   AND m_assistant.user_id = c.user_id
+                   AND m_assistant.role = 'assistant'
+              )
+            )
+          ORDER BY c.updated_at DESC
           LIMIT 1`
       )
       .get(userId) as { id?: string } | undefined;
@@ -4248,14 +4309,42 @@ export async function processChatMessage(
       activeConversationId = latestChatConversation?.id;
     } else {
       const requested = db
-        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .prepare(
+          `SELECT c.id, c.conversation_mode,
+                  EXISTS (
+                    SELECT 1 FROM messages m_any
+                     WHERE m_any.conversation_id = c.id
+                       AND m_any.user_id = c.user_id
+                  ) AS has_messages,
+                  EXISTS (
+                    SELECT 1 FROM messages m_assistant
+                     WHERE m_assistant.conversation_id = c.id
+                       AND m_assistant.user_id = c.user_id
+                       AND m_assistant.role = 'assistant'
+                  ) AS has_assistant_reply
+             FROM conversations c
+            WHERE c.id = ? AND c.user_id = ?`
+        )
         .get(activeConversationId, userId) as
-        | { id: string; conversation_mode: string | null }
+        | {
+            id: string;
+            conversation_mode: string | null;
+            has_messages: number;
+            has_assistant_reply: number;
+          }
         | undefined;
       if (!requested?.id) {
         throw new Error("Conversation not found for this user.");
       }
-      if (requested.conversation_mode !== "zen" && requested.conversation_mode !== "chat") {
+      const requestedIsUnfinishedZenTurn =
+        (requested.conversation_mode === "zen" || requested.conversation_mode === "chat") &&
+        requested.has_messages === 1 &&
+        requested.has_assistant_reply !== 1;
+      if (
+        (requested.conversation_mode !== "zen" &&
+          requested.conversation_mode !== "chat") ||
+        requestedIsUnfinishedZenTurn
+      ) {
         activeConversationId = latestChatConversation?.id;
       }
     }
@@ -4268,6 +4357,7 @@ export async function processChatMessage(
   throwIfChatRequestCancelled(settings.signal);
   if (!activeConversationId) {
     activeConversationId = randomId(12);
+    createdConversationForTurn = true;
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
@@ -4424,6 +4514,27 @@ export async function processChatMessage(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, NULL, ?, ?)"
     ).run(userMessageId, activeConversationId, userId, message, promptShortcutPayload, now);
   }
+  let cancelledPersistedTurnRolledBack = false;
+  const rollbackIfCancelledBeforeAssistantReply = (error: unknown): void => {
+    if (cancelledPersistedTurnRolledBack) return;
+    if (!isChatRequestCancelledError(error, settings.signal)) return;
+    cancelledPersistedTurnRolledBack = true;
+    rollbackCancelledPersistedTurn({
+      db,
+      userId,
+      conversationId: activeConversationId,
+      userMessageId,
+      deleteConversationIfEmpty: createdConversationForTurn,
+    });
+  };
+  const throwIfCancelledBeforeAssistantReply = (): void => {
+    try {
+      throwIfChatRequestCancelled(settings.signal);
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
+  };
 
   const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
     resolvePrimaryChatProviderForPossibleImageToolTurn({
@@ -4444,24 +4555,33 @@ export async function processChatMessage(
     )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
   );
 
-  let {
-    assistantReplyRaw,
-    providerNameUsed,
-    modelUsed,
-    fallbackInvocation,
-  } = await generateWithLenientLocalFallback({
-    provider: primaryProvider,
-    promptMessages,
-    botOverrides: primaryBotOverrides,
-    secondaryOllamaHost: settings.secondaryOllamaHost,
-    lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
-    denialBoundaryProvider: auxiliaryProvider,
-    denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-    botSystemPrompt: effectiveBotSystemPrompt,
-    userMessage: message,
-    signal: settings.signal,
-  });
-  throwIfChatRequestCancelled(settings.signal);
+  let assistantReplyRaw = "";
+  let providerNameUsed: ProviderName = primaryProvider.name;
+  let modelUsed = "";
+  let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+  try {
+    ({
+      assistantReplyRaw,
+      providerNameUsed,
+      modelUsed,
+      fallbackInvocation,
+    } = await generateWithLenientLocalFallback({
+      provider: primaryProvider,
+      promptMessages,
+      botOverrides: primaryBotOverrides,
+      secondaryOllamaHost: settings.secondaryOllamaHost,
+      lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+      denialBoundaryProvider: auxiliaryProvider,
+      denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+      botSystemPrompt: effectiveBotSystemPrompt,
+      userMessage: message,
+      signal: settings.signal,
+    }));
+  } catch (error) {
+    rollbackIfCancelledBeforeAssistantReply(error);
+    throw error;
+  }
+  throwIfCancelledBeforeAssistantReply();
   pushBackendEvent(
     "model",
     "Model response received",
@@ -4471,18 +4591,24 @@ export async function processChatMessage(
     shouldSuppressAssistantReply(assistantReplyRaw) &&
     !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
   ) {
-    const boundary = await generateOrganicTextBoundaryReply({
-      boundaryProvider: auxiliaryProvider,
-      boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: effectiveBotSystemPrompt,
-      userMessage: message,
-      signal: settings.signal,
-    });
+    let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
+    try {
+      boundary = await generateOrganicTextBoundaryReply({
+        boundaryProvider: auxiliaryProvider,
+        boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+        botSystemPrompt: effectiveBotSystemPrompt,
+        userMessage: message,
+        signal: settings.signal,
+      });
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
     assistantReplyRaw = boundary.assistantReplyRaw;
     providerNameUsed = boundary.providerNameUsed;
     modelUsed = boundary.modelUsed;
   }
-  throwIfChatRequestCancelled(settings.signal);
+  throwIfCancelledBeforeAssistantReply();
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
     explicitAskQuestionRequest ||
@@ -4536,21 +4662,27 @@ export async function processChatMessage(
     sendImgPromptPersisted && sendImgPromptPersisted.length > 0 ? "busy" : "none";
   let persistedImageJobId: string | undefined;
   if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
-    throwIfChatRequestCancelled(settings.signal);
+    throwIfCancelledBeforeAssistantReply();
     const chatToolRequestedSize = inferChatToolRequestedImageSize(
       `${message}\n${sendImgPromptPersisted}`
     );
-    const acq = await tryAcquireImageSlot({
-      userId,
-      conversationId: activeConversationId,
-      botId: activeBotId ?? null,
-      mode,
-      incognito: false,
-      captionPrompt: sendImgPromptPersisted,
-      userMessage: message,
-      source: "chat_tool",
-      requestedSize: chatToolRequestedSize,
-    });
+    let acq: Awaited<ReturnType<typeof tryAcquireImageSlot>>;
+    try {
+      acq = await tryAcquireImageSlot({
+        userId,
+        conversationId: activeConversationId,
+        botId: activeBotId ?? null,
+        mode,
+        incognito: false,
+        captionPrompt: sendImgPromptPersisted,
+        userMessage: message,
+        source: "chat_tool",
+        requestedSize: chatToolRequestedSize,
+      });
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
     if (!acq.ok) {
       sendImgPromptPersisted = undefined;
       assistantDisplay =
@@ -4563,7 +4695,7 @@ export async function processChatMessage(
       if (settings.signal?.aborted) {
         acq.job.abortController.abort();
         await releaseImageSlot(userId);
-        throwIfChatRequestCancelled(settings.signal);
+        throwIfCancelledBeforeAssistantReply();
       }
       assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
       startChatImageBackgroundJob({
@@ -4605,6 +4737,7 @@ export async function processChatMessage(
       conversationStartersPersisted = startersPersisted;
     }
   }
+  throwIfCancelledBeforeAssistantReply();
   const assistantAskQuestionForTurn =
     askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
   const persistedToolCallEvents = buildAssistantToolCallEvents({

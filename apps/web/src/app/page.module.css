@@ -2400,11 +2400,189 @@
   gap: 6px;
 }
 
+.settingsModelField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.settingsModelField > span {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .settingsModelLaneLabel {
   display: none;
   color: var(--fg-muted);
   font-size: 11px;
   line-height: 1.2;
+}
+
+.settingsModelField .composeModelControl,
+.settingsModelLane .composeModelControl,
+.settingsFallbackGrid .composeModelControl {
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.settingsModelField .composeModelControl[data-provider],
+.settingsModelLane .composeModelControl[data-provider],
+.settingsFallbackGrid .composeModelControl[data-provider],
+.promptCenterModelField .composeModelControl[data-provider],
+.botParameterModelField .composeModelControl[data-provider] {
+  border-color: color-mix(in srgb, var(--line-strong) 52%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 7%, transparent),
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, var(--bg) 6%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 1px 2px color-mix(in srgb, #000000 9%, transparent);
+}
+
+.settingsModelField .composeModelControl[data-provider]:hover,
+.settingsModelField .composeModelControl[data-provider]:focus-within,
+.settingsModelLane .composeModelControl[data-provider]:hover,
+.settingsModelLane .composeModelControl[data-provider]:focus-within,
+.settingsFallbackGrid .composeModelControl[data-provider]:hover,
+.settingsFallbackGrid .composeModelControl[data-provider]:focus-within,
+.promptCenterModelField .composeModelControl[data-provider]:hover,
+.promptCenterModelField .composeModelControl[data-provider]:focus-within,
+.botParameterModelField .composeModelControl[data-provider]:hover,
+.botParameterModelField .composeModelControl[data-provider]:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 78%
+    ),
+    color-mix(in srgb, var(--bg-surface) 90%, var(--bg-hover) 10%);
+}
+
+.settingsModelField .composeModelTrigger,
+.settingsModelLane .composeModelTrigger,
+.settingsFallbackGrid .composeModelTrigger,
+.promptCenterModelField .composeModelTrigger,
+.botParameterModelField .composeModelTrigger {
+  width: 100%;
+  padding: 0 9px 0 13px;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  box-shadow: none;
+  transform: none;
+}
+
+.settingsModelField .composeModelTrigger:hover:not(:disabled),
+.settingsModelField .composeModelTrigger:focus-visible,
+.settingsModelLane .composeModelTrigger:hover:not(:disabled),
+.settingsModelLane .composeModelTrigger:focus-visible,
+.settingsFallbackGrid .composeModelTrigger:hover:not(:disabled),
+.settingsFallbackGrid .composeModelTrigger:focus-visible,
+.promptCenterModelField .composeModelTrigger:hover:not(:disabled),
+.promptCenterModelField .composeModelTrigger:focus-visible,
+.botParameterModelField .composeModelTrigger:hover:not(:disabled),
+.botParameterModelField .composeModelTrigger:focus-visible {
+  background: transparent;
+  color: var(--fg);
+  transform: none;
+}
+
+.settingsModelField .composeModelTrigger:active:not(:disabled),
+.settingsModelLane .composeModelTrigger:active:not(:disabled),
+.settingsFallbackGrid .composeModelTrigger:active:not(:disabled),
+.promptCenterModelField .composeModelTrigger:active:not(:disabled),
+.botParameterModelField .composeModelTrigger:active:not(:disabled) {
+  transform: none;
+}
+
+.settingsModelField .composeControlLabel,
+.settingsModelLane .composeControlLabel,
+.settingsFallbackGrid .composeControlLabel,
+.promptCenterModelField .composeControlLabel,
+.botParameterModelField .composeControlLabel {
+  display: none;
+}
+
+.settingsModelField .composeModelTriggerName,
+.settingsModelLane .composeModelTriggerName,
+.settingsFallbackGrid .composeModelTriggerName,
+.promptCenterModelField .composeModelTriggerName,
+.botParameterModelField .composeModelTriggerName {
+  max-width: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.settingsModelField .composeModelTriggerChevron,
+.settingsModelLane .composeModelTriggerChevron,
+.settingsFallbackGrid .composeModelTriggerChevron,
+.promptCenterModelField .composeModelTriggerChevron,
+.botParameterModelField .composeModelTriggerChevron {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg) 72%, var(--bg-surface));
+  color: var(--fg-muted);
+}
+
+.themeDark .settingsModelField .composeModelControl[data-provider],
+.themeDark .settingsModelLane .composeModelControl[data-provider],
+.themeDark .settingsFallbackGrid .composeModelControl[data-provider],
+.themeDark .promptCenterModelField .composeModelControl[data-provider],
+.themeDark .botParameterModelField .composeModelControl[data-provider] {
+  border-color: color-mix(in srgb, var(--line-strong) 82%, #ffffff 6%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 8%, transparent),
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg-surface) 92%, var(--fg) 8%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 1px 2px color-mix(in srgb, #000000 28%, transparent);
+}
+
+.themeDark .settingsModelField .composeModelControl[data-provider]:hover,
+.themeDark .settingsModelField .composeModelControl[data-provider]:focus-within,
+.themeDark .settingsModelLane .composeModelControl[data-provider]:hover,
+.themeDark .settingsModelLane .composeModelControl[data-provider]:focus-within,
+.themeDark .settingsFallbackGrid .composeModelControl[data-provider]:hover,
+.themeDark .settingsFallbackGrid .composeModelControl[data-provider]:focus-within,
+.themeDark .promptCenterModelField .composeModelControl[data-provider]:hover,
+.themeDark .promptCenterModelField .composeModelControl[data-provider]:focus-within,
+.themeDark .botParameterModelField .composeModelControl[data-provider]:hover,
+.themeDark .botParameterModelField .composeModelControl[data-provider]:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 78%
+    ),
+    color-mix(in srgb, var(--bg-surface) 88%, var(--fg) 12%);
+}
+
+.themeDark .settingsModelField .composeModelTriggerChevron,
+.themeDark .settingsModelLane .composeModelTriggerChevron,
+.themeDark .settingsFallbackGrid .composeModelTriggerChevron,
+.themeDark .promptCenterModelField .composeModelTriggerChevron,
+.themeDark .botParameterModelField .composeModelTriggerChevron {
+  border-color: color-mix(in srgb, var(--line-strong) 74%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 84%, var(--fg) 16%);
+  color: color-mix(in srgb, var(--fg) 66%, var(--fg-muted));
 }
 
 .settingsFallbackControls {
@@ -2693,18 +2871,29 @@
   box-shadow: 0 -12px 28px -24px color-mix(in srgb, #000 72%, transparent);
   padding: 10px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settingsSaveDock .error,
+.settingsSaveDock .panelNotice {
+  margin: 0;
+}
+
+.settingsDockRow {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.settingsSaveDock span {
+.settingsDockRow span {
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.35;
 }
 
-.settingsSaveDock button {
+.settingsDockRow button {
   min-width: 132px;
 }
 
@@ -2720,12 +2909,8 @@
     max-width: none;
   }
 
-  .settingsSectionHeader,
-  .settingsSaveDock {
-    align-items: stretch;
-  }
-
   .settingsSectionHeader {
+    align-items: stretch;
     flex-direction: column;
   }
 
@@ -2733,11 +2918,12 @@
     text-align: left;
   }
 
-  .settingsSaveDock {
+  .settingsDockRow {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .settingsSaveDock button {
+  .settingsDockRow button {
     width: 100%;
   }
 }
@@ -16593,18 +16779,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .promptCenterModelCard label,
+.promptCenterModelField,
 .promptCenterField {
   display: grid;
   gap: 6px;
 }
 
 .promptCenterModelCard label span,
+.promptCenterModelField > span,
 .promptCenterField span,
 .promptCenterFlagsHeader span,
 .promptCenterReadonlyBlock > span {
   color: var(--fg-muted);
   font-size: 12px;
   font-weight: 750;
+}
+
+.promptCenterModelField .composeModelControl {
+  width: 100%;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.promptCenterModelField .composeModelTrigger {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.promptCenterModelField .composeModelTriggerName {
+  max-width: none;
 }
 
 .promptCenterModelCard select,
@@ -19008,6 +19211,92 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 4px;
 }
 
+.settingsModelProviderStack {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsModelProviderDropdown {
+  --settings-model-provider-accent: var(--accent);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--settings-model-provider-accent) 10%, transparent),
+      transparent 48%
+    ),
+    var(--bg);
+  box-shadow: inset 3px 0 0 var(--settings-model-provider-accent);
+}
+
+.settingsModelProviderDropdown[data-model-provider="ollama"] {
+  --settings-model-provider-accent: #111827;
+}
+
+.settingsModelProviderDropdown[data-model-provider="openai"] {
+  --settings-model-provider-accent: #10a37f;
+}
+
+.settingsModelProviderDropdown[data-model-provider="anthropic"] {
+  --settings-model-provider-accent: #d97757;
+}
+
+.settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
+  --settings-model-provider-accent: #777169;
+}
+
+.themeDark .settingsModelProviderDropdown[data-model-provider="ollama"] {
+  --settings-model-provider-accent: #f8fafc;
+}
+
+.themeDark .settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
+  --settings-model-provider-accent: #b8b2aa;
+}
+
+.settingsModelProviderDropdown summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settingsModelProviderDropdown summary small {
+  text-align: right;
+}
+
+.settingsModelProviderSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settingsModelProviderSwatch {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--settings-model-provider-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-model-provider-accent) 16%, transparent);
+}
+
+@media (max-width: 760px) {
+  .settingsModelProviderDropdown summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .settingsModelProviderDropdown summary small {
+    text-align: left;
+  }
+}
+
+.settingsModelEmpty {
+  padding: 10px 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
 .settingsModelToggle {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -21200,6 +21489,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.botParameterModelField .composeModelControl {
+  width: 100%;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.botParameterModelField .composeModelTrigger {
+  width: 100%;
+  padding: 0 11px;
+}
+
+.botParameterModelField .composeModelTriggerName {
+  max-width: none;
 }
 
 .panelBots .form button.botPreferredModelsButton,

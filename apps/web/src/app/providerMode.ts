@@ -50,12 +50,19 @@ export function combinedOnlineModelOptions<T extends ProviderModeModelOption>(
   );
 }
 
-export function filterVisibleOnlineModelOptions<T extends ProviderModeModelOption>(
+export function filterVisibleModelOptions<T extends ProviderModeModelOption>(
   options: readonly T[],
   hiddenModelIds: readonly string[]
 ): T[] {
   const hidden = new Set(hiddenModelIds.map((id) => id.trim()).filter(Boolean));
   return options.filter((model) => !hidden.has(model.id));
+}
+
+export function filterVisibleOnlineModelOptions<T extends ProviderModeModelOption>(
+  options: readonly T[],
+  hiddenModelIds: readonly string[]
+): T[] {
+  return filterVisibleModelOptions(options, hiddenModelIds);
 }
 
 export function inferOnlineProviderForModelChoice(

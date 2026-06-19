@@ -54,6 +54,7 @@ import {
 import {
   applyOnlineModelChoice,
   combinedOnlineModelOptions,
+  filterVisibleModelOptions,
   nextResponseMode,
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
@@ -4794,7 +4795,7 @@ interface UserSettings {
   prismDefaultLlmModel: string;
   /** Empty → use hub chat model for turns that may emit in-thread image tool JSON. */
   prismImageToolLlmModel: string;
-  /** Empty string means server auto-picks from the visible catalog. */
+  /** Empty string means server auto-picks from the catalog. */
   preferredLocalModel: string;
   preferredOnlineModel: string;
   preferredLocalImageModel: string;
@@ -4813,6 +4814,17 @@ interface UserSettings {
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
 }
+
+type SavedApiKeySettingsState = Pick<
+  UserSettings,
+  | "hasOpenAiApiKey"
+  | "hasAnthropicApiKey"
+  | "hasElevenLabsApiKey"
+  | "openAiApiKeySource"
+  | "anthropicApiKeySource"
+  | "elevenLabsApiKeySource"
+>;
+
 interface DevChatDebugEvent {
   id: string;
   createdAt: string;
@@ -5090,7 +5102,7 @@ interface CommandCenterStateV1 {
   commands?: unknown;
 }
 
-const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear", "refresh"]);
+const BUILT_IN_COMMAND_NAMES = new Set(["help", "compact", "clear", "refresh", "restart"]);
 const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "help",
   "compact",
@@ -5098,6 +5110,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "clear",
   "cls",
   "refresh",
+  "restart",
   "dev",
   "forget",
   "forget-all",
@@ -5251,6 +5264,22 @@ function createBuiltInRefreshCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInRestartCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/restart",
+    name: "restart",
+    title: "restart",
+    command: "Restarts the local Prism API server.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -5375,10 +5404,13 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInCompactCommand(),
     createBuiltInClearCommand(),
     createBuiltInRefreshCommand(),
+    createBuiltInRestartCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
-  const preferredModel = normalizeModelChoice(parsed?.preferredModel);
+  const preferredModel = normalizeCommandCenterPreferredModelChoice(
+    parsed?.preferredModel
+  );
   const commandListRaw = Array.isArray(parsed?.commands) ? parsed.commands : [];
   const seen = new Set<string>();
   const commands: CommandCenterCommand[] = [];
@@ -5583,6 +5615,19 @@ const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
 const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
 const SETTINGS_ANTHROPIC_KEY_FIELD = "anthropicApiKey";
 const SETTINGS_ELEVENLABS_KEY_FIELD = "elevenLabsApiKey";
+const SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD = "prismDefaultLlmModel";
+const SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD = "prismImageToolLlmModel";
+const SETTINGS_PREFERRED_LOCAL_MODEL_FIELD = "preferredLocalModel";
+const SETTINGS_PREFERRED_ONLINE_MODEL_FIELD = "preferredOnlineModel";
+const SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD = "preferredLocalImageModel";
+const SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD = "preferredOpenAiImageModel";
+const SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD =
+  "preferredZenWallpaperLocalImageModel";
+const SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD =
+  "preferredZenWallpaperOpenAiImageModel";
+const SETTINGS_LENIENT_LOCAL_FALLBACK_MODEL_FIELD = "lenientLocalFallbackModel";
+const SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD =
+  "lenientLocalImageFallbackModel";
 const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
@@ -5623,8 +5668,6 @@ function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
 }
 
 const NO_LOCAL_IMAGE_MODEL_CHOICE = "__prism_no_local_image__";
-const ONLINE_MODEL_FALLBACK_ID = "gpt-4o-mini";
-const ANTHROPIC_MODEL_FALLBACK_ID = "claude-sonnet-4-6";
 const BOT_TEMPERATURE_DEFAULT = 0.7;
 const BOT_TEMPERATURE_MIN = 0;
 const BOT_TEMPERATURE_MAX = 1.2;
@@ -5919,11 +5962,46 @@ function parseCommandCenterModelChoice(
   const providerRaw = normalized.slice(0, separatorIndex).trim().toLowerCase();
   const modelId = normalized.slice(separatorIndex + 1).trim();
   if (!modelId) return null;
-  if (!isProvider(providerRaw)) return null;
+  if (providerRaw !== "local") return null;
   return {
-    provider: providerRaw,
+    provider: "local",
     modelId,
   };
+}
+
+function normalizeCommandCenterPreferredModelChoice(value: string | null | undefined): string {
+  const normalized = normalizeModelChoice(value);
+  if (normalized === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  const parsed = parseCommandCenterModelChoice(normalized);
+  return parsed ? `local:${parsed.modelId}` : AUTO_MODEL_CHOICE;
+}
+
+function commandCenterAuxiliaryModelId(settings: UserSettings | null): string {
+  const accountOverride = settings?.prismDefaultLlmModel?.trim() ?? "";
+  if (accountOverride.length > 0) return accountOverride;
+  const serverAuxiliary = settings?.ollamaAuxiliaryModel?.trim() ?? "";
+  return serverAuxiliary.length > 0 ? serverAuxiliary : "llama3.2";
+}
+
+function resolveCommandCenterModelChoiceForSend(
+  value: string,
+  settings: UserSettings | null,
+  catalog: ModelCatalog | null
+): string {
+  const normalized = normalizeCommandCenterPreferredModelChoice(value);
+  const parsed = parseCommandCenterModelChoice(normalized);
+  if (parsed) {
+    const visibleChoice = visibleModelChoiceForProvider(
+      catalog,
+      settings,
+      "local",
+      parsed.modelId
+    );
+    if (visibleChoice !== AUTO_MODEL_CHOICE) {
+      return `local:${visibleChoice}`;
+    }
+  }
+  return `local:${commandCenterAuxiliaryModelId(settings)}`;
 }
 
 /** Row to badge in chat model menus: the concrete id saved in Settings (no badge when Auto). */
@@ -5973,25 +6051,6 @@ function modelLabelFromId(id: string): string {
     .join(" ");
 }
 
-function localModelDuplicateKey(model: ModelCatalogEntry): string {
-  const rawId = model.id.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)
-    ? model.id.slice(SECONDARY_OLLAMA_MODEL_PREFIX.length)
-    : model.id;
-  return modelLabelFromId(rawId).toLocaleLowerCase();
-}
-
-function preferPrimaryLocalModelEntries(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
-  const primaryKeys = new Set(
-    models
-      .filter((model) => model.localHost !== "secondary")
-      .map(localModelDuplicateKey)
-  );
-  return models.filter(
-    (model) =>
-      model.localHost !== "secondary" || !primaryKeys.has(localModelDuplicateKey(model))
-  );
-}
-
 function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
   return (
     model.provider === "local" &&
@@ -6006,6 +6065,39 @@ function normalizeApiKeySource(value: unknown, hasSavedKey: boolean): ApiKeySour
     : hasSavedKey
       ? "saved"
       : "none";
+}
+
+function apiKeySourceAvailable(source: ApiKeySource | null | undefined): boolean {
+  return source === "saved" || source === "server";
+}
+
+function apiKeySourceModelGroupMeta(source: ApiKeySource): string {
+  return source === "server" ? "Server key connected" : "Saved key connected";
+}
+
+function normalizeSavedApiKeySettingsState(
+  state: Partial<SavedApiKeySettingsState>
+): SavedApiKeySettingsState {
+  const hasOpenAiApiKey = state.hasOpenAiApiKey === true;
+  const hasAnthropicApiKey = state.hasAnthropicApiKey === true;
+  const hasElevenLabsApiKey = state.hasElevenLabsApiKey === true;
+  return {
+    hasOpenAiApiKey,
+    hasAnthropicApiKey,
+    hasElevenLabsApiKey,
+    openAiApiKeySource: normalizeApiKeySource(
+      state.openAiApiKeySource,
+      hasOpenAiApiKey
+    ),
+    anthropicApiKeySource: normalizeApiKeySource(
+      state.anthropicApiKeySource,
+      hasAnthropicApiKey
+    ),
+    elevenLabsApiKeySource: normalizeApiKeySource(
+      state.elevenLabsApiKeySource,
+      hasElevenLabsApiKey
+    ),
+  };
 }
 
 function apiKeySourceStatusLabel(providerLabel: string, source: ApiKeySource): string {
@@ -6074,32 +6166,20 @@ function apiKeyConnectionDisplay(
   };
 }
 
-function onlineProviderApiKeySource(
-  settings: UserSettings | null,
-  provider: Provider
-): ApiKeySource {
-  if (!settings) return "none";
-  if (provider === "anthropic") return settings.anthropicApiKeySource;
-  if (provider === "openai") return settings.openAiApiKeySource;
-  return "none";
-}
-
-function onlineProviderHasAvailableCredential(
-  settings: UserSettings | null,
-  provider: Provider
-): boolean {
-  return onlineProviderApiKeySource(settings, provider) !== "none";
-}
-
 function onlineProviderCanPreserveModelChoice(
   catalog: ModelCatalog | null,
-  settings: UserSettings | null,
   provider: Provider
 ): boolean {
-  return (
-    onlineProviderHasAvailableCredential(settings, provider) ||
-    (catalog?.online ?? []).some((model) => model.provider === provider)
-  );
+  return (catalog?.online ?? []).some((model) => model.provider === provider);
+}
+
+function isHiddenBotModelId(
+  settings: UserSettings | null,
+  modelId: string | null | undefined
+): boolean {
+  const normalized = modelId?.trim() ?? "";
+  if (!normalized) return false;
+  return (settings?.hiddenBotModelIds ?? []).includes(normalized);
 }
 
 function modelOptionsForProvider(
@@ -6110,31 +6190,36 @@ function modelOptionsForProvider(
   if (provider === "local") {
     const fallbackId = settings?.ollamaModel?.trim() || "Local default";
     return catalog?.local.length
-      ? preferPrimaryLocalModelEntries(catalog.local)
-      : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
+      ? catalog.local
+      : [{
+          id: fallbackId,
+          label: fallbackId,
+          provider: "local",
+          isDefault: true,
+          hostLabel: "Primary host",
+        }];
   }
   const onlineOptions = (catalog?.online ?? []).filter(
     (model) => model.provider === provider
   );
   if (onlineOptions.length > 0) {
-    return onlineOptions;
+    return onlineOptions.map((model) => ({
+      ...model,
+      hostLabel: model.hostLabel ?? providerDisplayLabel(provider),
+    }));
   }
-  if (!onlineProviderHasAvailableCredential(settings, provider)) {
-    return [];
-  }
-  return provider === "anthropic"
-    ? [{
-        id: ANTHROPIC_MODEL_FALLBACK_ID,
-        label: "Claude Sonnet 4.6",
-        provider: "anthropic",
-        isDefault: true,
-      }]
-    : [{
-        id: ONLINE_MODEL_FALLBACK_ID,
-        label: "GPT 4o Mini",
-        provider: "openai",
-        isDefault: true,
-      }];
+  return [];
+}
+
+function chatModelOptionsForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider
+): ModelCatalogEntry[] {
+  return filterVisibleModelOptions(
+    modelOptionsForProvider(catalog, settings, provider),
+    settings?.hiddenBotModelIds ?? []
+  );
 }
 
 function botCustomizerModelOptionsForProvider(
@@ -6142,7 +6227,7 @@ function botCustomizerModelOptionsForProvider(
   settings: UserSettings | null,
   provider: Provider
 ): ModelCatalogEntry[] {
-  return availableModelOptionsForProvider(catalog, settings, provider);
+  return chatModelOptionsForProvider(catalog, settings, provider);
 }
 
 function availableModelOptionsForProvider(
@@ -6150,30 +6235,7 @@ function availableModelOptionsForProvider(
   settings: UserSettings | null,
   provider: Provider
 ): ModelCatalogEntry[] {
-  const hidden = new Set(settings?.hiddenBotModelIds ?? []);
-  return modelOptionsForProvider(catalog, settings, provider).filter(
-    (model) => isRequiredPrimaryLocalModel(model) || !hidden.has(model.id)
-  );
-}
-
-function botCustomizerModelChoiceVisible(
-  settings: UserSettings | null,
-  choice: string
-): boolean {
-  return (
-    choice === REQUIRED_PRIMARY_LOCAL_MODEL_ID ||
-    choice === AUTO_MODEL_CHOICE ||
-    !new Set(settings?.hiddenBotModelIds ?? []).has(choice)
-  );
-}
-
-function visibleBotCustomizerModelChoice(
-  settings: UserSettings | null,
-  choice: string
-): string {
-  return botCustomizerModelChoiceVisible(settings, choice)
-    ? choice
-    : AUTO_MODEL_CHOICE;
+  return modelOptionsForProvider(catalog, settings, provider);
 }
 
 function defaultModelChoiceForProvider(
@@ -6181,7 +6243,9 @@ function defaultModelChoiceForProvider(
   settings: UserSettings | null,
   provider: Provider
 ): string {
-  const options = availableModelOptionsForProvider(catalog, settings, provider);
+  const options = chatModelOptionsForProvider(catalog, settings, provider).filter(
+    (model) => !model.disabledReason
+  );
   return options.find((model) => model.isDefault)?.id ?? options[0]?.id ?? AUTO_MODEL_CHOICE;
 }
 
@@ -6191,20 +6255,24 @@ function visibleConcreteModelChoiceForProvider(
   provider: Provider,
   choice: string | null | undefined
 ): string {
-  const visibleChoice = visibleBotCustomizerModelChoice(
-    settings,
-    normalizeModelChoice(choice)
-  );
-  return visibleChoice === AUTO_MODEL_CHOICE
-    ? defaultModelChoiceForProvider(catalog, settings, provider)
-    : visibleChoice;
+  const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === AUTO_MODEL_CHOICE) {
+    return defaultModelChoiceForProvider(catalog, settings, provider);
+  }
+  return chatModelOptionsForProvider(catalog, settings, provider).some(
+    (model) => model.id === visibleChoice
+  )
+    ? visibleChoice
+    : defaultModelChoiceForProvider(catalog, settings, provider);
 }
 
 function defaultOnlineModelChoice(
   catalog: ModelCatalog | null,
   settings: UserSettings | null
 ): string {
-  const options = onlineModelOptionsForPicker(catalog, settings);
+  const options = onlineModelOptionsForPicker(catalog, settings).filter(
+    (model) => !model.disabledReason
+  );
   return options.find((model) => model.isDefault)?.id ?? options[0]?.id ?? AUTO_MODEL_CHOICE;
 }
 
@@ -6213,17 +6281,17 @@ function visibleConcreteOnlineModelChoice(
   settings: UserSettings | null,
   choice: string | null | undefined
 ): string {
-  const visibleChoice = visibleBotCustomizerModelChoice(
-    settings,
-    normalizeModelChoice(choice)
-  );
+  const visibleChoice = normalizeModelChoice(choice);
   if (visibleChoice === AUTO_MODEL_CHOICE) {
+    return defaultOnlineModelChoice(catalog, settings);
+  }
+  if (isHiddenBotModelId(settings, visibleChoice)) {
     return defaultOnlineModelChoice(catalog, settings);
   }
   const options = onlineModelOptionsForPicker(catalog, settings);
   const provider = inferOnlineProviderForModelId(visibleChoice);
   return options.some((model) => model.id === visibleChoice) ||
-    onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+    onlineProviderCanPreserveModelChoice(catalog, provider)
     ? visibleChoice
     : defaultOnlineModelChoice(catalog, settings);
 }
@@ -6234,18 +6302,30 @@ function visibleModelChoiceForProvider(
   provider: Provider,
   choice: string | null | undefined
 ): string {
-  const visibleChoice = visibleBotCustomizerModelChoice(
-    settings,
-    normalizeModelChoice(choice)
-  );
-  if (provider === "local" || visibleChoice === AUTO_MODEL_CHOICE) {
+  const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === AUTO_MODEL_CHOICE) {
     return visibleChoice;
   }
-  return availableModelOptionsForProvider(catalog, settings, provider).some(
+  return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice
   )
     ? visibleChoice
     : AUTO_MODEL_CHOICE;
+}
+
+function visibleOptionalModelChoiceForProvider(
+  catalog: ModelCatalog | null,
+  settings: UserSettings | null,
+  provider: Provider,
+  choice: string | null | undefined
+): string {
+  const visibleChoice = choice?.trim() ?? "";
+  if (!visibleChoice) return "";
+  return chatModelOptionsForProvider(catalog, settings, provider).some(
+    (model) => model.id === visibleChoice
+  )
+    ? visibleChoice
+    : "";
 }
 
 function visiblePreferredOnlineModelChoice(
@@ -6253,13 +6333,11 @@ function visiblePreferredOnlineModelChoice(
   settings: UserSettings | null,
   choice: string | null | undefined
 ): string {
-  const visibleChoice = visibleBotCustomizerModelChoice(
-    settings,
-    normalizeModelChoice(choice)
-  );
+  const visibleChoice = normalizeModelChoice(choice);
   if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  if (isHiddenBotModelId(settings, visibleChoice)) return AUTO_MODEL_CHOICE;
   const provider = inferOnlineProviderForModelId(visibleChoice);
-  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+  return onlineProviderCanPreserveModelChoice(catalog, provider)
     ? visibleChoice
     : AUTO_MODEL_CHOICE;
 }
@@ -6285,10 +6363,14 @@ function onlineModelOptionsForPicker(
   catalog: ModelCatalog | null,
   settings: UserSettings | null
 ): ModelCatalogEntry[] {
-  return combinedOnlineModelOptions(
-    availableModelOptionsForProvider(catalog, settings, "openai"),
-    availableModelOptionsForProvider(catalog, settings, "anthropic")
-  ).map((model) => ({
+  return withOnlineProviderHostLabels(combinedOnlineModelOptions(
+    chatModelOptionsForProvider(catalog, settings, "openai"),
+    chatModelOptionsForProvider(catalog, settings, "anthropic")
+  ));
+}
+
+function withOnlineProviderHostLabels(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  return options.map((model) => ({
     ...model,
     hostLabel: model.hostLabel ?? providerDisplayLabel(model.provider),
   }));
@@ -6300,22 +6382,8 @@ function modelOptionsForResponseMode(
   responseMode: ResponseMode
 ): ModelCatalogEntry[] {
   return responseMode === "local"
-    ? availableModelOptionsForProvider(catalog, settings, "local")
+    ? chatModelOptionsForProvider(catalog, settings, "local")
     : onlineModelOptionsForPicker(catalog, settings);
-}
-
-function allBotCustomizerModelOptions(
-  catalog: ModelCatalog | null,
-  settings: UserSettings | null
-): ModelCatalogEntry[] {
-  const seen = new Set<string>();
-  return (["local", "openai", "anthropic"] as const)
-    .flatMap((provider) => modelOptionsForProvider(catalog, settings, provider))
-    .filter((model) => {
-      if (seen.has(model.id)) return false;
-      seen.add(model.id);
-      return true;
-    });
 }
 
 function includeSelectedModelOption(
@@ -6323,12 +6391,17 @@ function includeSelectedModelOption(
   choice: string,
   provider: Provider
 ): ModelCatalogEntry[] {
-  if (choice === AUTO_MODEL_CHOICE || options.some((model) => model.id === choice)) {
+  const normalizedChoice = choice.trim();
+  if (
+    !normalizedChoice ||
+    normalizedChoice === AUTO_MODEL_CHOICE ||
+    options.some((model) => model.id === normalizedChoice)
+  ) {
     return options;
   }
   return [
     ...options,
-    { id: choice, label: choice, provider },
+    { id: normalizedChoice, label: normalizedChoice, provider },
   ];
 }
 
@@ -6345,8 +6418,9 @@ function includeSelectedOnlineModelOption(
   ) {
     return options;
   }
+  if (isHiddenBotModelId(settings, normalizedChoice)) return options;
   const provider = inferOnlineProviderForModelId(normalizedChoice);
-  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
+  return onlineProviderCanPreserveModelChoice(catalog, provider)
     ? includeSelectedModelOption(options, normalizedChoice, provider)
     : options;
 }
@@ -6361,7 +6435,9 @@ function includeSelectedResponseModeModelOption(
 ): ModelCatalogEntry[] {
   return responseMode === "online"
     ? includeSelectedOnlineModelOption(catalog, settings, options, choice)
-    : includeSelectedModelOption(options, choice, provider);
+    : isHiddenBotModelId(settings, choice)
+      ? options
+      : includeSelectedModelOption(options, choice, provider);
 }
 
 function visibleLocalImageModelSelectValue(value: string | null | undefined): string {
@@ -6388,6 +6464,112 @@ function uniqueModelOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
     seen.add(key);
     return true;
   });
+}
+
+type SettingsModelEligibilityGroupId = "ollama" | "openai" | "anthropic" | "elevenlabs";
+
+interface SettingsModelEligibilityGroup {
+  id: SettingsModelEligibilityGroupId;
+  label: string;
+  meta: string;
+  models: ModelCatalogEntry[];
+}
+
+function settingsModelGroupOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
+  const seen = new Set<string>();
+  return options.filter((model) => {
+    const id = model.id.trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function settingsOllamaGroupMeta(models: ModelCatalogEntry[]): string {
+  const hasSecondaryHost = models.some((model) => model.localHost === "secondary");
+  if (!hasSecondaryHost) return "Local Ollama host";
+  const hostCount = new Set(
+    models.map((model) => model.localHost ?? model.hostLabel ?? "primary")
+  ).size;
+  return `${hostCount} connected Ollama hosts`;
+}
+
+function settingsModelEligibilityGroups(args: {
+  catalog: ModelCatalog | null;
+  settings: UserSettings;
+  openAiImageModels: ModelCatalogEntry[];
+  elevenLabsImageModels: ModelCatalogEntry[];
+}): SettingsModelEligibilityGroup[] {
+  const groups: SettingsModelEligibilityGroup[] = [];
+  const ollama = settingsModelGroupOptions(
+    modelOptionsForProvider(args.catalog, args.settings, "local")
+  );
+  if (ollama.length > 0) {
+    groups.push({
+      id: "ollama",
+      label: "Ollama",
+      meta: settingsOllamaGroupMeta(ollama),
+      models: ollama,
+    });
+  }
+
+  if (apiKeySourceAvailable(args.settings.openAiApiKeySource)) {
+    const openAi = settingsModelGroupOptions([
+      ...modelOptionsForProvider(args.catalog, args.settings, "openai"),
+      ...args.openAiImageModels,
+    ]);
+    if (openAi.length > 0) {
+      groups.push({
+        id: "openai",
+        label: "OpenAI",
+        meta: `${apiKeySourceModelGroupMeta(args.settings.openAiApiKeySource)} - Chat and image`,
+        models: openAi,
+      });
+    }
+  }
+
+  if (apiKeySourceAvailable(args.settings.anthropicApiKeySource)) {
+    const anthropic = settingsModelGroupOptions(
+      modelOptionsForProvider(args.catalog, args.settings, "anthropic")
+    );
+    if (anthropic.length > 0) {
+      groups.push({
+        id: "anthropic",
+        label: "Anthropic",
+        meta: `${apiKeySourceModelGroupMeta(args.settings.anthropicApiKeySource)} - Chat`,
+        models: anthropic,
+      });
+    }
+  }
+
+  if (apiKeySourceAvailable(args.settings.elevenLabsApiKeySource)) {
+    const elevenLabs = settingsModelGroupOptions(args.elevenLabsImageModels);
+    if (elevenLabs.length > 0) {
+      groups.push({
+        id: "elevenlabs",
+        label: "ElevenLabs",
+        meta: `${apiKeySourceModelGroupMeta(args.settings.elevenLabsApiKeySource)} - Image & Video`,
+        models: elevenLabs,
+      });
+    }
+  }
+
+  return groups;
+}
+
+function settingsModelToggleMeta(
+  groupId: SettingsModelEligibilityGroupId,
+  model: ModelCatalogEntry,
+  required: boolean
+): string {
+  if (required) return "Required";
+  if (groupId === "ollama") {
+    return `Offline${model.hostLabel ? ` - ${model.hostLabel}` : ""}`;
+  }
+  if (groupId === "anthropic") return "Chat";
+  if (groupId === "elevenlabs") return "Image & Video";
+  const id = model.id.toLowerCase();
+  return id.includes("image") || id.startsWith("dall-e") ? "Image" : "Chat";
 }
 
 function inferOnlineProviderForModelId(modelId: string): Provider {
@@ -11260,11 +11442,16 @@ interface ComposerModelPickerProps {
   disabled?: boolean;
   title?: string;
   ariaLabel: string;
+  formName?: string;
   placement?: "up" | "down";
   minMenuWidthPx?: number;
   menuClassName?: string;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
   showAutoOption?: boolean;
+  /** Value emitted by the synthetic Auto/Disabled row. Defaults to `auto`. */
+  autoOptionValue?: string;
+  /** Visible label for the synthetic Auto/Disabled row. Defaults to Auto. */
+  autoOptionLabel?: string;
   /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
   /**
@@ -11284,10 +11471,13 @@ function ComposerModelPicker({
   disabled,
   title,
   ariaLabel,
+  formName,
   placement = "up",
   minMenuWidthPx = COMPOSE_MENU_MODEL_MIN_WIDTH_PX,
   menuClassName,
   showAutoOption = true,
+  autoOptionValue = AUTO_MODEL_CHOICE,
+  autoOptionLabel = "Auto",
   autoOptionMetaOverride,
   settingsDefaultModelId,
   dismissPopoversSignal,
@@ -11295,17 +11485,17 @@ function ComposerModelPicker({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const autoOptionLabel = "Auto";
+  const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
   const selectedModel =
-    (value === AUTO_MODEL_CHOICE
+    (value === autoOptionValue
       ? null
       : options.find((model) => model.id === value)) ??
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
   const selectedLabel =
-    value === AUTO_MODEL_CHOICE
+    value === autoOptionValue
       ? autoOptionLabel
       : selectedModel?.label ?? value;
   const menuOpen = open && !disabled;
@@ -11355,10 +11545,19 @@ function ComposerModelPicker({
   }, [dismissPopoversSignal]);
 
   const pick = (nextValue: string): void => {
+    if (formValueRef.current) {
+      formValueRef.current.value = nextValue;
+    }
     onChange(nextValue);
     setOpen(false);
     triggerRef.current?.focus();
   };
+
+  useEffect(() => {
+    if (formValueRef.current) {
+      formValueRef.current.value = value;
+    }
+  }, [value]);
 
   return (
     <div
@@ -11367,6 +11566,14 @@ function ComposerModelPicker({
       data-open={menuOpen ? "true" : undefined}
       data-provider={provider}
     >
+      {formName ? (
+        <input
+          ref={formValueRef}
+          type="hidden"
+          name={formName}
+          defaultValue={value}
+        />
+      ) : null}
       <button
         ref={triggerRef}
         type="button"
@@ -11418,12 +11625,12 @@ function ComposerModelPicker({
           >
             {showAutoOption && (
               <button
-                key={AUTO_MODEL_CHOICE}
+                key={autoOptionValue}
                 type="button"
                 className={`${styles.composeBotOption} ${styles.composeModelOption}`}
                 role="option"
-                aria-selected={value === AUTO_MODEL_CHOICE}
-                onClick={() => pick(AUTO_MODEL_CHOICE)}
+                aria-selected={value === autoOptionValue}
+                onClick={() => pick(autoOptionValue)}
               >
                 <span className={styles.composeModelOptionMain}>
                   <span className={styles.composeModelOptionName}>
@@ -14053,7 +14260,12 @@ function shouldAcceptComposerShortcutCompletionKey(event: {
   metaKey: boolean;
 }): boolean {
   if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
-  return event.key === "Tab" || event.key === " " || event.key === "Spacebar";
+  return (
+    event.key === "Enter" ||
+    event.key === "Tab" ||
+    event.key === " " ||
+    event.key === "Spacebar"
+  );
 }
 
 function getMountedEditorView(editor: Editor | null | undefined): Editor["view"] | null {
@@ -17280,6 +17492,59 @@ function HomeContent(): React.JSX.Element {
   const [comfyUiStatus, setComfyUiStatus] = useState<SecondaryOllamaStatus | null>(null);
   const [comfyUiStatusChecking, setComfyUiStatusChecking] = useState(false);
   const [openAiKey, setOpenAiKey] = useState("");
+  const [apiKeyInputResetToken, setApiKeyInputResetToken] = useState(0);
+  const clearSettingsApiKeyDrafts = useCallback(
+    (
+      providers: ApiKeyValidationProvider[] = [
+        "openai",
+        "anthropic",
+        "elevenlabs",
+      ]
+    ) => {
+      const providerSet = new Set(providers);
+      if (providerSet.has("openai")) setOpenAiKey("");
+      if (providerSet.has("anthropic")) setAnthropicKey("");
+      if (providerSet.has("elevenlabs")) setElevenLabsKey("");
+
+      setApiKeyDraftValidation((previous) => {
+        let changed = false;
+        const next = { ...previous };
+        for (const provider of providers) {
+          const current = previous[provider];
+          if (
+            current.value !== "" ||
+            current.status !== "idle" ||
+            current.detail !== null
+          ) {
+            changed = true;
+            next[provider] = { value: "", status: "idle", detail: null };
+          }
+        }
+        return changed ? next : previous;
+      });
+
+      setApiKeyInputResetToken((current) => current + 1);
+
+      if (typeof document !== "undefined") {
+        const fieldNames: Record<ApiKeyValidationProvider, string> = {
+          openai: SETTINGS_OPENAI_KEY_FIELD,
+          anthropic: SETTINGS_ANTHROPIC_KEY_FIELD,
+          elevenlabs: SETTINGS_ELEVENLABS_KEY_FIELD,
+        };
+        for (const provider of providers) {
+          document
+            .querySelectorAll<HTMLInputElement>(
+              `input[name="${fieldNames[provider]}"]`
+            )
+            .forEach((input) => {
+              input.value = "";
+              input.defaultValue = "";
+            });
+        }
+      }
+    },
+    []
+  );
   const setApiKeyDraftValue = useCallback(
     (provider: ApiKeyValidationProvider, value: string) => {
       if (provider === "openai") {
@@ -18057,6 +18322,7 @@ function HomeContent(): React.JSX.Element {
   const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
   const [settingsHostsModalOpen, setSettingsHostsModalOpen] = useState(false);
   const [settingsDefaultsModalOpen, setSettingsDefaultsModalOpen] = useState(false);
+  const [profileNameModalOpen, setProfileNameModalOpen] = useState(false);
   const [tutorialProgress, setTutorialProgress] = useState<TutorialProgress>(
     DEFAULT_TUTORIAL_PROGRESS
   );
@@ -18065,6 +18331,7 @@ function HomeContent(): React.JSX.Element {
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const [factoryResetArmed, setFactoryResetArmed] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
+  const [profileNameDraft, setProfileNameDraft] = useState("");
   const [changePasswordNew, setChangePasswordNew] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
   const [botProfileActivePage, setBotProfileActivePage] =
@@ -18461,6 +18728,17 @@ function HomeContent(): React.JSX.Element {
   }, [settingsDefaultsModalOpen]);
 
   useEffect(() => {
+    if (!profileNameModalOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setProfileNameModalOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [profileNameModalOpen]);
+
+  useEffect(() => {
     if (!changePasswordModalOpen) return;
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -18710,6 +18988,8 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
+    setProfileNameModalOpen(false);
+    setProfileNameDraft("");
     setOpenAiKey("");
     setAnthropicKey("");
     setElevenLabsKey("");
@@ -19835,6 +20115,7 @@ function HomeContent(): React.JSX.Element {
         label: entry.label,
         provider: "openai" as const,
         isDefault: "isDefault" in entry ? entry.isDefault : undefined,
+        hostLabel: providerDisplayLabel("openai"),
       })),
     []
   );
@@ -19844,32 +20125,60 @@ function HomeContent(): React.JSX.Element {
         id: entry.id,
         label: entry.label,
         provider: "openai" as const,
+        hostLabel: "ElevenLabs",
         disabledReason: ELEVENLABS_IMAGE_MENU_DISABLED_REASON,
       })),
     []
   );
+  const visibleOpenAiImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      filterVisibleModelOptions(
+        openAiImageModelCatalogEntries,
+        settings?.hiddenBotModelIds ?? []
+      ),
+    [openAiImageModelCatalogEntries, settings?.hiddenBotModelIds]
+  );
+  const visibleElevenLabsImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
+    () =>
+      filterVisibleModelOptions(
+        elevenLabsImageModelCatalogEntries,
+        settings?.hiddenBotModelIds ?? []
+      ),
+    [elevenLabsImageModelCatalogEntries, settings?.hiddenBotModelIds]
+  );
   const onlineImageModelCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () => [
-      ...openAiImageModelCatalogEntries,
-      ...elevenLabsImageModelCatalogEntries,
+      ...(apiKeySourceAvailable(settings?.openAiApiKeySource)
+        ? visibleOpenAiImageModelCatalogEntries
+        : []),
+      ...(apiKeySourceAvailable(settings?.elevenLabsApiKeySource)
+        ? visibleElevenLabsImageModelCatalogEntries
+        : []),
     ],
-    [openAiImageModelCatalogEntries, elevenLabsImageModelCatalogEntries]
+    [
+      settings?.elevenLabsApiKeySource,
+      settings?.openAiApiKeySource,
+      visibleElevenLabsImageModelCatalogEntries,
+      visibleOpenAiImageModelCatalogEntries,
+    ]
   );
   const allComfyUiWorkflowCatalogEntries = useMemo<ModelCatalogEntry[]>(
     () =>
       uniqueModelOptions(
         comfyUiModelsPayload.allCheckpoints ?? comfyUiModelsPayload.checkpoints ?? []
-      ),
+      ).map((model) => ({
+        ...model,
+        hostLabel: model.hostLabel ?? "ComfyUI",
+      })),
     [comfyUiModelsPayload]
   );
   const localImageModelCatalogEntries = useMemo(() => {
     const base = availableModelOptionsForProvider(modelCatalog, settings, "local");
-    const ollamaImage = catalogEntriesMatchingLocalImageHeuristic(base);
-    const hiddenComfyUiWorkflowIds = new Set(settings?.hiddenComfyUiWorkflowIds ?? []);
-    const comfy = allComfyUiWorkflowCatalogEntries.filter(
-      (model) => !hiddenComfyUiWorkflowIds.has(model.id)
+    const ollamaImage = filterVisibleModelOptions(
+      catalogEntriesMatchingLocalImageHeuristic(base),
+      settings?.hiddenBotModelIds ?? []
     );
-    return [...ollamaImage, ...comfy];
+    return [...ollamaImage, ...allComfyUiWorkflowCatalogEntries];
   }, [allComfyUiWorkflowCatalogEntries, modelCatalog, settings]);
   const visibleLocalImageModelIds = useMemo(
     () => new Set(localImageModelCatalogEntries.map((model) => model.id)),
@@ -19879,14 +20188,50 @@ function HomeContent(): React.JSX.Element {
     const trimmed = modelId?.trim() ?? "";
     return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed) ? trimmed : "";
   };
+  const visibleOpenAiImageModelIds = useMemo(
+    () => new Set(visibleOpenAiImageModelCatalogEntries.map((model) => model.id)),
+    [visibleOpenAiImageModelCatalogEntries]
+  );
+  const visibleOpenAiImageModelIdOrEmpty = (
+    modelId: string | null | undefined
+  ): ReturnType<typeof normalizeOpenAiImageModelId> | "" => {
+    const trimmed = modelId?.trim() ?? "";
+    if (!trimmed) return "";
+    const normalized = normalizeOpenAiImageModelId(trimmed);
+    return visibleOpenAiImageModelIds.has(normalized) ? normalized : "";
+  };
+  const settingsModelGroups = useMemo(
+    () =>
+      settings
+        ? settingsModelEligibilityGroups({
+            catalog: modelCatalog,
+            settings,
+            openAiImageModels: openAiImageModelCatalogEntries,
+            elevenLabsImageModels: elevenLabsImageModelCatalogEntries,
+          })
+        : [],
+    [
+      elevenLabsImageModelCatalogEntries,
+      modelCatalog,
+      openAiImageModelCatalogEntries,
+      settings,
+    ]
+  );
 
   const hubPreferredLocalOptions = useMemo(
-    () =>
-      includeSelectedModelOption(
-        availableModelOptionsForProvider(modelCatalog, settings, "local"),
-        normalizeModelChoice(settings?.preferredLocalModel),
+    () => {
+      const choice = visibleModelChoiceForProvider(
+        modelCatalog,
+        settings,
+        "local",
+        settings?.preferredLocalModel
+      );
+      return includeSelectedModelOption(
+        chatModelOptionsForProvider(modelCatalog, settings, "local"),
+        choice,
         "local"
-      ),
+      );
+    },
     [modelCatalog, settings]
   );
   const hubPreferredOnlineOptions = useMemo(
@@ -19896,14 +20241,13 @@ function HomeContent(): React.JSX.Element {
         settings,
         settings?.preferredOnlineModel
       );
-      return includeSelectedOnlineModelOption(
-        modelCatalog,
-        settings,
-        uniqueModelOptions([
-          ...availableModelOptionsForProvider(modelCatalog, settings, "openai"),
-          ...availableModelOptionsForProvider(modelCatalog, settings, "anthropic"),
-        ]),
-        choice
+      return withOnlineProviderHostLabels(
+        includeSelectedOnlineModelOption(
+          modelCatalog,
+          settings,
+          onlineModelOptionsForPicker(modelCatalog, settings),
+          choice
+        )
       );
     },
     [modelCatalog, settings]
@@ -19911,7 +20255,7 @@ function HomeContent(): React.JSX.Element {
   const prismInternalLlmCallOptions = useMemo(
     () =>
       includeSelectedModelOption(
-        availableModelOptionsForProvider(modelCatalog, settings, "local"),
+        modelOptionsForProvider(modelCatalog, settings, "local"),
         (settings?.prismDefaultLlmModel ?? "").trim(),
         "local"
       ),
@@ -19920,7 +20264,7 @@ function HomeContent(): React.JSX.Element {
   const prismImageToolLlmCallOptions = useMemo(
     () =>
       includeSelectedModelOption(
-        availableModelOptionsForProvider(modelCatalog, settings, "local"),
+        modelOptionsForProvider(modelCatalog, settings, "local"),
         (settings?.prismImageToolLlmModel ?? "").trim(),
         "local"
       ),
@@ -19936,50 +20280,51 @@ function HomeContent(): React.JSX.Element {
         }`}
       >
         <div className={styles.settingsSystemModelRow}>
-          <label>
-            Prism internal LLM
-            <select
+          <div className={styles.settingsModelField}>
+            <span>Prism internal LLM</span>
+            <ComposerModelPicker
               value={(settings.prismDefaultLlmModel ?? "").trim()}
-              onChange={(event) => {
-                const next = event.target.value.trim();
+              onChange={(nextValue) => {
+                const next = nextValue.trim();
                 setSettings((previous) =>
                   previous ? { ...previous, prismDefaultLlmModel: next } : previous
                 );
               }}
-            >
-              <option value="">
-                Auto - server auxiliary (
-                {(settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"})
-              </option>
-              {prismInternalLlmCallOptions.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label}
-                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Image-request LLM
-            <select
+              options={prismInternalLlmCallOptions}
+              provider="local"
+              ariaLabel="Prism internal LLM"
+              formName={SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD}
+              placement="down"
+              minMenuWidthPx={260}
+              autoOptionValue=""
+              autoOptionMetaOverride={`server auxiliary (${
+                (settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"
+              })`}
+              dismissPopoversSignal={composerPopoverDismissSignal}
+            />
+          </div>
+          <div className={styles.settingsModelField}>
+            <span>Image-request LLM</span>
+            <ComposerModelPicker
               value={(settings.prismImageToolLlmModel ?? "").trim()}
-              onChange={(event) => {
-                const next = event.target.value.trim();
+              onChange={(nextValue) => {
+                const next = nextValue.trim();
                 setSettings((previous) =>
                   previous ? { ...previous, prismImageToolLlmModel: next } : previous
                 );
                 void persistPrismImageToolLlmModelField(next);
               }}
-            >
-              <option value="">Auto - hub chat model</option>
-              {prismImageToolLlmCallOptions.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label}
-                  {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={prismImageToolLlmCallOptions}
+              provider="local"
+              ariaLabel="Image-request LLM"
+              formName={SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD}
+              placement="down"
+              minMenuWidthPx={260}
+              autoOptionValue=""
+              autoOptionMetaOverride="hub chat model"
+              dismissPopoversSignal={composerPopoverDismissSignal}
+            />
+          </div>
         </div>
 
         <div className={styles.settingsModelMatrix}>
@@ -19995,10 +20340,14 @@ function HomeContent(): React.JSX.Element {
             </div>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Offline model</span>
-              <select
-                value={normalizeModelChoice(settings.preferredLocalModel)}
-                onChange={(event) => {
-                  const next = event.target.value;
+              <ComposerModelPicker
+                value={visibleModelChoiceForProvider(
+                  modelCatalog,
+                  settings,
+                  "local",
+                  settings.preferredLocalModel
+                )}
+                onChange={(next) => {
                   setSettings((previous) =>
                     previous
                       ? {
@@ -20009,26 +20358,26 @@ function HomeContent(): React.JSX.Element {
                       : previous
                   );
                 }}
-              >
-                <option value={AUTO_MODEL_CHOICE}>Auto - first visible local model</option>
-                {hubPreferredLocalOptions.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                    {model.hostLabel ? ` · ${model.hostLabel}` : ""}
-                  </option>
-                ))}
-              </select>
+                options={hubPreferredLocalOptions}
+                provider="local"
+                ariaLabel="Default offline chat model"
+                formName={SETTINGS_PREFERRED_LOCAL_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionMetaOverride="first available local model"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
-              <select
+              <ComposerModelPicker
                 value={visiblePreferredOnlineModelChoice(
                   modelCatalog,
                   settings,
                   settings.preferredOnlineModel
                 )}
-                onChange={(event) => {
-                  const next = event.target.value;
+                onChange={(next) => {
                   setSettings((previous) =>
                     previous
                       ? {
@@ -20039,14 +20388,16 @@ function HomeContent(): React.JSX.Element {
                       : previous
                   );
                 }}
-              >
-                <option value={AUTO_MODEL_CHOICE}>Auto - first visible online model</option>
-                {hubPreferredOnlineOptions.map((model) => (
-                  <option key={`${model.provider}:${model.id}`} value={model.id}>
-                    {model.label} · {providerDisplayLabel(model.provider)}
-                  </option>
-                ))}
-              </select>
+                options={hubPreferredOnlineOptions}
+                provider="online"
+                ariaLabel="Default online chat model"
+                formName={SETTINGS_PREFERRED_ONLINE_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionMetaOverride="first available online model"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
           </div>
 
@@ -20056,11 +20407,10 @@ function HomeContent(): React.JSX.Element {
             </div>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Offline model</span>
-              <select
+              <ComposerModelPicker
                 value={visibleLocalImageModelSelectValue(settings.preferredLocalImageModel)}
                 disabled={localImageModelCatalogEntries.length === 0}
-                onChange={(event) => {
-                  const next = event.target.value;
+                onChange={(next) => {
                   setSettings((previous) =>
                     previous ? { ...previous, preferredLocalImageModel: next } : previous
                   );
@@ -20069,32 +20419,30 @@ function HomeContent(): React.JSX.Element {
                     next
                   );
                 }}
-              >
-                <option value="">Auto - first detected local image model</option>
-                {(
+                options={
                   (settings.preferredLocalImageModel?.trim() ?? "").length > 0
                     ? includeSelectedLocalImageModelOption(
                         localImageModelCatalogEntries,
                         settings.preferredLocalImageModel
                       )
                     : localImageModelCatalogEntries
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
+                }
+                provider="local"
+                ariaLabel="Default offline image model"
+                formName={SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionMetaOverride="first detected local image model"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
-              <select
-                value={
-                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
-                    ? normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel)
-                    : ""
-                }
-                onChange={(event) => {
-                  const next = event.target.value;
+              <ComposerModelPicker
+                value={visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel)}
+                onChange={(next) => {
                   const stored =
                     next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
                   setSettings((previous) =>
@@ -20105,22 +20453,25 @@ function HomeContent(): React.JSX.Element {
                     next
                   );
                 }}
-              >
-                <option value="">Auto - {DEFAULT_OPENAI_IMAGE_MODEL_ID}</option>
-                {(
-                  (settings.preferredOpenAiImageModel ?? "").trim().length > 0
+                options={
+                  visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel)
                     ? includeSelectedModelOption(
-                        openAiImageModelCatalogEntries,
-                        normalizeOpenAiImageModelId(settings.preferredOpenAiImageModel),
+                        visibleOpenAiImageModelCatalogEntries,
+                        visibleOpenAiImageModelIdOrEmpty(settings.preferredOpenAiImageModel),
                         "openai"
                       )
-                    : openAiImageModelCatalogEntries
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
+                    : visibleOpenAiImageModelCatalogEntries
+                }
+                provider="openai"
+                ariaLabel="Default online image model"
+                formName={SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionMetaOverride={DEFAULT_OPENAI_IMAGE_MODEL_ID}
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
           </div>
 
@@ -20130,13 +20481,12 @@ function HomeContent(): React.JSX.Element {
             </div>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Offline model</span>
-              <select
+              <ComposerModelPicker
                 value={visibleLocalImageModelSelectValue(
                   settings.preferredZenWallpaperLocalImageModel
                 )}
                 disabled={localImageModelCatalogEntries.length === 0}
-                onChange={(event) => {
-                  const next = event.target.value;
+                onChange={(next) => {
                   setSettings((previous) =>
                     previous
                       ? { ...previous, preferredZenWallpaperLocalImageModel: next }
@@ -20147,34 +20497,32 @@ function HomeContent(): React.JSX.Element {
                     next
                   );
                 }}
-              >
-                <option value="">Auto - use image default</option>
-                {(
+                options={
                   (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "").length > 0
                     ? includeSelectedLocalImageModelOption(
                         localImageModelCatalogEntries,
                         settings.preferredZenWallpaperLocalImageModel
                       )
                     : localImageModelCatalogEntries
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
+                }
+                provider="local"
+                ariaLabel="Atmosphere wallpaper offline image model"
+                formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionMetaOverride="use image default"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
             <label className={styles.settingsModelLane}>
               <span className={styles.settingsModelLaneLabel}>Online model</span>
-              <select
-                value={
-                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
-                    ? normalizeOpenAiImageModelId(
-                        settings.preferredZenWallpaperOpenAiImageModel
-                      )
-                    : ""
-                }
-                onChange={(event) => {
-                  const next = event.target.value;
+              <ComposerModelPicker
+                value={visibleOpenAiImageModelIdOrEmpty(
+                  settings.preferredZenWallpaperOpenAiImageModel
+                )}
+                onChange={(next) => {
                   const stored =
                     next.trim().length > 0 ? normalizeOpenAiImageModelId(next) : "";
                   setSettings((previous) =>
@@ -20187,24 +20535,29 @@ function HomeContent(): React.JSX.Element {
                     next
                   );
                 }}
-              >
-                <option value="">Auto - use image API default</option>
-                {(
-                  (settings.preferredZenWallpaperOpenAiImageModel ?? "").trim().length > 0
+                options={
+                  visibleOpenAiImageModelIdOrEmpty(
+                    settings.preferredZenWallpaperOpenAiImageModel
+                  )
                     ? includeSelectedModelOption(
-                        openAiImageModelCatalogEntries,
-                        normalizeOpenAiImageModelId(
+                        visibleOpenAiImageModelCatalogEntries,
+                        visibleOpenAiImageModelIdOrEmpty(
                           settings.preferredZenWallpaperOpenAiImageModel
                         ),
                         "openai"
                       )
-                    : openAiImageModelCatalogEntries
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
+                    : visibleOpenAiImageModelCatalogEntries
+                }
+                provider="openai"
+                ariaLabel="Atmosphere wallpaper online image model"
+                formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionMetaOverride="use image API default"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
             </label>
           </div>
         </div>
@@ -20212,55 +20565,73 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.settingsFallbackControls}>
           <div className={styles.settingsFallbackTitle}>Copyright fallback</div>
           <div className={styles.settingsFallbackGrid}>
-            <label>
-              Text chat offline model
-              <select
-                value={settings.lenientLocalFallbackModel ?? ""}
-                onChange={(event) =>
+            <div className={styles.settingsModelField}>
+              <span>Text chat offline model</span>
+              <ComposerModelPicker
+                value={visibleOptionalModelChoiceForProvider(
+                  modelCatalog,
+                  settings,
+                  "local",
+                  settings.lenientLocalFallbackModel
+                )}
+                onChange={(next) =>
                   setSettings((previous) =>
                     previous
-                      ? { ...previous, lenientLocalFallbackModel: event.target.value }
+                      ? { ...previous, lenientLocalFallbackModel: next }
                       : previous
                   )
                 }
-              >
-                <option value="">Disabled</option>
-                {includeSelectedModelOption(
-                  modelOptionsForProvider(modelCatalog, settings, "local"),
-                  settings.lenientLocalFallbackModel ?? "",
+                options={includeSelectedModelOption(
+                  chatModelOptionsForProvider(modelCatalog, settings, "local"),
+                  visibleOptionalModelChoiceForProvider(
+                    modelCatalog,
+                    settings,
+                    "local",
+                    settings.lenientLocalFallbackModel
+                  ),
                   "local"
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Images offline model
-              <select
+                )}
+                provider="local"
+                ariaLabel="Copyright fallback text chat offline model"
+                formName={SETTINGS_LENIENT_LOCAL_FALLBACK_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionLabel="Disabled"
+                autoOptionMetaOverride="no text fallback model"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
+            </div>
+            <div className={styles.settingsModelField}>
+              <span>Images offline model</span>
+              <ComposerModelPicker
                 value={visibleLocalImageModelSelectValue(
                   settings.lenientLocalImageFallbackModel
                 )}
-                onChange={(event) =>
+                onChange={(next) =>
                   setSettings((previous) =>
                     previous
-                      ? { ...previous, lenientLocalImageFallbackModel: event.target.value }
+                      ? { ...previous, lenientLocalImageFallbackModel: next }
                       : previous
                   )
                 }
-              >
-                <option value="">Disabled</option>
-                {includeSelectedLocalImageModelOption(
+                options={includeSelectedLocalImageModelOption(
                   localImageModelCatalogEntries,
                   settings.lenientLocalImageFallbackModel
-                ).map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                )}
+                provider="local"
+                ariaLabel="Copyright fallback images offline model"
+                formName={SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD}
+                placement="down"
+                minMenuWidthPx={260}
+                autoOptionValue=""
+                autoOptionLabel="Disabled"
+                autoOptionMetaOverride="no image fallback model"
+                settingsDefaultModelId={null}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
+            </div>
           </div>
         </div>
 
@@ -20704,9 +21075,13 @@ function HomeContent(): React.JSX.Element {
           ? DEFAULT_OPENAI_IMAGE_MODEL_ID
           : trimmedChoice
         : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+    const visibleOpenAiSeedForMenu =
+      visibleOpenAiImageModelIdOrEmpty(openAiSeedForMenu) ||
+      visibleOpenAiImageModelCatalogEntries[0]?.id ||
+      "";
     const onlineOpts = includeSelectedModelOption(
       onlineImageModelCatalogEntries,
-      normalizeOpenAiImageModelId(openAiSeedForMenu),
+      visibleOpenAiSeedForMenu,
       "openai"
     );
     const visibleLocalChoice =
@@ -20725,7 +21100,7 @@ function HomeContent(): React.JSX.Element {
       modelProvider === "openai"
         ? trimmedChoice === AUTO_MODEL_CHOICE || trimmedChoice === ""
           ? AUTO_MODEL_CHOICE
-          : normalizeOpenAiImageModelId(trimmedChoice)
+          : visibleOpenAiImageModelIdOrEmpty(trimmedChoice) || AUTO_MODEL_CHOICE
         : visibleLocalChoice;
 
     return (
@@ -25204,7 +25579,10 @@ function HomeContent(): React.JSX.Element {
       titleRefreshInFlightRef.current.delete(conversationId);
     }
   }
-  async function refreshSettings(): Promise<{ comfyUiHost: string }> {
+  async function refreshSettings(): Promise<{
+    comfyUiHost: string;
+    keySettings: SavedApiKeySettingsState;
+  }> {
     const d = await api<{ settings: UserSettings }>("/api/settings");
     const secondaryHost =
       typeof d.settings.secondaryOllamaHost === "string"
@@ -25224,9 +25602,7 @@ function HomeContent(): React.JSX.Element {
       typeof d.settings.lenientLocalImageFallbackModel === "string"
         ? d.settings.lenientLocalImageFallbackModel
         : "";
-    const hasOpenAiApiKey = d.settings.hasOpenAiApiKey === true;
-    const hasAnthropicApiKey = d.settings.hasAnthropicApiKey === true;
-    const hasElevenLabsApiKey = d.settings.hasElevenLabsApiKey === true;
+    const keySettings = normalizeSavedApiKeySettingsState(d.settings);
     setSettings({
       ...d.settings,
       displayName,
@@ -25239,21 +25615,7 @@ function HomeContent(): React.JSX.Element {
       hiddenComfyUiWorkflowIds: Array.isArray(d.settings.hiddenComfyUiWorkflowIds)
         ? d.settings.hiddenComfyUiWorkflowIds
         : [],
-      hasOpenAiApiKey,
-      hasAnthropicApiKey,
-      hasElevenLabsApiKey,
-      openAiApiKeySource: normalizeApiKeySource(
-        d.settings.openAiApiKeySource,
-        hasOpenAiApiKey
-      ),
-      anthropicApiKeySource: normalizeApiKeySource(
-        d.settings.anthropicApiKeySource,
-        hasAnthropicApiKey
-      ),
-      elevenLabsApiKeySource: normalizeApiKeySource(
-        d.settings.elevenLabsApiKeySource,
-        hasElevenLabsApiKey
-      ),
+      ...keySettings,
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -25306,7 +25668,7 @@ function HomeContent(): React.JSX.Element {
           ? d.settings.ollamaAuxiliaryModel
           : "llama3.2",
     });
-    return { comfyUiHost };
+    return { comfyUiHost, keySettings };
   }
   async function persistPreferredImageModel(provider: Provider, modelId: string) {
     if (!settings) return;
@@ -26388,6 +26750,54 @@ function HomeContent(): React.JSX.Element {
     void deleteAccountConfirmed();
   }
 
+  function openProfileNameModal() {
+    setPanelError(null);
+    setPanelNotice(null);
+    setFactoryResetArmed(false);
+    setDeleteAccountArmed(false);
+    setProfileNameDraft(settings?.displayName?.trim() || user?.displayName?.trim() || "");
+    setProfileNameModalOpen(true);
+  }
+
+  async function submitProfileNameChange() {
+    const nextDisplayName = profileNameDraft.trim();
+    setPanelError(null);
+    setPanelNotice(null);
+    if (nextDisplayName.length === 0) {
+      setPanelError("Profile name cannot be empty.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api<{
+        ok: true;
+        settings?: Partial<UserSettings>;
+      }>("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ displayName: nextDisplayName }),
+      });
+      const savedDisplayName =
+        typeof response.settings?.displayName === "string" &&
+        response.settings.displayName.trim().length > 0
+          ? response.settings.displayName
+          : nextDisplayName.slice(0, 80);
+      setSettings((previous) =>
+        previous ? { ...previous, displayName: savedDisplayName } : previous
+      );
+      setUser((previous) =>
+        previous ? { ...previous, displayName: savedDisplayName } : previous
+      );
+      setProfileNameModalOpen(false);
+      setProfileNameDraft("");
+      setPanelNotice("Profile name updated.");
+      await refreshSettings();
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Profile name change failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteAccountConfirmed() {
     setBusy(true);
     setPanelError(null);
@@ -27046,6 +27456,30 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function restartServerFromSlashCommand(): Promise<void> {
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    try {
+      const result = await api<{ restarting?: boolean; mode?: string }>("/api/dev/restart", {
+        method: "POST",
+      });
+      appendDevChatDebugLines([
+        {
+          kind: "backend",
+          text: `[/restart] Prism API restart requested${result.mode ? ` (${result.mode})` : ""}.`,
+        },
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Server restart failed.");
+    }
+  }
+
   /** Built-in operational slash commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
     const tokens = trimmedLine
@@ -27060,6 +27494,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/clear" &&
       normalizedCommand !== "/cls" &&
       normalizedCommand !== "/refresh" &&
+      normalizedCommand !== "/restart" &&
       normalizedCommand !== "/help"
     ) {
       return false;
@@ -27081,6 +27516,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/refresh") {
       window.location.reload();
+      return true;
+    }
+    if (normalizedCommand === "/restart") {
+      await restartServerFromSlashCommand();
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -27594,7 +28033,11 @@ function HomeContent(): React.JSX.Element {
     }
     const commandCenterModelChoice =
       commandCenterResolution.kind === "resolved"
-        ? commandCenterResolution.modelChoice
+        ? resolveCommandCenterModelChoiceForSend(
+            commandCenterResolution.modelChoice,
+            settings,
+            modelCatalog
+          )
         : AUTO_MODEL_CHOICE;
     const commandCenterPromptShortcut =
       commandCenterResolution.kind === "resolved"
@@ -29645,6 +30088,7 @@ function HomeContent(): React.JSX.Element {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
     if (target.closest("[data-debug-composer='true']")) return;
+    if (e.defaultPrevented) return;
     setComposerSendTintActive(true);
     const fromMarkdownEditor = target.closest("[data-markdown-cm-host='true']") !== null;
     const fromPlainTextarea = target instanceof HTMLTextAreaElement;
@@ -29778,13 +30222,32 @@ function HomeContent(): React.JSX.Element {
     showEmptyStateSearchAfterReturn();
   }
 
-  function readSettingsFormText(
+  function readSettingsDraftText(
     form: HTMLFormElement,
     fieldName: string,
-    fallback: string
+    draftValue: string
   ): string {
+    if (draftValue.trim().length > 0) return draftValue;
     const value = new FormData(form).get(fieldName);
-    return typeof value === "string" ? value : fallback;
+    if (typeof value === "string" && value.trim().length > 0) return value;
+    if (typeof document !== "undefined") {
+      const matchingInputs = document.querySelectorAll<HTMLInputElement>(
+        `input[name="${fieldName}"]`
+      );
+      for (const input of matchingInputs) {
+        if (input.value.trim().length > 0) return input.value;
+      }
+    }
+    return typeof value === "string" ? value : draftValue;
+  }
+
+  function readSettingsFormDataText(
+    formData: FormData,
+    fieldName: string,
+    fallbackValue: string
+  ): string {
+    const value = formData.get(fieldName);
+    return typeof value === "string" ? value : fallbackValue;
   }
 
   async function saveSettings(
@@ -29795,35 +30258,103 @@ function HomeContent(): React.JSX.Element {
     if (!settings) return;
     setBusy(true);
     setPanelError(null);
+    setPanelNotice(null);
     try {
       // Only include the key field when the user typed something; otherwise
       // the backend would have no way to tell "no change" apart from "clear".
       // Server re-sanitizes via `sanitizeOpenAiKeyInput`, so a paste of
       // `OPENAI_API_KEY=sk-...` (or a quoted variant) is stripped before
       // it ever gets encrypted into the user row.
+      const formData = new FormData(e.currentTarget);
+      const prismDefaultLlmModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD,
+        settings.prismDefaultLlmModel
+      ).trim();
+      const prismImageToolLlmModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD,
+        settings.prismImageToolLlmModel
+      ).trim();
+      const preferredLocalModelRaw = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_LOCAL_MODEL_FIELD,
+        settings.preferredLocalModel
+      ).trim();
+      const preferredOnlineModelRaw = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_ONLINE_MODEL_FIELD,
+        settings.preferredOnlineModel
+      ).trim();
+      const preferredLocalImageModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD,
+        settings.preferredLocalImageModel
+      ).trim();
+      const preferredOpenAiImageModelRaw = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD,
+        settings.preferredOpenAiImageModel
+      ).trim();
+      const preferredZenWallpaperLocalImageModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD,
+        settings.preferredZenWallpaperLocalImageModel
+      ).trim();
+      const preferredZenWallpaperOpenAiImageModelRaw = readSettingsFormDataText(
+        formData,
+        SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD,
+        settings.preferredZenWallpaperOpenAiImageModel
+      ).trim();
+      const lenientLocalFallbackModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_LENIENT_LOCAL_FALLBACK_MODEL_FIELD,
+        settings.lenientLocalFallbackModel
+      ).trim();
+      const lenientLocalImageFallbackModel = readSettingsFormDataText(
+        formData,
+        SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD,
+        settings.lenientLocalImageFallbackModel
+      ).trim();
       const preferredOnlineModelChoice = visiblePreferredOnlineModelChoice(
         modelCatalog,
         settings,
-        settings.preferredOnlineModel
+        preferredOnlineModelRaw
       );
       const body: Record<string, unknown> = {
         ...settings,
+        prismDefaultLlmModel,
+        prismImageToolLlmModel,
+        preferredLocalModel:
+          preferredLocalModelRaw === AUTO_MODEL_CHOICE ? "" : preferredLocalModelRaw,
         preferredOnlineModel:
           preferredOnlineModelChoice === AUTO_MODEL_CHOICE
             ? ""
             : preferredOnlineModelChoice,
+        preferredLocalImageModel,
+        preferredOpenAiImageModel:
+          preferredOpenAiImageModelRaw.length > 0
+            ? normalizeOpenAiImageModelId(preferredOpenAiImageModelRaw)
+            : "",
+        preferredZenWallpaperLocalImageModel,
+        preferredZenWallpaperOpenAiImageModel:
+          preferredZenWallpaperOpenAiImageModelRaw.length > 0
+            ? normalizeOpenAiImageModelId(preferredZenWallpaperOpenAiImageModelRaw)
+            : "",
+        lenientLocalFallbackModel,
+        lenientLocalImageFallbackModel,
       };
-      const submittedOpenAiKey = readSettingsFormText(
+      const submittedOpenAiKey = readSettingsDraftText(
         e.currentTarget,
         SETTINGS_OPENAI_KEY_FIELD,
         openAiKey
       );
-      const submittedAnthropicKey = readSettingsFormText(
+      const submittedAnthropicKey = readSettingsDraftText(
         e.currentTarget,
         SETTINGS_ANTHROPIC_KEY_FIELD,
         anthropicKey
       );
-      const submittedElevenLabsKey = readSettingsFormText(
+      const submittedElevenLabsKey = readSettingsDraftText(
         e.currentTarget,
         SETTINGS_ELEVENLABS_KEY_FIELD,
         elevenLabsKey
@@ -29840,15 +30371,49 @@ function HomeContent(): React.JSX.Element {
       if (trimmedElevenLabsKey.length > 0) {
         body.elevenLabsApiKey = trimmedElevenLabsKey;
       }
-      await api("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
-      setOpenAiKey("");
-      setAnthropicKey("");
-      setElevenLabsKey("");
-      setApiKeyDraftValidation(createApiKeyDraftValidationMap());
-      const { comfyUiHost: savedComfyHost } = await refreshSettings();
+      const saved = await api<{
+        settings?: Partial<SavedApiKeySettingsState>;
+      }>("/api/settings", { method: "PATCH", body: JSON.stringify(body) });
+      let confirmedKeySettings: SavedApiKeySettingsState | null = null;
+      if (saved.settings) {
+        const keySettings = normalizeSavedApiKeySettingsState(saved.settings);
+        confirmedKeySettings = keySettings;
+        setSettings((previous) =>
+          previous
+            ? {
+                ...previous,
+                ...keySettings,
+              }
+            : previous
+        );
+      }
+      const { comfyUiHost: savedComfyHost, keySettings } = await refreshSettings();
+      confirmedKeySettings = keySettings;
+      const missingSavedKeys = [
+        trimmedKey.length > 0 && !confirmedKeySettings.hasOpenAiApiKey
+          ? "OpenAI"
+          : null,
+        trimmedAnthropicKey.length > 0 &&
+        !confirmedKeySettings.hasAnthropicApiKey
+          ? "Anthropic"
+          : null,
+        trimmedElevenLabsKey.length > 0 &&
+        !confirmedKeySettings.hasElevenLabsApiKey
+          ? "ElevenLabs"
+          : null,
+      ].filter((label): label is string => Boolean(label));
+      if (missingSavedKeys.length > 0) {
+        throw new Error(
+          `Could not confirm saved ${missingSavedKeys.join(", ")} API key${
+            missingSavedKeys.length === 1 ? "" : "s"
+          }.`
+        );
+      }
+      clearSettingsApiKeyDrafts();
       await refreshModels(savedComfyHost);
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
+      setPanelNotice("Settings saved.");
       if (options.closeHostsModalOnSuccess) {
         setSettingsHostsModalOpen(false);
       }
@@ -29870,6 +30435,33 @@ function HomeContent(): React.JSX.Element {
       setNewBotOnlineModel((current) =>
         current === modelId ? AUTO_MODEL_CHOICE : current
       );
+      setNewBotLocalImageModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+      setNewBotOpenAiImageModel((current) =>
+        current === modelId ? AUTO_MODEL_CHOICE : current
+      );
+      const clearModelChoiceByProvider = (
+        previous: Record<Provider, string>
+      ): Record<Provider, string> => ({
+        ...previous,
+        local: previous.local === modelId ? AUTO_MODEL_CHOICE : previous.local,
+        openai: previous.openai === modelId ? AUTO_MODEL_CHOICE : previous.openai,
+        anthropic:
+          previous.anthropic === modelId ? AUTO_MODEL_CHOICE : previous.anthropic,
+      });
+      setChatModelChoiceByProvider(clearModelChoiceByProvider);
+      setCoffeeModelChoiceByProvider(clearModelChoiceByProvider);
+      setStoryModelChoiceByProvider(clearModelChoiceByProvider);
+      setImageGenModelChoiceByProvider((previous) => ({
+        ...previous,
+        local: previous.local === modelId ? AUTO_MODEL_CHOICE : previous.local,
+        openai: previous.openai === modelId ? AUTO_MODEL_CHOICE : previous.openai,
+      }));
+      setCommandCenterPreferredModel((current) => {
+        const parsed = parseCommandCenterModelChoice(current);
+        return parsed?.modelId === modelId ? AUTO_MODEL_CHOICE : current;
+      });
     }
     setSettings((previous) => {
       if (!previous) return previous;
@@ -29879,9 +30471,27 @@ function HomeContent(): React.JSX.Element {
       } else {
         current.add(modelId);
       }
+      const clearIfHidden = (value: string | null | undefined): string => {
+        const trimmed = value?.trim() ?? "";
+        return !visible && trimmed === modelId ? "" : trimmed;
+      };
       return {
         ...previous,
         hiddenBotModelIds: Array.from(current),
+        preferredLocalModel: clearIfHidden(previous.preferredLocalModel),
+        preferredOnlineModel: clearIfHidden(previous.preferredOnlineModel),
+        preferredLocalImageModel: clearIfHidden(previous.preferredLocalImageModel),
+        preferredOpenAiImageModel: clearIfHidden(previous.preferredOpenAiImageModel),
+        preferredZenWallpaperLocalImageModel: clearIfHidden(
+          previous.preferredZenWallpaperLocalImageModel
+        ),
+        preferredZenWallpaperOpenAiImageModel: clearIfHidden(
+          previous.preferredZenWallpaperOpenAiImageModel
+        ),
+        lenientLocalFallbackModel: clearIfHidden(previous.lenientLocalFallbackModel),
+        lenientLocalImageFallbackModel: clearIfHidden(
+          previous.lenientLocalImageFallbackModel
+        ),
       };
     });
   }
@@ -29987,7 +30597,9 @@ function HomeContent(): React.JSX.Element {
     setBusy(true);
     setPanelError(null);
     try {
-      await api("/api/settings", {
+      const saved = await api<{
+        settings?: Partial<SavedApiKeySettingsState>;
+      }>("/api/settings", {
         method: "PATCH",
         body: JSON.stringify(
           provider === "openai"
@@ -29997,17 +30609,24 @@ function HomeContent(): React.JSX.Element {
               : { elevenLabsApiKey: null }
         ),
       });
-      if (provider === "openai") {
-        setOpenAiKey("");
-      } else if (provider === "anthropic") {
-        setAnthropicKey("");
-      } else {
-        setElevenLabsKey("");
+      if (saved.settings) {
+        const keySettings = normalizeSavedApiKeySettingsState(saved.settings);
+        setSettings((previous) =>
+          previous
+            ? {
+                ...previous,
+                ...keySettings,
+              }
+            : previous
+        );
       }
-      setApiKeyDraftValidation((previous) => ({
-        ...previous,
-        [provider]: { value: "", status: "idle", detail: null },
-      }));
+      if (provider === "openai") {
+        clearSettingsApiKeyDrafts(["openai"]);
+      } else if (provider === "anthropic") {
+        clearSettingsApiKeyDrafts(["anthropic"]);
+      } else {
+        clearSettingsApiKeyDrafts(["elevenlabs"]);
+      }
       const { comfyUiHost } = await refreshSettings();
       await refreshModels(comfyUiHost);
     } catch (err) {
@@ -35293,12 +35912,13 @@ function HomeContent(): React.JSX.Element {
     const headerOpenAi =
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
-        : normalizeOpenAiImageModelId(headerOpenAiRaw);
+        : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
 
     const openAiModelId = normalizeOpenAiImageModelId(
       headerOpenAi ||
-        botOpenAiImage ||
-        (settings?.preferredOpenAiImageModel?.trim() ?? "") ||
+        visibleOpenAiImageModelIdOrEmpty(botOpenAiImage) ||
+        visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
+        visibleOpenAiImageModelCatalogEntries[0]?.id ||
         DEFAULT_OPENAI_IMAGE_MODEL_ID
     );
 
@@ -35337,12 +35957,13 @@ function HomeContent(): React.JSX.Element {
     const headerOpenAi =
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
-        : normalizeOpenAiImageModelId(headerOpenAiRaw);
+        : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
     const openAiModelId = normalizeOpenAiImageModelId(
       headerOpenAi ||
-        botOpenAiImage ||
-        (settings?.preferredZenWallpaperOpenAiImageModel?.trim() ?? "") ||
-        (settings?.preferredOpenAiImageModel?.trim() ?? "") ||
+        visibleOpenAiImageModelIdOrEmpty(botOpenAiImage) ||
+        visibleOpenAiImageModelIdOrEmpty(settings?.preferredZenWallpaperOpenAiImageModel) ||
+        visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
+        visibleOpenAiImageModelCatalogEntries[0]?.id ||
         DEFAULT_OPENAI_IMAGE_MODEL_ID
     );
     return { localModelId, openAiModelId };
@@ -41149,8 +41770,30 @@ function HomeContent(): React.JSX.Element {
             </button>
           </div>
           {(() => {
-            const localModelOptions = modelCatalog?.local ?? [];
-            const onlineModelOptions = modelCatalog?.online ?? [];
+            const commandCenterSelectedLocalModelId =
+              parseCommandCenterModelChoice(commandCenterPreferredModel)?.modelId ??
+              AUTO_MODEL_CHOICE;
+            const visibleCommandCenterLocalModelId = visibleModelChoiceForProvider(
+              modelCatalog,
+              settings,
+              "local",
+              commandCenterSelectedLocalModelId
+            );
+            const commandCenterModelOptions: ModelCatalogEntry[] =
+              includeSelectedModelOption(
+                chatModelOptionsForProvider(modelCatalog, settings, "local"),
+                visibleCommandCenterLocalModelId,
+                "local"
+              ).map((model) => ({
+                ...model,
+                id: `local:${model.id}`,
+                hostLabel: model.hostLabel ?? "LOCAL",
+              }));
+            const commandCenterAutoModelId = commandCenterAuxiliaryModelId(settings);
+            const normalizedCommandCenterPreferredModel =
+              visibleCommandCenterLocalModelId === AUTO_MODEL_CHOICE
+                ? AUTO_MODEL_CHOICE
+                : `local:${visibleCommandCenterLocalModelId}`;
             const selectedCommand =
               commandCenterCommands.find(
                 (candidate) => candidate.id === commandCenterSelectedCommandId
@@ -41275,32 +41918,26 @@ function HomeContent(): React.JSX.Element {
                 <aside className={styles.promptCenterSidebar} aria-label="Commands and prompts">
                   <section className={styles.promptCenterModelCard}>
                     <span className={styles.promptCenterEyebrow}>Model</span>
-                    <label>
+                    <div className={styles.promptCenterModelField}>
                       <span>Prompt runs</span>
-                      <select
-                        value={commandCenterPreferredModel}
-                        onChange={(event) =>
+                      <ComposerModelPicker
+                        value={normalizedCommandCenterPreferredModel}
+                        onChange={(next) =>
                           setCommandCenterPreferredModel(
-                            normalizeModelChoice(event.currentTarget.value)
+                            normalizeCommandCenterPreferredModelChoice(next)
                           )
                         }
-                      >
-                        <option value={AUTO_MODEL_CHOICE}>Inherit current model</option>
-                        {localModelOptions.map((model) => (
-                          <option key={`local:${model.id}`} value={`local:${model.id}`}>
-                            {`LOCAL - ${model.label}`}
-                          </option>
-                        ))}
-                        {onlineModelOptions.map((model) => (
-                          <option
-                            key={`${model.provider}:${model.id}`}
-                            value={`${model.provider}:${model.id}`}
-                          >
-                            {`${providerDisplayLabel(model.provider)} - ${model.label}`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        options={commandCenterModelOptions}
+                        provider="local"
+                        ariaLabel="Prompt run model"
+                        placement="down"
+                        minMenuWidthPx={260}
+                        autoOptionLabel="Auto"
+                        autoOptionMetaOverride={`Prism auxiliary · ${commandCenterAutoModelId}`}
+                        settingsDefaultModelId={null}
+                        dismissPopoversSignal={composerPopoverDismissSignal}
+                      />
+                    </div>
                   </section>
                   <section className={styles.promptCenterListSection} data-kind="commands">
                     <div className={styles.promptCenterListHeader}>
@@ -41791,7 +42428,6 @@ function HomeContent(): React.JSX.Element {
           </div>
           {settings && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
-              {/* Preferred name omitted: bots learn the user’s name organically; avoid a separate “override” field. */}
               <section className={styles.settingsOverview} aria-label="Settings overview">
                 <div>
                   <span className={styles.settingsEyebrow}>Workspace settings</span>
@@ -41816,7 +42452,10 @@ function HomeContent(): React.JSX.Element {
               </section>
 
               <div className={styles.settingsSectionGrid}>
-                <section className={styles.settingsSection} aria-labelledby="settings-connections-title">
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="settings-connections-title"
+                >
                   <header className={styles.settingsSectionHeader}>
                     <div>
                       <span className={styles.settingsEyebrow}>Connections</span>
@@ -41833,6 +42472,7 @@ function HomeContent(): React.JSX.Element {
                         title={openAiKeyDisplay?.detail ?? undefined}
                       >
                         <input
+                          key={`settings-openai-key-${apiKeyInputResetToken}-${settings.hasOpenAiApiKey ? "saved" : "empty"}`}
                           type="password"
                           name={SETTINGS_OPENAI_KEY_FIELD}
                           placeholder={
@@ -41842,7 +42482,12 @@ function HomeContent(): React.JSX.Element {
                           }
                           value={openAiKey}
                           onChange={(event) => setApiKeyDraftValue("openai", event.target.value)}
-                          autoComplete="off"
+                          autoComplete="new-password"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
                         />
                         <span className={styles.settingsHostStatus} aria-live="polite">
                           {openAiKeyDisplay?.fieldText ?? "Optional"}
@@ -41867,6 +42512,7 @@ function HomeContent(): React.JSX.Element {
                         title={anthropicKeyDisplay?.detail ?? undefined}
                       >
                         <input
+                          key={`settings-anthropic-key-${apiKeyInputResetToken}-${settings.hasAnthropicApiKey ? "saved" : "empty"}`}
                           type="password"
                           name={SETTINGS_ANTHROPIC_KEY_FIELD}
                           placeholder={
@@ -41876,7 +42522,12 @@ function HomeContent(): React.JSX.Element {
                           }
                           value={anthropicKey}
                           onChange={(event) => setApiKeyDraftValue("anthropic", event.target.value)}
-                          autoComplete="off"
+                          autoComplete="new-password"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
                         />
                         <span className={styles.settingsHostStatus} aria-live="polite">
                           {anthropicKeyDisplay?.fieldText ?? "Optional"}
@@ -41901,6 +42552,7 @@ function HomeContent(): React.JSX.Element {
                         title={elevenLabsKeyDisplay?.detail ?? undefined}
                       >
                         <input
+                          key={`settings-elevenlabs-key-${apiKeyInputResetToken}-${settings.hasElevenLabsApiKey ? "saved" : "empty"}`}
                           type="password"
                           name={SETTINGS_ELEVENLABS_KEY_FIELD}
                           placeholder={
@@ -41910,7 +42562,12 @@ function HomeContent(): React.JSX.Element {
                           }
                           value={elevenLabsKey}
                           onChange={(event) => setApiKeyDraftValue("elevenlabs", event.target.value)}
-                          autoComplete="off"
+                          autoComplete="new-password"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-bwignore="true"
                         />
                         <span className={styles.settingsHostStatus} aria-live="polite">
                           {elevenLabsKeyDisplay?.fieldText ?? "Optional"}
@@ -41996,42 +42653,74 @@ function HomeContent(): React.JSX.Element {
                     <small>Some image choices save immediately.</small>
                   </header>
                   {renderDefaultsAndFallbacksControls("settings")}
-                  <details className={styles.settingsModelDropdown}>
-                    <summary>
-                      <span>Bot customizer model list</span>
-                      <small>
-                        {settings.hiddenBotModelIds.length === 0
-                          ? "All visible"
-                          : `${settings.hiddenBotModelIds.length} hidden`}
-                      </small>
-                    </summary>
-                    <div className={styles.settingsModelList}>
-                      {allBotCustomizerModelOptions(modelCatalog, settings).map((model) => {
-                        const required = isRequiredPrimaryLocalModel(model);
-                        const visible = required || !settings.hiddenBotModelIds.includes(model.id);
-                        return (
-                          <label key={model.id} className={styles.settingsModelToggle}>
-                            <input
-                              type="checkbox"
-                              checked={visible}
-                              disabled={required}
-                              onChange={(event) =>
-                                setBotCustomizerModelVisible(model.id, event.currentTarget.checked)
-                              }
-                            />
-                            <span>{model.label}</span>
+                  <div
+                    className={styles.settingsModelProviderStack}
+                    aria-label="Bot customizer model visibility"
+                  >
+                    {settingsModelGroups.map((group) => {
+                      const hiddenInGroup = group.models.filter(
+                        (model) =>
+                          !isRequiredPrimaryLocalModel(model) &&
+                          settings.hiddenBotModelIds.includes(model.id)
+                      ).length;
+                      const visibleInGroup = group.models.length - hiddenInGroup;
+                      return (
+                        <details
+                          key={group.id}
+                          className={`${styles.settingsModelDropdown} ${styles.settingsModelProviderDropdown}`}
+                          data-model-provider={group.id}
+                        >
+                          <summary>
+                            <span className={styles.settingsModelProviderSummary}>
+                              <span
+                                className={styles.settingsModelProviderSwatch}
+                                aria-hidden="true"
+                              />
+                              <span>{group.label}</span>
+                            </span>
                             <small>
-                              {required
-                                ? "Required"
-                                : model.provider === "local"
-                                ? `Offline${model.hostLabel ? ` · ${model.hostLabel}` : ""}`
-                                : providerDisplayLabel(model.provider)}
+                              {group.meta} - {visibleInGroup}/{group.models.length} visible
+                              {hiddenInGroup > 0 ? ` - ${hiddenInGroup} hidden` : ""}
                             </small>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </details>
+                          </summary>
+                          <div className={styles.settingsModelList}>
+                            {group.models.map((model) => {
+                              const required = isRequiredPrimaryLocalModel(model);
+                              const visible =
+                                required || !settings.hiddenBotModelIds.includes(model.id);
+                              return (
+                                <label
+                                  key={model.id}
+                                  className={styles.settingsModelToggle}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={visible}
+                                    disabled={required}
+                                    onChange={(event) =>
+                                      setBotCustomizerModelVisible(
+                                        model.id,
+                                        event.currentTarget.checked
+                                      )
+                                    }
+                                  />
+                                  <span>{model.label}</span>
+                                  <small>
+                                    {settingsModelToggleMeta(group.id, model, required)}
+                                  </small>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      );
+                    })}
+                    {settingsModelGroups.length === 0 ? (
+                      <div className={styles.settingsModelEmpty}>
+                        No model providers connected.
+                      </div>
+                    ) : null}
+                  </div>
                   <details className={styles.settingsModelDropdown}>
                     <summary>
                       <span>ComfyUI workflow list</span>
@@ -42147,7 +42836,7 @@ function HomeContent(): React.JSX.Element {
                 </section>
 
                 <section
-                  className={styles.settingsSection}
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                   aria-labelledby="settings-account-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -42167,6 +42856,14 @@ function HomeContent(): React.JSX.Element {
                       disabled={busy}
                     >
                       Log out
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={openProfileNameModal}
+                      disabled={busy}
+                    >
+                      Change profile name
                     </button>
                     <button
                       type="button"
@@ -42217,13 +42914,15 @@ function HomeContent(): React.JSX.Element {
                 </section>
               </div>
 
-              {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-
               <div className={styles.settingsSaveDock}>
-                <span>Changes to keys, chat defaults, and account behavior use Save.</span>
-                <button type="submit" disabled={busy}>
-                  {busy ? "Saving..." : "Save settings"}
-                </button>
+                {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
+                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                <div className={styles.settingsDockRow}>
+                  <span>Changes to keys, chat defaults, and account behavior use Save.</span>
+                  <button type="submit" disabled={busy}>
+                    {busy ? "Saving..." : "Save settings"}
+                  </button>
+                </div>
               </div>
             </form>
           )}
@@ -42276,6 +42975,7 @@ function HomeContent(): React.JSX.Element {
                           title={openAiKeyDisplay?.detail ?? undefined}
                         >
                           <input
+                            key={`settings-modal-openai-key-${apiKeyInputResetToken}-${settings.hasOpenAiApiKey ? "saved" : "empty"}`}
                             type="password"
                             name={SETTINGS_OPENAI_KEY_FIELD}
                             placeholder={
@@ -42285,7 +42985,12 @@ function HomeContent(): React.JSX.Element {
                             }
                             value={openAiKey}
                             onChange={(event) => setApiKeyDraftValue("openai", event.target.value)}
-                            autoComplete="off"
+                            autoComplete="new-password"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
                           />
                           <span className={styles.settingsHostStatus} aria-live="polite">
                             {openAiKeyDisplay?.fieldText ?? "Optional"}
@@ -42310,6 +43015,7 @@ function HomeContent(): React.JSX.Element {
                           title={anthropicKeyDisplay?.detail ?? undefined}
                         >
                           <input
+                            key={`settings-modal-anthropic-key-${apiKeyInputResetToken}-${settings.hasAnthropicApiKey ? "saved" : "empty"}`}
                             type="password"
                             name={SETTINGS_ANTHROPIC_KEY_FIELD}
                             placeholder={
@@ -42319,7 +43025,12 @@ function HomeContent(): React.JSX.Element {
                             }
                             value={anthropicKey}
                             onChange={(event) => setApiKeyDraftValue("anthropic", event.target.value)}
-                            autoComplete="off"
+                            autoComplete="new-password"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
                           />
                           <span className={styles.settingsHostStatus} aria-live="polite">
                             {anthropicKeyDisplay?.fieldText ?? "Optional"}
@@ -42344,6 +43055,7 @@ function HomeContent(): React.JSX.Element {
                           title={elevenLabsKeyDisplay?.detail ?? undefined}
                         >
                           <input
+                            key={`settings-modal-elevenlabs-key-${apiKeyInputResetToken}-${settings.hasElevenLabsApiKey ? "saved" : "empty"}`}
                             type="password"
                             name={SETTINGS_ELEVENLABS_KEY_FIELD}
                             placeholder={
@@ -42353,7 +43065,12 @@ function HomeContent(): React.JSX.Element {
                             }
                             value={elevenLabsKey}
                             onChange={(event) => setApiKeyDraftValue("elevenlabs", event.target.value)}
-                            autoComplete="off"
+                            autoComplete="new-password"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-bwignore="true"
                           />
                           <span className={styles.settingsHostStatus} aria-live="polite">
                             {elevenLabsKeyDisplay?.fieldText ?? "Optional"}
@@ -42444,12 +43161,14 @@ function HomeContent(): React.JSX.Element {
                       <p className={styles.muted} style={{ margin: 0 }}>
                         Keys are stored on this account after saving.
                       </p>
-                      {panelError && <p className={styles.error} role="alert">{panelError}</p>}
                       <div className={styles.settingsSaveDock}>
-                        <span>Save keys and server settings.</span>
-                        <button type="submit" disabled={busy}>
-                          {busy ? "Saving..." : "Save settings"}
-                        </button>
+                        {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                        <div className={styles.settingsDockRow}>
+                          <span>Save keys and server settings.</span>
+                          <button type="submit" disabled={busy}>
+                            {busy ? "Saving..." : "Save settings"}
+                          </button>
+                        </div>
                       </div>
                     </form>
                   )}
@@ -42549,6 +43268,65 @@ function HomeContent(): React.JSX.Element {
                     This PRISM workspace can also pair with companion clients, so your same environment can
                     travel across devices.
                   </p>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+          {profileNameModalOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+            <div
+              className={settingsModalBackdropClassName}
+              role="presentation"
+              onClick={() => {
+                setProfileNameModalOpen(false);
+              }}
+            >
+              <div
+                className={styles.settingsAboutModal}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Change profile name"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className={styles.settingsAboutModalHeader}>
+                  <div>
+                    <span>Account</span>
+                    <h4>Change profile name</h4>
+                    <p>This is the name Prism shows for your signed-in profile.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProfileNameModalOpen(false)}
+                    aria-label="Close profile name"
+                  >
+                    ×
+                  </button>
+                </header>
+                <div className={styles.settingsAboutModalBody}>
+                  <form
+                    className={styles.form}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitProfileNameChange();
+                    }}
+                  >
+                    <label>
+                      Profile name
+                      <input
+                        type="text"
+                        autoComplete="name"
+                        maxLength={80}
+                        value={profileNameDraft}
+                        onChange={(event) => setProfileNameDraft(event.target.value)}
+                      />
+                    </label>
+                    {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                    <button type="submit" disabled={busy || profileNameDraft.trim().length === 0}>
+                      {busy ? "Saving..." : "Update profile name"}
+                    </button>
+                  </form>
                 </div>
               </div>
             </div>,
@@ -42736,6 +43514,7 @@ function HomeContent(): React.JSX.Element {
           ]),
           visibleOnlineModelChoice
         );
+        const onlineModelPickerOptions = withOnlineProviderHostLabels(onlineModelOptions);
         const visibleLocalImageModelChoice = (() => {
           if (newBotLocalImageModel !== AUTO_MODEL_CHOICE && newBotLocalImageModel.trim()) {
             return newBotLocalImageModel.trim();
@@ -42751,20 +43530,21 @@ function HomeContent(): React.JSX.Element {
         })();
         const visibleOpenAiImageModelChoice = (() => {
           if (newBotOpenAiImageModel !== AUTO_MODEL_CHOICE && newBotOpenAiImageModel.trim()) {
-            return normalizeOpenAiImageModelId(newBotOpenAiImageModel.trim());
+            const visible = visibleOpenAiImageModelIdOrEmpty(newBotOpenAiImageModel);
+            if (visible) return visible;
           }
-          const fromSettings = settings?.preferredOpenAiImageModel?.trim() ?? "";
-          if (fromSettings) {
-            return normalizeOpenAiImageModelId(fromSettings);
-          }
-          return normalizeOpenAiImageModelId(DEFAULT_OPENAI_IMAGE_MODEL_ID);
+          return (
+            visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel) ||
+            visibleOpenAiImageModelCatalogEntries[0]?.id ||
+            normalizeOpenAiImageModelId(DEFAULT_OPENAI_IMAGE_MODEL_ID)
+          );
         })();
         const localImageModelOptionsForBot = includeSelectedLocalImageModelOption(
           localImageModelCatalogEntries,
           visibleLocalImageModelChoice
         );
         const openAiImageModelOptionsForBot = includeSelectedModelOption(
-          openAiImageModelCatalogEntries,
+          visibleOpenAiImageModelCatalogEntries,
           visibleOpenAiImageModelChoice,
           "openai"
         );
@@ -43408,36 +44188,35 @@ function HomeContent(): React.JSX.Element {
                               className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                             >
                               <span>Preferred offline model</span>
-                              <select
+                              <ComposerModelPicker
                                 value={visibleLocalModelChoice}
-                                onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
-                                aria-label="Preferred offline model for this bot"
-                              >
-                                {localModelOptions.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.label}{model.isDefault ? " (default)" : ""}
-                                  </option>
-                                ))}
-                              </select>
+                                onChange={setNewBotLocalModel}
+                                options={localModelOptions}
+                                provider="local"
+                                ariaLabel="Preferred offline model for this bot"
+                                placement="down"
+                                minMenuWidthPx={260}
+                                showAutoOption={false}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
                               <small>Used when this bot replies while the editor is set to LOCAL.</small>
                             </div>
                             <div
                               className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                             >
                               <span>Preferred online model</span>
-                              <select
+                              <ComposerModelPicker
                                 value={visibleOnlineModelChoice}
-                                onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
-                                aria-label="Preferred online model for this bot"
+                                onChange={setNewBotOnlineModel}
+                                options={onlineModelPickerOptions}
+                                provider="online"
+                                ariaLabel="Preferred online model for this bot"
                                 disabled={!newBotOnlineEnabled}
-                              >
-                                {onlineModelOptions.map((model) => (
-                                  <option key={`${model.provider}:${model.id}`} value={model.id}>
-                                    {model.label} · {providerDisplayLabel(model.provider)}
-                                    {model.isDefault ? " (default)" : ""}
-                                  </option>
-                                ))}
-                              </select>
+                                placement="down"
+                                minMenuWidthPx={260}
+                                showAutoOption={false}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
                               <small>
                                 {newBotOnlineEnabled
                                   ? "Used when this bot replies while the editor is set to ONLINE."
@@ -43452,21 +44231,23 @@ function HomeContent(): React.JSX.Element {
                               className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                             >
                               <span>Preferred offline image model</span>
-                              <select
+                              <ComposerModelPicker
                                 value={newBotLocalImageModel}
-                                onChange={(event) =>
-                                  setNewBotLocalImageModel(event.currentTarget.value)
-                                }
-                                aria-label="Preferred offline image model for this bot"
+                                onChange={setNewBotLocalImageModel}
+                                options={localImageModelOptionsForBot}
+                                provider="local"
+                                ariaLabel="Preferred offline image model for this bot"
                                 disabled={localImageModelCatalogEntries.length === 0}
-                              >
-                                <option value={AUTO_MODEL_CHOICE}>Use account default</option>
-                                {localImageModelOptionsForBot.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.label}{model.isDefault ? " (default)" : ""}
-                                  </option>
-                                ))}
-                              </select>
+                                placement="down"
+                                minMenuWidthPx={260}
+                                autoOptionLabel="Account default"
+                                autoOptionMetaOverride="Settings"
+                                settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                  settings,
+                                  "local"
+                                )}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
                               <small>
                                 Local / ComfyUI images when this bot is in scope. “Account default” follows
                                 Settings.
@@ -43476,21 +44257,23 @@ function HomeContent(): React.JSX.Element {
                               className={`${styles.botParameterField} ${styles.botParameterModelField}`}
                             >
                               <span>Preferred online image model</span>
-                              <select
+                              <ComposerModelPicker
                                 value={newBotOpenAiImageModel}
-                                onChange={(event) =>
-                                  setNewBotOpenAiImageModel(event.currentTarget.value)
-                                }
-                                aria-label="Preferred online image model for this bot"
+                                onChange={setNewBotOpenAiImageModel}
+                                options={openAiImageModelOptionsForBot}
+                                provider="openai"
+                                ariaLabel="Preferred online image model for this bot"
                                 disabled={!newBotOnlineEnabled}
-                              >
-                                <option value={AUTO_MODEL_CHOICE}>Use account default</option>
-                                {openAiImageModelOptionsForBot.map((model) => (
-                                  <option key={model.id} value={model.id}>
-                                    {model.label}{model.isDefault ? " (default)" : ""}
-                                  </option>
-                                ))}
-                              </select>
+                                placement="down"
+                                minMenuWidthPx={260}
+                                autoOptionLabel="Account default"
+                                autoOptionMetaOverride="Settings"
+                                settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                  settings,
+                                  "openai"
+                                )}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
                               <small>
                                 {newBotOnlineEnabled
                                   ? "OpenAI image models when this bot is in scope."
@@ -43618,17 +44401,17 @@ function HomeContent(): React.JSX.Element {
                             onBlur={hideFieldHelp}
                           >
                             <span>Preferred offline model</span>
-                            <select
+                            <ComposerModelPicker
                               value={visibleLocalModelChoice}
-                              onChange={(event) => setNewBotLocalModel(event.currentTarget.value)}
-                              aria-label="Preferred offline model for this bot"
-                            >
-                              {localModelOptions.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}{model.isDefault ? " (default)" : ""}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={setNewBotLocalModel}
+                              options={localModelOptions}
+                              provider="local"
+                              ariaLabel="Preferred offline model for this bot"
+                              placement="down"
+                              minMenuWidthPx={260}
+                              showAutoOption={false}
+                              dismissPopoversSignal={composerPopoverDismissSignal}
+                            />
                             <small>Used when this bot replies while the editor is set to LOCAL.</small>
                           </div>
                           <div
@@ -43645,19 +44428,18 @@ function HomeContent(): React.JSX.Element {
                             onBlur={hideFieldHelp}
                           >
                             <span>Preferred online model</span>
-                            <select
+                            <ComposerModelPicker
                               value={visibleOnlineModelChoice}
-                              onChange={(event) => setNewBotOnlineModel(event.currentTarget.value)}
-                              aria-label="Preferred online model for this bot"
+                              onChange={setNewBotOnlineModel}
+                              options={onlineModelPickerOptions}
+                              provider="online"
+                              ariaLabel="Preferred online model for this bot"
                               disabled={!newBotOnlineEnabled}
-                            >
-                              {onlineModelOptions.map((model) => (
-                                <option key={`${model.provider}:${model.id}`} value={model.id}>
-                                  {model.label} · {providerDisplayLabel(model.provider)}
-                                  {model.isDefault ? " (default)" : ""}
-                                </option>
-                              ))}
-                            </select>
+                              placement="down"
+                              minMenuWidthPx={260}
+                              showAutoOption={false}
+                              dismissPopoversSignal={composerPopoverDismissSignal}
+                            />
                             <small>
                               {newBotOnlineEnabled
                                 ? "Used when this bot replies while the editor is set to ONLINE."
@@ -43682,21 +44464,23 @@ function HomeContent(): React.JSX.Element {
                             onBlur={hideFieldHelp}
                           >
                             <span>Preferred offline image model</span>
-                            <select
+                            <ComposerModelPicker
                               value={newBotLocalImageModel}
-                              onChange={(event) =>
-                                setNewBotLocalImageModel(event.currentTarget.value)
-                              }
-                              aria-label="Preferred offline image model for this bot"
+                              onChange={setNewBotLocalImageModel}
+                              options={localImageModelOptionsForBot}
+                              provider="local"
+                              ariaLabel="Preferred offline image model for this bot"
                               disabled={localImageModelCatalogEntries.length === 0}
-                            >
-                              <option value={AUTO_MODEL_CHOICE}>Use account default</option>
-                              {localImageModelOptionsForBot.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}{model.isDefault ? " (default)" : ""}
-                                </option>
-                              ))}
-                            </select>
+                              placement="down"
+                              minMenuWidthPx={260}
+                              autoOptionLabel="Account default"
+                              autoOptionMetaOverride="Settings"
+                              settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                settings,
+                                "local"
+                              )}
+                              dismissPopoversSignal={composerPopoverDismissSignal}
+                            />
                             <small>
                               “Account default” follows Settings when no catalog pick is stored here.
                             </small>
@@ -43715,21 +44499,23 @@ function HomeContent(): React.JSX.Element {
                             onBlur={hideFieldHelp}
                           >
                             <span>Preferred online image model</span>
-                            <select
+                            <ComposerModelPicker
                               value={newBotOpenAiImageModel}
-                              onChange={(event) =>
-                                setNewBotOpenAiImageModel(event.currentTarget.value)
-                              }
-                              aria-label="Preferred online image model for this bot"
+                              onChange={setNewBotOpenAiImageModel}
+                              options={openAiImageModelOptionsForBot}
+                              provider="openai"
+                              ariaLabel="Preferred online image model for this bot"
                               disabled={!newBotOnlineEnabled}
-                            >
-                              <option value={AUTO_MODEL_CHOICE}>Use account default</option>
-                              {openAiImageModelOptionsForBot.map((model) => (
-                                <option key={model.id} value={model.id}>
-                                  {model.label}{model.isDefault ? " (default)" : ""}
-                                </option>
-                              ))}
-                            </select>
+                              placement="down"
+                              minMenuWidthPx={260}
+                              autoOptionLabel="Account default"
+                              autoOptionMetaOverride="Settings"
+                              settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                settings,
+                                "openai"
+                              )}
+                              dismissPopoversSignal={composerPopoverDismissSignal}
+                            />
                             <small>
                               {newBotOnlineEnabled
                                 ? "Uses your OpenAI key from Settings when online images run."
@@ -44350,7 +45136,7 @@ function HomeContent(): React.JSX.Element {
           const id = useOpenAi ? openAiModelId : localModelId;
           if (!id) return null;
           const entries = useOpenAi
-            ? openAiImageModelCatalogEntries
+            ? visibleOpenAiImageModelCatalogEntries
             : localImageModelCatalogEntries;
           const label = entries.find((e) => e.id === id)?.label ?? id;
           return viaAuto ? `Using ${label} · Auto` : `Using ${label}`;

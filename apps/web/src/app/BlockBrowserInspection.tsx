@@ -7,14 +7,13 @@ import {
 } from "./browserShortcutGuards";
 
 /**
- * Soft barrier against browser-chrome shortcuts in the production kiosk
+ * Soft barrier against browser-chrome shortcuts in the kiosk-like Prism
  * surface. Determined users can still bypass (menu bar, remote debugging,
- * etc.). Does not run in development or when NEXT_PUBLIC_ALLOW_BROWSER_DEVTOOLS=1.
+ * etc.). Set NEXT_PUBLIC_ALLOW_BROWSER_DEVTOOLS=1 to disable during browser
+ * tooling sessions.
  */
 export function BlockBrowserInspection(): null {
-  const enabled =
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PUBLIC_ALLOW_BROWSER_DEVTOOLS !== "1";
+  const enabled = process.env.NEXT_PUBLIC_ALLOW_BROWSER_DEVTOOLS !== "1";
 
   useEffect(() => {
     if (!enabled) return;
@@ -46,6 +45,7 @@ export function BlockBrowserInspection(): null {
         })
       ) {
         e.preventDefault();
+        e.stopPropagation();
       }
     };
 
@@ -58,16 +58,21 @@ export function BlockBrowserInspection(): null {
         })
       ) {
         e.preventDefault();
+        e.stopPropagation();
       }
     };
 
     document.addEventListener("contextmenu", onContextMenu, { capture: true });
+    window.addEventListener("keydown", onKeyDown, { capture: true });
     document.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     document.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
     return () => {
       document.removeEventListener("contextmenu", onContextMenu, { capture: true });
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
       document.removeEventListener("keydown", onKeyDown, { capture: true });
+      window.removeEventListener("wheel", onWheel, { capture: true });
       document.removeEventListener("wheel", onWheel, { capture: true });
     };
   }, [enabled]);

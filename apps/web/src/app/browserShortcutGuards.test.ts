@@ -26,9 +26,27 @@ test("blocks refresh shortcuts", () => {
     true
   );
   assert.equal(
+    shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "r", metaKey: true })),
+    true
+  );
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(
+      keyEvent({ key: "Unidentified", code: "KeyR", metaKey: true })
+    ),
+    true
+  );
+  assert.equal(
     shouldBlockBrowserKeyboardShortcut(
       keyEvent({ key: "R", metaKey: true, shiftKey: true })
     ),
+    true
+  );
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "Refresh" })),
+    true
+  );
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "Unidentified", code: "BrowserRefresh" })),
     true
   );
 });
