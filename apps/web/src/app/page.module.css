@@ -14692,26 +14692,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandToken) {
-  background-image: repeating-linear-gradient(
-    90deg,
-    #ff5f6d 0ch,
-    #ff5f6d 1ch,
-    #ffc371 1ch,
-    #ffc371 2ch,
-    #9be15d 2ch,
-    #9be15d 3ch,
-    #5d9fff 3ch,
-    #5d9fff 4ch,
-    #c77dff 4ch,
-    #c77dff 5ch
-  );
-  background-size: 5ch 100%;
-  background-repeat: repeat;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff5f6d 10%, var(--bg-elevated)),
+        color-mix(in srgb, #5d9fff 7%, var(--bg-elevated))
+      )
+      padding-box,
+    repeating-linear-gradient(
+        90deg,
+        #ff5f6d 0ch,
+        #ff5f6d 1ch,
+        #ffc371 1ch,
+        #ffc371 2ch,
+        #9be15d 2ch,
+        #9be15d 3ch,
+        #5d9fff 3ch,
+        #5d9fff 4ch,
+        #c77dff 4ch,
+        #c77dff 5ch
+      )
+      border-box;
+  background-size: 100% 100%, 10ch 100%;
+  background-repeat: no-repeat, repeat;
+  color: var(--fg);
+  -webkit-text-fill-color: var(--fg);
   font-weight: 800;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
+    0 7px 18px -16px color-mix(in srgb, #5d9fff 70%, transparent);
   animation: devCommandRainbowShift 2.8s linear infinite;
 }
 
@@ -14732,6 +14747,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-weight: 800;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  cursor: pointer;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
@@ -14754,10 +14770,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 @keyframes devCommandRainbowShift {
   from {
-    background-position: 0 0;
+    background-position: 0 0, 0 0;
   }
   to {
-    background-position: 10ch 0;
+    background-position: 0 0, 10ch 0;
   }
 }
 

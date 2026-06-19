@@ -13793,6 +13793,122 @@ function applyPromptShortcutChipBoundaryDelete(
   return false;
 }
 
+type ComposerShortcutChipKind = "command" | "prompt";
+
+interface EditorComposerShortcutChipRange {
+  kind: ComposerShortcutChipKind;
+  from: number;
+  to: number;
+}
+
+function extendEditorChipRangeThroughTrailingSpace(
+  editor: Editor,
+  range: { from: number; to: number }
+): { from: number; to: number } {
+  const trailingChar =
+    range.to < editor.state.doc.content.size
+      ? editor.state.doc.textBetween(range.to, range.to + 1, "\n", "\n")
+      : "";
+  return {
+    from: range.from,
+    to: range.to + (trailingChar === " " ? 1 : 0),
+  };
+}
+
+function findEditorComposerShortcutChipRanges(
+  editor: Editor,
+  commandNames: readonly string[],
+  promptNames: readonly string[]
+): EditorComposerShortcutChipRange[] {
+  const ranges: EditorComposerShortcutChipRange[] = [];
+  const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
+  if (commandRange) {
+    ranges.push({
+      kind: "command",
+      ...extendEditorChipRangeThroughTrailingSpace(editor, commandRange),
+    });
+  }
+  for (const promptRange of findPromptShortcutTokenRanges(editor.state.doc, promptNames)) {
+    ranges.push({
+      kind: "prompt",
+      ...extendEditorChipRangeThroughTrailingSpace(editor, promptRange),
+    });
+  }
+  return ranges.sort((a, b) => a.from - b.from);
+}
+
+function composerShortcutChipKindFromClick(
+  event: MouseEvent
+): ComposerShortcutChipKind | null {
+  const target = event.target;
+  const element =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
+  const chip = element?.closest(
+    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken"
+  );
+  if (!chip) return null;
+  return chip.classList.contains("tiptapPrismDevCommandToken")
+    ? "command"
+    : "prompt";
+}
+
+function applyComposerShortcutChipClickDelete(
+  editor: Editor,
+  pos: number,
+  kind: ComposerShortcutChipKind,
+  commandNames: readonly string[],
+  promptNames: readonly string[]
+): boolean {
+  const range = findEditorComposerShortcutChipRanges(
+    editor,
+    commandNames,
+    promptNames
+  ).find((candidate) => {
+    return (
+      candidate.kind === kind &&
+      pos >= candidate.from &&
+      pos <= candidate.to
+    );
+  });
+  if (!range) return false;
+  editor.chain().focus().deleteRange({ from: range.from, to: range.to }).run();
+  return true;
+}
+
+function applyComposerShortcutChipArrowKey(
+  editor: Editor,
+  direction: "left" | "right",
+  commandNames: readonly string[],
+  promptNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  if (!sel.empty) return false;
+  const caret = sel.from;
+  const ranges = findEditorComposerShortcutChipRanges(
+    editor,
+    commandNames,
+    promptNames
+  );
+  for (const range of ranges) {
+    const shouldJump =
+      direction === "right"
+        ? caret >= range.from && caret < range.to
+        : caret > range.from && caret <= range.to;
+    if (!shouldJump) continue;
+    editor
+      .chain()
+      .focus()
+      .setTextSelection(direction === "right" ? range.to : range.from)
+      .run();
+    return true;
+  }
+  return false;
+}
+
 function isPlainTextInsertionKey(event: {
   key: string;
   altKey: boolean;
@@ -14858,6 +14974,25 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             }
             return false;
           },
+          handleClick: (_view, pos, event) => {
+            const activeEditor = editorRef.current;
+            const chipKind = composerShortcutChipKindFromClick(event);
+            if (!activeEditor || !chipKind) return false;
+            if (
+              !applyComposerShortcutChipClickDelete(
+                activeEditor,
+                pos,
+                chipKind,
+                commandNamesForHighlight,
+                promptNamesForHighlight
+              )
+            ) {
+              return false;
+            }
+            event.preventDefault();
+            queueMicrotask(() => syncComposerPopovers(activeEditor));
+            return true;
+          },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
             if (
@@ -14945,6 +15080,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             ) {
               const dir = event.key === "ArrowLeft" ? "left" : "right";
               if (applyPrismBotLinkArrowKey(activeEditor, dir)) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyComposerShortcutChipArrowKey(
+                  activeEditor,
+                  dir,
+                  commandNamesForHighlight,
+                  promptNamesForHighlight
+                )
+              ) {
                 event.preventDefault();
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
