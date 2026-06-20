@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import { DEFAULT_ZEN_WALLPAPER_OPACITY } from "./settings.ts";
+import {
+  DEFAULT_ZEN_WALLPAPER_OPACITY,
+  DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+} from "./settings.ts";
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
   "pairing_codes",
@@ -61,6 +64,7 @@ export function restoreFactoryDefaultsInDatabase(
           preferred_zen_wallpaper_local_image_model = NULL,
           preferred_zen_wallpaper_openai_image_model = NULL,
           zen_wallpaper_opacity = ?,
+          zen_wallpaper_text_mask_enabled = ?,
           composer_writing_assist = 1,
           fallback_model_message_stripe = 1,
           prism_default_llm_model = NULL,
@@ -80,7 +84,12 @@ export function restoreFactoryDefaultsInDatabase(
         WHERE id = ?
       `
       )
-      .run(DEFAULT_ZEN_WALLPAPER_OPACITY, nowIso, userId) as {
+      .run(
+        DEFAULT_ZEN_WALLPAPER_OPACITY,
+        DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+        nowIso,
+        userId
+      ) as {
       changes?: number | bigint;
     };
 

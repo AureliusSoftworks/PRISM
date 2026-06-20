@@ -8,6 +8,7 @@ import {
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
   DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_WALLPAPER_OPACITY,
   MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
@@ -51,6 +52,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredZenWallpaperLocalImageModel: null,
     preferredZenWallpaperOpenAiImageModel: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
+    zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -654,15 +656,19 @@ describe("resolveNextSettings — Zen Atmosphere opacity", () => {
       resolveNextSettings({ zenWallpaperOpacity: "0.22" }, baseline()).zenWallpaperOpacity,
       0.22
     );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.9 }, baseline()).zenWallpaperOpacity,
+      0.9
+    );
   });
 
-  it("clamps opacity to the readable wallpaper range", () => {
+  it("clamps opacity to the configured wallpaper range", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperOpacity: 0.01 }, baseline()).zenWallpaperOpacity,
       MIN_ZEN_WALLPAPER_OPACITY
     );
     assert.equal(
-      resolveNextSettings({ zenWallpaperOpacity: 0.9 }, baseline()).zenWallpaperOpacity,
+      resolveNextSettings({ zenWallpaperOpacity: 1.4 }, baseline()).zenWallpaperOpacity,
       MAX_ZEN_WALLPAPER_OPACITY
     );
   });
@@ -673,6 +679,35 @@ describe("resolveNextSettings — Zen Atmosphere opacity", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperOpacity: "nope" }, current).zenWallpaperOpacity,
       0.19
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere text mask", () => {
+  it("stores boolean text-mask values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperTextMaskEnabled: false }, baseline())
+        .zenWallpaperTextMaskEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperTextMaskEnabled: true },
+        baseline({ zenWallpaperTextMaskEnabled: 0 })
+      ).zenWallpaperTextMaskEnabled,
+      true
+    );
+  });
+
+  it("keeps the stored text-mask setting when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperTextMaskEnabled: 0 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, false);
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperTextMaskEnabled: "sometimes" },
+        current
+      ).zenWallpaperTextMaskEnabled,
+      false
     );
   });
 });
