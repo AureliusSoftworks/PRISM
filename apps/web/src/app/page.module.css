@@ -18329,13 +18329,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   min-height: 1.42em;
   margin: 0;
   border: 1px solid var(--line);
-  padding: 1px 6px;
+  padding: 1px 0;
   color: var(--fg);
+  font-size: 0.95em;
   font-weight: inherit;
   line-height: 1.12;
+  overflow: hidden;
   white-space: nowrap;
   transform: translate(-50%, -50%);
   vertical-align: baseline;
@@ -18343,6 +18346,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   -webkit-text-fill-color: var(--fg);
+}
+
+.composeTextareaTokenText {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .composeTextareaToken[data-kind="command"] {
@@ -26347,39 +26359,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   height: auto;
 }
 
-.memoryFamilyCluster[data-memory-session="true"] {
-  border-color: color-mix(in srgb, var(--memory-family-color) 66%, transparent);
-  background:
-    radial-gradient(
-      circle at 34% 24%,
-      color-mix(in srgb, #ffffff 24%, transparent),
-      transparent 33%
-    ),
-    radial-gradient(
-      circle,
-      color-mix(in srgb, var(--memory-family-color) 42%, var(--bg) 58%),
-      color-mix(in srgb, var(--memory-family-color) 14%, var(--bg) 86%)
-    );
-}
-
-.memoryFamilyCluster[data-memory-session="true"]::before {
-  border-style: solid;
-  opacity: 0.46;
-}
-
-.memorySessionClusterGlyph,
 .memorySessionHeaderGlyph {
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 820;
   line-height: 1;
-}
-
-.memorySessionClusterGlyph {
-  position: relative;
-  z-index: 2;
-  font-size: clamp(20px, 34%, 34px);
-  color: color-mix(in srgb, #ffffff 82%, var(--memory-family-color) 18%);
-  text-shadow: 0 0 14px color-mix(in srgb, var(--memory-family-color) 54%, transparent);
 }
 
 .memorySessionHeaderGlyph {
@@ -26389,36 +26372,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   height: 100%;
   color: currentColor;
   font-size: 18px;
-}
-
-.memorySessionClusterMotes {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.memorySessionClusterMotes span {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #ffffff 78%, var(--memory-family-color) 22%);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--memory-family-color) 46%, transparent);
-}
-
-.memorySessionClusterMotes span:nth-child(1) {
-  left: 27%;
-  top: 23%;
-}
-
-.memorySessionClusterMotes span:nth-child(2) {
-  right: 23%;
-  top: 38%;
-}
-
-.memorySessionClusterMotes span:nth-child(3) {
-  left: 45%;
-  bottom: 21%;
 }
 
 .memoryFamilyCluster:not(:disabled):focus-visible,
