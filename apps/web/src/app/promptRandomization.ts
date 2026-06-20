@@ -90,6 +90,26 @@ function findNextPromptRandomizationDeckToken(
   return null;
 }
 
+export function collapseDeletedPromptWildcardDeckReferences(
+  source: string,
+  deck: PromptRandomizationDeck
+): string {
+  const invocationNames = [deck.name, ...(deck.aliases ?? [])]
+    .map(normalizePromptRandomizationDeckName)
+    .filter(Boolean);
+  if (invocationNames.length === 0) return source;
+  const names = new Set(invocationNames);
+  const fallback = `{${normalizePromptRandomizationDeckName(deck.name) || "wildcard"}}`;
+  return source.replace(
+    /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu,
+    (match, delimiter: string, rawName: string) => {
+      return names.has(normalizePromptRandomizationDeckName(rawName))
+        ? `${delimiter}${fallback}`
+        : match;
+    }
+  );
+}
+
 export function resolvePromptRandomizationGroups(
   source: string,
   options: {

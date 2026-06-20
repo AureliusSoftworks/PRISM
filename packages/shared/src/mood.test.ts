@@ -38,6 +38,17 @@ test("interruption increases annoyance with progress-aware weighting", () => {
   assert.ok(middle.annoyance > late.annoyance);
 });
 
+test("pending reply cancel is mood-neutral before visible text", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const next = applyPrismMoodInterruption(
+    base,
+    { kind: "pending_reply" },
+    "2026-06-19T12:00:01.000Z"
+  );
+  assert.deepEqual(next, base);
+  assert.equal(prismMoodInterruptionStreak(next), 0);
+});
+
 test("mood sensitivity clamps values and scales irritation jumps", () => {
   assert.equal(normalizePrismMoodSensitivity(-1), 0);
   assert.equal(normalizePrismMoodSensitivity(2), 1);
