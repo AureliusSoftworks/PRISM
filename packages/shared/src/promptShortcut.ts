@@ -83,6 +83,13 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     generationHint:
       "Return one style, tone, genre, or treatment, such as noir, deadpan, pastoral, glitchy, or documentary.",
   },
+  {
+    key: "NUM",
+    label: "NUM",
+    aliases: ["num", "number"],
+    title: "Generate a random number.",
+    generationHint: "Return one integer from 1 to 100, with digits only.",
+  },
 ] as const satisfies readonly BuiltInPromptWildcardSlot[];
 
 export type BuiltInPromptWildcardSlotKey =

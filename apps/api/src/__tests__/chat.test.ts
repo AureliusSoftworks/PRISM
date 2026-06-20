@@ -3696,6 +3696,72 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(result.prismMood?.recentDeltas.length, 0);
   });
 
+  it("uses resolved Command Center prompt text for the model while saving the visible shortcut sentence", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Prompt result." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please use /prompt here.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "chat",
+        commandCenterPrompt: true,
+        promptInputOverride: "Please use the expanded prompt body here.",
+        promptShortcut: {
+          v: 1,
+          commandId: "prompt-1",
+          name: "prompt",
+          invocation: "/prompt",
+          flags: [],
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.equal(chatBody?.messages?.at(-1)?.content, "Please use the expanded prompt body here.");
+    const storedUser = db
+      .prepare("SELECT content, tool_payload FROM messages WHERE role = 'user'")
+      .get() as { content: string; tool_payload: string };
+    assert.equal(storedUser.content, "Please use /prompt here.");
+    const storedPayload = JSON.parse(storedUser.tool_payload) as {
+      promptShortcut?: { resolvedPrompt?: string };
+    };
+    assert.equal(
+      storedPayload.promptShortcut?.resolvedPrompt,
+      "Please use the expanded prompt body here."
+    );
+    const userMessage = result.conversation.messages.find((message) => message.role === "user");
+    assert.equal(userMessage?.content, "Please use /prompt here.");
+    assert.equal(
+      userMessage?.promptShortcut?.resolvedPrompt,
+      "Please use the expanded prompt body here."
+    );
+  });
+
   it("saves funny-enough disclosures even when auto-memory is off", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);

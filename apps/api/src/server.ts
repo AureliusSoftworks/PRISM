@@ -2128,12 +2128,12 @@ function buildRoutes(): RouteDefinition[] {
           const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
           const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
             promptShortcut,
-            row.content
+            promptShortcut?.resolvedPrompt ?? row.content
           );
           const promptWildcards = parseStoredPromptWildcardPayload(row.tool_payload);
           const promptWildcardsWithResolvedPrompt = withPromptWildcardResolvedPrompt(
             promptWildcards,
-            row.content
+            promptWildcards?.resolvedPrompt ?? row.content
           );
           return {
             ...shared,
@@ -3234,6 +3234,14 @@ function buildRoutes(): RouteDefinition[] {
       if (!slot) {
         throw new HttpError(400, "Unknown wildcard slot.");
       }
+      if (slot.key === "NUM") {
+        json(ctx.res, 200, {
+          ok: true,
+          key: slot.key,
+          value: String(1 + Math.floor(Math.random() * 100)),
+        });
+        return;
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
@@ -3490,6 +3498,10 @@ function buildRoutes(): RouteDefinition[] {
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
       const promptWildcards = normalizePromptWildcardRunMetadata(body.promptWildcards);
       const commandCenterPrompt = body.commandCenterPrompt === true || Boolean(promptShortcut);
+      const resolvedCommandCenterPrompt =
+        !starterPrompt && commandCenterPrompt
+          ? readOptionalString(body.resolvedCommandCenterPrompt)
+          : null;
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const forceNewConversation = body.forceNewConversation === true;
@@ -3631,13 +3643,13 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onChatClientClose);
       ctx.req.once("aborted", onChatClientClose);
       ctx.res.once("close", onChatClientClose);
-      let messageForChat = message;
+      let messageForChat = resolvedCommandCenterPrompt ?? message;
       let promptShortcutForChat = promptShortcut;
       let promptWildcardsForChat = promptWildcards;
       if (
         !starterPrompt &&
         (commandCenterPrompt || promptWildcards) &&
-        promptWildcardNames(message).length > 0
+        promptWildcardNames(messageForChat).length > 0
       ) {
         const wildcardProvider = selectProvider(
           effectiveProvider,
@@ -3646,7 +3658,7 @@ function buildRoutes(): RouteDefinition[] {
           anthropicApiKey
         );
         const wildcardResolution = await resolvePromptWildcardsWithModel({
-          prompt: message,
+          prompt: messageForChat,
           provider: wildcardProvider,
           generationOverrides,
           existingReplacements:
@@ -3678,7 +3690,7 @@ function buildRoutes(): RouteDefinition[] {
         result = await processChatMessage(
           db,
           userId,
-          messageForChat,
+          message,
           userKey,
           {
             preferredProvider: effectiveProvider,
@@ -3722,6 +3734,7 @@ function buildRoutes(): RouteDefinition[] {
             prismInterruption,
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
+            ...(messageForChat !== message ? { promptInputOverride: messageForChat } : {}),
             ...(promptShortcutForChat ? { promptShortcut: promptShortcutForChat } : {}),
             ...(promptWildcardsForChat ? { promptWildcards: promptWildcardsForChat } : {}),
           },

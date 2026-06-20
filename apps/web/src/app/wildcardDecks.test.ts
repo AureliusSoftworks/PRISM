@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  findDuplicateWildcardDeckValueIssues,
   formatWildcardDeckValuesText,
   normalizeWildcardDeckNameInput,
   normalizeWildcardDeckValueList,
@@ -29,6 +30,16 @@ describe("wildcard deck helpers", () => {
     assert.equal(
       formatWildcardDeckValuesText(["lemon", "potato; chicken", "lemon"]),
       "lemon\npotato\nchicken"
+    );
+  });
+
+  it("finds duplicate deck values with the same normalization as saving", () => {
+    assert.deepEqual(
+      findDuplicateWildcardDeckValueIssues("lemon\nPotato\n  lemon  \npotato"),
+      [
+        { value: "lemon", firstValue: "lemon", index: 2, firstIndex: 0 },
+        { value: "potato", firstValue: "Potato", index: 3, firstIndex: 1 },
+      ]
     );
   });
 
