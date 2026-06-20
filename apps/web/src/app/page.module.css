@@ -9475,6 +9475,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messages[data-chat-ephemeral="true"] .message p,
 .messages[data-chat-ephemeral="true"] .message .markdownBody {
   color: color-mix(in srgb, var(--fg) 92%, transparent);
+  word-spacing: 0.1em;
   text-shadow: none;
   transition: font-size 220ms cubic-bezier(0.2, 0.72, 0.24, 1);
 }
@@ -9904,6 +9905,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .message p {
   white-space: pre-wrap;
   word-break: break-word;
+  word-spacing: 0.06em;
   line-height: 1.55;
   font-size: var(--message-dynamic-font-size, var(--font-size-message));
 }
@@ -9925,6 +9927,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 0.65em;
   overflow-x: auto;
   word-break: break-word;
+  word-spacing: 0.06em;
   font-size: var(--message-dynamic-font-size, var(--font-size-message));
   line-height: 1.55;
 }
