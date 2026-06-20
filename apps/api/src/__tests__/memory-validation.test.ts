@@ -261,6 +261,24 @@ describe("validateMemoryCandidates", () => {
     assert.deepEqual(result.rejected[0]?.reasonCodes, ["task_request_not_memory"]);
   });
 
+  it("rejects answer-shaped compiled memories before calling the critic", async () => {
+    const result = await validateMemoryCandidates(throwingProvider(), {
+      source: "compiled",
+      scope: "global",
+      rawContext: "assistant: Here is how to open a folder from the console.",
+      candidates: [
+        {
+          text:
+            "In PowerShell you can use this command: ``` explorer C:\\Path\\To\\Folder ``` and then hit Enter.",
+          confidence: 0.52,
+        },
+      ],
+    });
+
+    assert.equal(result.candidates.length, 0);
+    assert.deepEqual(result.rejected[0]?.reasonCodes, ["task_request_not_memory"]);
+  });
+
   it("pre-approves explicit preferred-name memories without the critic", async () => {
     const result = await validateMemoryCandidates(throwingProvider(), {
       source: "direct",

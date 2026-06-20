@@ -149,6 +149,7 @@ export interface AppConfig {
   ollamaEmbeddingModel: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  elevenLabsApiKey?: string;
   qdrantUrl: string;
   /** Optional default ComfyUI base URL from env (per-user setting overrides in practice). */
   comfyUiHost: string;
@@ -173,6 +174,7 @@ export function getAppConfig(): AppConfig {
     ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
     openAiApiKey: process.env.OPENAI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
     qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
     comfyUiHost: normalizeComfyUiHost(process.env.COMFYUI_HOST),
   };

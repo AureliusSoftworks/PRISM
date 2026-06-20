@@ -75,6 +75,20 @@ describe("createDatabase bot export hash migration", () => {
       const columns = reopened
         .prepare("PRAGMA table_info(bots)")
         .all() as Array<{ name: string }>;
+      const userColumns = reopened
+        .prepare("PRAGMA table_info(users)")
+        .all() as Array<{ name: string }>;
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "model_visibility_defaults_version"
+        )
+      );
+      assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
+      assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
+      const conversationColumns = reopened
+        .prepare("PRAGMA table_info(conversations)")
+        .all() as Array<{ name: string }>;
+      assert.ok(conversationColumns.some((column) => column.name === "zen_wallpaper_history"));
       assert.ok(columns.some((column) => column.name === "export_hash"));
       assert.ok(columns.some((column) => column.name === "flirt_enabled"));
       assert.ok(columns.some((column) => column.name === "semantic_facets"));

@@ -531,6 +531,19 @@ export function hasAboutYouMemoryForBot(
   return Boolean(row);
 }
 
+export function deleteMemoriesForBotScope(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null
+): number {
+  const trimmedBotId =
+    typeof botId === "string" && botId.trim().length > 0 ? botId.trim() : null;
+  const result = trimmedBotId
+    ? db.prepare("DELETE FROM memories WHERE user_id = ? AND bot_id = ?").run(userId, trimmedBotId)
+    : db.prepare("DELETE FROM memories WHERE user_id = ? AND bot_id IS NULL").run(userId);
+  return Number(result.changes ?? 0);
+}
+
 function firstNameFromDisplayName(displayName: string | null | undefined): string | null {
   const trimmed = typeof displayName === "string" ? displayName.trim() : "";
   if (!trimmed) return null;

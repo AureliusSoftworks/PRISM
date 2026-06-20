@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   hydrateAssistantMessageParts,
   parseAssistantPrismTools,
+  parseStoredAssistantToolPayload,
   parseStoredToolPayload,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
+  serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionPayload,
 } from "./prismTool.ts";
@@ -310,6 +312,33 @@ describe("parseAssistantPrismTools", () => {
     assert.equal(out.askQuestion, undefined);
     assert.equal(out.sendGeneratedImage, undefined);
   });
+
+  it("strips and parses zenDisplay-only tool blocks", () => {
+    const raw = [
+      "...",
+      PRISM_TOOL_START,
+      JSON.stringify({
+        v: 1,
+        zenDisplay: {
+          v: 1,
+          lines: [
+            { index: 0, x: 0.5, y: 0.24, align: "center" },
+            { index: 2, x: 0.5, y: 0.5, align: "center" },
+          ],
+        },
+      }),
+      PRISM_TOOL_END,
+    ].join("\n");
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "...");
+    assert.deepEqual(out.zenDisplay, {
+      v: 1,
+      lines: [
+        { index: 0, x: 0.5, y: 0.24, align: "center" },
+        { index: 2, x: 0.5, y: 0.5, align: "center" },
+      ],
+    });
+  });
 });
 
 describe("hydrateAssistantMessageParts", () => {
@@ -434,6 +463,25 @@ describe("hydrateAssistantMessageParts", () => {
     assert.equal(h.content.trim(), "Sure thing.");
     assert.equal(h.sentGeneratedImage?.imageId, "abc3");
   });
+
+  it("hydrates persisted zenDisplay metadata from tool_payload", () => {
+    const stored = serializeAssistantToolPayload({
+      moodKey: "neutral",
+      moodConfidence: 0.7,
+      zenDisplay: {
+        v: 1,
+        placement: { x: 0.3, y: 0.62, align: "end" },
+      },
+    });
+    const h = hydrateAssistantMessageParts({
+      content: "Yes.",
+      toolPayload: stored,
+    });
+    assert.deepEqual(h.zenDisplay, {
+      v: 1,
+      placement: { x: 0.3, y: 0.62, align: "end" },
+    });
+  });
 });
 
 describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
@@ -443,5 +491,24 @@ describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
     assert.deepEqual(parseStoredToolPayload(serialized), payload);
     assert.equal(parseStoredToolPayload(null), undefined);
     assert.equal(parseStoredToolPayload(""), undefined);
+  });
+
+  it("sanitizes zenDisplay coordinates and align aliases", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      zenDisplay: {
+        v: 1,
+        placement: { x: -1, y: 2, align: "middle" },
+        lines: [
+          { index: 1, x: 0.3333, y: 0.6666, align: "right" },
+          { index: -1, x: 0.5, y: 0.5, align: "center" },
+        ],
+      },
+    });
+    assert.deepEqual(parseStoredAssistantToolPayload(stored).zenDisplay, {
+      v: 1,
+      placement: { x: 0, y: 1, align: "center" },
+      lines: [{ index: 1, x: 0.333, y: 0.667, align: "end" }],
+    });
   });
 });

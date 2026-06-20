@@ -5,6 +5,7 @@ import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
   createDevSeedMemories,
+  deleteMemoriesForBotScope,
   deleteMemoryById,
   deleteMemoriesLinkedToMessages,
   demoteMemoryToShortTerm,
@@ -793,6 +794,48 @@ describe("persistMemoryCandidates", () => {
       }),
       true
     );
+  });
+
+  it("deletes only the requested bot memory scope", () => {
+    const db = createMemoryTestDb();
+    seedMemoryRow(db, "user-1", "bot-1", "m-bot-1");
+    seedMemoryRow(db, "user-1", "bot-2", "m-bot-2");
+    seedMemoryRow(db, "user-1", null, "m-default");
+    db.prepare(
+      "INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, source, tier, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "m-about-bot-1",
+      "user-1",
+      "bot-1",
+      "ciphertext",
+      "iv",
+      "tag",
+      0.96,
+      "about_you",
+      "long_term",
+      new Date().toISOString()
+    );
+
+    assert.equal(deleteMemoriesForBotScope(db, "user-1", "bot-1"), 2);
+    const rows = db
+      .prepare("SELECT id FROM memories WHERE user_id = ? ORDER BY id")
+      .all("user-1") as Array<{ id: string }>;
+
+    assert.deepEqual(rows.map((row) => row.id), ["m-bot-2", "m-default"]);
+  });
+
+  it("deletes the default memory scope without touching bot memories", () => {
+    const db = createMemoryTestDb();
+    seedMemoryRow(db, "user-1", "bot-1", "m-bot-1");
+    seedMemoryRow(db, "user-1", null, "m-default-1");
+    seedMemoryRow(db, "user-1", null, "m-default-2");
+
+    assert.equal(deleteMemoriesForBotScope(db, "user-1", null), 2);
+    const rows = db
+      .prepare("SELECT id FROM memories WHERE user_id = ? ORDER BY id")
+      .all("user-1") as Array<{ id: string }>;
+
+    assert.deepEqual(rows.map((row) => row.id), ["m-bot-1"]);
   });
 
   it("replaces seeded about-you name memory with explicit preference", async () => {

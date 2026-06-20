@@ -272,6 +272,18 @@ export function encodeComfyUiRemoteWorkflowModelId(relativePath: string): string
   return `${COMFYUI_REMOTE_WORKFLOW_PREFIX}${encodeURIComponent(assertSafeUserdataRelativePath(relativePath))}`;
 }
 
+export function formatComfyUiRemoteWorkflowLabel(relativePath: string): string {
+  const normalized = relativePath.trim().replace(/\\/g, "/");
+  const withoutWorkflowFolders = normalized
+    .replace(/^(?:default\/)?workflows?\//i, "")
+    .replace(/\/workflows?\//gi, "/");
+  const label = withoutWorkflowFolders
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .join("/");
+  return label || normalized || "Workflow";
+}
+
 /** Returns userdata-relative path when `id` uses {@link COMFYUI_REMOTE_WORKFLOW_PREFIX}. */
 export function parseComfyUiRemoteWorkflowPath(id: string): string | null {
   const t = id.trim();

@@ -73,6 +73,7 @@ import type {
   CoffeeTopicSelectionMode,
   CoffeeTurnResponse,
   BotVoicePreset,
+  ReasoningEffort,
 } from "@localai/shared";
 import {
   COFFEE_POLL_FINALIZE_REMAINING_MS,
@@ -1599,6 +1600,8 @@ async function refreshCoffeeMeetingSummary(args: {
   previousSummaryAssistantCount: number | null;
   activePollContext: string | null;
   prismDefaultLlmModel?: string | null;
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllamaEnabled?: boolean;
   summaryProvider?: LlmProvider;
 }): Promise<void> {
   const sourceMessages = coffeeMeetingSummarySourceMessages(args.history);
@@ -1616,7 +1619,11 @@ async function refreshCoffeeMeetingSummary(args: {
     .map(formatCoffeeTranscriptLine);
   if (transcriptLines.length === 0) return;
   const provider =
-    args.summaryProvider ?? getAuxiliaryProvider(args.prismDefaultLlmModel ?? undefined);
+    args.summaryProvider ??
+    getAuxiliaryProvider(args.prismDefaultLlmModel ?? undefined, {
+      secondaryOllamaHost: args.secondaryOllamaHost,
+      experimentalDualOllama: args.experimentalDualOllamaEnabled === true,
+    });
   const rawSummary = await provider.generateResponse(
     buildCoffeeMeetingSummaryMessages({
       group: args.group,
@@ -1652,6 +1659,8 @@ export async function kickoffCoffeeMeetingSummaryRefresh(args: {
   previousSummaryAssistantCount: number | null;
   activePollContext: string | null;
   prismDefaultLlmModel?: string | null;
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllamaEnabled?: boolean;
   summaryProvider?: LlmProvider;
 }): Promise<void> {
   try {
@@ -1667,6 +1676,7 @@ export interface CoffeeTurnSettings {
   openAiApiKey?: string;
   anthropicApiKey?: string;
   secondaryOllamaHost?: string | null;
+  experimentalDualOllamaEnabled?: boolean;
   userDisplayName?: string;
   userKey?: Buffer;
   /** Matches account Settings — drives auxiliary LLM for the Coffee router. */
@@ -1682,8 +1692,22 @@ export interface CoffeeTurnSettings {
    * `modelOverride`).
    */
   sessionSpeakerModel?: string | null;
+  reasoningEffort?: ReasoningEffort;
   /** Optional per-user image model/workflow prefs (same shape as chat mode). */
   assistantImageUserPrefs?: AssistantSentImageUserPrefs;
+}
+
+interface CoffeeAuxiliaryOptions {
+  prismDefaultLlmModel?: string | null;
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllamaEnabled?: boolean;
+}
+
+function coffeeAuxiliaryProvider(options?: CoffeeAuxiliaryOptions | null): LlmProvider {
+  return getAuxiliaryProvider(options?.prismDefaultLlmModel ?? undefined, {
+    secondaryOllamaHost: options?.secondaryOllamaHost,
+    experimentalDualOllama: options?.experimentalDualOllamaEnabled === true,
+  });
 }
 
 export interface CoffeeTurnInput {
@@ -2611,7 +2635,7 @@ export async function createCoffeeGroupWithGeneratedName(
   db: DatabaseSync,
   userId: string,
   input: CoffeeGroupCreateInput,
-  llm?: { prismDefaultLlmModel?: string | null } | null
+  llm?: CoffeeAuxiliaryOptions | null
 ): Promise<CoffeeGroup> {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
@@ -2626,7 +2650,7 @@ export async function createCoffeeGroupWithGeneratedName(
     return createCoffeeGroup(db, userId, input);
   }
   const fallbackName = buildDeterministicCoffeeGroupName(group);
-  const provider = getAuxiliaryProvider(llm?.prismDefaultLlmModel ?? undefined);
+  const provider = coffeeAuxiliaryProvider(llm);
   const generatedName = await inferCoffeeGroupName({
     provider,
     group,
@@ -6255,7 +6279,7 @@ export async function createCoffeeConversation(
   db: DatabaseSync,
   userId: string,
   input: CoffeeSessionCreateInput,
-  llm?: { prismDefaultLlmModel?: string | null; autoPickStarterTopic?: boolean; userKey?: Buffer } | null
+  llm?: (CoffeeAuxiliaryOptions & { autoPickStarterTopic?: boolean; userKey?: Buffer }) | null
 ): Promise<CoffeeSessionCreateResponse> {
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
@@ -6300,7 +6324,7 @@ export async function createCoffeeConversation(
     now
   );
   upsertCoffeeBotSocialState(db, userId, conversationId, initialSocialByBotId, now);
-  const provider = getAuxiliaryProvider(llm?.prismDefaultLlmModel ?? undefined);
+  const provider = coffeeAuxiliaryProvider(llm);
   const starterMemoryContext = loadCoffeeStarterMemoryContext({
     db,
     userId,
@@ -6354,7 +6378,7 @@ export async function createCoffeeConversationFromGroup(
   userId: string,
   groupId: string,
   input: CoffeeGroupSessionCreateInput = {},
-  llm?: { prismDefaultLlmModel?: string | null; userKey?: Buffer } | null
+  llm?: (CoffeeAuxiliaryOptions & { userKey?: Buffer }) | null
 ): Promise<CoffeeSessionCreateResponse> {
   const row = loadCoffeeGroupRow(db, userId, groupId);
   if (!row) throw new Error("Coffee group not found.");
@@ -6535,7 +6559,7 @@ async function generateCoffeeBotReply(args: {
         routerReason = ROUTER_FALLBACK_REASON;
       }
     } else {
-      const routerProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel ?? undefined);
+      const routerProvider = coffeeAuxiliaryProvider(settings);
       const routerMessages = buildRouterPrompt({
         group,
         history,
@@ -6615,6 +6639,9 @@ async function generateCoffeeBotReply(args: {
     settings.sessionSpeakerModel
   );
   if (speakerModel) speakerOptions.model = speakerModel;
+  if (settings.reasoningEffort) {
+    speakerOptions.reasoningEffort = settings.reasoningEffort;
+  }
   if (typeof speaker.temperature === "number") {
     speakerOptions.temperature = speaker.temperature;
   }
@@ -6811,7 +6838,7 @@ async function generateCoffeeBotReply(args: {
     });
     if (preferredAddressCandidates.length > 0) {
       const validation = await validateMemoryCandidates(
-        getAuxiliaryProvider(settings.prismDefaultLlmModel ?? undefined),
+        coffeeAuxiliaryProvider(settings),
         {
         source: "inferred",
         scope: "bot",
@@ -6879,6 +6906,8 @@ async function generateCoffeeBotReply(args: {
     previousSummaryAssistantCount: meetingSummaryAssistantCount,
     activePollContext,
     prismDefaultLlmModel: settings.prismDefaultLlmModel ?? null,
+    secondaryOllamaHost: settings.secondaryOllamaHost,
+    experimentalDualOllamaEnabled: settings.experimentalDualOllamaEnabled === true,
   });
   return {
     conversation: buildConversationResponse({
@@ -6990,6 +7019,7 @@ export async function generateCoffeeSessionSynopsis(
     temperature: 0.35,
   };
   if (settings.sessionSpeakerModel) options.model = settings.sessionSpeakerModel;
+  if (settings.reasoningEffort) options.reasoningEffort = settings.reasoningEffort;
 
   const raw = await provider.generateResponse(
     buildCoffeeSessionSynopsisMessages({

@@ -8,8 +8,13 @@ import type {
   Conversation,
   MemoryCategory,
   MemoryTier,
+  PrismMoodMode,
+  PrismMoodSnapshot,
   UserMemory,
   UserProfile,
+} from "@localai/shared";
+import {
+  sanitizePrismMoodState,
 } from "@localai/shared";
 
 export interface DbUserRecord {
@@ -32,6 +37,7 @@ export interface DbUserRecord {
   secondaryOllamaHost: string | null;
   comfyUiHost: string | null;
   composerWritingAssist: number;
+  experimentalDualOllamaEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -67,6 +73,23 @@ interface DbCoffeeBotSocialRow {
   leave_pressure: number;
 }
 
+interface DbPrismMoodRow {
+  mode: string;
+  mood_key: string;
+  confidence: number;
+  annoyance: number;
+  warmth: number;
+  engagement: number;
+  restraint: number;
+  recent_deltas: string;
+  ignore_until: string | null;
+  ignore_cooldown_ms: number | null;
+  ignore_forgiveness_chance: number | null;
+  ignore_penalty_level: number | null;
+  frozen: number;
+  updated_at: string;
+}
+
 export function resolveDbPath(): string {
   if (process.env.DB_PATH) {
     return process.env.DB_PATH;
@@ -100,14 +123,28 @@ export function createDatabase(): DatabaseSync {
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
+      hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
+      model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0,
       preferred_local_model TEXT,
       preferred_online_model TEXT,
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
+      experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
       preferred_openai_image_model TEXT,
+      preferred_zen_wallpaper_local_image_model TEXT,
+      preferred_zen_wallpaper_openai_image_model TEXT,
+      zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
+      zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000,
+      zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
+      zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
+      zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30,
+      zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
+      zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
+      zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -117,6 +154,9 @@ export function createDatabase(): DatabaseSync {
       anthropic_key_ciphertext TEXT,
       anthropic_key_iv TEXT,
       anthropic_key_tag TEXT,
+      elevenlabs_key_ciphertext TEXT,
+      elevenlabs_key_iv TEXT,
+      elevenlabs_key_tag TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -162,6 +202,12 @@ export function createDatabase(): DatabaseSync {
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -210,7 +256,8 @@ export function createDatabase(): DatabaseSync {
       quality TEXT NOT NULL DEFAULT 'standard',
       provider TEXT NOT NULL DEFAULT 'openai',
       local_rel_path TEXT,
-      model TEXT NOT NULL DEFAULT 'dall-e-3',
+      model TEXT NOT NULL DEFAULT 'gpt-image-2',
+      purpose TEXT NOT NULL DEFAULT 'gallery',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -287,6 +334,21 @@ export function createDatabase(): DatabaseSync {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_expires
+      ON zen_session_memories(user_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_created
+      ON zen_session_memories(user_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS session_opinions (
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
@@ -328,6 +390,27 @@ export function createDatabase(): DatabaseSync {
       leave_pressure REAL NOT NULL DEFAULT 0.1,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS prism_mood_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      annoyance REAL NOT NULL DEFAULT 0.12,
+      warmth REAL NOT NULL DEFAULT 0.62,
+      engagement REAL NOT NULL DEFAULT 0.62,
+      restraint REAL NOT NULL DEFAULT 0.68,
+      recent_deltas TEXT NOT NULL DEFAULT '[]',
+      ignore_until TEXT,
+      ignore_cooldown_ms INTEGER,
+      ignore_forgiveness_chance REAL,
+      ignore_penalty_level INTEGER,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, mode),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
@@ -422,9 +505,31 @@ export function createDatabase(): DatabaseSync {
   if (!hasHiddenBotModelIds) {
     db.exec("ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';");
   }
+  const hasHiddenComfyUiWorkflowIds = userColumns.some(
+    (column) => column.name === "hidden_comfyui_workflow_ids"
+  );
+  if (!hasHiddenComfyUiWorkflowIds) {
+    db.exec("ALTER TABLE users ADD COLUMN hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasModelVisibilityDefaultsVersion = userColumns.some(
+    (column) => column.name === "model_visibility_defaults_version"
+  );
+  if (!hasModelVisibilityDefaultsVersion) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
   const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
+  }
+  const hasExperimentalDualOllamaEnabled = userColumns.some(
+    (column) => column.name === "experimental_dual_ollama_enabled"
+  );
+  if (!hasExperimentalDualOllamaEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
   }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled"
@@ -478,6 +583,72 @@ export function createDatabase(): DatabaseSync {
   if (!hasPreferredOpenAiImageModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_openai_image_model TEXT;");
   }
+  const hasPreferredZenWallpaperLocalImageModel = userColumns.some(
+    (column) => column.name === "preferred_zen_wallpaper_local_image_model"
+  );
+  if (!hasPreferredZenWallpaperLocalImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_local_image_model TEXT;");
+  }
+  const hasPreferredZenWallpaperOpenAiImageModel = userColumns.some(
+    (column) => column.name === "preferred_zen_wallpaper_openai_image_model"
+  );
+  if (!hasPreferredZenWallpaperOpenAiImageModel) {
+    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;");
+  }
+  const hasZenWallpaperOpacity = userColumns.some(
+    (column) => column.name === "zen_wallpaper_opacity"
+  );
+  if (!hasZenWallpaperOpacity) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15;");
+  }
+  const hasZenWallpaperTextMaskEnabled = userColumns.some(
+    (column) => column.name === "zen_wallpaper_text_mask_enabled"
+  );
+  if (!hasZenWallpaperTextMaskEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenSessionIdleGapMs = userColumns.some(
+    (column) => column.name === "zen_session_idle_gap_ms"
+  );
+  if (!hasZenSessionIdleGapMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000;");
+  }
+  const hasZenFreshStartGapMs = userColumns.some(
+    (column) => column.name === "zen_fresh_start_gap_ms"
+  );
+  if (!hasZenFreshStartGapMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000;");
+  }
+  const hasZenRecentContextMessages = userColumns.some(
+    (column) => column.name === "zen_recent_context_messages"
+  );
+  if (!hasZenRecentContextMessages) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_recent_context_messages INTEGER NOT NULL DEFAULT 30;");
+  }
+  const hasZenWallpaperRegenMessageInterval = userColumns.some(
+    (column) => column.name === "zen_wallpaper_regen_message_interval"
+  );
+  if (!hasZenWallpaperRegenMessageInterval) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;");
+  }
+  const hasZenWallpaperRevealDelayMessageCount = userColumns.some(
+    (column) => column.name === "zen_wallpaper_reveal_delay_message_count"
+  );
+  if (!hasZenWallpaperRevealDelayMessageCount) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4;");
+  }
+  const hasZenWallpaperRevealSpanMessageCount = userColumns.some(
+    (column) => column.name === "zen_wallpaper_reveal_span_message_count"
+  );
+  if (!hasZenWallpaperRevealSpanMessageCount) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12;");
+  }
+  const hasZenMoodSensitivity = userColumns.some(
+    (column) => column.name === "zen_mood_sensitivity"
+  );
+  if (!hasZenMoodSensitivity) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
+  }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
   );
@@ -526,6 +697,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasAnthropicKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
+  }
+  const hasElevenLabsKeyCiphertext = userColumns.some(
+    (column) => column.name === "elevenlabs_key_ciphertext"
+  );
+  if (!hasElevenLabsKeyCiphertext) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_ciphertext TEXT;");
+  }
+  const hasElevenLabsKeyIv = userColumns.some(
+    (column) => column.name === "elevenlabs_key_iv"
+  );
+  if (!hasElevenLabsKeyIv) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_iv TEXT;");
+  }
+  const hasElevenLabsKeyTag = userColumns.some(
+    (column) => column.name === "elevenlabs_key_tag"
+  );
+  if (!hasElevenLabsKeyTag) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_tag TEXT;");
   }
   db.exec(`
     UPDATE users
@@ -636,6 +825,42 @@ export function createDatabase(): DatabaseSync {
   if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
   }
+  const hasZenWallpaperEnabledColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_enabled"
+  );
+  if (!hasZenWallpaperEnabledColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenWallpaperImageIdColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_image_id"
+  );
+  if (!hasZenWallpaperImageIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_image_id TEXT;");
+  }
+  const hasZenWallpaperPromptSeedColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_prompt_seed"
+  );
+  if (!hasZenWallpaperPromptSeedColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_prompt_seed TEXT;");
+  }
+  const hasZenWallpaperMessageCountColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_message_count"
+  );
+  if (!hasZenWallpaperMessageCountColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_message_count INTEGER;");
+  }
+  const hasZenWallpaperStatusColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_status"
+  );
+  if (!hasZenWallpaperStatusColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle';");
+  }
+  const hasZenWallpaperHistoryColumn = conversationColumns.some(
+    (column) => column.name === "zen_wallpaper_history"
+  );
+  if (!hasZenWallpaperHistoryColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_history TEXT NOT NULL DEFAULT '[]';");
+  }
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")
     .all() as Array<{ name: string }>;
@@ -673,6 +898,11 @@ export function createDatabase(): DatabaseSync {
     UPDATE conversations
     SET conversation_mode = 'sandbox'
     WHERE conversation_mode IS NULL OR trim(conversation_mode) = '';
+  `);
+  db.exec(`
+    UPDATE conversations
+    SET conversation_mode = 'zen'
+    WHERE conversation_mode = 'chat';
   `);
 
   const memoryColumns = db
@@ -821,8 +1051,14 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasImageModelColumn) {
     db.exec(
-      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'dall-e-3';"
+      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'gpt-image-2';"
     );
+  }
+  const hasImagePurposeColumn = imageColumns.some(
+    (column) => column.name === "purpose"
+  );
+  if (!hasImagePurposeColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';");
   }
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
@@ -915,6 +1151,33 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotSemanticFacetsUpdatedAtColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
   }
+  const prismMoodColumns = db
+    .prepare("PRAGMA table_info(prism_mood_state)")
+    .all() as Array<{ name: string }>;
+  const hasPrismMoodIgnoreUntilColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_until"
+  );
+  if (!hasPrismMoodIgnoreUntilColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_until TEXT;");
+  }
+  const hasPrismMoodIgnoreCooldownMsColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_cooldown_ms"
+  );
+  if (!hasPrismMoodIgnoreCooldownMsColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_cooldown_ms INTEGER;");
+  }
+  const hasPrismMoodIgnoreForgivenessChanceColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_forgiveness_chance"
+  );
+  if (!hasPrismMoodIgnoreForgivenessChanceColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_forgiveness_chance REAL;");
+  }
+  const hasPrismMoodIgnorePenaltyLevelColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_penalty_level"
+  );
+  if (!hasPrismMoodIgnorePenaltyLevelColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_penalty_level INTEGER;");
+  }
   db.exec(`
     UPDATE bots
     SET export_hash = lower(hex(randomblob(16)))
@@ -934,6 +1197,9 @@ export function createDatabase(): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
@@ -998,8 +1264,8 @@ export function mapConversation(
   messages: ChatMessage[]
 ): Conversation {
   const conversationMode =
-    row.conversation_mode === "chat"
-      ? "chat"
+    row.conversation_mode === "zen" || row.conversation_mode === "chat"
+      ? "zen"
       : row.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
@@ -1009,13 +1275,13 @@ export function mapConversation(
     userId: row.user_id,
     title: row.title,
     mode: conversationMode,
-    botId: row.bot_id ?? null,
+    botId: conversationMode === "zen" ? null : row.bot_id ?? null,
     ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
     ...(conversationMode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
     ...(conversationMode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
       ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
       : {}),
-    incognito: row.incognito === 1,
+    incognito: conversationMode === "zen" ? false : row.incognito === 1,
     lastBotId: row.last_bot_id ?? null,
     lastBotColor: row.last_bot_color ?? null,
     hasAssistantReply: row.has_assistant_reply === 1,
@@ -1137,4 +1403,107 @@ export function upsertCoffeeBotSocialState(
       updatedAt
     );
   }
+}
+
+function parsePrismMoodDeltas(raw: string | null | undefined): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function loadPrismMoodState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: PrismMoodMode
+): PrismMoodSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT mode, mood_key, confidence, annoyance, warmth, engagement, restraint,
+              recent_deltas, ignore_until, ignore_cooldown_ms,
+              ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
+         FROM prism_mood_state
+        WHERE user_id = ? AND conversation_id = ? AND mode = ?
+        LIMIT 1`
+    )
+    .get(userId, conversationId, mode) as DbPrismMoodRow | undefined;
+  if (!row) return null;
+  return sanitizePrismMoodState(
+    {
+      mode: row.mode,
+      moodKey: row.mood_key,
+      confidence: row.confidence,
+      annoyance: row.annoyance,
+      warmth: row.warmth,
+      engagement: row.engagement,
+      restraint: row.restraint,
+      lastUpdatedAt: row.updated_at,
+      recentDeltas: parsePrismMoodDeltas(row.recent_deltas),
+      ...(row.ignore_until ? { ignoreUntil: row.ignore_until } : {}),
+      ...(typeof row.ignore_cooldown_ms === "number"
+        ? { ignoreCooldownMs: row.ignore_cooldown_ms }
+        : {}),
+      ...(typeof row.ignore_forgiveness_chance === "number"
+        ? { ignoreForgivenessChance: row.ignore_forgiveness_chance }
+        : {}),
+      ...(typeof row.ignore_penalty_level === "number"
+        ? { ignorePenaltyLevel: row.ignore_penalty_level }
+        : {}),
+      frozen: row.frozen === 1,
+    },
+    mode,
+    row.updated_at
+  );
+}
+
+export function upsertPrismMoodState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  state: PrismMoodSnapshot
+): PrismMoodSnapshot {
+  const mood = sanitizePrismMoodState(state, state.mode, state.lastUpdatedAt);
+  db.prepare(
+    `INSERT INTO prism_mood_state (
+      user_id, conversation_id, mode, mood_key, confidence, annoyance, warmth,
+      engagement, restraint, recent_deltas, ignore_until, ignore_cooldown_ms,
+      ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, conversation_id, mode) DO UPDATE SET
+      mood_key = excluded.mood_key,
+      confidence = excluded.confidence,
+      annoyance = excluded.annoyance,
+      warmth = excluded.warmth,
+      engagement = excluded.engagement,
+      restraint = excluded.restraint,
+      recent_deltas = excluded.recent_deltas,
+      ignore_until = excluded.ignore_until,
+      ignore_cooldown_ms = excluded.ignore_cooldown_ms,
+      ignore_forgiveness_chance = excluded.ignore_forgiveness_chance,
+      ignore_penalty_level = excluded.ignore_penalty_level,
+      frozen = excluded.frozen,
+      updated_at = excluded.updated_at`
+  ).run(
+    userId,
+    conversationId,
+    mood.mode,
+    mood.moodKey,
+    mood.confidence,
+    mood.annoyance,
+    mood.warmth,
+    mood.engagement,
+    mood.restraint,
+    JSON.stringify(mood.recentDeltas),
+    mood.ignoreUntil ?? null,
+    mood.ignoreCooldownMs ?? null,
+    mood.ignoreForgivenessChance ?? null,
+    mood.ignorePenaltyLevel ?? null,
+    mood.frozen === true ? 1 : 0,
+    mood.lastUpdatedAt
+  );
+  return mood;
 }

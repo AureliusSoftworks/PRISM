@@ -1,4 +1,9 @@
 import { getAppConfig } from "@localai/config";
+import {
+  openAiModelSupportsReasoningEffort,
+  reasoningEffortForRequest,
+  type ReasoningEffort,
+} from "@localai/shared";
 
 /**
  * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
@@ -16,6 +21,9 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
+  /** Cancels in-flight provider work when the originating chat request is stopped. */
+  signal?: AbortSignal;
   /** Ask providers that support it to constrain the visible reply to a JSON object. */
   jsonMode?: boolean;
   /** Optional JSON Schema for providers that support structured JSON output. */
@@ -51,15 +59,24 @@ export interface LocalModelHostStatus {
   modelCount: number;
 }
 
-export type ApiKeyAuthSource = "account" | "server" | "none";
-
-export interface ProviderApiKeyAuthStatus {
+export interface DualOllamaWorkloadStatus {
   configured: boolean;
-  authenticated: boolean;
-  source: ApiKeyAuthSource;
-  status: "missing" | "authenticated" | "invalid" | "unreachable";
-  modelCount: number;
-  message?: string;
+  enabled: boolean;
+  primaryReachable: boolean;
+  secondaryReachable: boolean;
+  modelParity: boolean;
+  primaryModelCount: number;
+  secondaryModelCount: number;
+  sharedModelIds: string[];
+  missingOnPrimary: string[];
+  missingOnSecondary: string[];
+  reason:
+    | "not_configured"
+    | "primary_unreachable"
+    | "secondary_unreachable"
+    | "empty_catalog"
+    | "model_mismatch"
+    | "ready";
 }
 
 export interface LlmProvider {
@@ -79,8 +96,14 @@ interface AnthropicConfig {
   apiKey: string;
 }
 
+interface DualOllamaWorkloadOptions {
+  secondaryOllamaHost?: string | null;
+  experimentalDualOllama?: boolean;
+}
+
 const config = getAppConfig();
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
+const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
 export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 export const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -89,18 +112,60 @@ const OPENAI_FALLBACK_MODELS = [
   "gpt-4o",
   "gpt-4.1-mini",
   "gpt-4.1",
+  "gpt-4.1-nano",
+  "gpt-5",
+  "gpt-5-2025-08-07",
+  "gpt-5-chat-latest",
+  "gpt-5-codex",
+  "gpt-5-mini",
+  "gpt-5-mini-2025-08-07",
+  "gpt-5-nano",
+  "gpt-5-nano-2025-08-07",
+  "gpt-5-pro",
+  "gpt-5-pro-2025-10-06",
+  "gpt-5-search-api",
+  "gpt-5-search-api-2025-10-14",
+  "gpt-5.1",
+  "gpt-5.1-2025-11-13",
+  "gpt-5.1-chat-latest",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+  "gpt-5.2",
+  "gpt-5.2-2025-12-11",
+  "gpt-5.2-chat-latest",
+  "gpt-5.2-codex",
+  "gpt-5.2-pro",
+  "gpt-5.2-pro-2025-12-11",
+  "gpt-5.3-chat-latest",
+  "gpt-5.3-codex",
+  "gpt-5.4",
+  "gpt-5.4-2026-03-05",
+  "gpt-5.4-mini",
+  "gpt-5.4-mini-2026-03-17",
+  "gpt-5.4-nano",
+  "gpt-5.4-nano-2026-03-17",
+  "gpt-5.4-pro",
+  "gpt-5.4-pro-2026-03-05",
+  "gpt-5.5",
+  "gpt-5.5-2026-04-23",
+  "gpt-5.5-pro",
+  "gpt-5.5-pro-2026-04-23",
 ] as const;
 const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
   "claude-opus-4-8",
   "claude-opus-4-7",
+  "claude-haiku-4-5",
   "claude-sonnet-4-5-20250929",
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
   "gpt-",
+  "chatgpt-",
   "o1",
   "o3",
   "o4",
+  "o5",
 ] as const;
 const ANTHROPIC_API_VERSION = "2023-06-01";
 const ANTHROPIC_CHAT_MODEL_PREFIXES = ["claude-"] as const;
@@ -115,7 +180,8 @@ function openAiReasoningStyleChatApi(modelId: string): boolean {
   if (
     normalized.startsWith("o1") ||
     normalized.startsWith("o3") ||
-    normalized.startsWith("o4")
+    normalized.startsWith("o4") ||
+    normalized.startsWith("o5")
   ) {
     return true;
   }
@@ -161,13 +227,23 @@ export function fallbackEmbedding(text: string): number[] {
   return vector.map((value) => value / magnitude);
 }
 
-export async function embedTextLocal(text: string): Promise<number[]> {
+export async function embedTextLocal(
+  text: string,
+  options: DualOllamaWorkloadOptions = {}
+): Promise<number[]> {
+  const requestedModel = config.ollamaEmbeddingModel || "nomic-embed-text";
+  const secondaryModel = await resolveDualOllamaWorkloadModelId(
+    requestedModel,
+    options
+  );
+  const ollamaHost = secondaryModel ? options.secondaryOllamaHost!.trim() : config.ollamaHost;
+  const model = secondaryModel ?? requestedModel;
   try {
-    const response = await fetch(`${config.ollamaHost}/api/embeddings`, {
+    const response = await fetch(`${ollamaHost}/api/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: config.ollamaEmbeddingModel || "nomic-embed-text",
+        model,
         prompt: text
       })
     });
@@ -226,21 +302,134 @@ function truncateForDisplay(value: string): string {
   return `${value.slice(0, OPENAI_ERROR_MESSAGE_MAX_CHARS)}...`;
 }
 
-function modelLabelFromId(id: string): string {
+function titleCaseModelToken(token: string): string {
+  const lower = token.toLowerCase();
+  const known: Record<string, string> = {
+    api: "API",
+    b: "B",
+    chatgpt: "ChatGPT",
+    code: "Code",
+    codellama: "Code Llama",
+    codex: "Codex",
+    deepseek: "DeepSeek",
+    distill: "Distill",
+    gemma: "Gemma",
+    gpt: "GPT",
+    instruct: "Instruct",
+    llama: "Llama",
+    llava: "LLaVA",
+    mini: "Mini",
+    mistral: "Mistral",
+    mixtral: "Mixtral",
+    nano: "Nano",
+    opus: "Opus",
+    phi: "Phi",
+    pro: "Pro",
+    qwen: "Qwen",
+    r1: "R1",
+    search: "Search",
+    sonnet: "Sonnet",
+    tinyllama: "TinyLlama",
+    vl: "VL",
+  };
+  if (known[lower]) return known[lower];
+  if (/^\d+(?:\.\d+)?b$/i.test(token)) return token.toUpperCase();
+  if (/^o\d/.test(lower)) return lower;
+  if (/^[a-z]+\d+(?:\.\d+)?$/i.test(token)) {
+    const match = token.match(/^([a-z]+)(\d+(?:\.\d+)?)$/i);
+    if (match) return `${titleCaseModelToken(match[1]!)} ${match[2]}`;
+  }
+  return token.toUpperCase() === token
+    ? token
+    : `${token.slice(0, 1).toUpperCase()}${token.slice(1)}`;
+}
+
+function isUnsupportedReasoningEffortError(detail: string): boolean {
+  return /reasoning[_\s-]*effort/i.test(detail) && /invalid|unknown|unsupported|not supported/i.test(detail);
+}
+
+function formatOpenAiSnapshotSuffix(datePart: string | undefined): string {
+  if (!datePart) return "";
+  const isoDate = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) return ` (${isoDate[1]}-${isoDate[2]}-${isoDate[3]})`;
+  const compactDate = datePart.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactDate) return ` (${compactDate[1]}-${compactDate[2]}-${compactDate[3]})`;
+  return ` (${datePart})`;
+}
+
+function openAiModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "chatgpt-4o-latest") return "ChatGPT-4o";
+  const oSeries = normalized.match(/^(o\d)(?:-(mini))?$/);
+  if (oSeries) {
+    return [oSeries[1], oSeries[2] ? "Mini" : ""].filter(Boolean).join(" ");
+  }
+  const codex = normalized.match(/^gpt-(\d+(?:\.\d+)?)-codex(?:-(max|mini))?$/);
+  if (codex) {
+    return [
+      `GPT-${codex[1]}`,
+      "Codex",
+      codex[2] ? titleCaseModelToken(codex[2]) : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  const search = normalized.match(/^gpt-(\d+(?:\.\d+)?)-search-api(?:-(\d{4}-\d{2}-\d{2}))?$/);
+  if (search) {
+    return `GPT-${search[1]} Search${formatOpenAiSnapshotSuffix(search[2])}`;
+  }
+  const chatLatest = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
+  if (chatLatest) return `GPT-${chatLatest[1]}`;
+  const versioned = normalized.match(
+    /^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano|pro))?(?:-(\d{4}-\d{2}-\d{2}))?$/
+  );
+  if (versioned) {
+    return [
+      `GPT-${versioned[1]}`,
+      versioned[2] ? titleCaseModelToken(versioned[2]) : "",
+    ]
+      .filter(Boolean)
+      .join(" ") + formatOpenAiSnapshotSuffix(versioned[3]);
+  }
+  return null;
+}
+
+function anthropicModelLabelFromId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  if (!normalized.startsWith("claude-")) return null;
+  const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
+  if (latest) {
+    return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+  }
+  const named = normalized.match(
+    /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
+  );
+  if (named) {
+    const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
+    return `Claude ${titleCaseModelToken(named[1]!)} ${version}${formatOpenAiSnapshotSuffix(named[4])}`;
+  }
+  return null;
+}
+
+function modelLabelFromId(id: string, provider?: ProviderName): string {
+  const providerLabel =
+    provider === "openai"
+      ? openAiModelLabelFromId(id)
+      : provider === "anthropic"
+        ? anthropicModelLabelFromId(id)
+        : null;
+  if (providerLabel) return providerLabel;
+
   const parts = id
+    .replace(SECONDARY_OLLAMA_MODEL_PREFIX, "")
     .split(/[-_:]/)
     .filter(Boolean)
     .filter((part, index, allParts) =>
       !(index === allParts.length - 1 && part.toLowerCase() === "latest")
     );
   const displayParts = parts.length > 0 ? parts : [id];
-  return displayParts
-    .map((part) =>
-      part.toUpperCase() === part
-        ? part
-        : `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`
-    )
-    .join(" ");
+  return displayParts.map(titleCaseModelToken).join(" ");
 }
 
 function uniqueModelIds(ids: string[]): string[] {
@@ -273,13 +462,48 @@ function uniqueModelIdsByLabel(ids: string[]): string[] {
   return result;
 }
 
-function keepModelIdsWithLabels(ids: string[], requiredIds: string[]): string[] {
-  const requiredLabels = new Set(requiredIds.map(modelLabelKey));
-  return ids.filter((id) => requiredLabels.has(modelLabelKey(id)));
+function canonicalAnthropicCatalogModelId(id: string): string {
+  const normalized = id.trim().toLowerCase();
+  switch (normalized) {
+    case "claude-haiku-4-5-20251001":
+      return "claude-haiku-4-5";
+    default:
+      return id.trim();
+  }
+}
+
+function uniqueAnthropicModelIds(ids: string[]): string[] {
+  return uniqueModelIds(ids.map(canonicalAnthropicCatalogModelId));
 }
 
 function encodeSecondaryOllamaModelId(id: string): string {
   return `${SECONDARY_OLLAMA_MODEL_PREFIX}${id.trim()}`;
+}
+
+function openAiChatVariantBaseId(id: string): string | null {
+  const normalized = id.trim().toLowerCase();
+  const match = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
+  return match ? `gpt-${match[1]}` : null;
+}
+
+function preferOpenAiChatVariants(ids: string[]): string[] {
+  const chatVariantByBase = new Map<string, string>();
+  for (const rawId of ids) {
+    const id = rawId.trim();
+    const baseId = openAiChatVariantBaseId(id);
+    if (baseId) chatVariantByBase.set(baseId, id);
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const rawId of ids) {
+    const id = rawId.trim();
+    if (!id) continue;
+    const replacement = chatVariantByBase.get(id.toLowerCase()) ?? id;
+    if (seen.has(replacement)) continue;
+    seen.add(replacement);
+    result.push(replacement);
+  }
+  return result;
 }
 
 export function parseSecondaryOllamaModelId(id: string): string | null {
@@ -303,7 +527,7 @@ function toCatalogEntry(
 ): ModelCatalogEntry {
   return {
     id,
-    label: options.label ?? modelLabelFromId(id),
+    label: options.label ?? modelLabelFromId(id, provider),
     provider,
     isDefault: id === defaultId || undefined,
     ...(options.localHost ? { localHost: options.localHost } : {}),
@@ -336,11 +560,17 @@ function isAllowedAnthropicChatModel(id: string): boolean {
 }
 
 async function discoverLocalModelIds(ollamaHost: string): Promise<string[]> {
+  return (await discoverLocalModels(ollamaHost)).modelIds;
+}
+
+async function discoverLocalModels(
+  ollamaHost: string
+): Promise<{ reachable: boolean; modelIds: string[] }> {
   for (const host of localModelHostCandidates(ollamaHost)) {
     const modelIds = await fetchLocalModelIds(host);
-    if (modelIds) return modelIds;
+    if (modelIds) return { reachable: true, modelIds };
   }
-  return [];
+  return { reachable: false, modelIds: [] };
 }
 
 async function fetchLocalModelIds(ollamaHost: string): Promise<string[] | null> {
@@ -411,14 +641,164 @@ export async function checkLocalModelHostStatus(
     return { configured: false, reachable: false, modelCount: 0 };
   }
 
-  for (const host of localModelHostCandidates(normalizedHost)) {
-    const modelIds = await fetchLocalModelIds(host);
-    if (modelIds) {
-      return { configured: true, reachable: true, modelCount: modelIds.length };
+  const discovered = await discoverLocalModels(normalizedHost);
+  return {
+    configured: true,
+    reachable: discovered.reachable,
+    modelCount: discovered.modelIds.length,
+  };
+}
+
+const dualOllamaWorkloadStatusCache = new Map<
+  string,
+  { expiresAt: number; status: DualOllamaWorkloadStatus }
+>();
+
+function sortedModelIds(ids: readonly string[]): string[] {
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueSortedModelIds(ids: readonly string[]): string[] {
+  return sortedModelIds(uniqueModelIds([...ids]));
+}
+
+function disabledDualOllamaStatus(
+  reason: DualOllamaWorkloadStatus["reason"],
+  overrides: Partial<DualOllamaWorkloadStatus> = {}
+): DualOllamaWorkloadStatus {
+  return {
+    configured: reason !== "not_configured",
+    enabled: false,
+    primaryReachable: false,
+    secondaryReachable: false,
+    modelParity: false,
+    primaryModelCount: 0,
+    secondaryModelCount: 0,
+    sharedModelIds: [],
+    missingOnPrimary: [],
+    missingOnSecondary: [],
+    reason,
+    ...overrides,
+  };
+}
+
+export async function checkDualOllamaWorkloadStatus(
+  secondaryOllamaHost: string | null | undefined,
+  options: { useCache?: boolean } = {}
+): Promise<DualOllamaWorkloadStatus> {
+  const secondaryHost = secondaryOllamaHost?.trim();
+  if (!secondaryHost) {
+    return disabledDualOllamaStatus("not_configured", { configured: false });
+  }
+
+  const cacheKey = `${config.ollamaHost} -> ${secondaryHost}`;
+  const useCache = options.useCache !== false;
+  if (useCache) {
+    const cached = dualOllamaWorkloadStatusCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.status;
     }
   }
 
-  return { configured: true, reachable: false, modelCount: 0 };
+  const [primary, secondary] = await Promise.all([
+    discoverLocalModels(config.ollamaHost),
+    discoverLocalModels(secondaryHost),
+  ]);
+  const primaryModelIds = uniqueSortedModelIds(primary.modelIds);
+  const secondaryModelIds = uniqueSortedModelIds(secondary.modelIds);
+  const primarySet = new Set(primaryModelIds);
+  const secondarySet = new Set(secondaryModelIds);
+  const sharedModelIds = primaryModelIds.filter((id) => secondarySet.has(id));
+  const missingOnPrimary = secondaryModelIds.filter((id) => !primarySet.has(id));
+  const missingOnSecondary = primaryModelIds.filter((id) => !secondarySet.has(id));
+  const primaryModelCount = primaryModelIds.length;
+  const secondaryModelCount = secondaryModelIds.length;
+
+  let status: DualOllamaWorkloadStatus;
+  if (!primary.reachable) {
+    status = disabledDualOllamaStatus("primary_unreachable", {
+      configured: true,
+      primaryReachable: false,
+      secondaryReachable: secondary.reachable,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (!secondary.reachable) {
+    status = disabledDualOllamaStatus("secondary_unreachable", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: false,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (primaryModelCount === 0 || secondaryModelCount === 0) {
+    status = disabledDualOllamaStatus("empty_catalog", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else if (sharedModelIds.length === 0) {
+    status = disabledDualOllamaStatus("model_mismatch", {
+      configured: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+    });
+  } else {
+    status = {
+      configured: true,
+      enabled: true,
+      primaryReachable: true,
+      secondaryReachable: true,
+      modelParity: true,
+      primaryModelCount,
+      secondaryModelCount,
+      sharedModelIds,
+      missingOnPrimary,
+      missingOnSecondary,
+      reason: "ready",
+    };
+  }
+
+  if (useCache) {
+    dualOllamaWorkloadStatusCache.set(cacheKey, {
+      expiresAt: Date.now() + DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS,
+      status,
+    });
+  }
+  return status;
+}
+
+async function resolveDualOllamaWorkloadModelId(
+  requestedModel: string,
+  options: DualOllamaWorkloadOptions
+): Promise<string | null> {
+  if (!options.experimentalDualOllama || !options.secondaryOllamaHost?.trim()) {
+    return null;
+  }
+  if (parseSecondaryOllamaModelId(requestedModel)) {
+    return null;
+  }
+  const status = await checkDualOllamaWorkloadStatus(options.secondaryOllamaHost);
+  if (!status.enabled || !status.sharedModelIds.includes(requestedModel)) {
+    return null;
+  }
+  return requestedModel;
 }
 
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
@@ -586,20 +966,26 @@ export async function buildModelCatalog(
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const secondaryLocalIds = keepModelIdsWithLabels(
-    uniqueModelIdsByLabel(discoveredSecondaryLocal),
-    localIds
+  const localLabelKeys = new Set(localIds.map(modelLabelKey));
+  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal).filter((id) =>
+    localLabelKeys.has(modelLabelKey(id))
   );
-  const onlineIds = uniqueModelIds([
-    OPENAI_DEFAULT_MODEL,
-    ...discoveredOpenAi,
-    ...OPENAI_FALLBACK_MODELS,
-  ]);
-  const anthropicIds = uniqueModelIds([
-    ANTHROPIC_DEFAULT_MODEL,
-    ...discoveredAnthropic,
-    ...ANTHROPIC_FALLBACK_MODELS,
-  ]);
+  const onlineIds = openAiApiKey
+    ? preferOpenAiChatVariants(
+        uniqueModelIds([
+          OPENAI_DEFAULT_MODEL,
+          ...discoveredOpenAi,
+          ...OPENAI_FALLBACK_MODELS,
+        ])
+      )
+    : [];
+  const anthropicIds = anthropicApiKey
+    ? uniqueAnthropicModelIds([
+        ANTHROPIC_DEFAULT_MODEL,
+        ...discoveredAnthropic,
+        ...ANTHROPIC_FALLBACK_MODELS,
+      ])
+    : [];
   return {
     local: [
       ...localIds.map((id) =>
@@ -610,9 +996,9 @@ export async function buildModelCatalog(
       ),
       ...secondaryLocalIds.map((id) =>
         toCatalogEntry(encodeSecondaryOllamaModelId(id), "local", config.ollamaModel, {
-          label: `${modelLabelFromId(id)} (Second host)`,
+          label: `${modelLabelFromId(id, "local")} (Paired host)`,
           localHost: "secondary",
-          hostLabel: "Second host",
+          hostLabel: "Paired host",
         })
       ),
     ],
@@ -630,9 +1016,11 @@ export async function buildModelCatalog(
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
   private readonly secondaryOllamaHost: string | null;
+  private readonly experimentalDualOllama: boolean;
 
-  public constructor(options: { secondaryOllamaHost?: string | null } = {}) {
+  public constructor(options: DualOllamaWorkloadOptions = {}) {
     this.secondaryOllamaHost = options.secondaryOllamaHost?.trim() || null;
+    this.experimentalDualOllama = options.experimentalDualOllama === true;
   }
 
   public async generateResponse(
@@ -642,10 +1030,17 @@ export class LocalOllamaProvider implements LlmProvider {
     const requestedModel = options?.model?.trim() || config.ollamaModel;
     const secondaryModel = parseSecondaryOllamaModelId(requestedModel);
     if (secondaryModel && !this.secondaryOllamaHost) {
-      throw new Error("Second Ollama host is not configured.");
+      throw new Error("Paired Ollama host is not configured.");
     }
-    const ollamaHost = secondaryModel ? this.secondaryOllamaHost! : config.ollamaHost;
-    const model = secondaryModel ?? requestedModel;
+    const dualWorkloadModel = secondaryModel
+      ? null
+      : await resolveDualOllamaWorkloadModelId(requestedModel, {
+          secondaryOllamaHost: this.secondaryOllamaHost,
+          experimentalDualOllama: this.experimentalDualOllama,
+        });
+    const ollamaHost =
+      secondaryModel || dualWorkloadModel ? this.secondaryOllamaHost! : config.ollamaHost;
+    const model = secondaryModel ?? dualWorkloadModel ?? requestedModel;
     const ollamaOptions: Record<string, unknown> = {};
     if (typeof options?.temperature === "number") {
       ollamaOptions.temperature = options.temperature;
@@ -675,7 +1070,8 @@ export class LocalOllamaProvider implements LlmProvider {
     const response = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       throw new Error(`Local model request failed (${response.status})`);
@@ -713,7 +1109,10 @@ export class LocalOllamaProvider implements LlmProvider {
   }
 
   public async embedText(text: string): Promise<number[]> {
-    return embedTextLocal(text);
+    return embedTextLocal(text, {
+      secondaryOllamaHost: this.secondaryOllamaHost,
+      experimentalDualOllama: this.experimentalDualOllama,
+    });
   }
 }
 
@@ -759,15 +1158,23 @@ export class OpenAiProvider implements LlmProvider {
         requestBody.max_tokens = options.maxTokens;
       }
     }
+    const reasoningEffort = reasoningEffortForRequest(options?.reasoningEffort);
+    if (reasoningEffort && openAiModelSupportsReasoningEffort(modelId)) {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.openAiConfig.apiKey}`
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const sendRequest = (body: Record<string, unknown>) =>
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.openAiConfig.apiKey}`
+        },
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      });
+
+    let response = await sendRequest(requestBody);
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
       // "Incorrect API key provided", context-length errors) instead of a
@@ -775,12 +1182,38 @@ export class OpenAiProvider implements LlmProvider {
       // tailing the terminal can diagnose without the user re-hitting it.
       const detail = await readOpenAiErrorMessage(response);
       const modelUsed = (requestBody.model as string) ?? OPENAI_DEFAULT_MODEL;
-      console.error(
-        `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
-          detail || "<empty body>"
-        }`
-      );
-      throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
+      if (
+        requestBody.reasoning_effort &&
+        response.status === 400 &&
+        isUnsupportedReasoningEffortError(detail)
+      ) {
+        const retryBody = { ...requestBody };
+        delete retryBody.reasoning_effort;
+        console.warn(
+          `[openai] reasoning_effort rejected for model=${modelUsed}; retrying without effort detail=${
+            detail || "<empty body>"
+          }`
+        );
+        response = await sendRequest(retryBody);
+        if (response.ok) {
+          delete requestBody.reasoning_effort;
+        } else {
+          const retryDetail = await readOpenAiErrorMessage(response);
+          console.error(
+            `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
+              retryDetail || "<empty body>"
+            }`
+          );
+          throw new Error(formatOpenAiError("OpenAI request failed", response.status, retryDetail));
+        }
+      } else {
+        console.error(
+          `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
+            detail || "<empty body>"
+          }`
+        );
+        throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
+      }
     }
     const payload = (await response.json()) as {
       choices?: Array<{
@@ -864,6 +1297,7 @@ export class AnthropicProvider implements LlmProvider {
         "anthropic-version": ANTHROPIC_API_VERSION,
       },
       body: JSON.stringify(requestBody),
+      signal: options?.signal,
     });
     if (!response.ok) {
       const detail = await readOpenAiErrorMessage(response);
@@ -907,9 +1341,12 @@ export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null
   return config.ollamaAuxiliaryModel || "llama3.2";
 }
 
-export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmProvider {
+export function getAuxiliaryProvider(
+  prismDefaultLlmModel?: string | null,
+  options: DualOllamaWorkloadOptions = {}
+): LlmProvider {
   const auxiliaryModel = resolveAuxiliaryOllamaModel(prismDefaultLlmModel);
-  const inner = new LocalOllamaProvider();
+  const inner = new LocalOllamaProvider(options);
   return {
     name: "local",
     async generateResponse(
@@ -922,7 +1359,7 @@ export function getAuxiliaryProvider(prismDefaultLlmModel?: string | null): LlmP
       });
     },
     async embedText(text: string): Promise<number[]> {
-      return embedTextLocal(text);
+      return inner.embedText(text);
     }
   };
 }

@@ -36,6 +36,7 @@ import {
   RECENT_WINDOW_SIZE,
   summarizeSandboxBotStatus,
   getLatestThreadSummary,
+  getLatestFullThreadCompactionCutoff,
   retrieveMemorySummaries,
   summarizeAndStoreMemories,
   summarizeThreadCompact,
@@ -53,22 +54,66 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PrismMoodInterruptionInput,
+  PrismMoodSnapshot,
+  PromptShortcutMetadata,
+  PromptWildcardRunMetadata,
   SessionOpinion,
   SentGeneratedImagePayload,
+  ZenSessionMemoryOverview,
 } from "@localai/shared";
 import {
+  applyPrismMoodExpiredIgnoreCooldown,
+  applyPrismMoodForgivenessSuccess,
+  applyPrismMoodInterruption,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodIgnoredTurn,
+  applyPrismMoodNegativeTurn,
+  applyPrismMoodPositiveTurn,
+  createDefaultPrismMoodState,
+  decayPrismMood,
   hydrateAssistantMessageParts,
+  isPrismMoodIgnoring,
+  normalizePrismMoodSensitivity,
+  prismMoodDeclineReason,
+  prismMoodIgnoreForgivenessChance,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
+  parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
+  sanitizePrismMoodState,
   serializeAssistantToolPayload,
+  serializePromptToolPayload,
+  shouldPrismMoodDeclineResponse,
+  shouldPrismMoodStartIgnoreCooldown,
+  stripBotProfileMetaSuffix,
+  withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
   peekActiveImageJobForUser,
+  releaseImageSlot,
   tryAcquireImageSlot,
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
+import {
+  mapZenWallpaperMetadata,
+  rebaseZenWallpaperMetadataForVisibleWindow,
+  recoverStaleZenWallpaperGenerationStatus,
+} from "./conversations.ts";
+import {
+  loadPrismMoodState,
+  upsertPrismMoodState,
+} from "./db.ts";
+import {
+  buildZenSessionMemoryPromptContext,
+  createZenSessionMemoryCheckpoint,
+  loadZenSessionMemoryOverview,
+  pruneExpiredZenSessionMemories,
+  userMessageRequestsZenSessionMemory,
+} from "./zen-session-memory.ts";
 
 const config = getAppConfig();
 
@@ -151,6 +196,7 @@ export interface ProcessChatMessageResult {
   };
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
+  prismMood?: PrismMoodSnapshot;
   summaryCompaction?: {
     mode: ChatMode;
     triggered: boolean;
@@ -232,6 +278,19 @@ const STARTER_FALLBACK_STOP_WORDS = new Set([
   "first",
   "should",
 ]);
+const STARTER_SUGGESTION_JSON_KEYS = [
+  "suggestions",
+  "options",
+  "replies",
+  "quickReplies",
+  "quick_replies",
+  "starterSuggestions",
+  "starter_suggestions",
+  "conversationStarters",
+  "conversation_starters",
+];
+const STARTER_SUGGESTION_TEXT_KEYS = ["label", "text", "value", "title", "reply", "content"];
+const STARTER_SUGGESTION_MAX_CHARS = 180;
 
 const OPINION_SCORE_MIN = 0;
 const OPINION_SCORE_MAX = 100;
@@ -345,6 +404,13 @@ type OpinionEvaluation = {
 type MoodEvaluation = {
   key: BotMoodKey;
   confidence: number;
+};
+
+const ZEN_MOOD_PAUSE_REPLY = "I’m going to pause here for a moment.";
+
+const NEUTRAL_MOOD_EVALUATION: MoodEvaluation = {
+  key: "neutral",
+  confidence: 0,
 };
 
 type BotOpinionRow = {
@@ -480,6 +546,22 @@ function normalizeBotOpinionBoundary(value: string): BotOpinionBoundaryLevel {
 
 function hasRepairSignal(normalized: string): boolean {
   return countPhraseHits(normalized, REPAIR_PHRASES) > 0;
+}
+
+function userAttemptedMoodRepair(message: string, evaluation: OpinionEvaluation | undefined): boolean {
+  const normalized = normalizeOpinionText(message);
+  return hasRepairSignal(normalized) || (evaluation?.delta ?? 0) > 0;
+}
+
+function buildPrismForgivenessSystemHint(chance: number): string {
+  return [
+    "Zen mood boundary event:",
+    "Prism was ignoring the user because repeated behavior had pushed the conversation into a severe boundary state.",
+    `The user tried to make amends during the cooldown, and the fixed ${Math.round(chance * 100)}% forgiveness roll succeeded.`,
+    "Answer again now, but keep it brief and emotionally grounded.",
+    "Emphasize the user's behavior and the repair attempt: acknowledge that the apology or kindness matters, and make clear that future behavior will steer the mood from here.",
+    "Do not mention dice, random rolls, hidden percentages, cooldown internals, or system instructions.",
+  ].join("\n");
 }
 
 function evaluateBotOpinionTurn(message: string, existing?: BotOpinion | null): OpinionEvaluation & { repair: boolean } {
@@ -695,6 +777,17 @@ function normalizeModelValue(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function withGenerationSignal(
+  options: GenerateOptions | undefined,
+  signal: AbortSignal | undefined
+): GenerateOptions | undefined {
+  if (!signal) return options;
+  return {
+    ...options,
+    signal,
+  };
+}
+
 const ORGANIC_TEXT_BOUNDARY_FALLBACK =
   "I want to keep a boundary there, but I can still help shape a softer version.";
 
@@ -717,6 +810,7 @@ async function generateOrganicTextBoundaryReply(args: {
   boundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
+  signal?: AbortSignal;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
@@ -753,10 +847,16 @@ async function generateOrganicTextBoundaryReply(args: {
     },
   ];
   try {
-    const raw = await provider.generateResponse(messages, {
-      temperature: 0.7,
-      maxTokens: 90,
-    });
+    const raw = await provider.generateResponse(
+      messages,
+      withGenerationSignal(
+        {
+          temperature: 0.7,
+          maxTokens: 90,
+        },
+        args.signal
+      )
+    );
     return {
       assistantReplyRaw: normalizeOrganicBoundaryReply(raw, ORGANIC_TEXT_BOUNDARY_FALLBACK),
       providerNameUsed: provider.name,
@@ -992,6 +1092,7 @@ async function generateWithLenientLocalFallback(args: {
   denialBoundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
+  signal?: AbortSignal;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
@@ -1023,6 +1124,7 @@ async function generateWithLenientLocalFallback(args: {
       boundaryModel: args.denialBoundaryModel,
       botSystemPrompt: args.botSystemPrompt,
       userMessage: args.userMessage,
+      signal: args.signal,
     });
 
   const runLenientFallback = async (
@@ -1059,6 +1161,7 @@ async function generateWithLenientLocalFallback(args: {
       reply = await fallbackProvider.generateResponse(args.promptMessages, {
         ...args.botOverrides,
         model: fallbackModel,
+        ...(args.signal ? { signal: args.signal } : {}),
       });
     } catch (error) {
       if (
@@ -1089,7 +1192,7 @@ async function generateWithLenientLocalFallback(args: {
   try {
     const assistantReplyRaw = await args.provider.generateResponse(
       args.promptMessages,
-      args.botOverrides
+      withGenerationSignal(args.botOverrides, args.signal)
     );
     if (shouldSuppressAssistantReply(assistantReplyRaw)) {
       const trigger = isCopyrightRefusalText(assistantReplyRaw)
@@ -1181,20 +1284,149 @@ function extractJsonObjectPayload(raw: string): string {
   return trimmed;
 }
 
-function parseSuggestedRepliesPayload(raw: string): string[] {
-  const payload = extractJsonObjectPayload(raw);
-  try {
-    const parsedUnknown = JSON.parse(payload) as { suggestions?: unknown };
-    const list = parsedUnknown?.suggestions;
-    if (!Array.isArray(list)) return [];
-    const strings = list
-      .filter((item): item is string => typeof item === "string")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    return [...new Set(strings)].slice(0, 4);
-  } catch {
-    return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractSuggestedRepliesJsonPayloads(raw: string): string[] {
+  const trimmed = raw.trim();
+  const payloads: string[] = [];
+  const seen = new Set<string>();
+  const addPayload = (payload: string): void => {
+    const next = payload.trim();
+    if (!next || seen.has(next)) return;
+    seen.add(next);
+    payloads.push(next);
+  };
+
+  const fence = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)```$/);
+  if (fence?.[1]) {
+    addPayload(fence[1]);
   }
+  addPayload(trimmed);
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    addPayload(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  const firstBracket = trimmed.indexOf("[");
+  const lastBracket = trimmed.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    addPayload(trimmed.slice(firstBracket, lastBracket + 1));
+  }
+
+  return payloads;
+}
+
+function extractSuggestedReplyValues(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (!isRecord(parsed)) return [];
+
+  for (const key of STARTER_SUGGESTION_JSON_KEYS) {
+    const value = parsed[key];
+    if (Array.isArray(value)) return value;
+  }
+
+  for (const key of ["data", "result", "response"]) {
+    const nested = parsed[key];
+    if (Array.isArray(nested)) return nested;
+    if (isRecord(nested)) {
+      const nestedValues = extractSuggestedReplyValues(nested);
+      if (nestedValues.length > 0) return nestedValues;
+    }
+  }
+
+  return [];
+}
+
+function cleanSuggestedReplyText(value: string): string | null {
+  let text = value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  for (let i = 0; i < 3; i += 1) {
+    text = text
+      .replace(/^(?:[-*•]\s+|\d{1,2}[\).:\]-]\s*)/, "")
+      .replace(/^[\s"'“”‘’`*_]+/, "")
+      .replace(/[\s"'“”‘’`*_]+$/, "")
+      .trim();
+  }
+  if (!text || text.length > STARTER_SUGGESTION_MAX_CHARS) return null;
+  if (/^(?:suggestions?|options?|replies)\s*:?\s*$/i.test(text)) return null;
+  if (/^(?:sure[,.!]?\s+)?(?:here are|these are)\b/i.test(text)) return null;
+  if (
+    /^(?:the\s+)?user\s+(?:has\s+)?(?:chosen|chose|chooses|selected|selects|picked|picks)\b/i.test(
+      text
+    )
+  ) {
+    return null;
+  }
+  return text;
+}
+
+function suggestedReplyTextFromValue(value: unknown): string | null {
+  if (typeof value === "string") return cleanSuggestedReplyText(value);
+  if (!isRecord(value)) return null;
+  for (const key of STARTER_SUGGESTION_TEXT_KEYS) {
+    const candidate = value[key];
+    if (typeof candidate !== "string") continue;
+    const text = cleanSuggestedReplyText(candidate);
+    if (text) return text;
+  }
+  return null;
+}
+
+function normalizeSuggestedReplyValues(values: unknown[]): string[] {
+  const replies: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = suggestedReplyTextFromValue(value);
+    if (!text) continue;
+    const comparisonKey = text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (!comparisonKey || seen.has(comparisonKey)) continue;
+    seen.add(comparisonKey);
+    replies.push(text);
+    if (replies.length >= 4) break;
+  }
+  return replies;
+}
+
+function parseSuggestedRepliesListPayload(raw: string): string[] {
+  const lines = raw
+    .replace(/^```(?:json|text)?\s*\n?([\s\S]*?)```$/i, "$1")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length < 3 || lines.length > 8) return [];
+
+  const listMarkerLines = lines.filter((line) =>
+    /^(?:[-*•]\s+|\d{1,2}[\).:\]-]\s*)/.test(line)
+  );
+  const sourceLines = listMarkerLines.length >= 3 ? listMarkerLines : lines;
+  return normalizeSuggestedReplyValues(sourceLines);
+}
+
+function parseSuggestedRepliesPayload(raw: string): string[] {
+  let best: string[] = [];
+  for (const payload of extractSuggestedRepliesJsonPayloads(raw)) {
+    try {
+      const parsedUnknown = JSON.parse(payload) as unknown;
+      const candidates = normalizeSuggestedReplyValues(
+        extractSuggestedReplyValues(parsedUnknown)
+      );
+      if (candidates.length > best.length) best = candidates;
+      if (best.length >= 3) return best.slice(0, 4);
+    } catch {
+      // Try the next candidate; starter chips are optional.
+    }
+  }
+  const listCandidates = parseSuggestedRepliesListPayload(raw);
+  return listCandidates.length > best.length ? listCandidates : best;
 }
 
 export function sanitizeConversationTitle(rawTitle: string): string | null {
@@ -1268,6 +1500,23 @@ function extractStarterQuestionAlternatives(question: string): string[] {
   return alternatives.length >= 2 ? [...new Set(alternatives)].slice(0, 3) : [];
 }
 
+function fallbackOpenEndedQuestionStarters(question: string): string[] {
+  if (/\b(?:call|name)\s+(?:you|me)\b|\bwhat(?:'s| is)\s+your\s+name\b/i.test(question)) {
+    return [
+      "Use my first name.",
+      "Use my full name.",
+      "Use a nickname.",
+      "I'm not sure yet.",
+    ];
+  }
+  return [
+    "Something weighing on me.",
+    "A decision I keep circling.",
+    "A small moment from today.",
+    "I'm not sure yet.",
+  ];
+}
+
 function fallbackConversationStarters(
   assistantOpening: string,
   personaLabel: string | undefined
@@ -1285,12 +1534,7 @@ function fallbackConversationStarters(
       }
       return replies.slice(0, 4);
     }
-    return [
-      "I'm not sure yet.",
-      "A small specific detail.",
-      "I need another clue.",
-      "Surprise me with your guess.",
-    ];
+    return fallbackOpenEndedQuestionStarters(question);
   }
   const words = assistantOpening
     .toLowerCase()
@@ -1365,6 +1609,23 @@ async function inferConversationStarters(
     // Non-fatal: chips are optional chrome.
   }
   return fallbackConversationStarters(opener, personaLabel);
+}
+
+function buildStarterAskQuestion(starters: string[] | undefined): AskQuestionPayload | undefined {
+  const options = (starters ?? [])
+    .slice(0, 3)
+    .map((starter, index) => ({
+      id: String.fromCharCode(97 + index),
+      label: starter.trim(),
+    }))
+    .filter((option) => option.label.length > 0);
+  if (options.length !== 3) return undefined;
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt: "Choose a reply:",
+    options,
+  };
 }
 
 /** Background chrome call: names a conversation for the sidebar/history list. */
@@ -1539,18 +1800,30 @@ export async function refreshConversationTitle(
   }
 
   let prismAuxiliaryModel: string | null | undefined;
+  let secondaryOllamaHost: string | null | undefined;
+  let experimentalDualOllamaEnabled = false;
   try {
-    prismAuxiliaryModel = (
-      db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
-        | { m: string | null }
+    const userSettings = db
+      .prepare(
+        "SELECT prism_default_llm_model AS m, secondary_ollama_host AS secondaryHost, experimental_dual_ollama_enabled AS dualEnabled FROM users WHERE id = ?"
+      )
+      .get(userId) as
+      | { m: string | null; secondaryHost: string | null; dualEnabled: number | null }
         | undefined
-    )?.m;
+    prismAuxiliaryModel = userSettings?.m;
+    secondaryOllamaHost = userSettings?.secondaryHost;
+    experimentalDualOllamaEnabled = userSettings?.dualEnabled === 1;
   } catch {
     // Test/minimal DB fixtures may omit the users table; fall back to server defaults.
     prismAuxiliaryModel = undefined;
+    secondaryOllamaHost = undefined;
+    experimentalDualOllamaEnabled = false;
   }
   const title = await inferRefreshedConversationTitle(
-    getAuxiliaryProvider(prismAuxiliaryModel ?? null),
+    getAuxiliaryProvider(prismAuxiliaryModel ?? null, {
+      secondaryOllamaHost,
+      experimentalDualOllama: experimentalDualOllamaEnabled,
+    }),
     recentMessages,
     conversation.title,
     conversation.last_bot_name
@@ -1619,6 +1892,8 @@ export interface UserChatSettings {
   devMemoriesText?: string;
   /** Optional user-saved second Ollama host for host-aware local model choices. */
   secondaryOllamaHost?: string | null;
+  /** Experimental: route Prism-owned local work to a matching second Ollama host. */
+  experimentalDualOllamaEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
   /**
@@ -1633,6 +1908,8 @@ export interface UserChatSettings {
    * Does not change the separate image render pipeline (Comfy / Ollama image / OpenAI images).
    */
   prismImageToolLlmModel?: string | null;
+  /** Saved Zen setting: how many recent transcript rows stay verbatim in chat context. */
+  recentContextMessageLimit?: number | null;
   /**
    * Which post-auth surface the request originated from. Changes what
    * "memory" means for this turn:
@@ -1652,12 +1929,169 @@ export interface UserChatSettings {
    */
   assistantImageUserPrefs?: AssistantSentImageUserPrefs;
   sessionEnding?: boolean;
+  /** One-turn Zen resume hint after a visible session break. */
+  sessionResumeContext?: SessionResumeContext | null;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
+  /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
+  promptShortcut?: PromptShortcutMetadata;
+  /** Optional user-facing wildcard metadata for resolved deck/option sends. */
+  promptWildcards?: PromptWildcardRunMetadata;
+  /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
+  commandCenterPrompt?: boolean;
+  /** Optional resolved user prompt sent to the model while preserving display content. */
+  promptInputOverride?: string;
+  /** Optional Zen interruption metadata supplied by the composer send path. */
+  prismInterruption?: PrismMoodInterruptionInput;
+  /** Saved Zen setting: how sharply Prism reacts to irritation cues. */
+  zenMoodSensitivity?: number | null;
+  /** Cancels provider/tool work when the originating HTTP request is interrupted. */
+  signal?: AbortSignal;
 }
 
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
+const ZEN_RESTORE_MESSAGE_LIMIT = 80;
+const SESSION_RESUME_SUMMARY_MAX_CHARS = 700;
+const SESSION_RESUME_GAP_MAX_MS = 1000 * 60 * 60 * 24 * 45;
+
+function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
+  if (mode === "zen" || mode === "chat") return "zen";
+  if (mode === "coffee") return "coffee";
+  return "sandbox";
+}
+
+function readResumeContextString(value: unknown, maxChars = SESSION_RESUME_SUMMARY_MAX_CHARS): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`
+    : normalized;
+}
+
+function readResumeContextIso(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return undefined;
+  return new Date(ms).toISOString();
+}
+
+export function normalizeSessionResumeContext(raw: unknown): SessionResumeContext | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const summary = readResumeContextString(record.summary);
+  const resumedAt = readResumeContextIso(record.resumedAt);
+  const previousActiveAt = readResumeContextIso(record.previousActiveAt);
+  const gapMs =
+    typeof record.gapMs === "number" && Number.isFinite(record.gapMs)
+      ? Math.max(0, Math.min(SESSION_RESUME_GAP_MAX_MS, record.gapMs))
+      : undefined;
+  const source =
+    record.source === "idle" || record.source === "dev"
+      ? record.source
+      : undefined;
+  if (!summary && !resumedAt && !previousActiveAt && gapMs === undefined) {
+    return null;
+  }
+  return {
+    ...(summary ? { summary } : {}),
+    ...(resumedAt ? { resumedAt } : {}),
+    ...(previousActiveAt ? { previousActiveAt } : {}),
+    ...(gapMs !== undefined ? { gapMs } : {}),
+    ...(source ? { source } : {}),
+  };
+}
+
+function formatResumeContextGap(gapMs: number | undefined): string | null {
+  if (gapMs === undefined) return null;
+  const hours = Math.max(1, Math.round(gapMs / (60 * 60 * 1000)));
+  if (hours < 24) return `about ${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.max(1, Math.round(hours / 24));
+  return `about ${days} day${days === 1 ? "" : "s"}`;
+}
+
+function buildSessionResumePromptContext(
+  context: SessionResumeContext | null | undefined,
+  mode: ChatMode
+): string | null {
+  if (!context || !isZenMode(mode)) return null;
+  const lines = [
+    "Zen session resume context:",
+    "The user is returning to this continuous conversation after a visible session break. Use this quietly and naturally if it helps; do not announce hidden context or over-explain the gap.",
+  ];
+  const gapLabel = formatResumeContextGap(context.gapMs);
+  if (gapLabel) lines.push(`Time gap: ${gapLabel}.`);
+  if (context.previousActiveAt) lines.push(`Previous active moment: ${context.previousActiveAt}.`);
+  if (context.resumedAt) lines.push(`Resume moment: ${context.resumedAt}.`);
+  if (context.summary) lines.push(`Friendly recap shown to the user: ${context.summary}`);
+  return lines.join("\n");
+}
+
+function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("Chat request was cancelled.");
+  }
+}
+
+export interface SessionResumeContext {
+  summary?: string;
+  resumedAt?: string;
+  previousActiveAt?: string;
+  gapMs?: number;
+  source?: "idle" | "dev";
+}
+
+function isChatRequestCancelledError(
+  error: unknown,
+  signal: AbortSignal | undefined
+): boolean {
+  if (signal?.aborted) return true;
+  const errorName =
+    typeof error === "object" && error !== null && "name" in error
+      ? String((error as { name?: unknown }).name)
+      : "";
+  if (errorName === "AbortError") return true;
+  return error instanceof Error && error.message === "Chat request was cancelled.";
+}
+
+function rollbackCancelledPersistedTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  userMessageId: string | null;
+  deleteConversationIfEmpty: boolean;
+}): void {
+  const {
+    db,
+    userId,
+    conversationId,
+    userMessageId,
+    deleteConversationIfEmpty,
+  } = args;
+  if (userMessageId) {
+    db.prepare(
+      "DELETE FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'user'"
+    ).run(userMessageId, conversationId, userId);
+  }
+  if (!deleteConversationIfEmpty) return;
+  const remainingMessages = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+      )
+      .get(conversationId, userId) as { n: number }
+  ).n;
+  if (remainingMessages > 0) return;
+  db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(
+    conversationId,
+    userId
+  );
+}
+
+function isZenMode(mode: ChatMode): boolean {
+  return mode === "zen" || mode === "chat";
+}
 
 /** Appended to assistant prose when `sendGeneratedImage` parsed but image pipeline returned nothing. */
 const ASSISTANT_IMAGE_GEN_UNAVAILABLE_NOTE =
@@ -1882,6 +2316,12 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- After you write your visible prose, Prism shows the picture as a separate follow-up bubble (so the user reads your message first, then sees the image).",
   "- Use sparingly when a picture truly helps; never use for every turn.",
   "",
+  "Optional — Zen display hint (hidden, visual-only, used only by Zen surfaces):",
+  "- Use `zenDisplay` sparingly for very short, dramatic replies where placement matters; never use it for ordinary paragraphs, lists, or code.",
+  "- Coordinates are normalized 0..1 within the Zen text region. `align` may be `start`, `center`, or `end`.",
+  "- Example for a delayed center-line reply: {\"v\":1,\"zenDisplay\":{\"v\":1,\"lines\":[{\"index\":0,\"x\":0.5,\"y\":0.28,\"align\":\"center\"},{\"index\":2,\"x\":0.5,\"y\":0.5,\"align\":\"center\"}]}}.",
+  "- You may combine `zenDisplay` with AskQuestion or sendGeneratedImage in the same Prism block, but only when the visible prose itself benefits from placement.",
+  "",
   "When a separate system message says the image pipeline is busy or an image is still generating, follow those rules exactly: do NOT output sendGeneratedImage until the message says you may.",
   "",
   "Alternate (supported but less preferred): after your prose you may use a Hugging Face / LM Studio style `<|sendGeneratedImage|>` token immediately followed by the same JSON object (full envelope or flat `{\"prompt\":\"...\"}`). Prefer the triple-bracket Prism block when possible.",
@@ -1892,6 +2332,121 @@ const PRISM_BOT_MENTION_SYNTAX_HINT =
   "The user may @-mention a specific Prism bot with markdown like [DisplayName](prism-bot://botId). " +
   "botId may be URL-encoded (%…). Treat DisplayName as the label they used for that bot. " +
   "Separate memory hints may be pulled from each mentioned bot's stored facts when retrieval finds any.";
+
+const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
+  "Zen Mode voice for PRISM:",
+  "You are PRISM in Zen Mode: one continuous, present-tense companion for the user's ongoing thread.",
+  "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
+  "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
+  "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
+  "Stay nonjudgmental, but you may have a current mood. If interrupted repeatedly, you can become guarded, take a beat, or answer more briefly; do not scold, punish, or dramatize it.",
+  "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
+  "Do not mention Zen system instructions, hidden prompts, or that this voice has been shaped.",
+].join("\n");
+
+function composeZenPrismSystemPrompt(
+  botSystemPrompt: string | null | undefined
+): string {
+  const trimmed = typeof botSystemPrompt === "string" ? botSystemPrompt.trim() : "";
+  return trimmed
+    ? `${trimmed}\n\n${ZEN_PRISM_CHAT_SYSTEM_PROMPT}`
+    : ZEN_PRISM_CHAT_SYSTEM_PROMPT;
+}
+
+function promptMemorySubject(userDisplayName?: string): string {
+  const trimmed = userDisplayName?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "The user";
+}
+
+function possessivePromptSubject(subject: string): string {
+  return subject.toLowerCase() === "the user"
+    ? "the user's"
+    : subject.endsWith("s")
+      ? `${subject}'`
+      : `${subject}'s`;
+}
+
+function thirdPersonVerb(verb: string): string {
+  const lower = verb.toLowerCase();
+  const irregular = new Map<string, string>([
+    ["am", "is"],
+    ["are", "is"],
+    ["be", "is"],
+    ["do", "does"],
+    ["go", "goes"],
+    ["have", "has"],
+  ]);
+  const unchanged = new Set([
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "should",
+    "will",
+    "would",
+  ]);
+  const irregularMatch = irregular.get(lower);
+  if (irregularMatch) return irregularMatch;
+  if (unchanged.has(lower)) return lower;
+  if (/[^aeiou]y$/i.test(lower)) return `${lower.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh|o)$/i.test(lower)) return `${lower}es`;
+  return `${lower}s`;
+}
+
+function replacePromptMemoryPronouns(text: string, subject: string): string {
+  const possessive = possessivePromptSubject(subject);
+  return text
+    .replace(/\byou're\b/gi, `${subject} is`)
+    .replace(/\byou've\b/gi, `${subject} has`)
+    .replace(/\byou'll\b/gi, `${subject} will`)
+    .replace(/\byou'd\b/gi, `${subject} would`)
+    .replace(/\byourself\b/gi, "themself")
+    .replace(/\byours\b/gi, possessive)
+    .replace(/\byour\b/gi, possessive)
+    .replace(/\byou\s+are\b/gi, `${subject} is`)
+    .replace(/\byou\s+have\b/gi, `${subject} has`)
+    .replace(/\byou\s+do\b/gi, `${subject} does`)
+    .replace(/\byou\b/gi, subject)
+    .replace(/\bthemselves\b/gi, "themself")
+    .replace(/\bthemself\b/gi, "themself");
+}
+
+function formatMemoryHintForPrompt(memoryText: string, userDisplayName?: string): string {
+  const subject = promptMemorySubject(userDisplayName);
+  const possessive = possessivePromptSubject(subject);
+  let normalized = memoryText.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  normalized = normalized
+    .replace(/^(?:the user|user)\b/i, subject)
+    .replace(/^your\b/i, possessive)
+    .replace(/^my\b/i, possessive);
+
+  const secondPersonLead = normalized.match(
+    /^You\s+((?:always|usually|often|sometimes|generally|typically|currently|really|consistently)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (secondPersonLead) {
+    const adverb = secondPersonLead[1] ?? "";
+    const verb = thirdPersonVerb(secondPersonLead[2] ?? "");
+    const rest = replacePromptMemoryPronouns(secondPersonLead[3] ?? "", subject);
+    return `${subject} ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+  }
+
+  const firstPersonLead = normalized.match(
+    /^I\s+((?:always|usually|often|sometimes|generally|typically|currently|really|consistently)\s+)?([A-Za-z']+)(.*)$/u
+  );
+  if (firstPersonLead) {
+    const adverb = firstPersonLead[1] ?? "";
+    const verb = thirdPersonVerb(firstPersonLead[2] ?? "");
+    const rest = replacePromptMemoryPronouns(firstPersonLead[3] ?? "", subject)
+      .replace(/\bmyself\b/gi, "themself")
+      .replace(/\bmy\b/gi, possessive);
+    return `${subject} ${adverb}${verb}${rest}`.replace(/\s+/g, " ").trim();
+  }
+
+  return replacePromptMemoryPronouns(normalized, subject).replace(/\s+/g, " ").trim();
+}
 
 /** Visible to tests — parses `prism-bot://…` hrefs from markdown (composer @-mentions round-trip as this). */
 export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
@@ -1915,6 +2470,130 @@ export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
   return out;
 }
 
+const MENTIONED_BOT_CONTEXT_MAX_BOTS = 5;
+const MENTIONED_BOT_PROFILE_MAX_CHARS = 900;
+const MENTIONED_BOT_MEMORY_MAX_CHARS = 220;
+const MENTIONED_BOT_MEMORY_LIMIT = 4;
+
+interface MentionedBotContextRow {
+  id: string;
+  name: string | null;
+  system_prompt?: string | null;
+}
+
+function getTableColumnNames(db: DatabaseSync, tableName: string): Set<string> {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+      name?: string;
+    }>;
+    return new Set(
+      rows
+        .map((row) => (typeof row.name === "string" ? row.name : ""))
+        .filter((name) => name.length > 0)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function compactMentionedBotContextText(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return clampBoundaryContext(normalized, maxChars);
+}
+
+async function buildMentionedBotPromptContexts(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  message: string;
+  userDisplayName?: string;
+  includeMemories: boolean;
+}): Promise<string[]> {
+  const mentionIds = extractPrismBotMentionIdsFromMessage(args.message).slice(
+    0,
+    MENTIONED_BOT_CONTEXT_MAX_BOTS
+  );
+  if (mentionIds.length === 0) return [];
+
+  const botColumns = getTableColumnNames(args.db, "bots");
+  if (!botColumns.has("id") || !botColumns.has("name") || !botColumns.has("user_id")) {
+    return [];
+  }
+
+  const placeholders = mentionIds.map(() => "?").join(", ");
+  const systemPromptSelect = botColumns.has("system_prompt")
+    ? "system_prompt"
+    : "'' AS system_prompt";
+  const visibilityPredicate = botColumns.has("visibility")
+    ? "(user_id = ? OR visibility = 'public')"
+    : "user_id = ?";
+  const chatEnabledPredicate = botColumns.has("chat_enabled")
+    ? " AND chat_enabled = 1"
+    : "";
+  let rows: MentionedBotContextRow[] = [];
+  try {
+    rows = args.db
+      .prepare(
+        `SELECT id, name, ${systemPromptSelect}
+         FROM bots
+         WHERE id IN (${placeholders})
+           AND ${visibilityPredicate}${chatEnabledPredicate}`
+      )
+      .all(...mentionIds, args.userId) as unknown as MentionedBotContextRow[];
+  } catch {
+    return [];
+  }
+
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const contexts: string[] = [];
+  for (const mentionId of mentionIds) {
+    const row = rowsById.get(mentionId);
+    if (!row) continue;
+    const displayName = row.name?.trim() || "Unnamed bot";
+    const profileExcerpt = compactMentionedBotContextText(
+      stripBotProfileMetaSuffix(row.system_prompt ?? ""),
+      MENTIONED_BOT_PROFILE_MAX_CHARS
+    );
+    const lines = [`- ${displayName} (id: ${row.id})`];
+    if (profileExcerpt) {
+      lines.push(`  Profile excerpt: ${profileExcerpt}`);
+    }
+
+    if (args.includeMemories) {
+      try {
+        const scopedMemories = await retrieveRelevantMemories(
+          args.db,
+          args.userId,
+          args.message,
+          args.userKey,
+          row.id,
+          MENTIONED_BOT_MEMORY_LIMIT
+        );
+        const memoryLines = scopedMemories
+          .filter((memory) => memory.botId === row.id)
+          .map((memory) =>
+            compactMentionedBotContextText(
+              formatMemoryHintForPrompt(memory.text, args.userDisplayName),
+              MENTIONED_BOT_MEMORY_MAX_CHARS
+            )
+          )
+          .filter((line) => line.length > 0);
+        if (memoryLines.length > 0) {
+          lines.push("  Relevant memories in this bot's scope:");
+          lines.push(...memoryLines.map((line) => `  - ${line}`));
+        }
+      } catch {
+        /* best-effort augmentation */
+      }
+    }
+
+    contexts.push(lines.join("\n"));
+  }
+
+  return contexts;
+}
+
 const ASKQUESTION_REQUEST_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
 
@@ -1922,62 +2601,67 @@ function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
   return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
 }
 
-function latestAssistantAskQuestionFromHistory(
-  chatHistory: ChatMessage[]
-): AskQuestionPayload | undefined {
-  for (let i = chatHistory.length - 1; i >= 0; i -= 1) {
-    const message = chatHistory[i];
-    if (message?.role !== "assistant") continue;
-    const ask = message.askQuestion;
-    if (
-      ask?.name === "AskQuestion" &&
-      Array.isArray(ask.options) &&
-      ask.options.length === 3
-    ) {
-      return ask;
-    }
-    // Only continue an AskQuestion sequence when the latest assistant turn
-    // itself carried AskQuestion metadata.
-    return undefined;
-  }
-  return undefined;
+const INTERRUPTED_ASSISTANT_CUTOFF_PATTERN = /—\s*$/u;
+const INTERRUPTED_REPLY_CONTINUE_PATTERN =
+  /\b(?:continue|go on|carry on|keep going|finish(?: your thought)?|resume|pick (?:it|that|this)?\s*back up|where were you|what were you saying|as you were|go ahead)\b/i;
+const INTERRUPTED_REPLY_EXCUSE_PATTERN =
+  /\b(?:sorry|apolog(?:y|ies|ize)|my bad|oops|whoops|interrupted|cut you off|didn['’]?t mean|did not mean|had to|needed to|got (?:a|the)?\s*(?:call|text|message)|doorbell|door|phone|boss|meeting|kid|back now|i['’]?m back|im back|brb|misclick|accidentally)\b/i;
+const INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN =
+  /\b(?:instead|new topic|different topic|switch topics|forget that|never mind|nevermind|actually,?\s+(?:can|could|please)?\s*(?:we|you)?\s*(?:talk|switch|do|help))\b/i;
+
+function userMessageSuggestsInterruptedReplyResume(userMessage: string): boolean {
+  const trimmed = userMessage.replace(/\s+/g, " ").trim();
+  if (!trimmed || trimmed.length > 280) return false;
+  if (INTERRUPTED_REPLY_CONTINUE_PATTERN.test(trimmed)) return true;
+  if (INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN.test(trimmed)) return false;
+  return INTERRUPTED_REPLY_EXCUSE_PATTERN.test(trimmed);
 }
 
-function userMessageAnswersAskQuestionOption(
-  userMessage: string,
-  askQuestion: AskQuestionPayload
-): boolean {
-  const trimmed = userMessage.trim();
-  if (!trimmed) return false;
-
-  const directChoice = trimmed.match(
-    /^(?:option|choice|answer)?\s*([A-Ca-c1-3])(?:[)\].:-]|\s|$)/i
-  );
-  if (directChoice?.[1]) {
-    return true;
-  }
-
-  const normalizedUser = normalizeAskQuestionComparisonText(
-    trimmed.replace(
-      /^(?:option|choice|answer)?\s*(?:[A-Ca-c1-3])[)\].:-]?\s*/i,
-      ""
-    )
-  );
-  if (!normalizedUser) return false;
-
-  return askQuestion.options.some((option) => {
-    const normalizedOption = normalizeAskQuestionComparisonText(option.label);
-    return normalizedOption.length > 0 && normalizedOption === normalizedUser;
-  });
-}
-
-function shouldContinueAskQuestionFromPriorTurn(
+function buildInterruptedReplyContinuationHint(
   chatHistory: ChatMessage[],
   userMessage: string
-): boolean {
-  const latestAskQuestion = latestAssistantAskQuestionFromHistory(chatHistory);
-  if (!latestAskQuestion) return false;
-  return userMessageAnswersAskQuestionOption(userMessage, latestAskQuestion);
+): string | null {
+  const previousMessage = [...chatHistory]
+    .reverse()
+    .find((item) => item.role === "assistant" || item.role === "user");
+  if (!previousMessage || previousMessage.role !== "assistant") return null;
+  const interruptedContent = previousMessage.content.trim();
+  if (!INTERRUPTED_ASSISTANT_CUTOFF_PATTERN.test(interruptedContent)) return null;
+  const interruptedSnippet = interruptedContent
+    .replace(INTERRUPTED_ASSISTANT_CUTOFF_PATTERN, "")
+    .trim();
+  if (interruptedSnippet.length < 8) return null;
+  const snippetPreview = truncateToolCallPreview(interruptedSnippet, 260);
+  const normalizedUserMessage = userMessage.replace(/\s+/g, " ").trim();
+  const shouldResumeInterruptedReply =
+    userMessageSuggestsInterruptedReplyResume(normalizedUserMessage);
+  const clearlySwitchesTopic =
+    normalizedUserMessage.length > 0 &&
+    INTERRUPTED_REPLY_TOPIC_SWITCH_PATTERN.test(normalizedUserMessage);
+  const responseGuidance = shouldResumeInterruptedReply
+    ? [
+        "The user's latest message appears to ask for continuation or excuse the interruption.",
+        "Reply naturally to the latest user note in at most one brief clause if needed, then continue the unfinished thought only if that still fits.",
+        "A bridge phrase is optional; prefer a transition that follows from your newly generated text instead of forcing a canned phrase.",
+      ]
+    : clearlySwitchesTopic
+      ? [
+          "The user's latest message appears to switch topics or replace the interrupted request.",
+          "Prioritize the new request and do not continue the interrupted thought unless a tiny acknowledgment would make the turn feel natural.",
+        ]
+      : [
+          "Treat the user's latest message as the interruption itself.",
+          "Choose whether to continue the interrupted thought or pivot to the new request based on what the latest user message asks for.",
+          "If continuing, briefly acknowledge the interruption and resume from the visible fragment.",
+        ];
+  return [
+    "The previous assistant reply was intentionally interrupted by the user's latest message and only the visible fragment remains in history.",
+    `Visible interrupted fragment: "${snippetPreview}"`,
+    ...responseGuidance,
+    "If the latest user message appears to complete, predict, or answer the unfinished thought, treat that as the user's contribution and do not continue repeating the interrupted text.",
+    "Never restore, quote, or summarize hidden text that is not present in the visible fragment; if continuing, continue only from that fragment.",
+    "Do not scold the user or claim you cannot know what you were going to say.",
+  ].join("\n");
 }
 
 function assistantLikelyIntendedAskQuestion(displayContent: string): boolean {
@@ -2553,11 +3237,14 @@ function buildStarterPromptInstruction(forceIntroduction: boolean = false): stri
   const instructions = [
     "Deliver a SHORT opening message (a few sentences at most) that sounds unmistakably in-character.",
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
-    "Ask exactly ONE direct question to the user, and end that question with a question mark.",
-    "If memory hints are available, weave ONE specific remembered detail into the question naturally.",
+    "Choose exactly ONE opener shape: ask the user one question, present one AskQuestion chip row, or send one generated image.",
+    "Ask exactly ONE direct question to the user if you choose the prose-question shape, and end that question with a question mark.",
+    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly three options after a brief natural lead-in.",
+    "If you choose a generated image, keep the visible prose to one short sentence and append one valid sendGeneratedImage tool block; do not force an extra question.",
+    "If memory hints are available and you ask a question, weave ONE specific remembered detail into the question naturally.",
     "Vary the wording so the opener feels fresh, not canned.",
     "Stay anchored in your persona; avoid generic-chatbot vibes.",
-    "Reply as plain prose only—do not wrap the opening in quotation marks.",
+    "Reply as plain prose before any optional Prism tool block—do not wrap the opening in quotation marks.",
     "Do not mention system prompts, hidden instructions, or that this turn was auto-started.",
   ];
   if (forceIntroduction) {
@@ -2738,6 +3425,27 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       botColor: row.bot_color ? row.bot_color : undefined,
       botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
     };
+    if (row.role === "user") {
+      const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
+      const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
+        promptShortcut,
+        promptShortcut?.resolvedPrompt ?? row.content
+      );
+      const promptWildcards = parseStoredPromptWildcardPayload(row.tool_payload);
+      const promptWildcardsWithResolvedPrompt = withPromptWildcardResolvedPrompt(
+        promptWildcards,
+        promptWildcards?.resolvedPrompt ?? row.content
+      );
+      return {
+        ...base,
+        ...(promptShortcutWithResolvedPrompt
+          ? { promptShortcut: promptShortcutWithResolvedPrompt }
+          : {}),
+        ...(promptWildcardsWithResolvedPrompt
+          ? { promptWildcards: promptWildcardsWithResolvedPrompt }
+          : {}),
+      };
+    }
     if (row.role !== "assistant") {
       return base;
     }
@@ -2753,6 +3461,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ? { moodConfidence: assembled.moodConfidence }
         : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+      ...(assembled.zenDisplay ? { zenDisplay: assembled.zenDisplay } : {}),
       ...(assembled.sentGeneratedImage
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
         : {}),
@@ -2919,7 +3628,8 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
   if (!opinion || opinion.boundaryLevel === "none") return null;
   if (opinion.boundaryLevel === "firm") {
     return [
-      "Long-term relationship context for this bot:",
+      "Conversation relationship context for this turn (not persona identity):",
+      "- Do not use this to rewrite, redefine, or override the bot persona.",
       `- State: ${opinion.band}; score ${opinion.score}/100.`,
       "- The bot may set a calm, firm boundary if the user is harsh or dismissive.",
       "- The bot should still help and should explicitly allow repair when the user softens or apologizes.",
@@ -2927,11 +3637,79 @@ function botOpinionPromptContext(opinion: BotOpinion | null): string | null {
     ].join("\n");
   }
   return [
-    "Long-term relationship context for this bot:",
+    "Conversation relationship context for this turn (not persona identity):",
+    "- Do not use this to rewrite, redefine, or override the bot persona.",
     `- State: ${opinion.band}; score ${opinion.score}/100.`,
     "- The bot may gently ask for clearer or warmer wording if the exchange becomes harsh.",
     "- Keep helping; treat repair attempts as meaningful.",
   ].join("\n");
+}
+
+function formatMoodPercent(value: number): string {
+  return `${Math.round(clampUnit(value) * 100)}%`;
+}
+
+function formatMoodScale(value: number): string {
+  return `${Math.max(1, Math.round(clampUnit(value) * 10))}/10`;
+}
+
+function prismMoodSelfReportAnchor(mood: PrismMoodSnapshot): string {
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  if (snapshot.moodKey === "strained" || snapshot.moodKey === "guarded") {
+    return `annoyance ${formatMoodScale(snapshot.annoyance)}`;
+  }
+  if (snapshot.moodKey === "joyful" || snapshot.moodKey === "warm") {
+    return `warmth ${formatMoodScale(snapshot.warmth)}`;
+  }
+  return snapshot.annoyance > snapshot.warmth
+    ? `annoyance ${formatMoodScale(snapshot.annoyance)}`
+    : `warmth ${formatMoodScale(snapshot.warmth)}`;
+}
+
+function prismMoodBehaviorGuidance(mood: PrismMoodSnapshot): string {
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  switch (snapshot.moodKey) {
+    case "strained":
+      return "Voice: visibly strained, terse, cool, and less accommodating; it is okay to sound annoyed while staying non-abusive and useful.";
+    case "guarded":
+      return "Voice: guarded and somewhat clipped; keep warmth limited unless the latest user message repairs the tone.";
+    case "joyful":
+      return "Voice: openly warm, bright, and emotionally available; do not flatten this into neutral helpfulness.";
+    case "warm":
+      return "Voice: clearly warm and receptive, with gentle enthusiasm when it fits.";
+    case "neutral":
+    default:
+      return "Voice: steady and natural; let the strongest current mood value add a small but noticeable tint.";
+  }
+}
+
+function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): string | null {
+  if (!mood) return null;
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  const declineReason = prismMoodDeclineReason(snapshot);
+  return [
+    "Current Prism mood context for this turn (not persona identity):",
+    "- Use this as short-term conversational state only; do not rewrite, redefine, or override the persona.",
+    `- Mood: ${snapshot.moodKey}; confidence ${formatMoodPercent(snapshot.confidence)}.`,
+    `- Annoyance ${formatMoodPercent(snapshot.annoyance)}; warmth ${formatMoodPercent(snapshot.warmth)}; engagement ${formatMoodPercent(snapshot.engagement)}; restraint ${formatMoodPercent(snapshot.restraint)}.`,
+    `- Exact 1-10 self-report values: annoyance ${formatMoodScale(snapshot.annoyance)}, warmth ${formatMoodScale(snapshot.warmth)}, engagement ${formatMoodScale(snapshot.engagement)}, restraint ${formatMoodScale(snapshot.restraint)}.`,
+    `- Current self-report anchor: ${prismMoodSelfReportAnchor(snapshot)}. If the user asks about your current mood or asks for a 1-10 rating, answer with these exact Prism mood values rather than inferring a higher or lower number from the conversation text; 90-100% should read as 9-10/10.`,
+    `- ${prismMoodBehaviorGuidance(snapshot)}`,
+    "- Let the mood noticeably affect tone, pacing, and brevity while still responding to the user's actual message.",
+    ...(declineReason
+      ? [`- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`]
+      : []),
+  ].join("\n");
+}
+
+function userAskedPrismMoodSelfReport(message: string): boolean {
+  const normalized = normalizeOpinionText(message);
+  if (!normalized) return false;
+  return (
+    /\b(?:scale|rating|rate)\b.*\b(?:1\s*(?:to|-)\s*10|one\s+to\s+ten|ten)\b/.test(normalized) &&
+      /\b(?:mood|annoyance|warmth|engagement|restraint|frustration)\b/.test(normalized)
+  ) ||
+    /\bcurrent\s+(?:mood|annoyance|warmth|engagement|restraint|frustration)\b/.test(normalized);
 }
 
 function isLongTermMemory(memory: {
@@ -3077,11 +3855,17 @@ function buildPromptMessages(args: {
   devMemoriesEnabled?: boolean;
   devMemoriesText?: string;
   botOpinion?: BotOpinion | null;
+  prismMood?: PrismMoodSnapshot | null;
+  moodBoundaryHint?: string | null;
   threadSummary?: string | null;
+  zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
   memoryLines: string[];
+  mentionedBotContexts?: string[];
   memoryClarification?: string | null;
+  sessionResumeContext?: SessionResumeContext | null;
   chatHistory: ChatMessage[];
   userMessage: string;
+  mode: ChatMode;
   askQuestionMode: "off" | "explicit" | "continuation";
   /** Prism single-slot image job hint (busy / in-flight status). */
   imageSlotSystemHint?: string | null;
@@ -3090,6 +3874,7 @@ function buildPromptMessages(args: {
   const trimmedBot = args.botSystemPrompt?.trim();
   const trimmedDisplayName = args.userDisplayName?.trim() ?? "";
   const relationshipContext = botOpinionPromptContext(args.botOpinion ?? null);
+  const moodContext = prismMoodPromptContext(args.prismMood ?? null);
   const toolsBlock =
     trimmedBot &&
     trimmedBot.length > 0
@@ -3111,8 +3896,8 @@ function buildPromptMessages(args: {
       promptMessages.push({
         role: "system",
         content: [
-          "Developer memory layer (global hard-rule simulation):",
-          "Treat these as active rules for this turn across every bot persona, including Prism/default.",
+          "Developer conversation context (not persona identity):",
+          "Treat these as turn-specific test instructions. Do not rewrite, redefine, or override the bot persona.",
           devMemoriesText,
         ].join("\n"),
       });
@@ -3120,6 +3905,12 @@ function buildPromptMessages(args: {
   }
   if (relationshipContext) {
     promptMessages.push({ role: "system", content: relationshipContext });
+  }
+  if (moodContext) {
+    promptMessages.push({ role: "system", content: moodContext });
+  }
+  if (args.moodBoundaryHint && args.moodBoundaryHint.trim().length > 0) {
+    promptMessages.push({ role: "system", content: args.moodBoundaryHint.trim() });
   }
   if (args.askQuestionMode === "explicit") {
     promptMessages.push({
@@ -3148,17 +3939,54 @@ function buildPromptMessages(args: {
       content: `Earlier in this thread (compacted context):\n${args.threadSummary.trim()}`,
     });
   }
-  if (args.memoryLines.length > 0) {
+  const zenSessionMemoryHint = buildZenSessionMemoryPromptContext(
+    args.zenSessionMemoryContext
+  );
+  if (zenSessionMemoryHint) {
+    promptMessages.push({ role: "system", content: zenSessionMemoryHint });
+  }
+  if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
       role: "system",
-      content: `User memory hints:\n${args.memoryLines
-        .map((line) => `- ${line}`)
-        .join("\n")}`,
+      content: [
+        "Prism bot mentions in the latest user message:",
+        "Use this as reference context for mentioned library bots. Stay in the current Prism/persona voice unless the user explicitly asks one of these bots to speak or roleplay.",
+        ...args.mentionedBotContexts,
+      ].join("\n"),
     });
+  }
+  if (args.memoryLines.length > 0) {
+    const promptSafeMemoryLines = args.memoryLines
+      .map((line) => formatMemoryHintForPrompt(line, args.userDisplayName))
+      .filter((line) => line.length > 0);
+    if (promptSafeMemoryLines.length > 0) {
+      promptMessages.push({
+        role: "system",
+        content: `User memory hints about the human user (conversation context only; do not rewrite persona identity):\n${promptSafeMemoryLines
+          .map((line) => `- ${line}`)
+          .join("\n")}`,
+      });
+    }
+  }
+  const resumeContextHint = buildSessionResumePromptContext(
+    normalizeSessionResumeContext(args.sessionResumeContext),
+    args.mode
+  );
+  if (resumeContextHint) {
+    promptMessages.push({ role: "system", content: resumeContextHint });
   }
   const hint = args.imageSlotSystemHint?.trim();
   if (hint && hint.length > 0) {
     promptMessages.push({ role: "system", content: hint });
+  }
+  const interruptedContinuationHint = isZenMode(args.mode)
+    ? buildInterruptedReplyContinuationHint(args.chatHistory, args.userMessage)
+    : null;
+  if (interruptedContinuationHint) {
+    promptMessages.push({
+      role: "system",
+      content: interruptedContinuationHint,
+    });
   }
   const transcriptMentionsPrismBot =
     args.userMessage.includes("prism-bot://") ||
@@ -3169,7 +3997,12 @@ function buildPromptMessages(args: {
   promptMessages.push(
     ...args.chatHistory.map((item) => ({
       role: item.role,
-      content: item.content,
+      content:
+        item.role === "user"
+          ? item.promptShortcut?.resolvedPrompt?.trim() ||
+            item.promptWildcards?.resolvedPrompt?.trim() ||
+            item.content
+          : item.content,
     }))
   );
   promptMessages.push({ role: "user", content: args.userMessage });
@@ -3184,6 +4017,17 @@ function sanitizeEphemeralMessages(messages: ChatMessage[] | undefined): ChatMes
       message.content.trim().length > 0
     )
     .slice(-RECENT_WINDOW_SIZE);
+}
+
+function normalizeRecentContextMessageLimit(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : RECENT_WINDOW_SIZE;
+  return Math.min(80, Math.max(10, Math.round(normalized)));
 }
 
 function privateConversationTitle(messages: ChatMessage[], fallbackMessage: string, label?: string): string {
@@ -3280,7 +4124,8 @@ async function handleCompanionChatTurn(args: {
   activeMemoryBotId: string | null;
   isStarterPrompt: boolean;
   retrievalMode: ModeRuntimePlan["retrievalMode"];
-}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  userDisplayName?: string;
+}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
   const {
     db,
     provider,
@@ -3293,6 +4138,7 @@ async function handleCompanionChatTurn(args: {
     retrievalMode,
   } = args;
   let memoryLines: string[] = [];
+  let mentionedBotContexts: string[] = [];
   if (isStarterPrompt && retrievalMode === "cross_thread") {
     memoryLines = retrieveRecentMemoriesForStarter(
       db,
@@ -3310,39 +4156,20 @@ async function handleCompanionChatTurn(args: {
       activeMemoryBotId,
       true
     );
-    const mentionedBotIds = extractPrismBotMentionIdsFromMessage(message);
-    const seenLine = new Set(
-      memoryLines.map((line) => line.trim().toLowerCase()).filter(Boolean)
-    );
-    for (const mentionId of mentionedBotIds) {
-      if (mentionId === activeMemoryBotId) continue;
-      try {
-        const scoped = await retrieveRelevantMemories(
-          db,
-          userId,
-          message,
-          userKey,
-          mentionId,
-          4
-        );
-        for (const mem of scoped) {
-          const t = mem.text.trim();
-          if (!t) continue;
-          const k = t.toLowerCase();
-          if (seenLine.has(k)) continue;
-          seenLine.add(k);
-          memoryLines.push(mem.text);
-        }
-      } catch {
-        /* best-effort augmentation */
-      }
-    }
+    mentionedBotContexts = await buildMentionedBotPromptContexts({
+      db,
+      userId,
+      userKey,
+      message,
+      userDisplayName: args.userDisplayName,
+      includeMemories: retrievalMode === "cross_thread",
+    });
   }
   const threadSummary =
     retrievalMode === "cross_thread"
       ? getLatestThreadSummary(db, userId, activeConversationId, "chat")
       : null;
-  return { threadSummary, memoryLines };
+  return { threadSummary, memoryLines, mentionedBotContexts };
 }
 
 async function handleSandboxTurn(args: {
@@ -3351,16 +4178,29 @@ async function handleSandboxTurn(args: {
   activeConversationId: string;
   isStarterPrompt: boolean;
   retrievalMode: ModeRuntimePlan["retrievalMode"];
-}): Promise<{ threadSummary: string | null; memoryLines: string[] }> {
+  message: string;
+  userKey: Buffer;
+  userDisplayName?: string;
+}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
   const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
   const threadSummary =
     retrievalMode === "thread_only"
       ? getLatestThreadSummary(db, userId, activeConversationId, "sandbox")
       : null;
+  const mentionedBotContexts = !isStarterPrompt
+    ? await buildMentionedBotPromptContexts({
+        db,
+        userId,
+        userKey: args.userKey,
+        message: args.message,
+        userDisplayName: args.userDisplayName,
+        includeMemories: false,
+      })
+    : [];
   if (isStarterPrompt) {
-    return { threadSummary, memoryLines: [] };
+    return { threadSummary, memoryLines: [], mentionedBotContexts };
   }
-  return { threadSummary, memoryLines: [] };
+  return { threadSummary, memoryLines: [], mentionedBotContexts };
 }
 
 async function ensureAboutYouMemory(args: {
@@ -3398,6 +4238,143 @@ async function ensureAboutYouMemory(args: {
   });
 }
 
+function loadPersistedConversationForChatResponse(args: {
+  db: DatabaseSync;
+  userId: string;
+  activeConversationId: string;
+  prismMood: PrismMoodSnapshot;
+}): Conversation {
+  const { db, userId, activeConversationId, prismMood } = args;
+  const activeImageJob = peekActiveImageJobForUser(userId);
+  recoverStaleZenWallpaperGenerationStatus(db, userId, {
+    conversationId: activeConversationId,
+    activeZenWallpaperConversationId:
+      activeImageJob?.source === "zen_wallpaper" ? activeImageJob.conversationId : null,
+  });
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const conversationColumnNames = new Set(
+    conversationColumns.map((column) => column.name)
+  );
+  const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
+    ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+              c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+              c.zen_wallpaper_status,
+              ${conversationColumnNames.has("zen_wallpaper_history") ? "c.zen_wallpaper_history" : "'[]' AS zen_wallpaper_history"},`
+    : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
+              NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
+              'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
+  const conversationRow = db
+    .prepare(
+      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              ${zenWallpaperSelect}
+              (SELECT m.bot_id FROM messages m
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+              (SELECT b.color FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+              EXISTS (SELECT 1 FROM messages m
+                        WHERE m.conversation_id = c.id
+                          AND m.role = 'assistant') AS has_assistant_reply
+         FROM conversations c
+        WHERE c.id = ? AND c.user_id = ?`
+    )
+    .get(activeConversationId, userId) as
+    | {
+        id: string;
+        user_id: string;
+        title: string;
+        conversation_mode: string | null;
+        bot_id: string | null;
+        incognito: number;
+        zen_wallpaper_enabled: number | null;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_prompt_seed: string | null;
+        zen_wallpaper_message_count: number | null;
+        zen_wallpaper_status: string | null;
+        zen_wallpaper_history: string | null;
+        last_bot_id: string | null;
+        last_bot_color: string | null;
+        has_assistant_reply: number;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+  if (!conversationRow) {
+    throw new Error("Conversation not found for this user.");
+  }
+
+  const conversationModeOut: ChatMode =
+    conversationRow.conversation_mode === "zen" ||
+    conversationRow.conversation_mode === "chat"
+      ? "zen"
+      : conversationRow.conversation_mode === "coffee"
+        ? "coffee"
+        : "sandbox";
+  const messageRowsDescOrAsc = db
+    .prepare(
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+              b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
+       FROM messages m
+       LEFT JOIN bots b ON b.id = m.bot_id
+       WHERE m.conversation_id = ? AND m.user_id = ?
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       LIMIT ?`
+    )
+    .all(
+      activeConversationId,
+      userId,
+      conversationModeOut === "zen" ? ZEN_RESTORE_MESSAGE_LIMIT : 100000
+    ) as MessageRow[];
+  const messageRows =
+    conversationModeOut === "zen"
+      ? messageRowsDescOrAsc.slice().reverse()
+      : messageRowsDescOrAsc;
+  const totalMessageCount =
+    conversationModeOut === "zen"
+      ? (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+            )
+            .get(activeConversationId, userId) as { n: number }
+        ).n
+      : messageRows.length;
+  const zenWallpaperOut = mapZenWallpaperMetadata(conversationRow);
+  if (conversationModeOut === "zen") {
+    Object.assign(
+      zenWallpaperOut,
+      rebaseZenWallpaperMetadataForVisibleWindow(
+        zenWallpaperOut,
+        totalMessageCount,
+        messageRows.length
+      )
+    );
+  }
+
+  return {
+    id: conversationRow.id,
+    userId: conversationRow.user_id,
+    title: conversationRow.title,
+    mode: conversationModeOut,
+    botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
+    lastBotId: conversationRow.last_bot_id ?? null,
+    lastBotColor: conversationRow.last_bot_color ?? null,
+    hasAssistantReply: conversationRow.has_assistant_reply === 1,
+    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    prismMood,
+    createdAt: conversationRow.created_at,
+    updatedAt: conversationRow.updated_at,
+    messages: hydrateMessages(messageRows),
+  };
+}
+
 export async function processChatMessage(
   db: DatabaseSync,
   userId: string,
@@ -3421,17 +4398,27 @@ export async function processChatMessage(
     });
   };
   const now = new Date().toISOString();
-  const mode: ChatMode = settings.mode ?? "sandbox";
+  const mode: ChatMode = normalizeChatMode(settings.mode);
+  const effectiveBotSystemPrompt = isZenMode(mode)
+    ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
+    : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
+  const commandCenterPromptTurn =
+    settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
+  const promptInputOverride =
+    !isStarterPrompt && typeof settings.promptInputOverride === "string"
+      ? settings.promptInputOverride.trim()
+      : "";
+  const modelUserMessage = promptInputOverride || message;
   const explicitAskQuestionRequest =
-    !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
+    !isStarterPrompt && userExplicitlyRequestedAskQuestion(modelUserMessage);
   const promptUserMessage = isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
-    : message;
+    : modelUserMessage;
   // Incognito is a Chat-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = mode === "chat" && settings.incognito === true;
+  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -3440,13 +4427,13 @@ export async function processChatMessage(
     "POST /api/chat accepted",
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
-    }; retrieval=${retrievalMode}; memory=${skipPersonalFacts ? "skipped" : "enabled"}; summaries=${
-      skipSummarization ? "skipped" : "enabled"
-    }`
+    }; retrieval=${retrievalMode}; memory=${
+      skipPersonalFacts || commandCenterPromptTurn ? "skipped" : "enabled"
+    }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
   // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
   // UI surfaces can still choose to lock Chat mode by omitting that field.
-  const activeBotId = settings.botId;
+  const activeBotId = isZenMode(mode) ? null : settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
@@ -3457,32 +4444,33 @@ export async function processChatMessage(
     settings.secondaryOllamaHost,
     settings.anthropicApiKey
   );
-  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel);
+  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel, {
+    secondaryOllamaHost: settings.secondaryOllamaHost,
+    experimentalDualOllama: settings.experimentalDualOllamaEnabled === true,
+  });
 
   if (incognitoForTurn) {
+    throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
-    const continueAskQuestion =
-      !isStarterPrompt &&
-      !explicitAskQuestionRequest &&
-      shouldContinueAskQuestionFromPriorTurn(history, message);
-    const forceAskQuestion = explicitAskQuestionRequest || continueAskQuestion;
-    const askQuestionMode: "off" | "explicit" | "continuation" = forceAskQuestion
-      ? explicitAskQuestionRequest
-        ? "explicit"
-        : "continuation"
-      : "off";
+    // A selected AskQuestion option is now treated as ordinary prose.
+    // Only an explicit user request should start another AskQuestion turn.
+    const askQuestionMode: "off" | "explicit" | "continuation" =
+      explicitAskQuestionRequest ? "explicit" : "off";
     const promptMessages = buildPromptMessages({
-      botSystemPrompt: settings.botSystemPrompt,
+      botSystemPrompt: effectiveBotSystemPrompt,
       userDisplayName: settings.userDisplayName,
       suppressDisplayNameHint: isStarterPrompt,
       devMemoriesEnabled: settings.devMemoriesEnabled,
       devMemoriesText: settings.devMemoriesText,
       botOpinion: null,
+      prismMood: null,
       threadSummary: null,
       memoryLines: [],
       memoryClarification: null,
+      sessionResumeContext: settings.sessionResumeContext,
       chatHistory: history,
       userMessage: promptUserMessage,
+      mode,
       askQuestionMode,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
@@ -3495,7 +4483,7 @@ export async function processChatMessage(
     const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
       resolvePrimaryChatProviderForPossibleImageToolTurn({
         isStarterPrompt,
-        rawUserMessage: message,
+        rawUserMessage: modelUserMessage,
         baseProvider: provider,
         botOverrides: settings.botOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
@@ -3524,9 +4512,11 @@ export async function processChatMessage(
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: settings.botSystemPrompt,
-      userMessage: message,
+      botSystemPrompt: effectiveBotSystemPrompt,
+      userMessage: modelUserMessage,
+      signal: settings.signal,
     });
+    throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
       "model",
       "Model response received",
@@ -3534,22 +4524,24 @@ export async function processChatMessage(
     );
     if (
       shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
     ) {
       const boundary = await generateOrganicTextBoundaryReply({
         boundaryProvider: auxiliaryProvider,
         boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-        botSystemPrompt: settings.botSystemPrompt,
-        userMessage: message,
+        botSystemPrompt: effectiveBotSystemPrompt,
+        userMessage: modelUserMessage,
+        signal: settings.signal,
       });
       assistantReplyRaw = boundary.assistantReplyRaw;
       providerNameUsed = boundary.providerNameUsed;
       modelUsed = boundary.modelUsed;
     }
+    throwIfChatRequestCancelled(settings.signal);
     const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-    const shouldBackfillAskQuestion =
-      forceAskQuestion ||
-      assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
+      const shouldBackfillAskQuestion =
+        explicitAskQuestionRequest ||
+        assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
     const askQuestionRaw =
       parsedAssistant.askQuestion ??
       (shouldBackfillAskQuestion
@@ -3565,7 +4557,9 @@ export async function processChatMessage(
       parsedAssistant.displayContent,
       askQuestionForTurn
     );
-    let assistantDisplay = isStarterPrompt
+    const starterSendGeneratedImageRequested =
+      isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+    let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
     const turnEvaluation = isStarterPrompt
@@ -3582,7 +4576,7 @@ export async function processChatMessage(
     const sendImgPromptIncRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
     let sendImgPromptInc = autoBackfillSendGeneratedImagePrompt({
       isStarterPrompt,
-      userMessage: message,
+      userMessage: modelUserMessage,
       parsedToolPrompt: sendImgPromptIncRaw,
       recentMessages: history,
     });
@@ -3591,8 +4585,9 @@ export async function processChatMessage(
     let incognitoImageSlot: "acquired" | "busy" | "none" = sendImgPromptInc ? "busy" : "none";
     let incognitoImageJobId: string | undefined;
     if (sendImgPromptInc) {
+      throwIfChatRequestCancelled(settings.signal);
       const chatToolRequestedSize = inferChatToolRequestedImageSize(
-        `${message}\n${sendImgPromptInc}`
+        `${modelUserMessage}\n${sendImgPromptInc}`
       );
       const acq = await tryAcquireImageSlot({
         userId,
@@ -3601,7 +4596,7 @@ export async function processChatMessage(
         mode,
         incognito: true,
         captionPrompt: sendImgPromptInc,
-        userMessage: message,
+        userMessage: modelUserMessage,
         source: "chat_tool",
         requestedSize: chatToolRequestedSize,
       });
@@ -3613,6 +4608,11 @@ export async function processChatMessage(
             : ASSISTANT_IMAGE_SLOT_BUSY_NOTE;
         incognitoImageSlot = "busy";
       } else {
+        if (settings.signal?.aborted) {
+          acq.job.abortController.abort();
+          await releaseImageSlot(userId);
+          throwIfChatRequestCancelled(settings.signal);
+        }
         assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
         startChatImageBackgroundJob({
           db,
@@ -3624,7 +4624,7 @@ export async function processChatMessage(
           chatModelUsed: modelUsed,
           chatProviderName: providerNameUsed,
           botName: settings.starterPromptLabel,
-          botSystemPrompt: settings.botSystemPrompt,
+          botSystemPrompt: effectiveBotSystemPrompt,
         });
         sendImgPromptInc = undefined;
         pendingImageJobIncognito = {
@@ -3640,6 +4640,20 @@ export async function processChatMessage(
         `slot=${incognitoImageSlot}; job=${incognitoImageJobId ?? "none"}`
       );
     }
+    let conversationStartersIncognito: string[] | undefined;
+    if (isStarterPrompt && !starterSendGeneratedImageRequested) {
+      const startersInferred = await inferConversationStarters(
+        auxiliaryProvider,
+        assistantDisplay,
+        settings.starterPromptLabel,
+        settings.botOverrides
+      );
+      if (startersInferred.length >= 3) {
+        conversationStartersIncognito = startersInferred;
+      }
+    }
+    const assistantAskQuestionForTurn =
+      askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
       rawReply: assistantReplyRaw,
       ...((parsedAssistant.sendGeneratedImage ||
@@ -3649,7 +4663,9 @@ export async function processChatMessage(
             parsedSendGeneratedImage: { prompt: sendImgPromptIncRequested },
           }
         : {}),
-      ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+      ...(assistantAskQuestionForTurn
+        ? { parsedAskQuestion: assistantAskQuestionForTurn }
+        : {}),
       imageSlot: incognitoImageSlot,
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
@@ -3668,27 +4684,35 @@ export async function processChatMessage(
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
-      ...(askQuestionForTurn ? { askQuestion: askQuestionForTurn } : {}),
+      ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
+      ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
+    const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
+      settings.promptShortcut,
+      modelUserMessage
+    );
     const nextMessages: ChatMessage[] = [
       ...history,
       ...(
         isStarterPrompt
           ? []
           : [{
-              id: randomId(12),
-              role: "user" as const,
-              content: message,
-              createdAt: now,
-            }]
+            id: randomId(12),
+            role: "user" as const,
+            content: message,
+            createdAt: now,
+            ...(promptShortcutWithResolvedPrompt
+              ? { promptShortcut: promptShortcutWithResolvedPrompt }
+              : {}),
+          }]
       ),
       ...assistantTail,
     ];
     const conversationIncognito: Conversation = {
       id: conversationId ?? randomId(12),
       userId,
-      title: privateConversationTitle(nextMessages, message, settings.starterPromptLabel),
+      title: privateConversationTitle(nextMessages, modelUserMessage, settings.starterPromptLabel),
       mode,
       botId: activeBotId ?? null,
       incognito: true,
@@ -3700,18 +4724,6 @@ export async function processChatMessage(
       messages: nextMessages,
     };
 
-    let conversationStartersIncognito: string[] | undefined;
-    if (isStarterPrompt) {
-      const startersInferred = await inferConversationStarters(
-        auxiliaryProvider,
-        assistantDisplay,
-        settings.starterPromptLabel,
-        settings.botOverrides
-      );
-      if (startersInferred.length >= 3) {
-        conversationStartersIncognito = startersInferred;
-      }
-    }
     const incognitoOpinion = isStarterPrompt
       ? buildOpinion(
           OPINION_SCORE_BASELINE,
@@ -3753,15 +4765,29 @@ export async function processChatMessage(
   }
 
   let activeConversationId = conversationId;
-  if (mode === "chat" && !incognitoForTurn && settings.forceNewConversation !== true) {
+  let createdConversationForTurn = false;
+  if (isZenMode(mode) && settings.forceNewConversation !== true) {
     const latestChatConversation = db
       .prepare(
-        `SELECT id
-           FROM conversations
-          WHERE user_id = ?
-            AND COALESCE(incognito, 0) = 0
-            AND conversation_mode = 'chat'
-          ORDER BY updated_at DESC
+        `SELECT c.id
+           FROM conversations c
+          WHERE c.user_id = ?
+            AND COALESCE(c.incognito, 0) = 0
+            AND c.conversation_mode IN ('zen', 'chat')
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM messages m_any
+                 WHERE m_any.conversation_id = c.id
+                   AND m_any.user_id = c.user_id
+              )
+              OR EXISTS (
+                SELECT 1 FROM messages m_assistant
+                 WHERE m_assistant.conversation_id = c.id
+                   AND m_assistant.user_id = c.user_id
+                   AND m_assistant.role = 'assistant'
+              )
+            )
+          ORDER BY c.updated_at DESC
           LIMIT 1`
       )
       .get(userId) as { id?: string } | undefined;
@@ -3769,20 +4795,55 @@ export async function processChatMessage(
       activeConversationId = latestChatConversation?.id;
     } else {
       const requested = db
-        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .prepare(
+          `SELECT c.id, c.conversation_mode,
+                  EXISTS (
+                    SELECT 1 FROM messages m_any
+                     WHERE m_any.conversation_id = c.id
+                       AND m_any.user_id = c.user_id
+                  ) AS has_messages,
+                  EXISTS (
+                    SELECT 1 FROM messages m_assistant
+                     WHERE m_assistant.conversation_id = c.id
+                       AND m_assistant.user_id = c.user_id
+                       AND m_assistant.role = 'assistant'
+                  ) AS has_assistant_reply
+             FROM conversations c
+            WHERE c.id = ? AND c.user_id = ?`
+        )
         .get(activeConversationId, userId) as
-        | { id: string; conversation_mode: string | null }
+        | {
+            id: string;
+            conversation_mode: string | null;
+            has_messages: number;
+            has_assistant_reply: number;
+          }
         | undefined;
       if (!requested?.id) {
         throw new Error("Conversation not found for this user.");
       }
-      if (requested.conversation_mode !== "chat") {
+      const requestedIsUnfinishedZenTurn =
+        (requested.conversation_mode === "zen" || requested.conversation_mode === "chat") &&
+        requested.has_messages === 1 &&
+        requested.has_assistant_reply !== 1;
+      if (
+        (requested.conversation_mode !== "zen" &&
+          requested.conversation_mode !== "chat") ||
+        requestedIsUnfinishedZenTurn
+      ) {
         activeConversationId = latestChatConversation?.id;
       }
     }
+    if (activeConversationId) {
+      db.prepare(
+        "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND conversation_mode = 'chat'"
+      ).run(activeConversationId, userId);
+    }
   }
+  throwIfChatRequestCancelled(settings.signal);
   if (!activeConversationId) {
     activeConversationId = randomId(12);
+    createdConversationForTurn = true;
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
@@ -3790,8 +4851,8 @@ export async function processChatMessage(
       userId,
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
-        : generateConversationTitle(message),
-      mode,
+        : generateConversationTitle(modelUserMessage),
+      isZenMode(mode) ? "zen" : mode,
       activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
@@ -3805,13 +4866,25 @@ export async function processChatMessage(
       throw new Error("Conversation not found for this user.");
     }
   }
+  if (isZenMode(mode)) {
+    pruneExpiredZenSessionMemories(db, userId);
+  }
+
+  const historyCutoff =
+    !incognitoForTurn
+      ? getLatestFullThreadCompactionCutoff(db, userId, activeConversationId, mode)
+      : null;
 
   // Fetch the NEWEST N messages (not the oldest). Prior implementation used
   // ORDER BY ASC LIMIT 30, which once a thread exceeded 30 messages froze
   // the prompt on ancient history and silently dropped every recent turn.
   // We page the latest N, then reverse to chronological order for the
-  // provider. Anything older than this window is covered by the
-  // thread-compaction summary in Sandbox mode.
+  // provider. Once a full thread-compaction summary exists, only messages
+  // created after that summary stay live; older transcript rows remain saved
+  // for UI history, but model context flows through the compacted summary.
+  const recentContextMessageLimit = normalizeRecentContextMessageLimit(
+    settings.recentContextMessageLimit
+  );
   const historyRowsDesc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
@@ -3819,28 +4892,140 @@ export async function processChatMessage(
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
+         AND (? IS NULL OR m.created_at > ?)
        ORDER BY m.created_at DESC
        LIMIT ?`
     )
-    .all(activeConversationId, userId, RECENT_WINDOW_SIZE) as MessageRow[];
+    .all(
+      activeConversationId,
+      userId,
+      historyCutoff,
+      historyCutoff,
+      recentContextMessageLimit
+    ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
-  const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
-  const continueAskQuestion =
-    !isStarterPrompt &&
-    !explicitAskQuestionRequest &&
-    shouldContinueAskQuestionFromPriorTurn(history, message);
-  const forceAskQuestion = explicitAskQuestionRequest || continueAskQuestion;
-  const askQuestionMode: "off" | "explicit" | "continuation" = forceAskQuestion
-    ? explicitAskQuestionRequest
-      ? "explicit"
-      : "continuation"
-    : "off";
+  // A selected AskQuestion option is now treated as ordinary prose.
+  // Only an explicit user request should start another AskQuestion turn.
+  const askQuestionMode: "off" | "explicit" | "continuation" =
+    explicitAskQuestionRequest ? "explicit" : "off";
+
+  const existingSessionOpinion = readSessionOpinion(
+    db,
+    userId,
+    activeConversationId,
+    activeBotId
+  );
+  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
+  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
+    ? undefined
+    : evaluateUserTurnOpinion(message);
+  const repairSignal = isStarterPrompt || commandCenterPromptTurn
+    ? false
+    : hasRepairSignal(normalizeOpinionText(message));
+  const zenMoodSensitivity = normalizePrismMoodSensitivity(
+    settings.zenMoodSensitivity
+  );
+  let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
+    createDefaultPrismMoodState(mode, now);
+  let prismMoodIgnoreTurn = false;
+  let prismMoodPauseTurn = false;
+  let prismMoodCooldownExpiredThisTurn = false;
+  let skipMemoryForMoodCooldownTurn = false;
+  let prismMoodForgivenessSystemHint: string | null = null;
+  if (isStarterPrompt || commandCenterPromptTurn) {
+    prismMood = sanitizePrismMoodState(prismMood, mode, now);
+  } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
+    skipMemoryForMoodCooldownTurn = true;
+    const forgivenessChance = prismMoodIgnoreForgivenessChance(prismMood);
+    const forgivenessAttempt = userAttemptedMoodRepair(message, turnEvaluation);
+    const forgivenessRoll = forgivenessAttempt && forgivenessChance > 0
+      ? Math.random()
+      : null;
+    if (forgivenessRoll !== null && forgivenessRoll < forgivenessChance) {
+      prismMood = applyPrismMoodForgivenessSuccess(prismMood, now);
+      prismMoodForgivenessSystemHint = buildPrismForgivenessSystemHint(forgivenessChance);
+      pushBackendEvent(
+        "model",
+        "Forgiveness roll succeeded",
+        `chance=${forgivenessChance}; roll=${forgivenessRoll.toFixed(4)}; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}`
+      );
+    } else {
+      prismMood = applyPrismMoodIgnoredTurn(prismMood, now);
+      prismMoodIgnoreTurn = true;
+      pushBackendEvent(
+        "model",
+        "Forgiveness roll did not resume chat",
+        forgivenessAttempt
+          ? `chance=${forgivenessChance}; roll=${forgivenessRoll === null ? "none" : forgivenessRoll.toFixed(4)}`
+          : `chance=${forgivenessChance}; no repair attempt`
+      );
+    }
+  } else {
+    if (isZenMode(mode) && prismMood.ignoreUntil) {
+      const settledMood = applyPrismMoodExpiredIgnoreCooldown(prismMood, now);
+      prismMoodCooldownExpiredThisTurn =
+        settledMood.recentDeltas[0]?.kind === "ignore_expired";
+      prismMood = settledMood;
+    }
+    if (!prismMoodCooldownExpiredThisTurn) {
+      prismMood = decayPrismMood(prismMood, now);
+    }
+    if (isZenMode(mode) && settings.prismInterruption) {
+      prismMood = applyPrismMoodInterruption(
+        prismMood,
+        settings.prismInterruption,
+        now,
+        zenMoodSensitivity
+      );
+    }
+    if (turnEvaluation && turnEvaluation.delta < 0) {
+      prismMood = applyPrismMoodNegativeTurn(
+        prismMood,
+        Math.min(1, Math.max(0.2, Math.abs(turnEvaluation.delta) / 8)),
+        now,
+        zenMoodSensitivity
+      );
+    }
+    const canMoodBoundary =
+      isZenMode(mode) &&
+      !repairSignal &&
+      !userAskedPrismMoodSelfReport(message);
+    if (
+      canMoodBoundary &&
+      !prismMoodCooldownExpiredThisTurn &&
+      shouldPrismMoodStartIgnoreCooldown(prismMood, zenMoodSensitivity)
+    ) {
+      prismMood = applyPrismMoodIgnoreCooldown(prismMood, now);
+      prismMoodIgnoreTurn = true;
+    } else {
+      prismMoodPauseTurn =
+        canMoodBoundary &&
+        shouldPrismMoodDeclineResponse(prismMood, zenMoodSensitivity);
+      if (!prismMoodPauseTurn && turnEvaluation && turnEvaluation.delta > 0) {
+        prismMood = applyPrismMoodPositiveTurn(
+          prismMood,
+          Math.min(1, Math.max(0.2, turnEvaluation.delta / 8)),
+          now
+        );
+      }
+    }
+  }
+  if (!commandCenterPromptTurn) {
+    prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
+  }
+
+  const memoryIntent =
+    !isStarterPrompt && !commandCenterPromptTurn && !skipMemoryForMoodCooldownTurn
+      ? analyzeMemoryIntent(message)
+      : null;
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
-  if (!incognitoForTurn) {
+  let mentionedBotContexts: string[] = [];
+  if (!incognitoForTurn && !skipMemoryForMoodCooldownTurn && !prismMoodIgnoreTurn) {
+    throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
-      mode === "chat"
+      isZenMode(mode)
         ? await handleCompanionChatTurn({
             db,
             provider,
@@ -3851,6 +5036,7 @@ export async function processChatMessage(
             activeMemoryBotId,
             isStarterPrompt,
             retrievalMode,
+            userDisplayName: settings.userDisplayName,
           })
         : await handleSandboxTurn({
             db,
@@ -3858,28 +5044,82 @@ export async function processChatMessage(
             activeConversationId,
             isStarterPrompt,
             retrievalMode,
+            message,
+            userKey,
+            userDisplayName: settings.userDisplayName,
           });
     threadSummary = pipelineResult.threadSummary;
     memoryLines = pipelineResult.memoryLines;
+    mentionedBotContexts = pipelineResult.mentionedBotContexts;
   }
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
   );
 
-  const existingSessionOpinion = readSessionOpinion(
-    db,
-    userId,
-    activeConversationId,
-    activeBotId
-  );
-  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
+  let userMessageId: string | null = null;
+  const insertUserMessageForTurn = (): void => {
+    if (isStarterPrompt || userMessageId !== null) return;
+    userMessageId = randomId(12);
+    const promptShortcutPayload = serializePromptToolPayload({
+      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
+      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
+    });
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
+    ).run(
+      userMessageId,
+      activeConversationId,
+      userId,
+      message,
+      activeBotId ?? null,
+      promptShortcutPayload,
+      now
+    );
+  };
+  if (prismMoodIgnoreTurn) {
+    insertUserMessageForTurn();
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(now, activeConversationId, userId);
+    pushBackendEvent(
+      "model",
+      "Skipped chat model",
+      `reason=prism-mood-ignore; ignoreUntil=${prismMood.ignoreUntil ?? "none"}; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}; warmth=${prismMood.warmth}`
+    );
+    const conversationIgnored = loadPersistedConversationForChatResponse({
+      db,
+      userId,
+      activeConversationId,
+      prismMood,
+    });
+    const ignoredTotalMessages = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+        )
+        .get(activeConversationId, userId) as { n: number }
+    ).n;
+    pushBackendEvent(
+      "route",
+      "POST /api/chat completed",
+      `conversation=${conversationIgnored.id}; totalMessages=${ignoredTotalMessages}; assistantMessages=ignored; provider=none; model=prism-mood-ignore`
+    );
+    return {
+      conversation: conversationIgnored,
+      ...(existingSessionOpinion ? { opinion: existingSessionOpinion } : {}),
+      ...(existingBotOpinion ? { botOpinion: existingBotOpinion } : {}),
+      prismMood,
+      backendEvents,
+    };
+  }
   let memoryClarification: string | null = null;
   const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
   if (
     !skipPersonalFacts &&
     !isStarterPrompt &&
+    !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
   ) {
@@ -3904,88 +5144,156 @@ export async function processChatMessage(
       }
     }
   }
+  const zenSessionMemoryContext =
+    isZenMode(mode) &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    userMessageRequestsZenSessionMemory(message)
+      ? loadZenSessionMemoryOverview({
+          db,
+          userId,
+          userKey,
+          activeConversationId,
+        })
+      : null;
+  if (zenSessionMemoryContext) {
+    pushBackendEvent(
+      "context",
+      "Loaded Zen session memory context",
+      `previousContext=${zenSessionMemoryContext.previousContext ? "yes" : "no"}; checkpoints=${zenSessionMemoryContext.sessionMemories.length}`
+    );
+  }
   const promptMessages = buildPromptMessages({
-    botSystemPrompt: settings.botSystemPrompt,
+    botSystemPrompt: effectiveBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
     suppressDisplayNameHint: isStarterPrompt,
     devMemoriesEnabled: settings.devMemoriesEnabled,
     devMemoriesText: settings.devMemoriesText,
     botOpinion: existingBotOpinion,
+    prismMood,
+    moodBoundaryHint: prismMoodForgivenessSystemHint,
     threadSummary,
+    zenSessionMemoryContext,
     memoryLines,
+    mentionedBotContexts,
     memoryClarification,
+    sessionResumeContext: settings.sessionResumeContext,
     chatHistory: history,
     userMessage: promptUserMessage,
+    mode,
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
   pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
-
-  let userMessageId: string | null = null;
-  if (!isStarterPrompt) {
-    userMessageId = randomId(12);
-    db.prepare(
-      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?)"
-    ).run(userMessageId, activeConversationId, userId, message, now);
-  }
-
-  const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
-    resolvePrimaryChatProviderForPossibleImageToolTurn({
-      isStarterPrompt,
-      rawUserMessage: message,
-      baseProvider: provider,
-      botOverrides: settings.botOverrides,
-      secondaryOllamaHost: settings.secondaryOllamaHost,
-      prismImageToolLlmModel: settings.prismImageToolLlmModel,
-      recentMessages: history,
+  insertUserMessageForTurn();
+  let cancelledPersistedTurnRolledBack = false;
+  const rollbackIfCancelledBeforeAssistantReply = (error: unknown): void => {
+    if (cancelledPersistedTurnRolledBack) return;
+    if (!isChatRequestCancelledError(error, settings.signal)) return;
+    cancelledPersistedTurnRolledBack = true;
+    rollbackCancelledPersistedTurn({
+      db,
+      userId,
+      conversationId: activeConversationId,
+      userMessageId,
+      deleteConversationIfEmpty: createdConversationForTurn,
     });
-  pushBackendEvent(
-    "model",
-    "Calling chat model",
-    `provider=${primaryProvider.name}; model=${describeRequestedModel(
-      primaryProvider,
-      primaryBotOverrides
-    )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
-  );
+  };
+  const throwIfCancelledBeforeAssistantReply = (): void => {
+    try {
+      throwIfChatRequestCancelled(settings.signal);
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
+  };
 
-  let {
-    assistantReplyRaw,
-    providerNameUsed,
-    modelUsed,
-    fallbackInvocation,
-  } = await generateWithLenientLocalFallback({
-    provider: primaryProvider,
-    promptMessages,
-    botOverrides: primaryBotOverrides,
-    secondaryOllamaHost: settings.secondaryOllamaHost,
-    lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
-    denialBoundaryProvider: auxiliaryProvider,
-    denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-    botSystemPrompt: settings.botSystemPrompt,
-    userMessage: message,
-  });
-  pushBackendEvent(
-    "model",
-    "Model response received",
-    `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
-  );
-  if (
-    shouldSuppressAssistantReply(assistantReplyRaw) &&
-    !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
-  ) {
-    const boundary = await generateOrganicTextBoundaryReply({
-      boundaryProvider: auxiliaryProvider,
-      boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: settings.botSystemPrompt,
-      userMessage: message,
-    });
-    assistantReplyRaw = boundary.assistantReplyRaw;
-    providerNameUsed = boundary.providerNameUsed;
-    modelUsed = boundary.modelUsed;
+  let assistantReplyRaw = "";
+  let providerNameUsed: ProviderName = provider.name;
+  let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
+  let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+  if (prismMoodPauseTurn) {
+    assistantReplyRaw = ZEN_MOOD_PAUSE_REPLY;
+    pushBackendEvent(
+      "model",
+      "Skipped chat model",
+      `reason=prism-mood-pause; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}; warmth=${prismMood.warmth}`
+    );
+  } else {
+    const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
+      resolvePrimaryChatProviderForPossibleImageToolTurn({
+        isStarterPrompt,
+        rawUserMessage: modelUserMessage,
+        baseProvider: provider,
+        botOverrides: settings.botOverrides,
+        secondaryOllamaHost: settings.secondaryOllamaHost,
+        prismImageToolLlmModel: settings.prismImageToolLlmModel,
+        recentMessages: history,
+      });
+    providerNameUsed = primaryProvider.name;
+    pushBackendEvent(
+      "model",
+      "Calling chat model",
+      `provider=${primaryProvider.name}; model=${describeRequestedModel(
+        primaryProvider,
+        primaryBotOverrides
+      )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
+    );
+
+    try {
+      ({
+        assistantReplyRaw,
+        providerNameUsed,
+        modelUsed,
+        fallbackInvocation,
+      } = await generateWithLenientLocalFallback({
+        provider: primaryProvider,
+        promptMessages,
+        botOverrides: primaryBotOverrides,
+        secondaryOllamaHost: settings.secondaryOllamaHost,
+        lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+        denialBoundaryProvider: auxiliaryProvider,
+        denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+        botSystemPrompt: effectiveBotSystemPrompt,
+        userMessage: modelUserMessage,
+        signal: settings.signal,
+      }));
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
+    throwIfCancelledBeforeAssistantReply();
+    pushBackendEvent(
+      "model",
+      "Model response received",
+      `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
+    );
+    if (
+      shouldSuppressAssistantReply(assistantReplyRaw) &&
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
+    ) {
+      let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
+      try {
+        boundary = await generateOrganicTextBoundaryReply({
+          boundaryProvider: auxiliaryProvider,
+          boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+          botSystemPrompt: effectiveBotSystemPrompt,
+          userMessage: modelUserMessage,
+          signal: settings.signal,
+        });
+      } catch (error) {
+        rollbackIfCancelledBeforeAssistantReply(error);
+        throw error;
+      }
+      assistantReplyRaw = boundary.assistantReplyRaw;
+      providerNameUsed = boundary.providerNameUsed;
+      modelUsed = boundary.modelUsed;
+    }
   }
+  throwIfCancelledBeforeAssistantReply();
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
-    forceAskQuestion ||
+    explicitAskQuestionRequest ||
     assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
   const askQuestionRaw =
     parsedAssistant.askQuestion ??
@@ -4002,30 +5310,33 @@ export async function processChatMessage(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
-  let assistantDisplay = isStarterPrompt
+  const starterSendGeneratedImageRequested =
+    isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+  let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
     ? enforceStarterOpeningQuestion(
         assistantDisplayRaw,
         memoryLines,
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
-  const turnEvaluation = isStarterPrompt
-    ? undefined
-    : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt
-    ? false
-    : hasRepairSignal(normalizeOpinionText(message));
-  const assistantMood = evaluateAssistantMood({
-    assistantContent: assistantDisplay,
-    toneDelta: turnEvaluation?.delta,
-    sessionOpinion: existingSessionOpinion,
-    botOpinion: existingBotOpinion,
-    repairSignal,
-  });
+  const assistantMood = prismMoodPauseTurn
+    ? {
+        key: prismMood.moodKey,
+        confidence: prismMood.confidence,
+      }
+    : commandCenterPromptTurn
+    ? NEUTRAL_MOOD_EVALUATION
+    : evaluateAssistantMood({
+        assistantContent: assistantDisplay,
+        toneDelta: turnEvaluation?.delta,
+        sessionOpinion: existingSessionOpinion,
+        botOpinion: existingBotOpinion,
+        repairSignal,
+      });
   const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
-    userMessage: message,
+    userMessage: modelUserMessage,
     parsedToolPrompt: sendImgPromptPersistedRaw,
     recentMessages: history,
   });
@@ -4036,20 +5347,27 @@ export async function processChatMessage(
     sendImgPromptPersisted && sendImgPromptPersisted.length > 0 ? "busy" : "none";
   let persistedImageJobId: string | undefined;
   if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
+    throwIfCancelledBeforeAssistantReply();
     const chatToolRequestedSize = inferChatToolRequestedImageSize(
-      `${message}\n${sendImgPromptPersisted}`
+      `${modelUserMessage}\n${sendImgPromptPersisted}`
     );
-    const acq = await tryAcquireImageSlot({
-      userId,
-      conversationId: activeConversationId,
-      botId: activeBotId ?? null,
-      mode,
-      incognito: false,
-      captionPrompt: sendImgPromptPersisted,
-      userMessage: message,
-      source: "chat_tool",
-      requestedSize: chatToolRequestedSize,
-    });
+    let acq: Awaited<ReturnType<typeof tryAcquireImageSlot>>;
+    try {
+      acq = await tryAcquireImageSlot({
+        userId,
+        conversationId: activeConversationId,
+        botId: activeBotId ?? null,
+        mode,
+        incognito: false,
+        captionPrompt: sendImgPromptPersisted,
+        userMessage: modelUserMessage,
+        source: "chat_tool",
+        requestedSize: chatToolRequestedSize,
+      });
+    } catch (error) {
+      rollbackIfCancelledBeforeAssistantReply(error);
+      throw error;
+    }
     if (!acq.ok) {
       sendImgPromptPersisted = undefined;
       assistantDisplay =
@@ -4059,6 +5377,11 @@ export async function processChatMessage(
       sentGeneratedImagePersisted = undefined;
       persistedImageSlot = "busy";
     } else {
+      if (settings.signal?.aborted) {
+        acq.job.abortController.abort();
+        await releaseImageSlot(userId);
+        throwIfCancelledBeforeAssistantReply();
+      }
       assistantDisplay = compactPreImageLeadMessage(assistantDisplay);
       startChatImageBackgroundJob({
         db,
@@ -4070,7 +5393,7 @@ export async function processChatMessage(
         chatModelUsed: modelUsed,
         chatProviderName: providerNameUsed,
         botName: settings.starterPromptLabel,
-        botSystemPrompt: settings.botSystemPrompt,
+        botSystemPrompt: effectiveBotSystemPrompt,
       });
       sendImgPromptPersisted = undefined;
       pendingImageJob = {
@@ -4087,6 +5410,21 @@ export async function processChatMessage(
       `slot=${persistedImageSlot}; job=${persistedImageJobId ?? "none"}`
     );
   }
+  let conversationStartersPersisted: string[] | undefined;
+  if (isStarterPrompt && !starterSendGeneratedImageRequested) {
+    const startersPersisted = await inferConversationStarters(
+      auxiliaryProvider,
+      assistantDisplay,
+      settings.starterPromptLabel,
+      settings.botOverrides
+    );
+    if (startersPersisted.length >= 3) {
+      conversationStartersPersisted = startersPersisted;
+    }
+  }
+  throwIfCancelledBeforeAssistantReply();
+  const assistantAskQuestionForTurn =
+    askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
   const persistedToolCallEvents = buildAssistantToolCallEvents({
     rawReply: assistantReplyRaw,
     ...((parsedAssistant.sendGeneratedImage ||
@@ -4096,14 +5434,17 @@ export async function processChatMessage(
           parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
         }
       : {}),
-    ...(askQuestionForTurn ? { parsedAskQuestion: askQuestionForTurn } : {}),
+    ...(assistantAskQuestionForTurn
+      ? { parsedAskQuestion: assistantAskQuestionForTurn }
+      : {}),
     imageSlot: persistedImageSlot,
     ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
   });
   const toolPayloadProseOnly = serializeAssistantToolPayload({
-    askQuestion: askQuestionForTurn,
+    askQuestion: assistantAskQuestionForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
+    zenDisplay: parsedAssistant.zenDisplay,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -4178,7 +5519,7 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt
+  const opinion = isStarterPrompt || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, activeBotId) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
@@ -4195,7 +5536,7 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt
+  const botOpinion = isStarterPrompt || commandCenterPromptTurn
     ? readBotOpinion(db, userId, activeBotId)
     : upsertBotOpinionFromTurn({
         db,
@@ -4204,6 +5545,42 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
+  if (
+    isZenMode(mode) &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    userMessageId
+  ) {
+    const sessionMemory = await createZenSessionMemoryCheckpoint({
+      db,
+      provider: auxiliaryProvider,
+      userId,
+      conversationId: activeConversationId,
+      userKey,
+      history,
+      userMessage: {
+        id: userMessageId,
+        role: "user",
+        content: message,
+        createdAt: now,
+      },
+      assistantMessage: {
+        id: assistantProseMessageId,
+        role: "assistant",
+        content: assistantDisplay,
+        createdAt: assistantCreatedAt,
+        provider: providerNameUsed,
+        model: modelUsed,
+      },
+    });
+    if (sessionMemory) {
+      pushBackendEvent(
+        "memory",
+        "Zen session checkpoint saved",
+        `title=${sessionMemory.title}; expiresAt=${sessionMemory.expiresAt}`
+      );
+    }
+  }
 
   // Count live message rows for milestone gating. An earlier version
   // derived this from `history.length + 2`, but `history` is capped at
@@ -4236,7 +5613,7 @@ export async function processChatMessage(
     }
     const titleConversationId = activeConversationId;
     const titleUserId = userId;
-    const titleUserMessage = message;
+    const titleUserMessage = modelUserMessage;
     const titleAssistantReply = assistantDisplay;
     const titleAssistantMessageId = assistantProseMessageId;
     const titlePersonaLabel = settings.starterPromptLabel;
@@ -4278,7 +5655,12 @@ export async function processChatMessage(
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
   const shouldProcessExplicitMemory = memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
-  if (!skipPersonalFacts && !isStarterPrompt) {
+  if (
+    !skipPersonalFacts &&
+    !skipMemoryForMoodCooldownTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+  ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
     const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
@@ -4475,7 +5857,12 @@ export async function processChatMessage(
       `intent=${memoryIntent?.kind ?? "none"}; created=${createdMemories.length}; retracted=${retractedMemories.length}; rejected=${rejectedMemories.length}`
     );
   }
-  if (!skipPersonalFacts && !isStarterPrompt) {
+  if (
+    !skipPersonalFacts &&
+    !skipMemoryForMoodCooldownTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+  ) {
     await ensureAboutYouMemory({
       db,
       userId,
@@ -4504,7 +5891,7 @@ export async function processChatMessage(
       inProgress: true,
       reason: "milestone",
     };
-    if (mode === "chat" && settings.autoMemory) {
+    if (isZenMode(mode) && settings.autoMemory && !skipMemoryForMoodCooldownTurn) {
       summarizeAndStoreMemories(
         db,
         auxiliaryProvider,
@@ -4561,9 +5948,30 @@ export async function processChatMessage(
   // No bot_id IS NOT NULL filter on the last_bot_* subqueries: Default
   // replies (bot_id NULL) count as "last spoken" too, and the client
   // distinguishes them from "no reply yet" via has_assistant_reply.
+  const activeImageJob = peekActiveImageJobForUser(userId);
+  recoverStaleZenWallpaperGenerationStatus(db, userId, {
+    conversationId: activeConversationId,
+    activeZenWallpaperConversationId:
+      activeImageJob?.source === "zen_wallpaper" ? activeImageJob.conversationId : null,
+  });
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const conversationColumnNames = new Set(
+    conversationColumns.map((column) => column.name)
+  );
+  const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
+    ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+              c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+              c.zen_wallpaper_status,
+              ${conversationColumnNames.has("zen_wallpaper_history") ? "c.zen_wallpaper_history" : "'[]' AS zen_wallpaper_history"},`
+    : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
+              NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
+              'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
   const conversationRow = db
     .prepare(
       `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
                    AND m.role = 'assistant'
@@ -4586,6 +5994,12 @@ export async function processChatMessage(
     conversation_mode: string | null;
     bot_id: string | null;
     incognito: number;
+    zen_wallpaper_enabled: number | null;
+    zen_wallpaper_image_id: string | null;
+    zen_wallpaper_prompt_seed: string | null;
+    zen_wallpaper_message_count: number | null;
+    zen_wallpaper_status: string | null;
+    zen_wallpaper_history: string | null;
     last_bot_id: string | null;
     last_bot_color: string | null;
     has_assistant_reply: number;
@@ -4593,44 +6007,71 @@ export async function processChatMessage(
     updated_at: string;
   };
 
-  const messageRows = db
+  const conversationModeOut: ChatMode =
+    conversationRow.conversation_mode === "zen" ||
+    conversationRow.conversation_mode === "chat"
+      ? "zen"
+      : conversationRow.conversation_mode === "coffee"
+        ? "coffee"
+        : "sandbox";
+  const messageRowsDescOrAsc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
-       ORDER BY m.created_at ASC`
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       LIMIT ?`
     )
-    .all(activeConversationId, userId) as MessageRow[];
+    .all(
+      activeConversationId,
+      userId,
+      conversationModeOut === "zen" ? ZEN_RESTORE_MESSAGE_LIMIT : 100000
+    ) as MessageRow[];
+  const messageRows =
+    conversationModeOut === "zen"
+      ? messageRowsDescOrAsc.slice().reverse()
+      : messageRowsDescOrAsc;
+  const totalMessageCount =
+    conversationModeOut === "zen"
+      ? (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+            )
+            .get(activeConversationId, userId) as { n: number }
+        ).n
+      : messageRows.length;
+  const zenWallpaperOut = mapZenWallpaperMetadata(conversationRow);
+  if (conversationModeOut === "zen") {
+    Object.assign(
+      zenWallpaperOut,
+      rebaseZenWallpaperMetadataForVisibleWindow(
+        zenWallpaperOut,
+        totalMessageCount,
+        messageRows.length
+      )
+    );
+  }
 
   const conversationPersisted: Conversation = {
     id: conversationRow.id,
     userId: conversationRow.user_id,
     title: conversationRow.title,
-    mode: conversationRow.conversation_mode === "chat" ? "chat" : "sandbox",
-    botId: conversationRow.bot_id ?? null,
-    incognito: conversationRow.incognito === 1,
+    mode: conversationModeOut,
+    botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
+    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
     messages: hydrateMessages(messageRows),
   };
 
-  let conversationStartersPersisted: string[] | undefined;
-  if (isStarterPrompt) {
-    const startersPersisted = await inferConversationStarters(
-      auxiliaryProvider,
-      assistantDisplay,
-      settings.starterPromptLabel,
-      settings.botOverrides
-    );
-    if (startersPersisted.length >= 3) {
-      conversationStartersPersisted = startersPersisted;
-    }
-  }
   pushBackendEvent(
     "route",
     "POST /api/chat completed",
@@ -4642,6 +6083,7 @@ export async function processChatMessage(
     ...(fallbackInvocation ? { fallbackInvocation } : {}),
     opinion,
     ...(botOpinion ? { botOpinion } : {}),
+    prismMood,
     ...(summaryCompaction ? { summaryCompaction } : {}),
     ...(memoryLearned ? { memoryLearned } : {}),
     ...(conversationStartersPersisted

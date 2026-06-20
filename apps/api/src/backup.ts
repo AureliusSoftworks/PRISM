@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
+import {
+  normalizeZenWallpaperOpacity,
+  normalizeZenWallpaperTextMaskEnabled,
+} from "./settings.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -9,8 +13,10 @@ export interface BackupUserSettings {
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
+  experimentalDualOllamaEnabled: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
+  hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
   lenientLocalFallbackModel: string;
@@ -20,12 +26,17 @@ export interface BackupUserSettings {
   comfyUiWorkflows: unknown[];
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
+  preferredZenWallpaperLocalImageModel: string;
+  preferredZenWallpaperOpenAiImageModel: string;
+  zenWallpaperOpacity: number;
+  zenWallpaperTextMaskEnabled: boolean;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  elevenLabsApiKey?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -125,8 +136,10 @@ export function exportUserSnapshot(
          provider_locked,
          auto_memory,
          composer_writing_assist,
+         experimental_dual_ollama_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
+         hidden_comfyui_workflow_ids,
          preferred_local_model,
          preferred_online_model,
          lenient_local_fallback_model,
@@ -136,6 +149,10 @@ export function exportUserSnapshot(
          comfyui_workflows,
          preferred_local_image_model,
          preferred_openai_image_model,
+         preferred_zen_wallpaper_local_image_model,
+         preferred_zen_wallpaper_openai_image_model,
+         zen_wallpaper_opacity,
+         zen_wallpaper_text_mask_enabled,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -145,7 +162,10 @@ export function exportUserSnapshot(
          openai_key_tag,
          anthropic_key_ciphertext,
          anthropic_key_iv,
-         anthropic_key_tag
+         anthropic_key_tag,
+         elevenlabs_key_ciphertext,
+         elevenlabs_key_iv,
+         elevenlabs_key_tag
        FROM users
        WHERE id = ?`
     )
@@ -156,8 +176,10 @@ export function exportUserSnapshot(
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
+        experimental_dual_ollama_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
+        hidden_comfyui_workflow_ids: string | null;
         preferred_local_model: string | null;
         preferred_online_model: string | null;
         lenient_local_fallback_model: string | null;
@@ -167,6 +189,10 @@ export function exportUserSnapshot(
         comfyui_workflows: string | null;
         preferred_local_image_model: string | null;
         preferred_openai_image_model: string | null;
+        preferred_zen_wallpaper_local_image_model: string | null;
+        preferred_zen_wallpaper_openai_image_model: string | null;
+        zen_wallpaper_opacity: number | null;
+        zen_wallpaper_text_mask_enabled: number | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -177,6 +203,9 @@ export function exportUserSnapshot(
         anthropic_key_ciphertext: string | null;
         anthropic_key_iv: string | null;
         anthropic_key_tag: string | null;
+        elevenlabs_key_ciphertext: string | null;
+        elevenlabs_key_iv: string | null;
+        elevenlabs_key_tag: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -186,8 +215,10 @@ export function exportUserSnapshot(
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
         preferredLocalModel: user.preferred_local_model ?? "",
         preferredOnlineModel: user.preferred_online_model ?? "",
         lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
@@ -197,6 +228,16 @@ export function exportUserSnapshot(
         comfyUiWorkflows: safeParseArray(user.comfyui_workflows),
         preferredLocalImageModel: user.preferred_local_image_model ?? "",
         preferredOpenAiImageModel: user.preferred_openai_image_model ?? "",
+        preferredZenWallpaperLocalImageModel:
+          user.preferred_zen_wallpaper_local_image_model ?? "",
+        preferredZenWallpaperOpenAiImageModel:
+          user.preferred_zen_wallpaper_openai_image_model ?? "",
+        zenWallpaperOpacity: normalizeZenWallpaperOpacity(
+          user.zen_wallpaper_opacity
+        ),
+        zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
+          user.zen_wallpaper_text_mask_enabled
+        ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
@@ -222,6 +263,20 @@ export function exportUserSnapshot(
                   ciphertext: user.anthropic_key_ciphertext,
                   iv: user.anthropic_key_iv,
                   tag: user.anthropic_key_tag,
+                },
+                userKey
+              ),
+            }
+          : {}),
+        ...(user.elevenlabs_key_ciphertext &&
+        user.elevenlabs_key_iv &&
+        user.elevenlabs_key_tag
+          ? {
+              elevenLabsApiKey: decryptText(
+                {
+                  ciphertext: user.elevenlabs_key_ciphertext,
+                  iv: user.elevenlabs_key_iv,
+                  tag: user.elevenlabs_key_tag,
                 },
                 userKey
               ),
@@ -419,9 +474,16 @@ export function importUserSnapshot(
       typeof settings.anthropicApiKey === "string" && settings.anthropicApiKey.length > 0
         ? settings.anthropicApiKey
         : null;
+    const elevenLabsApiKey =
+      typeof settings.elevenLabsApiKey === "string" && settings.elevenLabsApiKey.length > 0
+        ? settings.elevenLabsApiKey
+        : null;
     const encryptedOpenAiKey = openAiApiKey ? encryptText(openAiApiKey, userKey) : null;
     const encryptedAnthropicKey = anthropicApiKey
       ? encryptText(anthropicApiKey, userKey)
+      : null;
+    const encryptedElevenLabsKey = elevenLabsApiKey
+      ? encryptText(elevenLabsApiKey, userKey)
       : null;
     db.prepare(`
       UPDATE users
@@ -431,8 +493,10 @@ export function importUserSnapshot(
         provider_locked = ?,
         auto_memory = ?,
         composer_writing_assist = ?,
+        experimental_dual_ollama_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
+        hidden_comfyui_workflow_ids = ?,
         preferred_local_model = ?,
         preferred_online_model = ?,
         lenient_local_fallback_model = ?,
@@ -442,6 +506,10 @@ export function importUserSnapshot(
         comfyui_workflows = ?,
         preferred_local_image_model = ?,
         preferred_openai_image_model = ?,
+        preferred_zen_wallpaper_local_image_model = ?,
+        preferred_zen_wallpaper_openai_image_model = ?,
+        zen_wallpaper_opacity = ?,
+        zen_wallpaper_text_mask_enabled = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -451,7 +519,10 @@ export function importUserSnapshot(
         openai_key_tag = ?,
         anthropic_key_ciphertext = ?,
         anthropic_key_iv = ?,
-        anthropic_key_tag = ?
+        anthropic_key_tag = ?,
+        elevenlabs_key_ciphertext = ?,
+        elevenlabs_key_iv = ?,
+        elevenlabs_key_tag = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
@@ -461,10 +532,18 @@ export function importUserSnapshot(
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
+      settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
           ? settings.hiddenBotModelIds.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0
+            )
+          : []
+      ),
+      JSON.stringify(
+        Array.isArray(settings.hiddenComfyUiWorkflowIds)
+          ? settings.hiddenComfyUiWorkflowIds.filter(
               (value): value is string => typeof value === "string" && value.trim().length > 0
             )
           : []
@@ -478,6 +557,10 @@ export function importUserSnapshot(
       JSON.stringify(Array.isArray(settings.comfyUiWorkflows) ? settings.comfyUiWorkflows : []),
       settings.preferredLocalImageModel?.trim() ?? "",
       settings.preferredOpenAiImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperLocalImageModel?.trim() ?? "",
+      settings.preferredZenWallpaperOpenAiImageModel?.trim() ?? "",
+      normalizeZenWallpaperOpacity(settings.zenWallpaperOpacity),
+      normalizeZenWallpaperTextMaskEnabled(settings.zenWallpaperTextMaskEnabled) ? 1 : 0,
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,
@@ -488,6 +571,9 @@ export function importUserSnapshot(
       encryptedAnthropicKey?.ciphertext ?? null,
       encryptedAnthropicKey?.iv ?? null,
       encryptedAnthropicKey?.tag ?? null,
+      encryptedElevenLabsKey?.ciphertext ?? null,
+      encryptedElevenLabsKey?.iv ?? null,
+      encryptedElevenLabsKey?.tag ?? null,
       userId
     );
   }
