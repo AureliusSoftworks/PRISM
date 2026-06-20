@@ -273,9 +273,9 @@ function uniqueModelIdsByLabel(ids: string[]): string[] {
   return result;
 }
 
-function removeModelIdsWithLabels(ids: string[], excludedIds: string[]): string[] {
-  const excludedLabels = new Set(excludedIds.map(modelLabelKey));
-  return ids.filter((id) => !excludedLabels.has(modelLabelKey(id)));
+function keepModelIdsWithLabels(ids: string[], requiredIds: string[]): string[] {
+  const requiredLabels = new Set(requiredIds.map(modelLabelKey));
+  return ids.filter((id) => requiredLabels.has(modelLabelKey(id)));
 }
 
 function encodeSecondaryOllamaModelId(id: string): string {
@@ -586,7 +586,7 @@ export async function buildModelCatalog(
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const secondaryLocalIds = removeModelIdsWithLabels(
+  const secondaryLocalIds = keepModelIdsWithLabels(
     uniqueModelIdsByLabel(discoveredSecondaryLocal),
     localIds
   );

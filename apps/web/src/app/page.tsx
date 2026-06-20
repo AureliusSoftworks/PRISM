@@ -5626,25 +5626,6 @@ function composeAutoOptionMetaLine(
   return entry?.label ?? modelLabelFromId(resolved.model);
 }
 
-function localModelDuplicateKey(model: ModelCatalogEntry): string {
-  const rawId = model.id.startsWith(SECONDARY_OLLAMA_MODEL_PREFIX)
-    ? model.id.slice(SECONDARY_OLLAMA_MODEL_PREFIX.length)
-    : model.id;
-  return modelLabelFromId(rawId).toLocaleLowerCase();
-}
-
-function preferPrimaryLocalModelEntries(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
-  const primaryKeys = new Set(
-    models
-      .filter((model) => model.localHost !== "secondary")
-      .map(localModelDuplicateKey)
-  );
-  return models.filter(
-    (model) =>
-      model.localHost !== "secondary" || !primaryKeys.has(localModelDuplicateKey(model))
-  );
-}
-
 function isRequiredPrimaryLocalModel(model: ModelCatalogEntry): boolean {
   return (
     model.provider === "local" &&
@@ -5661,7 +5642,7 @@ function modelOptionsForProvider(
   if (provider === "local") {
     const fallbackId = settings?.ollamaModel?.trim() || "Local default";
     return catalog?.local.length
-      ? preferPrimaryLocalModelEntries(catalog.local)
+      ? catalog.local
       : [{ id: fallbackId, label: fallbackId, provider: "local", isDefault: true }];
   }
   const onlineOptions = (catalog?.online ?? []).filter(
