@@ -150,7 +150,12 @@ import {
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
-import type { GenerateOptions, LlmProvider, ProviderMessage, ProviderName } from "./providers.ts";
+import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
+import {
+  normalizeComposerWildcardValueResponse,
+  promptWildcardNames,
+  resolvePromptWildcardsWithModel,
+} from "./prompt-wildcards.ts";
 import {
   defaultHiddenModelIdsForCatalog,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
@@ -186,7 +191,6 @@ import {
   type ChatMessage,
   type OpinionBand,
   type OpinionTrend,
-  type PromptShortcutWildcardReplacement,
   type SessionOpinion,
 } from "@localai/shared";
 import { generateImage } from "./image-provider.ts";
@@ -273,11 +277,6 @@ const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
 const COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT =
   "You generate one random wildcard value for a composer helper. Use only the requested wildcard type, not conversation context. Return JSON only in this exact shape: {\"value\":\"...\"}. The value must be short, natural, vivid, and must not include braces, quotes, labels, explanations, or multiple options.";
-const PROMPT_WILDCARD_SYSTEM_PROMPT =
-  "You fill prompt-template wildcards. Return JSON only. For each requested wildcard key, choose one concrete replacement value that fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces.";
-const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
-const PROMPT_WILDCARD_MAX_KEYS = 16;
-const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
 
 function scorePromptTags(promptLower: string, tags: readonly string[]): number {
   let score = 0;
@@ -781,298 +780,6 @@ function normalizeComposerRandomPromptResponse(raw: string): string {
   return normalized.length > COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS
     ? normalized.slice(0, COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS).trim()
     : normalized;
-}
-
-function promptWildcardNames(prompt: string): string[] {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
-    const name = normalizePromptWildcardKey(match[1]);
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    names.push(name);
-    if (names.length >= PROMPT_WILDCARD_MAX_KEYS) break;
-  }
-  return names;
-}
-
-function normalizePromptWildcardKey(value: unknown): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\s+/g, "_").toUpperCase()
-    : "";
-}
-
-function parsePromptWildcardJson(raw: string): unknown {
-  const cleaned = raw.trim();
-  const fenced = cleaned.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/);
-  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
-  try {
-    return JSON.parse(unwrapped) as unknown;
-  } catch {
-    const start = unwrapped.indexOf("{");
-    const end = unwrapped.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(unwrapped.slice(start, end + 1)) as unknown;
-    }
-    throw new Error("Wildcard response was not JSON.");
-  }
-}
-
-function normalizePromptWildcardValue(value: unknown, wildcardName: string): string | null {
-  const raw =
-    typeof value === "string"
-      ? value
-      : typeof value === "number" || typeof value === "boolean"
-        ? String(value)
-        : "";
-  const normalized = raw
-    .replace(/[{}]/g, "")
-    .replace(/^["'“”]+|["'“”]+$/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, PROMPT_WILDCARD_VALUE_MAX_CHARS)
-    .trim();
-  if (!normalized) return null;
-  if (normalizePromptWildcardKey(normalized) === wildcardName) return null;
-  return normalized;
-}
-
-function extractPromptWildcardValues(raw: string, names: readonly string[]): Map<string, string> {
-  const parsed = parsePromptWildcardJson(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return new Map();
-  }
-  const root = parsed as Record<string, unknown>;
-  const nested = ["wildcards", "values", "replacements"].find(
-    (key) => root[key] && typeof root[key] === "object" && !Array.isArray(root[key])
-  );
-  const record = nested ? root[nested] as Record<string, unknown> : root;
-  const values = new Map<string, string>();
-  for (const name of names) {
-    const candidate =
-      record[name] ??
-      record[name.toLowerCase()] ??
-      record[name.replace(/_/g, " ")] ??
-      record[name.replace(/_/g, " ").toUpperCase()] ??
-      record[name.toLowerCase().replace(/_/g, " ")];
-    const normalized = normalizePromptWildcardValue(candidate, name);
-    if (normalized) values.set(name, normalized);
-  }
-  return values;
-}
-
-function normalizeComposerWildcardValueResponse(
-  raw: string,
-  slot: { key: string; label: string }
-): string {
-  let candidate: unknown = raw;
-  try {
-    const parsed = parsePromptWildcardJson(raw);
-    if (typeof parsed === "string") {
-      candidate = parsed;
-    } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as Record<string, unknown>;
-      candidate =
-        record.value ??
-        record[slot.key] ??
-        record[slot.label] ??
-        record[slot.key.toLowerCase()] ??
-        record[slot.label.toLowerCase()];
-    }
-  } catch {
-    candidate = raw;
-  }
-  const normalized =
-    normalizePromptWildcardValue(candidate, slot.key) ??
-    normalizePromptWildcardValue(raw, slot.key);
-  if (!normalized) {
-    throw new Error("Wildcard generator returned an empty value.");
-  }
-  const cleaned = normalized.replace(/[.!?]+$/u, "").trim();
-  if (!cleaned) {
-    throw new Error("Wildcard generator returned an empty value.");
-  }
-  return cleaned;
-}
-
-interface PromptWildcardResolution {
-  prompt: string;
-  replacements: PromptShortcutWildcardReplacement[];
-}
-
-function normalizePromptShortcutReplacementRangesForPrompt(
-  prompt: string,
-  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
-): PromptShortcutWildcardReplacement[] {
-  if (!prompt || !Array.isArray(replacements) || replacements.length === 0) return [];
-  let lastEnd = 0;
-  return replacements
-    .map((replacement): PromptShortcutWildcardReplacement | null => {
-      const start = replacement.start;
-      const end = replacement.end;
-      if (
-        typeof start !== "number" ||
-        typeof end !== "number" ||
-        !Number.isFinite(start) ||
-        !Number.isFinite(end)
-      ) {
-        return null;
-      }
-      const normalizedStart = Math.floor(start);
-      const normalizedEnd = Math.floor(end);
-      if (
-        normalizedStart < 0 ||
-        normalizedEnd <= normalizedStart ||
-        normalizedEnd > prompt.length
-      ) {
-        return null;
-      }
-      const value = replacement.value;
-      if (typeof value !== "string" || prompt.slice(normalizedStart, normalizedEnd) !== value) {
-        return null;
-      }
-      const key =
-        typeof replacement.key === "string" && replacement.key.trim()
-          ? replacement.key.trim().slice(0, 64)
-          : "OPTION";
-      return {
-        key,
-        value,
-        start: normalizedStart,
-        end: normalizedEnd,
-      };
-    })
-    .filter((range): range is PromptShortcutWildcardReplacement => Boolean(range))
-    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0))
-    .filter((range) => {
-      const start = range.start ?? 0;
-      const end = range.end ?? 0;
-      if (start < lastEnd) return false;
-      lastEnd = end;
-      return true;
-    });
-}
-
-function applyPromptWildcardValues(
-  prompt: string,
-  values: ReadonlyMap<string, string>,
-  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
-): PromptWildcardResolution {
-  const preservedReplacements = normalizePromptShortcutReplacementRangesForPrompt(
-    prompt,
-    existingReplacements
-  );
-  if (values.size === 0) return { prompt, replacements: preservedReplacements };
-  let resolved = "";
-  let cursor = 0;
-  const replacements: PromptShortcutWildcardReplacement[] = [];
-  const preserveSegmentReplacements = (
-    segmentStart: number,
-    segmentEnd: number,
-    resolvedSegmentStart: number
-  ) => {
-    for (const replacement of preservedReplacements) {
-      const start = replacement.start ?? -1;
-      const end = replacement.end ?? -1;
-      if (start < segmentStart || end > segmentEnd) continue;
-      replacements.push({
-        ...replacement,
-        start: resolvedSegmentStart + (start - segmentStart),
-        end: resolvedSegmentStart + (end - segmentStart),
-      });
-    }
-  };
-  for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
-    const matchText = match[0] ?? "";
-    const name = normalizePromptWildcardKey(match[1]);
-    const matchIndex = match.index ?? 0;
-    const segmentStart = cursor;
-    const segmentEnd = matchIndex;
-    const resolvedSegmentStart = resolved.length;
-    resolved += prompt.slice(segmentStart, segmentEnd);
-    preserveSegmentReplacements(segmentStart, segmentEnd, resolvedSegmentStart);
-    const value = values.get(name);
-    if (value) {
-      const start = resolved.length;
-      resolved += value;
-      replacements.push({
-        key: name,
-        value,
-        start,
-        end: start + value.length,
-      });
-    } else {
-      resolved += matchText;
-    }
-    cursor = matchIndex + matchText.length;
-  }
-  const finalSegmentStart = cursor;
-  const finalResolvedSegmentStart = resolved.length;
-  resolved += prompt.slice(finalSegmentStart);
-  preserveSegmentReplacements(finalSegmentStart, prompt.length, finalResolvedSegmentStart);
-  return {
-    prompt: resolved,
-    replacements: replacements.sort(
-      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
-    ),
-  };
-}
-
-async function resolvePromptWildcardsWithModel(args: {
-  prompt: string;
-  provider: LlmProvider;
-  generationOverrides: GenerateOptions;
-  existingReplacements?: readonly PromptShortcutWildcardReplacement[];
-  signal?: AbortSignal;
-}): Promise<PromptWildcardResolution> {
-  const names = promptWildcardNames(args.prompt);
-  if (names.length === 0) {
-    return {
-      prompt: args.prompt,
-      replacements: normalizePromptShortcutReplacementRangesForPrompt(
-        args.prompt,
-        args.existingReplacements
-      ),
-    };
-  }
-  try {
-    const exampleKey = names[0] ?? "ADJECTIVE";
-    const promptMessages: ProviderMessage[] = [
-      { role: "system", content: PROMPT_WILDCARD_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: [
-          "Prompt template:",
-          args.prompt,
-          "",
-          `Wildcard keys: ${names.join(", ")}`,
-          `Return a single JSON object whose keys are exactly those wildcard keys, for example: {"${exampleKey}":"stinky"}.`,
-          "Choose values that make the prompt vivid and coherent. Do not rewrite the prompt.",
-        ].join("\n"),
-      },
-    ];
-    const raw = await args.provider.generateResponse(promptMessages, {
-      ...args.generationOverrides,
-      temperature: Math.max(0.6, args.generationOverrides.temperature ?? 0.72),
-      maxTokens: Math.min(900, Math.max(160, names.length * 70)),
-      jsonMode: true,
-      signal: args.signal,
-    });
-    const values = extractPromptWildcardValues(raw, names);
-    return applyPromptWildcardValues(args.prompt, values, args.existingReplacements);
-  } catch (error) {
-    console.warn(
-      "[prompt-wildcards] leaving prompt wildcards unresolved:",
-      error instanceof Error ? error.message : error
-    );
-    return {
-      prompt: args.prompt,
-      replacements: normalizePromptShortcutReplacementRangesForPrompt(
-        args.prompt,
-        args.existingReplacements
-      ),
-    };
-  }
 }
 
 function readBotSemanticFacetSummary(raw: string | null | undefined): string[] {
