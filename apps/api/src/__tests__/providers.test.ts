@@ -330,7 +330,7 @@ describe("buildModelCatalog", () => {
     );
   });
 
-  it("merges secondary Ollama host models while preserving duplicate names per host", async () => {
+  it("lists paired secondary Ollama models only when the same model exists locally", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
@@ -364,9 +364,13 @@ describe("buildModelCatalog", () => {
     const secondaryLlama = catalog.local.find(
       (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}llama3.2`
     );
-    assert.equal(secondaryLlama?.label, "Llama 3.2 (Second host)");
+    assert.equal(secondaryLlama?.label, "Llama 3.2 (Paired host)");
+    assert.equal(secondaryLlama?.hostLabel, "Paired host");
     assert.equal(secondaryLlama?.localHost, "secondary");
-    assert.ok(catalog.local.some((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`));
+    assert.equal(
+      catalog.local.find((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`),
+      undefined
+    );
   });
 });
 
@@ -495,7 +499,7 @@ describe("LocalOllamaProvider secondary routing", () => {
           [{ role: "user", content: "hi" }],
           { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
         ),
-      /Second Ollama host is not configured/
+      /Paired Ollama host is not configured/
     );
   });
 
@@ -528,7 +532,7 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.ok(!requestedChatUrl.startsWith("http://192.168.1.77:11434/"));
   });
 
-  it("routes Prism-owned local work to the secondary host when exact model parity is available", async () => {
+  it("routes Prism-owned local work to the secondary host when the requested model is paired", async () => {
     let requestedChatUrl = "";
     let requestedBody: Record<string, unknown> = {};
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -571,17 +575,17 @@ describe("checkDualOllamaWorkloadStatus", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("enables dual routing only when primary and secondary model sets match exactly", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          models: [
-            { name: "llama3.2" },
-            { name: "nomic-embed-text" },
-          ],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )) as typeof fetch;
+  it("enables dual routing when at least one model is paired", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      const models = url.includes("192.168.1.80")
+        ? [{ name: "llama3.2" }, { name: "mistral:latest" }]
+        : [{ name: "gemma3:latest" }, { name: "llama3.2" }];
+      return new Response(JSON.stringify({ models }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
 
     const status = await checkDualOllamaWorkloadStatus(
       "http://192.168.1.80:11434",
@@ -591,15 +595,17 @@ describe("checkDualOllamaWorkloadStatus", () => {
     assert.equal(status.enabled, true);
     assert.equal(status.modelParity, true);
     assert.equal(status.reason, "ready");
-    assert.deepEqual(status.sharedModelIds, ["llama3.2", "nomic-embed-text"]);
+    assert.deepEqual(status.sharedModelIds, ["llama3.2"]);
+    assert.deepEqual(status.missingOnSecondary, ["gemma3:latest"]);
+    assert.deepEqual(status.missingOnPrimary, ["mistral:latest"]);
   });
 
-  it("disables dual routing and reports missing models when catalogs differ", async () => {
+  it("disables dual routing when no models are paired", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       const models = url.includes("192.168.1.81")
         ? [{ name: "llama3.2" }]
-        : [{ name: "gemma3:latest" }, { name: "llama3.2" }];
+        : [{ name: "gemma3:latest" }];
       return new Response(JSON.stringify({ models }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -615,7 +621,7 @@ describe("checkDualOllamaWorkloadStatus", () => {
     assert.equal(status.modelParity, false);
     assert.equal(status.reason, "model_mismatch");
     assert.deepEqual(status.missingOnSecondary, ["gemma3:latest"]);
-    assert.deepEqual(status.missingOnPrimary, []);
+    assert.deepEqual(status.missingOnPrimary, ["llama3.2"]);
   });
 });
 

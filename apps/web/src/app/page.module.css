@@ -11004,6 +11004,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messages[data-chat-ephemeral="true"] .message .markdownBody {
   color: color-mix(in srgb, var(--fg) 92%, transparent);
   text-shadow: none;
+  transition: font-size 220ms cubic-bezier(0.2, 0.72, 0.24, 1);
+}
+
+.appLayout[data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] p,
+.appLayout[data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] .markdownBody {
+  color: color-mix(in srgb, #fffaf2 90%, var(--fg));
+}
+
+.themeLight.appLayout[data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] p,
+.themeLight.appLayout[data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] .markdownBody {
+  color: color-mix(in srgb, #15110d 86%, var(--accent-ink));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messages[data-chat-ephemeral="true"] .message p,
+  .messages[data-chat-ephemeral="true"] .message .markdownBody {
+    transition: none;
+  }
 }
 
 .messages[data-chat-ephemeral="true"] .messageUser h4 {

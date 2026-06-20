@@ -14120,6 +14120,7 @@ interface MessageBodyProps {
   promptWildcards?: PromptWildcardRunMetadata;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
+  renderPromptMetadataAsProse?: boolean;
   onTogglePromptShortcut?: () => void;
   onCollapsePromptShortcut?: () => void;
 }
@@ -16893,6 +16894,23 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
     props.assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(props.content).displayContent
       : props.content;
+  if (
+    props.messageRole === "user" &&
+    props.renderPromptMetadataAsProse === true &&
+    (props.promptShortcut || props.promptWildcards)
+  ) {
+    const markdownProps: MessageBodyProps = {
+      ...props,
+      content:
+        props.promptShortcut?.resolvedPrompt?.trim() ||
+        props.promptWildcards?.resolvedPrompt?.trim() ||
+        fullSource,
+      promptShortcut: undefined,
+      promptWildcards: undefined,
+      renderPromptMetadataAsProse: false,
+    };
+    return <MarkdownMessageBody {...markdownProps} />;
+  }
   if (props.messageRole === "user" && props.promptShortcut) {
     if (promptShortcutRendersAsStandalone(fullSource, props.promptShortcut)) {
       return (
@@ -41843,18 +41861,18 @@ function HomeContent(): React.JSX.Element {
               : "Optional";
   const dualOllamaWorkloadText =
     dualOllamaWorkloadStatus?.enabled
-      ? `Dual routing ready · ${dualOllamaWorkloadStatus.primaryModelCount} matched model${
-          dualOllamaWorkloadStatus.primaryModelCount === 1 ? "" : "s"
+      ? `Dual routing ready · ${dualOllamaWorkloadStatus.sharedModelIds.length} paired model${
+          dualOllamaWorkloadStatus.sharedModelIds.length === 1 ? "" : "s"
         }`
       : dualOllamaWorkloadStatus?.reason === "model_mismatch"
-        ? "Dual routing paused · model lists do not match exactly"
+        ? "Dual routing paused · no shared models detected"
         : dualOllamaWorkloadStatus?.reason === "empty_catalog"
           ? "Dual routing paused · one host has no detected models"
           : dualOllamaWorkloadStatus?.reason === "secondary_unreachable"
-            ? "Dual routing paused · second host is not reachable"
+            ? "Dual routing paused · paired host is not reachable"
             : dualOllamaWorkloadStatus?.reason === "primary_unreachable"
               ? "Dual routing paused · primary host is not reachable"
-              : "Dual routing waits for a second Ollama host";
+              : "Dual routing waits for a paired Ollama host";
 
   const comfyUiUiStatus: SecondaryOllamaUiStatus =
     !comfyUiDraftHost
@@ -42087,7 +42105,7 @@ function HomeContent(): React.JSX.Element {
       {
         id: "extras",
         title: "Extra servers (optional)",
-        subtitle: "Set secondary Ollama or ComfyUI for local image workflows.",
+        subtitle: "Pair matching Ollama models or add ComfyUI for local image workflows.",
         state: backupConfigured ? "done" : "optional",
       },
     ] as const;
@@ -49649,7 +49667,7 @@ function HomeContent(): React.JSX.Element {
                       )}
                     </label>
                     <label className={styles.settingsHostField}>
-                      <span className={styles.settingsHostLabel}>Second Ollama host</span>
+                      <span className={styles.settingsHostLabel}>Paired Ollama host</span>
                       <span
                         className={styles.settingsHostInputWrap}
                         data-status={secondaryOllamaUiStatus}
@@ -49666,6 +49684,10 @@ function HomeContent(): React.JSX.Element {
                           {secondaryOllamaStatusText}
                         </span>
                       </span>
+                      <small className={styles.settingsHostHint}>
+                        Only the model you want to pair needs to be installed on both devices. Models
+                        missing from this host stay primary-only.
+                      </small>
                     </label>
                     <div className={styles.settingsHostField}>
                       <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
@@ -49681,8 +49703,8 @@ function HomeContent(): React.JSX.Element {
                         Experimental dual Ollama routing
                       </label>
                       <small className={styles.settingsHostHint}>
-                        Requires both Ollama endpoints to expose the exact same model list. Prism falls back to primary
-                        if parity is missing.
+                        When enabled, Prism routes local background work to the paired host only for
+                        models installed on both devices. Missing models stay primary-only.
                         {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
                       </small>
                     </div>
@@ -50080,8 +50102,8 @@ function HomeContent(): React.JSX.Element {
                       }}
                     >
                       <p className={styles.settingsHostsLead}>
-                        Prism works without these fields. Add keys for online services, or add
-                        hosts for a fallback Ollama endpoint and external ComfyUI image server.
+                        Prism works without these fields. Add keys for online text models, or add
+                        hosts for paired Ollama routing and an external ComfyUI image server.
                       </p>
                       <label className={styles.settingsHostField}>
                         <span className={styles.settingsHostLabel}>OpenAI API key</span>
@@ -50204,7 +50226,7 @@ function HomeContent(): React.JSX.Element {
                         )}
                       </label>
                       <label className={styles.settingsHostField}>
-                        <span className={styles.settingsHostLabel}>Second Ollama host</span>
+                        <span className={styles.settingsHostLabel}>Paired Ollama host</span>
                         <span
                           className={styles.settingsHostInputWrap}
                           data-status={secondaryOllamaUiStatus}
@@ -50222,7 +50244,9 @@ function HomeContent(): React.JSX.Element {
                           </span>
                         </span>
                         <small className={styles.settingsHostHint}>
-                          Use host:port only, for example <code>192.168.1.50:11434</code>.
+                          Use host:port only, for example <code>192.168.1.50:11434</code>. Only
+                          matching local models become paired choices; you do not need to mirror your
+                          whole Ollama library.
                         </small>
                       </label>
                       <div className={styles.settingsHostField}>
@@ -50239,8 +50263,8 @@ function HomeContent(): React.JSX.Element {
                           Experimental dual Ollama routing
                         </label>
                         <small className={styles.settingsHostHint}>
-                          Requires both Ollama endpoints to expose the exact same model list. Prism falls back to
-                          primary if parity is missing.
+                          When enabled, Prism routes local background work to the paired host only for
+                          models installed on both devices. Missing models stay primary-only.
                           {settings.experimentalDualOllamaEnabled ? ` ${dualOllamaWorkloadText}.` : ""}
                         </small>
                       </div>
@@ -58991,6 +59015,8 @@ function HomeContent(): React.JSX.Element {
                   ? "settling"
                   : undefined;
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
+            const commandPromptDisplay =
+              chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -59029,6 +59055,7 @@ function HomeContent(): React.JSX.Element {
                 data-fallback-model-used={
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
+                data-command-display={commandPromptDisplay ? "prompt" : undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -59141,6 +59168,7 @@ function HomeContent(): React.JSX.Element {
                   promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  renderPromptMetadataAsProse={chatLikeSurface}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>
                       current === msg.id ? null : msg.id
@@ -60439,6 +60467,8 @@ function HomeContent(): React.JSX.Element {
                   ? "settling"
                   : undefined;
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
+            const commandPromptDisplay =
+              chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -60477,6 +60507,7 @@ function HomeContent(): React.JSX.Element {
                 data-fallback-model-used={
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
+                data-command-display={commandPromptDisplay ? "prompt" : undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -60586,6 +60617,7 @@ function HomeContent(): React.JSX.Element {
                   promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  renderPromptMetadataAsProse={chatLikeSurface}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>
                       current === msg.id ? null : msg.id
