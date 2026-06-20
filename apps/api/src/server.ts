@@ -76,6 +76,10 @@ import {
 import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
 import {
+  deleteZenSessionMemoryById,
+  loadZenSessionMemoryOverview,
+} from "./zen-session-memory.ts";
+import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
@@ -123,6 +127,7 @@ import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
   normalizeZenFreshStartGapMs,
+  normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
   normalizeZenSessionIdleGapMs,
   normalizeZenWallpaperOpacity,
@@ -160,11 +165,15 @@ import {
   formatComfyUiRemoteWorkflowLabel,
   hydrateAssistantMessageParts,
   isAllowedInAppOllamaPullModelName,
+  getBuiltInPromptWildcardSlot,
   normalizePromptShortcutMetadata,
+  normalizePromptWildcardRunMetadata,
   reasoningEffortForRequest,
   parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
   parseStoredComfyUiWorkflows,
   withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodInterruption,
   createDefaultPrismMoodState,
@@ -262,9 +271,11 @@ const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
+const COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT =
+  "You generate one random wildcard value for a composer helper. Use only the requested wildcard type, not conversation context. Return JSON only in this exact shape: {\"value\":\"...\"}. The value must be short, natural, vivid, and must not include braces, quotes, labels, explanations, or multiple options.";
 const PROMPT_WILDCARD_SYSTEM_PROMPT =
   "You fill prompt-template wildcards. Return JSON only. For each requested wildcard key, choose one concrete replacement value that fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces.";
-const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_]{1,63})\}/g;
+const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
 const PROMPT_WILDCARD_MAX_KEYS = 16;
 const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
 
@@ -331,6 +342,7 @@ interface UserDbRow {
   zen_wallpaper_regen_message_interval: number | null;
   zen_wallpaper_reveal_delay_message_count: number | null;
   zen_wallpaper_reveal_span_message_count: number | null;
+  zen_mood_sensitivity: number | null;
   comfyui_workflows: string | null;
   prism_default_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
@@ -472,7 +484,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -775,13 +787,19 @@ function promptWildcardNames(prompt: string): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
   for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
-    const name = match[1]?.trim();
+    const name = normalizePromptWildcardKey(match[1]);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     names.push(name);
     if (names.length >= PROMPT_WILDCARD_MAX_KEYS) break;
   }
   return names;
+}
+
+function normalizePromptWildcardKey(value: unknown): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\s+/g, "_").toUpperCase()
+    : "";
 }
 
 function parsePromptWildcardJson(raw: string): unknown {
@@ -815,7 +833,7 @@ function normalizePromptWildcardValue(value: unknown, wildcardName: string): str
     .slice(0, PROMPT_WILDCARD_VALUE_MAX_CHARS)
     .trim();
   if (!normalized) return null;
-  if (normalized.toUpperCase() === wildcardName) return null;
+  if (normalizePromptWildcardKey(normalized) === wildcardName) return null;
   return normalized;
 }
 
@@ -835,6 +853,7 @@ function extractPromptWildcardValues(raw: string, names: readonly string[]): Map
       record[name] ??
       record[name.toLowerCase()] ??
       record[name.replace(/_/g, " ")] ??
+      record[name.replace(/_/g, " ").toUpperCase()] ??
       record[name.toLowerCase().replace(/_/g, " ")];
     const normalized = normalizePromptWildcardValue(candidate, name);
     if (normalized) values.set(name, normalized);
@@ -842,24 +861,136 @@ function extractPromptWildcardValues(raw: string, names: readonly string[]): Map
   return values;
 }
 
+function normalizeComposerWildcardValueResponse(
+  raw: string,
+  slot: { key: string; label: string }
+): string {
+  let candidate: unknown = raw;
+  try {
+    const parsed = parsePromptWildcardJson(raw);
+    if (typeof parsed === "string") {
+      candidate = parsed;
+    } else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      candidate =
+        record.value ??
+        record[slot.key] ??
+        record[slot.label] ??
+        record[slot.key.toLowerCase()] ??
+        record[slot.label.toLowerCase()];
+    }
+  } catch {
+    candidate = raw;
+  }
+  const normalized =
+    normalizePromptWildcardValue(candidate, slot.key) ??
+    normalizePromptWildcardValue(raw, slot.key);
+  if (!normalized) {
+    throw new Error("Wildcard generator returned an empty value.");
+  }
+  const cleaned = normalized.replace(/[.!?]+$/u, "").trim();
+  if (!cleaned) {
+    throw new Error("Wildcard generator returned an empty value.");
+  }
+  return cleaned;
+}
+
 interface PromptWildcardResolution {
   prompt: string;
   replacements: PromptShortcutWildcardReplacement[];
 }
 
+function normalizePromptShortcutReplacementRangesForPrompt(
+  prompt: string,
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+): PromptShortcutWildcardReplacement[] {
+  if (!prompt || !Array.isArray(replacements) || replacements.length === 0) return [];
+  let lastEnd = 0;
+  return replacements
+    .map((replacement): PromptShortcutWildcardReplacement | null => {
+      const start = replacement.start;
+      const end = replacement.end;
+      if (
+        typeof start !== "number" ||
+        typeof end !== "number" ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end)
+      ) {
+        return null;
+      }
+      const normalizedStart = Math.floor(start);
+      const normalizedEnd = Math.floor(end);
+      if (
+        normalizedStart < 0 ||
+        normalizedEnd <= normalizedStart ||
+        normalizedEnd > prompt.length
+      ) {
+        return null;
+      }
+      const value = replacement.value;
+      if (typeof value !== "string" || prompt.slice(normalizedStart, normalizedEnd) !== value) {
+        return null;
+      }
+      const key =
+        typeof replacement.key === "string" && replacement.key.trim()
+          ? replacement.key.trim().slice(0, 64)
+          : "OPTION";
+      return {
+        key,
+        value,
+        start: normalizedStart,
+        end: normalizedEnd,
+      };
+    })
+    .filter((range): range is PromptShortcutWildcardReplacement => Boolean(range))
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0))
+    .filter((range) => {
+      const start = range.start ?? 0;
+      const end = range.end ?? 0;
+      if (start < lastEnd) return false;
+      lastEnd = end;
+      return true;
+    });
+}
+
 function applyPromptWildcardValues(
   prompt: string,
-  values: ReadonlyMap<string, string>
+  values: ReadonlyMap<string, string>,
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
 ): PromptWildcardResolution {
-  if (values.size === 0) return { prompt, replacements: [] };
+  const preservedReplacements = normalizePromptShortcutReplacementRangesForPrompt(
+    prompt,
+    existingReplacements
+  );
+  if (values.size === 0) return { prompt, replacements: preservedReplacements };
   let resolved = "";
   let cursor = 0;
   const replacements: PromptShortcutWildcardReplacement[] = [];
+  const preserveSegmentReplacements = (
+    segmentStart: number,
+    segmentEnd: number,
+    resolvedSegmentStart: number
+  ) => {
+    for (const replacement of preservedReplacements) {
+      const start = replacement.start ?? -1;
+      const end = replacement.end ?? -1;
+      if (start < segmentStart || end > segmentEnd) continue;
+      replacements.push({
+        ...replacement,
+        start: resolvedSegmentStart + (start - segmentStart),
+        end: resolvedSegmentStart + (end - segmentStart),
+      });
+    }
+  };
   for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
     const matchText = match[0] ?? "";
-    const name = match[1] ?? "";
+    const name = normalizePromptWildcardKey(match[1]);
     const matchIndex = match.index ?? 0;
-    resolved += prompt.slice(cursor, matchIndex);
+    const segmentStart = cursor;
+    const segmentEnd = matchIndex;
+    const resolvedSegmentStart = resolved.length;
+    resolved += prompt.slice(segmentStart, segmentEnd);
+    preserveSegmentReplacements(segmentStart, segmentEnd, resolvedSegmentStart);
     const value = values.get(name);
     if (value) {
       const start = resolved.length;
@@ -875,18 +1006,35 @@ function applyPromptWildcardValues(
     }
     cursor = matchIndex + matchText.length;
   }
-  resolved += prompt.slice(cursor);
-  return { prompt: resolved, replacements };
+  const finalSegmentStart = cursor;
+  const finalResolvedSegmentStart = resolved.length;
+  resolved += prompt.slice(finalSegmentStart);
+  preserveSegmentReplacements(finalSegmentStart, prompt.length, finalResolvedSegmentStart);
+  return {
+    prompt: resolved,
+    replacements: replacements.sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    ),
+  };
 }
 
 async function resolvePromptWildcardsWithModel(args: {
   prompt: string;
   provider: LlmProvider;
   generationOverrides: GenerateOptions;
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[];
   signal?: AbortSignal;
 }): Promise<PromptWildcardResolution> {
   const names = promptWildcardNames(args.prompt);
-  if (names.length === 0) return { prompt: args.prompt, replacements: [] };
+  if (names.length === 0) {
+    return {
+      prompt: args.prompt,
+      replacements: normalizePromptShortcutReplacementRangesForPrompt(
+        args.prompt,
+        args.existingReplacements
+      ),
+    };
+  }
   try {
     const exampleKey = names[0] ?? "ADJECTIVE";
     const promptMessages: ProviderMessage[] = [
@@ -911,13 +1059,19 @@ async function resolvePromptWildcardsWithModel(args: {
       signal: args.signal,
     });
     const values = extractPromptWildcardValues(raw, names);
-    return applyPromptWildcardValues(args.prompt, values);
+    return applyPromptWildcardValues(args.prompt, values, args.existingReplacements);
   } catch (error) {
     console.warn(
       "[prompt-wildcards] leaving prompt wildcards unresolved:",
       error instanceof Error ? error.message : error
     );
-    return { prompt: args.prompt, replacements: [] };
+    return {
+      prompt: args.prompt,
+      replacements: normalizePromptShortcutReplacementRangesForPrompt(
+        args.prompt,
+        args.existingReplacements
+      ),
+    };
   }
 }
 
@@ -1976,10 +2130,18 @@ function buildRoutes(): RouteDefinition[] {
             promptShortcut,
             row.content
           );
+          const promptWildcards = parseStoredPromptWildcardPayload(row.tool_payload);
+          const promptWildcardsWithResolvedPrompt = withPromptWildcardResolvedPrompt(
+            promptWildcards,
+            row.content
+          );
           return {
             ...shared,
             ...(promptShortcutWithResolvedPrompt
               ? { promptShortcut: promptShortcutWithResolvedPrompt }
+              : {}),
+            ...(promptWildcardsWithResolvedPrompt
+              ? { promptWildcards: promptWildcardsWithResolvedPrompt }
               : {}),
           };
         }
@@ -2980,11 +3142,17 @@ function buildRoutes(): RouteDefinition[] {
         readPrismInterruption(body.prismInterruption) ?? { kind: "pending_reply" };
       const currentMood = loadPrismMoodState(db, userId, conversation.id, mode) ??
         createDefaultPrismMoodState(mode, now);
+      const user = getUserRow(userId);
       const persisted = upsertPrismMoodState(
         db,
         userId,
         conversation.id,
-        applyPrismMoodInterruption(currentMood, prismInterruption, now)
+        applyPrismMoodInterruption(
+          currentMood,
+          prismInterruption,
+          now,
+          normalizeZenMoodSensitivity(user.zen_mood_sensitivity)
+        )
       );
       json(ctx.res, 200, { ok: true, prismMood: persisted });
     }),
@@ -3056,6 +3224,81 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("POST", "/api/composer/wildcard-value", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const slot = getBuiltInPromptWildcardSlot(
+        body.key ?? body.slotKey ?? body.label ?? body.name
+      );
+      if (!slot) {
+        throw new HttpError(400, "Unknown wildcard slot.");
+      }
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
+      const explicitModelOverride = readOptionalString(body.modelOverride);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride,
+        botPreferredModel:
+          effectiveProvider === "local"
+            ? readOptionalString(user.prism_default_llm_model) ??
+              readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey
+      );
+      const raw = await provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT,
+          },
+          {
+            role: "user",
+            content: [
+              `Wildcard key: ${slot.key}`,
+              `Display label: ${slot.label}`,
+              `Generation rule: ${slot.generationHint}`,
+              "Choose one genuinely random value that fits the wildcard type.",
+              "Do not use conversation context, user context, current prompt text, or adjacent words.",
+              `Random nonce: ${randomId(10)}`,
+              "Return JSON only: {\"value\":\"...\"}",
+            ].join("\n"),
+          },
+        ],
+        {
+          model: resolvedAuto.model,
+          temperature: 1.08,
+          maxTokens: 80,
+          jsonMode: true,
+        }
+      );
+      const value = normalizeComposerWildcardValueResponse(raw, slot);
+      json(ctx.res, 200, {
+        ok: true,
+        key: slot.key,
+        value,
+        provider: effectiveProvider,
+        model: resolvedAuto.model,
+      });
     }),
     route("POST", "/api/composer/random-prompt", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -3245,6 +3488,7 @@ function buildRoutes(): RouteDefinition[] {
         starterPrompt && body.starterPromptWarrantsIntro === true;
       const message = starterPrompt ? "" : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
+      const promptWildcards = normalizePromptWildcardRunMetadata(body.promptWildcards);
       const commandCenterPrompt = body.commandCenterPrompt === true || Boolean(promptShortcut);
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
@@ -3389,7 +3633,12 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.once("close", onChatClientClose);
       let messageForChat = message;
       let promptShortcutForChat = promptShortcut;
-      if (!starterPrompt && commandCenterPrompt && promptWildcardNames(message).length > 0) {
+      let promptWildcardsForChat = promptWildcards;
+      if (
+        !starterPrompt &&
+        (commandCenterPrompt || promptWildcards) &&
+        promptWildcardNames(message).length > 0
+      ) {
         const wildcardProvider = selectProvider(
           effectiveProvider,
           openAiApiKey,
@@ -3400,6 +3649,8 @@ function buildRoutes(): RouteDefinition[] {
           prompt: message,
           provider: wildcardProvider,
           generationOverrides,
+          existingReplacements:
+            promptShortcut?.wildcardReplacements ?? promptWildcards?.wildcardReplacements,
           signal: chatAbort.signal,
         });
         messageForChat = wildcardResolution.prompt;
@@ -3407,6 +3658,15 @@ function buildRoutes(): RouteDefinition[] {
           promptShortcut
             ? {
                 ...promptShortcut,
+                wildcardReplacements: wildcardResolution.replacements,
+              }
+            : undefined,
+          messageForChat
+        );
+        promptWildcardsForChat = withPromptWildcardResolvedPrompt(
+          promptWildcards
+            ? {
+                ...promptWildcards,
                 wildcardReplacements: wildcardResolution.replacements,
               }
             : undefined,
@@ -3436,6 +3696,9 @@ function buildRoutes(): RouteDefinition[] {
             recentContextMessageLimit: normalizeZenRecentContextMessages(
               user.zen_recent_context_messages
             ),
+            zenMoodSensitivity: normalizeZenMoodSensitivity(
+              user.zen_mood_sensitivity
+            ),
             experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
@@ -3460,6 +3723,7 @@ function buildRoutes(): RouteDefinition[] {
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
             ...(promptShortcutForChat ? { promptShortcut: promptShortcutForChat } : {}),
+            ...(promptWildcardsForChat ? { promptWildcards: promptWildcardsForChat } : {}),
           },
           conversationId
         );
@@ -4137,6 +4401,33 @@ function buildRoutes(): RouteDefinition[] {
         defaultDirectCount: defaultMemoryCount
       });
     }),
+    route("GET", "/api/zen/session-memory", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const conversationId = readOptionalString(ctx.query.get("conversationId"));
+      const overview = loadZenSessionMemoryOverview({
+        db,
+        userId,
+        userKey,
+        activeConversationId: conversationId,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        ...overview,
+      });
+    }),
+    route("DELETE", "/api/zen/session-memory/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const id = decodeURIComponent((ctx.params.id ?? "").trim());
+      if (!id) {
+        throw new HttpError(400, "Missing session memory id.");
+      }
+      const deleted = deleteZenSessionMemoryById(db, userId, id);
+      if (!deleted) {
+        throw new HttpError(404, "Session memory not found.");
+      }
+      json(ctx.res, 200, { ok: true, deleted: true });
+    }),
     route("POST", "/api/memories/dev-seed", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
@@ -4235,6 +4526,7 @@ function buildRoutes(): RouteDefinition[] {
       const includeAboutYou = body.includeAboutYou === true;
       let deletedMemories = 0;
       let deletedSummaries = 0;
+      let deletedZenSessionMemories = 0;
       db.exec("BEGIN IMMEDIATE TRANSACTION");
       try {
         const memoryResult = db
@@ -4246,8 +4538,12 @@ function buildRoutes(): RouteDefinition[] {
         const summaryResult = db
           .prepare("DELETE FROM memory_summaries WHERE user_id = ?")
           .run(userId);
+        const zenSessionResult = db
+          .prepare("DELETE FROM zen_session_memories WHERE user_id = ?")
+          .run(userId);
         deletedMemories = Number(memoryResult.changes ?? 0);
         deletedSummaries = Number(summaryResult.changes ?? 0);
+        deletedZenSessionMemories = Number(zenSessionResult.changes ?? 0);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -4264,6 +4560,7 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         deletedMemories,
         deletedSummaries,
+        deletedZenSessionMemories,
         includeAboutYou,
         vectorsCleared,
       });
@@ -4475,6 +4772,7 @@ function buildRoutes(): RouteDefinition[] {
       };
       const currentMood = loadPrismMoodState(db, userId, message.conversation_id, mode) ??
         createDefaultPrismMoodState(mode, now);
+      const user = getUserRow(userId);
       let persistedMood: ReturnType<typeof upsertPrismMoodState> | undefined;
       db.exec("BEGIN IMMEDIATE TRANSACTION");
       try {
@@ -4491,7 +4789,12 @@ function buildRoutes(): RouteDefinition[] {
           db,
           userId,
           message.conversation_id,
-          applyPrismMoodInterruption(currentMood, prismInterruption, now)
+          applyPrismMoodInterruption(
+            currentMood,
+            prismInterruption,
+            now,
+            normalizeZenMoodSensitivity(user.zen_mood_sensitivity)
+          )
         );
         db.exec("COMMIT");
       } catch (error) {
@@ -4593,6 +4896,9 @@ function buildRoutes(): RouteDefinition[] {
             normalizeZenWallpaperRevealSpanMessageCount(
               user.zen_wallpaper_reveal_span_message_count
             ),
+          zenMoodSensitivity: normalizeZenMoodSensitivity(
+            user.zen_mood_sensitivity
+          ),
           comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
@@ -4789,6 +5095,7 @@ function buildRoutes(): RouteDefinition[] {
           user.zen_wallpaper_reveal_delay_message_count,
         zenWallpaperRevealSpanMessageCount:
           user.zen_wallpaper_reveal_span_message_count,
+        zenMoodSensitivity: user.zen_mood_sensitivity,
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
@@ -4848,7 +5155,7 @@ function buildRoutes(): RouteDefinition[] {
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -4885,6 +5192,7 @@ function buildRoutes(): RouteDefinition[] {
         next.zenWallpaperRegenMessageInterval,
         next.zenWallpaperRevealDelayMessageCount,
         next.zenWallpaperRevealSpanMessageCount,
+        next.zenMoodSensitivity,
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,

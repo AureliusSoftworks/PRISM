@@ -18,6 +18,7 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
+import { createZenSessionMemoryCheckpoint } from "../zen-session-memory.ts";
 const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
@@ -92,6 +93,16 @@ function createChatTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
     );
     CREATE TABLE session_opinions (
       user_id TEXT NOT NULL,
@@ -4151,6 +4162,154 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
     const text =
       "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
     assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+describe("processChatMessage Zen session memory prompt gating", () => {
+  it("injects session memory only for explicit prior-context inquiries", async () => {
+    const db = createChatTestDb();
+    const createdAt = "2026-06-20T10:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run("active", "user-1", "Active Zen", createdAt, createdAt);
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run(
+      "previous",
+      "user-1",
+      "Bridge Story",
+      "2026-06-20T09:00:00.000Z",
+      "2026-06-20T09:30:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "summary-previous",
+      "user-1",
+      "previous",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "zen",
+        summary: "The user and Prism are midway through a bridge story.",
+        displaySummary: "I'm holding the bridge story at the choice.",
+        createdAt: "2026-06-20T09:31:00.000Z",
+      }),
+      "2026-06-20T09:31:00.000Z"
+    );
+    await createZenSessionMemoryCheckpoint({
+      db,
+      provider: {
+        name: "local",
+        async generateResponse() {
+          return JSON.stringify({
+            title: "Bridge Choice",
+            text: "Resume at the lantern-or-map choice before crossing the bridge.",
+          });
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      userId: "user-1",
+      conversationId: "previous",
+      userKey: CHAT_TEST_USER_KEY,
+      history: [
+        {
+          id: "previous-assistant",
+          role: "assistant",
+          content: "The bridge waits between a lantern path and a map path.",
+          createdAt: "2026-06-20T09:29:00.000Z",
+        },
+      ],
+      userMessage: {
+        id: "previous-user",
+        role: "user",
+        content: "Let's finish this later.",
+        createdAt: "2026-06-20T09:30:00.000Z",
+      },
+      assistantMessage: {
+        id: "previous-reply",
+        role: "assistant",
+        content: "We can pause at the choice.",
+        createdAt: "2026-06-20T09:30:01.000Z",
+      },
+      now: new Date("2026-06-20T09:30:00.000Z"),
+    });
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      bodies.push(body);
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "A steady Zen reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Tell me about the weather.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Prism.",
+      },
+      "active"
+    );
+    const ordinaryBodies = bodies.filter((body) =>
+      body.messages?.at(-1)?.role === "user" &&
+      body.messages.at(-1)?.content === "Tell me about the weather."
+    );
+    assert.equal(ordinaryBodies.length, 1);
+    assert.ok(
+      !ordinaryBodies[0]?.messages
+        ?.map((message) => message.content)
+        .join("\n")
+        .includes("Zen session memory context")
+    );
+
+    bodies.length = 0;
+    await processChatMessage(
+      db,
+      "user-1",
+      "Where were we last conversation?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Prism.",
+      },
+      "active"
+    );
+    const inquiryBodies = bodies.filter((body) =>
+      body.messages?.at(-1)?.role === "user" &&
+      body.messages.at(-1)?.content === "Where were we last conversation?"
+    );
+    assert.equal(inquiryBodies.length, 1);
+    const inquiryPrompt = inquiryBodies[0]?.messages
+      ?.map((message) => message.content)
+      .join("\n") ?? "";
+    assert.match(inquiryPrompt, /Zen session memory context/);
+    assert.match(inquiryPrompt, /midway through a bridge story/);
+    assert.match(inquiryPrompt, /lantern-or-map choice/);
   });
 });
 

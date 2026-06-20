@@ -144,6 +144,7 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30,
       zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
       zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
+      zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -333,6 +334,21 @@ export function createDatabase(): DatabaseSync {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_expires
+      ON zen_session_memories(user_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_created
+      ON zen_session_memories(user_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS session_opinions (
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
@@ -626,6 +642,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenWallpaperRevealSpanMessageCount) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12;");
+  }
+  const hasZenMoodSensitivity = userColumns.some(
+    (column) => column.name === "zen_mood_sensitivity"
+  );
+  if (!hasZenMoodSensitivity) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"

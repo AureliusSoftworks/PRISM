@@ -88,6 +88,16 @@ function createTestDb(): DatabaseSync {
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
     CREATE TABLE session_opinions (
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,

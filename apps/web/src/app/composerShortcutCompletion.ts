@@ -8,7 +8,7 @@ export interface ComposerShortcutCompletionToken {
 }
 
 export function normalizeComposerShortcutQuery(value: string): string {
-  return value.trim().replace(/^\/+/, "").toLowerCase();
+  return value.trim().replace(/^[!/]+/, "").toLowerCase();
 }
 
 export function composerShortcutQueryExactlyMatchesCommand(

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_ZEN_FRESH_START_GAP_MS,
+  DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
@@ -59,6 +60,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
     zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
     zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -811,6 +813,17 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(high.zenWallpaperRegenMessageInterval, 100);
     assert.equal(high.zenWallpaperRevealDelayMessageCount, 20);
     assert.equal(high.zenWallpaperRevealSpanMessageCount, 50);
+  });
+
+  it("clamps Zen mood sensitivity while preserving current value for invalid input", () => {
+    const current = baseline({ zenMoodSensitivity: 0.35 });
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: 0.8 }, current).zenMoodSensitivity, 0.8);
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: -1 }, current).zenMoodSensitivity, 0);
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: 2 }, current).zenMoodSensitivity, 1);
+    assert.equal(
+      resolveNextSettings({ zenMoodSensitivity: "nope" }, current).zenMoodSensitivity,
+      0.35
+    );
   });
 });
 

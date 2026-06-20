@@ -57,8 +57,10 @@ import type {
   PrismMoodInterruptionInput,
   PrismMoodSnapshot,
   PromptShortcutMetadata,
+  PromptWildcardRunMetadata,
   SessionOpinion,
   SentGeneratedImagePayload,
+  ZenSessionMemoryOverview,
 } from "@localai/shared";
 import {
   applyPrismMoodExpiredIgnoreCooldown,
@@ -72,19 +74,22 @@ import {
   decayPrismMood,
   hydrateAssistantMessageParts,
   isPrismMoodIgnoring,
+  normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
   parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
   sanitizePrismMoodState,
   serializeAssistantToolPayload,
-  serializePromptShortcutPayload,
+  serializePromptToolPayload,
   shouldPrismMoodDeclineResponse,
   shouldPrismMoodStartIgnoreCooldown,
   stripBotProfileMetaSuffix,
   withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
@@ -102,6 +107,13 @@ import {
   loadPrismMoodState,
   upsertPrismMoodState,
 } from "./db.ts";
+import {
+  buildZenSessionMemoryPromptContext,
+  createZenSessionMemoryCheckpoint,
+  loadZenSessionMemoryOverview,
+  pruneExpiredZenSessionMemories,
+  userMessageRequestsZenSessionMemory,
+} from "./zen-session-memory.ts";
 
 const config = getAppConfig();
 
@@ -1886,10 +1898,14 @@ export interface UserChatSettings {
   forceNewConversation?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
+  /** Optional user-facing wildcard metadata for resolved deck/option sends. */
+  promptWildcards?: PromptWildcardRunMetadata;
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
   /** Optional Zen interruption metadata supplied by the composer send path. */
   prismInterruption?: PrismMoodInterruptionInput;
+  /** Saved Zen setting: how sharply Prism reacts to irritation cues. */
+  zenMoodSensitivity?: number | null;
   /** Cancels provider/tool work when the originating HTTP request is interrupted. */
   signal?: AbortSignal;
 }
@@ -3364,10 +3380,18 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         promptShortcut,
         row.content
       );
+      const promptWildcards = parseStoredPromptWildcardPayload(row.tool_payload);
+      const promptWildcardsWithResolvedPrompt = withPromptWildcardResolvedPrompt(
+        promptWildcards,
+        row.content
+      );
       return {
         ...base,
         ...(promptShortcutWithResolvedPrompt
           ? { promptShortcut: promptShortcutWithResolvedPrompt }
+          : {}),
+        ...(promptWildcardsWithResolvedPrompt
+          ? { promptWildcards: promptWildcardsWithResolvedPrompt }
           : {}),
       };
     }
@@ -3783,6 +3807,7 @@ function buildPromptMessages(args: {
   prismMood?: PrismMoodSnapshot | null;
   moodBoundaryHint?: string | null;
   threadSummary?: string | null;
+  zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
@@ -3862,6 +3887,12 @@ function buildPromptMessages(args: {
       role: "system",
       content: `Earlier in this thread (compacted context):\n${args.threadSummary.trim()}`,
     });
+  }
+  const zenSessionMemoryHint = buildZenSessionMemoryPromptContext(
+    args.zenSessionMemoryContext
+  );
+  if (zenSessionMemoryHint) {
+    promptMessages.push({ role: "system", content: zenSessionMemoryHint });
   }
   if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
@@ -4774,6 +4805,9 @@ export async function processChatMessage(
       throw new Error("Conversation not found for this user.");
     }
   }
+  if (isZenMode(mode)) {
+    pruneExpiredZenSessionMemories(db, userId);
+  }
 
   const historyCutoff =
     !incognitoForTurn
@@ -4827,6 +4861,9 @@ export async function processChatMessage(
   const repairSignal = isStarterPrompt || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
+  const zenMoodSensitivity = normalizePrismMoodSensitivity(
+    settings.zenMoodSensitivity
+  );
   let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
     createDefaultPrismMoodState(mode, now);
   let prismMoodIgnoreTurn = false;
@@ -4873,13 +4910,19 @@ export async function processChatMessage(
       prismMood = decayPrismMood(prismMood, now);
     }
     if (isZenMode(mode) && settings.prismInterruption) {
-      prismMood = applyPrismMoodInterruption(prismMood, settings.prismInterruption, now);
+      prismMood = applyPrismMoodInterruption(
+        prismMood,
+        settings.prismInterruption,
+        now,
+        zenMoodSensitivity
+      );
     }
     if (turnEvaluation && turnEvaluation.delta < 0) {
       prismMood = applyPrismMoodNegativeTurn(
         prismMood,
         Math.min(1, Math.max(0.2, Math.abs(turnEvaluation.delta) / 8)),
-        now
+        now,
+        zenMoodSensitivity
       );
     }
     const canMoodBoundary =
@@ -4889,14 +4932,14 @@ export async function processChatMessage(
     if (
       canMoodBoundary &&
       !prismMoodCooldownExpiredThisTurn &&
-      shouldPrismMoodStartIgnoreCooldown(prismMood)
+      shouldPrismMoodStartIgnoreCooldown(prismMood, zenMoodSensitivity)
     ) {
       prismMood = applyPrismMoodIgnoreCooldown(prismMood, now);
       prismMoodIgnoreTurn = true;
     } else {
       prismMoodPauseTurn =
         canMoodBoundary &&
-        shouldPrismMoodDeclineResponse(prismMood);
+        shouldPrismMoodDeclineResponse(prismMood, zenMoodSensitivity);
       if (!prismMoodPauseTurn && turnEvaluation && turnEvaluation.delta > 0) {
         prismMood = applyPrismMoodPositiveTurn(
           prismMood,
@@ -4958,9 +5001,10 @@ export async function processChatMessage(
   const insertUserMessageForTurn = (): void => {
     if (isStarterPrompt || userMessageId !== null) return;
     userMessageId = randomId(12);
-    const promptShortcutPayload = serializePromptShortcutPayload(
-      withPromptShortcutResolvedPrompt(settings.promptShortcut, message)
-    );
+    const promptShortcutPayload = serializePromptToolPayload({
+      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, message),
+      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, message),
+    });
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
     ).run(
@@ -5039,6 +5083,25 @@ export async function processChatMessage(
       }
     }
   }
+  const zenSessionMemoryContext =
+    isZenMode(mode) &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    userMessageRequestsZenSessionMemory(message)
+      ? loadZenSessionMemoryOverview({
+          db,
+          userId,
+          userKey,
+          activeConversationId,
+        })
+      : null;
+  if (zenSessionMemoryContext) {
+    pushBackendEvent(
+      "context",
+      "Loaded Zen session memory context",
+      `previousContext=${zenSessionMemoryContext.previousContext ? "yes" : "no"}; checkpoints=${zenSessionMemoryContext.sessionMemories.length}`
+    );
+  }
   const promptMessages = buildPromptMessages({
     botSystemPrompt: effectiveBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
@@ -5049,6 +5112,7 @@ export async function processChatMessage(
     prismMood,
     moodBoundaryHint: prismMoodForgivenessSystemHint,
     threadSummary,
+    zenSessionMemoryContext,
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
@@ -5420,6 +5484,42 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
+  if (
+    isZenMode(mode) &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    userMessageId
+  ) {
+    const sessionMemory = await createZenSessionMemoryCheckpoint({
+      db,
+      provider: auxiliaryProvider,
+      userId,
+      conversationId: activeConversationId,
+      userKey,
+      history,
+      userMessage: {
+        id: userMessageId,
+        role: "user",
+        content: message,
+        createdAt: now,
+      },
+      assistantMessage: {
+        id: assistantProseMessageId,
+        role: "assistant",
+        content: assistantDisplay,
+        createdAt: assistantCreatedAt,
+        provider: providerNameUsed,
+        model: modelUsed,
+      },
+    });
+    if (sessionMemory) {
+      pushBackendEvent(
+        "memory",
+        "Zen session checkpoint saved",
+        `title=${sessionMemory.title}; expiresAt=${sessionMemory.expiresAt}`
+      );
+    }
+  }
 
   // Count live message rows for milestone gating. An earlier version
   // derived this from `history.length + 2`, but `history` is capped at

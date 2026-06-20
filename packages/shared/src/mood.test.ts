@@ -10,6 +10,7 @@ import {
   createDefaultPrismMoodState,
   decayPrismMood,
   isPrismMoodIgnoring,
+  normalizePrismMoodSensitivity,
   prismMoodInterruptionStreak,
   shouldPrismMoodDeclineResponse,
   shouldPrismMoodStartIgnoreCooldown,
@@ -35,6 +36,41 @@ test("interruption increases annoyance with progress-aware weighting", () => {
   assert.ok(early.annoyance > base.annoyance);
   assert.ok(middle.annoyance > early.annoyance);
   assert.ok(middle.annoyance > late.annoyance);
+});
+
+test("mood sensitivity clamps values and scales irritation jumps", () => {
+  assert.equal(normalizePrismMoodSensitivity(-1), 0);
+  assert.equal(normalizePrismMoodSensitivity(2), 1);
+  assert.equal(normalizePrismMoodSensitivity("0.75"), 0.75);
+
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const low = applyPrismMoodInterruption(
+    base,
+    { kind: "assistant_reveal", visibleTokenCount: 15, totalTokenCount: 30 },
+    "2026-06-19T12:00:01.000Z",
+    0
+  );
+  const high = applyPrismMoodInterruption(
+    base,
+    { kind: "assistant_reveal", visibleTokenCount: 15, totalTokenCount: 30 },
+    "2026-06-19T12:00:01.000Z",
+    1
+  );
+
+  assert.ok(high.annoyance > low.annoyance);
+  assert.ok(high.warmth < low.warmth);
+});
+
+test("high mood sensitivity crosses boundaries sooner", () => {
+  const mood = {
+    ...createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z"),
+    annoyance: 0.71,
+    warmth: 0.43,
+    engagement: 0.47,
+  };
+
+  assert.equal(shouldPrismMoodStartIgnoreCooldown(mood), false);
+  assert.equal(shouldPrismMoodStartIgnoreCooldown(mood, 1), true);
 });
 
 test("positive turns repair annoyance and warmth", () => {

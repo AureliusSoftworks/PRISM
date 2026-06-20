@@ -1,10 +1,35 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  getBuiltInPromptWildcardSlot,
+  normalizeBuiltInPromptWildcardSlotKey,
   parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
   serializePromptShortcutPayload,
+  serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
 } from "./promptShortcut.ts";
+
+describe("built-in prompt wildcard slots", () => {
+  it("normalizes labels, aliases, and brace tokens to canonical keys", () => {
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("ADJECTIVE"), "ADJECTIVE");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("adj"), "ADJECTIVE");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{PLURAL NOUN}"), "PLURAL_NOUN");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("plural-noun"), "PLURAL_NOUN");
+  });
+
+  it("rejects unsupported built-in wildcard keys", () => {
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("MOOD RING"), null);
+    assert.equal(getBuiltInPromptWildcardSlot("MOOD RING"), null);
+  });
+
+  it("keeps built-in wildcard keys unique", () => {
+    const keys = new Set(BUILT_IN_PROMPT_WILDCARD_SLOTS.map((slot) => slot.key));
+    assert.equal(keys.size, BUILT_IN_PROMPT_WILDCARD_SLOTS.length);
+  });
+});
 
 describe("prompt shortcut payloads", () => {
   it("round-trips persisted prompt shortcut metadata", () => {
@@ -72,6 +97,64 @@ describe("prompt shortcut payloads", () => {
         wildcardReplacements: [
           { key: "ADJECTIVE", value: "luminous", start: 36, end: 44 },
         ],
+      }
+    );
+  });
+
+  it("round-trips general wildcard run metadata alongside prompt shortcuts", () => {
+    const serialized = serializePromptToolPayload({
+      promptShortcut: {
+        v: 1,
+        commandId: "custom:/story",
+        name: "story",
+        invocation: "/story",
+        flags: [],
+      },
+      promptWildcards: {
+        v: 1,
+        template: "Tell me about !randomShit with {ADJECTIVE}.",
+        resolvedPrompt: "Tell me about lemon with luminous.",
+        wildcardReplacements: [
+          { key: "randomShit", value: "lemon", start: 14, end: 19 },
+          { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
+        ],
+      },
+    });
+
+    assert.equal(typeof serialized, "string");
+    assert.deepEqual(parseStoredPromptShortcutPayload(serialized), {
+      v: 1,
+      commandId: "custom:/story",
+      name: "story",
+      invocation: "/story",
+      flags: [],
+    });
+    assert.deepEqual(parseStoredPromptWildcardPayload(serialized), {
+      v: 1,
+      template: "Tell me about !randomShit with {ADJECTIVE}.",
+      resolvedPrompt: "Tell me about lemon with luminous.",
+      wildcardReplacements: [
+        { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19 },
+        { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
+      ],
+    });
+  });
+
+  it("adds the concrete prompt sent to wildcard metadata", () => {
+    assert.deepEqual(
+      withPromptWildcardResolvedPrompt(
+        {
+          v: 1,
+          template: "Tell me about !randomShit.",
+          wildcardReplacements: [{ key: "RANDOMSHIT", value: "potato", start: 14, end: 20 }],
+        },
+        "Tell me about potato."
+      ),
+      {
+        v: 1,
+        template: "Tell me about !randomShit.",
+        resolvedPrompt: "Tell me about potato.",
+        wildcardReplacements: [{ key: "RANDOMSHIT", value: "potato", start: 14, end: 20 }],
       }
     );
   });

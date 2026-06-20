@@ -2,7 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveLeadingDevCommandTextRanges,
+  resolvePendingWildcardSlotTextRanges,
   resolvePromptShortcutTextRanges,
+  resolveWildcardDeckTextRanges,
 } from "./tiptapPrismDevCommandHighlight.ts";
 
 describe("resolveLeadingDevCommandTextRanges", () => {
@@ -201,6 +203,64 @@ describe("resolvePromptShortcutTextRanges", () => {
         promptNames: ["foo"],
       }),
       []
+    );
+  });
+});
+
+describe("resolveWildcardDeckTextRanges", () => {
+  it("recognizes user-made wildcard decks inline", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("please !randomShit now", {
+        wildcardNames: ["randomShit"],
+      }),
+      [{ start: 7, end: 18, name: "randomshit" }]
+    );
+  });
+
+  it("opens for a bare bang token while typing via the composer token path", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("!", {
+        wildcardNames: ["randomShit"],
+      }),
+      []
+    );
+  });
+
+  it("filters bang tokens to known deck names", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("!unknown !randomShit.", {
+        wildcardNames: ["randomShit"],
+      }),
+      [{ start: 9, end: 20, name: "randomshit" }]
+    );
+  });
+});
+
+describe("resolvePendingWildcardSlotTextRanges", () => {
+  it("recognizes pending true wildcard brace slots", () => {
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("make it {ADJECTIVE} now", {
+        pendingWildcardSlotNames: ["ADJECTIVE"],
+      }),
+      [{ start: 8, end: 19, name: "ADJECTIVE" }]
+    );
+  });
+
+  it("normalizes pending wildcard names with spaces", () => {
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("{PLURAL NOUN}", {
+        pendingWildcardSlotNames: ["PLURAL_NOUN"],
+      }),
+      [{ start: 0, end: 13, name: "PLURAL_NOUN" }]
+    );
+  });
+
+  it("ignores unsupported pending wildcard slots", () => {
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("{NOUN} {PLACE}", {
+        pendingWildcardSlotNames: ["NOUN"],
+      }),
+      [{ start: 0, end: 6, name: "NOUN" }]
     );
   });
 });
