@@ -17,7 +17,9 @@ import {
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
+import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
+import { createZenSessionMemoryCheckpoint } from "../zen-session-memory.ts";
 const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
@@ -37,6 +39,12 @@ function createChatTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -56,9 +64,12 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL DEFAULT 'user-1',
       name TEXT NOT NULL,
+      system_prompt TEXT NOT NULL DEFAULT '',
       color TEXT,
       glyph TEXT,
-      delete_protected INTEGER NOT NULL DEFAULT 0
+      chat_enabled INTEGER NOT NULL DEFAULT 1,
+      delete_protected INTEGER NOT NULL DEFAULT 0,
+      visibility TEXT NOT NULL DEFAULT 'private'
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -83,6 +94,16 @@ function createChatTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
     );
     CREATE TABLE session_opinions (
       user_id TEXT NOT NULL,
@@ -110,6 +131,25 @@ function createChatTestDb(): DatabaseSync {
       repair_count INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, bot_scope_key)
+    );
+    CREATE TABLE prism_mood_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      annoyance REAL NOT NULL DEFAULT 0.12,
+      warmth REAL NOT NULL DEFAULT 0.62,
+      engagement REAL NOT NULL DEFAULT 0.62,
+      restraint REAL NOT NULL DEFAULT 0.68,
+      recent_deltas TEXT NOT NULL DEFAULT '[]',
+      ignore_until TEXT,
+      ignore_cooldown_ms INTEGER,
+      ignore_forgiveness_chance REAL,
+      ignore_penalty_level INTEGER,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, mode)
     );
   `);
   return db;
@@ -243,7 +283,7 @@ describe("processChatMessage starter prompts", () => {
         botId: "bot-1",
         incognito: false,
         botSystemPrompt: "You are Storm Bot. Invite the user into strange skies.",
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -274,11 +314,16 @@ describe("processChatMessage starter prompts", () => {
     const starterBody = bodies[0];
     assert.equal(starterBody?.messages?.[0]?.role, "system");
     assert.match(starterBody?.messages?.[0]?.content ?? "", /Storm Bot/);
-    assert.equal(starterBody?.messages?.[1]?.role, "user");
+    const starterUserMessage = starterBody?.messages?.find(
+      (message) => message.role === "user"
+    );
+    assert.ok(starterUserMessage);
     assert.match(
-      starterBody?.messages?.[1]?.content ?? "",
+      starterUserMessage.content,
       /Functionally simple/
     );
+    assert.match(starterUserMessage.content, /AskQuestion/);
+    assert.match(starterUserMessage.content, /sendGeneratedImage/);
 
     const inferBody = bodies[1];
     assert.equal(inferBody?.messages?.[0]?.role, "system");
@@ -289,6 +334,140 @@ describe("processChatMessage starter prompts", () => {
     );
     await flushBackgroundTitleJobs();
     assert.equal(fetchCount, 3);
+  });
+
+  it("persists starter choices as AskQuestion metadata for restored Zen chats", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              '{"suggestions":["Help me sort one decision","Ask me something grounding","Follow a playful thread","Just sit with me for a minute"]}',
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const assistant = result.conversation.messages[0];
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      assistant?.askQuestion?.options.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+
+    const storedAssistant = db
+      .prepare("SELECT tool_payload FROM messages WHERE role = 'assistant'")
+      .get() as { tool_payload: string | null };
+    const storedPayload = JSON.parse(storedAssistant.tool_payload ?? "{}") as {
+      askQuestion?: { prompt?: string; options?: Array<{ label?: string }> };
+    };
+    assert.equal(storedPayload.askQuestion?.prompt, "Choose a reply:");
+    assert.deepEqual(
+      storedPayload.askQuestion?.options?.map((option) => option.label),
+      [
+        "Help me sort one decision",
+        "Ask me something grounding",
+        "Follow a playful thread",
+      ]
+    );
+  });
+
+  it("rejects internal third-person starter choice labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (fetchCount === 2) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                '{"suggestions":["The user has chosen the first of the options","The user selected the second option","User picked the third reply"]}',
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: '{"title":"Check In"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
+      "I'm not sure yet.",
+    ]);
+    assert.deepEqual(
+      result.conversation.messages[0]?.askQuestion?.options.map((option) => option.label),
+      [
+        "Something weighing on me.",
+        "A decision I keep circling.",
+        "A small moment from today.",
+      ]
+    );
+    await flushBackgroundTitleJobs();
   });
 
   it("does not inject first-contact intro instructions for hero-start prompts", async () => {
@@ -479,7 +658,7 @@ describe("processChatMessage starter prompts", () => {
       "user-1",
       "memory-conv-1",
       null,
-      [{ text: "The user prefers reflective evening check-ins.", confidence: 0.96 }],
+      [{ text: "You prefer reflective evening check-ins.", confidence: 0.96 }],
       userKey,
       { sourceMessageIds: ["memory-source-1"] }
     );
@@ -542,6 +721,7 @@ describe("processChatMessage starter prompts", () => {
       {
         preferredProvider: "local",
         autoMemory: true,
+        userDisplayName: "Jared",
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
@@ -550,13 +730,18 @@ describe("processChatMessage starter prompts", () => {
     );
 
     const starterBody = bodies[0];
+    const starterIdentityBlock = starterBody?.messages?.[0]?.content ?? "";
     const starterUserInstruction = starterBody?.messages?.filter((m) => m.role === "user").pop();
+    assert.doesNotMatch(starterIdentityBlock, /reflective evening check-ins/i);
     assert.match(starterUserInstruction?.content ?? "", /Ask exactly ONE direct question/i);
     const memoryBlock = starterBody?.messages?.find((msg) =>
-      msg.content.startsWith("User memory hints:\n")
+      msg.content.startsWith(
+        "User memory hints about the human user (conversation context only; do not rewrite persona identity):\n"
+      )
     );
     assert.ok(memoryBlock);
-    assert.match(memoryBlock?.content ?? "", /reflective evening check-ins/i);
+    assert.match(memoryBlock?.content ?? "", /Jared prefers reflective evening check-ins/i);
+    assert.doesNotMatch(memoryBlock?.content ?? "", /- You prefer/i);
   });
 
   it("rewrites generic starter openers into memory-anchored questions", async () => {
@@ -678,10 +863,171 @@ describe("processChatMessage starter prompts", () => {
     );
 
     assert.deepEqual(result.conversationStarters, [
+      "Something weighing on me.",
+      "A decision I keep circling.",
+      "A small moment from today.",
       "I'm not sure yet.",
-      "A small specific detail.",
-      "I need another clue.",
-      "Surprise me with your guess.",
+    ]);
+  });
+
+  it("uses starter chips from alternate JSON keys and object labels", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What kind of check-in would help you settle in?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify({
+              options: [
+                { label: "Help me sort one decision" },
+                { label: "Ask me something grounding" },
+                { label: "Follow a playful thread" },
+                { label: "Just sit with me for a minute" },
+              ],
+            }),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "Help me sort one decision",
+      "Ask me something grounding",
+      "Follow a playful thread",
+      "Just sit with me for a minute",
+    ]);
+  });
+
+  it("uses starter chips from bare JSON arrays", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "Where should we begin tonight?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify([
+              "With the thing I keep postponing",
+              "With something lighter",
+              "Ask me one honest question",
+              "Help me slow down first",
+            ]),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "With the thing I keep postponing",
+      "With something lighter",
+      "Ask me one honest question",
+      "Help me slow down first",
+    ]);
+  });
+
+  it("uses starter chips from numbered list inference replies", async () => {
+    const db = createChatTestDb();
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "What would feel most useful to talk through first?",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "1. A decision I keep avoiding",
+              "2. A feeling I cannot quite name",
+              "3. Something practical for tonight",
+              "4. Surprise me with a gentle prompt",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: true,
+        starterPromptLabel: "Prism",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.deepEqual(result.conversationStarters, [
+      "A decision I keep avoiding",
+      "A feeling I cannot quite name",
+      "Something practical for tonight",
+      "Surprise me with a gentle prompt",
     ]);
   });
 
@@ -907,7 +1253,7 @@ describe("processChatMessage starter prompts", () => {
     );
   });
 
-  it("keeps private chats ephemeral while honoring the selected provider and bot", async () => {
+  it("keeps private chats ephemeral while honoring the selected provider", async () => {
     const db = createChatTestDb();
 
     let providerUrl = "";
@@ -974,10 +1320,10 @@ describe("processChatMessage starter prompts", () => {
 
     assert.equal(conversation.id, "private-session-1");
     assert.equal(conversation.incognito, true);
-    assert.equal(conversation.botId, "bot-1");
-    assert.equal(conversation.lastBotId, "bot-1");
+    assert.equal(conversation.botId, null);
+    assert.equal(conversation.lastBotId, null);
     assert.equal(conversation.messages.length, 4);
-    assert.equal(conversation.messages[3]?.botName, "Storm Bot");
+    assert.equal(conversation.messages[3]?.botName, undefined);
     assert.equal(conversation.messages[3]?.provider, "openai");
 
     const conversationCount = db
@@ -1579,6 +1925,879 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
+  it("treats selected AskQuestion options as prose instead of forcing continuation", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-askquestion-prose-answer";
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Which path?",
+      options: [
+        { id: "a", label: "Left" },
+        { id: "b", label: "Pause" },
+        { id: "c", label: "Right" },
+      ],
+    };
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "AskQuestion Answer",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Give me a fork.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Pick a path.",
+      "local",
+      "test-model",
+      null,
+      JSON.stringify({ v: 1, askQuestion: askPayload }),
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Plain prose after the choice." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Left",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Left/);
+    assert.doesNotMatch(promptText, /Continue the active AskQuestion flow/i);
+    assert.doesNotMatch(promptText, /follow-up multiple-choice/i);
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "Plain prose after the choice.");
+    assert.equal(lastAssistant?.askQuestion, undefined);
+  });
+
+  it("nudges the model to resume an interrupted Zen reply after an excuse", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-resume";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "No worries. As I was saying, the outer loop coordinates without owning every detail." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "sorry, had to take a call",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /continue the unfinished thought only if that still fits/i);
+    assert.match(promptText, /bridge phrase is optional/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("keeps interruption context but prioritizes topic switches", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-topic-switch";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me why this architecture works.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "The reason this works is that each boundary keeps state local while the outer loop coord—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Sure, let's switch topics." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "actually, can we switch topics and talk about CSS?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "The reason this works/i);
+    assert.match(promptText, /switch topics or replace the interrupted request/i);
+    assert.match(promptText, /Prioritize the new request/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("tells the model not to repeat interrupted text the user completed", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-user-completed";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Joke",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "Tell me a cliche joke.",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Why did the chicken cross the ro—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Exactly. You spared us both the suspense." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "To get to the other side.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /previous assistant reply was intentionally interrupted/i);
+    assert.match(promptText, /Visible interrupted fragment: "Why did the chicken/i);
+    assert.match(promptText, /appears to complete, predict, or answer the unfinished thought/i);
+    assert.match(promptText, /do not continue repeating the interrupted text/i);
+    assert.doesNotMatch(promptText, /As I was saying/i);
+  });
+
+  it("persists Zen interruption mood and lets warm repair turns recover it", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("I can shift with you.");
+
+    const interrupted = await processChatMessage(
+      db,
+      "user-1",
+      "Wait, pause that thought. I need a different angle.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        prismInterruption: {
+          kind: "assistant_reveal",
+          assistantMessageId: "assistant-visible-fragment",
+          visibleTokenCount: 38,
+          totalTokenCount: 72,
+          interruptionCount: 2,
+        },
+      }
+    );
+
+    assert.ok(interrupted.prismMood);
+    assert.equal(interrupted.prismMood?.mode, "zen");
+    assert.ok((interrupted.prismMood?.annoyance ?? 0) > 0.12);
+    assert.equal(interrupted.prismMood?.recentDeltas[0]?.kind, "interruption");
+    const row = db
+      .prepare(
+        "SELECT mood_key, annoyance, recent_deltas FROM prism_mood_state WHERE user_id = ? AND conversation_id = ? AND mode = ?"
+      )
+      .get("user-1", interrupted.conversation.id, "zen") as
+      | { mood_key: string; annoyance: number; recent_deltas: string }
+      | undefined;
+    assert.ok(row);
+    assert.ok(row.annoyance > 0.12);
+
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, that was abrupt. Thank you for staying with me.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      interrupted.conversation.id
+    );
+
+    assert.ok(repaired.prismMood);
+    assert.ok(
+      (repaired.prismMood?.annoyance ?? 1) <
+        (interrupted.prismMood?.annoyance ?? 0)
+    );
+    assert.ok(
+      (repaired.prismMood?.warmth ?? 0) >=
+        (interrupted.prismMood?.warmth ?? 1)
+    );
+    assert.equal(repaired.prismMood?.recentDeltas[0]?.kind, "positive_turn");
+  });
+
+  it("uses a one-line Zen mood pause once interruption pressure is high", async () => {
+    const db = createChatTestDb();
+    const conversationId = "pause-conversation";
+    const now = "2026-06-19T12:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(conversationId, "user-1", "Pause test", "zen", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "assistant-1",
+      conversationId,
+      "user-1",
+      "assistant",
+      "Previous assistant message.",
+      "2026-06-19T12:00:01.000Z"
+    );
+    const interruptionDelta = {
+      kind: "interruption",
+      at: now,
+      reason: "Interrupted.",
+      annoyanceDelta: 0.1,
+      warmthDelta: -0.04,
+      engagementDelta: -0.02,
+      restraintDelta: -0.01,
+      moodKeyBefore: "neutral",
+      moodKeyAfter: "guarded",
+    };
+    db.prepare(
+      `INSERT INTO prism_mood_state (
+        user_id, conversation_id, mode, mood_key, confidence, annoyance,
+        warmth, engagement, restraint, recent_deltas, frozen, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      conversationId,
+      "zen",
+      "guarded",
+      0.7,
+      0.62,
+      0.48,
+      0.5,
+      0.5,
+      JSON.stringify(Array.from({ length: 5 }, () => interruptionDelta)),
+      0,
+      now
+    );
+
+    const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/api/chat")) {
+        chatPayloads.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "This should not be used." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Are you still going to answer?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    const assistant = result.conversation.messages.at(-1);
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.content, "I’m going to pause here for a moment.");
+    assert.equal(result.prismMood?.moodKey, "guarded");
+  });
+
+  it("can ignore multiple Zen messages during a severe mood cooldown", async () => {
+    const db = createChatTestDb();
+    const conversationId = "ignore-conversation";
+    const now = "2026-06-19T12:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(conversationId, "user-1", "Ignore test", "zen", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "assistant-1",
+      conversationId,
+      "user-1",
+      "assistant",
+      "Previous assistant message.",
+      "2026-06-19T12:00:01.000Z"
+    );
+    const interruptionDelta = {
+      kind: "interruption",
+      at: now,
+      reason: "Interrupted.",
+      annoyanceDelta: 0.1,
+      warmthDelta: -0.04,
+      engagementDelta: -0.02,
+      restraintDelta: -0.01,
+      moodKeyBefore: "neutral",
+      moodKeyAfter: "guarded",
+    };
+    db.prepare(
+      `INSERT INTO prism_mood_state (
+        user_id, conversation_id, mode, mood_key, confidence, annoyance,
+        warmth, engagement, restraint, recent_deltas, ignore_until, frozen, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      conversationId,
+      "zen",
+      "guarded",
+      0.8,
+      0.74,
+      0.42,
+      0.47,
+      0.5,
+      JSON.stringify(Array.from({ length: 6 }, () => interruptionDelta)),
+      null,
+      0,
+      now
+    );
+
+    const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/api/chat")) {
+        chatPayloads.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Back online." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const ignoredStart = await processChatMessage(
+      db,
+      "user-1",
+      "Answer now.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(ignoredStart.conversation.messages.at(-1)?.role, "user");
+    assert.equal(ignoredStart.prismMood?.recentDeltas[0]?.kind, "ignore_started");
+    assert.ok(ignoredStart.prismMood?.ignoreUntil);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'assistant'").get(conversationId) as { n: number }).n,
+      1
+    );
+
+    const ignoredAgain = await processChatMessage(
+      db,
+      "user-1",
+      "I said answer.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(ignoredAgain.conversation.messages.at(-1)?.role, "user");
+    assert.equal(ignoredAgain.prismMood?.recentDeltas[0]?.kind, "ignored_turn");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'assistant'").get(conversationId) as { n: number }).n,
+      1
+    );
+
+    db.prepare(
+      "UPDATE prism_mood_state SET ignore_until = ? WHERE user_id = ? AND conversation_id = ? AND mode = ?"
+    ).run("2026-06-19T11:59:00.000Z", "user-1", conversationId, "zen");
+
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, I will slow down. Thank you for staying with me.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(repaired.conversation.messages.at(-1)?.role, "assistant");
+    assert.equal(repaired.conversation.messages.at(-1)?.content, "Back online.");
+    assert.equal(repaired.prismMood?.recentDeltas[0]?.kind, "positive_turn");
+  });
+
+  it("keeps relationship and mood context out of the persona identity block", async () => {
+    const db = createChatTestDb();
+    const userKey = CHAT_TEST_USER_KEY;
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-1",
+      "user-1",
+      "Leaf Bot",
+      "You are Leaf Bot. You are curious and warm.",
+      "#7fbf7f",
+      "leaf"
+    );
+    db.prepare(
+      `INSERT INTO bot_opinions (
+        user_id, bot_scope_key, bot_id, score, band, boundary_level, trend,
+        last_reason, recent_reasons, repair_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      "bot-1",
+      "bot-1",
+      24,
+      "strained",
+      "gentle",
+      "down",
+      "The user was curt in a prior turn.",
+      JSON.stringify(["The user was curt in a prior turn."]),
+      0,
+      "2026-01-01T00:00:00.000Z"
+    );
+    type ChatPayload = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (body.messages?.[0]?.content.includes("memory validation critic")) {
+        return new Response(
+          JSON.stringify({ message: { content: JSON.stringify({ results: [] }) } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Let us make that quieter and more useful." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Can we make tonight's check-in gentler?",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
+        devMemoriesEnabled: true,
+        devMemoriesText: "The test user likes slower pacing.",
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const generationBody = chatPayloads[0];
+    assert.ok(generationBody);
+    const messages = generationBody.messages ?? [];
+    const identityBlock = messages[0]?.content ?? "";
+    const promptText = messages
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n\n");
+    assert.match(identityBlock, /You are Leaf Bot/i);
+    assert.doesNotMatch(identityBlock, /slower pacing/i);
+    assert.doesNotMatch(identityBlock, /Conversation relationship context/i);
+    assert.doesNotMatch(identityBlock, /Current Prism mood context/i);
+    assert.match(promptText, /Developer conversation context \(not persona identity\)/);
+    assert.match(
+      promptText,
+      /Conversation relationship context for this turn \(not persona identity\)/
+    );
+    assert.match(promptText, /Current Prism mood context for this turn \(not persona identity\)/);
+    assert.doesNotMatch(promptText, /across every bot persona/i);
+  });
+
+  it("anchors extreme Prism mood values for direct self-report questions", async () => {
+    const runMoodPrompt = async (args: {
+      moodKey: string;
+      annoyance: number;
+      warmth: number;
+      engagement: number;
+      expectedAnchor: RegExp;
+      expectedVoice: RegExp;
+    }): Promise<string> => {
+      const db = createChatTestDb();
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+      ).run("mood-extreme", "user-1", "Mood check", now, now);
+      db.prepare(
+        `INSERT INTO prism_mood_state (
+          user_id, conversation_id, mode, mood_key, confidence, annoyance,
+          warmth, engagement, restraint, recent_deltas, frozen, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "user-1",
+        "mood-extreme",
+        "zen",
+        args.moodKey,
+        1,
+        args.annoyance,
+        args.warmth,
+        args.engagement,
+        0.38,
+        "[]",
+        1,
+        now
+      );
+
+      const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          messages?: Array<{ role: string; content: string }>;
+        };
+        if (String(input).includes("/api/chat")) {
+          chatPayloads.push(body);
+          return new Response(JSON.stringify({ message: { content: "Mood noted." } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+
+      await processChatMessage(
+        db,
+        "user-1",
+        "On a scale of 1 to 10, what is your current mood?",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          starterPrompt: false,
+          incognito: false,
+          mode: "chat",
+        },
+        "mood-extreme"
+      );
+
+      const promptText = (chatPayloads[0]?.messages ?? [])
+        .map((message) => `${message.role}: ${message.content}`)
+        .join("\n");
+      assert.match(promptText, args.expectedAnchor);
+      assert.match(promptText, args.expectedVoice);
+      assert.match(promptText, /Exact 1-10 self-report values:/);
+      assert.match(promptText, /90-100% should read as 9-10\/10/);
+      assert.match(promptText, /noticeably affect tone, pacing, and brevity/);
+      return promptText;
+    };
+
+    await runMoodPrompt({
+      moodKey: "strained",
+      annoyance: 1,
+      warmth: 0.12,
+      engagement: 0.28,
+      expectedAnchor: /Current self-report anchor: annoyance 10\/10/,
+      expectedVoice: /Voice: visibly strained, terse, cool/i,
+    });
+    await runMoodPrompt({
+      moodKey: "joyful",
+      annoyance: 0,
+      warmth: 1,
+      engagement: 1,
+      expectedAnchor: /Current self-report anchor: warmth 10\/10/,
+      expectedVoice: /Voice: openly warm, bright, and emotionally available/i,
+    });
+  });
+
   it("skips AskQuestion payload when options are not synthesized", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request) =>
@@ -1865,6 +3084,246 @@ describe("processChatMessage AskQuestion tool", () => {
   });
 });
 
+describe("processChatMessage thread compaction context", () => {
+  it("uses compacted summaries instead of pre-compaction transcript rows", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-compact-current-chat";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Compact Current Chat",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "old-user",
+      conversationId,
+      userId,
+      "user",
+      "PRE_COMPACTION_SECRET_ALPHA should stay in the transcript only.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "old-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "PRE_COMPACTION_SECRET_BETA should also stay out of live context.",
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the compacted plan."
+          : "The compacted summary preserves the early planning decisions.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "manual", force: true }
+    );
+    assert.equal(compacted.triggered, true);
+    assert.ok(compacted.latestSummaryAt);
+    const summaryTime = Date.parse(compacted.latestSummaryAt ?? "");
+    assert.ok(Number.isFinite(summaryTime));
+    insertMessage.run(
+      "post-user",
+      conversationId,
+      userId,
+      "user",
+      "Post-compaction question about the next step.",
+      new Date(summaryTime + 1000).toISOString()
+    );
+    insertMessage.run(
+      "post-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Post-compaction answer with the latest decision.",
+      new Date(summaryTime + 2000).toISOString()
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after compaction." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue from the compacted context.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Earlier in this thread \(compacted context\):/);
+    assert.match(promptText, /compacted summary preserves the early planning decisions/i);
+    assert.match(promptText, /Post-compaction question about the next step/);
+    assert.match(promptText, /Post-compaction answer with the latest decision/);
+    assert.match(promptText, /Continue from the compacted context/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_ALPHA/);
+    assert.doesNotMatch(promptText, /PRE_COMPACTION_SECRET_BETA/);
+    const preservedOldRows = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND content LIKE '%PRE_COMPACTION_SECRET_%'"
+      )
+      .get(conversationId) as { n: number };
+    assert.equal(preservedOldRows.n, 2);
+  });
+
+  it("keeps the recent live tail after milestone compaction", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-milestone-tail";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Milestone Tail",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:40.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    const messageCount = RECENT_WINDOW_SIZE + 5;
+    for (let index = 0; index < messageCount; index += 1) {
+      const content =
+        index === messageCount - 1
+          ? "RECENT_UNSUMMARIZED_CONTEXT must remain in live history."
+          : `Milestone transcript row ${index}`;
+      insertMessage.run(
+        `milestone-${index}`,
+        conversationId,
+        userId,
+        index % 2 === 0 ? "user" : "assistant",
+        content,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1000).toISOString()
+      );
+    }
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "I'm tracking the milestone summary."
+          : "Milestone summary covers only the older transcript rows.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "chat", reason: "milestone" }
+    );
+    assert.equal(compacted.triggered, true);
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Fresh reply after milestone." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "Continue after the milestone compaction.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Milestone summary covers only the older transcript rows/);
+    assert.match(promptText, /RECENT_UNSUMMARIZED_CONTEXT must remain in live history/);
+    assert.match(promptText, /Continue after the milestone compaction/);
+  });
+});
+
 describe("processChatMessage auto-generated titles", () => {
   it("updates a new conversation title in the background after the first reply", async () => {
     const db = createChatTestDb();
@@ -1896,7 +3355,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -1954,7 +3413,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -1999,7 +3458,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     await flushBackgroundTitleJobs();
@@ -2018,7 +3477,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -2187,7 +3646,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -2195,6 +3654,113 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
     assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
     assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("keeps Command Center prompt turns out of memories and mood state", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Prompt result.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Remember this: I prefer pistachios.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "chat",
+        commandCenterPrompt: true,
+        prismInterruption: {
+          kind: "pending_reply",
+        },
+      }
+    );
+
+    assert.equal(result.memoryLearned, undefined);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM prism_mood_state").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM session_opinions").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM bot_opinions").get() as { n: number }).n,
+      0
+    );
+    assert.equal(result.prismMood?.recentDeltas.length, 0);
+  });
+
+  it("uses resolved Command Center prompt text for the model while saving the visible shortcut sentence", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Prompt result." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please use /prompt here.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "chat",
+        commandCenterPrompt: true,
+        promptInputOverride: "Please use the expanded prompt body here.",
+        promptShortcut: {
+          v: 1,
+          commandId: "prompt-1",
+          name: "prompt",
+          invocation: "/prompt",
+          flags: [],
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.equal(chatBody?.messages?.at(-1)?.content, "Please use the expanded prompt body here.");
+    const storedUser = db
+      .prepare("SELECT content, tool_payload FROM messages WHERE role = 'user'")
+      .get() as { content: string; tool_payload: string };
+    assert.equal(storedUser.content, "Please use /prompt here.");
+    const storedPayload = JSON.parse(storedUser.tool_payload) as {
+      promptShortcut?: { resolvedPrompt?: string };
+    };
+    assert.equal(
+      storedPayload.promptShortcut?.resolvedPrompt,
+      "Please use the expanded prompt body here."
+    );
+    const userMessage = result.conversation.messages.find((message) => message.role === "user");
+    assert.equal(userMessage?.content, "Please use /prompt here.");
+    assert.equal(
+      userMessage?.promptShortcut?.resolvedPrompt,
+      "Please use the expanded prompt body here."
+    );
   });
 
   it("saves funny-enough disclosures even when auto-memory is off", async () => {
@@ -2212,7 +3778,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -2305,7 +3871,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -2395,7 +3961,7 @@ describe("processChatMessage conversational memory cues", () => {
       { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -2408,7 +3974,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       "conversation-1"
     );
@@ -2434,7 +4000,7 @@ describe("processChatMessage conversational memory cues", () => {
       { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -2447,7 +4013,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       "conversation-1"
     );
@@ -2534,7 +4100,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     const second = await processChatMessage(
@@ -2547,7 +4113,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-2",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -2576,7 +4142,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     const repaired = await processChatMessage(
@@ -2589,7 +4155,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       harsh.conversation.id
     );
@@ -2616,7 +4182,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -2645,7 +4211,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -2663,6 +4229,327 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
     const text =
       "Hey [SpongeBob](prism-bot://sb) and [Pat](prism-bot://pat%201) — also [SpongeBob](prism-bot://sb) again";
     assert.deepEqual(extractPrismBotMentionIdsFromMessage(text), ["sb", "pat 1"]);
+  });
+});
+
+describe("processChatMessage Zen session memory prompt gating", () => {
+  it("injects session memory only for explicit prior-context inquiries", async () => {
+    const db = createChatTestDb();
+    const createdAt = "2026-06-20T10:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run("active", "user-1", "Active Zen", createdAt, createdAt);
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run(
+      "previous",
+      "user-1",
+      "Bridge Story",
+      "2026-06-20T09:00:00.000Z",
+      "2026-06-20T09:30:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "summary-previous",
+      "user-1",
+      "previous",
+      JSON.stringify({
+        v: 1,
+        kind: "thread_compact",
+        mode: "zen",
+        summary: "The user and Prism are midway through a bridge story.",
+        displaySummary: "I'm holding the bridge story at the choice.",
+        createdAt: "2026-06-20T09:31:00.000Z",
+      }),
+      "2026-06-20T09:31:00.000Z"
+    );
+    await createZenSessionMemoryCheckpoint({
+      db,
+      provider: {
+        name: "local",
+        async generateResponse() {
+          return JSON.stringify({
+            title: "Bridge Choice",
+            text: "Resume at the lantern-or-map choice before crossing the bridge.",
+          });
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      userId: "user-1",
+      conversationId: "previous",
+      userKey: CHAT_TEST_USER_KEY,
+      history: [
+        {
+          id: "previous-assistant",
+          role: "assistant",
+          content: "The bridge waits between a lantern path and a map path.",
+          createdAt: "2026-06-20T09:29:00.000Z",
+        },
+      ],
+      userMessage: {
+        id: "previous-user",
+        role: "user",
+        content: "Let's finish this later.",
+        createdAt: "2026-06-20T09:30:00.000Z",
+      },
+      assistantMessage: {
+        id: "previous-reply",
+        role: "assistant",
+        content: "We can pause at the choice.",
+        createdAt: "2026-06-20T09:30:01.000Z",
+      },
+      now: new Date("2026-06-20T09:30:00.000Z"),
+    });
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      bodies.push(body);
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "A steady Zen reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Tell me about the weather.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Prism.",
+      },
+      "active"
+    );
+    const ordinaryBodies = bodies.filter((body) =>
+      body.messages?.at(-1)?.role === "user" &&
+      body.messages.at(-1)?.content === "Tell me about the weather."
+    );
+    assert.equal(ordinaryBodies.length, 1);
+    assert.ok(
+      !ordinaryBodies[0]?.messages
+        ?.map((message) => message.content)
+        .join("\n")
+        .includes("Zen session memory context")
+    );
+
+    bodies.length = 0;
+    await processChatMessage(
+      db,
+      "user-1",
+      "Where were we last conversation?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Prism.",
+      },
+      "active"
+    );
+    const inquiryBodies = bodies.filter((body) =>
+      body.messages?.at(-1)?.role === "user" &&
+      body.messages.at(-1)?.content === "Where were we last conversation?"
+    );
+    assert.equal(inquiryBodies.length, 1);
+    const inquiryPrompt = inquiryBodies[0]?.messages
+      ?.map((message) => message.content)
+      .join("\n") ?? "";
+    assert.match(inquiryPrompt, /Zen session memory context/);
+    assert.match(inquiryPrompt, /midway through a bridge story/);
+    assert.match(inquiryPrompt, /lantern-or-map choice/);
+  });
+});
+
+describe("processChatMessage session resume context", () => {
+  it("adds Zen resume context to the model prompt without storing it as a message", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Resume-aware reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Where were we?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        sessionResumeContext: {
+          summary: "We were shaping Prism into a living, continuous conversation.",
+          previousActiveAt: "2026-06-18T20:00:00.000Z",
+          resumedAt: "2026-06-19T09:00:00.000Z",
+          gapMs: 13 * 60 * 60 * 1000,
+          source: "dev",
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Zen session resume context:/);
+    assert.match(promptText, /about 13 hours/);
+    assert.match(promptText, /living, continuous conversation/);
+    assert.equal(result.conversation.messages.length, 2);
+    const storedResumeRows = db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE content LIKE '%Zen session resume context%'")
+      .get() as { n: number };
+    assert.equal(storedResumeRows.n, 0);
+  });
+
+  it("does not add resume context to Sandbox prompts", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Sandbox reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Keep testing.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        sessionResumeContext: {
+          summary: "This should not be included outside Zen.",
+          gapMs: 13 * 60 * 60 * 1000,
+          source: "dev",
+        },
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.doesNotMatch(promptText, /Zen session resume context:/);
+    assert.doesNotMatch(promptText, /outside Zen/);
+  });
+});
+
+describe("processChatMessage bot mentions", () => {
+  it("adds mentioned library bot profile context to the model prompt", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      "bot-mentor",
+      "Mentor Bot",
+      "A patient mentor who asks crisp follow-up questions.",
+      "#4f8cff",
+      "spark"
+    );
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Mentor Bot gives me a useful reference point here.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Can you compare this with [Mentor Bot](prism-bot://bot-mentor)?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const mentionContext = bodies
+      .flatMap((body) => body.messages ?? [])
+      .find((message) =>
+        message.content.startsWith("Prism bot mentions in the latest user message:")
+      );
+    assert.ok(mentionContext);
+    assert.match(mentionContext.content, /Mentor Bot/);
+    assert.match(mentionContext.content, /patient mentor/i);
+    assert.match(mentionContext.content, /Stay in the current Prism\/persona voice/i);
   });
 });
 
@@ -3082,6 +4969,111 @@ describe("buildAssistantToolCallEvents", () => {
   });
 });
 
+describe("processChatMessage Zen cancellation cleanup", () => {
+  it("removes a persisted first user message when the request is cancelled before a reply", async () => {
+    const db = createChatTestDb();
+    const controller = new AbortController();
+    let markProviderFetchStarted: () => void = () => {};
+    const providerFetchStarted = new Promise<void>((resolve) => {
+      markProviderFetchStarted = resolve;
+    });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      markProviderFetchStarted();
+      const signal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        const rejectAbort = () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted) {
+          rejectAbort();
+          return;
+        }
+        signal?.addEventListener("abort", rejectAbort, { once: true });
+      });
+    }) as typeof fetch;
+
+    const pending = processChatMessage(
+      db,
+      "user-1",
+      "Please start then cancel.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        signal: controller.signal,
+      }
+    );
+
+    await providerFetchStarted;
+    controller.abort();
+    await assert.rejects(pending, /abort|cancel/i);
+
+    const messageCount = db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+      .get("user-1") as { n: number };
+    assert.equal(messageCount.n, 0);
+    const conversationCount = db
+      .prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?")
+      .get("user-1") as { n: number };
+    assert.equal(conversationCount.n, 0);
+  });
+
+  it("does not reuse a stale Zen conversation that has user text but no assistant reply", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Fresh reply");
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+    ).run("stale-zen", "user-1", "Cancelled start", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)"
+    ).run("stale-user", "stale-zen", "user-1", "This was cancelled.", now);
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fresh start",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      },
+      "stale-zen"
+    );
+
+    assert.notEqual(result.conversation.id, "stale-zen");
+    assert.deepEqual(
+      result.conversation.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.content),
+      ["Fresh start"]
+    );
+    const staleRows = db
+      .prepare("SELECT content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all("stale-zen") as Array<{ content: string }>;
+    assert.deepEqual(
+      staleRows.map((row) => row.content),
+      ["This was cancelled."]
+    );
+  });
+});
+
 describe("bot judgment memories", () => {
   it("stores validated inferred bot-scoped judgment memories from assistant replies", async () => {
     const db = createChatTestDb();
@@ -3102,7 +5094,7 @@ describe("bot judgment memories", () => {
         starterPromptLabel: "Lara",
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3137,7 +5129,7 @@ describe("bot judgment memories", () => {
         starterPromptLabel: "Lara",
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 

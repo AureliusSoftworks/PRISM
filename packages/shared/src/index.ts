@@ -1,4 +1,47 @@
 export {
+  applyPrismMoodExpiredIgnoreCooldown,
+  applyPrismMoodForgivenessSuccess,
+  applyPrismMoodInterruption,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodIgnoredTurn,
+  applyPrismMoodNegativeTurn,
+  applyPrismMoodPositiveTurn,
+  clampPrismMoodValue,
+  coffeeSocialSnapshotToPrismMoodState,
+  createDefaultPrismMoodState,
+  DEFAULT_PRISM_MOOD_SENSITIVITY,
+  debugPatchPrismMood,
+  decayPrismMood,
+  derivePrismMoodConfidence,
+  derivePrismMoodKey,
+  interruptionProgressWeight,
+  isPrismMoodIgnoring,
+  MAX_PRISM_MOOD_SENSITIVITY,
+  MIN_PRISM_MOOD_SENSITIVITY,
+  normalizePrismMoodSensitivity,
+  PRISM_MOOD_IGNORE_COOLDOWN_MS,
+  PRISM_MOOD_IGNORE_FORGIVENESS_CHANCE,
+  PRISM_MOOD_IGNORE_FORGIVENESS_STEP,
+  prismMoodDeclineReason,
+  prismMoodIgnoreForgivenessChance,
+  prismMoodIgnoreUntilMs,
+  prismMoodInterruptionStreak,
+  resetPrismMood,
+  sanitizePrismMoodState,
+  shouldPrismMoodDeclineResponse,
+  shouldPrismMoodStartIgnoreCooldown,
+  type CoffeeSocialLikeSnapshot,
+  type PrismMoodDebugPatch,
+  type PrismMoodDelta,
+  type PrismMoodDeltaKind,
+  type PrismMoodInterruptionInput,
+  type PrismMoodKey,
+  type PrismMoodMode,
+  type PrismMoodSnapshot,
+  type PrismMoodState,
+} from "./mood.js";
+
+export {
   BOT_FACT_KEY_LABELS,
   BOT_FACT_KEY_ORDER,
   BOT_FACT_KEY_PLACEHOLDERS,
@@ -48,6 +91,7 @@ export {
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
+  normalizeZenDisplayMetadata,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -61,7 +105,38 @@ export {
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
+  type ZenDisplayAlign,
+  type ZenDisplayLinePlacement,
+  type ZenDisplayMetadata,
+  type ZenDisplayPlacement,
 } from "./prismTool.js";
+
+export {
+  normalizePromptShortcutMetadata,
+  normalizeBuiltInPromptWildcardSlotKey,
+  normalizePromptWildcardRunMetadata,
+  parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
+  serializePromptShortcutPayload,
+  serializePromptToolPayload,
+  withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
+  BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  getBuiltInPromptWildcardSlot,
+  type BuiltInPromptWildcardSlot,
+  type BuiltInPromptWildcardSlotKey,
+  type PromptShortcutFlag,
+  type PromptShortcutMetadata,
+  type PromptShortcutWildcardReplacement,
+  type PromptWildcardRunMetadata,
+} from "./promptShortcut.js";
+
+export {
+  ELEVENLABS_IMAGE_MODEL_IDS,
+  ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
+  isElevenLabsImageModelId,
+  type ElevenLabsImageModelId,
+} from "./elevenLabsImageModels.js";
 
 export {
   OPENAI_IMAGE_MODEL_IDS,
@@ -69,6 +144,7 @@ export {
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
   isAllowedOpenAiImageModelId,
+  isGptImageModelId,
   normalizeOpenAiImageModelId,
   normalizeOpenAiImageGenerationParams,
   catalogEntriesMatchingLocalImageHeuristic,
@@ -78,10 +154,10 @@ export {
   parseComfyUiCheckpointName,
   isAllowedInAppOllamaPullModelName,
   type OpenAiImageModelId,
+  type OpenAiImageSizeGpt,
   type NormalizedOpenAiImageSize,
+  type NormalizedOpenAiImageQuality,
   type NormalizedOpenAiImageRequest,
-  type OpenAiImageSizeDalle3,
-  type OpenAiImageSizeDalle2,
   type LocalImageModelCandidate,
 } from "./imageModels.js";
 
@@ -92,6 +168,7 @@ export {
   MAX_COMFY_UI_WORKFLOWS_STORED_JSON_BYTES,
   encodeComfyUiRemoteWorkflowModelId,
   encodeComfyUiWorkflowModelId,
+  formatComfyUiRemoteWorkflowLabel,
   findComfyUiWorkflowBindingByRemotePath,
   findComfyUiWorkflowRegistration,
   isComfyUiApiWorkflowNode,
@@ -105,6 +182,15 @@ export {
   type ComfyUiWorkflowPatchMap,
   type ComfyUiWorkflowRegistration,
 } from "./comfyUiWorkflow.js";
+
+export {
+  REASONING_EFFORT_VALUES,
+  normalizeReasoningEffort,
+  openAiModelSupportsReasoningEffort,
+  reasoningEffortForRequest,
+  type ReasoningEffort,
+  type RequestReasoningEffort,
+} from "./reasoningEffort.js";
 
 export {
   PRISM_DEFAULT_STORY_THEME,
@@ -187,8 +273,18 @@ export {
   swatchBorderCompensation,
 } from "./color.js";
 
-import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type {
+  AskQuestionPayload,
+  SentGeneratedImagePayload,
+  ZenDisplayMetadata,
+} from "./prismTool.js";
+import type {
+  PromptShortcutMetadata,
+  PromptWildcardRunMetadata,
+} from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
+import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
+import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
@@ -228,10 +324,16 @@ export interface ChatMessage {
   moodKey?: BotMoodKey;
   /** Optional confidence (0-1) for tuning and diagnostics. */
   moodConfidence?: number;
+  /** Display-only Zen layout hint; ignored outside Zen surfaces. */
+  zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** User-entered Prompt Center shortcut that resolved into this message content. */
+  promptShortcut?: PromptShortcutMetadata;
+  /** User-entered wildcard decks/options that resolved into this message content. */
+  promptWildcards?: PromptWildcardRunMetadata;
 }
 
 /**
@@ -451,6 +553,12 @@ export interface Conversation {
    */
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
   /**
+   * Normalized Prism mood/relationship state for this conversation surface.
+   * Coffee adapts its per-seat social state into this shape; Zen persists it
+   * directly so developer diagnostics and prompt shaping share one vocabulary.
+   */
+  prismMood?: PrismMoodSnapshot;
+  /**
    * Coffee-only — table feel / reply length / focus knobs for this session.
    * Omitted for non-coffee rows.
    */
@@ -496,6 +604,22 @@ export interface Conversation {
    * row WHITE, no-reply-yet falls back to the locked bot's color.
    */
   hasAssistantReply: boolean;
+  /** Zen-only generated ambient wallpaper metadata. */
+  zenWallpaper?: {
+    enabled: boolean;
+    imageId: string | null;
+    promptSeed: string | null;
+    generationMessageCount: number | null;
+    status: "idle" | "generating" | "ready" | "error";
+    history: Array<{
+      imageId: string;
+      promptSeed: string | null;
+      generationMessageCount: number;
+      revealStartMessageCount?: number;
+      revealFullMessageCount?: number;
+      createdAt?: string;
+    }>;
+  };
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -526,13 +650,41 @@ export interface UserMemory {
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
 
+export interface ZenSessionMemoryItem {
+  id: string;
+  conversationId?: string;
+  title: string;
+  text: string;
+  trigger?: string;
+  sourceMessageIds?: string[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ZenPreviousContextSummary {
+  conversationId: string;
+  title: string;
+  summary: string;
+  internalSummary?: string;
+  updatedAt: string;
+}
+
+export interface ZenSessionMemoryOverview {
+  previousContext: ZenPreviousContextSummary | null;
+  sessionMemories: ZenSessionMemoryItem[];
+}
+
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  MODEL_VISIBILITY_DEFAULTS_VERSION,
+  defaultHiddenModelIdsForCatalog,
+  isCommonOnlineChatModel,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
   type CatalogShapeForAuto,
+  type ModelForDefaultVisibility,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
 } from "./modelRouting.js";
@@ -589,7 +741,7 @@ export interface MemoryValidationEvent {
  * Defaults to `"sandbox"` on the server when omitted, so pre-`mode` clients
  * keep the previous cross-session memory behavior.
  */
-export type ChatMode = "chat" | "sandbox" | "coffee";
+export type ChatMode = "zen" | "chat" | "sandbox" | "coffee";
 
 /**
  * Companion-only preferences. These are intentionally "feel" controls, while
@@ -609,6 +761,7 @@ export interface ChatCompanionPreferences {
 export interface SandboxRuntimeControls {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
+  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
 }
 
@@ -619,13 +772,14 @@ export interface ChatRequestPayload {
   message: string;
   starterPrompt?: boolean;
   mode?: ChatMode;
-  /** Companion-only optional preferences (used only when mode === "chat"). */
+  /** Companion-only optional preferences (used only when mode === "zen"). */
   companionPreferences?: ChatCompanionPreferences;
   /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
   /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
+  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
@@ -635,6 +789,8 @@ export interface ChatRequestPayload {
   ephemeralMessages?: ChatMessage[];
   /** Optional signal to trigger end-of-session rolling compaction. */
   sessionEnding?: boolean;
+  /** Optional metadata when the latest Zen send interrupted Prism. */
+  prismInterruption?: PrismMoodInterruptionInput;
 }
 
 /**
@@ -647,7 +803,7 @@ export interface StarterChatExtras {
 
 export type OpinionBand = "guarded" | "warming" | "trusting";
 export type OpinionTrend = "up" | "down" | "steady";
-export type BotMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
+export type BotMoodKey = PrismMoodKey;
 
 export interface SessionOpinion {
   score: number;
@@ -675,6 +831,7 @@ export interface BotOpinion {
 export interface ChatResponsePayload extends StarterChatExtras {
   conversation: Conversation;
   assistantMessage: ChatMessage;
+  prismMood?: PrismMoodSnapshot;
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
   summaryCompaction?: {
@@ -771,6 +928,7 @@ export interface CoffeeContinueRequest {
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
   preferredProvider?: LlmProviderName;
+  reasoningEffort?: ReasoningEffort;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -803,6 +961,7 @@ export interface CoffeeTurnRequest {
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
   preferredProvider?: LlmProviderName;
+  reasoningEffort?: ReasoningEffort;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */

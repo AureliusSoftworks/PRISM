@@ -91,6 +91,32 @@ export function findPrismBotMarkdownLinkAtCaret(
   return null;
 }
 
+export function applyTaggedMentionBoundaryDelete(
+  value: string,
+  selStart: number,
+  selEnd: number,
+  direction: "backward" | "forward"
+): { value: string; caret: number } | null {
+  if (selStart !== selEnd) return null;
+  const caret = selStart;
+  const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, PRISM_BOT_MARKDOWN_LINK_RE.flags);
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(value)) !== null) {
+    const wholeStart = m.index;
+    const wholeEndExclusive = wholeStart + (m[0]?.length ?? 0);
+    const matchesBoundary =
+      direction === "backward"
+        ? caret === wholeEndExclusive
+        : caret === wholeStart;
+    if (!matchesBoundary) continue;
+    return {
+      value: value.slice(0, wholeStart) + value.slice(wholeEndExclusive),
+      caret: wholeStart,
+    };
+  }
+  return null;
+}
+
 /**
  * Word-level Backspace **only** while editing a tagged bot:
  * - the in-flight `@…` line tail (from `@` through end of line — so multi-word

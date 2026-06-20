@@ -200,15 +200,20 @@ export async function checkComfyUiHostStatus(
     return { configured: false, reachable: false, modelCount: 0 };
   }
   try {
-    const names = await fetchComfyUiCheckpointNames(trimmed);
-    const reachable = names.length > 0 || (await probeComfyUiHostReachable(trimmed));
+    const workflowPaths = await listComfyUiWorkflowJsonRelPaths(trimmed);
+    const reachable =
+      workflowPaths.length > 0 || (await probeComfyUiHostReachable(trimmed));
     return {
       configured: true,
       reachable,
-      modelCount: names.length,
+      modelCount: workflowPaths.length,
     };
   } catch {
-    return { configured: true, reachable: false, modelCount: 0 };
+    return {
+      configured: true,
+      reachable: await probeComfyUiHostReachable(trimmed),
+      modelCount: 0,
+    };
   }
 }
 
@@ -220,6 +225,11 @@ export interface ComfyUiUserdataListEntry {
   name: string;
   path: string;
   type: "file" | "directory";
+}
+
+function isComfyUiSettingsJsonPath(nameOrPath: string): boolean {
+  const basename = nameOrPath.replace(/\\/g, "/").split("/").pop()?.trim().toLowerCase();
+  return basename === "comfy.settings.json";
 }
 
 async function comfyUiTryFetch(
@@ -338,7 +348,9 @@ export async function listComfyUiWorkflowJsonRelPaths(
       } else if (
         e.type === "file" &&
         /\.json$/i.test(e.name) &&
-        !/\.pending\.json$/i.test(e.name)
+        !/\.pending\.json$/i.test(e.name) &&
+        !isComfyUiSettingsJsonPath(e.name) &&
+        !isComfyUiSettingsJsonPath(e.path)
       ) {
         if (!seen.has(e.path)) {
           seen.add(e.path);

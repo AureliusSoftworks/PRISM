@@ -1,0 +1,327 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import type { LlmProvider, ProviderMessage } from "../providers.ts";
+import {
+  buildZenSessionMemoryPromptContext,
+  createZenSessionMemoryCheckpoint,
+  deleteZenSessionMemoryById,
+  getZenPreviousContextSummary,
+  listZenSessionMemories,
+  loadZenSessionMemoryOverview,
+  pruneExpiredZenSessionMemories,
+  userMessageRequestsZenSessionMemory,
+  userMessageSuggestsZenSessionDeferral,
+} from "../zen-session-memory.ts";
+
+const USER_KEY = Buffer.alloc(32, 11);
+
+function createTestDb(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL DEFAULT 'zen',
+      incognito INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE memory_summaries (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+function fakeProvider(title = "Bridge Story", text = "Resume at the bridge choice."): LlmProvider {
+  return {
+    name: "local",
+    async generateResponse(_messages: ProviderMessage[]) {
+      return JSON.stringify({ title, text });
+    },
+    async embedText() {
+      return [];
+    },
+  };
+}
+
+function insertConversation(
+  db: DatabaseSync,
+  id: string,
+  updatedAt: string,
+  options?: { userId?: string; title?: string; incognito?: boolean }
+): void {
+  db.prepare(
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', ?, ?, ?)"
+  ).run(
+    id,
+    options?.userId ?? "user-1",
+    options?.title ?? id,
+    options?.incognito ? 1 : 0,
+    updatedAt,
+    updatedAt
+  );
+}
+
+function insertThreadSummary(
+  db: DatabaseSync,
+  conversationId: string,
+  summary: string,
+  createdAt: string,
+  displaySummary?: string
+): void {
+  db.prepare(
+    "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(
+    `sum-${conversationId}`,
+    "user-1",
+    conversationId,
+    JSON.stringify({
+      v: 1,
+      kind: "thread_compact",
+      mode: "zen",
+      summary,
+      ...(displaySummary ? { displaySummary } : {}),
+      createdAt,
+    }),
+    createdAt
+  );
+}
+
+async function createCheckpoint(
+  db: DatabaseSync,
+  index: number,
+  now: Date,
+  userId = "user-1"
+) {
+  insertConversation(db, `conversation-${index}`, now.toISOString(), { userId });
+  return await createZenSessionMemoryCheckpoint({
+    db,
+    provider: fakeProvider(`Checkpoint ${index}`, `Resume checkpoint ${index}.`),
+    userId,
+    conversationId: `conversation-${index}`,
+    userKey: USER_KEY,
+    history: [
+      {
+        id: `history-${index}`,
+        role: "assistant",
+        content: `The story is at beat ${index}.`,
+        createdAt: now.toISOString(),
+      },
+    ],
+    userMessage: {
+      id: `user-${index}`,
+      role: "user",
+      content: "Let's finish this later.",
+      createdAt: now.toISOString(),
+    },
+    assistantMessage: {
+      id: `assistant-${index}`,
+      role: "assistant",
+      content: "Absolutely, we can pause here.",
+      createdAt: now.toISOString(),
+    },
+    now,
+  });
+}
+
+describe("Zen session memory checkpoints", () => {
+  it("creates encrypted checkpoints and reads them back", async () => {
+    const db = createTestDb();
+    const now = new Date("2026-06-20T12:00:00.000Z");
+    const checkpoint = await createCheckpoint(db, 1, now);
+
+    assert.ok(checkpoint);
+    assert.equal(checkpoint.title, "Checkpoint 1");
+    assert.equal(checkpoint.text, "Resume checkpoint 1.");
+
+    const raw = db
+      .prepare("SELECT ciphertext FROM zen_session_memories WHERE id = ?")
+      .get(checkpoint.id) as { ciphertext: string };
+    assert.ok(!raw.ciphertext.includes("Resume checkpoint"));
+
+    const memories = listZenSessionMemories(db, "user-1", USER_KEY, now);
+    assert.equal(memories.length, 1);
+    assert.equal(memories[0]?.text, "Resume checkpoint 1.");
+    assert.equal(memories[0]?.sourceMessageIds?.length, 2);
+  });
+
+  it("keeps only the newest three checkpoints per user", async () => {
+    const db = createTestDb();
+    for (let index = 1; index <= 4; index += 1) {
+      await createCheckpoint(
+        db,
+        index,
+        new Date(`2026-06-20T12:0${index}:00.000Z`)
+      );
+    }
+
+    const memories = listZenSessionMemories(
+      db,
+      "user-1",
+      USER_KEY,
+      new Date("2026-06-20T12:05:00.000Z")
+    );
+    assert.deepEqual(
+      memories.map((memory) => memory.title),
+      ["Checkpoint 4", "Checkpoint 3", "Checkpoint 2"]
+    );
+  });
+
+  it("prunes checkpoints after 96 hours", async () => {
+    const db = createTestDb();
+    await createCheckpoint(db, 1, new Date("2026-06-20T12:00:00.000Z"));
+
+    const deleted = pruneExpiredZenSessionMemories(
+      db,
+      "user-1",
+      new Date("2026-06-24T12:00:00.001Z")
+    );
+    assert.equal(deleted, 1);
+    assert.equal(
+      listZenSessionMemories(
+        db,
+        "user-1",
+        USER_KEY,
+        new Date("2026-06-24T12:00:00.001Z")
+      ).length,
+      0
+    );
+  });
+
+  it("keeps checkpoint reads and deletes isolated by user", async () => {
+    const db = createTestDb();
+    const userOne = await createCheckpoint(
+      db,
+      1,
+      new Date("2026-06-20T12:00:00.000Z"),
+      "user-1"
+    );
+    const userTwo = await createCheckpoint(
+      db,
+      2,
+      new Date("2026-06-20T12:01:00.000Z"),
+      "user-2"
+    );
+    assert.ok(userOne);
+    assert.ok(userTwo);
+
+    assert.equal(deleteZenSessionMemoryById(db, "user-1", userTwo.id), false);
+    assert.equal(deleteZenSessionMemoryById(db, "user-2", userTwo.id), true);
+    assert.deepEqual(
+      listZenSessionMemories(db, "user-1", USER_KEY).map((memory) => memory.id),
+      [userOne.id]
+    );
+  });
+
+  it("extracts only clear deferral requests", async () => {
+    const db = createTestDb();
+    insertConversation(db, "conversation-1", "2026-06-20T12:00:00.000Z");
+
+    const ordinary = await createZenSessionMemoryCheckpoint({
+      db,
+      provider: fakeProvider(),
+      userId: "user-1",
+      conversationId: "conversation-1",
+      userKey: USER_KEY,
+      history: [],
+      userMessage: {
+        id: "user-ordinary",
+        role: "user",
+        content: "Tell me more about the tower.",
+        createdAt: "2026-06-20T12:00:00.000Z",
+      },
+      assistantMessage: {
+        id: "assistant-ordinary",
+        role: "assistant",
+        content: "The tower leans over the sea.",
+        createdAt: "2026-06-20T12:00:01.000Z",
+      },
+      now: new Date("2026-06-20T12:00:00.000Z"),
+    });
+
+    assert.equal(ordinary, null);
+    assert.equal(userMessageSuggestsZenSessionDeferral("Let's finish this later."), true);
+    assert.equal(userMessageSuggestsZenSessionDeferral("Tell me more."), false);
+  });
+});
+
+describe("Zen previous context summaries", () => {
+  it("uses the newest non-incognito Zen summary outside the active conversation", () => {
+    const db = createTestDb();
+    insertConversation(db, "active", "2026-06-20T12:00:00.000Z", { title: "Active" });
+    insertConversation(db, "older", "2026-06-20T11:00:00.000Z", { title: "Older" });
+    insertConversation(db, "newer", "2026-06-20T13:00:00.000Z", { title: "Newer" });
+    insertConversation(db, "secret", "2026-06-20T14:00:00.000Z", {
+      title: "Secret",
+      incognito: true,
+    });
+    insertThreadSummary(db, "older", "Older internal summary.", "2026-06-20T11:01:00.000Z");
+    insertThreadSummary(
+      db,
+      "newer",
+      "Newer internal summary.",
+      "2026-06-20T13:01:00.000Z",
+      "Newer display summary."
+    );
+    insertThreadSummary(db, "secret", "Secret summary.", "2026-06-20T14:01:00.000Z");
+
+    const context = getZenPreviousContextSummary({
+      db,
+      userId: "user-1",
+      activeConversationId: "active",
+    });
+    assert.equal(context?.conversationId, "newer");
+    assert.equal(context?.summary, "Newer display summary.");
+    assert.equal(context?.internalSummary, "Newer internal summary.");
+  });
+
+  it("falls back to the active summary when no previous Zen summary exists", () => {
+    const db = createTestDb();
+    insertConversation(db, "active", "2026-06-20T12:00:00.000Z", { title: "Active" });
+    insertThreadSummary(db, "active", "Active summary.", "2026-06-20T12:01:00.000Z");
+
+    const overview = loadZenSessionMemoryOverview({
+      db,
+      userId: "user-1",
+      userKey: USER_KEY,
+      activeConversationId: "active",
+    });
+    assert.equal(overview.previousContext?.conversationId, "active");
+    assert.equal(overview.previousContext?.summary, "Active summary.");
+  });
+
+  it("builds prompt context only for available prior/session context", () => {
+    assert.equal(userMessageRequestsZenSessionMemory("Where were we last time?"), true);
+    assert.equal(userMessageRequestsZenSessionMemory("What should we cook?"), false);
+    assert.equal(buildZenSessionMemoryPromptContext(null), null);
+    assert.match(
+      buildZenSessionMemoryPromptContext({
+        previousContext: {
+          conversationId: "conversation-1",
+          title: "Story",
+          summary: "The hero reached the bridge.",
+          updatedAt: "2026-06-20T12:00:00.000Z",
+        },
+        sessionMemories: [],
+      }) ?? "",
+      /Zen session memory context/
+    );
+  });
+});

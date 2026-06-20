@@ -21,6 +21,7 @@ import {
   type StorySessionStatus,
   type StorySessionSummary,
   type StoryTranscriptEntry,
+  type ReasoningEffort,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import type { GenerateOptions, LlmProvider, ProviderName } from "./providers.ts";
@@ -52,6 +53,7 @@ export interface StoryGenerationInput {
   model: string;
   bots: StoryBotProfile[];
   premise?: string | null;
+  reasoningEffort?: ReasoningEffort;
 }
 
 interface StorySessionRow {
@@ -1393,6 +1395,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
   if (isBaselineLocalStoryGeneration(args)) {
     return {
       model: args.model,
+      ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
       temperature: Math.max(0.25, Math.min(0.55, avgTemperature)),
       maxTokens: 2800,
       jsonMode: true,
@@ -1402,6 +1405,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
   }
   return {
     model: args.model,
+    ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
     temperature: Math.max(0.35, Math.min(0.85, avgTemperature)),
     maxTokens: 5000,
     jsonMode: true,

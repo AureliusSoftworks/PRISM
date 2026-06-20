@@ -1,9 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_ZEN_FRESH_START_GAP_MS,
+  DEFAULT_ZEN_MOOD_SENSITIVITY,
+  DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+  DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+  DEFAULT_ZEN_WALLPAPER_OPACITY,
+  DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+  DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+  MAX_ZEN_WALLPAPER_OPACITY,
+  MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
+  parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
+  sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
 } from "../settings.ts";
@@ -25,8 +38,10 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     providerLocked: 0,
     autoMemory: 1,
     composerWritingAssist: 1,
+    experimentalDualOllamaEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
+    hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
     lenientLocalFallbackModel: null,
@@ -35,6 +50,17 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     comfyUiHost: null,
     preferredLocalImageModel: null,
     preferredOpenAiImageModel: null,
+    preferredZenWallpaperLocalImageModel: null,
+    preferredZenWallpaperOpenAiImageModel: null,
+    zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
+    zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+    zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+    zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
+    zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
+    zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
+    zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
+    zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -193,6 +219,37 @@ describe("resolveNextSettings — composerWritingAssist", () => {
         current
       ).composerWritingAssist,
       0
+    );
+  });
+});
+
+describe("resolveNextSettings — experimentalDualOllamaEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: true },
+        baseline({ experimentalDualOllamaEnabled: 0 })
+      ).experimentalDualOllamaEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: false },
+        baseline({ experimentalDualOllamaEnabled: 1 })
+      ).experimentalDualOllamaEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ experimentalDualOllamaEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).experimentalDualOllamaEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { experimentalDualOllamaEnabled: "true" as unknown as boolean },
+        current
+      ).experimentalDualOllamaEnabled,
+      1
     );
   });
 });
@@ -458,10 +515,10 @@ describe("resolveNextSettings — image panel model picks", () => {
 
   it("stores preferred OpenAI image model id", () => {
     const next = resolveNextSettings(
-      { preferredOpenAiImageModel: "dall-e-2" },
+      { preferredOpenAiImageModel: "gpt-image-1-mini" },
       baseline()
     );
-    assert.equal(next.preferredOpenAiImageModel, "dall-e-2");
+    assert.equal(next.preferredOpenAiImageModel, "gpt-image-1-mini");
   });
 
   it("clears local image model when given empty string", () => {
@@ -475,11 +532,11 @@ describe("resolveNextSettings — image panel model picks", () => {
   it("keeps stored ids when the patch omits them", () => {
     const current = baseline({
       preferredLocalImageModel: "comfyui:abc.safetensors",
-      preferredOpenAiImageModel: "dall-e-3",
+      preferredOpenAiImageModel: "gpt-image-2",
     });
     const next = resolveNextSettings({ theme: "light" }, current);
     assert.equal(next.preferredLocalImageModel, "comfyui:abc.safetensors");
-    assert.equal(next.preferredOpenAiImageModel, "dall-e-3");
+    assert.equal(next.preferredOpenAiImageModel, "gpt-image-2");
   });
 });
 
@@ -541,6 +598,235 @@ describe("resolveNextSettings — openAiApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — Zen Atmosphere model picks", () => {
+  it("stores preferred local wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors" },
+      baseline()
+    );
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+  });
+
+  it("stores preferred OpenAI wallpaper image model id", () => {
+    const next = resolveNextSettings(
+      { preferredZenWallpaperOpenAiImageModel: "gpt-image-2" },
+      baseline()
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+
+  it("clears wallpaper image model ids with empty strings", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "old-local",
+      preferredZenWallpaperOpenAiImageModel: "old-openai",
+    });
+    const next = resolveNextSettings(
+      {
+        preferredZenWallpaperLocalImageModel: "",
+        preferredZenWallpaperOpenAiImageModel: "",
+      },
+      current
+    );
+    assert.equal(next.preferredZenWallpaperLocalImageModel, null);
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, null);
+  });
+
+  it("keeps stored wallpaper ids when the patch omits them", () => {
+    const current = baseline({
+      preferredZenWallpaperLocalImageModel: "comfyui:ambient.safetensors",
+      preferredZenWallpaperOpenAiImageModel: "gpt-image-2",
+    });
+    const next = resolveNextSettings({ theme: "light" }, current);
+    assert.equal(
+      next.preferredZenWallpaperLocalImageModel,
+      "comfyui:ambient.safetensors"
+    );
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere opacity", () => {
+  it("stores numeric and numeric-string opacity values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.28 }, baseline()).zenWallpaperOpacity,
+      0.28
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "0.22" }, baseline()).zenWallpaperOpacity,
+      0.22
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.9 }, baseline()).zenWallpaperOpacity,
+      0.9
+    );
+  });
+
+  it("clamps opacity to the configured wallpaper range", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 0.01 }, baseline()).zenWallpaperOpacity,
+      MIN_ZEN_WALLPAPER_OPACITY
+    );
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: 1.4 }, baseline()).zenWallpaperOpacity,
+      MAX_ZEN_WALLPAPER_OPACITY
+    );
+  });
+
+  it("keeps the stored opacity when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperOpacity: 0.19 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperOpacity, 0.19);
+    assert.equal(
+      resolveNextSettings({ zenWallpaperOpacity: "nope" }, current).zenWallpaperOpacity,
+      0.19
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere text mask", () => {
+  it("stores boolean text-mask values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperTextMaskEnabled: false }, baseline())
+        .zenWallpaperTextMaskEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperTextMaskEnabled: true },
+        baseline({ zenWallpaperTextMaskEnabled: 0 })
+      ).zenWallpaperTextMaskEnabled,
+      true
+    );
+  });
+
+  it("keeps the stored text-mask setting when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperTextMaskEnabled: 0 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, false);
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperTextMaskEnabled: "sometimes" },
+        current
+      ).zenWallpaperTextMaskEnabled,
+      false
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Mode settings", () => {
+  it("stores Zen session and context settings", () => {
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: 2 * 60 * 60 * 1000,
+        zenFreshStartGapMs: 3 * 24 * 60 * 60 * 1000,
+        zenRecentContextMessages: 42,
+        zenWallpaperRegenMessageInterval: 24,
+        zenWallpaperRevealDelayMessageCount: 3,
+        zenWallpaperRevealSpanMessageCount: 10,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, 2 * 60 * 60 * 1000);
+    assert.equal(next.zenFreshStartGapMs, 3 * 24 * 60 * 60 * 1000);
+    assert.equal(next.zenRecentContextMessages, 42);
+    assert.equal(next.zenWallpaperRegenMessageInterval, 24);
+    assert.equal(next.zenWallpaperRevealDelayMessageCount, 3);
+    assert.equal(next.zenWallpaperRevealSpanMessageCount, 10);
+  });
+
+  it("keeps stored values when omitted or invalid", () => {
+    const current = baseline({
+      zenSessionIdleGapMs: 4 * 60 * 60 * 1000,
+      zenFreshStartGapMs: 4 * 24 * 60 * 60 * 1000,
+      zenRecentContextMessages: 44,
+      zenWallpaperRegenMessageInterval: 40,
+      zenWallpaperRevealDelayMessageCount: 6,
+      zenWallpaperRevealSpanMessageCount: 16,
+    });
+
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: "nope",
+        zenFreshStartGapMs: false,
+        zenRecentContextMessages: null,
+        zenWallpaperRegenMessageInterval: undefined,
+        zenWallpaperRevealDelayMessageCount: "still nope",
+        zenWallpaperRevealSpanMessageCount: Number.NaN,
+      },
+      current
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, current.zenSessionIdleGapMs);
+    assert.equal(next.zenFreshStartGapMs, current.zenFreshStartGapMs);
+    assert.equal(next.zenRecentContextMessages, current.zenRecentContextMessages);
+    assert.equal(next.zenWallpaperRegenMessageInterval, current.zenWallpaperRegenMessageInterval);
+    assert.equal(
+      next.zenWallpaperRevealDelayMessageCount,
+      current.zenWallpaperRevealDelayMessageCount
+    );
+    assert.equal(
+      next.zenWallpaperRevealSpanMessageCount,
+      current.zenWallpaperRevealSpanMessageCount
+    );
+  });
+
+  it("clamps fresh starts to happen no earlier than the idle session break", () => {
+    const next = resolveNextSettings(
+      {
+        zenSessionIdleGapMs: 20 * 60 * 60 * 1000,
+        zenFreshStartGapMs: 2 * 60 * 60 * 1000,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenSessionIdleGapMs, 20 * 60 * 60 * 1000);
+    assert.equal(next.zenFreshStartGapMs, 20 * 60 * 60 * 1000);
+  });
+
+  it("clamps context and wallpaper counts to sane bounds", () => {
+    const low = resolveNextSettings(
+      {
+        zenRecentContextMessages: 1,
+        zenWallpaperRegenMessageInterval: 1,
+        zenWallpaperRevealDelayMessageCount: -2,
+        zenWallpaperRevealSpanMessageCount: 0,
+      },
+      baseline()
+    );
+    const high = resolveNextSettings(
+      {
+        zenRecentContextMessages: 999,
+        zenWallpaperRegenMessageInterval: 999,
+        zenWallpaperRevealDelayMessageCount: 999,
+        zenWallpaperRevealSpanMessageCount: 999,
+      },
+      baseline()
+    );
+
+    assert.equal(low.zenRecentContextMessages, 10);
+    assert.equal(low.zenWallpaperRegenMessageInterval, 5);
+    assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
+    assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
+    assert.equal(high.zenRecentContextMessages, 80);
+    assert.equal(high.zenWallpaperRegenMessageInterval, 100);
+    assert.equal(high.zenWallpaperRevealDelayMessageCount, 20);
+    assert.equal(high.zenWallpaperRevealSpanMessageCount, 50);
+  });
+
+  it("clamps Zen mood sensitivity while preserving current value for invalid input", () => {
+    const current = baseline({ zenMoodSensitivity: 0.35 });
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: 0.8 }, current).zenMoodSensitivity, 0.8);
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: -1 }, current).zenMoodSensitivity, 0);
+    assert.equal(resolveNextSettings({ zenMoodSensitivity: 2 }, current).zenMoodSensitivity, 1);
+    assert.equal(
+      resolveNextSettings({ zenMoodSensitivity: "nope" }, current).zenMoodSensitivity,
+      0.35
+    );
+  });
+});
+
 describe("resolveNextSettings — anthropicApiKey", () => {
   it("non-empty string is a replace", () => {
     const next = resolveNextSettings({ anthropicApiKey: "sk-ant-abc" }, baseline());
@@ -568,6 +854,37 @@ describe("resolveNextSettings — anthropicApiKey", () => {
     assert.deepEqual(next.anthropicKeyIntent, {
       action: "replace",
       plaintext: "sk-ant-api03-abc",
+    });
+  });
+});
+
+describe("resolveNextSettings — elevenLabsApiKey", () => {
+  it("non-empty string is a replace", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "xi-abc" }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
+    });
+  });
+
+  it("whitespace keeps the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: "   " }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "keep" });
+  });
+
+  it("explicit null clears the stored key", () => {
+    const next = resolveNextSettings({ elevenLabsApiKey: null }, baseline());
+    assert.deepEqual(next.elevenLabsKeyIntent, { action: "clear" });
+  });
+
+  it("strips a pasted `ELEVENLABS_API_KEY=` prefix", () => {
+    const next = resolveNextSettings(
+      { elevenLabsApiKey: "ELEVENLABS_API_KEY=\"xi-abc\"" },
+      baseline()
+    );
+    assert.deepEqual(next.elevenLabsKeyIntent, {
+      action: "replace",
+      plaintext: "xi-abc",
     });
   });
 });
@@ -639,6 +956,15 @@ describe("sanitizeAnthropicKeyInput", () => {
     assert.equal(
       sanitizeAnthropicKeyInput("ANTHROPIC_API_KEY='sk-ant-api03-abc'"),
       "sk-ant-api03-abc"
+    );
+  });
+});
+
+describe("sanitizeElevenLabsKeyInput", () => {
+  it("uses the same env-line stripping behavior as OpenAI keys", () => {
+    assert.equal(
+      sanitizeElevenLabsKeyInput("ELEVENLABS_API_KEY='xi-abc'"),
+      "xi-abc"
     );
   });
 });
@@ -715,6 +1041,50 @@ describe("resolveNextSettings — comfyUiWorkflows", () => {
     assert.equal(next.comfyUiWorkflows.length, 1);
     assert.equal(next.comfyUiWorkflows[0]?.remotePath, "default/workflows/foo.json");
     assert.equal(next.comfyUiWorkflows[0]?.workflow, undefined);
+  });
+});
+
+describe("resolveNextSettings — hiddenComfyUiWorkflowIds", () => {
+  it("keeps current hidden workflows when the field is omitted", () => {
+    const current = JSON.stringify(["comfyui-remote:default%2Fworkflows%2Fhidden.json"]);
+    const next = resolveNextSettings(
+      {},
+      baseline({ hiddenComfyUiWorkflowIds: current })
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+    ]);
+  });
+
+  it("accepts only ComfyUI workflow model ids", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenComfyUiWorkflowIds: [
+          " comfyui-remote:default%2Fworkflows%2Fhidden.json ",
+          "comfyui-workflow:legacy",
+          "llama3.2",
+          "not-a-workflow",
+        ],
+      },
+      baseline()
+    );
+    assert.deepEqual(next.hiddenComfyUiWorkflowIds, [
+      "comfyui-remote:default%2Fworkflows%2Fhidden.json",
+      "comfyui-workflow:legacy",
+    ]);
+  });
+
+  it("parses stored hidden workflows defensively", () => {
+    assert.deepEqual(
+      parseHiddenComfyUiWorkflowIds(
+        JSON.stringify([
+          "comfyui-remote:workflows%2Fscene.json",
+          "comfyui-remote:workflows%2Fscene.json",
+          "gpt-5",
+        ])
+      ),
+      ["comfyui-remote:workflows%2Fscene.json"]
+    );
   });
 });
 

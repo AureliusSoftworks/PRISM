@@ -79,6 +79,7 @@ Rules:
 - If a joke has no stable user preference or fact, reject it with reasonCodes ["joke_without_stable_signal"].
 - If a literal claim is implausible and no useful preference can be inferred, reject it with reasonCodes ["implausible_literal"].
 - Reject one-off tasks, questions, ambiguous "you are" statements, malformed text, and low-confidence guesses.
+- For source="compiled", reject whole assistant replies, instructions, code snippets, and multi-step answers instead of saving them as facts.
 - Reject insulting, shaming, diagnosing, threatening, or punitive user labels and use reasonCodes ["unsafe_judgment"].
 - If userDisplayName is provided and the memory is about the human user, write the final memory with that name (for example, "Jared prefers..."). If the memory is about a bot/persona, keep the existing second-person framing.
 - Never invent new personal facts.
@@ -92,6 +93,11 @@ const ASSISTANT_IDENTITY_COMMAND_PATTERN =
 
 const USER_PREFERENCE_PATTERN =
   /^(?:you|the user)\s+(?:prefer|prefers|would like|want|wants|need|needs)\b/i;
+
+const COMPILED_MEMORY_MAX_TEXT_LENGTH = 240;
+
+const COMPILED_MEMORY_ANSWER_SHAPE_PATTERN =
+  /(```|`[^`]+`|\b(?:in powershell|from (?:the )?(?:cli|console|terminal)|hit enter|run this|use this command|open explorer|here(?:'s| is) how|step \d+|first,|next,|finally,)\b|^\s*(?:to|if you want to|you can|use|run|open|click|select|type|enter)\s+)/i;
 
 const UNSAFE_JUDGMENT_PATTERN =
   /\b(?:worthless|pathetic|disgusting|subhuman|idiot|moron|stupid|deranged|crazy|insane|psycho|hate\s+you|kill|harm|punish|ban(?:ned)?\s+you|never\s+talk\s+to\s+you)\b/i;
@@ -312,6 +318,13 @@ function deterministicPreReject(
   const text = normalizeWhitespace(candidate.text);
   if (!text || text.length < 4) {
     return { originalText: candidate.text, reasonCodes: ["malformed_text"] };
+  }
+  if (
+    source === "compiled" &&
+    (text.length > COMPILED_MEMORY_MAX_TEXT_LENGTH ||
+      COMPILED_MEMORY_ANSWER_SHAPE_PATTERN.test(text))
+  ) {
+    return { originalText: candidate.text, reasonCodes: ["task_request_not_memory"] };
   }
   if (source === "inferred" && UNSAFE_JUDGMENT_PATTERN.test(text)) {
     return { originalText: candidate.text, reasonCodes: ["unsafe_judgment"] };

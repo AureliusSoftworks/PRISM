@@ -64,6 +64,7 @@ type ThreadSummaryDebug = {
   conversationId: string;
   inProgress: boolean;
   latestSummary: string | null;
+  latestDisplaySummary: string | null;
   latestSummaryAt: string | null;
   summaryCount: number;
   totalMessages: number;
@@ -74,6 +75,10 @@ const threadSummaryInFlight = new Set<string>();
 
 function threadSummaryKey(userId: string, conversationId: string, mode: ChatMode): string {
   return `${userId}:${conversationId}:${mode}`;
+}
+
+function normalizeThreadSummaryMode(mode: ChatMode | undefined): "zen" | "sandbox" {
+  return mode === "zen" || mode === "chat" ? "zen" : "sandbox";
 }
 
 function normalizeDisplaySummary(raw: string, fallback: string): string {
@@ -205,7 +210,7 @@ function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
         };
       }
       if (parsed.kind === SUMMARY_KIND_THREAD_COMPACT) {
-        const mode = parsed.mode === "chat" ? "chat" : "sandbox";
+        const mode = normalizeThreadSummaryMode(parsed.mode as ChatMode | undefined);
         return {
           v: 1,
           kind: SUMMARY_KIND_THREAD_COMPACT,
@@ -299,7 +304,7 @@ export async function summarizeAndStoreMemories(
       v: 1,
       kind: SUMMARY_KIND_CHAT_FACTS,
       summary: summary.trim(),
-      mode: "chat",
+      mode: "zen",
       reason: "milestone",
       createdAt: now,
     }),
@@ -402,7 +407,7 @@ export async function summarizeThreadCompact(
     force?: boolean;
   }
 ): Promise<{ triggered: boolean; latestSummary?: string; latestSummaryAt?: string }> {
-  const mode = options?.mode === "chat" ? "chat" : "sandbox";
+  const mode = normalizeThreadSummaryMode(options?.mode);
   const reason = options?.reason ?? "milestone";
   const force = options?.force === true;
   const key = threadSummaryKey(userId, conversationId, mode);
@@ -460,7 +465,7 @@ export async function summarizeThreadCompact(
     return { triggered: false };
   }
   let displaySummary: string | undefined;
-  if (mode === "chat") {
+  if (mode === "zen") {
     try {
       const recapRaw = await auxiliaryProvider.generateResponse([
         { role: "system", content: CHAT_VISIBLE_RECAP_PROMPT },
@@ -520,6 +525,7 @@ export function getLatestThreadSummary(
   conversationId: string,
   mode: ChatMode = "sandbox"
 ): string | null {
+  const requestedMode = normalizeThreadSummaryMode(mode);
   const rows = db
     .prepare(
       "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 25"
@@ -530,8 +536,8 @@ export function getLatestThreadSummary(
     const decoded = decodeSummaryRecord(row.summary);
     if (!decoded) continue;
     if (decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
-    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
-    if (decodedMode !== mode) continue;
+    const decodedMode = normalizeThreadSummaryMode(decoded.mode);
+    if (decodedMode !== requestedMode) continue;
     return decoded.summary;
   }
   return null;
@@ -543,6 +549,7 @@ export function getLatestThreadDisplaySummary(
   conversationId: string,
   mode: ChatMode = "sandbox"
 ): string | null {
+  const requestedMode = normalizeThreadSummaryMode(mode);
   const rows = db
     .prepare(
       "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 25"
@@ -553,9 +560,9 @@ export function getLatestThreadDisplaySummary(
     const decoded = decodeSummaryRecord(row.summary);
     if (!decoded) continue;
     if (decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
-    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
-    if (decodedMode !== mode) continue;
-    if (mode === "chat") {
+    const decodedMode = normalizeThreadSummaryMode(decoded.mode);
+    if (decodedMode !== requestedMode) continue;
+    if (requestedMode === "zen") {
       return decoded.displaySummary ?? decoded.summary;
     }
     return decoded.summary;
@@ -841,6 +848,7 @@ export function clearThreadCompactions(
   conversationId: string,
   mode: ChatMode
 ): number {
+  const requestedMode = normalizeThreadSummaryMode(mode);
   const rows = db
     .prepare(
       "SELECT id, summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC"
@@ -850,8 +858,8 @@ export function clearThreadCompactions(
     .filter((row) => {
       const decoded = decodeSummaryRecord(row.summary);
       if (!decoded || decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) return false;
-      const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
-      return decodedMode === mode;
+      const decodedMode = normalizeThreadSummaryMode(decoded.mode);
+      return decodedMode === requestedMode;
     })
     .map((row) => row.id);
   if (targetIds.length === 0) return 0;
@@ -872,6 +880,7 @@ export function getThreadCompactionDebug(
   conversationId: string,
   mode: ChatMode
 ): ThreadSummaryDebug {
+  const requestedMode = normalizeThreadSummaryMode(mode);
   const rows = db
     .prepare(
       "SELECT summary, created_at FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 80"
@@ -880,8 +889,8 @@ export function getThreadCompactionDebug(
   const matchingRows = rows.filter((row) => {
     const decoded = decodeSummaryRecord(row.summary);
     if (!decoded || decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) return false;
-    const decodedMode = decoded.mode === "chat" ? "chat" : "sandbox";
-    return decodedMode === mode;
+    const decodedMode = normalizeThreadSummaryMode(decoded.mode);
+    return decodedMode === requestedMode;
   });
   const latest = matchingRows[0];
   const latestDecoded = latest ? decodeSummaryRecord(latest.summary) : null;
@@ -902,12 +911,18 @@ export function getThreadCompactionDebug(
       ).n
     : totalMessages;
   return {
-    mode,
+    mode: requestedMode,
     conversationId,
-    inProgress: threadSummaryInFlight.has(threadSummaryKey(userId, conversationId, mode)),
+    inProgress: threadSummaryInFlight.has(threadSummaryKey(userId, conversationId, requestedMode)),
     latestSummary:
       latestDecoded && latestDecoded.kind === SUMMARY_KIND_THREAD_COMPACT
         ? latestDecoded.summary
+        : null,
+    latestDisplaySummary:
+      latestDecoded && latestDecoded.kind === SUMMARY_KIND_THREAD_COMPACT
+        ? requestedMode === "zen"
+          ? latestDecoded.displaySummary ?? latestDecoded.summary
+          : latestDecoded.summary
         : null,
     latestSummaryAt: latest?.created_at ?? null,
     summaryCount: matchingRows.length,
@@ -916,12 +931,39 @@ export function getThreadCompactionDebug(
   };
 }
 
+/** Latest compaction that covered the whole thread, safe to use as a raw-history cutoff. */
+export function getLatestFullThreadCompactionCutoff(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  mode: ChatMode
+): string | null {
+  const requestedMode = normalizeThreadSummaryMode(mode);
+  const rows = db
+    .prepare(
+      "SELECT summary, created_at FROM memory_summaries WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT 80"
+    )
+    .all(userId, conversationId) as Array<{ summary: string; created_at: string }>;
+  for (const row of rows) {
+    const decoded = decodeSummaryRecord(row.summary);
+    if (!decoded || decoded.kind !== SUMMARY_KIND_THREAD_COMPACT) continue;
+    const decodedMode = normalizeThreadSummaryMode(decoded.mode);
+    if (decodedMode !== requestedMode) continue;
+    if (decoded.reason === "manual" || decoded.reason === "mode_exit") {
+      return row.created_at;
+    }
+  }
+  return null;
+}
+
 export function isThreadCompactionInProgress(
   userId: string,
   conversationId: string,
   mode: ChatMode
 ): boolean {
-  return threadSummaryInFlight.has(threadSummaryKey(userId, conversationId, mode));
+  return threadSummaryInFlight.has(
+    threadSummaryKey(userId, conversationId, normalizeThreadSummaryMode(mode))
+  );
 }
 
 export { RECENT_WINDOW_SIZE };

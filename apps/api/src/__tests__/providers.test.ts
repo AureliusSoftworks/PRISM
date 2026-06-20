@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import {
   ANTHROPIC_DEFAULT_MODEL,
   buildModelCatalog,
-  checkAnthropicApiKeyStatus,
-  checkOpenAiApiKeyStatus,
+  checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   embedTextLocal,
   getAuxiliaryProvider,
@@ -244,7 +243,7 @@ describe("buildModelCatalog", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("keeps fallback defaults available when discovery is unavailable", async () => {
+  it("does not advertise online providers without matching API keys", async () => {
     globalThis.fetch = (async () =>
       new Response("offline", { status: 503 })) as typeof fetch;
 
@@ -253,7 +252,32 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.defaults.local);
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
+    assert.deepEqual(catalog.online, []);
+  });
+
+  it("keeps fallback defaults available when keyed discovery is unavailable", async () => {
+    globalThis.fetch = (async () =>
+      new Response("offline", { status: 503 })) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test", undefined, "sk-ant-test");
+
+    assert.ok(catalog.defaults.local);
+    assert.equal(catalog.defaults.online, "gpt-4o-mini");
+    assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.equal(catalog.online[0]?.id, catalog.defaults.online);
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5-chat-latest")?.label,
+      "GPT-5"
+    );
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
+    assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
+      "Claude Haiku 4.5"
+    );
+    assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });
 
   it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {
@@ -277,6 +301,13 @@ describe("buildModelCatalog", () => {
           JSON.stringify({
             data: [
               { id: "gpt-4o" },
+              { id: "gpt-5.1" },
+              { id: "gpt-5.1-chat-latest" },
+              { id: "gpt-5.3" },
+              { id: "gpt-5.3-chat-latest" },
+              { id: "gpt-5.4-mini" },
+              { id: "chatgpt-4o-latest" },
+              { id: "o5-mini" },
               { id: "text-embedding-3-small" },
               { id: "dall-e-3" },
               { id: "o3-mini" },
@@ -292,15 +323,76 @@ describe("buildModelCatalog", () => {
 
     assert.ok(catalog.local.some((model) => model.id === "llama3.2"));
     assert.equal(
-      catalog.local.filter((model) => model.label === "Llama3.2").length,
+      catalog.local.filter((model) => model.label === "Llama 3.2").length,
       1
     );
     const gemma = catalog.local.find((model) => model.id === "gemma3:latest");
-    assert.equal(gemma?.label, "Gemma3");
+    assert.equal(gemma?.label, "Gemma 3");
     assert.ok(catalog.online.some((model) => model.id === "gpt-4o"));
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5.1"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.1-chat-latest"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.1-chat-latest")?.label,
+      "GPT-5.1"
+    );
+    assert.ok(!catalog.online.some((model) => model.id === "gpt-5.3"));
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.3-chat-latest"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.3-chat-latest")?.label,
+      "GPT-5.3"
+    );
+    assert.ok(catalog.online.some((model) => model.id === "gpt-5.4-mini"));
+    assert.ok(catalog.online.some((model) => model.id === "chatgpt-4o-latest"));
     assert.ok(catalog.online.some((model) => model.id === "o3-mini"));
+    assert.ok(catalog.online.some((model) => model.id === "o5-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("api.openai.com")) {
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("api.anthropic.com")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "claude-haiku-4-5-20251001" },
+              { id: "claude-haiku-4-5" },
+              { id: "claude-3-5-haiku-latest" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test", undefined, "sk-ant-test");
+    const haikuModels = catalog.online.filter((model) =>
+      model.label.toLowerCase().includes("haiku")
+    );
+
+    assert.deepEqual(
+      haikuModels.map((model) => model.id).sort((a, b) => a.localeCompare(b)),
+      ["claude-haiku-4-5", "claude-3-5-haiku-latest"]
+        .sort((a, b) => a.localeCompare(b))
+    );
+    assert.equal(
+      catalog.online.filter((model) => model.id === "claude-haiku-4-5").length,
+      1
+    );
   });
 
   it("falls back to IPv4 loopback when catalog discovery hits unreachable localhost", async () => {
@@ -325,13 +417,13 @@ describe("buildModelCatalog", () => {
     const catalog = await buildModelCatalog(undefined);
 
     assert.ok(catalog.local.some((model) => model.id === "gemma3:latest"));
-    assert.deepEqual(requestedUrls, [
-      "http://localhost:11434/api/tags",
-      "http://127.0.0.1:11434/api/tags",
-    ]);
+    assert.ok(
+      requestedUrls.includes("http://127.0.0.1:11434/api/tags"),
+      `expected IPv4 loopback fallback, got ${JSON.stringify(requestedUrls)}`
+    );
   });
 
-  it("merges secondary Ollama host models while preferring primary duplicate names", async () => {
+  it("lists paired secondary Ollama models only when the same model exists locally", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
@@ -365,8 +457,13 @@ describe("buildModelCatalog", () => {
     const secondaryLlama = catalog.local.find(
       (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}llama3.2`
     );
-    assert.equal(secondaryLlama, undefined);
-    assert.ok(catalog.local.some((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`));
+    assert.equal(secondaryLlama?.label, "Llama 3.2 (Paired host)");
+    assert.equal(secondaryLlama?.hostLabel, "Paired host");
+    assert.equal(secondaryLlama?.localHost, "secondary");
+    assert.equal(
+      catalog.local.find((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`),
+      undefined
+    );
   });
 });
 
@@ -495,8 +592,129 @@ describe("LocalOllamaProvider secondary routing", () => {
           [{ role: "user", content: "hi" }],
           { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
         ),
-      /Second Ollama host is not configured/
+      /Paired Ollama host is not configured/
     );
+  });
+
+  it("does not automatically route to the secondary host when dual routing is off", async () => {
+    let requestedChatUrl = "";
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({ models: [{ name: "llama3.2" }] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      requestedChatUrl = url;
+      assert.ok(init?.body);
+      return new Response(JSON.stringify({ message: { content: "primary ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider({
+      secondaryOllamaHost: "http://192.168.1.77:11434",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "llama3.2",
+    });
+
+    assert.ok(requestedChatUrl.endsWith("/api/chat"));
+    assert.ok(!requestedChatUrl.startsWith("http://192.168.1.77:11434/"));
+  });
+
+  it("routes Prism-owned local work to the secondary host when the requested model is paired", async () => {
+    let requestedChatUrl = "";
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(
+          JSON.stringify({
+            models: [
+              { name: "llama3.2" },
+              { name: "nomic-embed-text" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      requestedChatUrl = url;
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "secondary ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider("llama3.2", {
+      secondaryOllamaHost: "http://192.168.1.78:11434",
+      experimentalDualOllama: true,
+    });
+    const response = await provider.generateResponse([{ role: "user", content: "title this" }]);
+
+    assert.equal(response, "secondary ok");
+    assert.equal(requestedChatUrl, "http://192.168.1.78:11434/api/chat");
+    assert.equal(requestedBody.model, "llama3.2");
+  });
+});
+
+describe("checkDualOllamaWorkloadStatus", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("enables dual routing when at least one model is paired", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      const models = url.includes("192.168.1.80")
+        ? [{ name: "llama3.2" }, { name: "mistral:latest" }]
+        : [{ name: "gemma3:latest" }, { name: "llama3.2" }];
+      return new Response(JSON.stringify({ models }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const status = await checkDualOllamaWorkloadStatus(
+      "http://192.168.1.80:11434",
+      { useCache: false }
+    );
+
+    assert.equal(status.enabled, true);
+    assert.equal(status.modelParity, true);
+    assert.equal(status.reason, "ready");
+    assert.deepEqual(status.sharedModelIds, ["llama3.2"]);
+    assert.deepEqual(status.missingOnSecondary, ["gemma3:latest"]);
+    assert.deepEqual(status.missingOnPrimary, ["mistral:latest"]);
+  });
+
+  it("disables dual routing when no models are paired", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      const models = url.includes("192.168.1.81")
+        ? [{ name: "llama3.2" }]
+        : [{ name: "gemma3:latest" }];
+      return new Response(JSON.stringify({ models }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const status = await checkDualOllamaWorkloadStatus(
+      "http://192.168.1.81:11434",
+      { useCache: false }
+    );
+
+    assert.equal(status.enabled, false);
+    assert.equal(status.modelParity, false);
+    assert.equal(status.reason, "model_mismatch");
+    assert.deepEqual(status.missingOnSecondary, ["gemma3:latest"]);
+    assert.deepEqual(status.missingOnPrimary, ["llama3.2"]);
   });
 });
 
@@ -668,6 +886,7 @@ describe("checkLocalModelHostStatus", () => {
 describe("openAiModelUsesFixedDefaultTemperature", () => {
   it("returns true for reasoning-style models (temperature must be omitted)", () => {
     assert.equal(openAiModelUsesFixedDefaultTemperature("o3-mini"), true);
+    assert.equal(openAiModelUsesFixedDefaultTemperature("o5-mini"), true);
     assert.equal(openAiModelUsesFixedDefaultTemperature("gpt-5-nano"), true);
   });
 
@@ -680,6 +899,7 @@ describe("openAiModelUsesMaxCompletionTokens", () => {
   it("returns true for reasoning-style model ids that require max_completion_tokens", () => {
     assert.equal(openAiModelUsesMaxCompletionTokens("o3-mini"), true);
     assert.equal(openAiModelUsesMaxCompletionTokens("O4-mini"), true);
+    assert.equal(openAiModelUsesMaxCompletionTokens("O5-mini"), true);
     assert.equal(openAiModelUsesMaxCompletionTokens("gpt-5-nano"), true);
   });
 
@@ -772,6 +992,87 @@ describe("OpenAiProvider request shape", () => {
     });
 
     assert.equal(body.temperature, 0.91);
+  });
+
+  it("sends reasoning_effort for supported OpenAI reasoning models", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.4",
+      reasoningEffort: "high",
+    });
+
+    assert.equal(body.reasoning_effort, "high");
+  });
+
+  it("omits reasoning_effort for auto and unsupported models", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.4",
+      reasoningEffort: "auto",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-4o-mini",
+      reasoningEffort: "high",
+    });
+
+    assert.equal("reasoning_effort" in (bodies[0] ?? {}), false);
+    assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+  });
+
+  it("retries once without reasoning_effort when OpenAI rejects it", async () => {
+    const originalConsoleWarn = console.warn;
+    const bodies: Array<Record<string, unknown>> = [];
+    console.warn = () => {};
+    try {
+      globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        if (bodies.length === 1) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Unknown parameter: 'reasoning_effort'.",
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }) as typeof fetch;
+
+      const provider = new OpenAiProvider({ apiKey: "sk-test" });
+      const response = await provider.generateResponse([{ role: "user", content: "hi" }], {
+        model: "gpt-5.4",
+        reasoningEffort: "xhigh",
+      });
+
+      assert.equal(response, "ok");
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.reasoning_effort, "xhigh");
+      assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+    } finally {
+      console.warn = originalConsoleWarn;
+    }
   });
 
   it("requests JSON object output when jsonMode is enabled", async () => {

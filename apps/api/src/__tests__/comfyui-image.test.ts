@@ -7,6 +7,7 @@ import {
   extractCheckpointNames,
   extractFirstOutputImageFromComfyHistoryJson,
   inferComfyUiWorkflowPatchMap,
+  listComfyUiWorkflowJsonRelPaths,
   parseComfyUiDimensions,
   parseComfyUiUserdataWorkflowFileToApiGraph,
   randomizeComfyUiWorkflowSeedInputs,
@@ -119,6 +120,57 @@ describe("buildTxt2ImgWorkflow", () => {
     assert.equal(loader.inputs?.ckpt_name, "model.safetensors");
     assert.equal(latent.inputs?.width, 768);
     assert.equal(latent.inputs?.height, 512);
+  });
+});
+
+describe("listComfyUiWorkflowJsonRelPaths", () => {
+  it("filters ComfyUI settings JSON files out of workflow discovery", async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        const url = new URL(rawUrl);
+        if (!url.pathname.endsWith("/v2/userdata")) {
+          return new Response("not found", { status: 404 });
+        }
+
+        const dir = url.searchParams.get("path") ?? "";
+        const entriesByDir: Record<string, unknown[]> = {
+          "": [
+            { name: "root.json", path: "root.json", type: "file" },
+            { name: "comfy.settings.json", path: "comfy.settings.json", type: "file" },
+          ],
+          workflows: [
+            { name: "portrait.json", path: "workflows/portrait.json", type: "file" },
+            { name: "COMFY.SETTINGS.JSON", path: "workflows/COMFY.SETTINGS.JSON", type: "file" },
+            { name: "draft.pending.json", path: "workflows/draft.pending.json", type: "file" },
+            { name: "nested", path: "workflows/nested", type: "directory" },
+          ],
+          "workflows/nested": [
+            { name: "scene.json", path: "workflows/nested/scene.json", type: "file" },
+            { name: "comfy.settings.json", path: "workflows/nested/comfy.settings.json", type: "file" },
+          ],
+          "default/workflows": [
+            { name: "landscape.json", path: "default/workflows/landscape.json", type: "file" },
+          ],
+        };
+
+        return new Response(JSON.stringify(entriesByDir[dir] ?? []), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+
+      const paths = await listComfyUiWorkflowJsonRelPaths("http://comfy.local");
+      assert.deepEqual(paths, [
+        "default/workflows/landscape.json",
+        "root.json",
+        "workflows/nested/scene.json",
+        "workflows/portrait.json",
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

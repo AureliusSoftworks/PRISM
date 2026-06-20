@@ -151,7 +151,7 @@ export async function generateLocalImageBytesByModelId(args: {
     const secondary = args.secondaryOllamaHost?.trim();
     if (!secondary) {
       throw new Error(
-        "Second Ollama host is not configured. Add it in Settings, or pick a model on the primary host."
+        "Paired Ollama host is not configured. Add it in Settings, or pick a model on the primary host."
       );
     }
     const normalized = normalizeOllamaHostForStatusCheck(secondary) ?? secondary.replace(/\/$/, "");

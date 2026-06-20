@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  buildZenWallpaperHistoryForGeneratedImage,
+  clearConversationMessages,
   createDevSeedConversations,
   deleteAllConversations,
   deleteConversation,
@@ -9,7 +11,10 @@ import {
   deleteConversationsByBot,
   getConversationSweepState,
   listConversationSummaries,
+  rebaseZenWallpaperMetadataForVisibleWindow,
+  recoverStaleZenWallpaperGenerationStatus,
   rewindConversation,
+  setZenStarterConversationSuppression,
   sweepConversations,
   undoLatestConversationSweep,
 } from "../conversations.ts";
@@ -32,6 +37,12 @@ function createTestDb(): DatabaseSync {
       archived_at TEXT,
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -76,6 +87,29 @@ function createTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE zen_session_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+    CREATE TABLE session_opinions (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_scope_key TEXT NOT NULL,
+      bot_id TEXT,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'warming',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_scope_key)
     );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
@@ -167,6 +201,224 @@ function seedBotChat(
   ).run(botId, conversationId, userId);
 }
 
+describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
+  it("rebases absolute wallpaper reveal counts to the restored message window", () => {
+    const metadata = rebaseZenWallpaperMetadataForVisibleWindow(
+      {
+        enabled: true,
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 95,
+        status: "ready",
+        history: [
+          {
+            imageId: "wallpaper-old",
+            promptSeed: "old prompt",
+            generationMessageCount: 30,
+            revealStartMessageCount: 34,
+            revealFullMessageCount: 46,
+          },
+          {
+            imageId: "wallpaper-new",
+            promptSeed: "new prompt",
+            generationMessageCount: 95,
+            revealStartMessageCount: 99,
+            revealFullMessageCount: 111,
+          },
+        ],
+      },
+      100,
+      80
+    );
+
+    assert.equal(metadata.generationMessageCount, 75);
+    assert.deepEqual(
+      metadata.history.map((entry) => ({
+        imageId: entry.imageId,
+        generationMessageCount: entry.generationMessageCount,
+        revealStartMessageCount: entry.revealStartMessageCount,
+        revealFullMessageCount: entry.revealFullMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-old",
+          generationMessageCount: 10,
+          revealStartMessageCount: 14,
+          revealFullMessageCount: 26,
+        },
+        {
+          imageId: "wallpaper-new",
+          generationMessageCount: 75,
+          revealStartMessageCount: 79,
+          revealFullMessageCount: 91,
+        },
+      ]
+    );
+  });
+
+  it("keeps a legacy current image visible when its stored count is beyond the current thread", () => {
+    const metadata = rebaseZenWallpaperMetadataForVisibleWindow(
+      {
+        enabled: true,
+        imageId: "wallpaper-stale",
+        promptSeed: "stale prompt",
+        generationMessageCount: 8,
+        status: "generating",
+        history: [],
+      },
+      5,
+      5
+    );
+
+    assert.equal(metadata.generationMessageCount, 5);
+    assert.deepEqual(metadata.history, [
+      {
+        imageId: "wallpaper-stale",
+        promptSeed: "stale prompt",
+        generationMessageCount: 5,
+        revealStartMessageCount: 5,
+        revealFullMessageCount: 5,
+      },
+    ]);
+  });
+});
+
+describe("buildZenWallpaperHistoryForGeneratedImage", () => {
+  it("replaces the scroll timeline with an immediately visible wallpaper", () => {
+    const history = buildZenWallpaperHistoryForGeneratedImage(
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 30,
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+      ]),
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 120,
+        revealStartMessageCount: 124,
+        revealFullMessageCount: 136,
+        createdAt: "2026-06-19T12:00:00.000Z",
+      },
+      {
+        latestMessageCount: 120,
+        restoreMessageLimit: 80,
+        replaceImmediately: true,
+      }
+    );
+
+    assert.deepEqual(history, [
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 120,
+        revealStartMessageCount: 0,
+        revealFullMessageCount: 0,
+        createdAt: "2026-06-19T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("keeps automatic wallpaper generations on the scroll reveal timeline", () => {
+    const history = buildZenWallpaperHistoryForGeneratedImage(
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 30,
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+      ]),
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 70,
+        revealStartMessageCount: 74,
+        revealFullMessageCount: 86,
+      },
+      {
+        latestMessageCount: 70,
+        restoreMessageLimit: 80,
+      }
+    );
+
+    assert.deepEqual(
+      history.map((entry) => ({
+        imageId: entry.imageId,
+        revealStartMessageCount: entry.revealStartMessageCount,
+        revealFullMessageCount: entry.revealFullMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-old",
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+        {
+          imageId: "wallpaper-new",
+          revealStartMessageCount: 74,
+          revealFullMessageCount: 86,
+        },
+      ]
+    );
+  });
+});
+
+describe("recoverStaleZenWallpaperGenerationStatus", () => {
+  function createWallpaperStatusDb(): DatabaseSync {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        zen_wallpaper_image_id TEXT,
+        zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle'
+      );
+    `);
+    return db;
+  }
+
+  it("resets orphaned generating rows to ready when an image already exists", () => {
+    const db = createWallpaperStatusDb();
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, zen_wallpaper_image_id, zen_wallpaper_status) VALUES (?, ?, ?, 'generating')"
+    ).run("conv-1", "user-1", "img-1");
+
+    recoverStaleZenWallpaperGenerationStatus(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: null,
+    });
+
+    const row = db
+      .prepare("SELECT zen_wallpaper_status FROM conversations WHERE id = ?")
+      .get("conv-1") as { zen_wallpaper_status: string };
+    assert.equal(row.zen_wallpaper_status, "ready");
+    db.close();
+  });
+
+  it("leaves the actively generating conversation alone", () => {
+    const db = createWallpaperStatusDb();
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, zen_wallpaper_image_id, zen_wallpaper_status) VALUES (?, ?, NULL, 'generating')"
+    ).run("conv-1", "user-1");
+
+    recoverStaleZenWallpaperGenerationStatus(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: "conv-1",
+    });
+
+    const row = db
+      .prepare("SELECT zen_wallpaper_status FROM conversations WHERE id = ?")
+      .get("conv-1") as { zen_wallpaper_status: string };
+    assert.equal(row.zen_wallpaper_status, "generating");
+    db.close();
+  });
+});
+
 function seedListConversation(
   db: DatabaseSync,
   options: {
@@ -205,6 +457,29 @@ function seedListConversation(
       options.assistantBotId,
       options.updatedAt
     );
+  }
+}
+
+function seedStarterOnlyZenConversation(
+  db: DatabaseSync,
+  options: {
+    id: string;
+    userId: string;
+    archivedAt?: string | null;
+    includeUserMessage?: boolean;
+  }
+): void {
+  const now = "2026-01-01T00:00:00.000Z";
+  db.prepare(
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, archived_at, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', ?, 0, ?, ?)"
+  ).run(options.id, options.userId, "Zen", options.archivedAt ?? null, now, now);
+  db.prepare(
+    "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'assistant', ?, ?)"
+  ).run(`assistant-${options.id}`, options.id, options.userId, "hello", now);
+  if (options.includeUserMessage) {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, 'user', ?, ?)"
+    ).run(`user-${options.id}`, options.id, options.userId, "follow up", now);
   }
 }
 
@@ -288,6 +563,74 @@ describe("listConversationSummaries", () => {
 
     const conversations = listConversationSummaries(db, "user-1");
     assert.deepEqual(conversations.map((conversation) => conversation.id), ["active-1"]);
+  });
+});
+
+describe("setZenStarterConversationSuppression", () => {
+  it("archives and promotes an uncontinued Zen starter conversation", () => {
+    const db = createTestDb();
+    seedStarterOnlyZenConversation(db, { id: "zen-1", userId: "user-1" });
+
+    const suppressed = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      true
+    );
+
+    assert.deepEqual(suppressed, { conversationId: "zen-1", suppressed: true });
+    const archived = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.ok(archived.archived_at, "starter should be hidden from Zen auto-open");
+
+    const promoted = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      false
+    );
+
+    assert.deepEqual(promoted, { conversationId: "zen-1", suppressed: false });
+    const restored = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.equal(restored.archived_at, null);
+  });
+
+  it("archives and promotes continued Zen conversations", () => {
+    const db = createTestDb();
+    seedStarterOnlyZenConversation(db, {
+      id: "zen-1",
+      userId: "user-1",
+      includeUserMessage: true,
+    });
+
+    const suppressed = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      true
+    );
+
+    assert.deepEqual(suppressed, { conversationId: "zen-1", suppressed: true });
+    const archived = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.ok(archived.archived_at, "continued Zen chat should be suppressible");
+
+    const promoted = setZenStarterConversationSuppression(
+      db,
+      "user-1",
+      "zen-1",
+      false
+    );
+
+    assert.deepEqual(promoted, { conversationId: "zen-1", suppressed: false });
+    const restored = db
+      .prepare("SELECT archived_at FROM conversations WHERE id = ?")
+      .get("zen-1") as { archived_at: string | null };
+    assert.equal(restored.archived_at, null);
   });
 });
 
@@ -413,6 +756,167 @@ describe("deleteConversation", () => {
       .prepare("SELECT id FROM conversations WHERE id = ?")
       .get("chat-2") as { id?: string } | undefined;
     assert.equal(otherChat?.id, "chat-2");
+  });
+});
+
+describe("clearConversationMessages", () => {
+  it("empties a zen chat without deleting the conversation row", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    insertLinkedMemory(db, "user-1", "chat-1", "memory-chat-1", ["msg-chat-1"]);
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("chat-1", "user-1");
+    db.prepare(
+      "INSERT INTO session_opinions (user_id, conversation_id, bot_scope_key, score, band, trend, last_reason, recent_reasons, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "user-1",
+      "chat-1",
+      "__default__",
+      64,
+      "open",
+      "warmer",
+      "A prior turn existed.",
+      JSON.stringify(["A prior turn existed."]),
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const result = clearConversationMessages(db, "user-1", "chat-1");
+
+    assert.deepEqual(result, {
+      deletedMessages: 1,
+      deletedSummaries: 1,
+      deletedExports: 1,
+    });
+    const conversation = db
+      .prepare("SELECT id, title, conversation_mode FROM conversations WHERE id = ?")
+      .get("chat-1") as { id: string; title: string; conversation_mode: string } | undefined;
+    assert.equal(conversation?.id, "chat-1");
+    assert.equal(conversation?.title, "New chat");
+    assert.equal(conversation?.conversation_mode, "zen");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_summaries WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversation_exports WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM session_opinions WHERE conversation_id = ?")
+        .get("chat-1") as { n: number }).n,
+      0
+    );
+    const image = db
+      .prepare("SELECT conversation_id FROM images WHERE id = ?")
+      .get("img-chat-1") as { conversation_id: string | null } | undefined;
+    assert.equal(image?.conversation_id, null);
+    const memory = db
+      .prepare("SELECT conversation_id FROM memories WHERE id = ?")
+      .get("memory-chat-1") as { conversation_id: string | null } | undefined;
+    assert.equal(memory?.conversation_id, null);
+  });
+
+  it("clears stale Zen wallpaper metadata while preserving Atmosphere enablement", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    db.prepare(
+      `UPDATE conversations
+          SET conversation_mode = 'zen',
+              zen_wallpaper_enabled = 1,
+              zen_wallpaper_image_id = ?,
+              zen_wallpaper_prompt_seed = ?,
+              zen_wallpaper_message_count = ?,
+              zen_wallpaper_status = 'ready',
+              zen_wallpaper_history = ?
+        WHERE id = ? AND user_id = ?`
+    ).run(
+      "wallpaper-old",
+      "old prompt",
+      12,
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 12,
+          revealStartMessageCount: 16,
+          revealFullMessageCount: 28,
+        },
+      ]),
+      "chat-1",
+      "user-1"
+    );
+
+    clearConversationMessages(db, "user-1", "chat-1");
+
+    const conversation = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations
+          WHERE id = ? AND user_id = ?`
+      )
+      .get("chat-1", "user-1") as
+      | {
+          zen_wallpaper_enabled: number;
+          zen_wallpaper_image_id: string | null;
+          zen_wallpaper_prompt_seed: string | null;
+          zen_wallpaper_message_count: number | null;
+          zen_wallpaper_status: string;
+          zen_wallpaper_history: string;
+        }
+      | undefined;
+
+    assert.equal(conversation?.zen_wallpaper_enabled, 1);
+    assert.equal(conversation?.zen_wallpaper_image_id, null);
+    assert.equal(conversation?.zen_wallpaper_prompt_seed, null);
+    assert.equal(conversation?.zen_wallpaper_message_count, null);
+    assert.equal(conversation?.zen_wallpaper_status, "idle");
+    assert.equal(conversation?.zen_wallpaper_history, "[]");
+  });
+
+  it("leaves other users' chat context untouched", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    seedChat(db, "user-2", "chat-2");
+
+    clearConversationMessages(db, "user-1", "chat-1");
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ?")
+        .get("user-2") as { n: number }).n,
+      1
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+        .get("user-2") as { n: number }).n,
+      1
+    );
+    const otherSummary = db
+      .prepare("SELECT conversation_id FROM memory_summaries WHERE user_id = ?")
+      .get("user-2") as { conversation_id: string | null } | undefined;
+    assert.equal(otherSummary?.conversation_id, "chat-2");
+  });
+
+  it("rejects Coffee conversations", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "coffee-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'coffee' WHERE id = ? AND user_id = ?"
+    ).run("coffee-1", "user-1");
+
+    assert.throws(
+      () => clearConversationMessages(db, "user-1", "coffee-1"),
+      /Coffee conversations cannot be cleared/
+    );
   });
 });
 

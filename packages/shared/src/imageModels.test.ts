@@ -12,31 +12,58 @@ import {
 
 describe("imageModels", () => {
   it("normalizes OpenAI image model allowlist", () => {
-    assert.equal(normalizeOpenAiImageModelId(undefined), "dall-e-3");
-    assert.equal(normalizeOpenAiImageModelId("dall-e-2"), "dall-e-2");
-    assert.equal(normalizeOpenAiImageModelId("gpt-4o"), "dall-e-3");
+    assert.equal(normalizeOpenAiImageModelId(undefined), "gpt-image-2");
+    assert.equal(normalizeOpenAiImageModelId("gpt-image-2"), "gpt-image-2");
+    assert.equal(normalizeOpenAiImageModelId("gpt-image-1.5"), "gpt-image-1.5");
+    assert.equal(normalizeOpenAiImageModelId("gpt-image-1"), "gpt-image-1");
+    assert.equal(normalizeOpenAiImageModelId("gpt-image-1-mini"), "gpt-image-1-mini");
+    assert.equal(normalizeOpenAiImageModelId("dall-e-2"), "gpt-image-2");
+    assert.equal(normalizeOpenAiImageModelId("dall-e-3"), "gpt-image-2");
+    assert.equal(normalizeOpenAiImageModelId("gpt-4o"), "gpt-image-2");
   });
 
-  it("coerces dall-e-2 sizes and drops hd quality from normalized shape", () => {
+  it("normalizes retired DALL-E model ids to GPT Image defaults", () => {
     const r = normalizeOpenAiImageGenerationParams(
       "dall-e-2",
       "1792x1024",
       "hd"
     );
-    assert.equal(r.model, "dall-e-2");
-    assert.equal(r.size, "1024x1024");
-    assert.equal("quality" in r, false);
+    assert.equal(r.model, "gpt-image-2");
+    assert.equal(r.size, "1536x1024");
+    assert.equal(r.quality, "high");
   });
 
-  it("preserves dall-e-3 portrait sizes", () => {
+  it("folds legacy DALL-E portrait sizes onto GPT Image portrait size", () => {
     const r = normalizeOpenAiImageGenerationParams(
       "dall-e-3",
       "1024x1792",
       "hd"
     );
-    assert.equal(r.model, "dall-e-3");
-    assert.equal(r.size, "1024x1792");
-    assert.equal(r.quality, "hd");
+    assert.equal(r.model, "gpt-image-2");
+    assert.equal(r.size, "1024x1536");
+    assert.equal(r.quality, "high");
+  });
+
+  it("normalizes GPT Image sizes and quality names", () => {
+    const r = normalizeOpenAiImageGenerationParams(
+      "gpt-image-2",
+      "1536x1024",
+      "hd"
+    );
+    assert.equal(r.model, "gpt-image-2");
+    assert.equal(r.size, "1536x1024");
+    assert.equal(r.quality, "high");
+  });
+
+  it("folds legacy dall-e portrait size onto GPT Image portrait size", () => {
+    const r = normalizeOpenAiImageGenerationParams(
+      "gpt-image-1.5",
+      "1024x1792",
+      "standard"
+    );
+    assert.equal(r.model, "gpt-image-1.5");
+    assert.equal(r.size, "1024x1536");
+    assert.equal(r.quality, "medium");
   });
 
   it("matches local image heuristic including flux2-klein", () => {

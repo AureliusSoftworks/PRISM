@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --experimental-strip-types src/app/botMention.test.ts src/app/composerMentionPortal.test.ts src/app/coffee-bot-info-card.test.ts src/app/coffee-replay.test.ts src/app/coffee-seat-plate-blink.test.ts src/app/coffee-seat-gaze.test.ts src/app/coffee-user-reveal-flow.test.ts src/app/coffeeOfflineProtection.test.ts src/app/plainTextWordBackspace.test.ts src/app/prismBotMarkdownNav.test.ts src/app/story-mode-dialog.test.ts",
+    "test": "node --test --experimental-strip-types src/app/botMention.test.ts src/app/browserShortcutGuards.test.ts src/app/chatRevealPacing.test.ts src/app/composerMentionPortal.test.ts src/app/composerShortcutCompletion.test.ts src/app/coffee-bot-info-card.test.ts src/app/coffee-replay.test.ts src/app/coffee-seat-plate-blink.test.ts src/app/coffee-seat-gaze.test.ts src/app/coffee-user-reveal-flow.test.ts src/app/coffeeOfflineProtection.test.ts src/app/plainTextWordBackspace.test.ts src/app/prismBotMarkdownNav.test.ts src/app/promptRandomization.test.ts src/app/promptShortcutPreviewHighlight.test.ts src/app/providerMode.test.ts src/app/story-mode-dialog.test.ts src/app/tiptapPrismDevCommandHighlight.test.ts src/app/wildcardDecks.test.ts src/app/zenToneText.test.ts",
     "predev": "npm --prefix ../../packages/shared run build",
     "prebuild": "npm --prefix ../../packages/shared run build",
     "pretypecheck": "npm --prefix ../../packages/shared run build",
