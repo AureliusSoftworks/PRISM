@@ -12967,6 +12967,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 0 2px 1px;
   color: var(--fg);
   font-size: 12px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.compactedSummaryDebugHeader:active {
+  cursor: grabbing;
 }
 
 .compactedSummaryDebugTitle {
@@ -13243,6 +13250,96 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .compactedSummaryDebugDock {
   position: fixed;
   bottom: calc(128px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 920px) {
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock {
+    top: var(--compacted-summary-debug-top, clamp(76px, 9dvh, 104px));
+    right: auto;
+    bottom: auto;
+    left: var(--compacted-summary-debug-left, clamp(12px, 2.25vw, 36px));
+    width: var(--compacted-summary-debug-width, clamp(260px, 20vw, 340px));
+    height: var(--compacted-summary-debug-height, min(44dvh, 390px));
+    min-width: 240px;
+    min-height: 180px;
+    max-width: min(420px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow: hidden;
+    padding: 0;
+    pointer-events: auto;
+    resize: both;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock::after {
+    content: "";
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    width: 13px;
+    height: 13px;
+    border-right: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    border-bottom: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    border-bottom-right-radius: 3px;
+    pointer-events: none;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock[data-minimized="true"] {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    resize: none;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock[data-minimized="true"]::after {
+    display: none;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock
+    .compactedSummaryDebugBubble {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock
+    .compactedSummaryDebugBubble[data-minimized="true"] {
+    width: min(100%, 320px);
+    height: auto;
+    max-width: none;
+    align-self: flex-start;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock
+    .compactedSummaryDebugBubble
+    > pre {
+    max-height: none;
+  }
+
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesFrame
+    > .compactedSummaryDebugDock
+    .compactedSummaryDebugDetails[data-kind="atmosphere"] {
+    flex-basis: clamp(92px, 15dvh, 152px);
+    max-height: clamp(92px, 15dvh, 152px);
+  }
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] .messagesFrame > .askQuestionRecallBubbleDock {
