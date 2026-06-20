@@ -384,6 +384,15 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 24;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH = 290;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT = 360;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH = 240;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT = 180;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH = 420;
+const COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN = 12;
 const DEV_TOOLS_NAV_ITEMS = [
   {
     id: "observe",
@@ -593,6 +602,17 @@ type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
 type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
 type DevToolsPanelPosition = { x: number; y: number };
 type DevToolsPanelDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+};
+type CompactedSummaryDebugPanelRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+type CompactedSummaryDebugPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
@@ -977,6 +997,44 @@ function clampDevToolsPanelPosition(
   return {
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
+  };
+}
+
+function clampCompactedSummaryDebugPanelRect(
+  rect: CompactedSummaryDebugPanelRect,
+  viewportWidth: number,
+  viewportHeight: number
+): CompactedSummaryDebugPanelRect {
+  const availableWidth = Math.max(
+    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
+    viewportWidth - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
+  );
+  const availableHeight = Math.max(
+    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
+    viewportHeight - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
+  );
+  const width = Math.min(
+    Math.max(rect.width, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH),
+    Math.min(COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH, availableWidth)
+  );
+  const height = Math.min(
+    Math.max(rect.height, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT),
+    availableHeight
+  );
+  const maxX = Math.max(
+    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
+    viewportWidth - width - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
+  );
+  const maxY = Math.max(
+    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
+    viewportHeight - height - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
+  );
+
+  return {
+    x: Math.min(Math.max(rect.x, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxX),
+    y: Math.min(Math.max(rect.y, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxY),
+    width,
+    height,
   };
 }
 
@@ -18371,6 +18429,16 @@ function HomeContent(): React.JSX.Element {
   const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] = useState<string | null>(null);
   const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
   const [compactedSummaryDebugMinimized, setCompactedSummaryDebugMinimized] = useState(false);
+  const [compactedSummaryDebugPanelRect, setCompactedSummaryDebugPanelRect] =
+    useState<CompactedSummaryDebugPanelRect>({
+      x: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X,
+      y: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y,
+      width: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH,
+      height: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT,
+    });
+  const compactedSummaryDebugDockRef = useRef<HTMLDivElement | null>(null);
+  const compactedSummaryDebugPanelDragRef =
+    useRef<CompactedSummaryDebugPanelDragState | null>(null);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
@@ -23473,6 +23541,139 @@ function HomeContent(): React.JSX.Element {
     }
   }, []);
 
+  const compactedSummaryDebugFloatingEnabled =
+    viewportWidth >= COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH;
+  const compactedSummaryDebugPanelStyle = useMemo(
+    () =>
+      ({
+        "--compacted-summary-debug-left": `${compactedSummaryDebugPanelRect.x}px`,
+        "--compacted-summary-debug-top": `${compactedSummaryDebugPanelRect.y}px`,
+        "--compacted-summary-debug-width": `${compactedSummaryDebugPanelRect.width}px`,
+        "--compacted-summary-debug-height": `${compactedSummaryDebugPanelRect.height}px`,
+      }) as React.CSSProperties,
+    [compactedSummaryDebugPanelRect]
+  );
+  const startCompactedSummaryDebugPanelDrag = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!compactedSummaryDebugFloatingEnabled || event.button !== 0) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("button, a, input, textarea, select, [role='button']")
+      ) {
+        return;
+      }
+      const panel = compactedSummaryDebugDockRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      compactedSummaryDebugPanelDragRef.current = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is missing in some test environments.
+      }
+      event.preventDefault();
+    },
+    [compactedSummaryDebugFloatingEnabled]
+  );
+  const dragCompactedSummaryDebugPanel = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const dragState = compactedSummaryDebugPanelDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const panel = compactedSummaryDebugDockRef.current;
+      if (!panel) return;
+
+      const rect = panel.getBoundingClientRect();
+      const next = clampCompactedSummaryDebugPanelRect(
+        {
+          x: event.clientX - dragState.offsetX,
+          y: event.clientY - dragState.offsetY,
+          width: rect.width,
+          height: rect.height,
+        },
+        window.innerWidth,
+        window.innerHeight
+      );
+      panel.style.setProperty("--compacted-summary-debug-left", `${next.x}px`);
+      panel.style.setProperty("--compacted-summary-debug-top", `${next.y}px`);
+      panel.style.setProperty("--compacted-summary-debug-width", `${next.width}px`);
+      panel.style.setProperty("--compacted-summary-debug-height", `${next.height}px`);
+      setCompactedSummaryDebugPanelRect(next);
+    },
+    []
+  );
+  const endCompactedSummaryDebugPanelDrag = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const dragState = compactedSummaryDebugPanelDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      compactedSummaryDebugPanelDragRef.current = null;
+
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!compactedSummaryDebugFloatingEnabled) return;
+    setCompactedSummaryDebugPanelRect((current) => {
+      const next = clampCompactedSummaryDebugPanelRect(
+        current,
+        viewportWidth,
+        viewportHeight
+      );
+      return next.x === current.x &&
+        next.y === current.y &&
+        next.width === current.width &&
+        next.height === current.height
+        ? current
+        : next;
+    });
+  }, [compactedSummaryDebugFloatingEnabled, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    if (
+      !compactedSummaryDebugFloatingEnabled ||
+      compactedSummaryDebugMinimized ||
+      !devShowCompactedSummaryInChat
+    ) {
+      return;
+    }
+    const panel = compactedSummaryDebugDockRef.current;
+    if (!panel || typeof ResizeObserver === "undefined") return;
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      setCompactedSummaryDebugPanelRect((current) => {
+        if (Math.abs(width - current.width) < 1 && Math.abs(height - current.height) < 1) {
+          return current;
+        }
+        return clampCompactedSummaryDebugPanelRect(
+          { ...current, width, height },
+          viewportWidth,
+          viewportHeight
+        );
+      });
+    });
+    resizeObserver.observe(panel);
+    return () => resizeObserver.disconnect();
+  }, [
+    compactedSummaryDebugFloatingEnabled,
+    compactedSummaryDebugMinimized,
+    devShowCompactedSummaryInChat,
+    viewportHeight,
+    viewportWidth,
+  ]);
+
   const compactedSummaryDebugNode = useMemo(() => {
     if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
     if (view !== "chat" || !activeZenConversationId) return null;
@@ -23528,7 +23729,14 @@ function HomeContent(): React.JSX.Element {
           ? `message ${detail.zenWallpaper.generationMessageCount}`
           : null;
     return (
-      <div className={styles.compactedSummaryDebugDock} role="note">
+      <div
+        ref={compactedSummaryDebugDockRef}
+        className={styles.compactedSummaryDebugDock}
+        role="note"
+        data-floating={compactedSummaryDebugFloatingEnabled ? "true" : undefined}
+        data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
+        style={compactedSummaryDebugPanelStyle}
+      >
         <div
           className={styles.compactedSummaryDebugBubble}
           data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
@@ -23538,7 +23746,13 @@ function HomeContent(): React.JSX.Element {
               : undefined
           }
         >
-          <div className={styles.compactedSummaryDebugHeader}>
+          <div
+            className={styles.compactedSummaryDebugHeader}
+            onPointerDown={startCompactedSummaryDebugPanelDrag}
+            onPointerMove={dragCompactedSummaryDebugPanel}
+            onPointerUp={endCompactedSummaryDebugPanelDrag}
+            onPointerCancel={endCompactedSummaryDebugPanelDrag}
+          >
             <div className={styles.compactedSummaryDebugTitle}>
               <strong>Compacted context</strong>
               <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
@@ -23624,6 +23838,8 @@ function HomeContent(): React.JSX.Element {
   }, [
     activeZenConversationId,
     compactedSummaryDebugMinimized,
+    compactedSummaryDebugFloatingEnabled,
+    compactedSummaryDebugPanelStyle,
     copiedAtmospherePromptText,
     copyAtmospherePromptToClipboard,
     currentZenDisplaySummary,
@@ -23633,6 +23849,9 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     devShowCompactedSummaryInChat,
     manualCompactionStatus,
+    dragCompactedSummaryDebugPanel,
+    endCompactedSummaryDebugPanelDrag,
+    startCompactedSummaryDebugPanelDrag,
     summaryDebug,
     summaryDebugMatchesActiveZen,
     view,
