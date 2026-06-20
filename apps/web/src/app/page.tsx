@@ -15598,6 +15598,7 @@ function renderComposerTextareaOverlayContent(
       );
     }
     const tokenText = value.slice(range.start, range.end);
+    const tokenLabel = composerTextareaChipLabel(value, range);
     nodes.push(
       <span
         key={`chip-slot-${range.kind}-${range.start}-${range.end}-${index}`}
@@ -15610,7 +15611,7 @@ function renderComposerTextareaOverlayContent(
           data-kind={range.kind}
           aria-hidden="true"
         >
-          {composerTextareaChipLabel(value, range)}
+          <span className={styles.composeTextareaTokenText}>{tokenLabel}</span>
         </span>
       </span>
     );
@@ -29886,6 +29887,12 @@ function HomeContent(): React.JSX.Element {
     setZenPreviousContext(d.previousContext ?? null);
     setZenSessionMemories(d.sessionMemories ?? []);
   }
+  async function refreshPrismMemoryPanel() {
+    await refreshDefaultMemories();
+    if (view === "chat") {
+      await refreshZenSessionMemory();
+    }
+  }
   async function runMemoryPanelLoad(
     label: string,
     load: () => Promise<void>
@@ -29918,7 +29925,7 @@ function HomeContent(): React.JSX.Element {
   async function refreshOpenMemoryViews() {
     await refreshMemories();
     if (memoryPanelScope === "default") {
-      await refreshDefaultMemories();
+      await refreshPrismMemoryPanel();
     } else if (memoryPanelScope === "session") {
       await refreshZenSessionMemory();
     } else if (memoryPanelBot?.id) {
@@ -31626,7 +31633,7 @@ function HomeContent(): React.JSX.Element {
         if (botId && memoryPanelBot?.id === botId) {
           await refreshBotMemories(botId);
         } else if (memoryPanelScope === "default") {
-          await refreshDefaultMemories();
+          await refreshPrismMemoryPanel();
         }
       } catch {
         // Best-effort UI refresh; the server is the source of truth.
@@ -32835,7 +32842,7 @@ function HomeContent(): React.JSX.Element {
       if (stillViewingRequest) {
         const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
         if (memoryPanelScope === "default") {
-          await refreshDefaultMemories();
+          await refreshPrismMemoryPanel();
         } else if (memoryPanelScope === "session") {
           await refreshZenSessionMemory();
         } else if (nextBotId) {
@@ -39220,20 +39227,8 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
     setBotMemories([]);
-    await runMemoryPanelLoad("Loading Prism shared memories...", async () => {
-      await refreshDefaultMemories();
-    });
-    openRightPanel("memories");
-  }
-
-  async function openSessionMemoriesPanel() {
-    setMemoryPanelScope("session");
-    setMemoryPanelBotId(null);
-    setMemoryPanelSelectedFamily(null);
-    setFocusedMemoryId(null);
-    setBotMemories([]);
-    await runMemoryPanelLoad("Loading Zen session memory...", async () => {
-      await refreshZenSessionMemory();
+    await runMemoryPanelLoad(view === "chat" ? "Loading Prism memories..." : "Loading Prism shared memories...", async () => {
+      await refreshPrismMemoryPanel();
     });
     openRightPanel("memories");
   }
@@ -39245,9 +39240,20 @@ function HomeContent(): React.JSX.Element {
     setFocusedMemoryId(null);
     await runMemoryPanelLoad("Loading memory directories...", async () => {
       await refreshMemories();
-      await refreshZenSessionMemory();
     });
     openRightPanel("memories");
+  }
+
+  function openContextualMemoriesPanel() {
+    if (activeBot) {
+      void openMemoriesPanelForBot(activeBot);
+      return;
+    }
+    if (view === "chat") {
+      void openDefaultMemoriesPanel();
+      return;
+    }
+    void openAllMemoriesPanel();
   }
 
   function openConversationMemoriesPanel() {
@@ -39486,28 +39492,8 @@ function HomeContent(): React.JSX.Element {
     } as React.CSSProperties;
   }, [memoryFamilyDirectories, defaultDirectMemoryCount]);
 
-  const zenSessionMemoryDisplayCount =
-    zenSessionMemories.length + (zenPreviousContext ? 1 : 0);
-  const sessionMemoryDirectoryStyle = useMemo(() => {
-    const maxCount = Math.max(
-      1,
-      defaultDirectMemoryCount,
-      zenSessionMemoryDisplayCount,
-      ...memoryFamilyDirectories.map((family) => family.memoryCount)
-    );
-    const size = ratioBubbleSize(zenSessionMemoryDisplayCount, maxCount);
-    return {
-      ["--memory-family-x" as string]: "50%",
-      ["--memory-family-y" as string]: "84%",
-      ["--memory-family-size" as string]: `${Math.max(58, size)}px`,
-      ["--memory-family-color" as string]: PRISM_COLORS.m,
-      ["--memory-family-delay" as string]: "0.58s",
-    } as React.CSSProperties;
-  }, [
-    defaultDirectMemoryCount,
-    memoryFamilyDirectories,
-    zenSessionMemoryDisplayCount,
-  ]);
+  const showZenSessionMemoryInPrismPanel =
+    view === "chat" && memoryPanelScope === "default";
 
   const selectedMemoryFamilyDirectory = useMemo(
     () => memoryFamilyDirectories.find((family) => family.id === memoryPanelSelectedFamily) ?? null,
@@ -40149,6 +40135,82 @@ function HomeContent(): React.JSX.Element {
     (memory: UserMemory) =>
       formatMemoryPanelText(memory.text, memoryPanelSubjectLabel, memoryCategory(memory)),
     [memoryPanelSubjectLabel]
+  );
+  const renderZenSessionMemorySection = (): React.JSX.Element => (
+    <>
+      <section
+        className={styles.zenSessionPreviousCard}
+        data-empty={zenPreviousContext ? undefined : "true"}
+        aria-label="Previous context"
+      >
+        <div className={styles.zenSessionPreviousHeader}>
+          <span>Previous Context</span>
+          <strong>{zenPreviousContext ? zenPreviousContext.title : "Nothing stored yet"}</strong>
+        </div>
+        {zenPreviousContext ? (
+          <>
+            <p>{zenPreviousContext.summary}</p>
+            <small>Non-expiring Zen context</small>
+          </>
+        ) : (
+          <>
+            <p>Once Zen has a compacted thread summary, it can appear here for later resuming.</p>
+            <small>Not counted in the three checkpoint slots</small>
+          </>
+        )}
+      </section>
+      {zenSessionMemories.length > 0 ? (
+        <ul className={styles.zenSessionMemoryList} aria-label="Session checkpoints">
+          {zenSessionMemories.map((memory) => {
+            const deleteKey = zenSessionMemoryDeleteKey(memory.id);
+            const isArmed = pendingDeleteKey === deleteKey;
+            return (
+              <li key={memory.id} className={styles.zenSessionMemoryItem}>
+                <div className={styles.zenSessionMemoryOrb} aria-hidden="true">
+                  <span />
+                </div>
+                <div className={styles.zenSessionMemoryBody}>
+                  <div className={styles.zenSessionMemoryMeta}>
+                    <strong>{memory.title}</strong>
+                    <span>{formatZenSessionMemoryExpiry(memory.expiresAt)}</span>
+                  </div>
+                  <p>{memory.text}</p>
+                  {memory.trigger ? (
+                    <small>Saved from: {memory.trigger}</small>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className={`${styles.zenSessionMemoryDelete} ${
+                    isArmed ? styles.zenSessionMemoryDeleteArmed : ""
+                  }`}
+                  data-delete-affordance="true"
+                  onClick={() => {
+                    if (isArmed) {
+                      void deleteZenSessionMemory(memory.id);
+                      return;
+                    }
+                    armDelete(deleteKey);
+                  }}
+                  aria-label={
+                    isArmed
+                      ? `Confirm delete session memory: ${memory.title}`
+                      : `Delete session memory: ${memory.title}`
+                  }
+                >
+                  {isArmed ? "Confirm" : "Delete"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className={styles.memoryEmptyState}>
+          <strong>No session checkpoints</strong>
+          <p>When you ask Zen to pause or finish something later, up to three short-lived checkpoints will appear here.</p>
+        </div>
+      )}
+    </>
   );
 
   useEffect(() => {
@@ -43302,15 +43364,7 @@ function HomeContent(): React.JSX.Element {
     };
     const handleMemories = () => {
       closeMenu();
-      if (activeBot) {
-        void openMemoriesPanelForBot(activeBot);
-        return;
-      }
-      if (view === "chat") {
-        void openAllMemoriesPanel();
-        return;
-      }
-      void openAllMemoriesPanel();
+      openContextualMemoriesPanel();
     };
     const activeBotIsFavorite = Boolean(
       activeBot &&
@@ -43979,15 +44033,7 @@ function HomeContent(): React.JSX.Element {
             onClick={() => {
               if (memoriesDisabled) return;
               runAndClose(() => {
-                if (activeBot) {
-                  void openMemoriesPanelForBot(activeBot);
-                  return;
-                }
-                if (view === "chat") {
-                  void openAllMemoriesPanel();
-                  return;
-                }
-                void openAllMemoriesPanel();
+                openContextualMemoriesPanel();
               });
             }}
           >
@@ -44150,11 +44196,7 @@ function HomeContent(): React.JSX.Element {
           role="menuitem"
           onClick={() =>
             runAndClose(() => {
-              if (activeBot) {
-                void openMemoriesPanelForBot(activeBot);
-                return;
-              }
-              void openAllMemoriesPanel();
+              openContextualMemoriesPanel();
             })
           }
         >
@@ -46385,7 +46427,9 @@ function HomeContent(): React.JSX.Element {
                 {memoryPanelScope === "all"
                   ? "All memories"
                   : memoryPanelScope === "default"
-                    ? "Default memories"
+                    ? view === "chat"
+                      ? "Prism memories"
+                      : "Default memories"
                     : memoryPanelScope === "session"
                       ? "Session memory"
                       : "Bot memories"}
@@ -46443,7 +46487,11 @@ function HomeContent(): React.JSX.Element {
               </span>
               <div>
                 <strong>Prism</strong>
-                <span>Shared memories every bot may draw from.</span>
+                <span>
+                  {showZenSessionMemoryInPrismPanel
+                    ? "Prism memories and Zen session context."
+                    : "Shared memories every bot may draw from."}
+                </span>
               </div>
             </div>
           )}
@@ -46464,7 +46512,9 @@ function HomeContent(): React.JSX.Element {
                 ? `${selectedMemoryFamilyDirectory?.letter ?? "?"} family: each orb is a bot; orbit dots indicate saved memories.`
                 : "PRISM directories and your shared Prism memory. Tap to drill in."
               : memoryPanelScope === "default"
-                ? "Prism short-term memories float here; protected long-term memories stack below by category."
+                ? showZenSessionMemoryInPrismPanel
+                  ? "Zen session context sits with Prism memories here; protected long-term memories stack below by category."
+                  : "Prism short-term memories float here; protected long-term memories stack below by category."
                 : memoryPanelScope === "session"
                   ? "Previous context stays; session checkpoints fade after about four days."
                   : "Short-term memories float here; protected long-term memories stack below by category."}
@@ -46486,28 +46536,6 @@ function HomeContent(): React.JSX.Element {
                 <span className={styles.memoryDefaultGlyph} aria-hidden="true">
                   <PrismTriangleMark />
                 </span>
-              </button>
-              <button
-                type="button"
-                role="listitem"
-                className={styles.memoryFamilyCluster}
-                data-memory-session="true"
-                data-memory-physics-id="session:zen"
-                style={sessionMemoryDirectoryStyle}
-                onClick={() => void runMemoryTransition(openSessionMemoriesPanel, "forward")}
-                aria-label={`Zen session memory: ${zenSessionMemoryDisplayCount} item${zenSessionMemoryDisplayCount === 1 ? "" : "s"}. Open session memory.`}
-                title={`Zen session memory: ${zenSessionMemoryDisplayCount} item${zenSessionMemoryDisplayCount === 1 ? "" : "s"}`}
-              >
-                <span className={styles.memorySessionClusterGlyph} aria-hidden="true">
-                  S
-                </span>
-                {zenSessionMemories.length > 0 ? (
-                  <span className={styles.memorySessionClusterMotes} aria-hidden="true">
-                    {zenSessionMemories.map((memory) => (
-                      <span key={`session-mote:${memory.id}`} />
-                    ))}
-                  </span>
-                ) : null}
               </button>
               {memoryFamilyDirectories.map((family) => (
                 <button
@@ -46630,81 +46658,11 @@ function HomeContent(): React.JSX.Element {
             )
           ) : memoryPanelScope === "session" ? (
             <div className={styles.memoryPanelMemoryStacks}>
-              <section
-                className={styles.zenSessionPreviousCard}
-                data-empty={zenPreviousContext ? undefined : "true"}
-                aria-label="Previous context"
-              >
-                <div className={styles.zenSessionPreviousHeader}>
-                  <span>Previous Context</span>
-                  <strong>{zenPreviousContext ? zenPreviousContext.title : "Nothing stored yet"}</strong>
-                </div>
-                {zenPreviousContext ? (
-                  <>
-                    <p>{zenPreviousContext.summary}</p>
-                    <small>Non-expiring Zen context</small>
-                  </>
-                ) : (
-                  <>
-                    <p>Once Zen has a compacted thread summary, it can appear here for later resuming.</p>
-                    <small>Not counted in the three checkpoint slots</small>
-                  </>
-                )}
-              </section>
-              {zenSessionMemories.length > 0 ? (
-                <ul className={styles.zenSessionMemoryList} aria-label="Session checkpoints">
-                  {zenSessionMemories.map((memory) => {
-                    const deleteKey = zenSessionMemoryDeleteKey(memory.id);
-                    const isArmed = pendingDeleteKey === deleteKey;
-                    return (
-                      <li key={memory.id} className={styles.zenSessionMemoryItem}>
-                        <div className={styles.zenSessionMemoryOrb} aria-hidden="true">
-                          <span />
-                        </div>
-                        <div className={styles.zenSessionMemoryBody}>
-                          <div className={styles.zenSessionMemoryMeta}>
-                            <strong>{memory.title}</strong>
-                            <span>{formatZenSessionMemoryExpiry(memory.expiresAt)}</span>
-                          </div>
-                          <p>{memory.text}</p>
-                          {memory.trigger ? (
-                            <small>Saved from: {memory.trigger}</small>
-                          ) : null}
-                        </div>
-                        <button
-                          type="button"
-                          className={`${styles.zenSessionMemoryDelete} ${
-                            isArmed ? styles.zenSessionMemoryDeleteArmed : ""
-                          }`}
-                          data-delete-affordance="true"
-                          onClick={() => {
-                            if (isArmed) {
-                              void deleteZenSessionMemory(memory.id);
-                              return;
-                            }
-                            armDelete(deleteKey);
-                          }}
-                          aria-label={
-                            isArmed
-                              ? `Confirm delete session memory: ${memory.title}`
-                              : `Delete session memory: ${memory.title}`
-                          }
-                        >
-                          {isArmed ? "Confirm" : "Delete"}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className={styles.memoryEmptyState}>
-                  <strong>No session checkpoints</strong>
-                  <p>When you ask Zen to pause or finish something later, up to three short-lived checkpoints will appear here.</p>
-                </div>
-              )}
+              {renderZenSessionMemorySection()}
             </div>
-          ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 ? (
+          ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 || showZenSessionMemoryInPrismPanel ? (
             <div className={styles.memoryPanelMemoryStacks}>
+              {showZenSessionMemoryInPrismPanel ? renderZenSessionMemorySection() : null}
               {visibleMemoryBubbles.length > 0 ? (
                 <>
                   <ul
@@ -56305,11 +56263,7 @@ function HomeContent(): React.JSX.Element {
       openRightPanel("settings");
     };
     const handleCoffeeToolbarMemories = () => {
-      if (activeBot) {
-        void openMemoriesPanelForBot(activeBot);
-        return;
-      }
-      void openAllMemoriesPanel();
+      openContextualMemoriesPanel();
     };
     const handleCoffeeToolbarImages = () => {
       const inflightKey = resolveActiveImageGenInflightScopeKey();
@@ -59014,7 +58968,7 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.sidebarFooter}>
             <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
             <button type="button" onClick={openFreshBotCustomizer}>Bots</button>
-            <button type="button" onClick={() => void openAllMemoriesPanel()}>Memories</button>
+            <button type="button" onClick={openContextualMemoriesPanel}>Memories</button>
           </div>
         )}
       </aside>
