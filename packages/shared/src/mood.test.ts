@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyPrismMoodInterruption,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   coffeeSocialSnapshotToPrismMoodState,
   createDefaultPrismMoodState,
   decayPrismMood,
+  isPrismMoodIgnoring,
   prismMoodInterruptionStreak,
   shouldPrismMoodDeclineResponse,
+  shouldPrismMoodStartIgnoreCooldown,
 } from "./mood.ts";
 
 test("interruption increases annoyance with progress-aware weighting", () => {
@@ -110,6 +114,42 @@ test("negative turns nudge mood but cannot trigger pause alone", () => {
   assert.ok(mood.annoyance > 0.12);
   assert.equal(prismMoodInterruptionStreak(mood), 0);
   assert.equal(shouldPrismMoodDeclineResponse(mood), false);
+});
+
+test("severe interruption mood can start an ignore cooldown", () => {
+  let mood = {
+    ...createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z"),
+    annoyance: 0.74,
+    warmth: 0.42,
+    engagement: 0.47,
+    recentDeltas: Array.from({ length: 6 }, () => ({
+      kind: "interruption" as const,
+      at: "2026-06-19T12:00:00.000Z",
+      reason: "Interrupted.",
+      annoyanceDelta: 0.1,
+      warmthDelta: -0.04,
+      engagementDelta: -0.02,
+      restraintDelta: -0.01,
+      moodKeyBefore: "neutral" as const,
+      moodKeyAfter: "guarded" as const,
+    })),
+  };
+  assert.equal(shouldPrismMoodStartIgnoreCooldown(mood), true);
+  mood = applyPrismMoodIgnoreCooldown(mood, "2026-06-19T12:00:01.000Z", 10_000);
+  assert.equal(mood.recentDeltas[0]?.kind, "ignore_started");
+  assert.equal(mood.ignoreUntil, "2026-06-19T12:00:11.000Z");
+  assert.equal(isPrismMoodIgnoring(mood, "2026-06-19T12:00:05.000Z"), true);
+  assert.equal(isPrismMoodIgnoring(mood, "2026-06-19T12:00:12.000Z"), false);
+});
+
+test("ignored turns record without extending the cooldown", () => {
+  const cooling = {
+    ...createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z"),
+    ignoreUntil: "2026-06-19T12:01:00.000Z",
+  };
+  const ignored = applyPrismMoodIgnoredTurn(cooling, "2026-06-19T12:00:05.000Z");
+  assert.equal(ignored.recentDeltas[0]?.kind, "ignored_turn");
+  assert.equal(ignored.ignoreUntil, cooling.ignoreUntil);
 });
 
 test("high annoyance can decline a response", () => {

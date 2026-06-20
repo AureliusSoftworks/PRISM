@@ -3,6 +3,13 @@ export interface PromptShortcutFlag {
   value: string;
 }
 
+export interface PromptShortcutWildcardReplacement {
+  key: string;
+  value: string;
+  start?: number;
+  end?: number;
+}
+
 export interface PromptShortcutMetadata {
   v: 1;
   commandId: string;
@@ -10,11 +17,19 @@ export interface PromptShortcutMetadata {
   invocation: string;
   flags: PromptShortcutFlag[];
   passthrough?: string;
+  resolvedPrompt?: string;
+  wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
 function readPromptShortcutString(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
+}
+
+function readPromptShortcutRange(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const normalized = Math.floor(value);
+  return normalized >= 0 && normalized <= 20000 ? normalized : undefined;
 }
 
 export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutMetadata | undefined {
@@ -36,7 +51,33 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
         .filter((flag): flag is PromptShortcutFlag => Boolean(flag))
         .slice(0, 20)
     : [];
+  const wildcardReplacements = Array.isArray(row.wildcardReplacements)
+    ? row.wildcardReplacements
+        .map((replacement): PromptShortcutWildcardReplacement | null => {
+          if (!replacement || typeof replacement !== "object") return null;
+          const replacementRow = replacement as Record<string, unknown>;
+          const key = readPromptShortcutString(replacementRow.key, 64)
+            .replace(/[{}]/g, "")
+            .toUpperCase();
+          const replacementValue = readPromptShortcutString(replacementRow.value, 1000);
+          if (!key || !replacementValue) return null;
+          const start = readPromptShortcutRange(replacementRow.start);
+          const end = readPromptShortcutRange(replacementRow.end);
+          const hasValidRange = start !== undefined && end !== undefined && end > start;
+          return {
+            key,
+            value: replacementValue,
+            ...(hasValidRange ? { start, end } : {}),
+          };
+        })
+        .filter(
+          (replacement): replacement is PromptShortcutWildcardReplacement =>
+            Boolean(replacement)
+        )
+        .slice(0, 80)
+    : [];
   const passthrough = readPromptShortcutString(row.passthrough, 2000);
+  const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
   return {
     v: 1,
     commandId,
@@ -44,6 +85,8 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
     invocation,
     flags,
     ...(passthrough ? { passthrough } : {}),
+    ...(resolvedPrompt ? { resolvedPrompt } : {}),
+    ...(wildcardReplacements.length > 0 ? { wildcardReplacements } : {}),
   };
 }
 
@@ -59,6 +102,16 @@ export function parseStoredPromptShortcutPayload(
   } catch {
     return undefined;
   }
+}
+
+export function withPromptShortcutResolvedPrompt(
+  promptShortcut: PromptShortcutMetadata | undefined,
+  resolvedPrompt: unknown
+): PromptShortcutMetadata | undefined {
+  const normalized = normalizePromptShortcutMetadata(promptShortcut);
+  if (!normalized) return undefined;
+  const prompt = readPromptShortcutString(resolvedPrompt, 20000);
+  return prompt ? { ...normalized, resolvedPrompt: prompt } : normalized;
 }
 
 export function serializePromptShortcutPayload(

@@ -25,8 +25,8 @@ describe("default online model visibility", () => {
       { id: "o5-mini", provider: "openai" as const },
       { id: "claude-sonnet-4-6", provider: "anthropic" as const },
       { id: "claude-opus-4-8", provider: "anthropic" as const },
+      { id: "claude-haiku-4-5", provider: "anthropic" as const },
       { id: "claude-3-5-sonnet-latest", provider: "anthropic" as const },
-      { id: "claude-3-5-haiku-latest", provider: "anthropic" as const },
     ]) {
       assert.equal(isCommonOnlineChatModel(model), true, model.id);
     }
@@ -49,6 +49,7 @@ describe("default online model visibility", () => {
         { id: "gpt-4o-mini-search-preview", provider: "openai" as const },
         { id: "claude-sonnet-4-6", provider: "anthropic" as const },
         { id: "claude-sonnet-4-5-20250929", provider: "anthropic" as const },
+        { id: "claude-3-5-haiku-latest", provider: "anthropic" as const },
         { id: "claude-test-model", provider: "anthropic" as const },
       ],
     };
@@ -63,6 +64,7 @@ describe("default online model visibility", () => {
       "gpt-5.2-pro",
       "gpt-4o-mini-search-preview",
       "claude-sonnet-4-5-20250929",
+      "claude-3-5-haiku-latest",
       "claude-test-model",
     ]);
   });

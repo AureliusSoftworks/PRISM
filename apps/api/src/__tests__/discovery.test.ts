@@ -29,7 +29,7 @@ describe("buildDiscoveryTxt", () => {
     assert.deepEqual(buildDiscoveryTxt(), {
       api: String(PRISM_API_VERSION),
       version: PRISM_SERVER_VERSION,
-      pairing: "required",
+      pairing: "disabled",
       tls: "optional",
     });
   });

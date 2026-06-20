@@ -1,4 +1,9 @@
 import { getAppConfig } from "@localai/config";
+import {
+  openAiModelSupportsReasoningEffort,
+  reasoningEffortForRequest,
+  type ReasoningEffort,
+} from "@localai/shared";
 
 /**
  * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
@@ -16,6 +21,7 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
   /** Cancels in-flight provider work when the originating chat request is stopped. */
   signal?: AbortSignal;
   /** Ask providers that support it to constrain the visible reply to a JSON object. */
@@ -150,7 +156,7 @@ const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
   "claude-opus-4-8",
   "claude-opus-4-7",
-  "claude-3-5-haiku-latest",
+  "claude-haiku-4-5",
   "claude-sonnet-4-5-20250929",
 ] as const;
 const OPENAI_CHAT_MODEL_PREFIXES = [
@@ -338,6 +344,10 @@ function titleCaseModelToken(token: string): string {
     : `${token.slice(0, 1).toUpperCase()}${token.slice(1)}`;
 }
 
+function isUnsupportedReasoningEffortError(detail: string): boolean {
+  return /reasoning[_\s-]*effort/i.test(detail) && /invalid|unknown|unsupported|not supported/i.test(detail);
+}
+
 function formatOpenAiSnapshotSuffix(datePart: string | undefined): string {
   if (!datePart) return "";
   const isoDate = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -390,7 +400,7 @@ function anthropicModelLabelFromId(id: string): string | null {
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
   if (latest) {
-    return `Claude ${titleCaseModelToken(latest[3]!)} ${latest[1]}.${latest[2]}`;
+    return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   }
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
@@ -450,6 +460,20 @@ function uniqueModelIdsByLabel(ids: string[]): string[] {
     result.push(trimmed);
   }
   return result;
+}
+
+function canonicalAnthropicCatalogModelId(id: string): string {
+  const normalized = id.trim().toLowerCase();
+  switch (normalized) {
+    case "claude-haiku-4-5-20251001":
+      return "claude-haiku-4-5";
+    default:
+      return id.trim();
+  }
+}
+
+function uniqueAnthropicModelIds(ids: string[]): string[] {
+  return uniqueModelIds(ids.map(canonicalAnthropicCatalogModelId));
 }
 
 function encodeSecondaryOllamaModelId(id: string): string {
@@ -852,7 +876,7 @@ export async function buildModelCatalog(
       )
     : [];
   const anthropicIds = anthropicApiKey
-    ? uniqueModelIds([
+    ? uniqueAnthropicModelIds([
         ANTHROPIC_DEFAULT_MODEL,
         ...discoveredAnthropic,
         ...ANTHROPIC_FALLBACK_MODELS,
@@ -1030,16 +1054,23 @@ export class OpenAiProvider implements LlmProvider {
         requestBody.max_tokens = options.maxTokens;
       }
     }
+    const reasoningEffort = reasoningEffortForRequest(options?.reasoningEffort);
+    if (reasoningEffort && openAiModelSupportsReasoningEffort(modelId)) {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.openAiConfig.apiKey}`
-      },
-      body: JSON.stringify(requestBody),
-      signal: options?.signal,
-    });
+    const sendRequest = (body: Record<string, unknown>) =>
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.openAiConfig.apiKey}`
+        },
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      });
+
+    let response = await sendRequest(requestBody);
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
       // "Incorrect API key provided", context-length errors) instead of a
@@ -1047,12 +1078,38 @@ export class OpenAiProvider implements LlmProvider {
       // tailing the terminal can diagnose without the user re-hitting it.
       const detail = await readOpenAiErrorMessage(response);
       const modelUsed = (requestBody.model as string) ?? OPENAI_DEFAULT_MODEL;
-      console.error(
-        `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
-          detail || "<empty body>"
-        }`
-      );
-      throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
+      if (
+        requestBody.reasoning_effort &&
+        response.status === 400 &&
+        isUnsupportedReasoningEffortError(detail)
+      ) {
+        const retryBody = { ...requestBody };
+        delete retryBody.reasoning_effort;
+        console.warn(
+          `[openai] reasoning_effort rejected for model=${modelUsed}; retrying without effort detail=${
+            detail || "<empty body>"
+          }`
+        );
+        response = await sendRequest(retryBody);
+        if (response.ok) {
+          delete requestBody.reasoning_effort;
+        } else {
+          const retryDetail = await readOpenAiErrorMessage(response);
+          console.error(
+            `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
+              retryDetail || "<empty body>"
+            }`
+          );
+          throw new Error(formatOpenAiError("OpenAI request failed", response.status, retryDetail));
+        }
+      } else {
+        console.error(
+          `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
+            detail || "<empty body>"
+          }`
+        );
+        throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
+      }
     }
     const payload = (await response.json()) as {
       choices?: Array<{

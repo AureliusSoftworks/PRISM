@@ -13,7 +13,7 @@ const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LO
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 2;
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 3;
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
@@ -52,7 +52,7 @@ const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [
 
 const COMMON_ANTHROPIC_CHAT_MODEL_PATTERNS = [
   /^claude-(?:sonnet|opus|haiku)-4(?:-\d+)?$/,
-  /^claude-3-5-(?:sonnet|haiku)-latest$/,
+  /^claude-3-5-sonnet-latest$/,
 ] as const;
 
 function isModelIdHiddenByDefaultForNonChatUse(modelId: string): boolean {

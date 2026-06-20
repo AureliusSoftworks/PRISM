@@ -82,6 +82,10 @@ interface DbPrismMoodRow {
   engagement: number;
   restraint: number;
   recent_deltas: string;
+  ignore_until: string | null;
+  ignore_cooldown_ms: number | null;
+  ignore_forgiveness_chance: number | null;
+  ignore_penalty_level: number | null;
   frozen: number;
   updated_at: string;
 }
@@ -384,6 +388,10 @@ export function createDatabase(): DatabaseSync {
       engagement REAL NOT NULL DEFAULT 0.62,
       restraint REAL NOT NULL DEFAULT 0.68,
       recent_deltas TEXT NOT NULL DEFAULT '[]',
+      ignore_until TEXT,
+      ignore_cooldown_ms INTEGER,
+      ignore_forgiveness_chance REAL,
+      ignore_penalty_level INTEGER,
       frozen INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, mode),
@@ -1121,6 +1129,33 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotSemanticFacetsUpdatedAtColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
   }
+  const prismMoodColumns = db
+    .prepare("PRAGMA table_info(prism_mood_state)")
+    .all() as Array<{ name: string }>;
+  const hasPrismMoodIgnoreUntilColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_until"
+  );
+  if (!hasPrismMoodIgnoreUntilColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_until TEXT;");
+  }
+  const hasPrismMoodIgnoreCooldownMsColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_cooldown_ms"
+  );
+  if (!hasPrismMoodIgnoreCooldownMsColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_cooldown_ms INTEGER;");
+  }
+  const hasPrismMoodIgnoreForgivenessChanceColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_forgiveness_chance"
+  );
+  if (!hasPrismMoodIgnoreForgivenessChanceColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_forgiveness_chance REAL;");
+  }
+  const hasPrismMoodIgnorePenaltyLevelColumn = prismMoodColumns.some(
+    (column) => column.name === "ignore_penalty_level"
+  );
+  if (!hasPrismMoodIgnorePenaltyLevelColumn) {
+    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_penalty_level INTEGER;");
+  }
   db.exec(`
     UPDATE bots
     SET export_hash = lower(hex(randomblob(16)))
@@ -1367,7 +1402,8 @@ export function loadPrismMoodState(
   const row = db
     .prepare(
       `SELECT mode, mood_key, confidence, annoyance, warmth, engagement, restraint,
-              recent_deltas, frozen, updated_at
+              recent_deltas, ignore_until, ignore_cooldown_ms,
+              ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
          FROM prism_mood_state
         WHERE user_id = ? AND conversation_id = ? AND mode = ?
         LIMIT 1`
@@ -1385,6 +1421,16 @@ export function loadPrismMoodState(
       restraint: row.restraint,
       lastUpdatedAt: row.updated_at,
       recentDeltas: parsePrismMoodDeltas(row.recent_deltas),
+      ...(row.ignore_until ? { ignoreUntil: row.ignore_until } : {}),
+      ...(typeof row.ignore_cooldown_ms === "number"
+        ? { ignoreCooldownMs: row.ignore_cooldown_ms }
+        : {}),
+      ...(typeof row.ignore_forgiveness_chance === "number"
+        ? { ignoreForgivenessChance: row.ignore_forgiveness_chance }
+        : {}),
+      ...(typeof row.ignore_penalty_level === "number"
+        ? { ignorePenaltyLevel: row.ignore_penalty_level }
+        : {}),
       frozen: row.frozen === 1,
     },
     mode,
@@ -1402,8 +1448,9 @@ export function upsertPrismMoodState(
   db.prepare(
     `INSERT INTO prism_mood_state (
       user_id, conversation_id, mode, mood_key, confidence, annoyance, warmth,
-      engagement, restraint, recent_deltas, frozen, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      engagement, restraint, recent_deltas, ignore_until, ignore_cooldown_ms,
+      ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, conversation_id, mode) DO UPDATE SET
       mood_key = excluded.mood_key,
       confidence = excluded.confidence,
@@ -1412,6 +1459,10 @@ export function upsertPrismMoodState(
       engagement = excluded.engagement,
       restraint = excluded.restraint,
       recent_deltas = excluded.recent_deltas,
+      ignore_until = excluded.ignore_until,
+      ignore_cooldown_ms = excluded.ignore_cooldown_ms,
+      ignore_forgiveness_chance = excluded.ignore_forgiveness_chance,
+      ignore_penalty_level = excluded.ignore_penalty_level,
       frozen = excluded.frozen,
       updated_at = excluded.updated_at`
   ).run(
@@ -1425,6 +1476,10 @@ export function upsertPrismMoodState(
     mood.engagement,
     mood.restraint,
     JSON.stringify(mood.recentDeltas),
+    mood.ignoreUntil ?? null,
+    mood.ignoreCooldownMs ?? null,
+    mood.ignoreForgivenessChance ?? null,
+    mood.ignorePenaltyLevel ?? null,
     mood.frozen === true ? 1 : 0,
     mood.lastUpdatedAt
   );

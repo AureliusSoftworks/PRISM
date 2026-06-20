@@ -73,6 +73,7 @@ import type {
   CoffeeTopicSelectionMode,
   CoffeeTurnResponse,
   BotVoicePreset,
+  ReasoningEffort,
 } from "@localai/shared";
 import {
   COFFEE_POLL_FINALIZE_REMAINING_MS,
@@ -1691,6 +1692,7 @@ export interface CoffeeTurnSettings {
    * `modelOverride`).
    */
   sessionSpeakerModel?: string | null;
+  reasoningEffort?: ReasoningEffort;
   /** Optional per-user image model/workflow prefs (same shape as chat mode). */
   assistantImageUserPrefs?: AssistantSentImageUserPrefs;
 }
@@ -6637,6 +6639,9 @@ async function generateCoffeeBotReply(args: {
     settings.sessionSpeakerModel
   );
   if (speakerModel) speakerOptions.model = speakerModel;
+  if (settings.reasoningEffort) {
+    speakerOptions.reasoningEffort = settings.reasoningEffort;
+  }
   if (typeof speaker.temperature === "number") {
     speakerOptions.temperature = speaker.temperature;
   }
@@ -7014,6 +7019,7 @@ export async function generateCoffeeSessionSynopsis(
     temperature: 0.35,
   };
   if (settings.sessionSpeakerModel) options.model = settings.sessionSpeakerModel;
+  if (settings.reasoningEffort) options.reasoningEffort = settings.reasoningEffort;
 
   const raw = await provider.generateResponse(
     buildCoffeeSessionSynopsisMessages({

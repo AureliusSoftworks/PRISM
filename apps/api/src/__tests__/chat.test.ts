@@ -131,6 +131,10 @@ function createChatTestDb(): DatabaseSync {
       engagement REAL NOT NULL DEFAULT 0.62,
       restraint REAL NOT NULL DEFAULT 0.68,
       recent_deltas TEXT NOT NULL DEFAULT '[]',
+      ignore_until TEXT,
+      ignore_cooldown_ms INTEGER,
+      ignore_forgiveness_chance REAL,
+      ignore_penalty_level INTEGER,
       frozen INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, mode)
@@ -267,7 +271,7 @@ describe("processChatMessage starter prompts", () => {
         botId: "bot-1",
         incognito: false,
         botSystemPrompt: "You are Storm Bot. Invite the user into strange skies.",
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -298,13 +302,16 @@ describe("processChatMessage starter prompts", () => {
     const starterBody = bodies[0];
     assert.equal(starterBody?.messages?.[0]?.role, "system");
     assert.match(starterBody?.messages?.[0]?.content ?? "", /Storm Bot/);
-    assert.equal(starterBody?.messages?.[1]?.role, "user");
+    const starterUserMessage = starterBody?.messages?.find(
+      (message) => message.role === "user"
+    );
+    assert.ok(starterUserMessage);
     assert.match(
-      starterBody?.messages?.[1]?.content ?? "",
+      starterUserMessage.content,
       /Functionally simple/
     );
-    assert.match(starterBody?.messages?.[1]?.content ?? "", /AskQuestion/);
-    assert.match(starterBody?.messages?.[1]?.content ?? "", /sendGeneratedImage/);
+    assert.match(starterUserMessage.content, /AskQuestion/);
+    assert.match(starterUserMessage.content, /sendGeneratedImage/);
 
     const inferBody = bodies[1];
     assert.equal(inferBody?.messages?.[0]?.role, "system");
@@ -1234,7 +1241,7 @@ describe("processChatMessage starter prompts", () => {
     );
   });
 
-  it("keeps private chats ephemeral while honoring the selected provider and bot", async () => {
+  it("keeps private chats ephemeral while honoring the selected provider", async () => {
     const db = createChatTestDb();
 
     let providerUrl = "";
@@ -1301,10 +1308,10 @@ describe("processChatMessage starter prompts", () => {
 
     assert.equal(conversation.id, "private-session-1");
     assert.equal(conversation.incognito, true);
-    assert.equal(conversation.botId, "bot-1");
-    assert.equal(conversation.lastBotId, "bot-1");
+    assert.equal(conversation.botId, null);
+    assert.equal(conversation.lastBotId, null);
     assert.equal(conversation.messages.length, 4);
-    assert.equal(conversation.messages[3]?.botName, "Storm Bot");
+    assert.equal(conversation.messages[3]?.botName, undefined);
     assert.equal(conversation.messages[3]?.provider, "openai");
 
     const conversationCount = db
@@ -2453,6 +2460,135 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(result.prismMood?.moodKey, "guarded");
   });
 
+  it("can ignore multiple Zen messages during a severe mood cooldown", async () => {
+    const db = createChatTestDb();
+    const conversationId = "ignore-conversation";
+    const now = "2026-06-19T12:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(conversationId, "user-1", "Ignore test", "zen", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "assistant-1",
+      conversationId,
+      "user-1",
+      "assistant",
+      "Previous assistant message.",
+      "2026-06-19T12:00:01.000Z"
+    );
+    const interruptionDelta = {
+      kind: "interruption",
+      at: now,
+      reason: "Interrupted.",
+      annoyanceDelta: 0.1,
+      warmthDelta: -0.04,
+      engagementDelta: -0.02,
+      restraintDelta: -0.01,
+      moodKeyBefore: "neutral",
+      moodKeyAfter: "guarded",
+    };
+    db.prepare(
+      `INSERT INTO prism_mood_state (
+        user_id, conversation_id, mode, mood_key, confidence, annoyance,
+        warmth, engagement, restraint, recent_deltas, ignore_until, frozen, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      conversationId,
+      "zen",
+      "guarded",
+      0.8,
+      0.74,
+      0.42,
+      0.47,
+      0.5,
+      JSON.stringify(Array.from({ length: 6 }, () => interruptionDelta)),
+      null,
+      0,
+      now
+    );
+
+    const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/api/chat")) {
+        chatPayloads.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Back online." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const ignoredStart = await processChatMessage(
+      db,
+      "user-1",
+      "Answer now.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(ignoredStart.conversation.messages.at(-1)?.role, "user");
+    assert.equal(ignoredStart.prismMood?.recentDeltas[0]?.kind, "ignore_started");
+    assert.ok(ignoredStart.prismMood?.ignoreUntil);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'assistant'").get(conversationId) as { n: number }).n,
+      1
+    );
+
+    const ignoredAgain = await processChatMessage(
+      db,
+      "user-1",
+      "I said answer.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(ignoredAgain.conversation.messages.at(-1)?.role, "user");
+    assert.equal(ignoredAgain.prismMood?.recentDeltas[0]?.kind, "ignored_turn");
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'assistant'").get(conversationId) as { n: number }).n,
+      1
+    );
+
+    db.prepare(
+      "UPDATE prism_mood_state SET ignore_until = ? WHERE user_id = ? AND conversation_id = ? AND mode = ?"
+    ).run("2026-06-19T11:59:00.000Z", "user-1", conversationId, "zen");
+
+    const repaired = await processChatMessage(
+      db,
+      "user-1",
+      "Sorry, I will slow down. Thank you for staying with me.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(repaired.conversation.messages.at(-1)?.role, "assistant");
+    assert.equal(repaired.conversation.messages.at(-1)?.content, "Back online.");
+    assert.equal(repaired.prismMood?.recentDeltas[0]?.kind, "positive_turn");
+  });
+
   it("keeps relationship and mood context out of the persona identity block", async () => {
     const db = createChatTestDb();
     const userKey = CHAT_TEST_USER_KEY;
@@ -3207,7 +3343,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3265,7 +3401,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -3310,7 +3446,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     await flushBackgroundTitleJobs();
@@ -3329,7 +3465,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -3498,7 +3634,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3564,7 +3700,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3657,7 +3793,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3747,7 +3883,7 @@ describe("processChatMessage conversational memory cues", () => {
       { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -3760,7 +3896,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       "conversation-1"
     );
@@ -3786,7 +3922,7 @@ describe("processChatMessage conversational memory cues", () => {
       { durability: 0.4 }
     );
     db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, ?)"
     ).run("conversation-1", "user-1", "Existing chat", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
 
     const result = await processChatMessage(
@@ -3799,7 +3935,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       "conversation-1"
     );
@@ -3886,7 +4022,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     const second = await processChatMessage(
@@ -3899,7 +4035,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-2",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3928,7 +4064,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
     const repaired = await processChatMessage(
@@ -3941,7 +4077,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       harsh.conversation.id
     );
@@ -3968,7 +4104,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -3997,7 +4133,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       },
       first.conversation.id
     );
@@ -4697,7 +4833,7 @@ describe("bot judgment memories", () => {
         starterPromptLabel: "Lara",
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 
@@ -4732,7 +4868,7 @@ describe("bot judgment memories", () => {
         starterPromptLabel: "Lara",
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "sandbox",
       }
     );
 

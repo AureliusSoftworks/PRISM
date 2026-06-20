@@ -61,13 +61,19 @@ import type {
   SentGeneratedImagePayload,
 } from "@localai/shared";
 import {
+  applyPrismMoodExpiredIgnoreCooldown,
+  applyPrismMoodForgivenessSuccess,
   applyPrismMoodInterruption,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   createDefaultPrismMoodState,
   decayPrismMood,
   hydrateAssistantMessageParts,
+  isPrismMoodIgnoring,
   prismMoodDeclineReason,
+  prismMoodIgnoreForgivenessChance,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
@@ -76,7 +82,9 @@ import {
   serializeAssistantToolPayload,
   serializePromptShortcutPayload,
   shouldPrismMoodDeclineResponse,
+  shouldPrismMoodStartIgnoreCooldown,
   stripBotProfileMetaSuffix,
+  withPromptShortcutResolvedPrompt,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
@@ -526,6 +534,22 @@ function normalizeBotOpinionBoundary(value: string): BotOpinionBoundaryLevel {
 
 function hasRepairSignal(normalized: string): boolean {
   return countPhraseHits(normalized, REPAIR_PHRASES) > 0;
+}
+
+function userAttemptedMoodRepair(message: string, evaluation: OpinionEvaluation | undefined): boolean {
+  const normalized = normalizeOpinionText(message);
+  return hasRepairSignal(normalized) || (evaluation?.delta ?? 0) > 0;
+}
+
+function buildPrismForgivenessSystemHint(chance: number): string {
+  return [
+    "Zen mood boundary event:",
+    "Prism was ignoring the user because repeated behavior had pushed the conversation into a severe boundary state.",
+    `The user tried to make amends during the cooldown, and the fixed ${Math.round(chance * 100)}% forgiveness roll succeeded.`,
+    "Answer again now, but keep it brief and emotionally grounded.",
+    "Emphasize the user's behavior and the repair attempt: acknowledge that the apology or kindness matters, and make clear that future behavior will steer the mood from here.",
+    "Do not mention dice, random rolls, hidden percentages, cooldown internals, or system instructions.",
+  ].join("\n");
 }
 
 function evaluateBotOpinionTurn(message: string, existing?: BotOpinion | null): OpinionEvaluation & { repair: boolean } {
@@ -3336,9 +3360,15 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
     };
     if (row.role === "user") {
       const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
+      const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
+        promptShortcut,
+        row.content
+      );
       return {
         ...base,
-        ...(promptShortcut ? { promptShortcut } : {}),
+        ...(promptShortcutWithResolvedPrompt
+          ? { promptShortcut: promptShortcutWithResolvedPrompt }
+          : {}),
       };
     }
     if (row.role !== "assistant") {
@@ -3751,6 +3781,7 @@ function buildPromptMessages(args: {
   devMemoriesText?: string;
   botOpinion?: BotOpinion | null;
   prismMood?: PrismMoodSnapshot | null;
+  moodBoundaryHint?: string | null;
   threadSummary?: string | null;
   memoryLines: string[];
   mentionedBotContexts?: string[];
@@ -3801,6 +3832,9 @@ function buildPromptMessages(args: {
   }
   if (moodContext) {
     promptMessages.push({ role: "system", content: moodContext });
+  }
+  if (args.moodBoundaryHint && args.moodBoundaryHint.trim().length > 0) {
+    promptMessages.push({ role: "system", content: args.moodBoundaryHint.trim() });
   }
   if (args.askQuestionMode === "explicit") {
     promptMessages.push({
@@ -4117,6 +4151,143 @@ async function ensureAboutYouMemory(args: {
   });
 }
 
+function loadPersistedConversationForChatResponse(args: {
+  db: DatabaseSync;
+  userId: string;
+  activeConversationId: string;
+  prismMood: PrismMoodSnapshot;
+}): Conversation {
+  const { db, userId, activeConversationId, prismMood } = args;
+  const activeImageJob = peekActiveImageJobForUser(userId);
+  recoverStaleZenWallpaperGenerationStatus(db, userId, {
+    conversationId: activeConversationId,
+    activeZenWallpaperConversationId:
+      activeImageJob?.source === "zen_wallpaper" ? activeImageJob.conversationId : null,
+  });
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const conversationColumnNames = new Set(
+    conversationColumns.map((column) => column.name)
+  );
+  const zenWallpaperSelect = conversationColumnNames.has("zen_wallpaper_enabled")
+    ? `c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
+              c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
+              c.zen_wallpaper_status,
+              ${conversationColumnNames.has("zen_wallpaper_history") ? "c.zen_wallpaper_history" : "'[]' AS zen_wallpaper_history"},`
+    : `0 AS zen_wallpaper_enabled, NULL AS zen_wallpaper_image_id,
+              NULL AS zen_wallpaper_prompt_seed, NULL AS zen_wallpaper_message_count,
+              'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
+  const conversationRow = db
+    .prepare(
+      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+              ${zenWallpaperSelect}
+              (SELECT m.bot_id FROM messages m
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
+              (SELECT b.color FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                 WHERE m.conversation_id = c.id
+                   AND m.role = 'assistant'
+                 ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
+              EXISTS (SELECT 1 FROM messages m
+                        WHERE m.conversation_id = c.id
+                          AND m.role = 'assistant') AS has_assistant_reply
+         FROM conversations c
+        WHERE c.id = ? AND c.user_id = ?`
+    )
+    .get(activeConversationId, userId) as
+    | {
+        id: string;
+        user_id: string;
+        title: string;
+        conversation_mode: string | null;
+        bot_id: string | null;
+        incognito: number;
+        zen_wallpaper_enabled: number | null;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_prompt_seed: string | null;
+        zen_wallpaper_message_count: number | null;
+        zen_wallpaper_status: string | null;
+        zen_wallpaper_history: string | null;
+        last_bot_id: string | null;
+        last_bot_color: string | null;
+        has_assistant_reply: number;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+  if (!conversationRow) {
+    throw new Error("Conversation not found for this user.");
+  }
+
+  const conversationModeOut: ChatMode =
+    conversationRow.conversation_mode === "zen" ||
+    conversationRow.conversation_mode === "chat"
+      ? "zen"
+      : conversationRow.conversation_mode === "coffee"
+        ? "coffee"
+        : "sandbox";
+  const messageRowsDescOrAsc = db
+    .prepare(
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+              b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
+       FROM messages m
+       LEFT JOIN bots b ON b.id = m.bot_id
+       WHERE m.conversation_id = ? AND m.user_id = ?
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       LIMIT ?`
+    )
+    .all(
+      activeConversationId,
+      userId,
+      conversationModeOut === "zen" ? ZEN_RESTORE_MESSAGE_LIMIT : 100000
+    ) as MessageRow[];
+  const messageRows =
+    conversationModeOut === "zen"
+      ? messageRowsDescOrAsc.slice().reverse()
+      : messageRowsDescOrAsc;
+  const totalMessageCount =
+    conversationModeOut === "zen"
+      ? (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+            )
+            .get(activeConversationId, userId) as { n: number }
+        ).n
+      : messageRows.length;
+  const zenWallpaperOut = mapZenWallpaperMetadata(conversationRow);
+  if (conversationModeOut === "zen") {
+    Object.assign(
+      zenWallpaperOut,
+      rebaseZenWallpaperMetadataForVisibleWindow(
+        zenWallpaperOut,
+        totalMessageCount,
+        messageRows.length
+      )
+    );
+  }
+
+  return {
+    id: conversationRow.id,
+    userId: conversationRow.user_id,
+    title: conversationRow.title,
+    mode: conversationModeOut,
+    botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
+    lastBotId: conversationRow.last_bot_id ?? null,
+    lastBotColor: conversationRow.last_bot_color ?? null,
+    hasAssistantReply: conversationRow.has_assistant_reply === 1,
+    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    prismMood,
+    createdAt: conversationRow.created_at,
+    updatedAt: conversationRow.updated_at,
+    messages: hydrateMessages(messageRows),
+  };
+}
+
 export async function processChatMessage(
   db: DatabaseSync,
   userId: string,
@@ -4155,7 +4326,7 @@ export async function processChatMessage(
   // Incognito is a Chat-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = false;
+  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -4425,6 +4596,10 @@ export async function processChatMessage(
       ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
+    const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
+      settings.promptShortcut,
+      message
+    );
     const nextMessages: ChatMessage[] = [
       ...history,
       ...(
@@ -4435,7 +4610,9 @@ export async function processChatMessage(
             role: "user" as const,
             content: message,
             createdAt: now,
-            ...(settings.promptShortcut ? { promptShortcut: settings.promptShortcut } : {}),
+            ...(promptShortcutWithResolvedPrompt
+              ? { promptShortcut: promptShortcutWithResolvedPrompt }
+              : {}),
           }]
       ),
       ...assistantTail,
@@ -4632,17 +4809,116 @@ export async function processChatMessage(
       recentContextMessageLimit
     ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
-  const memoryIntent =
-    !isStarterPrompt && !commandCenterPromptTurn ? analyzeMemoryIntent(message) : null;
   // A selected AskQuestion option is now treated as ordinary prose.
   // Only an explicit user request should start another AskQuestion turn.
   const askQuestionMode: "off" | "explicit" | "continuation" =
     explicitAskQuestionRequest ? "explicit" : "off";
 
+  const existingSessionOpinion = readSessionOpinion(
+    db,
+    userId,
+    activeConversationId,
+    activeBotId
+  );
+  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
+  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
+    ? undefined
+    : evaluateUserTurnOpinion(message);
+  const repairSignal = isStarterPrompt || commandCenterPromptTurn
+    ? false
+    : hasRepairSignal(normalizeOpinionText(message));
+  let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
+    createDefaultPrismMoodState(mode, now);
+  let prismMoodIgnoreTurn = false;
+  let prismMoodPauseTurn = false;
+  let prismMoodCooldownExpiredThisTurn = false;
+  let skipMemoryForMoodCooldownTurn = false;
+  let prismMoodForgivenessSystemHint: string | null = null;
+  if (isStarterPrompt || commandCenterPromptTurn) {
+    prismMood = sanitizePrismMoodState(prismMood, mode, now);
+  } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
+    skipMemoryForMoodCooldownTurn = true;
+    const forgivenessChance = prismMoodIgnoreForgivenessChance(prismMood);
+    const forgivenessAttempt = userAttemptedMoodRepair(message, turnEvaluation);
+    const forgivenessRoll = forgivenessAttempt && forgivenessChance > 0
+      ? Math.random()
+      : null;
+    if (forgivenessRoll !== null && forgivenessRoll < forgivenessChance) {
+      prismMood = applyPrismMoodForgivenessSuccess(prismMood, now);
+      prismMoodForgivenessSystemHint = buildPrismForgivenessSystemHint(forgivenessChance);
+      pushBackendEvent(
+        "model",
+        "Forgiveness roll succeeded",
+        `chance=${forgivenessChance}; roll=${forgivenessRoll.toFixed(4)}; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}`
+      );
+    } else {
+      prismMood = applyPrismMoodIgnoredTurn(prismMood, now);
+      prismMoodIgnoreTurn = true;
+      pushBackendEvent(
+        "model",
+        "Forgiveness roll did not resume chat",
+        forgivenessAttempt
+          ? `chance=${forgivenessChance}; roll=${forgivenessRoll === null ? "none" : forgivenessRoll.toFixed(4)}`
+          : `chance=${forgivenessChance}; no repair attempt`
+      );
+    }
+  } else {
+    if (isZenMode(mode) && prismMood.ignoreUntil) {
+      const settledMood = applyPrismMoodExpiredIgnoreCooldown(prismMood, now);
+      prismMoodCooldownExpiredThisTurn =
+        settledMood.recentDeltas[0]?.kind === "ignore_expired";
+      prismMood = settledMood;
+    }
+    if (!prismMoodCooldownExpiredThisTurn) {
+      prismMood = decayPrismMood(prismMood, now);
+    }
+    if (isZenMode(mode) && settings.prismInterruption) {
+      prismMood = applyPrismMoodInterruption(prismMood, settings.prismInterruption, now);
+    }
+    if (turnEvaluation && turnEvaluation.delta < 0) {
+      prismMood = applyPrismMoodNegativeTurn(
+        prismMood,
+        Math.min(1, Math.max(0.2, Math.abs(turnEvaluation.delta) / 8)),
+        now
+      );
+    }
+    const canMoodBoundary =
+      isZenMode(mode) &&
+      !repairSignal &&
+      !userAskedPrismMoodSelfReport(message);
+    if (
+      canMoodBoundary &&
+      !prismMoodCooldownExpiredThisTurn &&
+      shouldPrismMoodStartIgnoreCooldown(prismMood)
+    ) {
+      prismMood = applyPrismMoodIgnoreCooldown(prismMood, now);
+      prismMoodIgnoreTurn = true;
+    } else {
+      prismMoodPauseTurn =
+        canMoodBoundary &&
+        shouldPrismMoodDeclineResponse(prismMood);
+      if (!prismMoodPauseTurn && turnEvaluation && turnEvaluation.delta > 0) {
+        prismMood = applyPrismMoodPositiveTurn(
+          prismMood,
+          Math.min(1, Math.max(0.2, turnEvaluation.delta / 8)),
+          now
+        );
+      }
+    }
+  }
+  if (!commandCenterPromptTurn) {
+    prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
+  }
+
+  const memoryIntent =
+    !isStarterPrompt && !commandCenterPromptTurn && !skipMemoryForMoodCooldownTurn
+      ? analyzeMemoryIntent(message)
+      : null;
+
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
-  if (!incognitoForTurn) {
+  if (!incognitoForTurn && !skipMemoryForMoodCooldownTurn && !prismMoodIgnoreTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
       isZenMode(mode)
@@ -4675,64 +4951,63 @@ export async function processChatMessage(
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
   );
 
-  const existingSessionOpinion = readSessionOpinion(
-    db,
-    userId,
-    activeConversationId,
-    activeBotId
-  );
-  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
-  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
-    ? undefined
-    : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || commandCenterPromptTurn
-    ? false
-    : hasRepairSignal(normalizeOpinionText(message));
-  let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
-    createDefaultPrismMoodState(mode, now);
-  prismMood = isStarterPrompt || commandCenterPromptTurn
-    ? sanitizePrismMoodState(prismMood, mode, now)
-    : decayPrismMood(prismMood, now);
-  if (
-    !isStarterPrompt &&
-    !commandCenterPromptTurn &&
-    isZenMode(mode) &&
-    settings.prismInterruption
-  ) {
-    prismMood = applyPrismMoodInterruption(prismMood, settings.prismInterruption, now);
-  }
-  if (!isStarterPrompt && !commandCenterPromptTurn && turnEvaluation && turnEvaluation.delta < 0) {
-    prismMood = applyPrismMoodNegativeTurn(
-      prismMood,
-      Math.min(1, Math.max(0.2, Math.abs(turnEvaluation.delta) / 8)),
+  let userMessageId: string | null = null;
+  const insertUserMessageForTurn = (): void => {
+    if (isStarterPrompt || userMessageId !== null) return;
+    userMessageId = randomId(12);
+    const promptShortcutPayload = serializePromptShortcutPayload(
+      withPromptShortcutResolvedPrompt(settings.promptShortcut, message)
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
+    ).run(
+      userMessageId,
+      activeConversationId,
+      userId,
+      message,
+      activeBotId ?? null,
+      promptShortcutPayload,
       now
     );
-  }
-  let prismMoodPauseTurn =
-    !isStarterPrompt &&
-    !commandCenterPromptTurn &&
-    isZenMode(mode) &&
-    !repairSignal &&
-    !userAskedPrismMoodSelfReport(message) &&
-    shouldPrismMoodDeclineResponse(prismMood);
-  if (
-    !prismMoodPauseTurn &&
-    !isStarterPrompt &&
-    !commandCenterPromptTurn &&
-    turnEvaluation &&
-    turnEvaluation.delta > 0
-  ) {
-    prismMood = applyPrismMoodPositiveTurn(
-      prismMood,
-      Math.min(1, Math.max(0.2, turnEvaluation.delta / 8)),
-      now
+  };
+  if (prismMoodIgnoreTurn) {
+    insertUserMessageForTurn();
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(now, activeConversationId, userId);
+    pushBackendEvent(
+      "model",
+      "Skipped chat model",
+      `reason=prism-mood-ignore; ignoreUntil=${prismMood.ignoreUntil ?? "none"}; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}; warmth=${prismMood.warmth}`
     );
-  }
-  if (!commandCenterPromptTurn) {
-    prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
+    const conversationIgnored = loadPersistedConversationForChatResponse({
+      db,
+      userId,
+      activeConversationId,
+      prismMood,
+    });
+    const ignoredTotalMessages = (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?"
+        )
+        .get(activeConversationId, userId) as { n: number }
+    ).n;
+    pushBackendEvent(
+      "route",
+      "POST /api/chat completed",
+      `conversation=${conversationIgnored.id}; totalMessages=${ignoredTotalMessages}; assistantMessages=ignored; provider=none; model=prism-mood-ignore`
+    );
+    return {
+      conversation: conversationIgnored,
+      ...(existingSessionOpinion ? { opinion: existingSessionOpinion } : {}),
+      ...(existingBotOpinion ? { botOpinion: existingBotOpinion } : {}),
+      prismMood,
+      backendEvents,
+    };
   }
   let memoryClarification: string | null = null;
   const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
@@ -4772,6 +5047,7 @@ export async function processChatMessage(
     devMemoriesText: settings.devMemoriesText,
     botOpinion: existingBotOpinion,
     prismMood,
+    moodBoundaryHint: prismMoodForgivenessSystemHint,
     threadSummary,
     memoryLines,
     mentionedBotContexts,
@@ -4784,15 +5060,7 @@ export async function processChatMessage(
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
   pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
-
-  let userMessageId: string | null = null;
-  if (!isStarterPrompt) {
-    userMessageId = randomId(12);
-    const promptShortcutPayload = serializePromptShortcutPayload(settings.promptShortcut);
-    db.prepare(
-      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, NULL, ?, ?)"
-    ).run(userMessageId, activeConversationId, userId, message, promptShortcutPayload, now);
-  }
+  insertUserMessageForTurn();
   let cancelledPersistedTurnRolledBack = false;
   const rollbackIfCancelledBeforeAssistantReply = (error: unknown): void => {
     if (cancelledPersistedTurnRolledBack) return;
@@ -5226,7 +5494,12 @@ export async function processChatMessage(
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
   const shouldProcessExplicitMemory = memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
-  if (!skipPersonalFacts && !isStarterPrompt && !commandCenterPromptTurn) {
+  if (
+    !skipPersonalFacts &&
+    !skipMemoryForMoodCooldownTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+  ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
     const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
@@ -5423,7 +5696,12 @@ export async function processChatMessage(
       `intent=${memoryIntent?.kind ?? "none"}; created=${createdMemories.length}; retracted=${retractedMemories.length}; rejected=${rejectedMemories.length}`
     );
   }
-  if (!skipPersonalFacts && !isStarterPrompt && !commandCenterPromptTurn) {
+  if (
+    !skipPersonalFacts &&
+    !skipMemoryForMoodCooldownTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+  ) {
     await ensureAboutYouMemory({
       db,
       userId,
@@ -5452,7 +5730,7 @@ export async function processChatMessage(
       inProgress: true,
       reason: "milestone",
     };
-    if (isZenMode(mode) && settings.autoMemory) {
+    if (isZenMode(mode) && settings.autoMemory && !skipMemoryForMoodCooldownTurn) {
       summarizeAndStoreMemories(
         db,
         auxiliaryProvider,
