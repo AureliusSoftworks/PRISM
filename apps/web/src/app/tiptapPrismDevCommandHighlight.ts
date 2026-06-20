@@ -12,6 +12,7 @@ export interface PendingWildcardSlotDecoration {
   from: number;
   to: number;
   key: string;
+  text?: string;
 }
 
 interface PrismDevCommandHighlightOptions {
@@ -364,8 +365,8 @@ function normalizePendingWildcardSlotRanges(
     const key = normalizeTrueWildcardSlotName(pending.key);
     if (!key) continue;
     const text = doc.textBetween(from, to, "\n", "\n");
-    const expected = `{${key.replace(/_/g, " ")}}`;
-    if (normalizeTrueWildcardSlotName(text) !== key || text !== expected) continue;
+    const expected = pending.text ?? `{${key.replace(/_/g, " ")}}`;
+    if (text !== expected) continue;
     ranges.push({ from, to, key });
   }
   return ranges;

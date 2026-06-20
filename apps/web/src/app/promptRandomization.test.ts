@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  collapseDeletedPromptWildcardDeckReferences,
   resolvePromptRandomizationGroups,
   splitPromptRandomizationOptions,
 } from "./promptRandomization.ts";
@@ -81,6 +82,29 @@ describe("resolvePromptRandomizationGroups", () => {
         prompt: "Pick potato.",
         replacements: [{ key: "RANDOMSHIT", value: "potato", start: 5, end: 11 }],
       }
+    );
+  });
+});
+
+describe("collapseDeletedPromptWildcardDeckReferences", () => {
+  it("replaces deleted deck invocations with a stable brace fallback", () => {
+    assert.equal(
+      collapseDeletedPromptWildcardDeckReferences("Write about !moods today.", {
+        name: "moods",
+        values: ["joyful", "grim"],
+      }),
+      "Write about {moods} today."
+    );
+  });
+
+  it("collapses aliases to the deleted deck's primary name", () => {
+    assert.equal(
+      collapseDeletedPromptWildcardDeckReferences("Mix !tone and !other.", {
+        name: "moods",
+        aliases: ["tone"],
+        values: ["joyful"],
+      }),
+      "Mix {moods} and !other."
     );
   });
 });

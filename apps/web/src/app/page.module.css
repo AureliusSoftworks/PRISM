@@ -13639,6 +13639,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --compose-send-glow: color-mix(in srgb, var(--compose-user-send-color) 28%, transparent);
 }
 
+.compose[data-compose-send-tint="true"] .markdownComposerSurface,
+.compose[data-compose-send-tint="true"] textarea {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 38%, var(--line));
+  box-shadow: inset -18px 0 24px -24px var(--compose-send-glow);
+}
+
+.compose[data-compose-bot-selected="true"] .markdownComposerSurface,
+.compose[data-compose-bot-selected="true"] textarea {
+  border-color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 54%,
+    var(--line)
+  );
+  box-shadow: inset -18px 0 24px -24px color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 46%,
+    transparent
+  );
+}
+
+.appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] .markdownComposerSurface,
+.appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea {
+  border-color: color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 18%,
+    var(--line)
+  );
+  box-shadow: inset -18px 0 24px -24px color-mix(
+    in srgb,
+    var(--compose-bot-color, var(--accent)) 14%,
+    transparent
+  );
+}
+
 .compose[data-choice-composer-hidden="true"] {
   display: none;
 }
@@ -14351,6 +14385,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     border-color 0.34s ease,
     background 0.34s ease,
     box-shadow 0.34s ease;
+}
+
+.appLayout[data-zen-surface="true"]
+  .compose[data-compose-send-tint="true"]
+  .markdownComposerSurface {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 62%, var(--line));
+  box-shadow:
+    0 18px 64px rgba(0, 0, 0, 0.24),
+    0 0 0 1px color-mix(in srgb, var(--compose-send-ink) 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
 }
 
 .appLayout[data-zen-surface="true"] .markdownComposerSurface:focus-within {
@@ -16126,7 +16170,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background-repeat: no-repeat, repeat;
   color: var(--fg);
   -webkit-text-fill-color: var(--fg);
-  font-weight: 800;
+  font-weight: inherit;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   cursor: pointer;
@@ -16150,7 +16194,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--bg-elevated) 72%, transparent);
   color: var(--fg);
   -webkit-text-fill-color: var(--fg);
-  font-weight: 800;
+  font-weight: inherit;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   cursor: pointer;
@@ -16167,7 +16211,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .markdownRichEditorHost :global(.tiptapPrismWildcardDeckToken) {
   border: 1px solid color-mix(in srgb, #b7e63a 34%, var(--line));
   border-left-color: color-mix(in srgb, #2fd3e3 58%, #b7e63a 42%);
-  border-radius: 7px;
+  border-radius: 0;
   padding: 1px 7px;
   background:
     linear-gradient(
@@ -16178,7 +16222,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--bg-elevated) 74%, transparent);
   color: var(--fg);
   -webkit-text-fill-color: var(--fg);
-  font-weight: 820;
+  font-weight: inherit;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   cursor: pointer;
@@ -16202,7 +16246,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       border-box;
   color: #ffffff;
   -webkit-text-fill-color: #ffffff;
-  font-weight: 820;
+  font-weight: inherit;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -17486,7 +17530,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeWildcardSlotRail {
   display: flex;
   gap: 6px;
-  max-width: min(430px, calc(100vw - 44px));
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 5px 7px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.composeCommandRail {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 5px 5px 7px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -17495,6 +17555,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeWildcardSlotButton[data-command-kind="wildcard-slot"] {
   position: relative;
+  display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   min-height: 30px;
@@ -17667,6 +17728,61 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, #2fd3e3 10%, var(--bg-active)) 62%,
       var(--bg-active)
     );
+}
+
+button.composeCommandRailButton[data-command-kind="command"] {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 30px;
+  max-width: 138px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff4d6d 10%, var(--bg-elevated)),
+        color-mix(in srgb, #2fd3e3 8%, var(--bg-elevated))
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: var(--fg);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 18%, transparent) inset,
+    0 8px 20px -18px color-mix(in srgb, #7b5cff 72%, transparent);
+}
+
+button.composeCommandRailButton[data-command-kind="command"]::before {
+  content: none;
+}
+
+.composeCommandRailButton .composeBotOptionName {
+  flex: 0 1 auto;
+  font-size: 11px;
+  font-weight: 880;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+button.composeCommandRailButton[data-command-kind="command"]:hover,
+button.composeCommandRailButton[data-command-kind="command"]:focus-visible,
+button.composeCommandRailButton[data-command-kind="command"][aria-selected="true"] {
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff4d6d 15%, var(--bg-active)),
+        color-mix(in srgb, #2fd3e3 12%, var(--bg-active))
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 28%, transparent) inset,
+    0 0 0 1px color-mix(in srgb, #ffffff 12%, transparent),
+    0 10px 24px -16px color-mix(in srgb, #2fd3e3 82%, transparent);
 }
 
 .composeCommandOption[data-command-kind="wildcard"] {
@@ -18138,10 +18254,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-height: 60px;
   max-height: 220px;
   resize: none;
-  padding: 16px 18px;
+  padding: 17px 18px;
   font: inherit;
   font-size: var(--font-size-compose);
-  line-height: 1.5;
+  line-height: 1.42;
   min-width: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
   /* Hide internal scrollbar — only the conversation pane should scroll. */
@@ -18151,6 +18267,158 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .compose textarea::-webkit-scrollbar {
   display: none;
+}
+
+.composeTextareaVisualWrap {
+  --compose-textarea-overlay-padding: 17px 18px;
+  --compose-textarea-overlay-font-size: var(--font-size-compose);
+  --compose-textarea-overlay-line-height: 1.42;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.composeTextareaVisualOverlay {
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  padding: var(--compose-textarea-overlay-padding);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--compose-textarea-overlay-font-size);
+  line-height: var(--compose-textarea-overlay-line-height);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.composeTextareaVisualOverlay::-webkit-scrollbar {
+  display: none;
+}
+
+.composeTextareaVisualPlaceholder {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.composeTextareaTokenSlot {
+  position: relative;
+  display: inline-block;
+  color: transparent;
+  line-height: inherit;
+  vertical-align: baseline;
+  white-space: pre;
+  -webkit-text-fill-color: transparent;
+}
+
+.composeTextareaTokenMeasure {
+  visibility: hidden;
+}
+
+.composeTextareaToken {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 1.42em;
+  margin: 0;
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+  color: var(--fg);
+  font-weight: inherit;
+  line-height: 1.12;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  vertical-align: baseline;
+  pointer-events: none;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  -webkit-text-fill-color: var(--fg);
+}
+
+.composeTextareaToken[data-kind="command"] {
+  border-color: transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ff5f6d 10%, var(--bg-elevated)),
+        color-mix(in srgb, #5d9fff 7%, var(--bg-elevated))
+      )
+      padding-box,
+    repeating-linear-gradient(
+        90deg,
+        #ff5f6d 0ch,
+        #ff5f6d 1ch,
+        #ffc371 1ch,
+        #ffc371 2ch,
+        #9be15d 2ch,
+        #9be15d 3ch,
+        #5d9fff 3ch,
+        #5d9fff 4ch,
+        #c77dff 4ch,
+        #c77dff 5ch
+      )
+      border-box;
+  background-size: 100% 100%, 10ch 100%;
+  background-repeat: no-repeat, repeat;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
+    0 7px 18px -16px color-mix(in srgb, #5d9fff 70%, transparent);
+  animation: devCommandRainbowShift 2.8s linear infinite;
+}
+
+.composeTextareaToken[data-kind="prompt"] {
+  border-color: color-mix(in srgb, #2fd3e3 34%, var(--line));
+  border-left-color: color-mix(in srgb, #2fd3e3 62%, var(--accent-ink));
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #2fd3e3 12%, transparent),
+      color-mix(in srgb, var(--accent-ink) 6%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+}
+
+.composeTextareaToken[data-kind="wildcard"] {
+  border-color: color-mix(in srgb, #b7e63a 34%, var(--line));
+  border-left-color: color-mix(in srgb, #2fd3e3 58%, #b7e63a 42%);
+  border-radius: 0;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 11%, transparent),
+      color-mix(in srgb, #2fd3e3 8%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 74%, transparent);
+}
+
+.composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--compose-send-ink, var(--accent-ink));
+  -webkit-text-fill-color: transparent;
+}
+
+.composeTextareaVisualWrap textarea[data-rich-overlay="true"]::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+
+.composeTextareaVisualWrap textarea[data-rich-overlay="true"]::selection {
+  background: color-mix(in srgb, var(--accent-ink) 26%, transparent);
 }
 
 .compose[data-compose-ready="true"] textarea {
@@ -18592,6 +18860,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   resize: vertical;
 }
 
+.promptCenterPromptTextComposer .composeEditorShell,
+.promptCenterPromptTextComposer .composeInner,
+.promptCenterPromptTextComposer .composeTextareaVisualWrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.promptCenterPromptTextComposer .composeEditorShell {
+  max-width: none;
+}
+
+.promptCenterPromptTextComposer .composeInner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.promptCenterPromptTextComposer .composeTextareaVisualWrap {
+  --compose-textarea-overlay-padding: 10px;
+  --compose-textarea-overlay-font-size: 13px;
+  --compose-textarea-overlay-line-height: 1.42;
+}
+
+.promptCenterPromptTextComposer .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
+  min-height: 180px;
+  max-height: 320px;
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.42;
+  border-radius: 10px;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
 .promptCenterModelCard select:focus-visible,
 .promptCenterField input:focus-visible,
 .promptCenterField textarea:focus-visible,
@@ -18750,13 +19052,59 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: var(--bg-hover);
 }
 
+.promptCenterListHeader button:disabled,
+.promptCenterFlagsHeader button:disabled,
+.promptCenterDangerRow button:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+  border-color: color-mix(in srgb, var(--fg-muted) 22%, var(--line));
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg-muted);
+}
+
 .promptCenterPromptList {
   min-height: 0;
   overflow-y: auto;
   display: grid;
   align-content: start;
   gap: 7px;
-  padding-right: 2px;
+  padding: 1px 4px 1px 1px;
+}
+
+.promptCenterScrollArea {
+  --prompt-center-scroll-top-shadow: transparent;
+  --prompt-center-scroll-bottom-shadow: transparent;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--accent-ink) 44%, var(--fg-muted)) transparent;
+  box-shadow:
+    inset 0 13px 13px -16px var(--prompt-center-scroll-top-shadow),
+    inset 0 -15px 15px -17px var(--prompt-center-scroll-bottom-shadow);
+}
+
+.promptCenterScrollArea[data-scrollable="true"][data-scroll-at-top="false"] {
+  --prompt-center-scroll-top-shadow: color-mix(in srgb, var(--accent-ink) 56%, #000 28%);
+}
+
+.promptCenterScrollArea[data-scrollable="true"][data-scroll-at-bottom="false"] {
+  --prompt-center-scroll-bottom-shadow: color-mix(in srgb, var(--accent-ink) 56%, #000 28%);
+}
+
+.promptCenterScrollArea::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.promptCenterScrollArea::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  border-radius: 999px;
+}
+
+.promptCenterScrollArea::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bg-surface) 84%, transparent);
 }
 
 .promptCenterListSection[data-kind="commands"] .promptCenterPromptList {
@@ -18822,6 +19170,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterPromptRow[data-active="true"] {
   border-color: color-mix(in srgb, var(--prompt-command-color) 46%, var(--line-strong));
   background: color-mix(in srgb, var(--prompt-command-color) 9%, var(--bg-elevated));
+}
+
+.promptCenterPromptRow[data-incomplete="true"] {
+  border-color: color-mix(in srgb, #ff9f1c 46%, var(--line));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff9f1c 11%, transparent),
+      transparent 56%
+    ),
+    color-mix(in srgb, var(--bg-surface) 88%, transparent);
+}
+
+.promptCenterPromptRow[data-incomplete="true"] .promptCenterPromptMeta {
+  color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
 }
 
 .promptCenterPromptRow[data-wildcard-deck="true"] {
@@ -18891,6 +19254,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: grid;
   align-content: start;
   gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--accent-ink) 44%, var(--fg-muted)) transparent;
+}
+
+.promptCenterEditor::-webkit-scrollbar {
+  width: 8px;
+}
+
+.promptCenterEditor::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  border-radius: 999px;
+}
+
+.promptCenterEditor::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bg-surface) 84%, transparent);
 }
 
 .promptCenterMobileBack {
@@ -19113,6 +19495,113 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterDangerRow button {
   border-color: color-mix(in srgb, #ff4d6d 40%, var(--line));
   color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
+}
+
+.promptCenterPromptWildcardDock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--line));
+  border-radius: 12px;
+  padding: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 6%, transparent),
+      color-mix(in srgb, #2fd3e3 6%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow:
+    0 -12px 28px color-mix(in srgb, var(--bg-deep) 72%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+  backdrop-filter: blur(10px) saturate(1.04);
+  -webkit-backdrop-filter: blur(10px) saturate(1.04);
+}
+
+.promptCenterPromptWildcardDockHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.promptCenterPromptWildcardDockHeader span:first-child {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.promptCenterPromptWildcardDockHeader span:last-child {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.promptCenterPromptWildcardGrid {
+  max-height: 156px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+  padding-right: 1px;
+}
+
+.promptCenterPromptWildcardButton {
+  --prompt-command-color: var(--accent-ink);
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--prompt-command-color) 30%, var(--line));
+  border-radius: 9px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--prompt-command-color) 12%, transparent),
+      transparent 72%
+    ),
+    color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg);
+  padding: 8px 9px;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--prompt-command-color) 72%, transparent);
+}
+
+.promptCenterPromptWildcardButton:hover,
+.promptCenterPromptWildcardButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--prompt-command-color) 52%, var(--line-strong));
+  background: color-mix(in srgb, var(--prompt-command-color) 10%, var(--bg-hover));
+}
+
+.promptCenterPromptWildcardName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--prompt-command-color) 74%, var(--fg));
+  font: 850 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.promptCenterPromptWildcardMeta,
+.promptCenterPromptWildcardEmpty {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.promptCenterPromptWildcardEmpty {
+  margin: 0;
+  white-space: normal;
 }
 
 .promptCenterEmptyState {
@@ -30319,6 +30808,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     padding: 12px 14px;
   }
 
+  .composeTextareaVisualWrap {
+    --compose-textarea-overlay-padding: 12px 14px;
+  }
+
   .composeInner {
     gap: 8px;
   }
@@ -30580,6 +31073,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   .promptCenterFlagRow button {
     justify-self: end;
+  }
+
+  .promptCenterPromptWildcardDock {
+    bottom: 0;
+  }
+
+  .promptCenterPromptWildcardGrid {
+    grid-template-columns: 1fr;
+    max-height: 132px;
   }
 
   .commandHelpRow {

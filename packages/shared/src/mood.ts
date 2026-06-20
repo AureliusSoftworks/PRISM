@@ -459,19 +459,17 @@ export function applyPrismMoodInterruption(
 ): PrismMoodState {
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
+  if (input?.kind === "pending_reply") return base;
   const severity = interruptionProgressWeight(input);
-  const pendingReplyWeight = input?.kind === "pending_reply" ? 0.62 : 1;
   const restraintRelief = 1 - base.restraint * 0.42;
   const streak = prismMoodInterruptionStreak(base);
   const streakWeight = 1 + Math.min(1.35, streak * 0.23);
-  const weight = severity * pendingReplyWeight * restraintRelief * streakWeight *
+  const weight = severity * restraintRelief * streakWeight *
     prismMoodSensitivityJumpWeight(sensitivity);
   return withMoodDelta(base, {
     kind: "interruption",
     now,
-    reason: input?.kind === "pending_reply"
-      ? "The user interrupted before the reply became visible."
-      : "The user interrupted the visible reply.",
+    reason: "The user interrupted the visible reply.",
     annoyanceDelta: 0.135 * weight,
     warmthDelta: -0.052 * weight,
     engagementDelta: -0.035 * weight,
