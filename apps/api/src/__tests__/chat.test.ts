@@ -6,6 +6,7 @@ import {
   buildAssistantToolCallEvents,
   compactPreImageLeadMessage,
   extractPrismBotMentionIdsFromMessage,
+  inferChatToolRequestedImageSize,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
@@ -2794,7 +2795,42 @@ describe("autoBackfillSendGeneratedImagePrompt", () => {
         },
       ],
     });
-    assert.equal(out, "I'd love to.");
+    assert.equal(
+      out,
+      "Create the image the assistant just offered. Use the assistant's visual brief instead of the user's short affirmation: Would you care to see some of my latest drawings?"
+    );
+  });
+
+  it("uses the assistant's atmosphere offer instead of a bare yes prompt", () => {
+    const out = autoBackfillSendGeneratedImagePrompt({
+      isStarterPrompt: false,
+      userMessage: "Yes.",
+      parsedToolPrompt: undefined,
+      recentMessages: [
+        {
+          role: "assistant",
+          content:
+            "Would you like me to create a 16:9 abstract ambient wallpaper for this Zen chat canvas?",
+        },
+      ],
+    });
+    assert.match(out ?? "", /abstract ambient wallpaper/i);
+    assert.notEqual(out, "Yes.");
+  });
+});
+
+describe("inferChatToolRequestedImageSize", () => {
+  it("treats chat atmosphere wallpaper prompts as landscape", () => {
+    assert.equal(
+      inferChatToolRequestedImageSize(
+        "Create an abstract ambient wallpaper for a calm Zen chat canvas."
+      ),
+      "1536x1024"
+    );
+    assert.equal(
+      inferChatToolRequestedImageSize("soft gradients for a desktop chat background"),
+      "1536x1024"
+    );
   });
 });
 

@@ -685,6 +685,13 @@ const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly strin
     "16:9",
     "21:9",
     "banner",
+    "desktop wallpaper",
+    "desktop background",
+    "widescreen wallpaper",
+    "chat background",
+    "chat canvas",
+    "zen chat canvas",
+    "ambient wallpaper",
   ],
 };
 

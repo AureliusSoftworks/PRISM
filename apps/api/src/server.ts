@@ -185,6 +185,13 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
     "16:9",
     "21:9",
     "banner",
+    "desktop wallpaper",
+    "desktop background",
+    "widescreen wallpaper",
+    "chat background",
+    "chat canvas",
+    "zen chat canvas",
+    "ambient wallpaper",
   ],
 } as const;
 const COMPOSER_CLEANUP_SYSTEM_PROMPT =

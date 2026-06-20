@@ -778,10 +778,16 @@ async function generateOrganicTextBoundaryReply(args: {
 function latestAssistantContentForImageIntent(
   recentMessages: readonly Pick<ChatMessage, "role" | "content">[]
 ): string {
+  return latestAssistantMessageForImageIntent(recentMessages).toLowerCase();
+}
+
+function latestAssistantMessageForImageIntent(
+  recentMessages: readonly Pick<ChatMessage, "role" | "content">[]
+): string {
   for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
     const msg = recentMessages[index];
     if (!msg || msg.role !== "assistant") continue;
-    return msg.content.trim().toLowerCase();
+    return msg.content.trim();
   }
   return "";
 }
@@ -799,6 +805,25 @@ function userMessageLooksLikeVisualPeekRequest(text: string): boolean {
 function textContainsSceneReferenceCue(text: string): boolean {
   return /\b(window|outside|view|scene|landscape|street|city|lake|mountain|shore|sky|room|studio)\b/.test(
     text
+  );
+}
+
+function assistantMessageOffersVisual(text: string): boolean {
+  return (
+    /\b(?:would\s+you\s+(?:like|care)\s+to\s+see|want\s+to\s+see|would\s+you\s+like\s+me\s+to\s+(?:create|make|generate|paint|draw)|can\s+i\s+show\s+you|i\s+can\s+(?:show\s+you|share|create|make|generate|paint|draw)|shall\s+i\s+(?:show\s+you|create|make|generate|paint|draw))\b/.test(
+      text
+    ) &&
+    /\b(image|picture|photo|drawing|drawings|sketch|sketches|painting|paintings|illustration|illustrations|artwork|wallpaper|background)\b/.test(
+      text
+    )
+  );
+}
+
+function userMessageAffirmsVisualOffer(text: string): boolean {
+  return (
+    /^(?:yes|yeah|yep|sure|absolutely|please|of course)\b/.test(text) ||
+    /\bi(?:'d| would)\s+love\s+to\b/.test(text) ||
+    /\bthat sounds (?:great|good|lovely|nice)\b/.test(text)
   );
 }
 
@@ -853,21 +878,30 @@ export function userMessageSuggestsInChatImageRequest(
   }
 
   if (!latestAssistant) return false;
-  const assistantOfferedVisual =
-    /\b(?:would\s+you\s+(?:like|care)\s+to\s+see|want\s+to\s+see|can\s+i\s+show\s+you|i\s+can\s+show\s+you|i\s+can\s+share|shall\s+i\s+show\s+you)\b/.test(
-      latestAssistant
-    ) &&
-    /\b(image|picture|photo|drawing|drawings|sketch|sketches|painting|paintings|illustration|illustrations|artwork)\b/.test(
-      latestAssistant
-    );
-  const userAffirmed =
-    /^(?:yes|yeah|yep|sure|absolutely|please|of course)\b/.test(t) ||
-    /\bi(?:'d| would)\s+love\s+to\b/.test(t) ||
-    /\bthat sounds (?:great|good|lovely|nice)\b/.test(t);
-  return assistantOfferedVisual && userAffirmed;
+  return assistantMessageOffersVisual(latestAssistant) && userMessageAffirmsVisualOffer(t);
 }
 
 const AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS = 1200;
+
+function clipAutoBackfilledImagePrompt(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS) return normalized;
+  return `${normalized.slice(0, AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS - 3).trimEnd()}...`;
+}
+
+function autoBackfillPromptFromAssistantVisualOffer(args: {
+  userMessage: string;
+  recentMessages: readonly Pick<ChatMessage, "role" | "content">[];
+}): string | undefined {
+  const userAffirmed = userMessageAffirmsVisualOffer(args.userMessage.trim().toLowerCase());
+  if (!userAffirmed) return undefined;
+  const latestAssistantRaw = latestAssistantMessageForImageIntent(args.recentMessages);
+  const latestAssistant = latestAssistantRaw.toLowerCase();
+  if (!latestAssistant || !assistantMessageOffersVisual(latestAssistant)) return undefined;
+  return clipAutoBackfilledImagePrompt(
+    `Create the image the assistant just offered. Use the assistant's visual brief instead of the user's short affirmation: ${latestAssistantRaw}`
+  );
+}
 
 /**
  * If the assistant forgot to emit `sendGeneratedImage` for an obvious image
@@ -886,10 +920,13 @@ export function autoBackfillSendGeneratedImagePrompt(args: {
   if (!userMessageSuggestsInChatImageRequest(args.userMessage, args.recentMessages ?? [])) {
     return undefined;
   }
-  const normalized = args.userMessage.replace(/\s+/g, " ").trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS) return normalized;
-  return `${normalized.slice(0, AUTO_BACKFILLED_IMAGE_PROMPT_MAX_CHARS - 3).trimEnd()}...`;
+  const contextualOfferPrompt = autoBackfillPromptFromAssistantVisualOffer({
+    userMessage: args.userMessage,
+    recentMessages: args.recentMessages ?? [],
+  });
+  if (contextualOfferPrompt) return contextualOfferPrompt;
+  const normalized = clipAutoBackfilledImagePrompt(args.userMessage);
+  return normalized || undefined;
 }
 
 const PRE_IMAGE_LEAD_FALLBACK = "Got it - I will share it in a sec.";
@@ -1653,6 +1690,13 @@ const CHAT_IMAGE_TOOL_VARIANT_TAGS = {
     "16:9",
     "21:9",
     "banner",
+    "desktop wallpaper",
+    "desktop background",
+    "widescreen wallpaper",
+    "chat background",
+    "chat canvas",
+    "zen chat canvas",
+    "ambient wallpaper",
   ],
 } as const;
 
@@ -1664,7 +1708,7 @@ function scoreChatImageToolTags(text: string, tags: readonly string[]): number {
   return score;
 }
 
-function inferChatToolRequestedImageSize(textRaw: string): string {
+export function inferChatToolRequestedImageSize(textRaw: string): string {
   const text = textRaw.toLowerCase();
   const portrait = scoreChatImageToolTags(text, CHAT_IMAGE_TOOL_VARIANT_TAGS.portrait);
   const letterbox = scoreChatImageToolTags(text, CHAT_IMAGE_TOOL_VARIANT_TAGS.letterbox);
@@ -1828,6 +1872,11 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "Optional — send a generated image for the user (saved to their library alongside manual images):",
   "- If you include sendGeneratedImage, keep the visible prose before it very short (one concise sentence).",
   "- Add a `sendGeneratedImage` object with a single `prompt` field: a concrete image-model description (scene, style, subject).",
+  "- If the user only says yes/sure/please after you offered an image, do NOT use that affirmation as the prompt seed; fulfill your prior visual offer and summarize the recent context into visual cues.",
+  "- For ambient/chat-background/wallpaper images, make the prompt explicitly 16:9 widescreen landscape. Use spacious negative space, no single focal subject, and keep the center calm for chat text.",
+  "- For atmosphere prompts, do NOT paste role-labeled transcripts, raw keyword scraps, or n-gram fragments. Convert conversation into a short mood seed plus concrete abstract visual cues.",
+  "- For abstract Prism/chat wallpapers, translate software/conversation ideas into light, glass, gradients, mist, geometry, texture, and restrained prismatic edge glints.",
+  "- Never request visible text, letters, numbers, logos, icons, UI, screenshots, or readable code in generated images unless the user explicitly asks for those.",
   "- You may combine AskQuestion and sendGeneratedImage in one JSON object: {\"v\":1,\"askQuestion\":{...},\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- After you write your visible prose, Prism shows the picture as a separate follow-up bubble (so the user reads your message first, then sees the image).",
