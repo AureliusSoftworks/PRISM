@@ -12122,6 +12122,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--prompt-shortcut-wildcard-color) 28%, transparent);
 }
 
+.promptShortcutUnfoldedText {
+  margin: 0;
+  color: currentColor;
+  white-space: pre-wrap;
+}
+
+.promptShortcutUnfoldedInsertion {
+  color: color-mix(in srgb, currentColor 76%, var(--fg) 24%);
+  font-weight: inherit;
+  text-shadow: 0 0 12px
+    color-mix(in srgb, currentColor 18%, transparent);
+}
+
 .botMentionChip {
   display: inline;
   font-weight: 600;
@@ -18296,6 +18309,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   -ms-overflow-style: none;
 }
 
+.compose .composeTextareaVisualOverlay {
+  color: var(--compose-send-ink, var(--fg));
+  transition: color 0.34s ease;
+}
+
 .composeTextareaVisualOverlay::-webkit-scrollbar {
   display: none;
 }
@@ -18415,6 +18433,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     color-mix(in srgb, var(--bg-elevated) 74%, transparent);
 }
 
+.composeTextareaToken[data-kind="wildcard-slot"] {
+  border-color: transparent;
+  border-radius: 0;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 9%, #05070b),
+        color-mix(in srgb, #2fd3e3 10%, #05070b)
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
+    0 7px 18px -16px color-mix(in srgb, #7b5cff 72%, transparent);
+}
+
 .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
   position: relative;
   z-index: 1;
@@ -18430,12 +18467,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .composeTextareaVisualWrap textarea[data-rich-overlay="true"]::selection {
-  background: color-mix(in srgb, var(--accent-ink) 26%, transparent);
+  background: color-mix(in srgb, var(--compose-send-ink, var(--accent-ink)) 26%, transparent);
 }
 
 .compose[data-compose-ready="true"] textarea {
   border-color: color-mix(in srgb, var(--accent-ink) 74%, var(--line));
   box-shadow: inset -18px 0 24px -24px var(--accent-glow);
+}
+
+.compose[data-compose-send-tint="true"][data-compose-ready="true"] textarea {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 74%, var(--line));
+  box-shadow: inset -18px 0 24px -24px var(--compose-send-glow);
 }
 
 .compose[data-compose-ready="true"][data-compose-bot-selected="true"] textarea {
@@ -18476,6 +18518,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow:
     0 0 0 3px var(--accent-glow),
     inset -18px 0 24px -24px var(--accent-glow);
+}
+
+.compose[data-compose-send-tint="true"][data-compose-ready="true"] textarea:focus {
+  border-color: var(--compose-send-ink);
+  box-shadow:
+    0 0 0 3px var(--compose-send-glow),
+    inset -18px 0 24px -24px var(--compose-send-glow);
 }
 
 .compose[data-compose-ready="true"][data-compose-bot-selected="true"] textarea:focus {
@@ -18592,6 +18641,60 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .composeInner button:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+.appLayout[data-zen-surface="true"] .compose .composeInner button {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 44%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 74%, var(--compose-send-ink) 16%),
+      color-mix(in srgb, var(--bg) 84%, var(--compose-send-ink) 12%)
+    );
+  color: var(--compose-send-ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 14%, transparent);
+  transition:
+    background 0.34s ease,
+    border-color 0.34s ease,
+    color 0.34s ease,
+    box-shadow 0.34s ease,
+    filter 0.18s ease,
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.appLayout[data-zen-surface="true"]
+  .compose[data-compose-ready="true"]
+  .composeInner
+  button:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 72%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 62%, var(--compose-send-ink) 28%),
+      color-mix(in srgb, var(--bg) 72%, var(--compose-send-ink) 22%)
+    );
+  color: var(--compose-send-ink);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 24px color-mix(in srgb, var(--compose-send-ink) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
+}
+
+.appLayout[data-zen-surface="true"] .compose .composeInner button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 84%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 54%, var(--compose-send-ink) 36%),
+      color-mix(in srgb, var(--bg) 66%, var(--compose-send-ink) 28%)
+    );
+}
+
+.appLayout[data-zen-surface="true"] .compose .composeInner button:disabled {
+  border-color: color-mix(in srgb, var(--compose-send-ink) 18%, var(--line));
+  background: color-mix(in srgb, var(--bg-deep) 86%, var(--compose-send-ink) 14%);
+  color: color-mix(in srgb, var(--compose-send-ink-muted) 82%, var(--fg-muted));
 }
 
 .compose[data-compose-bot-selected="true"] .composeInner button:not(:disabled) {
@@ -18920,6 +19023,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterWildcardValueBox {
   width: 100%;
   min-height: 144px;
+  max-height: clamp(180px, 32vh, 260px);
   border: 1px solid var(--line);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-surface) 94%, #000 6%);
@@ -18929,12 +19033,48 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   flex-wrap: wrap;
   align-content: flex-start;
   gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, #2fd3e3 48%, var(--fg-muted)) transparent;
   cursor: text;
+}
+
+.promptCenterWildcardValueBox::-webkit-scrollbar {
+  width: 8px;
+}
+
+.promptCenterWildcardValueBox::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  border-radius: 999px;
+}
+
+.promptCenterWildcardValueBox::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, #b7e63a, #2fd3e3);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bg-surface) 84%, transparent);
 }
 
 .promptCenterWildcardValueBox:focus-within {
   border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 14%, transparent);
+}
+
+.promptCenterWildcardValueBox[data-invalid="true"] {
+  border-color: color-mix(in srgb, #ff9f1c 62%, var(--line-strong));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff9f1c 7%, transparent),
+      color-mix(in srgb, var(--bg-surface) 94%, #000 6%)
+    );
+}
+
+.promptCenterWildcardValueBox[data-invalid="true"]:focus-within {
+  border-color: color-mix(in srgb, #ff9f1c 72%, var(--line-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ff9f1c 16%, transparent);
 }
 
 .promptCenterWildcardValueBox input {
@@ -18954,6 +19094,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterWildcardValueBox input:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+.promptCenterWildcardValueHint {
+  margin-top: -2px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.promptCenterWildcardValueHint[data-invalid="true"] {
+  color: color-mix(in srgb, #ff9f1c 78%, var(--fg));
 }
 
 .promptCenterWildcardValueChip {
@@ -19501,6 +19653,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--bg-hover);
 }
 
+.promptCenterFlagRow[data-invalid="true"] input {
+  border-color: color-mix(in srgb, #ff9f1c 62%, var(--line-strong));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff9f1c 9%, transparent),
+      color-mix(in srgb, var(--bg-surface) 94%, #000 6%)
+    );
+}
+
+.promptCenterFlagRow[data-invalid="true"] input:focus-visible {
+  border-color: color-mix(in srgb, #ff9f1c 72%, var(--line-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ff9f1c 16%, transparent);
+}
+
+.promptCenterFlagRow[data-invalid="true"] .promptCenterAliasHint {
+  color: color-mix(in srgb, #ff9f1c 78%, var(--fg));
+}
+
 .promptCenterDangerRow {
   justify-content: flex-end;
   padding-top: 4px;
@@ -19557,12 +19728,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterPromptWildcardGrid {
-  max-height: 156px;
-  overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 7px;
-  padding-right: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 6px;
 }
 
 .promptCenterPromptWildcardButton {
@@ -19578,9 +19746,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     color-mix(in srgb, var(--bg-surface) 88%, transparent);
   color: var(--fg);
-  padding: 8px 9px;
+  padding: 7px 8px 7px 10px;
   display: grid;
-  gap: 3px;
+  gap: 2px;
   text-align: left;
   cursor: pointer;
   box-shadow: inset 3px 0 0 color-mix(in srgb, var(--prompt-command-color) 72%, transparent);
@@ -19591,6 +19759,59 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   outline: none;
   border-color: color-mix(in srgb, var(--prompt-command-color) 52%, var(--line-strong));
   background: color-mix(in srgb, var(--prompt-command-color) 10%, var(--bg-hover));
+}
+
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"] {
+  position: relative;
+  border-color: transparent;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 9%, #05070b),
+        color-mix(in srgb, #2fd3e3 10%, #05070b)
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: #ffffff;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
+    0 8px 20px -18px color-mix(in srgb, #7b5cff 72%, transparent);
+}
+
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"]::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  opacity: 0.86;
+}
+
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"]:hover,
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"]:focus-visible {
+  border-color: transparent;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 15%, #05070b),
+        color-mix(in srgb, #2fd3e3 15%, #05070b)
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+}
+
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"] .promptCenterPromptWildcardName,
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"] .promptCenterPromptWildcardMeta {
+  color: #ffffff;
+}
+
+.promptCenterPromptWildcardButton[data-wildcard-kind="slot"] .promptCenterPromptWildcardMeta {
+  opacity: 0.74;
 }
 
 .promptCenterPromptWildcardName {
@@ -31035,8 +31256,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .promptCenterPromptWildcardGrid {
-    grid-template-columns: 1fr;
-    max-height: 132px;
+    grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   }
 
   .commandHelpRow {

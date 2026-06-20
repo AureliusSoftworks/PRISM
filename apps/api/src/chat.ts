@@ -1902,6 +1902,8 @@ export interface UserChatSettings {
   promptWildcards?: PromptWildcardRunMetadata;
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
+  /** Optional resolved user prompt sent to the model while preserving display content. */
+  promptInputOverride?: string;
   /** Optional Zen interruption metadata supplied by the composer send path. */
   prismInterruption?: PrismMoodInterruptionInput;
   /** Saved Zen setting: how sharply Prism reacts to irritation cues. */
@@ -3378,12 +3380,12 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
       const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
         promptShortcut,
-        row.content
+        promptShortcut?.resolvedPrompt ?? row.content
       );
       const promptWildcards = parseStoredPromptWildcardPayload(row.tool_payload);
       const promptWildcardsWithResolvedPrompt = withPromptWildcardResolvedPrompt(
         promptWildcards,
-        row.content
+        promptWildcards?.resolvedPrompt ?? row.content
       );
       return {
         ...base,
@@ -3946,7 +3948,12 @@ function buildPromptMessages(args: {
   promptMessages.push(
     ...args.chatHistory.map((item) => ({
       role: item.role,
-      content: item.content,
+      content:
+        item.role === "user"
+          ? item.promptShortcut?.resolvedPrompt?.trim() ||
+            item.promptWildcards?.resolvedPrompt?.trim() ||
+            item.content
+          : item.content,
     }))
   );
   promptMessages.push({ role: "user", content: args.userMessage });
@@ -4349,11 +4356,16 @@ export async function processChatMessage(
   const isStarterPrompt = settings.starterPrompt === true;
   const commandCenterPromptTurn =
     settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
+  const promptInputOverride =
+    !isStarterPrompt && typeof settings.promptInputOverride === "string"
+      ? settings.promptInputOverride.trim()
+      : "";
+  const modelUserMessage = promptInputOverride || message;
   const explicitAskQuestionRequest =
-    !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
+    !isStarterPrompt && userExplicitlyRequestedAskQuestion(modelUserMessage);
   const promptUserMessage = isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
-    : message;
+    : modelUserMessage;
   // Incognito is a Chat-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
@@ -4422,7 +4434,7 @@ export async function processChatMessage(
     const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
       resolvePrimaryChatProviderForPossibleImageToolTurn({
         isStarterPrompt,
-        rawUserMessage: message,
+        rawUserMessage: modelUserMessage,
         baseProvider: provider,
         botOverrides: settings.botOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
@@ -4452,7 +4464,7 @@ export async function processChatMessage(
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
       botSystemPrompt: effectiveBotSystemPrompt,
-      userMessage: message,
+      userMessage: modelUserMessage,
       signal: settings.signal,
     });
     throwIfChatRequestCancelled(settings.signal);
@@ -4463,13 +4475,13 @@ export async function processChatMessage(
     );
     if (
       shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
     ) {
       const boundary = await generateOrganicTextBoundaryReply({
         boundaryProvider: auxiliaryProvider,
         boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
-        userMessage: message,
+        userMessage: modelUserMessage,
         signal: settings.signal,
       });
       assistantReplyRaw = boundary.assistantReplyRaw;
@@ -4515,7 +4527,7 @@ export async function processChatMessage(
     const sendImgPromptIncRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
     let sendImgPromptInc = autoBackfillSendGeneratedImagePrompt({
       isStarterPrompt,
-      userMessage: message,
+      userMessage: modelUserMessage,
       parsedToolPrompt: sendImgPromptIncRaw,
       recentMessages: history,
     });
@@ -4526,7 +4538,7 @@ export async function processChatMessage(
     if (sendImgPromptInc) {
       throwIfChatRequestCancelled(settings.signal);
       const chatToolRequestedSize = inferChatToolRequestedImageSize(
-        `${message}\n${sendImgPromptInc}`
+        `${modelUserMessage}\n${sendImgPromptInc}`
       );
       const acq = await tryAcquireImageSlot({
         userId,
@@ -4535,7 +4547,7 @@ export async function processChatMessage(
         mode,
         incognito: true,
         captionPrompt: sendImgPromptInc,
-        userMessage: message,
+        userMessage: modelUserMessage,
         source: "chat_tool",
         requestedSize: chatToolRequestedSize,
       });
@@ -4629,7 +4641,7 @@ export async function processChatMessage(
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
       settings.promptShortcut,
-      message
+      modelUserMessage
     );
     const nextMessages: ChatMessage[] = [
       ...history,
@@ -4651,7 +4663,7 @@ export async function processChatMessage(
     const conversationIncognito: Conversation = {
       id: conversationId ?? randomId(12),
       userId,
-      title: privateConversationTitle(nextMessages, message, settings.starterPromptLabel),
+      title: privateConversationTitle(nextMessages, modelUserMessage, settings.starterPromptLabel),
       mode,
       botId: activeBotId ?? null,
       incognito: true,
@@ -4790,7 +4802,7 @@ export async function processChatMessage(
       userId,
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
-        : generateConversationTitle(message),
+        : generateConversationTitle(modelUserMessage),
       isZenMode(mode) ? "zen" : mode,
       activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
@@ -5002,8 +5014,8 @@ export async function processChatMessage(
     if (isStarterPrompt || userMessageId !== null) return;
     userMessageId = randomId(12);
     const promptShortcutPayload = serializePromptToolPayload({
-      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, message),
-      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, message),
+      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
+      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
     });
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
@@ -5162,7 +5174,7 @@ export async function processChatMessage(
     const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
       resolvePrimaryChatProviderForPossibleImageToolTurn({
         isStarterPrompt,
-        rawUserMessage: message,
+        rawUserMessage: modelUserMessage,
         baseProvider: provider,
         botOverrides: settings.botOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
@@ -5194,7 +5206,7 @@ export async function processChatMessage(
         denialBoundaryProvider: auxiliaryProvider,
         denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
-        userMessage: message,
+        userMessage: modelUserMessage,
         signal: settings.signal,
       }));
     } catch (error) {
@@ -5209,7 +5221,7 @@ export async function processChatMessage(
     );
     if (
       shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
     ) {
       let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
       try {
@@ -5217,7 +5229,7 @@ export async function processChatMessage(
           boundaryProvider: auxiliaryProvider,
           boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
           botSystemPrompt: effectiveBotSystemPrompt,
-          userMessage: message,
+          userMessage: modelUserMessage,
           signal: settings.signal,
         });
       } catch (error) {
@@ -5275,7 +5287,7 @@ export async function processChatMessage(
   const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
-    userMessage: message,
+    userMessage: modelUserMessage,
     parsedToolPrompt: sendImgPromptPersistedRaw,
     recentMessages: history,
   });
@@ -5288,7 +5300,7 @@ export async function processChatMessage(
   if (sendImgPromptPersisted && sendImgPromptPersisted.length > 0) {
     throwIfCancelledBeforeAssistantReply();
     const chatToolRequestedSize = inferChatToolRequestedImageSize(
-      `${message}\n${sendImgPromptPersisted}`
+      `${modelUserMessage}\n${sendImgPromptPersisted}`
     );
     let acq: Awaited<ReturnType<typeof tryAcquireImageSlot>>;
     try {
@@ -5299,7 +5311,7 @@ export async function processChatMessage(
         mode,
         incognito: false,
         captionPrompt: sendImgPromptPersisted,
-        userMessage: message,
+        userMessage: modelUserMessage,
         source: "chat_tool",
         requestedSize: chatToolRequestedSize,
       });
@@ -5552,7 +5564,7 @@ export async function processChatMessage(
     }
     const titleConversationId = activeConversationId;
     const titleUserId = userId;
-    const titleUserMessage = message;
+    const titleUserMessage = modelUserMessage;
     const titleAssistantReply = assistantDisplay;
     const titleAssistantMessageId = assistantProseMessageId;
     const titlePersonaLabel = settings.starterPromptLabel;

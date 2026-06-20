@@ -23,8 +23,33 @@ export interface CommandCenterWildcardDeckDraft {
 const WILDCARD_DECK_MAX_VALUES = 500;
 const WILDCARD_DECK_VALUE_DELIMITER_RE = /[\r\n,;\t]+/u;
 
+export interface WildcardDeckDuplicateValueIssue {
+  value: string;
+  firstValue: string;
+  index: number;
+  firstIndex: number;
+}
+
 function splitWildcardDeckValueInput(value: string): string[] {
   return value.split(WILDCARD_DECK_VALUE_DELIMITER_RE);
+}
+
+function wildcardDeckValueInputParts(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.flatMap((item) =>
+        typeof item === "string" ? splitWildcardDeckValueInput(item) : []
+      )
+    : typeof value === "string"
+      ? splitWildcardDeckValueInput(value)
+      : [];
+}
+
+function normalizeWildcardDeckValueInput(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 160).trim();
+}
+
+export function normalizeWildcardDeckValueKey(value: string): string {
+  return normalizeWildcardDeckValueInput(value).toLowerCase();
 }
 
 export function normalizeWildcardDeckNameInput(value: string): string {
@@ -37,21 +62,17 @@ export function normalizeWildcardDeckNameInput(value: string): string {
 }
 
 export function normalizeWildcardDeckValueList(value: unknown): string[] {
-  const source = Array.isArray(value)
-    ? value.flatMap((item) => (typeof item === "string" ? splitWildcardDeckValueInput(item) : []))
-    : typeof value === "string"
-      ? splitWildcardDeckValueInput(value)
-      : [];
+  const source = wildcardDeckValueInputParts(value);
   const values: string[] = [];
   const seen = new Set<string>();
   for (const item of source) {
     if (typeof item !== "string") continue;
-    const normalized = item.replace(/\s+/g, " ").trim();
+    const normalized = normalizeWildcardDeckValueInput(item);
     if (!normalized) continue;
-    const key = normalized.toLowerCase();
+    const key = normalizeWildcardDeckValueKey(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
-    values.push(normalized.slice(0, 160).trim());
+    values.push(normalized);
     if (values.length >= WILDCARD_DECK_MAX_VALUES) break;
   }
   return values;
@@ -59,6 +80,32 @@ export function normalizeWildcardDeckValueList(value: unknown): string[] {
 
 export function formatWildcardDeckValuesText(value: unknown): string {
   return normalizeWildcardDeckValueList(value).join("\n");
+}
+
+export function findDuplicateWildcardDeckValueIssues(
+  value: unknown
+): WildcardDeckDuplicateValueIssue[] {
+  const seen = new Map<string, { value: string; index: number }>();
+  const issues: WildcardDeckDuplicateValueIssue[] = [];
+  let normalizedIndex = 0;
+  for (const item of wildcardDeckValueInputParts(value)) {
+    const normalized = normalizeWildcardDeckValueInput(item);
+    if (!normalized) continue;
+    const key = normalizeWildcardDeckValueKey(normalized);
+    const first = seen.get(key);
+    if (first) {
+      issues.push({
+        value: normalized,
+        firstValue: first.value,
+        index: normalizedIndex,
+        firstIndex: first.index,
+      });
+    } else {
+      seen.set(key, { value: normalized, index: normalizedIndex });
+    }
+    normalizedIndex += 1;
+  }
+  return issues;
 }
 
 function normalizeWildcardDeckColorTag(value: unknown): WildcardDeckColorTag | undefined {

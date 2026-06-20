@@ -18,6 +18,8 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("adj"), "ADJECTIVE");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{PLURAL NOUN}"), "PLURAL_NOUN");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("plural-noun"), "PLURAL_NOUN");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{NUM}"), "NUM");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("number"), "NUM");
   });
 
   it("rejects unsupported built-in wildcard keys", () => {
