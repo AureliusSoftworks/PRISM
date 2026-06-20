@@ -9327,6 +9327,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin-top: 0;
 }
 
+/* Sparse chat turns should breathe near the visual center. These auto margins
+   absorb spare vertical space while the thread is short, then collapse once
+   the content grows taller than the viewport so scrolling returns to normal. */
+.messages[data-chat-ephemeral="true"] > article.message:first-of-type {
+  margin-block-start: auto;
+}
+
+.messages[data-chat-ephemeral="true"] > article.message:last-of-type {
+  margin-block-end: auto;
+}
+
 .chatArchiveLoadingIndicator {
   justify-self: center;
   align-self: center;
