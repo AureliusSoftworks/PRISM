@@ -11,6 +11,31 @@ export interface PromptRandomizationDeck {
   aliases?: readonly string[];
 }
 
+export function promptInsertionStartsSentence(before: string): boolean {
+  if (/[\r\n]\s*$/u.test(before)) return true;
+  const trimmed = before.trimEnd();
+  if (!trimmed) return true;
+  return /[.!?]["')\]]*$/u.test(trimmed);
+}
+
+export function withSentenceCasedPromptInsertion(value: string, before: string): string {
+  const shouldStartSentence = promptInsertionStartsSentence(before);
+  const chars = Array.from(value);
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index]!;
+    if (!/[A-Za-z]/u.test(char)) continue;
+    const word = chars.slice(index).join("").match(/^[A-Za-z]+/u)?.[0] ?? char;
+    if (!shouldStartSentence && (word === "I" || (word.length > 1 && /^[A-Z]+$/u.test(word)))) {
+      return value;
+    }
+    const nextChar = shouldStartSentence ? char.toLocaleUpperCase() : char.toLocaleLowerCase();
+    if (nextChar === char) return value;
+    chars[index] = nextChar;
+    return chars.join("");
+  }
+  return value;
+}
+
 export function splitPromptRandomizationOptions(source: string): string[] {
   const options: string[] = [];
   let current = "";
@@ -141,12 +166,13 @@ export function resolvePromptRandomizationGroups(
       );
       const value = choices[choiceIndex] ?? choices[0] ?? "";
       const replacementStart = prompt.length;
-      prompt += value;
+      const casedValue = withSentenceCasedPromptInsertion(value, prompt);
+      prompt += casedValue;
       replacements.push({
         key: deckReplacementKey(deckToken.deck.name),
-        value,
+        value: casedValue,
         start: replacementStart,
-        end: replacementStart + value.length,
+        end: replacementStart + casedValue.length,
       });
       cursor = deckToken.end;
       continue;
@@ -166,12 +192,13 @@ export function resolvePromptRandomizationGroups(
       );
       const value = choices[choiceIndex] ?? choices[0] ?? "";
       const replacementStart = prompt.length;
-      prompt += value;
+      const casedValue = withSentenceCasedPromptInsertion(value, prompt);
+      prompt += casedValue;
       replacements.push({
         key: "OPTION",
-        value,
+        value: casedValue,
         start: replacementStart,
-        end: replacementStart + value.length,
+        end: replacementStart + casedValue.length,
       });
     } else {
       prompt += source.slice(start, end + 1);

@@ -2,9 +2,25 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  promptInsertionStartsSentence,
   resolvePromptRandomizationGroups,
   splitPromptRandomizationOptions,
+  withSentenceCasedPromptInsertion,
 } from "./promptRandomization.ts";
+
+describe("withSentenceCasedPromptInsertion", () => {
+  it("capitalizes sentence-start insertions and lowercases mid-sentence insertions", () => {
+    assert.equal(withSentenceCasedPromptInsertion("moldy phrase", ""), "Moldy phrase");
+    assert.equal(withSentenceCasedPromptInsertion("moldy phrase", "Wait. "), "Moldy phrase");
+    assert.equal(withSentenceCasedPromptInsertion("Moldy phrase", "a random "), "moldy phrase");
+    assert.equal(promptInsertionStartsSentence("line one\n"), true);
+  });
+
+  it("does not mangle acronyms or the pronoun I mid-sentence", () => {
+    assert.equal(withSentenceCasedPromptInsertion("PRISM memory", "ask "), "PRISM memory");
+    assert.equal(withSentenceCasedPromptInsertion("I remember this", "and "), "I remember this");
+  });
+});
 
 describe("splitPromptRandomizationOptions", () => {
   it("splits pipe options and trims whitespace", () => {
@@ -82,6 +98,34 @@ describe("resolvePromptRandomizationGroups", () => {
         prompt: "Pick potato.",
         replacements: [{ key: "RANDOMSHIT", value: "potato", start: 5, end: 11 }],
       }
+    );
+  });
+
+  it("sentence-cases deck and option replacements by placement", () => {
+    const result = resolvePromptRandomizationGroups(
+      "!mood begins. a !mood follows. Then. {soft|LOUD} lands.",
+      {
+        decks: [
+          {
+            name: "mood",
+            values: ["moldy"],
+          },
+        ],
+        random: () => 0,
+      }
+    );
+
+    assert.equal(result.prompt, "Moldy begins. a moldy follows. Then. Soft lands.");
+    assert.deepEqual(
+      result.replacements.map((replacement) => ({
+        value: replacement.value,
+        text: result.prompt.slice(replacement.start, replacement.end),
+      })),
+      [
+        { value: "Moldy", text: "Moldy" },
+        { value: "moldy", text: "moldy" },
+        { value: "Soft", text: "Soft" },
+      ]
     );
   });
 });

@@ -140,6 +140,7 @@ import {
   type PrismMoodInterruptionInput,
   type PrismMoodSnapshot,
   type PromptShortcutMetadata,
+  type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
   type BuiltInPromptWildcardSlotKey,
   type SentGeneratedImagePayload,
@@ -178,6 +179,7 @@ import {
 import {
   collapseDeletedPromptWildcardDeckReferences,
   resolvePromptRandomizationGroups,
+  withSentenceCasedPromptInsertion,
 } from "./promptRandomization";
 import {
   createWildcardDeckDraft,
@@ -14231,6 +14233,44 @@ function renderPromptShortcutPromptSent(
   return nodes;
 }
 
+function promptShortcutWildcardReplacementsForPromptText(
+  promptSent: string,
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+): PromptShortcutWildcardReplacement[] {
+  if (!promptSent || !Array.isArray(replacements) || replacements.length === 0) return [];
+  return replacements
+    .map((replacement): PromptShortcutWildcardReplacement | null => {
+      const start = replacement.start;
+      const end = replacement.end;
+      if (
+        typeof start !== "number" ||
+        typeof end !== "number" ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end)
+      ) {
+        return null;
+      }
+      const normalizedStart = Math.floor(start);
+      const normalizedEnd = Math.floor(end);
+      if (
+        normalizedStart < 0 ||
+        normalizedEnd <= normalizedStart ||
+        normalizedEnd > promptSent.length
+      ) {
+        return null;
+      }
+      return {
+        ...replacement,
+        start: normalizedStart,
+        end: normalizedEnd,
+        value: promptSent.slice(normalizedStart, normalizedEnd),
+      };
+    })
+    .filter((replacement): replacement is PromptShortcutWildcardReplacement =>
+      Boolean(replacement)
+    );
+}
+
 function promptShortcutExpandedPromptBody(
   fullPrompt: string,
   promptShortcut: PromptShortcutMetadata
@@ -14279,27 +14319,6 @@ function promptShortcutInvocationRange(
   return null;
 }
 
-function promptShortcutInsertionStartsSentence(before: string): boolean {
-  if (/[\r\n]\s*$/u.test(before)) return true;
-  const trimmed = before.trimEnd();
-  if (!trimmed) return true;
-  return /[.!?]["')\]]*$/u.test(trimmed);
-}
-
-function withPromptShortcutInsertionCasing(value: string, before: string): string {
-  const shouldStartSentence = promptShortcutInsertionStartsSentence(before);
-  const chars = Array.from(value);
-  for (let index = 0; index < chars.length; index += 1) {
-    const char = chars[index]!;
-    if (!/[A-Za-z]/u.test(char)) continue;
-    const nextChar = shouldStartSentence ? char.toLocaleUpperCase() : char.toLocaleLowerCase();
-    if (nextChar === char) return value;
-    chars[index] = nextChar;
-    return chars.join("");
-  }
-  return value;
-}
-
 function PromptShortcutUnfoldedMessage({
   promptShortcut,
   fullPrompt,
@@ -14311,10 +14330,13 @@ function PromptShortcutUnfoldedMessage({
   const invocationRange = promptShortcutInvocationRange(fullPrompt, promptShortcut);
   const before = invocationRange ? fullPrompt.slice(0, invocationRange.start) : "";
   const after = invocationRange ? fullPrompt.slice(invocationRange.end) : "";
-  const displayPromptBody = withPromptShortcutInsertionCasing(promptBody, before);
+  const displayPromptBody = withSentenceCasedPromptInsertion(promptBody, before);
   const promptBodyHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
     displayPromptBody,
-    promptShortcut.wildcardReplacements
+    promptShortcutWildcardReplacementsForPromptText(
+      displayPromptBody,
+      promptShortcut.wildcardReplacements
+    )
   );
   return (
     <p className={styles.promptShortcutUnfoldedText}>
@@ -14348,7 +14370,10 @@ function PromptShortcutMessage({
   const promptSent = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
   const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
     promptSent,
-    promptShortcut.wildcardReplacements
+    promptShortcutWildcardReplacementsForPromptText(
+      promptSent,
+      promptShortcut.wildcardReplacements
+    )
   );
   const wildcardHighlightStyle =
     promptSentHighlightRanges.length > 0
@@ -14442,7 +14467,10 @@ function PromptWildcardRunMessage({
   const promptSent = promptWildcards.resolvedPrompt?.trim() || fullPrompt.trim();
   const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
     promptSent,
-    promptWildcards.wildcardReplacements
+    promptShortcutWildcardReplacementsForPromptText(
+      promptSent,
+      promptWildcards.wildcardReplacements
+    )
   );
   const wildcardHighlightStyle =
     promptSentHighlightRanges.length > 0
@@ -32322,12 +32350,18 @@ function HomeContent(): React.JSX.Element {
       if (!basePrompt) {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
+      const beforePrompt = prompt.slice(0, range.start);
+      const casedBasePrompt = withSentenceCasedPromptInsertion(basePrompt, beforePrompt);
+      const casedBasePromptReplacements = promptShortcutWildcardReplacementsForPromptText(
+        casedBasePrompt,
+        basePromptResolution.replacements
+      );
       if (index === 0) {
         firstCommand = command;
         firstInvocation = rawDraft.slice(range.start, range.end);
-        firstPromptRandomizationReplacements = basePromptResolution.replacements;
+        firstPromptRandomizationReplacements = casedBasePromptReplacements;
       }
-      prompt = `${prompt.slice(0, range.start)}${basePrompt}${prompt.slice(range.end)}`;
+      prompt = `${prompt.slice(0, range.start)}${casedBasePrompt}${prompt.slice(range.end)}`;
     }
 
     if (!firstCommand) return { kind: "none" };
