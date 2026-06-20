@@ -18821,7 +18821,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterModelCard label span,
 .promptCenterModelField > span,
-.promptCenterField span,
+.promptCenterField > span,
 .promptCenterFlagsHeader span,
 .promptCenterReadonlyBlock > span {
   color: var(--fg-muted);
@@ -18892,6 +18892,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --compose-textarea-overlay-padding: 10px;
   --compose-textarea-overlay-font-size: 13px;
   --compose-textarea-overlay-line-height: 1.42;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 500;
 }
 
 .promptCenterPromptTextComposer .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
