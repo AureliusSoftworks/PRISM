@@ -6369,8 +6369,13 @@
   outline: none;
 }
 
-.devMoodFaceButton .messageMoodBadge {
-  transform: scale(1.08);
+.devMoodFaceButton .messageMoodBadge[data-face="coffee"] {
+  width: 34px;
+  height: 34px;
+}
+
+.devMoodFaceButton .messageMoodCoffeeFace {
+  font-size: 21px;
 }
 
 .devMoodPanel {
@@ -11116,6 +11121,59 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   flex-shrink: 0;
 }
 
+.messageMoodBadge[data-face="coffee"] {
+  --coffee-bot-color: var(--accent);
+  --coffee-plate-emoji-face-scale-y: 1;
+  --coffee-plate-emoji-nudge-y: 0px;
+  position: relative;
+  overflow: hidden;
+  color: var(--coffee-bot-color);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.1), transparent 48%),
+    #080808;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 62%, rgba(255, 255, 255, 0.2));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45) inset,
+    0 0 12px color-mix(in srgb, var(--coffee-bot-color) 26%, transparent);
+}
+
+.messageMoodCoffeeFace {
+  display: block;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 11.5px;
+  line-height: 1;
+  font-weight: 750;
+  letter-spacing: 0;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  color: color-mix(in srgb, var(--coffee-bot-color) 78%, #ffffff);
+  transform-origin: center center;
+}
+
+.messageMoodCoffeeFace[data-voice-preset="warm"] {
+  font-family: inherit;
+  font-weight: inherit;
+}
+
+.messageMoodCoffeeFace[data-voice-preset="concise"] {
+  font-family: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.006em;
+}
+
+.messageMoodCoffeeFace[data-voice-preset="playful"] {
+  font-family: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.messageMoodCoffeeFace[data-voice-preset="formal"] {
+  font-family: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  font-variant-numeric: lining-nums;
+}
+
 .messageMoodAnchor {
   position: relative;
   display: inline-flex;
@@ -11191,6 +11249,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .messageAssistant h4 .messageMoodBadge[data-placement="trailing"] .messageMoodFace {
     width: 34px;
     height: 34px;
+  }
+
+  .messageAssistant h4 .messageMoodBadge[data-face="coffee"][data-placement="trailing"] {
+    width: 34px;
+    height: 34px;
+  }
+
+  .messageAssistant h4
+    .messageMoodBadge[data-face="coffee"][data-placement="trailing"]
+    .messageMoodCoffeeFace {
+    font-size: 21px;
   }
 
   .messageAssistant h4 .messageMoodBadge[data-placement="trailing"] .messageMoodFeature {
@@ -13086,11 +13155,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--accent) 10%, var(--bg-surface)),
       color-mix(in srgb, var(--bg) 93%, transparent)
     );
-  cursor: copy;
+  cursor: default;
   outline: none;
   transition:
     background 0.18s ease,
     box-shadow 0.18s ease;
+}
+
+.compactedSummaryDebugDetails[data-kind="atmosphere"][data-custom="true"] {
+  flex-basis: clamp(118px, 16dvh, 150px);
+  max-height: clamp(118px, 16dvh, 150px);
 }
 
 .compactedSummaryDebugDetails[data-kind="atmosphere"]:hover {
@@ -13103,7 +13177,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 0 2px color-mix(in srgb, var(--accent) 58%, transparent);
 }
 
-.compactedSummaryDebugDetails > span {
+.compactedSummaryDebugDetails > span,
+.compactedSummaryDebugDetailsHeader {
   flex: 0 0 auto;
   display: block;
   padding: 7px 10px 5px;
@@ -13114,21 +13189,73 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-transform: uppercase;
 }
 
-.compactedSummaryDebugDetails[data-kind="atmosphere"] > span {
+.compactedSummaryDebugDetails[data-kind="atmosphere"] > span,
+.compactedSummaryDebugDetails[data-kind="atmosphere"] > .compactedSummaryDebugDetailsHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.compactedSummaryDebugCopyState {
+.compactedSummaryDebugDetailsHeader > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compactedSummaryDebugHeaderActions {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compactedSummaryDebugToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.compactedSummaryDebugToggle input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.compactedSummaryDebugCopyButton {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
   color: color-mix(in srgb, var(--accent) 84%, var(--fg-muted));
   font-size: 10px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.compactedSummaryDebugCopyButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.compactedSummaryDebugCopyButton:not(:disabled):hover,
+.compactedSummaryDebugCopyButton:not(:disabled):focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
+  color: var(--fg);
 }
 
 .compactedSummaryDebugDetails[data-kind="atmosphere"][data-copy-state="copied"]
-  .compactedSummaryDebugCopyState {
+  .compactedSummaryDebugCopyButton {
   color: color-mix(in srgb, #44d7e6 72%, var(--fg));
 }
 
@@ -13136,6 +13263,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   flex: 1 1 auto;
   max-height: none;
   color: color-mix(in srgb, var(--fg) 86%, var(--fg-muted));
+}
+
+.compactedSummaryDebugDetails pre[data-empty="true"] {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.compactedSummaryDebugPromptEditor {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font: 12px/1.45 var(--font-mono);
+}
+
+.compactedSummaryDebugPromptEditor::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
 }
 
 @keyframes typingPulse {

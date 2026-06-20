@@ -8313,144 +8313,37 @@ function MessageMoodFace(props: {
   moodKey: NonNullable<Message["moodKey"]>;
   variant?: "classic" | "prism";
   placement?: "leading" | "trailing";
+  color?: string | null;
+  voicePreset?: BotVoicePreset;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
-  const mouthByMood: Record<NonNullable<Message["moodKey"]>, string> = {
-    joyful: "M7.5 15.5 Q12 21 16.5 15.5",
-    warm: "M8 15 Q12 18.5 16 15",
-    neutral: "M8 16 H16",
-    guarded: "M8 17.2 Q12 14.4 16 17.2",
-    strained: "M8 18 Q12 12.8 16 18",
-  };
-  const eyesByMood: Record<NonNullable<Message["moodKey"]>, [string, string]> = {
-    joyful: ["M8.2 10.7 Q9.2 9.7 10.2 10.7", "M13.8 10.7 Q14.8 9.7 15.8 10.7"],
-    warm: ["M8.2 10.9 Q9.2 10 10.2 10.9", "M13.8 10.9 Q14.8 10 15.8 10.9"],
-    neutral: ["M8.2 11 H10.2", "M13.8 11 H15.8"],
-    guarded: ["M8.2 11.3 H10.1", "M13.9 11.3 H15.8"],
-    strained: ["M8.2 11.8 H10", "M14 11.8 H15.8"],
-  };
-  const browByMood: Partial<Record<NonNullable<Message["moodKey"]>, string>> = {
-    guarded: "M7 8.5 L10 7.4 M14 7.4 L17 8.5",
-    strained: "M7 9.2 L10 7 M14 7 L17 9.2",
-  };
-  if (variant === "classic") {
-    const browPath = browByMood[moodKey];
-    const [leftEyePath, rightEyePath] = eyesByMood[moodKey];
-    return (
-      <span
-        className={styles.messageMoodBadge}
-        data-mood={moodKey}
-        data-placement={placement}
-        aria-hidden="true"
-      >
-        <svg
-          className={styles.messageMoodFace}
-          viewBox="0 0 24 24"
-          role="img"
-          focusable="false"
-          aria-hidden="true"
-        >
-          <circle className={styles.messageMoodFaceBase} cx="12" cy="12" r="9" />
-          <path className={styles.messageMoodFeature} d={leftEyePath} />
-          <path className={styles.messageMoodFeature} d={rightEyePath} />
-          {browPath ? <path className={styles.messageMoodFeature} d={browPath} /> : null}
-          <path className={styles.messageMoodFeature} d={mouthByMood[moodKey]} />
-        </svg>
-      </span>
-    );
-  }
-  // The Prism face keeps a stable primitive set across moods (ring + brows +
-  // eyes + mouth) so these paths can be tweened later without redesigning topology.
-  const faceByMood: Record<
-    NonNullable<Message["moodKey"]>,
-    {
-      leftBrow: string;
-      rightBrow: string;
-      leftEye: string;
-      rightEye: string;
-      mouth: string;
-    }
-  > = {
-    joyful: {
-      leftBrow: "M7.3 8.3 Q8.8 7.7 10.2 8.2",
-      rightBrow: "M13.8 8.2 Q15.2 7.7 16.7 8.3",
-      leftEye: "M7.7 10.7 Q9 9.4 10.3 10.7",
-      rightEye: "M13.7 10.7 Q15 9.4 16.3 10.7",
-      mouth: "M7.4 14.9 Q12 19.1 16.6 14.9",
-    },
-    warm: {
-      leftBrow: "M7.4 8.7 Q8.8 8.1 10.2 8.6",
-      rightBrow: "M13.8 8.6 Q15.2 8.1 16.6 8.7",
-      leftEye: "M7.8 10.9 Q9 9.9 10.2 10.9",
-      rightEye: "M13.8 10.9 Q15 9.9 16.2 10.9",
-      mouth: "M7.8 15.4 Q12 18 16.2 15.4",
-    },
-    neutral: {
-      leftBrow: "M7.5 8.9 H10.1",
-      rightBrow: "M13.9 8.9 H16.5",
-      leftEye: "M7.9 11 H10.1",
-      rightEye: "M13.9 11 H16.1",
-      mouth: "M8.2 15.8 H15.8",
-    },
-    guarded: {
-      leftBrow: "M7.1 8.9 L10.1 7.8",
-      rightBrow: "M13.9 7.8 L16.9 8.9",
-      leftEye: "M7.8 11.4 H10",
-      rightEye: "M14 11.4 H16.2",
-      mouth: "M8.1 16.8 Q12 14.7 15.9 16.8",
-    },
-    strained: {
-      leftBrow: "M7.1 9.4 L10.1 7.2",
-      rightBrow: "M13.9 7.2 L16.9 9.4",
-      leftEye: "M7.9 11.8 L10 10.6",
-      rightEye: "M14 10.6 L16.1 11.8",
-      mouth: "M8.1 17.6 Q10.3 14.8 12 17.4 Q13.7 14.8 15.9 17.6",
-    },
-  };
-  const face = faceByMood[moodKey];
+  const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(moodKey);
+  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, false);
+  const color = props.color?.trim();
+  const style = color
+    ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
+    : undefined;
   return (
     <span
       className={styles.messageMoodBadge}
       data-mood={moodKey}
       data-placement={placement}
+      data-face="coffee"
+      data-variant={variant}
+      style={style}
       aria-hidden="true"
     >
-      <svg
-        className={styles.messageMoodFace}
-        viewBox="0 0 24 24"
-        role="img"
-        focusable="false"
-        aria-hidden="true"
-      >
-        {/* Neutral shell keeps the badge legible in both themes. */}
-        <circle
-          cx="12"
-          cy="12"
-          r="8.9"
-          fill="none"
-          stroke="currentColor"
-          strokeOpacity="0.2"
-          strokeWidth="1.7"
-        />
-        {/* PRISM segmented ring (P/R/I/S/M) to match hub glyph methodology. */}
-        <path d="M12 3.2 A8.8 8.8 0 0 1 18.3 5.8" stroke={PRISM_COLORS.p} strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M19.4 7.2 A8.8 8.8 0 0 1 20.8 12" stroke={PRISM_COLORS.r} strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M20.6 14 A8.8 8.8 0 0 1 16.9 18.9" stroke={PRISM_COLORS.i} strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M15.1 20 A8.8 8.8 0 0 1 8.9 20" stroke={PRISM_COLORS.s} strokeWidth="1.8" strokeLinecap="round" />
-        <path
-          d="M7.1 18.9 A8.8 8.8 0 0 1 3.4 12 A8.8 8.8 0 0 1 8 5.4"
-          stroke={PRISM_COLORS.m}
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-        <path className={styles.messageMoodFeature} d={face.leftBrow} style={{ stroke: PRISM_COLORS.p }} />
-        <path className={styles.messageMoodFeature} d={face.rightBrow} style={{ stroke: PRISM_COLORS.r }} />
-        <path className={styles.messageMoodFeature} d={face.leftEye} style={{ stroke: PRISM_COLORS.i }} />
-        <path className={styles.messageMoodFeature} d={face.rightEye} style={{ stroke: PRISM_COLORS.s }} />
-        <path className={styles.messageMoodFeature} d={face.mouth} style={{ stroke: PRISM_COLORS.m }} />
-      </svg>
+      <CoffeeSeatPlateEmoji
+        enabled={variant === "prism"}
+        isTalking={false}
+        scheduleKey={`message-mood-${variant}-${moodKey}`}
+        baseText={seatPlateGlyph.text}
+        rotateDeg={seatPlateGlyph.rotateDeg}
+        voicePreset={props.voicePreset ?? "neutral"}
+        className={styles.messageMoodCoffeeFace}
+      />
     </span>
   );
 }
@@ -18523,6 +18416,8 @@ function HomeContent(): React.JSX.Element {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedAtmospherePromptText, setCopiedAtmospherePromptText] = useState<string | null>(null);
+  const [customAtmospherePromptEnabled, setCustomAtmospherePromptEnabled] = useState(false);
+  const [customAtmospherePromptDraft, setCustomAtmospherePromptDraft] = useState("");
   const copiedAtmospherePromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messageContextMenu, setMessageContextMenu] = useState<{
     message: Message;
@@ -23721,8 +23616,13 @@ function HomeContent(): React.JSX.Element {
       latestAtmosphereEntry?.promptSeed?.trim() ||
       detail?.zenWallpaper?.promptSeed?.trim() ||
       null;
+    const atmospherePromptCopyText = customAtmospherePromptEnabled
+      ? customAtmospherePromptDraft.trim()
+      : atmospherePromptText;
     const atmospherePromptLabel =
-      latestAtmosphereEntry?.generationMessageCount !== undefined
+      customAtmospherePromptEnabled
+        ? "custom /atmosphere"
+        : latestAtmosphereEntry?.generationMessageCount !== undefined
         ? `message ${latestAtmosphereEntry.generationMessageCount}`
         : detail?.zenWallpaper?.generationMessageCount !== null &&
             detail?.zenWallpaper?.generationMessageCount !== undefined
@@ -23742,6 +23642,7 @@ function HomeContent(): React.JSX.Element {
           data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
           data-empty={
             !displaySummaryText && !internalSummaryText && !atmospherePromptText
+              && !customAtmospherePromptEnabled
               ? "true"
               : undefined
           }
@@ -23796,40 +23697,69 @@ function HomeContent(): React.JSX.Element {
                   <pre>{internalSummaryText}</pre>
                 </div>
               ) : null}
-              {atmospherePromptText ? (
-                <div
-                  className={styles.compactedSummaryDebugDetails}
-                  data-kind="atmosphere"
-                  data-copy-state={
-                    copiedAtmospherePromptText === atmospherePromptText ? "copied" : undefined
-                  }
-                  role="button"
-                  tabIndex={0}
-                  title="Copy Atmosphere prompt to clipboard"
-                  aria-label="Copy Atmosphere prompt to clipboard"
-                  onClick={() => {
-                    void copyAtmospherePromptToClipboard(atmospherePromptText);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    void copyAtmospherePromptToClipboard(atmospherePromptText);
-                  }}
-                >
+              <div
+                className={styles.compactedSummaryDebugDetails}
+                data-kind="atmosphere"
+                data-custom={customAtmospherePromptEnabled ? "true" : undefined}
+                data-copy-state={
+                  atmospherePromptCopyText &&
+                  copiedAtmospherePromptText === atmospherePromptCopyText
+                    ? "copied"
+                    : undefined
+                }
+              >
+                <div className={styles.compactedSummaryDebugDetailsHeader}>
                   <span>
-                    <span>
-                      Atmosphere prompt
-                      {atmospherePromptLabel ? ` - ${atmospherePromptLabel}` : ""}
-                    </span>
-                    <span className={styles.compactedSummaryDebugCopyState}>
-                      {copiedAtmospherePromptText === atmospherePromptText
-                        ? "Copied"
-                        : "Click to copy"}
-                    </span>
+                    Atmosphere prompt
+                    {atmospherePromptLabel ? ` - ${atmospherePromptLabel}` : ""}
                   </span>
-                  <pre>{atmospherePromptText}</pre>
+                  <span className={styles.compactedSummaryDebugHeaderActions}>
+                    <label className={styles.compactedSummaryDebugToggle}>
+                      <input
+                        type="checkbox"
+                        checked={customAtmospherePromptEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setCustomAtmospherePromptEnabled(next);
+                          if (next) {
+                            setCustomAtmospherePromptDraft("");
+                          }
+                        }}
+                      />
+                      Custom
+                    </label>
+                    <button
+                      type="button"
+                      className={styles.compactedSummaryDebugCopyButton}
+                      disabled={!atmospherePromptCopyText}
+                      title="Copy Atmosphere prompt to clipboard"
+                      aria-label="Copy Atmosphere prompt to clipboard"
+                      onClick={() => {
+                        if (!atmospherePromptCopyText) return;
+                        void copyAtmospherePromptToClipboard(atmospherePromptCopyText);
+                      }}
+                    >
+                      {atmospherePromptCopyText &&
+                      copiedAtmospherePromptText === atmospherePromptCopyText
+                        ? "Copied"
+                        : "Copy"}
+                    </button>
+                  </span>
                 </div>
-              ) : null}
+                {customAtmospherePromptEnabled ? (
+                  <textarea
+                    className={styles.compactedSummaryDebugPromptEditor}
+                    value={customAtmospherePromptDraft}
+                    onChange={(event) => setCustomAtmospherePromptDraft(event.target.value)}
+                    placeholder="Type the exact Atmosphere prompt to test with /atmosphere..."
+                    aria-label="Custom Atmosphere prompt"
+                  />
+                ) : (
+                  <pre data-empty={atmospherePromptText ? undefined : "true"}>
+                    {atmospherePromptText ?? "No Atmosphere prompt yet."}
+                  </pre>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -23844,6 +23774,8 @@ function HomeContent(): React.JSX.Element {
     copyAtmospherePromptToClipboard,
     currentZenDisplaySummary,
     currentZenInternalSummary,
+    customAtmospherePromptDraft,
+    customAtmospherePromptEnabled,
     detail?.zenWallpaper?.generationMessageCount,
     detail?.zenWallpaper?.promptSeed,
     detail?.id,
@@ -26242,6 +26174,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!chatEphemeralMode || !detail?.id || detail.messages.length === 0) return;
     if (!latestUserMessageId) return;
+    if (latestMessageRole !== "user") return;
     const fadeKey = `${detail.id}:${latestUserMessageId}`;
     if (!chatUserMessageFadeStartByKeyRef.current.has(fadeKey)) {
       chatUserMessageFadeStartByKeyRef.current.set(fadeKey, Date.now());
@@ -26290,6 +26223,7 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralMode,
     detail?.id,
     detail?.messages.length,
+    latestMessageRole,
     latestUserMessageId,
     latestUserMessageAsQuestion,
     setChatArchiveLoadingForConversation,
@@ -29263,6 +29197,13 @@ function HomeContent(): React.JSX.Element {
       setError("Atmosphere is already generating.");
       return;
     }
+    const promptOverride = customAtmospherePromptEnabled
+      ? customAtmospherePromptDraft.trim()
+      : undefined;
+    if (customAtmospherePromptEnabled && !promptOverride) {
+      setError("Type a custom Atmosphere prompt, or turn off Custom before using /atmosphere.");
+      return;
+    }
 
     setError(null);
     setConversationStarterPrompts(null);
@@ -29276,6 +29217,7 @@ function HomeContent(): React.JSX.Element {
       enabled: true,
       force: true,
       replaceImmediately: true,
+      promptOverride,
     });
   }
 
@@ -38160,7 +38102,12 @@ function HomeContent(): React.JSX.Element {
 
   async function requestZenWallpaperUpdate(
     conversationId: string,
-    options: { enabled: boolean; force?: boolean; replaceImmediately?: boolean }
+    options: {
+      enabled: boolean;
+      force?: boolean;
+      replaceImmediately?: boolean;
+      promptOverride?: string;
+    }
   ): Promise<void> {
     if (options.enabled && !zenWallpaperImageGenerationAvailable()) {
       setZenWallpaperError("Configure an image generation model before enabling Atmosphere.");
@@ -38178,6 +38125,9 @@ function HomeContent(): React.JSX.Element {
       };
       if (options.replaceImmediately === true) {
         body.replaceImmediately = true;
+      }
+      if (options.promptOverride?.trim()) {
+        body.promptOverride = options.promptOverride.trim();
       }
       if (options.enabled) {
         if (effectivePreferredProvider === "local") {
@@ -40628,9 +40578,19 @@ function HomeContent(): React.JSX.Element {
           : "off";
     const toggleZenAtmosphere = () => {
       if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
+      const nextEnabled = !zenAtmosphereEnabled;
+      const promptOverride =
+        nextEnabled && customAtmospherePromptEnabled
+          ? customAtmospherePromptDraft.trim()
+          : undefined;
+      if (nextEnabled && customAtmospherePromptEnabled && !promptOverride) {
+        setError("Type a custom Atmosphere prompt, or turn off Custom before generating.");
+        return;
+      }
       void requestZenWallpaperUpdate(detail.id, {
-        enabled: !zenAtmosphereEnabled,
-        force: !zenAtmosphereEnabled,
+        enabled: nextEnabled,
+        force: nextEnabled,
+        promptOverride,
       });
     };
 
@@ -41353,9 +41313,19 @@ function HomeContent(): React.JSX.Element {
             onClick={() => {
               if (zenAtmosphereDisabled || !detail) return;
               runAndClose(() => {
+                const nextEnabled = !zenAtmosphereEnabled;
+                const promptOverride =
+                  nextEnabled && customAtmospherePromptEnabled
+                    ? customAtmospherePromptDraft.trim()
+                    : undefined;
+                if (nextEnabled && customAtmospherePromptEnabled && !promptOverride) {
+                  setError("Type a custom Atmosphere prompt, or turn off Custom before generating.");
+                  return;
+                }
                 void requestZenWallpaperUpdate(detail.id, {
-                  enabled: !zenAtmosphereEnabled,
-                  force: !zenAtmosphereEnabled,
+                  enabled: nextEnabled,
+                  force: nextEnabled,
+                  promptOverride,
                 });
               });
             }}
@@ -41966,7 +41936,12 @@ function HomeContent(): React.JSX.Element {
           aria-label="Open Prism mood details"
           title="Prism mood"
         >
-          <MessageMoodFace moodKey={moodKey} variant="prism" />
+          <MessageMoodFace
+            moodKey={moodKey}
+            variant="prism"
+            color={activeBot?.color}
+            voicePreset={coffeeSeatVoicePreset(activeBot)}
+          />
         </button>
         {devMoodVisualOpen ? (
           <div className={styles.devMoodPanel} role="dialog" aria-label="Prism mood details">
@@ -54655,6 +54630,7 @@ function HomeContent(): React.JSX.Element {
                           moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                           variant="classic"
                           placement="leading"
+                          color={msg.botColor}
                         />
                         {showMoodTooltip && assistantMoodKey ? (
                           <span className={styles.messageMoodTooltip}>
@@ -56097,6 +56073,7 @@ function HomeContent(): React.JSX.Element {
                           moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                           variant="classic"
                           placement="leading"
+                          color={msg.botColor}
                         />
                         {showMoodTooltip && assistantMoodKey ? (
                           <span className={styles.messageMoodTooltip}>
