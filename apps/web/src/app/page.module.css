@@ -10592,6 +10592,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes chatEphemeralWordEmphasis {
+  0% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.16);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes chatEphemeralWordAffirm {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  34% {
+    transform: translateY(-0.14em);
+  }
+  68% {
+    transform: translateY(0.04em);
+  }
+}
+
 @keyframes chatEphemeralRainbowShift {
   from { background-position: 0% 50%; }
   to { background-position: 100% 50%; }
@@ -10623,6 +10648,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .chatEphemeralTypedWordRainbow {
     animation: none;
     background-position: 50% 50%;
+  }
+
+  .chatEphemeralTypedWordEmphasis,
+  .chatEphemeralTypedWordAffirm {
+    animation: none;
+    transform: none;
   }
 
   @keyframes chatMessageManifest {
@@ -10912,6 +10943,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transition: font-size 0.32s cubic-bezier(0.2, 0.72, 0.18, 1);
 }
 
+.chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
+  position: relative;
+  min-height: clamp(240px, 48dvh, 540px);
+}
+
+.chatEphemeralMarkdownBody[data-zen-placement-active="true"] .chatEphemeralLine {
+  transition:
+    font-size 0.32s cubic-bezier(0.2, 0.72, 0.18, 1),
+    top 0.42s cubic-bezier(0.2, 0.72, 0.18, 1),
+    left 0.42s cubic-bezier(0.2, 0.72, 0.18, 1);
+}
+
+.chatEphemeralMarkdownBody[data-zen-placement-active="true"]
+  .chatEphemeralLine[data-zen-line-placement="true"] {
+  position: absolute;
+  left: var(--zen-line-x, 50%);
+  top: var(--zen-line-y, 50%);
+  width: max-content;
+  max-width: 100%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.chatEphemeralMarkdownBody[data-zen-placement-active="true"]
+  .chatEphemeralLine[data-zen-line-placement="true"][data-zen-line-align="start"] {
+  transform: translate(0, -50%);
+  text-align: left;
+}
+
+.chatEphemeralMarkdownBody[data-zen-placement-active="true"]
+  .chatEphemeralLine[data-zen-line-placement="true"][data-zen-line-align="end"] {
+  transform: translate(-100%, -50%);
+  text-align: right;
+}
+
 .chatEphemeralLineHeading1,
 .chatEphemeralLineHeading2,
 .chatEphemeralLineHeading3,
@@ -10975,6 +11041,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline;
   opacity: 1;
   animation: none;
+}
+
+.chatEphemeralTypedWordEmphasis,
+.chatEphemeralTypedWordAffirm {
+  display: inline-block;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.chatEphemeralTypedWordEmphasis {
+  animation: chatEphemeralWordEmphasis 0.42s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordAffirm {
+  animation: chatEphemeralWordAffirm 0.62s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .chatEphemeralTypedWordNoFade {
@@ -13116,7 +13197,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .compactedSummaryDebugBubble > pre {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
   border-radius: 6px;
   background:
@@ -13146,8 +13227,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .compactedSummaryDebugDetails[data-kind="atmosphere"] {
-  flex: 0 1 clamp(78px, 11dvh, 108px);
-  max-height: clamp(78px, 11dvh, 108px);
+  flex: 1 1 0;
+  max-height: 320px;
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
   background:
     linear-gradient(
@@ -13163,8 +13244,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .compactedSummaryDebugDetails[data-kind="atmosphere"][data-custom="true"] {
-  flex-basis: clamp(118px, 16dvh, 150px);
-  max-height: clamp(118px, 16dvh, 150px);
+  flex-basis: 0;
+  max-height: 320px;
 }
 
 .compactedSummaryDebugDetails[data-kind="atmosphere"]:hover {
@@ -13486,8 +13567,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .messagesFrame
     > .compactedSummaryDebugDock
     .compactedSummaryDebugDetails[data-kind="atmosphere"] {
-    flex-basis: clamp(92px, 15dvh, 152px);
-    max-height: clamp(92px, 15dvh, 152px);
+    flex-basis: 0;
+    max-height: none;
   }
 }
 
@@ -13745,8 +13826,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
-  --zen-prose-runway-top: clamp(220px, 34dvh, 520px);
-  --zen-prose-runway-bottom: clamp(260px, 48dvh, 420px);
+  --zen-tone-gap-extra: 0px;
+  --zen-tone-runway-extra: 0px;
+  --zen-tone-scroll-margin-extra: 0px;
+  --zen-prose-runway-top: clamp(240px, calc(38dvh + var(--zen-tone-runway-extra)), 672px);
+  --zen-prose-runway-bottom: clamp(300px, calc(54dvh + var(--zen-tone-runway-extra)), 632px);
   --zen-text-top-fade-start: clamp(28px, 5dvh, 68px);
   --zen-text-top-fade-mid: clamp(108px, 16dvh, 192px);
   --zen-text-top-fade-end: clamp(188px, 26dvh, 320px);
@@ -13762,6 +13846,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding-bottom: max(104px, var(--zen-prose-runway-bottom));
   scroll-padding-top: var(--zen-prose-runway-top);
   scroll-padding-bottom: var(--zen-prose-runway-bottom);
+  gap: clamp(34px, calc(7dvh + var(--zen-tone-gap-extra)), 156px);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
@@ -13790,6 +13875,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
+.appLayout[data-zen-surface="true"]
+  .messages[data-chat-ephemeral="true"]:not([data-replying-live="true"]) {
+  scroll-snap-type: y proximity;
+  scroll-padding-top: 50dvh;
+  scroll-padding-bottom: 50dvh;
+}
+
 .appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] {
   --zen-assistant-prose: color-mix(in srgb, #15120f 90%, var(--fg) 10%);
   --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 62%, var(--fg-muted));
@@ -13798,7 +13890,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
-  scroll-margin-block: clamp(36px, 10dvh, 128px);
+  scroll-margin-block: clamp(56px, calc(14dvh + var(--zen-tone-scroll-margin-extra)), 280px);
+  scroll-snap-align: center;
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant,
@@ -17858,7 +17951,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterListHeader button,
 .promptCenterFlagsHeader button,
 .promptCenterDangerRow button,
-.promptCenterMobileBack {
+.promptCenterMobileBack,
+.promptCenterSaveButton {
   border: 1px solid color-mix(in srgb, var(--accent-ink) 26%, var(--line));
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
@@ -17876,7 +17970,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterDangerRow button:hover,
 .promptCenterDangerRow button:focus-visible,
 .promptCenterMobileBack:hover,
-.promptCenterMobileBack:focus-visible {
+.promptCenterMobileBack:focus-visible,
+.promptCenterSaveButton:hover:not(:disabled),
+.promptCenterSaveButton:focus-visible:not(:disabled) {
   outline: none;
   border-color: var(--line-strong);
   background: var(--bg-hover);
@@ -18003,6 +18099,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   word-break: break-word;
 }
 
+.promptCenterEditorHeaderActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .promptCenterStatusBadge {
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--line));
@@ -18018,6 +18123,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
   background: color-mix(in srgb, var(--bg-hover) 82%, transparent);
   color: var(--fg-muted);
+}
+
+.promptCenterSaveButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .promptCenterReadonlyBody,
@@ -30061,8 +30171,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
-    --zen-prose-runway-top: clamp(132px, 30dvh, 260px);
-    --zen-prose-runway-bottom: clamp(180px, 38dvh, 320px);
+    --zen-prose-runway-top: clamp(148px, calc(34dvh + var(--zen-tone-runway-extra)), 412px);
+    --zen-prose-runway-bottom: clamp(220px, calc(46dvh + var(--zen-tone-runway-extra)), 492px);
     padding-top: var(--zen-prose-runway-top);
     padding-bottom: max(
       var(--zen-prose-runway-bottom),
@@ -30070,6 +30180,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
     scroll-padding-top: var(--zen-prose-runway-top);
     scroll-padding-bottom: var(--zen-prose-runway-bottom);
+    gap: clamp(26px, calc(6dvh + var(--zen-tone-gap-extra)), 128px);
   }
 
   .appLayout[data-zen-surface="true"] .messages.messagesEmptyState[data-chat-ephemeral="true"] {
@@ -30086,7 +30197,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
-    scroll-margin-block: clamp(28px, 8dvh, 76px);
+    scroll-margin-block: clamp(38px, 11dvh, 104px);
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
@@ -30100,6 +30211,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       calc(env(safe-area-inset-bottom) + 96px)
     );
     scroll-padding-bottom: max(70dvh, var(--zen-prose-runway-bottom));
+  }
+
+  .chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
+    min-height: clamp(220px, 44dvh, 420px);
   }
 
   .appLayout[data-chat-sidebar-hidden="true"] .compose {

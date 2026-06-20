@@ -1,5 +1,6 @@
 export {
   applyPrismMoodInterruption,
+  applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   clampPrismMoodValue,
   coffeeSocialSnapshotToPrismMoodState,
@@ -10,6 +11,7 @@ export {
   derivePrismMoodKey,
   interruptionProgressWeight,
   prismMoodDeclineReason,
+  prismMoodInterruptionStreak,
   resetPrismMood,
   sanitizePrismMoodState,
   shouldPrismMoodDeclineResponse,
@@ -74,6 +76,7 @@ export {
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
+  normalizeZenDisplayMetadata,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -87,6 +90,10 @@ export {
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
+  type ZenDisplayAlign,
+  type ZenDisplayLinePlacement,
+  type ZenDisplayMetadata,
+  type ZenDisplayPlacement,
 } from "./prismTool.js";
 
 export {
@@ -120,10 +127,10 @@ export {
   parseComfyUiCheckpointName,
   isAllowedInAppOllamaPullModelName,
   type OpenAiImageModelId,
+  type OpenAiImageSizeGpt,
   type NormalizedOpenAiImageSize,
+  type NormalizedOpenAiImageQuality,
   type NormalizedOpenAiImageRequest,
-  type OpenAiImageSizeDalle3,
-  type OpenAiImageSizeDalle2,
   type LocalImageModelCandidate,
 } from "./imageModels.js";
 
@@ -230,7 +237,11 @@ export {
   swatchBorderCompensation,
 } from "./color.js";
 
-import type { AskQuestionPayload, SentGeneratedImagePayload } from "./prismTool.js";
+import type {
+  AskQuestionPayload,
+  SentGeneratedImagePayload,
+  ZenDisplayMetadata,
+} from "./prismTool.js";
 import type { PromptShortcutMetadata } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
@@ -273,6 +284,8 @@ export interface ChatMessage {
   moodKey?: BotMoodKey;
   /** Optional confidence (0-1) for tuning and diagnostics. */
   moodConfidence?: number;
+  /** Display-only Zen layout hint; ignored outside Zen surfaces. */
+  zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */

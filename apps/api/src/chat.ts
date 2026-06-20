@@ -62,6 +62,7 @@ import type {
 } from "@localai/shared";
 import {
   applyPrismMoodInterruption,
+  applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   createDefaultPrismMoodState,
   decayPrismMood,
@@ -74,6 +75,7 @@ import {
   sanitizePrismMoodState,
   serializeAssistantToolPayload,
   serializePromptShortcutPayload,
+  shouldPrismMoodDeclineResponse,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
@@ -382,6 +384,13 @@ type OpinionEvaluation = {
 type MoodEvaluation = {
   key: BotMoodKey;
   confidence: number;
+};
+
+const ZEN_MOOD_PAUSE_REPLY = "I’m going to pause here for a moment.";
+
+const NEUTRAL_MOOD_EVALUATION: MoodEvaluation = {
+  key: "neutral",
+  confidence: 0,
 };
 
 type BotOpinionRow = {
@@ -1853,6 +1862,8 @@ export interface UserChatSettings {
   forceNewConversation?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
+  /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
+  commandCenterPrompt?: boolean;
   /** Optional Zen interruption metadata supplied by the composer send path. */
   prismInterruption?: PrismMoodInterruptionInput;
   /** Cancels provider/tool work when the originating HTTP request is interrupted. */
@@ -2213,6 +2224,12 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- After you write your visible prose, Prism shows the picture as a separate follow-up bubble (so the user reads your message first, then sees the image).",
   "- Use sparingly when a picture truly helps; never use for every turn.",
+  "",
+  "Optional — Zen display hint (hidden, visual-only, used only by Zen surfaces):",
+  "- Use `zenDisplay` sparingly for very short, dramatic replies where placement matters; never use it for ordinary paragraphs, lists, or code.",
+  "- Coordinates are normalized 0..1 within the Zen text region. `align` may be `start`, `center`, or `end`.",
+  "- Example for a delayed center-line reply: {\"v\":1,\"zenDisplay\":{\"v\":1,\"lines\":[{\"index\":0,\"x\":0.5,\"y\":0.28,\"align\":\"center\"},{\"index\":2,\"x\":0.5,\"y\":0.5,\"align\":\"center\"}]}}.",
+  "- You may combine `zenDisplay` with AskQuestion or sendGeneratedImage in the same Prism block, but only when the visible prose itself benefits from placement.",
   "",
   "When a separate system message says the image pipeline is busy or an image is still generating, follow those rules exactly: do NOT output sendGeneratedImage until the message says you may.",
   "",
@@ -3339,6 +3356,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ? { moodConfidence: assembled.moodConfidence }
         : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+      ...(assembled.zenDisplay ? { zenDisplay: assembled.zenDisplay } : {}),
       ...(assembled.sentGeneratedImage
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
         : {}),
@@ -3526,6 +3544,40 @@ function formatMoodPercent(value: number): string {
   return `${Math.round(clampUnit(value) * 100)}%`;
 }
 
+function formatMoodScale(value: number): string {
+  return `${Math.max(1, Math.round(clampUnit(value) * 10))}/10`;
+}
+
+function prismMoodSelfReportAnchor(mood: PrismMoodSnapshot): string {
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  if (snapshot.moodKey === "strained" || snapshot.moodKey === "guarded") {
+    return `annoyance ${formatMoodScale(snapshot.annoyance)}`;
+  }
+  if (snapshot.moodKey === "joyful" || snapshot.moodKey === "warm") {
+    return `warmth ${formatMoodScale(snapshot.warmth)}`;
+  }
+  return snapshot.annoyance > snapshot.warmth
+    ? `annoyance ${formatMoodScale(snapshot.annoyance)}`
+    : `warmth ${formatMoodScale(snapshot.warmth)}`;
+}
+
+function prismMoodBehaviorGuidance(mood: PrismMoodSnapshot): string {
+  const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
+  switch (snapshot.moodKey) {
+    case "strained":
+      return "Voice: visibly strained, terse, cool, and less accommodating; it is okay to sound annoyed while staying non-abusive and useful.";
+    case "guarded":
+      return "Voice: guarded and somewhat clipped; keep warmth limited unless the latest user message repairs the tone.";
+    case "joyful":
+      return "Voice: openly warm, bright, and emotionally available; do not flatten this into neutral helpfulness.";
+    case "warm":
+      return "Voice: clearly warm and receptive, with gentle enthusiasm when it fits.";
+    case "neutral":
+    default:
+      return "Voice: steady and natural; let the strongest current mood value add a small but noticeable tint.";
+  }
+}
+
 function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): string | null {
   if (!mood) return null;
   const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
@@ -3535,10 +3587,24 @@ function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): str
     "- Use this as short-term conversational state only; do not rewrite, redefine, or override the persona.",
     `- Mood: ${snapshot.moodKey}; confidence ${formatMoodPercent(snapshot.confidence)}.`,
     `- Annoyance ${formatMoodPercent(snapshot.annoyance)}; warmth ${formatMoodPercent(snapshot.warmth)}; engagement ${formatMoodPercent(snapshot.engagement)}; restraint ${formatMoodPercent(snapshot.restraint)}.`,
-    declineReason
-      ? `- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`
-      : "- Let the mood subtly affect pacing and brevity, while still responding to the user's actual message.",
+    `- Exact 1-10 self-report values: annoyance ${formatMoodScale(snapshot.annoyance)}, warmth ${formatMoodScale(snapshot.warmth)}, engagement ${formatMoodScale(snapshot.engagement)}, restraint ${formatMoodScale(snapshot.restraint)}.`,
+    `- Current self-report anchor: ${prismMoodSelfReportAnchor(snapshot)}. If the user asks about your current mood or asks for a 1-10 rating, answer with these exact Prism mood values rather than inferring a higher or lower number from the conversation text; 90-100% should read as 9-10/10.`,
+    `- ${prismMoodBehaviorGuidance(snapshot)}`,
+    "- Let the mood noticeably affect tone, pacing, and brevity while still responding to the user's actual message.",
+    ...(declineReason
+      ? [`- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`]
+      : []),
   ].join("\n");
+}
+
+function userAskedPrismMoodSelfReport(message: string): boolean {
+  const normalized = normalizeOpinionText(message);
+  if (!normalized) return false;
+  return (
+    /\b(?:scale|rating|rate)\b.*\b(?:1\s*(?:to|-)\s*10|one\s+to\s+ten|ten)\b/.test(normalized) &&
+      /\b(?:mood|annoyance|warmth|engagement|restraint|frustration)\b/.test(normalized)
+  ) ||
+    /\bcurrent\s+(?:mood|annoyance|warmth|engagement|restraint|frustration)\b/.test(normalized);
 }
 
 function isLongTermMemory(memory: {
@@ -4079,6 +4145,8 @@ export async function processChatMessage(
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
     : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
+  const commandCenterPromptTurn =
+    settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
   const explicitAskQuestionRequest =
     !isStarterPrompt && userExplicitlyRequestedAskQuestion(message);
   const promptUserMessage = isStarterPrompt
@@ -4096,9 +4164,9 @@ export async function processChatMessage(
     "POST /api/chat accepted",
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
-    }; retrieval=${retrievalMode}; memory=${skipPersonalFacts ? "skipped" : "enabled"}; summaries=${
-      skipSummarization ? "skipped" : "enabled"
-    }`
+    }; retrieval=${retrievalMode}; memory=${
+      skipPersonalFacts || commandCenterPromptTurn ? "skipped" : "enabled"
+    }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
   // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
   // UI surfaces can still choose to lock Chat mode by omitting that field.
@@ -4354,6 +4422,7 @@ export async function processChatMessage(
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
       ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
+      ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const nextMessages: ChatMessage[] = [
@@ -4563,7 +4632,8 @@ export async function processChatMessage(
       recentContextMessageLimit
     ) as MessageRow[];
   const history = hydrateMessages(historyRowsDesc.slice().reverse());
-  const memoryIntent = !isStarterPrompt ? analyzeMemoryIntent(message) : null;
+  const memoryIntent =
+    !isStarterPrompt && !commandCenterPromptTurn ? analyzeMemoryIntent(message) : null;
   // A selected AskQuestion option is now treated as ordinary prose.
   // Only an explicit user request should start another AskQuestion turn.
   const askQuestionMode: "off" | "explicit" | "continuation" =
@@ -4615,33 +4685,61 @@ export async function processChatMessage(
     activeBotId
   );
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
-  const turnEvaluation = isStarterPrompt
+  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt
+  const repairSignal = isStarterPrompt || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   let prismMood = loadPrismMoodState(db, userId, activeConversationId, mode) ??
     createDefaultPrismMoodState(mode, now);
-  prismMood = isStarterPrompt
+  prismMood = isStarterPrompt || commandCenterPromptTurn
     ? sanitizePrismMoodState(prismMood, mode, now)
     : decayPrismMood(prismMood, now);
-  if (!isStarterPrompt && isZenMode(mode) && settings.prismInterruption) {
+  if (
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    isZenMode(mode) &&
+    settings.prismInterruption
+  ) {
     prismMood = applyPrismMoodInterruption(prismMood, settings.prismInterruption, now);
   }
-  if (!isStarterPrompt && turnEvaluation && turnEvaluation.delta > 0) {
+  if (!isStarterPrompt && !commandCenterPromptTurn && turnEvaluation && turnEvaluation.delta < 0) {
+    prismMood = applyPrismMoodNegativeTurn(
+      prismMood,
+      Math.min(1, Math.max(0.2, Math.abs(turnEvaluation.delta) / 8)),
+      now
+    );
+  }
+  let prismMoodPauseTurn =
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    isZenMode(mode) &&
+    !repairSignal &&
+    !userAskedPrismMoodSelfReport(message) &&
+    shouldPrismMoodDeclineResponse(prismMood);
+  if (
+    !prismMoodPauseTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn &&
+    turnEvaluation &&
+    turnEvaluation.delta > 0
+  ) {
     prismMood = applyPrismMoodPositiveTurn(
       prismMood,
       Math.min(1, Math.max(0.2, turnEvaluation.delta / 8)),
       now
     );
   }
-  prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
+  if (!commandCenterPromptTurn) {
+    prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
+  }
   let memoryClarification: string | null = null;
   const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
   if (
     !skipPersonalFacts &&
     !isStarterPrompt &&
+    !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
   ) {
@@ -4717,77 +4815,87 @@ export async function processChatMessage(
     }
   };
 
-  const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
-    resolvePrimaryChatProviderForPossibleImageToolTurn({
-      isStarterPrompt,
-      rawUserMessage: message,
-      baseProvider: provider,
-      botOverrides: settings.botOverrides,
-      secondaryOllamaHost: settings.secondaryOllamaHost,
-      prismImageToolLlmModel: settings.prismImageToolLlmModel,
-      recentMessages: history,
-    });
-  pushBackendEvent(
-    "model",
-    "Calling chat model",
-    `provider=${primaryProvider.name}; model=${describeRequestedModel(
-      primaryProvider,
-      primaryBotOverrides
-    )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
-  );
-
   let assistantReplyRaw = "";
-  let providerNameUsed: ProviderName = primaryProvider.name;
-  let modelUsed = "";
+  let providerNameUsed: ProviderName = provider.name;
+  let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
   let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
-  try {
-    ({
-      assistantReplyRaw,
-      providerNameUsed,
-      modelUsed,
-      fallbackInvocation,
-    } = await generateWithLenientLocalFallback({
-      provider: primaryProvider,
-      promptMessages,
-      botOverrides: primaryBotOverrides,
-      secondaryOllamaHost: settings.secondaryOllamaHost,
-      lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
-      denialBoundaryProvider: auxiliaryProvider,
-      denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: effectiveBotSystemPrompt,
-      userMessage: message,
-      signal: settings.signal,
-    }));
-  } catch (error) {
-    rollbackIfCancelledBeforeAssistantReply(error);
-    throw error;
-  }
-  throwIfCancelledBeforeAssistantReply();
-  pushBackendEvent(
-    "model",
-    "Model response received",
-    `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
-  );
-  if (
-    shouldSuppressAssistantReply(assistantReplyRaw) &&
-    !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
-  ) {
-    let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
+  if (prismMoodPauseTurn) {
+    assistantReplyRaw = ZEN_MOOD_PAUSE_REPLY;
+    pushBackendEvent(
+      "model",
+      "Skipped chat model",
+      `reason=prism-mood-pause; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}; warmth=${prismMood.warmth}`
+    );
+  } else {
+    const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
+      resolvePrimaryChatProviderForPossibleImageToolTurn({
+        isStarterPrompt,
+        rawUserMessage: message,
+        baseProvider: provider,
+        botOverrides: settings.botOverrides,
+        secondaryOllamaHost: settings.secondaryOllamaHost,
+        prismImageToolLlmModel: settings.prismImageToolLlmModel,
+        recentMessages: history,
+      });
+    providerNameUsed = primaryProvider.name;
+    pushBackendEvent(
+      "model",
+      "Calling chat model",
+      `provider=${primaryProvider.name}; model=${describeRequestedModel(
+        primaryProvider,
+        primaryBotOverrides
+      )}; imageToolRoute=${primaryProvider === provider ? "normal" : "rerouted"}`
+    );
+
     try {
-      boundary = await generateOrganicTextBoundaryReply({
-        boundaryProvider: auxiliaryProvider,
-        boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+      ({
+        assistantReplyRaw,
+        providerNameUsed,
+        modelUsed,
+        fallbackInvocation,
+      } = await generateWithLenientLocalFallback({
+        provider: primaryProvider,
+        promptMessages,
+        botOverrides: primaryBotOverrides,
+        secondaryOllamaHost: settings.secondaryOllamaHost,
+        lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+        denialBoundaryProvider: auxiliaryProvider,
+        denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
         userMessage: message,
         signal: settings.signal,
-      });
+      }));
     } catch (error) {
       rollbackIfCancelledBeforeAssistantReply(error);
       throw error;
     }
-    assistantReplyRaw = boundary.assistantReplyRaw;
-    providerNameUsed = boundary.providerNameUsed;
-    modelUsed = boundary.modelUsed;
+    throwIfCancelledBeforeAssistantReply();
+    pushBackendEvent(
+      "model",
+      "Model response received",
+      `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
+    );
+    if (
+      shouldSuppressAssistantReply(assistantReplyRaw) &&
+      !shouldBypassSuppressionForImageIntent(isStarterPrompt, message, history)
+    ) {
+      let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
+      try {
+        boundary = await generateOrganicTextBoundaryReply({
+          boundaryProvider: auxiliaryProvider,
+          boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+          botSystemPrompt: effectiveBotSystemPrompt,
+          userMessage: message,
+          signal: settings.signal,
+        });
+      } catch (error) {
+        rollbackIfCancelledBeforeAssistantReply(error);
+        throw error;
+      }
+      assistantReplyRaw = boundary.assistantReplyRaw;
+      providerNameUsed = boundary.providerNameUsed;
+      modelUsed = boundary.modelUsed;
+    }
   }
   throwIfCancelledBeforeAssistantReply();
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
@@ -4818,13 +4926,20 @@ export async function processChatMessage(
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
-  const assistantMood = evaluateAssistantMood({
-    assistantContent: assistantDisplay,
-    toneDelta: turnEvaluation?.delta,
-    sessionOpinion: existingSessionOpinion,
-    botOpinion: existingBotOpinion,
-    repairSignal,
-  });
+  const assistantMood = prismMoodPauseTurn
+    ? {
+        key: prismMood.moodKey,
+        confidence: prismMood.confidence,
+      }
+    : commandCenterPromptTurn
+    ? NEUTRAL_MOOD_EVALUATION
+    : evaluateAssistantMood({
+        assistantContent: assistantDisplay,
+        toneDelta: turnEvaluation?.delta,
+        sessionOpinion: existingSessionOpinion,
+        botOpinion: existingBotOpinion,
+        repairSignal,
+      });
   const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
@@ -4936,6 +5051,7 @@ export async function processChatMessage(
     askQuestion: assistantAskQuestionForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
+    zenDisplay: parsedAssistant.zenDisplay,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -5010,7 +5126,7 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt
+  const opinion = isStarterPrompt || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, activeBotId) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
@@ -5027,7 +5143,7 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt
+  const botOpinion = isStarterPrompt || commandCenterPromptTurn
     ? readBotOpinion(db, userId, activeBotId)
     : upsertBotOpinionFromTurn({
         db,
@@ -5110,7 +5226,7 @@ export async function processChatMessage(
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
   const shouldProcessExplicitMemory = memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
-  if (!skipPersonalFacts && !isStarterPrompt) {
+  if (!skipPersonalFacts && !isStarterPrompt && !commandCenterPromptTurn) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
     const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
@@ -5307,7 +5423,7 @@ export async function processChatMessage(
       `intent=${memoryIntent?.kind ?? "none"}; created=${createdMemories.length}; retracted=${retractedMemories.length}; rejected=${rejectedMemories.length}`
     );
   }
-  if (!skipPersonalFacts && !isStarterPrompt) {
+  if (!skipPersonalFacts && !isStarterPrompt && !commandCenterPromptTurn) {
     await ensureAboutYouMemory({
       db,
       userId,

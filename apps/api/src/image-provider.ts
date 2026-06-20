@@ -1,7 +1,6 @@
 import { getAppConfig } from "@localai/config";
 import {
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
-  isGptImageModelId,
   normalizeOpenAiImageGenerationParams,
 } from "@localai/shared";
 import { readOpenAiErrorMessage } from "./providers.ts";
@@ -10,7 +9,7 @@ import { readOpenAiErrorMessage } from "./providers.ts";
 export const DALLE_IMAGE_MODEL_ID = DEFAULT_OPENAI_IMAGE_MODEL_ID;
 
 export interface ImageGenerationResult {
-  /** Temporary DALL-E URL, or an empty string when the Images API returned base64 bytes. */
+  /** Temporary OpenAI URL, or an empty string when the Images API returned base64 bytes. */
   url: string;
   imageBytes?: Buffer;
   revisedPrompt: string;
@@ -47,18 +46,9 @@ export async function generateImage(
     n: 1,
   };
 
-  if (isGptImageModelId(normalized.model)) {
-    body.size = normalized.size;
-    body.quality = normalized.quality ?? "medium";
-    body.output_format = "png";
-  } else if (normalized.model === "dall-e-3") {
-    body.size = normalized.size;
-    body.quality = normalized.quality ?? "standard";
-    body.response_format = "url";
-  } else {
-    body.size = normalized.size;
-    body.response_format = "url";
-  }
+  body.size = normalized.size;
+  body.quality = normalized.quality;
+  body.output_format = "png";
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",

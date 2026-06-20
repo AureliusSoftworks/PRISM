@@ -41,6 +41,27 @@ export interface SentGeneratedImagePayload {
   imageModel?: string;
 }
 
+export type ZenDisplayAlign = "start" | "center" | "end";
+
+export interface ZenDisplayPlacement {
+  /** Normalized horizontal placement within the available Zen text region. */
+  x?: number;
+  /** Normalized vertical placement within the available Zen text region. */
+  y?: number;
+  align?: ZenDisplayAlign;
+}
+
+export interface ZenDisplayLinePlacement extends ZenDisplayPlacement {
+  /** Zero-based rendered line index after normal newline splitting. */
+  index: number;
+}
+
+export interface ZenDisplayMetadata {
+  v: 1;
+  placement?: ZenDisplayPlacement;
+  lines?: ZenDisplayLinePlacement[];
+}
+
 export type StoredMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 export interface StoredAssistantMoodPayload {
@@ -52,6 +73,8 @@ export interface StoredAssistantToolEnvelope {
   v: 1;
   askQuestion?: AskQuestionPayload;
   mood?: StoredAssistantMoodPayload;
+  /** Display-only Zen layout hint. Ignored by non-Zen clients. */
+  zenDisplay?: ZenDisplayMetadata;
   /** Persisted assistant-generated image attachment (never the raw model stub). */
   sentGeneratedImage?: SentGeneratedImagePayload;
 }
@@ -64,6 +87,8 @@ export interface ParsedAssistantTurn {
   displayContent: string;
   /** Parsed AskQuestion when the envelope was valid and complete. */
   askQuestion?: AskQuestionPayload;
+  /** Optional display-only Zen layout hint. */
+  zenDisplay?: ZenDisplayMetadata;
   /**
    * Model asked to synthesize/describe an image for `sendGeneratedImage` tool JSON.
    * Server runs generation and persists `SentGeneratedImagePayload` on `tool_payload`.
@@ -75,6 +100,7 @@ export interface ParsedStoredAssistantToolPayload {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
 }
 
@@ -191,22 +217,112 @@ function normalizeStoredSentGeneratedImagePayload(
   };
 }
 
+function parseVersion(value: unknown): number {
+  return typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value.trim())
+      : Number.NaN;
+}
+
+function roundedNormalizedCoordinate(value: number): number {
+  return Number(Math.max(0, Math.min(1, value)).toFixed(3));
+}
+
+function normalizeZenDisplayCoordinate(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return roundedNormalizedCoordinate(value);
+}
+
+function normalizeZenDisplayAlign(value: unknown): ZenDisplayAlign | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "start" || normalized === "left") return "start";
+  if (normalized === "center" || normalized === "middle") return "center";
+  if (normalized === "end" || normalized === "right") return "end";
+  return undefined;
+}
+
+function normalizeZenDisplayPlacement(value: unknown): ZenDisplayPlacement | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const x = normalizeZenDisplayCoordinate(row.x);
+  const y = normalizeZenDisplayCoordinate(row.y);
+  const align = normalizeZenDisplayAlign(row.align);
+  if (x === undefined && y === undefined && align === undefined) return undefined;
+  return {
+    ...(x !== undefined ? { x } : {}),
+    ...(y !== undefined ? { y } : {}),
+    ...(align ? { align } : {}),
+  };
+}
+
+function normalizeZenDisplayLinePlacement(value: unknown): ZenDisplayLinePlacement | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const indexRaw = row.index;
+  if (typeof indexRaw !== "number" || !Number.isInteger(indexRaw) || indexRaw < 0) {
+    return undefined;
+  }
+  const placement = normalizeZenDisplayPlacement(row);
+  if (!placement) return undefined;
+  return {
+    index: Math.min(indexRaw, 80),
+    ...placement,
+  };
+}
+
+export function normalizeZenDisplayMetadata(value: unknown): ZenDisplayMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const version = parseVersion(row.v);
+  if (!Number.isNaN(version) && version !== 1) return undefined;
+
+  const placement = normalizeZenDisplayPlacement(row.placement);
+  const rawLines = Array.isArray(row.lines)
+    ? row.lines
+    : Array.isArray(row.linePlacements)
+      ? row.linePlacements
+      : [];
+  const seen = new Set<number>();
+  const lines = rawLines
+    .map(normalizeZenDisplayLinePlacement)
+    .filter((line): line is ZenDisplayLinePlacement => {
+      if (!line || seen.has(line.index)) return false;
+      seen.add(line.index);
+      return true;
+    })
+    .slice(0, 12);
+
+  if (!placement && lines.length === 0) return undefined;
+  return {
+    v: 1,
+    ...(placement ? { placement } : {}),
+    ...(lines.length > 0 ? { lines } : {}),
+  };
+}
+
 /**
  * Parses Prism tool-block JSON possibly containing AskQuestion, sendGeneratedImage request, or both.
  */
 function normalizePrismToolBlockPayload(parsed: unknown): {
   askQuestion?: AskQuestionPayload;
   sendGeneratedImage?: { prompt: string };
+  zenDisplay?: ZenDisplayMetadata;
 } {
   const askFlat = normalizeAskQuestionEnvelope(parsed);
   let pairSend: { prompt: string } | undefined;
+  let zenDisplay: ZenDisplayMetadata | undefined;
   if (parsed && typeof parsed === "object") {
-    pairSend = normalizeSendGeneratedImageRequestFromRecord(parsed as Record<string, unknown>);
+    const row = parsed as Record<string, unknown>;
+    pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
+    zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
   }
   if (askFlat) {
     return {
       askQuestion: askFlat,
       ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
+      ...(zenDisplay ? { zenDisplay } : {}),
     };
   }
   if (!parsed || typeof parsed !== "object") return {};
@@ -219,9 +335,11 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   const out: {
     askQuestion?: AskQuestionPayload;
     sendGeneratedImage?: { prompt: string };
+    zenDisplay?: ZenDisplayMetadata;
   } = {};
   if (askNested) out.askQuestion = askNested;
   if (pairSend) out.sendGeneratedImage = pairSend;
+  if (zenDisplay) out.zenDisplay = zenDisplay;
   return out;
 }
 
@@ -367,7 +485,7 @@ function extractLastStandaloneFencedToolJson(raw: string): {
     try {
       const parsed = JSON.parse(jsonCandidate) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage) {
+      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) {
         continue;
       }
       const prose = `${raw.slice(0, idx)}${raw.slice(idx + fenceLen)}`.trimEnd();
@@ -444,7 +562,7 @@ function extractLastAltSendGeneratedImageSpan(raw: string): { innerJson: string;
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (block.askQuestion || block.sendGeneratedImage) {
+      if (block.askQuestion || block.sendGeneratedImage || block.zenDisplay) {
         const spanEnd = tokenStart + last[0].length + leadingWs + openIdx + tail.length;
         const prose = `${raw.slice(0, tokenStart)}${raw.slice(spanEnd)}`.trimEnd();
         return { innerJson: tail, prose };
@@ -479,7 +597,7 @@ function extractTrailingBareToolJson(raw: string): { innerJson: string; prose: s
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage) continue;
+      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) continue;
       return {
         innerJson: tail,
         prose: s.slice(0, openIdx).trimEnd(),
@@ -559,13 +677,14 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const jsonText = stripMarkdownFences(innerJson);
   try {
     const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
-    if (!block.askQuestion && !block.sendGeneratedImage) {
+    if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) {
       return { displayContent: cleanedProse };
     }
     return {
       displayContent: cleanedProse,
       ...(block.askQuestion ? { askQuestion: block.askQuestion } : {}),
       ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
+      ...(block.zenDisplay ? { zenDisplay: block.zenDisplay } : {}),
     };
   } catch {
     return { displayContent: cleanedProse };
@@ -594,15 +713,18 @@ export function parseStoredAssistantToolPayload(
         root?.sentGeneratedImage !== undefined
           ? normalizeStoredSentGeneratedImagePayload(root.sentGeneratedImage)
           : undefined;
+      const zenDisplay = root ? normalizeZenDisplayMetadata(root.zenDisplay) : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
+        ...(zenDisplay ? { zenDisplay } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
     const row = parsed as Record<string, unknown>;
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
+    const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -627,6 +749,7 @@ export function parseStoredAssistantToolPayload(
       ...(askQuestion ? { askQuestion } : {}),
       ...(moodKey ? { moodKey } : {}),
       ...(moodConfidence !== undefined ? { moodConfidence } : {}),
+      ...(zenDisplay ? { zenDisplay } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
     };
   } catch {
@@ -642,6 +765,7 @@ export function hydrateAssistantMessageParts(args: {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
@@ -654,6 +778,7 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.moodConfidence !== undefined
       ? { moodConfidence: stored.moodConfidence }
       : {}),
+    ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
   };
 }
@@ -668,17 +793,20 @@ export function serializeAssistantToolPayload(args: {
   askQuestion?: AskQuestionPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
+  zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasMood = args.moodKey !== undefined;
   const hasImage = args.sentGeneratedImage !== undefined;
-  if (!hasAsk && !hasMood && !hasImage) return null;
+  const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
+  const hasZen = zenDisplay !== undefined;
+  if (!hasAsk && !hasMood && !hasImage && !hasZen) return null;
 
-  if (!hasAsk && !hasMood && hasImage) {
+  if (!hasAsk && !hasMood && !hasZen && hasImage) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasMood && !hasImage) {
+  if (hasAsk && !hasMood && !hasImage && !hasZen) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
@@ -696,6 +824,7 @@ export function serializeAssistantToolPayload(args: {
           },
         }
       : {}),
+    ...(hasZen ? { zenDisplay } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
   };
   return JSON.stringify(payload);

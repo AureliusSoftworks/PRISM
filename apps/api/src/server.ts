@@ -163,6 +163,8 @@ import {
   normalizePromptShortcutMetadata,
   parseStoredPromptShortcutPayload,
   parseStoredComfyUiWorkflows,
+  applyPrismMoodInterruption,
+  createDefaultPrismMoodState,
   debugPatchPrismMood,
   resetPrismMood,
   type PrismMoodInterruptionInput,
@@ -255,7 +257,7 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
 const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
-  "You write one ready-to-send user prompt for Prism's dice button. The prompt must be a message the human user could send next. Use the bot persona, remembered facts, and recent conversation context to make it specific and fresh. Do not speak as the bot. Do not mention system prompts, hidden context, or that memories were used. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
+  "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
 
 function scorePromptTags(promptLower: string, tags: readonly string[]): number {
   let score = 0;
@@ -2759,6 +2761,34 @@ function buildRoutes(): RouteDefinition[] {
       const persisted = upsertPrismMoodState(db, userId, conversation.id, mood);
       json(ctx.res, 200, { ok: true, prismMood: persisted });
     }),
+    route("POST", "/api/conversations/:id/prism-mood/interrupt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+        throw new Error("Only Zen conversations can be interrupted.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const mode = readPrismMoodMode(conversation.conversation_mode);
+      const now = new Date().toISOString();
+      const prismInterruption =
+        readPrismInterruption(body.prismInterruption) ?? { kind: "pending_reply" };
+      const currentMood = loadPrismMoodState(db, userId, conversation.id, mode) ??
+        createDefaultPrismMoodState(mode, now);
+      const persisted = upsertPrismMoodState(
+        db,
+        userId,
+        conversation.id,
+        applyPrismMoodInterruption(currentMood, prismInterruption, now)
+      );
+      json(ctx.res, 200, { ok: true, prismMood: persisted });
+    }),
     route("POST", "/api/composer/cleanup", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -2935,6 +2965,30 @@ function buildRoutes(): RouteDefinition[] {
             : "User";
         return `${speaker}: ${message.content}`;
       });
+      const latestRecentMessage = recentMessages[recentMessages.length - 1] ?? null;
+      const randomPromptMode =
+        recentMessages.length === 0
+          ? "opening"
+          : latestRecentMessage?.role === "assistant"
+            ? "reply"
+            : "followup";
+      const randomPromptTask =
+        randomPromptMode === "opening"
+          ? [
+              "Task: Write the first user message for a brand-new conversation.",
+              "Invent something genuinely random but coherent: curious, playful, practical, reflective, or lightly weird is fine; nonsense is not.",
+              "It should feel like a real person starting a conversation, not like a writing prompt template.",
+            ]
+          : randomPromptMode === "reply"
+            ? [
+                "Task: Write the user's next reply to the assistant's latest message.",
+                "Privately answer this: What would be a good response to this prompt?",
+                "The message may answer the assistant, ask a follow-up, choose a direction, or push back naturally.",
+              ]
+            : [
+                "Task: Write one natural additional user message that continues the current thread.",
+                "It should add a useful detail, clarify intent, or ask the next obvious thing a person might ask.",
+              ];
       const promptMessages: ProviderMessage[] = [
         {
           role: "system",
@@ -2961,9 +3015,11 @@ function buildRoutes(): RouteDefinition[] {
                   .map((line) => `- ${clampComposerContextText(line, 420)}`)
                   .join("\n")}`
               : "Recent conversation: none yet.",
-            "Write one unique, natural user prompt that would be interesting for this specific bot to answer now.",
-            "Keep it short: one question or request, roughly 8-28 words.",
+            `Generation mode: ${randomPromptMode}.`,
+            ...randomPromptTask,
+            "Keep it short: one conversational message, roughly 5-28 words.",
             "Avoid generic prompts like 'Tell me something interesting.'",
+            "Do not include labels, explanations, quotation marks, or multiple options.",
           ].join("\n\n"),
         },
       ];
@@ -2990,6 +3046,7 @@ function buildRoutes(): RouteDefinition[] {
         starterPrompt && body.starterPromptWarrantsIntro === true;
       const message = starterPrompt ? "" : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
+      const commandCenterPrompt = body.commandCenterPrompt === true || Boolean(promptShortcut);
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
       const forceNewConversation = body.forceNewConversation === true;
@@ -3136,7 +3193,7 @@ function buildRoutes(): RouteDefinition[] {
           userKey,
           {
             preferredProvider: effectiveProvider,
-            autoMemory: !incognito && Boolean(user.auto_memory),
+            autoMemory: !commandCenterPrompt && !incognito && Boolean(user.auto_memory),
             openAiApiKey,
             anthropicApiKey,
             userDisplayName: user.display_name,
@@ -3172,6 +3229,7 @@ function buildRoutes(): RouteDefinition[] {
             forceNewConversation,
             prismInterruption,
             signal: chatAbort.signal,
+            ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
             ...(promptShortcut ? { promptShortcut } : {}),
           },
           conversationId
@@ -4160,6 +4218,29 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Only the latest Zen assistant message can be interrupted.");
       }
 
+      const mode = readPrismMoodMode(message.conversation_mode);
+      const now = new Date().toISOString();
+      const parsedPrismInterruption = readPrismInterruption(
+        body.prismInterruption ?? {
+          kind: "assistant_reveal",
+          assistantMessageId: message.id,
+          visibleTokenCount: body.visibleTokenCount,
+          totalTokenCount: body.totalTokenCount,
+        }
+      );
+      const prismInterruption: PrismMoodInterruptionInput = {
+        kind: parsedPrismInterruption?.kind ?? "assistant_reveal",
+        assistantMessageId: parsedPrismInterruption?.assistantMessageId ?? message.id,
+        ...(parsedPrismInterruption?.visibleTokenCount !== undefined
+          ? { visibleTokenCount: parsedPrismInterruption.visibleTokenCount }
+          : {}),
+        ...(parsedPrismInterruption?.totalTokenCount !== undefined
+          ? { totalTokenCount: parsedPrismInterruption.totalTokenCount }
+          : {}),
+      };
+      const currentMood = loadPrismMoodState(db, userId, message.conversation_id, mode) ??
+        createDefaultPrismMoodState(mode, now);
+      let persistedMood: ReturnType<typeof upsertPrismMoodState> | undefined;
       db.exec("BEGIN IMMEDIATE TRANSACTION");
       try {
         db.prepare(
@@ -4170,7 +4251,13 @@ function buildRoutes(): RouteDefinition[] {
         ).run(userId, message.conversation_id);
         db.prepare(
           "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
-        ).run(new Date().toISOString(), message.conversation_id, userId);
+        ).run(now, message.conversation_id, userId);
+        persistedMood = upsertPrismMoodState(
+          db,
+          userId,
+          message.conversation_id,
+          applyPrismMoodInterruption(currentMood, prismInterruption, now)
+        );
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -4179,6 +4266,7 @@ function buildRoutes(): RouteDefinition[] {
 
       json(ctx.res, 200, {
         ok: true,
+        prismMood: persistedMood,
       });
     }),
     route("DELETE", "/api/messages/:id", async (ctx) => {
