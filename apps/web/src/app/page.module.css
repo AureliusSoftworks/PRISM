@@ -2414,7 +2414,7 @@
 }
 
 .settingsModelLaneLabel {
-  display: none;
+  display: inline-flex;
   color: var(--fg-muted);
   font-size: 11px;
   line-height: 1.2;
@@ -2610,7 +2610,7 @@
   }
 
   .settingsModelLaneLabel {
-    display: inline;
+    display: inline-flex;
   }
 }
 
@@ -2841,11 +2841,120 @@
   gap: 12px;
 }
 
+.settingsSectionHeaderAside {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .settingsSectionHeader small {
   color: var(--fg-muted);
   font-size: 11px;
   line-height: 1.3;
   text-align: right;
+}
+
+.panelSectionInfo {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.panelSectionInfo[data-variant="control"] {
+  margin-left: 0;
+}
+
+.panelSectionInfo[data-variant="control"] .panelSectionInfoButton {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+}
+
+.panelSectionInfo[data-variant="control"] .panelSectionInfoButton svg {
+  width: 11px;
+  height: 11px;
+}
+
+.panelSectionInfoButton {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 56%, var(--line));
+  background: color-mix(in srgb, var(--bg-surface) 80%, var(--bg));
+  color: var(--fg-muted);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  box-shadow: none;
+  cursor: help;
+}
+
+.panelSectionInfoButton:hover:not(:disabled),
+.panelSectionInfoButton:focus-visible {
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg-surface));
+  transform: none;
+  box-shadow: 0 8px 20px -18px color-mix(in srgb, var(--accent-ink) 64%, transparent);
+}
+
+.panelSectionInfoButton:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.panelSectionInfoTooltip {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(260px, calc(100vw - 48px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 54%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 96%, var(--bg));
+  color: var(--fg);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.panelSectionInfo[data-variant="control"] .panelSectionInfoTooltip {
+  left: 0;
+  right: auto;
+}
+
+.panelSectionInfo:hover .panelSectionInfoTooltip,
+.panelSectionInfo:focus-within .panelSectionInfoTooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.controlLabelWithInfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.controlLabelWithInfo > span:first-child {
+  min-width: 0;
 }
 
 .settingsFieldGrid {
@@ -2974,8 +3083,18 @@
     flex-direction: column;
   }
 
+  .settingsSectionHeaderAside {
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+
   .settingsSectionHeader small {
     text-align: left;
+  }
+
+  .panelSectionInfoTooltip {
+    right: 0;
   }
 
   .settingsDockRow {
@@ -11847,6 +11966,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--bg-elevated);
 }
 
+.promptWildcardRunInline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: 7px;
+}
+
+.promptWildcardRunInline > div:first-child {
+  min-width: 0;
+}
+
+.promptWildcardRunInline .promptShortcutPreview {
+  grid-column: 1 / -1;
+}
+
+.promptWildcardCapsule {
+  border-color: color-mix(in srgb, #2fd3e3 34%, var(--line));
+  border-left-color: color-mix(in srgb, #b7e63a 58%, #2fd3e3 42%);
+  border-radius: 7px;
+  padding-inline: 8px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 10%, transparent),
+      color-mix(in srgb, #2fd3e3 9%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 84%, var(--bg-surface));
+}
+
+.promptWildcardCapsule:hover,
+.promptWildcardCapsule:focus-visible {
+  border-color: color-mix(in srgb, #2fd3e3 52%, var(--line-strong));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 15%, transparent),
+      color-mix(in srgb, #2fd3e3 13%, transparent)
+    ),
+    var(--bg-elevated);
+}
+
 .promptShortcutPreview {
   display: grid;
   gap: 10px;
@@ -15996,6 +16156,68 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   cursor: pointer;
 }
 
+.markdownRichEditorHost :global(.tiptapPrismWildcardDeckPrefix) {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-size: 0;
+  letter-spacing: 0;
+  line-height: 0;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismWildcardDeckToken) {
+  border: 1px solid color-mix(in srgb, #b7e63a 34%, var(--line));
+  border-left-color: color-mix(in srgb, #2fd3e3 58%, #b7e63a 42%);
+  border-radius: 7px;
+  padding: 1px 7px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 11%, transparent),
+      color-mix(in srgb, #2fd3e3 8%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 74%, transparent);
+  color: var(--fg);
+  -webkit-text-fill-color: var(--fg);
+  font-weight: 820;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 1px 7px;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 16%, var(--bg-elevated)),
+        color-mix(in srgb, #2fd3e3 9%, var(--bg-elevated))
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  font-weight: 820;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-left: 2px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, #ffffff 28%, transparent);
+  border-top-color: #ffffff;
+  animation: wildcardPendingSpin 0.7s linear infinite;
+}
+
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
   color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
   -webkit-text-fill-color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
@@ -16023,6 +16245,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes wildcardPendingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes composerRandomRainbowFlow {
   from {
     background-position: 0 0, 0 0;
@@ -16042,6 +16270,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
   .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
@@ -17254,6 +17483,75 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: min(360px, calc(100vw - 24px));
 }
 
+.composeWildcardSlotRail {
+  display: flex;
+  gap: 6px;
+  max-width: min(430px, calc(100vw - 44px));
+  padding: 5px 5px 7px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.composeWildcardSlotButton[data-command-kind="wildcard-slot"] {
+  position: relative;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 30px;
+  max-width: 138px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 14%, #05070b),
+        color-mix(in srgb, #2fd3e3 12%, #05070b)
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: #ffffff;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 20%, transparent) inset,
+    0 8px 20px -18px color-mix(in srgb, #2fd3e3 70%, transparent);
+}
+
+.composeWildcardSlotButton[data-command-kind="wildcard-slot"]::before {
+  content: none;
+}
+
+.composeWildcardSlotButton .composeCommandSlash,
+.composeWildcardSlotButton .composeBotOptionName {
+  color: #ffffff;
+}
+
+.composeWildcardSlotButton .composeBotOptionName {
+  flex: 0 1 auto;
+  font-size: 11px;
+  font-weight: 880;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composeWildcardSlotButton[data-command-kind="wildcard-slot"]:hover,
+.composeWildcardSlotButton[data-command-kind="wildcard-slot"]:focus-visible,
+.composeWildcardSlotButton[data-command-kind="wildcard-slot"][aria-selected="true"] {
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 22%, #05070b),
+        color-mix(in srgb, #2fd3e3 18%, #05070b)
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 30%, transparent) inset,
+    0 0 0 1px color-mix(in srgb, #ffffff 16%, transparent),
+    0 10px 24px -16px color-mix(in srgb, #7b5cff 80%, transparent);
+}
+
 .composeCommandSectionHeader {
   display: flex;
   align-items: center;
@@ -17284,6 +17582,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, #b7e63a 56%, transparent),
     color-mix(in srgb, #2fd3e3 62%, transparent),
     color-mix(in srgb, #7b5cff 70%, transparent)
+  );
+}
+
+.composeCommandSectionHeader[data-command-kind="wildcard"]::after {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, #b7e63a 64%, transparent),
+    color-mix(in srgb, #2fd3e3 66%, transparent)
+  );
+}
+
+.composeCommandSectionHeader[data-command-kind="wildcard-slot"] {
+  color: color-mix(in srgb, #ffffff 88%, var(--fg));
+}
+
+.composeCommandSectionHeader[data-command-kind="wildcard-slot"]::after {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    #ff4d6d,
+    #ff9f1c,
+    #b7e63a,
+    #2fd3e3,
+    #7b5cff
   );
 }
 
@@ -17344,6 +17667,116 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, #2fd3e3 10%, var(--bg-active)) 62%,
       var(--bg-active)
     );
+}
+
+.composeCommandOption[data-command-kind="wildcard"] {
+  position: relative;
+  padding-left: 14px;
+  border: 1px solid color-mix(in srgb, #2fd3e3 28%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #b7e63a 6%, transparent),
+      color-mix(in srgb, #2fd3e3 5%, transparent) 62%,
+      transparent
+    );
+}
+
+.composeCommandOption[data-command-kind="wildcard"]::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #b7e63a, #2fd3e3);
+  opacity: 0.78;
+  box-shadow: 0 0 12px color-mix(in srgb, #2fd3e3 24%, transparent);
+}
+
+.composeCommandOption[data-command-kind="wildcard"]:hover,
+.composeCommandOption[data-command-kind="wildcard"]:focus-visible {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #b7e63a 10%, var(--bg-hover)),
+      color-mix(in srgb, #2fd3e3 8%, var(--bg-hover)) 62%,
+      var(--bg-hover)
+    );
+}
+
+.composeCommandOption[data-command-kind="wildcard"][aria-selected="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #b7e63a 14%, var(--bg-active)),
+      color-mix(in srgb, #2fd3e3 11%, var(--bg-active)) 62%,
+      var(--bg-active)
+    );
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"] {
+  position: relative;
+  padding-left: 14px;
+  border: 1px solid color-mix(in srgb, #ffffff 22%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ffffff 9%, transparent),
+      color-mix(in srgb, #2fd3e3 5%, transparent) 64%,
+      transparent
+    ),
+    color-mix(in srgb, #05070b 38%, var(--bg-surface));
+  color: #ffffff;
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"]::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  opacity: 0.86;
+  box-shadow: 0 0 14px color-mix(in srgb, #ffffff 18%, transparent);
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"] .composeBotOptionName,
+.composeCommandOption[data-command-kind="wildcard-slot"] .composeCommandMeta,
+.composeCommandOption[data-command-kind="wildcard-slot"] .composeCommandSlash {
+  color: #ffffff;
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"] .composeCommandMeta {
+  opacity: 0.72;
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"]:hover,
+.composeCommandOption[data-command-kind="wildcard-slot"]:focus-visible {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ffffff 14%, transparent),
+      color-mix(in srgb, #2fd3e3 8%, transparent) 64%,
+      transparent
+    ),
+    color-mix(in srgb, #05070b 48%, var(--bg-hover));
+}
+
+.composeCommandOption[data-command-kind="wildcard-slot"][aria-selected="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ffffff 18%, transparent),
+      color-mix(in srgb, #2fd3e3 11%, transparent) 64%,
+      transparent
+    ),
+    color-mix(in srgb, #05070b 54%, var(--bg-active));
 }
 
 .composeCommandOption[data-color-tag] .composeBotOptionName {
@@ -18069,7 +18502,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .promptCenterSidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, auto) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, auto) minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   overflow: hidden;
@@ -18150,6 +18583,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
+.promptCenterField input[data-field-kind="description"] {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+}
+
 .promptCenterField textarea {
   min-height: 180px;
   resize: vertical;
@@ -18162,6 +18599,103 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 14%, transparent);
+}
+
+.promptCenterWildcardValueBox {
+  width: 100%;
+  min-height: 144px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, #000 6%);
+  color: var(--fg);
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 7px;
+  cursor: text;
+}
+
+.promptCenterWildcardValueBox:focus-within {
+  border-color: color-mix(in srgb, var(--accent-ink) 56%, var(--line-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-ink) 14%, transparent);
+}
+
+.promptCenterWildcardValueBox input {
+  flex: 1 1 150px;
+  width: auto;
+  min-width: 120px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  padding: 2px 3px;
+  font: 650 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  box-shadow: none;
+}
+
+.promptCenterWildcardValueBox input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.promptCenterWildcardValueChip {
+  max-width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, #2fd3e3 34%, var(--line));
+  border-left-color: color-mix(in srgb, #b7e63a 58%, #2fd3e3 42%);
+  border-radius: 7px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 10%, transparent),
+      color-mix(in srgb, #2fd3e3 8%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 84%, var(--bg-surface));
+  color: var(--fg);
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 780 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 14%, transparent) inset,
+    0 6px 14px color-mix(in srgb, #000 8%, transparent);
+}
+
+.promptCenterWildcardValueChip span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.promptCenterWildcardValueChip span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptCenterWildcardValueChip span:last-child {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+  font-weight: 900;
+}
+
+.promptCenterWildcardValueChip:hover,
+.promptCenterWildcardValueChip:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #2fd3e3 52%, var(--line-strong));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 15%, transparent),
+      color-mix(in srgb, #2fd3e3 12%, transparent)
+    ),
+    var(--bg-elevated);
 }
 
 .promptCenterListSection {
@@ -18288,6 +18822,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .promptCenterPromptRow[data-active="true"] {
   border-color: color-mix(in srgb, var(--prompt-command-color) 46%, var(--line-strong));
   background: color-mix(in srgb, var(--prompt-command-color) 9%, var(--bg-elevated));
+}
+
+.promptCenterPromptRow[data-wildcard-deck="true"] {
+  border-radius: 8px;
+}
+
+.promptCenterPromptRow[data-wildcard-deck="true"] .promptCenterPromptColorDot {
+  border-radius: 3px;
 }
 
 .promptCenterPromptDelete {
@@ -20632,6 +21174,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-weight: 700;
 }
 
+.settingsDropdownSummaryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settingsDropdownSummaryRow .panelSectionInfoButton {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settingsDropdownSummaryRow .panelSectionInfoTooltip {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .settingsModelDropdown summary small {
   color: var(--fg-muted);
   font-size: 11px;
@@ -21677,8 +22239,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 6px;
 }
 
-.botProfileField span,
-.botProfileScaleHeader span {
+.botProfileField > span,
+.botProfileScaleHeader > span:not(.controlLabelWithInfo),
+.botProfileScaleHeader .controlLabelWithInfo > span:first-child {
   color: var(--fg);
   font-size: 12px;
   font-weight: 700;
@@ -21901,7 +22464,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: 0;
 }
 
-.botProfileBirthdayControl span {
+.botProfileBirthdayControl > span:not(.controlLabelWithInfo),
+.botProfileBirthdayControl .controlLabelWithInfo > span:first-child {
   color: var(--fg);
   font-size: 12px;
   font-weight: 700;
@@ -22843,7 +23407,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .botParameterHeader span,
 .botParameterField > span,
 .botParameterField legend,
-.botParameterQuestionRow span {
+.botParameterQuestionRow > span:not(.controlLabelWithInfo),
+.botParameterQuestionRow .controlLabelWithInfo > span:first-child {
   font-size: 12px;
   font-weight: 650;
   color: var(--fg);
@@ -24249,6 +24814,168 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: clamp(190px, calc(52dvh - 170px), 320px);
 }
 
+.zenSessionPreviousCard {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 26%, var(--fg) 12%);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 12% 0%,
+      color-mix(in srgb, var(--memory-panel-color) 16%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--bg) 86%, var(--fg) 8%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent),
+    0 12px 28px color-mix(in srgb, #000000 12%, transparent);
+}
+
+.zenSessionPreviousCard[data-empty="true"] {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--bg) 91%, var(--fg) 6%);
+}
+
+.zenSessionPreviousHeader {
+  display: grid;
+  gap: 2px;
+}
+
+.zenSessionPreviousHeader span,
+.zenSessionMemoryMeta span,
+.zenSessionPreviousCard small,
+.zenSessionMemoryBody small {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.zenSessionPreviousHeader span,
+.zenSessionMemoryMeta span {
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.zenSessionPreviousHeader strong {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.zenSessionPreviousCard p,
+.zenSessionMemoryBody p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.zenSessionMemoryList {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zenSessionMemoryItem {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 24%, var(--fg) 10%);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 16% 48%,
+      color-mix(in srgb, var(--memory-panel-color) 13%, transparent),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--bg) 88%, var(--fg) 7%);
+}
+
+.zenSessionMemoryOrb {
+  width: 38px;
+  height: 38px;
+  border-radius: 46% 54% 42% 58% / 58% 40% 60% 42%;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 52%, transparent);
+  background:
+    radial-gradient(
+      circle at 34% 28%,
+      color-mix(in srgb, #ffffff 22%, transparent),
+      transparent 36%
+    ),
+    color-mix(in srgb, var(--memory-panel-color) 30%, var(--bg) 70%);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--memory-panel-color) 20%, transparent);
+}
+
+.zenSessionMemoryOrb span {
+  width: 13px;
+  height: 13px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--memory-panel-color) 70%, #ffffff 30%);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--memory-panel-color) 36%, transparent);
+}
+
+.zenSessionMemoryBody {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.zenSessionMemoryMeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.zenSessionMemoryMeta strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.zenSessionMemoryMeta span {
+  flex-shrink: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.zenSessionMemoryDelete {
+  align-self: stretch;
+  min-width: 62px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 26%, var(--fg) 12%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 76%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.zenSessionMemoryDelete:hover,
+.zenSessionMemoryDelete:focus-visible {
+  border-color: color-mix(in srgb, var(--memory-panel-color) 54%, var(--fg) 18%);
+  color: var(--fg);
+  outline: none;
+}
+
+.zenSessionMemoryDeleteArmed {
+  border-color: color-mix(in srgb, #ff4d6d 70%, var(--fg) 10%);
+  background: color-mix(in srgb, #ff4d6d 18%, var(--bg) 82%);
+  color: var(--fg);
+}
+
 .memoryShortTermEmpty {
   display: grid;
   place-items: center;
@@ -25129,6 +25856,80 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .memoryDefaultGlyph svg {
   width: 100%;
   height: auto;
+}
+
+.memoryFamilyCluster[data-memory-session="true"] {
+  border-color: color-mix(in srgb, var(--memory-family-color) 66%, transparent);
+  background:
+    radial-gradient(
+      circle at 34% 24%,
+      color-mix(in srgb, #ffffff 24%, transparent),
+      transparent 33%
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--memory-family-color) 42%, var(--bg) 58%),
+      color-mix(in srgb, var(--memory-family-color) 14%, var(--bg) 86%)
+    );
+}
+
+.memoryFamilyCluster[data-memory-session="true"]::before {
+  border-style: solid;
+  opacity: 0.46;
+}
+
+.memorySessionClusterGlyph,
+.memorySessionHeaderGlyph {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.memorySessionClusterGlyph {
+  position: relative;
+  z-index: 2;
+  font-size: clamp(20px, 34%, 34px);
+  color: color-mix(in srgb, #ffffff 82%, var(--memory-family-color) 18%);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--memory-family-color) 54%, transparent);
+}
+
+.memorySessionHeaderGlyph {
+  display: inline-grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: currentColor;
+  font-size: 18px;
+}
+
+.memorySessionClusterMotes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.memorySessionClusterMotes span {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffffff 78%, var(--memory-family-color) 22%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--memory-family-color) 46%, transparent);
+}
+
+.memorySessionClusterMotes span:nth-child(1) {
+  left: 27%;
+  top: 23%;
+}
+
+.memorySessionClusterMotes span:nth-child(2) {
+  right: 23%;
+  top: 38%;
+}
+
+.memorySessionClusterMotes span:nth-child(3) {
+  left: 45%;
+  bottom: 21%;
 }
 
 .memoryFamilyCluster:not(:disabled):focus-visible,
@@ -33730,6 +34531,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-transform: uppercase;
 }
 
+.coffeeGroupPresetField {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.coffeeGroupStartControlLabel {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .coffeeAutoTopicToggle {
   display: flex;
   align-items: flex-start;
@@ -35148,6 +35963,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeSettingsFieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.84rem;
   font-weight: 650;
   line-height: 1.25;

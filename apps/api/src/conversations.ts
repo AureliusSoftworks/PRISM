@@ -549,6 +549,9 @@ function deleteConversationsByIds(
     `UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
   ).run(userId, ...conversationIds);
   db.prepare(
+    `UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
+  ).run(userId, ...conversationIds);
+  db.prepare(
     `UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${placeholders})`
   ).run(userId, ...conversationIds);
   db.prepare(
@@ -1101,6 +1104,9 @@ export function deleteConversation(
       "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
     ).run(userId, conversationId);
     db.prepare(
+      "UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
+    ).run(userId, conversationId);
+    db.prepare(
       "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
     ).run(userId, conversationId);
     db.prepare(
@@ -1159,6 +1165,9 @@ export function clearConversationMessages(
     ).run(conversationId, userId);
     const summaryDelete = db.prepare(
       "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
+    ).run(userId, conversationId);
+    db.prepare(
+      "DELETE FROM zen_session_memories WHERE user_id = ? AND conversation_id = ?"
     ).run(userId, conversationId);
     const messageDelete = db.prepare(
       "DELETE FROM messages WHERE conversation_id = ? AND user_id = ?"
@@ -1269,6 +1278,9 @@ export function deleteConversationsByBot(
     ).run(userId, ...groupParams);
     db.prepare(
       `UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
+    ).run(userId, ...groupParams);
+    db.prepare(
+      `UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
     ).run(userId, ...groupParams);
     db.prepare(
       `UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
@@ -1457,6 +1469,9 @@ export function deleteAllConversations(
     ).run(userId, userId);
     db.prepare(
       "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+    ).run(userId, userId);
+    db.prepare(
+      "UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
     ).run(userId, userId);
     db.prepare(
       "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"

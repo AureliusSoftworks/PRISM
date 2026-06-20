@@ -71,6 +71,7 @@ import {
 import {
   Download,
   Image as ImageGlyph,
+  Info,
   LogOut,
   Maximize2,
   Minimize2,
@@ -85,6 +86,7 @@ import styles from "./page.module.css";
 import {
   BOT_FACT_KEY_LABELS,
   BOT_VOICE_PRESET_LABELS,
+  BUILT_IN_PROMPT_WILDCARD_SLOTS,
   MAX_CUSTOM_FACTS,
   ageFromIsoBirthday,
   classifyMemoryCategoryFromText,
@@ -100,10 +102,14 @@ import {
   stripPurposeStatementPrefixes,
   westernZodiacFromIsoBirthday,
   catalogEntriesMatchingLocalImageHeuristic,
+  DEFAULT_PRISM_MOOD_SENSITIVITY,
   ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
   isComfyUiModelId,
   isElevenLabsImageModelId,
+  MAX_PRISM_MOOD_SENSITIVITY,
+  MIN_PRISM_MOOD_SENSITIVITY,
   normalizeOpenAiImageModelId,
+  normalizePrismMoodSensitivity,
   openAiModelSupportsReasoningEffort,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   parseComfyUiRemoteWorkflowPath,
@@ -132,7 +138,8 @@ import {
   type PrismMoodInterruptionInput,
   type PrismMoodSnapshot,
   type PromptShortcutMetadata,
-  type PromptShortcutWildcardReplacement,
+  type PromptWildcardRunMetadata,
+  type BuiltInPromptWildcardSlotKey,
   type SentGeneratedImagePayload,
   type ZenDisplayMetadata,
   type StoryEpisodeManifest,
@@ -143,10 +150,12 @@ import {
   type StorySessionSummary,
   type StoryTranscriptEntry,
   type ReasoningEffort,
+  type ZenPreviousContextSummary,
+  type ZenSessionMemoryItem,
+  type ZenSessionMemoryOverview,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
-  looksLikePrismDevComposerCommand,
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
 } from "./prismDevChatCommands";
@@ -154,9 +163,31 @@ import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   findLeadingDevCommandTokenRange,
   findPromptShortcutTokenRanges,
+  findWildcardDeckTokenRanges,
+  type PendingWildcardSlotDecoration,
   PrismDevCommandHighlight,
   resolvePromptShortcutTextRanges,
+  resolveWildcardDeckTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
+import {
+  resolvePromptShortcutPreviewHighlightRanges,
+  type PromptShortcutPreviewHighlightRange,
+} from "./promptShortcutPreviewHighlight";
+import { resolvePromptRandomizationGroups } from "./promptRandomization";
+import {
+  createWildcardDeckDraft,
+  formatWildcardDeckValuesText,
+  normalizeWildcardDeckAliases,
+  normalizeWildcardDeckNameInput,
+  normalizeWildcardDecks,
+  normalizeWildcardDeckValueList,
+  sanitizeWildcardDeckAliases,
+  uniqueWildcardDeckNameForList,
+  wildcardDeckInvocationNames,
+  wildcardDeckToDraft,
+  type CommandCenterWildcardDeck,
+  type CommandCenterWildcardDeckDraft,
+} from "./wildcardDecks";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
   composeMentionTabPlainTextAction,
@@ -253,9 +284,14 @@ const ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY = "prism_zen_initial_starter_cache_v
 const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
 const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
 const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
+const COMMAND_CENTER_WILDCARD_DELETE_KEY_PREFIX = "cmdwildcard:";
 
 function commandCenterPromptDeleteKey(commandId: string): string {
   return `${COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX}${commandId}`;
+}
+
+function commandCenterWildcardDeleteKey(deckId: string): string {
+  return `${COMMAND_CENTER_WILDCARD_DELETE_KEY_PREFIX}${deckId}`;
 }
 
 // Namespace bot-delete keys so they can share the same single "armed" state
@@ -324,6 +360,12 @@ const MEMORY_CARD_DELETE_PREFIX = "memcard:";
 
 function memoryCardDeleteKey(memoryId: string): string {
   return `${MEMORY_CARD_DELETE_PREFIX}${memoryId}`;
+}
+
+const ZEN_SESSION_MEMORY_DELETE_PREFIX = "zensession:";
+
+function zenSessionMemoryDeleteKey(memoryId: string): string {
+  return `${ZEN_SESSION_MEMORY_DELETE_PREFIX}${memoryId}`;
 }
 
 function normalizeAuthUsername(raw: string): string {
@@ -582,8 +624,6 @@ const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
 const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
 /** When set, inline developer metrics are rendered in the chat stream. */
 const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
-/** When set, local slash dev commands like `/forget` are enabled in composer. */
-const PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY = "prism_dev_slash_commands";
 /** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
 const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
 /** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
@@ -3371,6 +3411,8 @@ interface Message {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
+  /** User-entered wildcard decks/options that resolved into this message content. */
+  promptWildcards?: PromptWildcardRunMetadata;
 }
 
 function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
@@ -5153,6 +5195,7 @@ interface UserSettings {
   zenWallpaperRegenMessageInterval: number;
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
+  zenMoodSensitivity: number;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -5175,6 +5218,7 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperRegenMessageInterval"
   | "zenWallpaperRevealDelayMessageCount"
   | "zenWallpaperRevealSpanMessageCount"
+  | "zenMoodSensitivity"
 >;
 
 type SavedApiKeySettingsState = Pick<
@@ -5192,6 +5236,34 @@ interface DevChatDebugEvent {
   createdAt: string;
   kind: "summary" | "memory" | "opinion" | "tool" | "backend";
   text: string;
+}
+
+function PanelSectionInfo({
+  id,
+  label,
+  variant = "section",
+  children,
+}: {
+  id: string;
+  label: string;
+  variant?: "section" | "control";
+  children: string;
+}): React.JSX.Element {
+  return (
+    <span className={styles.panelSectionInfo} data-variant={variant}>
+      <span
+        className={styles.panelSectionInfoButton}
+        tabIndex={0}
+        aria-label={label}
+        aria-describedby={id}
+      >
+        <Info size={14} strokeWidth={2.1} aria-hidden="true" />
+      </span>
+      <span id={id} className={styles.panelSectionInfoTooltip} role="tooltip">
+        {children}
+      </span>
+    </span>
+  );
 }
 
 function inferDevChatDebugKind(event: DevChatDebugEvent): DevChatDebugEvent["kind"] {
@@ -5496,6 +5568,7 @@ interface CommandCenterStateV1 {
   schema: "prism-command-center-v1";
   preferredModel?: string;
   commands?: unknown;
+  wildcardDecks?: unknown;
 }
 
 const BUILT_IN_COMMAND_NAMES = new Set([
@@ -5776,59 +5849,6 @@ function commandInvocationNames(command: CommandCenterCommand): string[] {
   return [command.name, ...command.aliases].filter(Boolean);
 }
 
-function splitPromptRandomizationOptions(source: string): string[] {
-  const options: string[] = [];
-  let current = "";
-  let escaped = false;
-  for (const char of source) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      current += char;
-      escaped = true;
-      continue;
-    }
-    if (char === "|") {
-      options.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += char;
-  }
-  options.push(current.trim());
-  return options.filter(Boolean);
-}
-
-function resolvePromptRandomizationGroups(source: string): string {
-  let resolved = "";
-  let cursor = 0;
-  while (cursor < source.length) {
-    const start = source.indexOf("{", cursor);
-    if (start < 0) {
-      resolved += source.slice(cursor);
-      break;
-    }
-    const end = source.indexOf("}", start + 1);
-    if (end < 0) {
-      resolved += source.slice(cursor);
-      break;
-    }
-    const body = source.slice(start + 1, end);
-    const options = body.includes("|") ? splitPromptRandomizationOptions(body) : [];
-    resolved += source.slice(cursor, start);
-    if (options.length > 0) {
-      resolved += options[Math.floor(Math.random() * options.length)] ?? options[0] ?? "";
-    } else {
-      resolved += source.slice(start, end + 1);
-    }
-    cursor = end + 1;
-  }
-  return resolved;
-}
-
 function isCommandCenterOperationalCommand(command: CommandCenterCommand): boolean {
   return command.builtIn || command.readOnly;
 }
@@ -5837,22 +5857,83 @@ function isCommandCenterPromptShortcut(command: CommandCenterCommand): boolean {
   return !command.builtIn && !command.readOnly;
 }
 
-function createRuntimeCommandCenterCommand(
-  name: string,
-  command: string,
-  aliases: string[] = []
-): CommandCenterCommand {
-  const now = new Date().toISOString();
-  return {
-    id: `runtime:/${name}`,
-    name,
-    title: name,
-    command,
-    aliases,
+function isComposerWildcardDeckPick(command: CommandCenterCommand): boolean {
+  return command.id.startsWith("wildcard:");
+}
+
+function isComposerTrueWildcardSlotPick(command: CommandCenterCommand): boolean {
+  return command.id.startsWith("wildcard-slot:");
+}
+
+function composerTrueWildcardSlotKey(
+  command: CommandCenterCommand
+): BuiltInPromptWildcardSlotKey | null {
+  if (!isComposerTrueWildcardSlotPick(command)) return null;
+  const key = command.id.slice("wildcard-slot:".length);
+  return BUILT_IN_PROMPT_WILDCARD_SLOTS.some((slot) => slot.key === key)
+    ? (key as BuiltInPromptWildcardSlotKey)
+    : null;
+}
+
+function composerTrueWildcardSlotFallback(command: CommandCenterCommand): string {
+  return command.command.trim() || `{${command.name}}`;
+}
+
+function composerShortcutInvocationPrefix(command: CommandCenterCommand): "/" | "!" {
+  return isComposerWildcardDeckPick(command) || isComposerTrueWildcardSlotPick(command)
+    ? "!"
+    : "/";
+}
+
+function composerCommandPickKind(
+  command: CommandCenterCommand
+): "command" | "prompt" | "wildcard" | "wildcard-slot" {
+  if (isComposerTrueWildcardSlotPick(command)) return "wildcard-slot";
+  if (isComposerWildcardDeckPick(command)) return "wildcard";
+  return isCommandCenterOperationalCommand(command) ? "command" : "prompt";
+}
+
+function composerShortcutInsertionText(command: CommandCenterCommand): string {
+  if (isComposerTrueWildcardSlotPick(command)) {
+    return `${composerTrueWildcardSlotFallback(command)} `;
+  }
+  return `${composerShortcutInvocationPrefix(command)}${command.name} `;
+}
+
+const BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
+  BUILT_IN_PROMPT_WILDCARD_SLOTS.map((slot) => ({
+    id: `wildcard-slot:${slot.key}`,
+    name: slot.label,
+    title: slot.title,
+    command: `{${slot.label}}`,
+    aliases: [...slot.aliases],
     arguments: [],
     builtIn: true,
     readOnly: true,
-    createdAt: now,
+    createdAt: "built-in",
+    updatedAt: "built-in",
+  }));
+
+function commandCenterWildcardDeckPick(deck: CommandCenterWildcardDeck): CommandCenterCommand {
+  const now = deck.updatedAt || deck.createdAt || new Date().toISOString();
+  const sampleValues = deck.values.slice(0, 4).join(", ");
+  const itemCountLabel = `${deck.values.length} item${deck.values.length === 1 ? "" : "s"}`;
+  const description = deck.description.trim();
+  return {
+    id: `wildcard:${deck.id}`,
+    name: deck.name,
+    title: description
+      ? `${description} · ${itemCountLabel}`
+      : sampleValues
+        ? `${itemCountLabel}: ${sampleValues}`
+        : itemCountLabel,
+    command: sampleValues,
+    ...(deck.colorTag ? { colorTag: deck.colorTag } : {}),
+    aliases: deck.aliases,
+    arguments: [],
+    builtIn: false,
+    readOnly: false,
+    createdAt: deck.createdAt || now,
     updatedAt: now,
   };
 }
@@ -5906,6 +5987,7 @@ function clampTextAfterLeadingCommandChip(
 function normalizeCommandCenterState(raw: unknown): {
   preferredModel: string;
   commands: CommandCenterCommand[];
+  wildcardDecks: CommandCenterWildcardDeck[];
 } {
   const fallbackHelp = createBuiltInHelpCommand();
   const builtInCommands = [
@@ -5980,6 +6062,7 @@ function normalizeCommandCenterState(raw: unknown): {
       ...builtInCommands,
       ...commands.filter((command) => !BUILT_IN_COMMAND_RESERVED_NAMES.has(command.name)),
     ]),
+    wildcardDecks: normalizeWildcardDecks(parsed?.wildcardDecks),
   };
 }
 
@@ -6177,6 +6260,9 @@ const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
+const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
+const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
+const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -6591,6 +6677,14 @@ function normalizeZenWallpaperRevealSpanMessageCountSetting(value: unknown): num
   );
 }
 
+function normalizeZenMoodSensitivitySetting(value: unknown): number {
+  return normalizePrismMoodSensitivity(value, DEFAULT_ZEN_MOOD_SENSITIVITY);
+}
+
+function formatZenMoodSensitivity(value: unknown): string {
+  return `${Math.round(normalizeZenMoodSensitivitySetting(value) * 100)}%`;
+}
+
 function defaultZenModeSettings(): ZenModeSettingsFields {
   return {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
@@ -6603,6 +6697,7 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
       DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
     zenWallpaperRevealSpanMessageCount:
       DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+    zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
   };
 }
 
@@ -6685,6 +6780,9 @@ function normalizeZenModeSettingsFields(
       normalizeZenWallpaperRevealSpanMessageCountSetting(
         settings?.zenWallpaperRevealSpanMessageCount
       ),
+    zenMoodSensitivity: normalizeZenMoodSensitivitySetting(
+      settings?.zenMoodSensitivity
+    ),
   };
 }
 
@@ -6697,6 +6795,23 @@ function formatZenDuration(value: unknown, kind: "idle" | "fresh" = "idle"): str
   if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
   const days = ms / (24 * 60 * 60 * 1000);
   return `${Math.round(days * 10) / 10}d`;
+}
+
+function formatZenSessionMemoryExpiry(expiresAt: string): string {
+  const expiresMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresMs)) return "expires soon";
+  const remainingMs = expiresMs - Date.now();
+  if (remainingMs <= 0) return "expired";
+  const hours = remainingMs / (60 * 60 * 1000);
+  if (hours < 1) {
+    return "expires in under 1 hour";
+  }
+  if (hours < 24) {
+    const roundedHours = Math.max(1, Math.round(hours));
+    return `expires in ${roundedHours} hour${roundedHours === 1 ? "" : "s"}`;
+  }
+  const days = Math.ceil(hours / 24);
+  return `expires in ${days} day${days === 1 ? "" : "s"}`;
 }
 
 function parseCommandCenterModelChoice(
@@ -12485,7 +12600,16 @@ function ComposerModelPicker({
                 aria-label="Reasoning effort"
               >
                 <div className={styles.composeModelEffortHeader}>
-                  <span>Effort</span>
+                  <span className={styles.controlLabelWithInfo}>
+                    <span>Effort</span>
+                    <PanelSectionInfo
+                      id="compose-model-effort-info"
+                      label="About reasoning effort"
+                      variant="control"
+                    >
+                      Adjusts how much reasoning the selected model spends before answering.
+                    </PanelSectionInfo>
+                  </span>
                   <span className={styles.composeModelEffortStatus}>
                     <output>{REASONING_EFFORT_LABELS[effortControl.value]}</output>
                     <button
@@ -12593,6 +12717,8 @@ interface HueLensControlProps {
   showCount?: boolean;
   /** Whether the active state can be cleared back to "All". */
   allowClear?: boolean;
+  /** Optional tooltip id; when provided the visible label gets a control-level info marker. */
+  infoId?: string;
   /**
    * Notifies the parent shell when the user is actively pressing/touching
    * the slider thumb. The empty-state surface uses this to drive a
@@ -12616,6 +12742,7 @@ function HueLensControl({
   resolvedTheme,
   showCount = true,
   allowClear = true,
+  infoId,
   onInteractionChange,
 }: HueLensControlProps): React.JSX.Element | null {
   const hueChangeFrameRef = useRef<number | null>(null);
@@ -12703,8 +12830,17 @@ function HueLensControl({
       data-active={active ? "true" : undefined}
       style={lensStyle}
     >
-      <span className={styles.hueLensLabel} aria-hidden="true">
-        Lens
+      <span className={`${styles.hueLensLabel} ${styles.controlLabelWithInfo}`}>
+        <span>Lens</span>
+        {infoId ? (
+          <PanelSectionInfo
+            id={infoId}
+            label="About color lens"
+            variant="control"
+          >
+            Filters the visible bot list by the color family on each bot's Prism.
+          </PanelSectionInfo>
+        ) : null}
       </span>
       <input
         type="range"
@@ -13838,6 +13974,7 @@ interface MessageBodyProps {
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
   onOpenCommandMention?: (commandId: string) => void;
   promptShortcut?: PromptShortcutMetadata;
+  promptWildcards?: PromptWildcardRunMetadata;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
   onTogglePromptShortcut?: () => void;
@@ -13867,70 +14004,21 @@ function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
   return invocation || `/${promptShortcut.name}`;
 }
 
-interface PromptShortcutWildcardRange {
-  start: number;
-  end: number;
-  value: string;
-}
-
 function promptShortcutWildcardColor(index: number | undefined): string {
   const normalized =
     typeof index === "number" && Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
   return PRISM_NOTICE_PALETTE[normalized % PRISM_NOTICE_PALETTE.length] ?? PRISM_COLORS.p;
 }
 
-function normalizePromptShortcutWildcardRanges(
-  promptSent: string,
-  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
-): PromptShortcutWildcardRange[] {
-  if (!promptSent || !Array.isArray(replacements) || replacements.length === 0) return [];
-  let lastEnd = 0;
-  return replacements
-    .map((replacement): PromptShortcutWildcardRange | null => {
-      const start = replacement.start;
-      const end = replacement.end;
-      if (
-        typeof start !== "number" ||
-        typeof end !== "number" ||
-        !Number.isFinite(start) ||
-        !Number.isFinite(end)
-      ) {
-        return null;
-      }
-      const normalizedStart = Math.floor(start);
-      const normalizedEnd = Math.floor(end);
-      if (
-        normalizedStart < 0 ||
-        normalizedEnd <= normalizedStart ||
-        normalizedEnd > promptSent.length
-      ) {
-        return null;
-      }
-      const value = replacement.value;
-      if (typeof value !== "string" || promptSent.slice(normalizedStart, normalizedEnd) !== value) {
-        return null;
-      }
-      return { start: normalizedStart, end: normalizedEnd, value };
-    })
-    .filter((range): range is PromptShortcutWildcardRange => Boolean(range))
-    .sort((a, b) => a.start - b.start || a.end - b.end)
-    .filter((range) => {
-      if (range.start < lastEnd) return false;
-      lastEnd = range.end;
-      return true;
-    });
-}
-
 function renderPromptShortcutPromptSent(
   promptSent: string,
-  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+  highlightRanges: readonly PromptShortcutPreviewHighlightRange[]
 ): React.ReactNode {
   if (!promptSent) return "(empty prompt)";
-  const ranges = normalizePromptShortcutWildcardRanges(promptSent, replacements);
-  if (ranges.length === 0) return promptSent;
+  if (highlightRanges.length === 0) return promptSent;
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
-  for (const [index, range] of ranges.entries()) {
+  for (const [index, range] of highlightRanges.entries()) {
     if (range.start > cursor) {
       nodes.push(promptSent.slice(cursor, range.start));
     }
@@ -13966,8 +14054,12 @@ function PromptShortcutMessage({
 }) {
   const label = promptShortcutLabel(promptShortcut);
   const promptSent = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
+  const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
+    promptSent,
+    promptShortcut.wildcardReplacements
+  );
   const wildcardHighlightStyle =
-    promptShortcut.wildcardReplacements && promptShortcut.wildcardReplacements.length > 0
+    promptSentHighlightRanges.length > 0
       ? ({
           ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
         } as React.CSSProperties)
@@ -14029,12 +14121,231 @@ function PromptShortcutMessage({
           <span className={styles.promptShortcutPreviewSection}>
             <span>Prompt sent</span>
             <code style={wildcardHighlightStyle}>
-              {renderPromptShortcutPromptSent(promptSent, promptShortcut.wildcardReplacements)}
+              {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
             </code>
           </span>
         </span>
       )}
     </span>
+  );
+}
+
+function PromptWildcardRunMessage({
+  promptWildcards,
+  fullPrompt,
+  colorIndex,
+  expanded,
+  onToggle,
+  onCollapse,
+  children,
+}: {
+  promptWildcards: PromptWildcardRunMetadata;
+  fullPrompt: string;
+  colorIndex?: number;
+  expanded: boolean;
+  onToggle?: () => void;
+  onCollapse?: () => void;
+  children: React.ReactNode;
+}) {
+  const promptSent = promptWildcards.resolvedPrompt?.trim() || fullPrompt.trim();
+  const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
+    promptSent,
+    promptWildcards.wildcardReplacements
+  );
+  const wildcardHighlightStyle =
+    promptSentHighlightRanges.length > 0
+      ? ({
+          ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
+        } as React.CSSProperties)
+      : undefined;
+  return (
+    <div
+      className={`${styles.promptShortcutInline} ${styles.promptWildcardRunInline}`}
+      data-prompt-wildcards-preview="true"
+      data-expanded={expanded ? "true" : undefined}
+    >
+      <div>{children}</div>
+      <button
+        type="button"
+        className={`${styles.promptShortcutCapsule} ${styles.promptWildcardCapsule}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle?.();
+        }}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} wildcard preview`}
+      >
+        <span>!wildcards</span>
+      </button>
+      {expanded && (
+        <div className={styles.promptShortcutPreview} role="group" aria-label="Wildcard preview">
+          <span className={styles.promptShortcutPreviewHeader}>
+            <span className={styles.promptShortcutPreviewTitle}>Wildcard run</span>
+            <span className={styles.promptShortcutPreviewActions}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCollapse?.();
+                }}
+              >
+                Collapse
+              </button>
+            </span>
+          </span>
+          <span className={styles.promptShortcutPreviewSection}>
+            <span>Template</span>
+            <code>{promptWildcards.template}</code>
+          </span>
+          <span className={styles.promptShortcutPreviewSection}>
+            <span>Prompt sent</span>
+            <code style={wildcardHighlightStyle}>
+              {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
+            </code>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE = /[\r\n,;\t]+/u;
+
+function WildcardDeckValuesInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (nextValue: string) => void;
+}): React.JSX.Element {
+  const values = useMemo(() => normalizeWildcardDeckValueList(value), [value]);
+  const [draftValue, setDraftValue] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const updateValues = useCallback(
+    (nextValues: readonly string[]) => {
+      onChange(formatWildcardDeckValuesText(nextValues));
+    },
+    [onChange]
+  );
+
+  const commitInputValue = useCallback(
+    (raw: string): boolean => {
+      const nextItems = normalizeWildcardDeckValueList(raw);
+      if (nextItems.length === 0) return false;
+      updateValues([...values, ...nextItems]);
+      setDraftValue("");
+      return true;
+    },
+    [updateValues, values]
+  );
+
+  const removeValueAt = useCallback(
+    (index: number) => {
+      updateValues(values.filter((_, itemIndex) => itemIndex !== index));
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => inputRef.current?.focus());
+      }
+    },
+    [updateValues, values]
+  );
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const next = event.currentTarget.value;
+    if (!WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE.test(next)) {
+      setDraftValue(next);
+      return;
+    }
+    const parts = next.split(WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE);
+    const keepTrailingDraft = !WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE.test(
+      next.slice(-1)
+    );
+    const committedParts = keepTrailingDraft ? parts.slice(0, -1) : parts;
+    if (committedParts.length > 0) {
+      updateValues([...values, ...normalizeWildcardDeckValueList(committedParts)]);
+    }
+    setDraftValue(keepTrailingDraft ? parts.at(-1) ?? "" : "");
+  };
+
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    const isDelimiter =
+      event.key === "," ||
+      event.key === ";" ||
+      event.key === "Tab" ||
+      event.key === "Enter";
+    if (isDelimiter && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (draftValue.trim().length === 0 && event.key === "Tab") return;
+      event.preventDefault();
+      commitInputValue(draftValue);
+      return;
+    }
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      draftValue.length === 0 &&
+      values.length > 0 &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault();
+      updateValues(values.slice(0, -1));
+    }
+  };
+
+  const handleInputPaste = (event: React.ClipboardEvent<HTMLInputElement>): void => {
+    const text = event.clipboardData.getData("text");
+    if (!WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE.test(text)) return;
+    event.preventDefault();
+    commitInputValue(text);
+  };
+
+  return (
+    <div
+      className={styles.promptCenterWildcardValueBox}
+      onClick={() => inputRef.current?.focus()}
+    >
+      {values.map((item, index) => (
+        <button
+          key={`${item}-${index}`}
+          type="button"
+          className={styles.promptCenterWildcardValueChip}
+          onClick={(event) => {
+            event.stopPropagation();
+            removeValueAt(index);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Backspace" && event.key !== "Delete") return;
+            event.preventDefault();
+            event.stopPropagation();
+            removeValueAt(index);
+          }}
+          aria-label={`Remove wildcard value ${item}`}
+          title="Remove value"
+        >
+          <span>{item}</span>
+          <span aria-hidden="true">×</span>
+        </button>
+      ))}
+      <input
+        ref={inputRef}
+        type="text"
+        value={draftValue}
+        onChange={handleInputChange}
+        onKeyDown={handleInputKeyDown}
+        onPaste={handleInputPaste}
+        onBlur={() => {
+          commitInputValue(draftValue);
+        }}
+        placeholder={values.length > 0 ? "Add another value" : "lemon, potato; chicken"}
+        spellCheck={true}
+      />
+    </div>
   );
 }
 
@@ -14771,16 +15082,18 @@ interface ComposerInputProps {
   submitIconOnly?: boolean;
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
+  onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
   onFocus: () => void;
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
   commandPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
+  wildcardPicks?: readonly CommandCenterCommand[];
   dismissPopoversSignal?: number;
 }
 
-type ComposerShortcutScope = "leading" | "inline";
+type ComposerShortcutScope = "leading" | "inline" | "wildcard";
 
 interface ComposerShortcutToken {
   from: number;
@@ -14839,6 +15152,78 @@ function filterCommandPicksForShortcutQuery(
     .slice(0, 10);
 }
 
+function filterWildcardPicksForShortcutQuery(
+  commands: readonly CommandCenterCommand[],
+  query: string
+): CommandCenterCommand[] {
+  const slots = filterCommandPicksForShortcutQuery(
+    commands.filter(isComposerTrueWildcardSlotPick),
+    query
+  );
+  const decks = filterCommandPicksForShortcutQuery(
+    commands.filter((command) => !isComposerTrueWildcardSlotPick(command)),
+    query
+  );
+  return [...slots, ...decks];
+}
+
+function commandIndexesMatching(
+  commands: readonly CommandCenterCommand[],
+  predicate: (command: CommandCenterCommand) => boolean
+): number[] {
+  const indexes: number[] = [];
+  commands.forEach((command, index) => {
+    if (predicate(command)) indexes.push(index);
+  });
+  return indexes;
+}
+
+function wildcardRailHorizontalHighlight(
+  commands: readonly CommandCenterCommand[],
+  highlight: number,
+  direction: -1 | 1
+): number | null {
+  const slotIndexes = commandIndexesMatching(commands, isComposerTrueWildcardSlotPick);
+  if (slotIndexes.length === 0) return null;
+  const safeHighlight =
+    ((highlight % Math.max(1, commands.length)) + Math.max(1, commands.length)) %
+    Math.max(1, commands.length);
+  const currentSlotOffset = slotIndexes.indexOf(safeHighlight);
+  if (currentSlotOffset < 0) {
+    return direction > 0 ? slotIndexes[0]! : slotIndexes[slotIndexes.length - 1]!;
+  }
+  return slotIndexes[
+    (currentSlotOffset + direction + slotIndexes.length) % slotIndexes.length
+  ]!;
+}
+
+function wildcardPopoverVerticalHighlight(
+  commands: readonly CommandCenterCommand[],
+  highlight: number,
+  direction: -1 | 1,
+  scope: ComposerShortcutScope
+): number {
+  const len = commands.length;
+  if (len === 0) return 0;
+  const safeHighlight = ((highlight % len) + len) % len;
+  if (scope !== "wildcard") return (safeHighlight + direction + len) % len;
+  const slotIndexes = commandIndexesMatching(commands, isComposerTrueWildcardSlotPick);
+  const deckIndexes = commandIndexesMatching(
+    commands,
+    (command) => !isComposerTrueWildcardSlotPick(command)
+  );
+  if (slotIndexes.length === 0 || deckIndexes.length === 0) {
+    return (safeHighlight + direction + len) % len;
+  }
+  if (slotIndexes.includes(safeHighlight)) {
+    return direction > 0 ? deckIndexes[0]! : safeHighlight;
+  }
+  const deckOffset = deckIndexes.indexOf(safeHighlight);
+  if (deckOffset < 0) return safeHighlight;
+  if (direction < 0 && deckOffset === 0) return slotIndexes[0]!;
+  return deckIndexes[(deckOffset + direction + deckIndexes.length) % deckIndexes.length]!;
+}
+
 function leadingSlashShortcutTokenFromLinePrefix(
   textToCaret: string,
   lineStartOffset = 0
@@ -14875,14 +15260,37 @@ function promptShortcutTokenFromTextToCaret(
   };
 }
 
+function wildcardDeckTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /(^|[\s([{])!([a-z0-9_-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const delimiterLength = match[1]?.length ?? 0;
+  const matchIndex = match.index ?? 0;
+  const from = lineStartOffset + lineStartInText + matchIndex + delimiterLength;
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "wildcard",
+  };
+}
+
 function shortcutTokenFromTextToCaret(
   textToCaret: string,
   lineStartOffset: number,
   scope: ComposerShortcutScope
 ): ComposerShortcutToken | null {
-  return scope === "leading"
-    ? leadingSlashShortcutTokenFromLinePrefix(textToCaret, lineStartOffset)
-    : promptShortcutTokenFromTextToCaret(textToCaret, lineStartOffset);
+  if (scope === "leading") {
+    return leadingSlashShortcutTokenFromLinePrefix(textToCaret, lineStartOffset);
+  }
+  if (scope === "wildcard") {
+    return wildcardDeckTokenFromTextToCaret(textToCaret, lineStartOffset);
+  }
+  return promptShortcutTokenFromTextToCaret(textToCaret, lineStartOffset);
 }
 
 function getComposerShortcutFromEditor(
@@ -14919,7 +15327,7 @@ function insertComposerShortcutInEditor(
 ): boolean {
   const token = getComposerShortcutFromEditor(editor, scope);
   if (!token) return false;
-  const replacement = `/${command.name} `;
+  const replacement = composerShortcutInsertionText(command);
   editor
     .chain()
     .focus()
@@ -14929,20 +15337,84 @@ function insertComposerShortcutInEditor(
   return true;
 }
 
+interface PendingComposerWildcardSlot {
+  id: string;
+  key: BuiltInPromptWildcardSlotKey;
+  fallback: string;
+  from: number;
+  to: number;
+}
+
+function insertPendingWildcardSlotInEditor(
+  editor: Editor,
+  command: CommandCenterCommand,
+  scope: ComposerShortcutScope,
+  id: string
+): PendingComposerWildcardSlot | null {
+  const key = composerTrueWildcardSlotKey(command);
+  if (!key) return null;
+  const token = getComposerShortcutFromEditor(editor, scope);
+  if (!token) return null;
+  const fallback = composerTrueWildcardSlotFallback(command);
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: token.from, to: token.to })
+    .insertContentAt(token.from, `${fallback} `)
+    .run();
+  return {
+    id,
+    key,
+    fallback,
+    from: token.from,
+    to: token.from + fallback.length,
+  };
+}
+
+function replacePendingWildcardSlotInEditor(
+  editor: Editor,
+  pending: PendingComposerWildcardSlot,
+  value: string
+): boolean {
+  const resolved = value.trim();
+  if (!resolved) return false;
+  if (editor.state.doc.textBetween(pending.from, pending.to, "\n", "\n") !== pending.fallback) {
+    return false;
+  }
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: pending.from, to: pending.to })
+    .insertContentAt(pending.from, resolved)
+    .run();
+  return true;
+}
+
+function replaceTextareaComposerShortcutWithText(
+  text: string,
+  caret: number,
+  replacement: string,
+  scope: ComposerShortcutScope
+): { value: string; caret: number; start: number; end: number } | null {
+  const token = getComposerShortcutFromTextarea(text, caret, scope);
+  if (!token) return null;
+  const value = `${text.slice(0, token.from)}${replacement}${text.slice(token.to)}`;
+  return {
+    value,
+    caret: token.from + replacement.length,
+    start: token.from,
+    end: token.from + replacement.trimEnd().length,
+  };
+}
+
 function replaceTextareaComposerShortcut(
   text: string,
   caret: number,
   command: CommandCenterCommand,
   scope: ComposerShortcutScope
 ): { value: string; caret: number } | null {
-  const token = getComposerShortcutFromTextarea(text, caret, scope);
-  if (!token) return null;
-  const replacement = `/${command.name} `;
-  const value = `${text.slice(0, token.from)}${replacement}${text.slice(token.to)}`;
-  return {
-    value,
-    caret: token.from + replacement.length,
-  };
+  const replacement = composerShortcutInsertionText(command);
+  return replaceTextareaComposerShortcutWithText(text, caret, replacement, scope);
 }
 
 function editorComposerShortcutExactlyMatchesAnyCommand(
@@ -14952,7 +15424,7 @@ function editorComposerShortcutExactlyMatchesAnyCommand(
 ): boolean {
   return composerShortcutTokenExactlyMatchesAnyCommand(
     getComposerShortcutFromEditor(editor, scope),
-    commands
+    commands.filter((command) => !isComposerTrueWildcardSlotPick(command))
   );
 }
 
@@ -14964,7 +15436,7 @@ function textareaComposerShortcutExactlyMatchesAnyCommand(
 ): boolean {
   return composerShortcutTokenExactlyMatchesAnyCommand(
     getComposerShortcutFromTextarea(text, caret, scope),
-    commands
+    commands.filter((command) => !isComposerTrueWildcardSlotPick(command))
   );
 }
 
@@ -15031,6 +15503,43 @@ function applyTextareaPromptShortcutChipDelete(
   promptNames: readonly string[]
 ): { value: string; caret: number } | null {
   const ranges = resolvePromptShortcutTextRanges(text, { promptNames });
+  if (ranges.length === 0) return null;
+
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  for (const range of ranges) {
+    const chipFrom = range.start;
+    const chipTo = range.end + (text[range.end] === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (start !== end) {
+      if (start >= chipTo || end <= chipFrom) continue;
+      from = Math.min(start, chipFrom);
+      to = Math.max(end, chipTo);
+    } else if (direction === "backward") {
+      if (start <= chipFrom || start > chipTo) continue;
+    } else if (start < chipFrom || start >= chipTo) {
+      continue;
+    }
+
+    return {
+      value: `${text.slice(0, from)}${text.slice(to)}`,
+      caret: from,
+    };
+  }
+
+  return null;
+}
+
+function applyTextareaWildcardDeckChipDelete(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "backward" | "forward",
+  wildcardNames: readonly string[]
+): { value: string; caret: number } | null {
+  const ranges = resolveWildcardDeckTextRanges(text, { wildcardNames });
   if (ranges.length === 0) return null;
 
   const start = Math.min(selectionStart, selectionEnd);
@@ -15128,7 +15637,43 @@ function applyPromptShortcutChipBoundaryDelete(
   return false;
 }
 
-type ComposerShortcutChipKind = "command" | "prompt";
+function applyWildcardDeckChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  wildcardNames: readonly string[]
+): boolean {
+  const ranges = findWildcardDeckTokenRanges(editor.state.doc, wildcardNames);
+  if (ranges.length === 0) return false;
+  const sel = editor.state.selection;
+
+  for (const range of ranges) {
+    const trailingChar =
+      range.to < editor.state.doc.content.size
+        ? editor.state.doc.textBetween(range.to, range.to + 1, "\n", "\n")
+        : "";
+    const chipFrom = range.from;
+    const chipTo = range.to + (trailingChar === " " ? 1 : 0);
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (!sel.empty) {
+      if (sel.from >= chipTo || sel.to <= chipFrom) continue;
+      from = Math.min(sel.from, chipFrom);
+      to = Math.max(sel.to, chipTo);
+    } else if (direction === "backward") {
+      if (sel.from <= chipFrom || sel.from > chipTo) continue;
+    } else if (sel.from < chipFrom || sel.from >= chipTo) {
+      continue;
+    }
+
+    editor.chain().focus().deleteRange({ from, to }).run();
+    return true;
+  }
+
+  return false;
+}
+
+type ComposerShortcutChipKind = "command" | "prompt" | "wildcard";
 
 interface EditorComposerShortcutChipRange {
   kind: ComposerShortcutChipKind;
@@ -15153,7 +15698,8 @@ function extendEditorChipRangeThroughTrailingSpace(
 function findEditorComposerShortcutChipRanges(
   editor: Editor,
   commandNames: readonly string[],
-  promptNames: readonly string[]
+  promptNames: readonly string[],
+  wildcardNames: readonly string[]
 ): EditorComposerShortcutChipRange[] {
   const ranges: EditorComposerShortcutChipRange[] = [];
   const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
@@ -15167,6 +15713,12 @@ function findEditorComposerShortcutChipRanges(
     ranges.push({
       kind: "prompt",
       ...extendEditorChipRangeThroughTrailingSpace(editor, promptRange),
+    });
+  }
+  for (const wildcardRange of findWildcardDeckTokenRanges(editor.state.doc, wildcardNames)) {
+    ranges.push({
+      kind: "wildcard",
+      ...extendEditorChipRangeThroughTrailingSpace(editor, wildcardRange),
     });
   }
   return ranges.sort((a, b) => a.from - b.from);
@@ -15183,12 +15735,12 @@ function composerShortcutChipKindFromClick(
         ? target.parentElement
         : null;
   const chip = element?.closest(
-    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken"
+    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken, .tiptapPrismWildcardDeckToken"
   );
   if (!chip) return null;
-  return chip.classList.contains("tiptapPrismDevCommandToken")
-    ? "command"
-    : "prompt";
+  if (chip.classList.contains("tiptapPrismDevCommandToken")) return "command";
+  if (chip.classList.contains("tiptapPrismWildcardDeckToken")) return "wildcard";
+  return "prompt";
 }
 
 function applyComposerShortcutChipClickDelete(
@@ -15196,12 +15748,14 @@ function applyComposerShortcutChipClickDelete(
   pos: number,
   kind: ComposerShortcutChipKind,
   commandNames: readonly string[],
-  promptNames: readonly string[]
+  promptNames: readonly string[],
+  wildcardNames: readonly string[]
 ): boolean {
   const range = findEditorComposerShortcutChipRanges(
     editor,
     commandNames,
-    promptNames
+    promptNames,
+    wildcardNames
   ).find((candidate) => {
     return (
       candidate.kind === kind &&
@@ -15218,7 +15772,8 @@ function applyComposerShortcutChipArrowKey(
   editor: Editor,
   direction: "left" | "right",
   commandNames: readonly string[],
-  promptNames: readonly string[]
+  promptNames: readonly string[],
+  wildcardNames: readonly string[]
 ): boolean {
   const sel = editor.state.selection;
   if (!sel.empty) return false;
@@ -15226,7 +15781,8 @@ function applyComposerShortcutChipArrowKey(
   const ranges = findEditorComposerShortcutChipRanges(
     editor,
     commandNames,
-    promptNames
+    promptNames,
+    wildcardNames
   );
   for (const range of ranges) {
     const shouldJump =
@@ -15383,6 +15939,12 @@ interface ComposerCommandPopoverProps {
 }
 
 function commandPickDescription(command: CommandCenterCommand): string {
+  if (isComposerTrueWildcardSlotPick(command)) {
+    return command.title.trim() || "Filled by the selected model on send.";
+  }
+  if (isComposerWildcardDeckPick(command)) {
+    return command.title.trim() || command.command.trim().replace(/\s+/g, " ").slice(0, 96);
+  }
   const aliasText =
     command.aliases.length > 0
       ? `Aliases: ${command.aliases.map((alias) => `/${alias}`).join(", ")}`
@@ -15482,9 +16044,20 @@ function ComposerCommandPopover({
   if (!open || !adjustedStyle || typeof document === "undefined") {
     return null;
   }
-  const hasCommandRows = commands.some(isCommandCenterOperationalCommand);
-  const hasPromptRows = commands.some((command) => !isCommandCenterOperationalCommand(command));
-  const showSectionHeaders = scope === "leading" && hasCommandRows && hasPromptRows;
+  const indexedCommands = commands.map((command, index) => ({ command, index }));
+  const wildcardRailEntries =
+    scope === "wildcard"
+      ? indexedCommands.filter(({ command }) => isComposerTrueWildcardSlotPick(command))
+      : [];
+  const listEntries =
+    scope === "wildcard"
+      ? indexedCommands.filter(({ command }) => !isComposerTrueWildcardSlotPick(command))
+      : indexedCommands;
+  const visibleKinds = new Set(listEntries.map(({ command }) => composerCommandPickKind(command)));
+  const showSectionHeaders =
+    scope === "wildcard"
+      ? wildcardRailEntries.length > 0 && listEntries.length > 0
+      : visibleKinds.size > 1;
 
   return createPortal(
     <div
@@ -15492,30 +16065,73 @@ function ComposerCommandPopover({
       className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
       style={adjustedStyle}
       role="listbox"
-      aria-label={scope === "leading" ? "Choose a command or prompt" : "Choose a prompt"}
+      aria-label={
+        scope === "wildcard"
+          ? "Choose a wildcard"
+          : scope === "leading"
+            ? "Choose a command or prompt"
+            : "Choose a prompt"
+      }
     >
       <div className={styles.composeBotListbox}>
         {commands.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
-            {scope === "leading" ? "No commands or prompts match." : "No prompts match."}
+            {scope === "wildcard"
+              ? "No wildcards match."
+              : scope === "leading"
+                ? "No commands or prompts match."
+                : "No prompts match."}
           </div>
         )}
-        {commands.map((command, index) => {
+        {wildcardRailEntries.length > 0 ? (
+          <div
+            className={styles.composeWildcardSlotRail}
+            role="group"
+            aria-label="Wildcard generators"
+          >
+            {wildcardRailEntries.map(({ command, index }) => {
+              const active = index === safeHighlight;
+              const description = commandPickDescription(command);
+              return (
+                <button
+                  key={command.id}
+                  type="button"
+                  data-command-index={index}
+                  data-command-kind="wildcard-slot"
+                  role="option"
+                  aria-selected={active ? "true" : "false"}
+                  className={`${styles.composeWildcardSlotButton} ${styles.composeCommandOption}`}
+                  title={description}
+                  onMouseEnter={() => onHighlightIndexChange(index)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    onPickCommand(command);
+                  }}
+                >
+                  <span className={styles.composeCommandSlash} aria-hidden="true">
+                    !
+                  </span>
+                  <span className={styles.composeBotOptionName}>{command.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {listEntries.map(({ command, index }, listIndex) => {
           const active = index === safeHighlight;
           const description = commandPickDescription(command);
-          const commandKind = isCommandCenterOperationalCommand(command) ? "command" : "prompt";
-          const previousCommand = index > 0 ? commands[index - 1] : null;
-          const previousKind =
-            previousCommand && isCommandCenterOperationalCommand(previousCommand)
-              ? "command"
-              : previousCommand
-                ? "prompt"
-                : null;
+          const commandKind = composerCommandPickKind(command);
+          const previousCommand = listIndex > 0 ? listEntries[listIndex - 1]?.command : null;
+          const previousKind = previousCommand ? composerCommandPickKind(previousCommand) : null;
           const sectionHeader =
             showSectionHeaders && commandKind !== previousKind
               ? commandKind === "command"
                 ? "Commands"
-                : "Prompts"
+                : commandKind === "wildcard-slot"
+                  ? "Wildcards"
+                  : commandKind === "wildcard"
+                  ? "Decks"
+                  : "Prompts"
               : null;
           return (
             <Fragment key={command.id}>
@@ -15544,7 +16160,7 @@ function ComposerCommandPopover({
                 }}
               >
                 <span className={styles.composeCommandSlash} aria-hidden="true">
-                  /
+                  {composerShortcutInvocationPrefix(command)}
                 </span>
                 <span className={styles.composeCommandText}>
                   <span className={styles.composeBotOptionName}>{command.name}</span>
@@ -15590,6 +16206,25 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
         onCollapse={props.onCollapsePromptShortcut}
         onOpenPrompt={props.onOpenCommandMention}
       />
+    );
+  }
+  if (props.messageRole === "user" && props.promptWildcards) {
+    const markdownProps: MessageBodyProps = {
+      ...props,
+      promptShortcut: undefined,
+      promptWildcards: undefined,
+    };
+    return (
+      <PromptWildcardRunMessage
+        promptWildcards={props.promptWildcards}
+        fullPrompt={fullSource}
+        colorIndex={props.promptShortcutColorIndex}
+        expanded={props.promptShortcutExpanded === true}
+        onToggle={props.onTogglePromptShortcut}
+        onCollapse={props.onCollapsePromptShortcut}
+      >
+        <MarkdownMessageBody {...markdownProps} />
+      </PromptWildcardRunMessage>
     );
   }
   return <MarkdownMessageBody {...props} />;
@@ -16084,6 +16719,7 @@ interface DesktopMarkdownComposerProps {
   writingAssistEnabled: boolean;
   onValueChange: (value: string) => void;
   onFocus: () => void;
+  onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
   submitDisabled: boolean;
   submitLabel: React.ReactNode;
   submitAriaLabel: string;
@@ -16097,6 +16733,8 @@ interface DesktopMarkdownComposerProps {
   commandPicks?: readonly CommandCenterCommand[];
   /** User prompt shortcuts shown in the composer autocomplete menu. */
   promptPicks?: readonly CommandCenterCommand[];
+  /** User wildcard decks shown in the composer autocomplete menu. */
+  wildcardPicks?: readonly CommandCenterCommand[];
   /** True while the dice button is generating a context-aware prompt. */
   generatingRandomPrompt?: boolean;
   /** When true, the editor is locked (read-only) and visually muted. */
@@ -16122,6 +16760,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       mentionBots,
       commandPicks = [],
       promptPicks = [],
+      wildcardPicks = [],
+      onGenerateWildcardSlotValue,
       generatingRandomPrompt = false,
       disabled = false,
       dismissPopoversSignal,
@@ -16138,6 +16778,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const mentionBotsRef = useRef(mentionBots);
     const commandPicksRef = useRef(commandPicks);
     const promptPicksRef = useRef(promptPicks);
+    const wildcardPicksRef = useRef(wildcardPicks);
     const [mentionUi, setMentionUi] = useState<{
       open: boolean;
       caretRect: DOMRect | null;
@@ -16153,6 +16794,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }>({ open: false, caretRect: null, filtered: [], highlight: 0, scope: "leading" });
     const mentionUiRef = useRef(mentionUi);
     const commandUiRef = useRef(commandUi);
+    const pendingWildcardSlotIdRef = useRef(0);
+    const pendingWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
+    const pendingWildcardDecorationsRef = useRef<PendingWildcardSlotDecoration[]>([]);
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
@@ -16163,11 +16807,64 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       promptPicksRef.current = promptPicks;
     }, [promptPicks]);
     useLayoutEffect(() => {
+      wildcardPicksRef.current = wildcardPicks;
+    }, [wildcardPicks]);
+    useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
     useLayoutEffect(() => {
       commandUiRef.current = commandUi;
     }, [commandUi]);
+
+    const pendingWildcardSlotsForDecoration = useCallback(
+      () => pendingWildcardDecorationsRef.current,
+      []
+    );
+
+    const refreshPendingWildcardSlotDecorations = useCallback((ed?: Editor | null) => {
+      const activeEditor = ed ?? editorRef.current;
+      if (!activeEditor) return;
+      try {
+        activeEditor.view.dispatch(
+          activeEditor.state.tr.setMeta("prismPendingWildcardSlots", Date.now())
+        );
+      } catch {
+        // The editor may be tearing down while an async wildcard response returns.
+      }
+    }, []);
+
+    const setPendingWildcardSlots = useCallback(
+      (
+        updater:
+          | PendingComposerWildcardSlot[]
+          | ((current: PendingComposerWildcardSlot[]) => PendingComposerWildcardSlot[])
+      ) => {
+        const current = pendingWildcardSlotsRef.current;
+        const next = typeof updater === "function" ? updater(current) : updater;
+        pendingWildcardSlotsRef.current = next;
+        pendingWildcardDecorationsRef.current = next.map((slot) => ({
+          from: slot.from,
+          to: slot.to,
+          key: slot.key,
+        }));
+        refreshPendingWildcardSlotDecorations();
+      },
+      [refreshPendingWildcardSlotDecorations]
+    );
+
+    const prunePendingWildcardSlots = useCallback(
+      (ed: Editor) => {
+        const current = pendingWildcardSlotsRef.current;
+        if (current.length === 0) return;
+        const next = current.filter(
+          (slot) => ed.state.doc.textBetween(slot.from, slot.to, "\n", "\n") === slot.fallback
+        );
+        if (next.length !== current.length) {
+          setPendingWildcardSlots(next);
+        }
+      },
+      [setPendingWildcardSlots]
+    );
 
     const dismissMentionPopover = useCallback(() => {
       const ed = editorRef.current;
@@ -16255,11 +16952,21 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         !leadingToken && promptPicksRef.current.length > 0
           ? getComposerShortcutFromEditor(ed, "inline")
           : null;
-      const token = leadingToken ?? promptToken;
-      const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+      const wildcardToken =
+        !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "wildcard")
+          : null;
+      const token = leadingToken ?? promptToken ?? wildcardToken;
+      const scope: ComposerShortcutScope = leadingToken
+        ? "leading"
+        : promptToken
+          ? "inline"
+          : "wildcard";
       const commands = leadingToken
         ? [...commandPicksRef.current, ...promptPicksRef.current]
-        : promptPicksRef.current;
+        : promptToken
+          ? promptPicksRef.current
+          : wildcardPicksRef.current;
       if (!token || !commands.length) {
         setCommandUi((s) =>
           s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -16269,7 +16976,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       setMentionUi((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
-      const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
+      const filtered =
+        scope === "wildcard"
+          ? filterWildcardPicksForShortcutQuery(commands, token.query)
+          : filterCommandPicksForShortcutQuery(commands, token.query);
       const view = getMountedEditorView(ed);
       if (!view) {
         setCommandUi((s) =>
@@ -16315,7 +17025,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         promptPicksRef.current.length > 0
           ? getComposerShortcutFromEditor(ed, "inline")
           : null;
-      if (leadingToken || promptToken) {
+      const wildcardToken =
+        wildcardPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "wildcard")
+          : null;
+      if (leadingToken || promptToken || wildcardToken) {
         syncCommandPopover(ed);
         return;
       }
@@ -16324,6 +17038,51 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
     }, [syncCommandPopover, syncMentionPopover]);
+
+    const removePendingWildcardSlot = useCallback(
+      (id: string) => {
+        setPendingWildcardSlots((current) => current.filter((slot) => slot.id !== id));
+      },
+      [setPendingWildcardSlots]
+    );
+
+    const generatePendingWildcardSlot = useCallback(
+      (pending: PendingComposerWildcardSlot) => {
+        if (!onGenerateWildcardSlotValue) {
+          removePendingWildcardSlot(pending.id);
+          return;
+        }
+        void (async () => {
+          try {
+            const value = await onGenerateWildcardSlotValue(pending.key);
+            const ed = editorRef.current;
+            if (ed) {
+              replacePendingWildcardSlotInEditor(ed, pending, value);
+            }
+          } catch {
+            // Leave the literal {KEY} fallback in place for send-time wildcard fill.
+          } finally {
+            removePendingWildcardSlot(pending.id);
+          }
+        })();
+      },
+      [onGenerateWildcardSlotValue, removePendingWildcardSlot]
+    );
+
+    const applyComposerCommandPickInEditor = useCallback(
+      (ed: Editor, command: CommandCenterCommand, scope: ComposerShortcutScope): boolean => {
+        if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
+          const id = `wildcard-slot-${++pendingWildcardSlotIdRef.current}`;
+          const pending = insertPendingWildcardSlotInEditor(ed, command, scope, id);
+          if (!pending) return false;
+          setPendingWildcardSlots((current) => [...current, pending]);
+          generatePendingWildcardSlot(pending);
+          return true;
+        }
+        return insertComposerShortcutInEditor(ed, command, scope);
+      },
+      [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
+    );
 
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
@@ -16337,6 +17096,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const promptNamesForHighlight = useMemo(
       () => promptPicks.flatMap((command) => commandInvocationNames(command)),
       [promptPicks]
+    );
+    const wildcardNamesForHighlight = useMemo(
+      () =>
+        wildcardPicks
+          .filter(isComposerWildcardDeckPick)
+          .flatMap((command) => commandInvocationNames(command)),
+      [wildcardPicks]
     );
 
     const editor = useEditor(
@@ -16355,6 +17121,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           PrismDevCommandHighlight.configure({
             commandNames: commandNamesForHighlight,
             promptNames: promptNamesForHighlight,
+            wildcardNames: wildcardNamesForHighlight,
+            pendingWildcardSlots: pendingWildcardSlotsForDecoration,
           }),
           Placeholder.configure({ placeholder }),
           Markdown.configure({
@@ -16428,7 +17196,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 pos,
                 chipKind,
                 commandNamesForHighlight,
-                promptNamesForHighlight
+                promptNamesForHighlight,
+                wildcardNamesForHighlight
               )
             ) {
               return false;
@@ -16449,6 +17218,17 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               !(event as globalThis.KeyboardEvent).isComposing
             ) {
               if (applyPrismBotLinkBackspace(activeEditor)) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyWildcardDeckChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  wildcardNamesForHighlight
+                )
+              ) {
                 event.preventDefault();
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
@@ -16491,6 +17271,17 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 return true;
               }
               if (
+                applyWildcardDeckChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  wildcardNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
                 applyPromptShortcutChipBoundaryDelete(
                   activeEditor,
                   "forward",
@@ -16522,6 +17313,22 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               !event.metaKey &&
               !(event as globalThis.KeyboardEvent).isComposing
             ) {
+              if (
+                commandUiRef.current.open &&
+                commandUiRef.current.scope === "wildcard" &&
+                commandUiRef.current.filtered.length > 0
+              ) {
+                const nextHighlight = wildcardRailHorizontalHighlight(
+                  commandUiRef.current.filtered,
+                  commandUiRef.current.highlight,
+                  event.key === "ArrowLeft" ? -1 : 1
+                );
+                if (nextHighlight !== null) {
+                  event.preventDefault();
+                  setCommandUi((s) => ({ ...s, highlight: nextHighlight }));
+                  return true;
+                }
+              }
               const dir = event.key === "ArrowLeft" ? "left" : "right";
               if (applyPrismBotLinkArrowKey(activeEditor, dir)) {
                 event.preventDefault();
@@ -16533,7 +17340,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   activeEditor,
                   dir,
                   commandNamesForHighlight,
-                  promptNamesForHighlight
+                  promptNamesForHighlight,
+                  wildcardNamesForHighlight
                 )
               ) {
                 event.preventDefault();
@@ -16595,13 +17403,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 const hi =
                   ((commandUiRef.current.highlight % filtered.length) + filtered.length) %
                   filtered.length;
-                if (
-                  insertComposerShortcutInEditor(
-                    activeEditor,
-                    filtered[hi]!,
-                    commandUiRef.current.scope
-                  )
-                ) {
+                if (applyComposerCommandPickInEditor(
+                  activeEditor,
+                  filtered[hi]!,
+                  commandUiRef.current.scope
+                )) {
                   setCommandUi((s) =>
                     s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                   );
@@ -16642,10 +17448,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               ) {
                 event.preventDefault();
                 const delta = event.key === "ArrowDown" ? 1 : -1;
-                const len = commandUiRef.current.filtered.length;
+                const filtered = commandUiRef.current.filtered;
                 setCommandUi((s) => ({
                   ...s,
-                  highlight: (s.highlight + delta + len) % len,
+                  highlight: wildcardPopoverVerticalHighlight(
+                    filtered,
+                    s.highlight,
+                    delta,
+                    s.scope
+                  ),
                 }));
                 return true;
               }
@@ -16700,6 +17511,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           },
         },
         onUpdate: ({ editor: ed }) => {
+          prunePendingWildcardSlots(ed);
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
           queueMicrotask(() => {
@@ -16720,8 +17532,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       [
         placeholder,
         syncComposerPopovers,
+        applyComposerCommandPickInEditor,
+        pendingWildcardSlotsForDecoration,
+        prunePendingWildcardSlots,
         commandNamesForHighlight,
         promptNamesForHighlight,
+        wildcardNamesForHighlight,
       ]
     );
 
@@ -16977,7 +17793,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           onPickCommand={(command) => {
             const ed = editorRef.current;
             if (!ed) return;
-            if (insertComposerShortcutInEditor(ed, command, commandUiRef.current.scope)) {
+            if (applyComposerCommandPickInEditor(ed, command, commandUiRef.current.scope)) {
               setCommandUi((s) =>
                 s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
               );
@@ -17007,12 +17823,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     submitIconOnly,
     onChange,
     onValueChange,
+    onGenerateWildcardSlotValue,
     onFocus,
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
     commandPicks = [],
     promptPicks = [],
+    wildcardPicks = [],
     dismissPopoversSignal,
   },
   ref
@@ -17023,7 +17841,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const mentionBotsRef = useRef(mentionBots);
   const commandPicksRef = useRef(commandPicks);
   const promptPicksRef = useRef(promptPicks);
+  const wildcardPicksRef = useRef(wildcardPicks);
+  const textareaValueRef = useRef(value);
   const pendingTextareaCaretRef = useRef<number | null>(null);
+  const pendingTextareaWildcardIdRef = useRef(0);
+  const pendingTextareaWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
   const [taMention, setTaMention] = useState<{
     open: boolean;
     caretRect: DOMRect | null;
@@ -17052,6 +17874,12 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     promptPicksRef.current = promptPicks;
   }, [promptPicks]);
   useLayoutEffect(() => {
+    wildcardPicksRef.current = wildcardPicks;
+  }, [wildcardPicks]);
+  useLayoutEffect(() => {
+    textareaValueRef.current = value;
+  }, [value]);
+  useLayoutEffect(() => {
     taMentionRef.current = taMention;
   }, [taMention]);
   useLayoutEffect(() => {
@@ -17070,6 +17898,88 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     );
   }, []);
 
+  const removePendingTextareaWildcardSlot = useCallback((id: string) => {
+    pendingTextareaWildcardSlotsRef.current =
+      pendingTextareaWildcardSlotsRef.current.filter((slot) => slot.id !== id);
+  }, []);
+
+  const generatePendingTextareaWildcardSlot = useCallback(
+    (pending: PendingComposerWildcardSlot) => {
+      if (!onGenerateWildcardSlotValue) {
+        removePendingTextareaWildcardSlot(pending.id);
+        return;
+      }
+      void (async () => {
+        try {
+          const value = (await onGenerateWildcardSlotValue(pending.key)).trim();
+          if (!value) return;
+          const current = textareaValueRef.current;
+          if (current.slice(pending.from, pending.to) !== pending.fallback) return;
+          const nextValue = `${current.slice(0, pending.from)}${value}${current.slice(
+            pending.to
+          )}`;
+          textareaValueRef.current = nextValue;
+          pendingTextareaCaretRef.current = pending.from + value.length;
+          onValueChange(nextValue);
+        } catch {
+          // Leave the literal {KEY} fallback in place for send-time wildcard fill.
+        } finally {
+          removePendingTextareaWildcardSlot(pending.id);
+        }
+      })();
+    },
+    [onGenerateWildcardSlotValue, onValueChange, removePendingTextareaWildcardSlot]
+  );
+
+  const applyTextareaCommandPick = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      command: CommandCenterCommand,
+      scope: ComposerShortcutScope
+    ): boolean => {
+      if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
+        const key = composerTrueWildcardSlotKey(command);
+        if (!key) return false;
+        const fallback = composerTrueWildcardSlotFallback(command);
+        const next = replaceTextareaComposerShortcutWithText(
+          el.value,
+          el.selectionStart ?? 0,
+          `${fallback} `,
+          scope
+        );
+        if (!next) return false;
+        const pending: PendingComposerWildcardSlot = {
+          id: `textarea-wildcard-slot-${++pendingTextareaWildcardIdRef.current}`,
+          key,
+          fallback,
+          from: next.start,
+          to: next.start + fallback.length,
+        };
+        pendingTextareaWildcardSlotsRef.current = [
+          ...pendingTextareaWildcardSlotsRef.current,
+          pending,
+        ];
+        textareaValueRef.current = next.value;
+        pendingTextareaCaretRef.current = next.caret;
+        onValueChange(next.value);
+        generatePendingTextareaWildcardSlot(pending);
+        return true;
+      }
+      const next = replaceTextareaComposerShortcut(
+        el.value,
+        el.selectionStart ?? 0,
+        command,
+        scope
+      );
+      if (!next) return false;
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      return true;
+    },
+    [generatePendingTextareaWildcardSlot, onGenerateWildcardSlotValue, onValueChange]
+  );
+
   useEffect(() => {
     if (dismissPopoversSignal === undefined) return;
     dismissTaMentionPopover();
@@ -17086,11 +17996,21 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       !leadingToken && promptPicksRef.current.length > 0
         ? getComposerShortcutFromTextarea(el.value, caret, "inline")
         : null;
-    const token = leadingToken ?? promptToken;
-    const scope: ComposerShortcutScope = leadingToken ? "leading" : "inline";
+    const wildcardToken =
+      !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard")
+        : null;
+    const token = leadingToken ?? promptToken ?? wildcardToken;
+    const scope: ComposerShortcutScope = leadingToken
+      ? "leading"
+      : promptToken
+        ? "inline"
+        : "wildcard";
     const commands = leadingToken
       ? [...commandPicksRef.current, ...promptPicksRef.current]
-      : promptPicksRef.current;
+      : promptToken
+        ? promptPicksRef.current
+        : wildcardPicksRef.current;
     if (!token || !commands.length) {
       setTaCommand((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -17100,7 +18020,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     setTaMention((s) =>
       s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
     );
-    const filtered = filterCommandPicksForShortcutQuery(commands, token.query);
+    const filtered =
+      scope === "wildcard"
+        ? filterWildcardPicksForShortcutQuery(commands, token.query)
+        : filterCommandPicksForShortcutQuery(commands, token.query);
     const caretRect = getTextareaCaretClientRect(el);
     const anchorRect = caretRect
       ? getComposerCommandMenuAnchorRect(composeEditorShellRef.current, caretRect)
@@ -17216,6 +18139,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           placeholder={effectivePlaceholder}
           writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
+          onGenerateWildcardSlotValue={onGenerateWildcardSlotValue}
           onFocus={onFocus}
           submitDisabled={submitDisabled}
           submitLabel={submitLabel}
@@ -17226,6 +18150,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           mentionBots={mentionBots}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
+          wildcardPicks={wildcardPicks}
           generatingRandomPrompt={generatingRandomPrompt}
           disabled={generatingRandomPrompt}
           dismissPopoversSignal={dismissPopoversSignal}
@@ -17313,6 +18238,21 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(commandApplied.value);
                     return;
                   }
+                  const wildcardApplied = applyTextareaWildcardDeckChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "backward",
+                    wildcardPicksRef.current
+                      .filter(isComposerWildcardDeckPick)
+                      .flatMap((command) => commandInvocationNames(command))
+                  );
+                  if (wildcardApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = wildcardApplied.caret;
+                    onValueChange(wildcardApplied.value);
+                    return;
+                  }
                   const promptApplied = applyTextareaPromptShortcutChipDelete(
                     el.value,
                     start,
@@ -17363,6 +18303,21 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     onValueChange(commandApplied.value);
                     return;
                   }
+                  const wildcardApplied = applyTextareaWildcardDeckChipDelete(
+                    el.value,
+                    start,
+                    end,
+                    "forward",
+                    wildcardPicksRef.current
+                      .filter(isComposerWildcardDeckPick)
+                      .flatMap((command) => commandInvocationNames(command))
+                  );
+                  if (wildcardApplied) {
+                    event.preventDefault();
+                    pendingTextareaCaretRef.current = wildcardApplied.caret;
+                    onValueChange(wildcardApplied.value);
+                    return;
+                  }
                   const promptApplied = applyTextareaPromptShortcutChipDelete(
                     el.value,
                     start,
@@ -17387,6 +18342,22 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   !event.metaKey &&
                   !event.nativeEvent.isComposing
                 ) {
+                  if (
+                    taCommandRef.current.open &&
+                    taCommandRef.current.scope === "wildcard" &&
+                    taCommandRef.current.filtered.length > 0
+                  ) {
+                    const nextHighlight = wildcardRailHorizontalHighlight(
+                      taCommandRef.current.filtered,
+                      taCommandRef.current.highlight,
+                      event.key === "ArrowLeft" ? -1 : 1
+                    );
+                    if (nextHighlight !== null) {
+                      event.preventDefault();
+                      setTaCommand((s) => ({ ...s, highlight: nextHighlight }));
+                      return;
+                    }
+                  }
                   const start = el.selectionStart ?? 0;
                   const end = el.selectionEnd ?? 0;
                   const dir = event.key === "ArrowLeft" ? "left" : "right";
@@ -17449,15 +18420,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   const hi =
                     ((taCommandRef.current.highlight % filtered.length) + filtered.length) %
                     filtered.length;
-                  const next = replaceTextareaComposerShortcut(
-                    el.value,
-                    el.selectionStart ?? 0,
+                  if (applyTextareaCommandPick(
+                    el,
                     filtered[hi]!,
                     taCommandRef.current.scope
-                  );
-                  if (next) {
-                    pendingTextareaCaretRef.current = next.caret;
-                    onValueChange(next.value);
+                  )) {
                     setTaCommand((s) =>
                       s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
                     );
@@ -17497,10 +18464,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 ) {
                   event.preventDefault();
                   const delta = event.key === "ArrowDown" ? 1 : -1;
-                  const len = taCommandRef.current.filtered.length;
+                  const filtered = taCommandRef.current.filtered;
                   setTaCommand((s) => ({
                     ...s,
-                    highlight: (s.highlight + delta + len) % len,
+                    highlight: wildcardPopoverVerticalHighlight(
+                      filtered,
+                      s.highlight,
+                      delta,
+                      s.scope
+                    ),
                   }));
                 }
                 if (
@@ -17582,15 +18554,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             onPickCommand={(command) => {
               const el = textareaRef.current;
               if (!el) return;
-              const next = replaceTextareaComposerShortcut(
-                el.value,
-                el.selectionStart ?? 0,
-                command,
-                taCommandRef.current.scope
-              );
-              if (!next) return;
-              pendingTextareaCaretRef.current = next.caret;
-              onValueChange(next.value);
+              if (!applyTextareaCommandPick(el, command, taCommandRef.current.scope)) return;
               setTaCommand((s) =>
                 s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
               );
@@ -17628,6 +18592,8 @@ function optionalScaleLabel(
 
 function BotProfileScaleControl({
   label,
+  infoId,
+  info,
   value,
   labels,
   leftLabel,
@@ -17635,6 +18601,8 @@ function BotProfileScaleControl({
   onChange,
 }: {
   label: string;
+  infoId?: string;
+  info?: string;
   value: BotProfileScaleValue | null;
   labels: readonly [string, string, string, string, string];
   leftLabel: string;
@@ -17644,7 +18612,18 @@ function BotProfileScaleControl({
   return (
     <div className={styles.botProfileScaleControl}>
       <div className={styles.botProfileScaleHeader}>
-        <span>{label}</span>
+        <span className={styles.controlLabelWithInfo}>
+          <span>{label}</span>
+          {info && infoId ? (
+            <PanelSectionInfo
+              id={infoId}
+              label={`About ${label}`}
+              variant="control"
+            >
+              {info}
+            </PanelSectionInfo>
+          ) : null}
+        </span>
         <strong>{optionalScaleLabel(value, labels)}</strong>
       </div>
       <input
@@ -17917,6 +18896,8 @@ function BotProfileBuilder({
             </div>
             <BotProfileScaleControl
               label="Openness"
+              infoId="bot-profile-scale-info-openness"
+              info="Sets how imaginative, curious, and novelty-seeking this bot tends to feel."
               value={profile.core.openness}
               labels={["Grounded", "Practical", "Balanced", "Imaginative", "Highly exploratory"]}
               leftLabel="Grounded"
@@ -17925,6 +18906,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Conscientiousness"
+              infoId="bot-profile-scale-info-conscientiousness"
+              info="Sets how structured, careful, and planful this bot tends to be."
               value={profile.core.conscientiousness}
               labels={["Spontaneous", "Loose", "Balanced", "Methodical", "Highly organized"]}
               leftLabel="Spontaneous"
@@ -17933,6 +18916,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Extraversion"
+              infoId="bot-profile-scale-info-extraversion"
+              info="Sets how quiet, expressive, or energetic this bot feels in conversation."
               value={profile.core.extraversion}
               labels={["Reserved", "Quiet", "Balanced", "Expressive", "Highly energetic"]}
               leftLabel="Reserved"
@@ -17941,6 +18926,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Agreeableness"
+              infoId="bot-profile-scale-info-agreeableness"
+              info="Sets how much this bot cooperates, challenges, or gently pushes back."
               value={profile.core.agreeableness}
               labels={["Challenging", "Questioning", "Balanced", "Cooperative", "Highly accommodating"]}
               leftLabel="Challenging"
@@ -17949,6 +18936,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Emotional baseline"
+              infoId="bot-profile-scale-info-emotional-baseline"
+              info="Sets whether this bot feels more reactive, sensitive, steady, or composed by default."
               value={profile.core.emotionalStability}
               labels={["Reactive", "Sensitive", "Balanced", "Steady", "Very composed"]}
               leftLabel="Reactive"
@@ -18027,6 +19016,8 @@ function BotProfileBuilder({
             </div>
             <BotProfileScaleControl
               label="Political perspective"
+              infoId="bot-profile-scale-info-political-perspective"
+              info="Sets the bot's broad fictional or conversational political lean when that context matters."
               value={profile.worldview.politicalView}
               labels={["Left-leaning", "Somewhat left", "Mixed / centrist", "Somewhat right", "Right-leaning"]}
               leftLabel="Left"
@@ -18035,6 +19026,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Outlook"
+              infoId="bot-profile-scale-info-outlook"
+              info="Sets whether the bot's worldview skews skeptical, balanced, hopeful, or bright."
               value={profile.worldview.optimism}
               labels={["Skeptical", "Cautious", "Balanced", "Hopeful", "Radiantly optimistic"]}
               leftLabel="Skeptical"
@@ -18043,6 +19036,8 @@ function BotProfileBuilder({
             />
             <BotProfileScaleControl
               label="Tradition vs change"
+              infoId="bot-profile-scale-info-tradition"
+              info="Sets whether the bot favors new approaches, established customs, or a balance of both."
               value={profile.worldview.tradition}
               labels={["Change-first", "Open to change", "Balanced", "Tradition-aware", "Tradition-first"]}
               leftLabel="Change"
@@ -18198,7 +19193,16 @@ function BotProfileBuilder({
                             />
                           </label>
                           <label className={styles.botProfileBirthdayControl}>
-                            <span>Era</span>
+                            <span className={styles.controlLabelWithInfo}>
+                              <span>Era</span>
+                              <PanelSectionInfo
+                                id="bot-profile-birthday-era-info"
+                                label="About birth era"
+                                variant="control"
+                              >
+                                Choose whether the year is interpreted as AD or BC for historical and fictional timelines.
+                              </PanelSectionInfo>
+                            </span>
                             <select
                               className={styles.botProfileBirthdayEraSelect}
                               value={birthEra}
@@ -18639,6 +19643,7 @@ function HomeContent(): React.JSX.Element {
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
+    zenMoodSensitivity,
   } = effectiveZenModeSettings;
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
@@ -18755,6 +19760,9 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [zenPreviousContext, setZenPreviousContext] =
+    useState<ZenPreviousContextSummary | null>(null);
+  const [zenSessionMemories, setZenSessionMemories] = useState<ZenSessionMemoryItem[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
     () => new Set()
@@ -19175,14 +20183,21 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterCommands, setCommandCenterCommands] = useState<CommandCenterCommand[]>(
     () => normalizeCommandCenterState(null).commands
   );
+  const [commandCenterWildcardDecks, setCommandCenterWildcardDecks] = useState<
+    CommandCenterWildcardDeck[]
+  >(() => normalizeCommandCenterState(null).wildcardDecks);
   const commandCenterCommandById = useMemo(
     () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
     [commandCenterCommands]
   );
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
+  const [commandCenterSelectedWildcardDeckId, setCommandCenterSelectedWildcardDeckId] =
+    useState<string | null>(null);
   const [commandCenterDraft, setCommandCenterDraft] =
     useState<CommandCenterEditableDraft | null>(null);
+  const [commandCenterWildcardDraft, setCommandCenterWildcardDraft] =
+    useState<CommandCenterWildcardDeckDraft | null>(null);
   const [commandCenterSaveNotice, setCommandCenterSaveNotice] = useState<string | null>(null);
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
     useState<string | null>(null);
@@ -19763,7 +20778,6 @@ function HomeContent(): React.JSX.Element {
   const [importBotFileBusyGlyph, setImportBotFileBusyGlyph] = useState<BotGlyphName>(DEFAULT_BOT_GLYPH);
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
-  const [devSlashCommandsEnabled, setDevSlashCommandsEnabledState] = useState(false);
   const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
   const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
     useState(false);
@@ -19789,19 +20803,6 @@ function HomeContent(): React.JSX.Element {
         window.localStorage.setItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY, "1");
       } else {
         window.localStorage.removeItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistDevSlashCommandsEnabled = useCallback((next: boolean) => {
-    setDevSlashCommandsEnabledState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY);
       }
     } catch {
       // private mode / quota — preference just won't survive reload
@@ -19842,9 +20843,6 @@ function HomeContent(): React.JSX.Element {
       setDevChatMetricsEnabledState(
         window.localStorage.getItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY) === "1"
       );
-      setDevSlashCommandsEnabledState(
-        window.localStorage.getItem(PRISM_DEV_SLASH_COMMANDS_STORAGE_KEY) === "1"
-      );
       setDevDebugComposerEnabledState(
         window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
       );
@@ -19854,7 +20852,6 @@ function HomeContent(): React.JSX.Element {
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
       setDevChatMetricsEnabledState(false);
-      setDevSlashCommandsEnabledState(false);
       setDevDebugComposerEnabledState(false);
       setDevShowCompactedSummaryInChatState(false);
     }
@@ -19870,25 +20867,19 @@ function HomeContent(): React.JSX.Element {
     () => commandCenterCommands.filter(isCommandCenterPromptShortcut),
     [commandCenterCommands]
   );
-  const runtimeDevCommandPicks = useMemo(
+  const composerWildcardDeckPicks = useMemo(
     () =>
-      devSlashCommandsEnabled
-        ? [
-            createRuntimeCommandCenterCommand(
-              "forget",
-              "Forget memories for the current bot, or the Zen/default memory bucket."
-            ),
-            createRuntimeCommandCenterCommand(
-              "forget-all",
-              "Hard-reset all bot/default memories, summaries, and recall state."
-            ),
-          ]
-        : [],
-    [devSlashCommandsEnabled]
+      [
+        ...BUILT_IN_WILDCARD_SLOT_PICKS,
+        ...commandCenterWildcardDecks
+          .filter((deck) => deck.values.length > 0)
+          .map(commandCenterWildcardDeckPick),
+      ],
+    [commandCenterWildcardDecks]
   );
   const composerCommandPicks = useMemo(
-    () => [...commandCenterOperationalPicks, ...runtimeDevCommandPicks],
-    [commandCenterOperationalPicks, runtimeDevCommandPicks]
+    () => commandCenterOperationalPicks,
+    [commandCenterOperationalPicks]
   );
   /** Confirms delete-bot from the Bots panel header (alertdialog, not window.confirm). */
   const [panelBotDeleteConfirm, setPanelBotDeleteConfirm] = useState<{
@@ -20445,6 +21436,7 @@ function HomeContent(): React.JSX.Element {
     (commandId: string) => {
       openRightPanel("command-center");
       setCommandCenterSelectedCommandId(commandId);
+      setCommandCenterSelectedWildcardDeckId(null);
       setCommandCenterSpecsCommandId(commandId);
     },
     [openRightPanel]
@@ -21688,7 +22680,7 @@ function HomeContent(): React.JSX.Element {
       ),
     [modelCatalog, settings]
   );
-  function renderZenAtmosphereModelRow(): React.ReactNode {
+  function renderZenAtmosphereModelRow(infoIdPrefix = "zen-atmosphere"): React.ReactNode {
     if (!settings) return null;
     return (
       <div className={styles.settingsModelPairRow}>
@@ -21696,7 +22688,16 @@ function HomeContent(): React.JSX.Element {
           <span>Atmosphere wallpaper</span>
         </div>
         <label className={styles.settingsModelLane}>
-          <span className={styles.settingsModelLaneLabel}>Offline model</span>
+          <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+            <span>Offline model</span>
+            <PanelSectionInfo
+              id={`${infoIdPrefix}-offline-model-info`}
+              label="About Atmosphere offline model"
+              variant="control"
+            >
+              Selects the local image model used for generated Zen Atmosphere wallpapers.
+            </PanelSectionInfo>
+          </span>
           <ComposerModelPicker
             value={visibleLocalImageModelSelectValue(
               settings.preferredZenWallpaperLocalImageModel
@@ -21733,7 +22734,16 @@ function HomeContent(): React.JSX.Element {
           />
         </label>
         <label className={styles.settingsModelLane}>
-          <span className={styles.settingsModelLaneLabel}>Online model</span>
+          <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+            <span>Online model</span>
+            <PanelSectionInfo
+              id={`${infoIdPrefix}-online-model-info`}
+              label="About Atmosphere online model"
+              variant="control"
+            >
+              Selects the online image model used for Zen Atmosphere when online image generation is available.
+            </PanelSectionInfo>
+          </span>
           <ComposerModelPicker
             value={visibleOnlineImageModelIdOrEmpty(
               settings.preferredZenWallpaperOpenAiImageModel
@@ -21807,7 +22817,16 @@ function HomeContent(): React.JSX.Element {
       >
         <div className={styles.settingsSystemModelRow}>
           <div className={styles.settingsModelField}>
-            <span>Prism internal LLM</span>
+            <span className={styles.controlLabelWithInfo}>
+              <span>Prism internal LLM</span>
+              <PanelSectionInfo
+                id={`${variant}-control-info-prism-internal-llm`}
+                label="About Prism internal LLM"
+                variant="control"
+              >
+                Chooses the local model Prism uses for internal tasks like titles, summaries, routing, and helper inference.
+              </PanelSectionInfo>
+            </span>
             <ComposerModelPicker
               value={(settings.prismDefaultLlmModel ?? "").trim()}
               onChange={(nextValue) => {
@@ -21830,7 +22849,16 @@ function HomeContent(): React.JSX.Element {
             />
           </div>
           <div className={styles.settingsModelField}>
-            <span>Image-request LLM</span>
+            <span className={styles.controlLabelWithInfo}>
+              <span>Image-request LLM</span>
+              <PanelSectionInfo
+                id={`${variant}-control-info-image-request-llm`}
+                label="About image-request LLM"
+                variant="control"
+              >
+                Chooses the local chat model used when a conversation turn may call the in-thread image tool.
+              </PanelSectionInfo>
+            </span>
             <ComposerModelPicker
               value={(settings.prismImageToolLlmModel ?? "").trim()}
               onChange={(nextValue) => {
@@ -21865,7 +22893,16 @@ function HomeContent(): React.JSX.Element {
               <span>Chat replies</span>
             </div>
             <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+                <span>Offline model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-default-offline-chat-model`}
+                  label="About default offline chat model"
+                  variant="control"
+                >
+                  Sets the default local chat model for normal assistant replies.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visibleModelChoiceForProvider(
                   modelCatalog,
@@ -21896,7 +22933,16 @@ function HomeContent(): React.JSX.Element {
               />
             </label>
             <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+                <span>Online model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-default-online-chat-model`}
+                  label="About default online chat model"
+                  variant="control"
+                >
+                  Sets the default online chat model when the response mode is online.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visiblePreferredOnlineModelChoice(
                   modelCatalog,
@@ -21932,7 +22978,16 @@ function HomeContent(): React.JSX.Element {
               <span>Image generation</span>
             </div>
             <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Offline model</span>
+              <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+                <span>Offline model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-default-offline-image-model`}
+                  label="About default offline image model"
+                  variant="control"
+                >
+                  Sets the default local image model used for image generation.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visibleLocalImageModelSelectValue(settings.preferredLocalImageModel)}
                 disabled={localImageModelCatalogEntries.length === 0}
@@ -21965,7 +23020,16 @@ function HomeContent(): React.JSX.Element {
               />
             </label>
             <label className={styles.settingsModelLane}>
-              <span className={styles.settingsModelLaneLabel}>Online model</span>
+              <span className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}>
+                <span>Online model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-default-online-image-model`}
+                  label="About default online image model"
+                  variant="control"
+                >
+                  Sets the default online image model when online image generation is available.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visibleOnlineImageModelIdOrEmpty(settings.preferredOpenAiImageModel)}
                 onChange={(next) => {
@@ -22014,14 +23078,23 @@ function HomeContent(): React.JSX.Element {
             </label>
           </div>
 
-          {includeZenAtmosphere && renderZenAtmosphereModelRow()}
+          {includeZenAtmosphere && renderZenAtmosphereModelRow(`${variant}-zen-atmosphere`)}
         </div>
 
         <div className={styles.settingsFallbackControls}>
           <div className={styles.settingsFallbackTitle}>Copyright fallback</div>
           <div className={styles.settingsFallbackGrid}>
             <div className={styles.settingsModelField}>
-              <span>Text chat offline model</span>
+              <span className={styles.controlLabelWithInfo}>
+                <span>Text chat offline model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-text-fallback-model`}
+                  label="About text fallback model"
+                  variant="control"
+                >
+                  Optional local model used when a primary online text reply is blocked or refused.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visibleOptionalModelChoiceForProvider(
                   modelCatalog,
@@ -22059,7 +23132,16 @@ function HomeContent(): React.JSX.Element {
               />
             </div>
             <div className={styles.settingsModelField}>
-              <span>Images offline model</span>
+              <span className={styles.controlLabelWithInfo}>
+                <span>Images offline model</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-image-fallback-model`}
+                  label="About image fallback model"
+                  variant="control"
+                >
+                  Optional local image model used when the primary image request needs an offline fallback.
+                </PanelSectionInfo>
+              </span>
               <ComposerModelPicker
                 value={visibleLocalImageModelSelectValue(
                   settings.lenientLocalImageFallbackModel
@@ -22093,7 +23175,16 @@ function HomeContent(): React.JSX.Element {
         {includeZenAtmosphere && (
           <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
             <span className={styles.settingsRangeHeader}>
-              <span>Atmosphere wallpaper opacity</span>
+              <span className={styles.controlLabelWithInfo}>
+                <span>Atmosphere wallpaper opacity</span>
+                <PanelSectionInfo
+                  id={`${variant}-control-info-atmosphere-wallpaper-opacity`}
+                  label="About Atmosphere wallpaper opacity"
+                  variant="control"
+                >
+                  Controls how strongly the generated Atmosphere wallpaper shows behind Zen text.
+                </PanelSectionInfo>
+              </span>
               <span className={styles.settingsRangeValue}>
                 {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
               </span>
@@ -22751,6 +23842,7 @@ function HomeContent(): React.JSX.Element {
       const defaults = normalizeCommandCenterState(null);
       setCommandCenterPreferredModel(defaults.preferredModel);
       setCommandCenterCommands(defaults.commands);
+      setCommandCenterWildcardDecks(defaults.wildcardDecks);
       return;
     }
     if (typeof window === "undefined") return;
@@ -22760,10 +23852,12 @@ function HomeContent(): React.JSX.Element {
       const normalized = normalizeCommandCenterState(parsed);
       setCommandCenterPreferredModel(normalized.preferredModel);
       setCommandCenterCommands(normalized.commands);
+      setCommandCenterWildcardDecks(normalized.wildcardDecks);
     } catch {
       const defaults = normalizeCommandCenterState(null);
       setCommandCenterPreferredModel(defaults.preferredModel);
       setCommandCenterCommands(defaults.commands);
+      setCommandCenterWildcardDecks(defaults.wildcardDecks);
     }
   }, [user]);
 
@@ -22773,6 +23867,7 @@ function HomeContent(): React.JSX.Element {
       schema: "prism-command-center-v1",
       preferredModel: commandCenterPreferredModel,
       commands: commandCenterCommands,
+      wildcardDecks: commandCenterWildcardDecks,
     });
     try {
       window.localStorage.setItem(
@@ -22781,12 +23876,13 @@ function HomeContent(): React.JSX.Element {
           schema: "prism-command-center-v1",
           preferredModel: normalized.preferredModel,
           commands: normalized.commands,
+          wildcardDecks: normalized.wildcardDecks,
         })
       );
     } catch {
       // Non-fatal: command center still works for this page session.
     }
-  }, [commandCenterCommands, commandCenterPreferredModel, user]);
+  }, [commandCenterCommands, commandCenterPreferredModel, commandCenterWildcardDecks, user]);
 
   useEffect(() => {
     if (!commandCenterSelectedCommandId) return;
@@ -22795,6 +23891,14 @@ function HomeContent(): React.JSX.Element {
     );
     if (!stillExists) setCommandCenterSelectedCommandId(null);
   }, [commandCenterCommands, commandCenterSelectedCommandId]);
+
+  useEffect(() => {
+    if (!commandCenterSelectedWildcardDeckId) return;
+    const stillExists = commandCenterWildcardDecks.some(
+      (deck) => deck.id === commandCenterSelectedWildcardDeckId
+    );
+    if (!stillExists) setCommandCenterSelectedWildcardDeckId(null);
+  }, [commandCenterWildcardDecks, commandCenterSelectedWildcardDeckId]);
 
   useEffect(() => {
     const selectedCommand =
@@ -22814,6 +23918,18 @@ function HomeContent(): React.JSX.Element {
     });
     setCommandCenterSaveNotice(null);
   }, [commandCenterCommands, commandCenterSelectedCommandId]);
+
+  useEffect(() => {
+    const selectedDeck =
+      commandCenterWildcardDecks.find((deck) => deck.id === commandCenterSelectedWildcardDeckId) ??
+      null;
+    if (!selectedDeck) {
+      setCommandCenterWildcardDraft(null);
+      return;
+    }
+    setCommandCenterWildcardDraft(wildcardDeckToDraft(selectedDeck));
+    setCommandCenterSaveNotice(null);
+  }, [commandCenterWildcardDecks, commandCenterSelectedWildcardDeckId]);
 
   useEffect(() => {
     if (!commandCenterSpecsCommandId) return;
@@ -23255,7 +24371,7 @@ function HomeContent(): React.JSX.Element {
     const colorIndexes = new Map<string, number>();
     let promptShortcutIndex = 0;
     for (const message of visibleDetailMessages) {
-      if (!message.promptShortcut) continue;
+      if (!message.promptShortcut && !message.promptWildcards) continue;
       colorIndexes.set(message.id, promptShortcutIndex);
       promptShortcutIndex += 1;
     }
@@ -28257,6 +29373,18 @@ function HomeContent(): React.JSX.Element {
     const d = await api<{ memories: UserMemory[] }>("/api/memories?scope=default");
     setBotMemories(d.memories);
   }
+  async function refreshZenSessionMemory() {
+    const conversationId =
+      detailIdRef.current && detailIdRef.current !== "pending"
+        ? detailIdRef.current
+        : selectedIdRef.current;
+    const query = conversationId
+      ? `?conversationId=${encodeURIComponent(conversationId)}`
+      : "";
+    const d = await api<ZenSessionMemoryOverview>(`/api/zen/session-memory${query}`);
+    setZenPreviousContext(d.previousContext ?? null);
+    setZenSessionMemories(d.sessionMemories ?? []);
+  }
   async function runMemoryPanelLoad(
     label: string,
     load: () => Promise<void>
@@ -28290,6 +29418,8 @@ function HomeContent(): React.JSX.Element {
     await refreshMemories();
     if (memoryPanelScope === "default") {
       await refreshDefaultMemories();
+    } else if (memoryPanelScope === "session") {
+      await refreshZenSessionMemory();
     } else if (memoryPanelBot?.id) {
       await refreshBotMemories(memoryPanelBot.id);
     }
@@ -29242,6 +30372,7 @@ function HomeContent(): React.JSX.Element {
       commandCenterModelChoice?: string;
       commandCenterPrompt?: boolean;
       promptShortcut?: PromptShortcutMetadata;
+      promptWildcards?: PromptWildcardRunMetadata;
       prismInterruption?: PrismMoodInterruptionInput;
     } = {}
   ): Record<string, unknown> {
@@ -29308,6 +30439,7 @@ function HomeContent(): React.JSX.Element {
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
+      ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
     };
   }
 
@@ -29526,7 +30658,7 @@ function HomeContent(): React.JSX.Element {
 
     if (parsed.kind === "unknown") {
       setError(
-        `Unknown dev command "${parsed.token}". Type /dev help for a short list.`,
+        `Unknown dev command "${parsed.token}". Type /dev to open Developer Tools.`,
       );
       return true;
     }
@@ -29558,27 +30690,20 @@ function HomeContent(): React.JSX.Element {
       return true;
     }
 
-    if (!detail) {
-      setError("Open a chat first - then try /dev help or /dev askquestion in the composer.");
+    if (parsed.kind === "help") {
+      if (!DEV_TOOLS_ENABLED) {
+        setError("Developer tools are not enabled in this build.");
+        return true;
+      }
+      setDevToolsMessage("Dev commands are listed in System.");
+      setDevToolsActiveSection("system");
+      setDevTogglesOpen(false);
+      setDevToolsOpen(true);
       return true;
     }
 
-    if (parsed.kind === "help") {
-      const m: Message = {
-        ...devAssistShell(),
-        content:
-          "**Dev commands** (local preview only — nothing is sent to the server)\n\n" +
-          "- `/dev help` - this list\n" +
-          "- `/dev` or `/dev panel` - open Developer Tools\n" +
-          "- `/dev close` - close Developer Tools\n" +
-          "- `/dev toggles` - open Dev toggles\n" +
-          "- `/dev askquestion` - inject a sample AskQuestion chip row",
-      };
-      setDetail({
-        ...detail,
-        hasAssistantReply: true,
-        messages: [...detail.messages, m],
-      });
+    if (!detail) {
+      setError("Open a chat first - then try /dev askquestion in the composer.");
       return true;
     }
 
@@ -29966,10 +31091,12 @@ function HomeContent(): React.JSX.Element {
       await api<{
         deletedMemories?: number;
         deletedSummaries?: number;
+        deletedZenSessionMemories?: number;
         vectorsCleared?: boolean;
       }>("/api/dev/clear-session-memory", { method: "POST" });
       try {
         await refreshMemories();
+        await refreshZenSessionMemory();
       } catch {
         // Best-effort UI refresh; the server is the source of truth.
       }
@@ -30141,9 +31268,9 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  /** Local slash commands gated by Dev toggles (e.g. `/forget`, `/forget-all`). */
+  /** Local slash dev commands hidden from normal slash discovery. */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
-    if (!devSlashCommandsEnabled) return false;
+    if (!DEV_TOOLS_ENABLED) return false;
     const tokens = trimmedLine
       .split(/\s+/)
       .map((token) => token.trim())
@@ -30224,17 +31351,24 @@ function HomeContent(): React.JSX.Element {
     let prompt = rawDraft;
     let firstCommand: CommandCenterCommand | null = null;
     let firstInvocation = "";
+    let firstPromptRandomizationReplacements: NonNullable<
+      PromptShortcutMetadata["wildcardReplacements"]
+    > = [];
     for (let index = ranges.length - 1; index >= 0; index -= 1) {
       const range = ranges[index]!;
       const command = commandByInvocation.get(range.name.toLowerCase());
       if (!command) continue;
-      const basePrompt = resolvePromptRandomizationGroups(command.command.trim());
+      const basePromptResolution = resolvePromptRandomizationGroups(command.command.trim(), {
+        decks: commandCenterWildcardDecks,
+      });
+      const basePrompt = basePromptResolution.prompt;
       if (!basePrompt) {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
       if (index === 0) {
         firstCommand = command;
         firstInvocation = rawDraft.slice(range.start, range.end);
+        firstPromptRandomizationReplacements = basePromptResolution.replacements;
       }
       prompt = `${prompt.slice(0, range.start)}${basePrompt}${prompt.slice(range.end)}`;
     }
@@ -30253,6 +31387,9 @@ function HomeContent(): React.JSX.Element {
           invocation: firstInvocation,
           flags: [],
           resolvedPrompt: prompt.trim(),
+          ...(firstPromptRandomizationReplacements.length > 0
+            ? { wildcardReplacements: firstPromptRandomizationReplacements }
+            : {}),
         }
       : null;
     return {
@@ -30260,6 +31397,36 @@ function HomeContent(): React.JSX.Element {
       promptShortcut,
       prompt,
       modelChoice: commandCenterPreferredModel,
+    };
+  }
+
+  function draftContainsTrueWildcardSlots(value: string): boolean {
+    return /\{[A-Z][A-Z0-9_ ]{1,63}\}/g.test(value);
+  }
+
+  function resolveComposerWildcardDraft(rawDraft: string): {
+    prompt: string;
+    promptWildcards: PromptWildcardRunMetadata | null;
+  } {
+    const resolution = resolvePromptRandomizationGroups(rawDraft, {
+      decks: commandCenterWildcardDecks,
+    });
+    const hasWildcardRun =
+      resolution.replacements.length > 0 ||
+      draftContainsTrueWildcardSlots(rawDraft) ||
+      draftContainsTrueWildcardSlots(resolution.prompt);
+    return {
+      prompt: resolution.prompt,
+      promptWildcards: hasWildcardRun
+        ? {
+            v: 1,
+            template: rawDraft,
+            resolvedPrompt: resolution.prompt.trim(),
+            ...(resolution.replacements.length > 0
+              ? { wildcardReplacements: resolution.replacements }
+              : {}),
+          }
+        : null,
     };
   }
 
@@ -30678,11 +31845,12 @@ function HomeContent(): React.JSX.Element {
     const commandCenterPromptActive = commandCenterResolution.kind === "resolved";
     const commandCenterSubmitActive =
       commandCenterPromptActive && commandCenterResolution.promptShortcut !== null;
-    const trimmed = (
+    const composerWildcardResolution =
       commandCenterResolution.kind === "resolved"
-        ? commandCenterResolution.prompt
-        : rawDraft
-    ).trim();
+        ? { prompt: commandCenterResolution.prompt, promptWildcards: null }
+        : resolveComposerWildcardDraft(rawDraft);
+    const composerPromptWildcards = composerWildcardResolution.promptWildcards;
+    const trimmed = composerWildcardResolution.prompt.trim();
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
@@ -30886,6 +32054,7 @@ function HomeContent(): React.JSX.Element {
         content: trimmed,
         createdAt: new Date().toISOString(),
         ...(commandCenterPromptShortcut ? { promptShortcut: commandCenterPromptShortcut } : {}),
+        ...(composerPromptWildcards ? { promptWildcards: composerPromptWildcards } : {}),
       };
       const optimisticTitle =
         detailForSend?.title ?? (trimmed.length > 42 ? `${trimmed.slice(0, 39)}...` : trimmed);
@@ -30980,6 +32149,9 @@ function HomeContent(): React.JSX.Element {
         ...(commandCenterPromptActive ? { commandCenterPrompt: true } : {}),
         ...(commandCenterPromptShortcut
           ? { promptShortcut: commandCenterPromptShortcut }
+          : {}),
+        ...(composerPromptWildcards
+          ? { promptWildcards: composerPromptWildcards }
           : {}),
         ...(sessionResumeContextForSend
           ? { sessionResumeContext: sessionResumeContextForSend }
@@ -31164,6 +32336,8 @@ function HomeContent(): React.JSX.Element {
         const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
         if (memoryPanelScope === "default") {
           await refreshDefaultMemories();
+        } else if (memoryPanelScope === "session") {
+          await refreshZenSessionMemory();
         } else if (nextBotId) {
           await refreshBotMemories(nextBotId);
         } else {
@@ -31544,6 +32718,38 @@ function HomeContent(): React.JSX.Element {
     } catch {
       return fallbackPrompt;
     }
+  }
+
+  async function generateComposerWildcardSlotValue(
+    key: BuiltInPromptWildcardSlotKey
+  ): Promise<string> {
+    const commandCenterModelChoice = resolveCommandCenterModelChoiceForSend(
+      commandCenterPreferredModel,
+      settings,
+      modelCatalog
+    );
+    const parsedModelChoice = parseCommandCenterModelChoice(commandCenterModelChoice);
+    const response = await api<{
+      value?: string;
+      provider?: Provider;
+      model?: string;
+    }>("/api/composer/wildcard-value", {
+      method: "POST",
+      body: JSON.stringify({
+        key,
+        ...(parsedModelChoice
+          ? {
+              preferredProvider: parsedModelChoice.provider,
+              modelOverride: parsedModelChoice.modelId,
+            }
+          : {}),
+      }),
+    });
+    const value = response.value?.trim();
+    if (!value) {
+      throw new Error("Wildcard generator returned an empty value.");
+    }
+    return value;
   }
 
   /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
@@ -33722,6 +34928,20 @@ function HomeContent(): React.JSX.Element {
     }
     setFocusedMemoryId((current) => (current === id ? null : current));
     await refreshOpenMemoryViews();
+  }
+
+  async function deleteZenSessionMemory(id: string) {
+    const result = await api<{ deleted?: boolean }>(
+      `/api/zen/session-memory/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+    if (result.deleted === false) {
+      setError("Could not remove that session memory. Try again.");
+      return;
+    }
+    disarmDelete();
+    setZenSessionMemories((current) => current.filter((memory) => memory.id !== id));
+    await refreshZenSessionMemory();
   }
 
   async function demoteLongTermMemory(id: string) {
@@ -35921,7 +37141,8 @@ function HomeContent(): React.JSX.Element {
     if (pendingDeleteKey === null) return;
     const memoryScoped =
       pendingDeleteKey.startsWith(LONG_TERM_MEMORY_ACTION_PREFIX) ||
-      pendingDeleteKey.startsWith(MEMORY_CARD_DELETE_PREFIX);
+      pendingDeleteKey.startsWith(MEMORY_CARD_DELETE_PREFIX) ||
+      pendingDeleteKey.startsWith(ZEN_SESSION_MEMORY_DELETE_PREFIX);
     if (!memoryScoped) return;
     if (panel === "memories") return;
     disarmDelete();
@@ -37504,6 +38725,18 @@ function HomeContent(): React.JSX.Element {
     openRightPanel("memories");
   }
 
+  async function openSessionMemoriesPanel() {
+    setMemoryPanelScope("session");
+    setMemoryPanelBotId(null);
+    setMemoryPanelSelectedFamily(null);
+    setFocusedMemoryId(null);
+    setBotMemories([]);
+    await runMemoryPanelLoad("Loading Zen session memory...", async () => {
+      await refreshZenSessionMemory();
+    });
+    openRightPanel("memories");
+  }
+
   async function openAllMemoriesPanel() {
     setMemoryPanelScope("all");
     setMemoryPanelBotId(null);
@@ -37511,6 +38744,7 @@ function HomeContent(): React.JSX.Element {
     setFocusedMemoryId(null);
     await runMemoryPanelLoad("Loading memory directories...", async () => {
       await refreshMemories();
+      await refreshZenSessionMemory();
     });
     openRightPanel("memories");
   }
@@ -37750,6 +38984,29 @@ function HomeContent(): React.JSX.Element {
       ["--memory-family-delay" as string]: "0.42s",
     } as React.CSSProperties;
   }, [memoryFamilyDirectories, defaultDirectMemoryCount]);
+
+  const zenSessionMemoryDisplayCount =
+    zenSessionMemories.length + (zenPreviousContext ? 1 : 0);
+  const sessionMemoryDirectoryStyle = useMemo(() => {
+    const maxCount = Math.max(
+      1,
+      defaultDirectMemoryCount,
+      zenSessionMemoryDisplayCount,
+      ...memoryFamilyDirectories.map((family) => family.memoryCount)
+    );
+    const size = ratioBubbleSize(zenSessionMemoryDisplayCount, maxCount);
+    return {
+      ["--memory-family-x" as string]: "50%",
+      ["--memory-family-y" as string]: "84%",
+      ["--memory-family-size" as string]: `${Math.max(58, size)}px`,
+      ["--memory-family-color" as string]: PRISM_COLORS.m,
+      ["--memory-family-delay" as string]: "0.58s",
+    } as React.CSSProperties;
+  }, [
+    defaultDirectMemoryCount,
+    memoryFamilyDirectories,
+    zenSessionMemoryDisplayCount,
+  ]);
 
   const selectedMemoryFamilyDirectory = useMemo(
     () => memoryFamilyDirectories.find((family) => family.id === memoryPanelSelectedFamily) ?? null,
@@ -41549,7 +42806,7 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       if (view === "chat") {
-        void openDefaultMemoriesPanel();
+        void openAllMemoriesPanel();
         return;
       }
       void openAllMemoriesPanel();
@@ -42226,7 +43483,7 @@ function HomeContent(): React.JSX.Element {
                   return;
                 }
                 if (view === "chat") {
-                  void openDefaultMemoriesPanel();
+                  void openAllMemoriesPanel();
                   return;
                 }
                 void openAllMemoriesPanel();
@@ -42750,20 +44007,6 @@ function HomeContent(): React.JSX.Element {
           <label className={styles.devTogglesModalOption}>
             <input
               type="checkbox"
-              checked={devSlashCommandsEnabled}
-              onChange={(event) => persistDevSlashCommandsEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Enable ! dev commands in chat</strong>
-              <small>
-                Allows local chat commands like <code>/forget</code> and{" "}
-                <code>/forget-all</code> to run in the composer without sending them to the model.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
               checked={devDebugComposerEnabled}
               onChange={(event) => persistDevDebugComposerEnabled(event.currentTarget.checked)}
             />
@@ -43053,6 +44296,8 @@ function HomeContent(): React.JSX.Element {
     const devToolsMemoryScopeLabel =
       memoryPanelScope === "bot" && memoryPanelBot
         ? memoryPanelBot.name
+        : memoryPanelScope === "session"
+          ? "Zen session"
         : "all bots";
     const devToolsHasSavedConversation = Boolean(
       (detail?.id && detail.id !== "pending") || (selectedId && selectedId !== "pending")
@@ -43098,6 +44343,8 @@ function HomeContent(): React.JSX.Element {
         ? memoryPanelBot.name
         : memoryPanelScope === "default"
           ? "Default Prism"
+          : memoryPanelScope === "session"
+            ? "Zen session"
           : "All bots";
     const devToolsTraceCount = devChatDebugEvents.length;
     const devToolsSectionContent = (() => {
@@ -43406,7 +44653,16 @@ function HomeContent(): React.JSX.Element {
                   <strong>{devToolsMemorySeedSource}</strong>
                 </div>
                 <label className={styles.devToolsCountControl}>
-                  <span>Seed type</span>
+                  <span className={styles.controlLabelWithInfo}>
+                    <span>Seed type</span>
+                    <PanelSectionInfo
+                      id="dev-tools-seed-type-info"
+                      label="About seed type"
+                      variant="control"
+                    >
+                      Chooses whether generated seed memories are direct facts, inferred assumptions, or compiled summaries.
+                    </PanelSectionInfo>
+                  </span>
                   <select
                     value={devToolsMemorySeedSource}
                     onChange={(event) =>
@@ -43422,9 +44678,18 @@ function HomeContent(): React.JSX.Element {
                   </select>
                 </label>
                 <label className={styles.devToolsCountControl}>
-                  <span>
-                    Certainty{" "}
-                    <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+                  <span className={styles.controlLabelWithInfo}>
+                    <span>
+                      Certainty{" "}
+                      <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+                    </span>
+                    <PanelSectionInfo
+                      id="dev-tools-memory-certainty-info"
+                      label="About memory certainty"
+                      variant="control"
+                    >
+                      Sets the confidence score assigned to generated non-direct memory seeds.
+                    </PanelSectionInfo>
                   </span>
                   <input
                     type="range"
@@ -43486,10 +44751,14 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.devToolsCardGrid}>
               <section className={styles.devToolsCard}>
                 <div className={styles.devToolsCardHeader}>
-                  <span>Local toggles</span>
-                  <strong>{devSlashCommandsEnabled ? "/dev on" : "/dev off"}</strong>
+                  <span>Local controls</span>
+                  <strong>Commands on</strong>
                 </div>
                 <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Dev commands</small>
+                    <strong>Panel-only</strong>
+                  </span>
                   <span className={styles.devToolsStat}>
                     <small>Metrics</small>
                     <strong>{devChatMetricsEnabled ? "On" : "Off"}</strong>
@@ -43514,6 +44783,31 @@ function HomeContent(): React.JSX.Element {
                   >
                     Open toggles
                   </button>
+                </div>
+              </section>
+
+              <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                <div className={styles.devToolsCardHeader}>
+                  <span>Dev commands</span>
+                  <strong>Always on</strong>
+                </div>
+                <p className={styles.devToolsSectionHint}>
+                  Hidden from the normal slash menu and command help. Type them directly in the
+                  composer; open this panel with <strong>/dev</strong>.
+                </p>
+                <div className={styles.devToolsStatGrid}>
+                  <span className={styles.devToolsStat}>
+                    <small>Open tools</small>
+                    <strong>/dev</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Forget current scope</small>
+                    <strong>/forget</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Hard memory reset</small>
+                    <strong>/forget-all</strong>
+                  </span>
                 </div>
               </section>
 
@@ -44325,15 +45619,30 @@ function HomeContent(): React.JSX.Element {
                 <>
                   {" "}· {memoryPanelBot!.name}: <strong>{botMemories.length}</strong>
                 </>
+              ) : memoryPanelScope === "session" ? (
+                <>
+                  {" "}· Session: <strong>{zenSessionMemories.length}</strong>
+                </>
               ) : null}
             </p>
             <p className={styles.devToolsSectionHint}>
-              {memoryPanelScope === "bot" && memoryPanelBot
+              {memoryPanelScope === "session"
+                ? "Session checkpoints are created by Zen pause/resume turns."
+                : memoryPanelScope === "bot" && memoryPanelBot
                 ? `Adds the chosen quantity to ${devToolsMemoryScopeLabel}.`
                 : "Distributes the chosen quantity randomly across all bots."}
             </p>
             <label className={styles.devToolsCountControl}>
-              <span>Seed type</span>
+              <span className={styles.controlLabelWithInfo}>
+                <span>Seed type</span>
+                <PanelSectionInfo
+                  id="memory-panel-seed-type-info"
+                  label="About seed type"
+                  variant="control"
+                >
+                  Chooses whether generated seed memories are direct facts, inferred assumptions, or compiled summaries.
+                </PanelSectionInfo>
+              </span>
               <select
                 value={devToolsMemorySeedSource}
                 onChange={(event) =>
@@ -44347,9 +45656,18 @@ function HomeContent(): React.JSX.Element {
               </select>
             </label>
             <label className={styles.devToolsCountControl}>
-              <span>
-                Certainty{" "}
-                <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+              <span className={styles.controlLabelWithInfo}>
+                <span>
+                  Certainty{" "}
+                  <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
+                </span>
+                <PanelSectionInfo
+                  id="memory-panel-certainty-info"
+                  label="About memory certainty"
+                  variant="control"
+                >
+                  Sets the confidence score assigned to generated non-direct memory seeds.
+                </PanelSectionInfo>
               </span>
               <input
                 type="range"
@@ -44366,7 +45684,7 @@ function HomeContent(): React.JSX.Element {
               />
             </label>
             <div className={styles.devToolsActions}>
-              {memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
+              {memoryPanelScope === "session" ? null : memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
                 <button
                   type="button"
                   className={styles.devToolsAction}
@@ -44518,7 +45836,9 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderTitle}>
               {view !== "chat" ? (
-                memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
+                memoryPanelScope === "bot" ||
+                memoryPanelScope === "default" ||
+                memoryPanelScope === "session" ? (
                 <button
                   type="button"
                   className={styles.panelBack}
@@ -44565,7 +45885,9 @@ function HomeContent(): React.JSX.Element {
                   ? "All memories"
                   : memoryPanelScope === "default"
                     ? "Default memories"
-                    : "Bot memories"}
+                    : memoryPanelScope === "session"
+                      ? "Session memory"
+                      : "Bot memories"}
               </h3>
             </div>
             <button
@@ -44624,6 +45946,17 @@ function HomeContent(): React.JSX.Element {
               </div>
             </div>
           )}
+          {memoryPanelScope === "session" && (
+            <div className={styles.memoryBotHeader}>
+              <span className={styles.memoryBotGlyph} aria-hidden="true">
+                <span className={styles.memorySessionHeaderGlyph}>S</span>
+              </span>
+              <div>
+                <strong>Session</strong>
+                <span>Zen-only context for picking up where you left off.</span>
+              </div>
+            </div>
+          )}
           <p className={styles.memoryPanelHint}>
             {memoryPanelScope === "all"
               ? memoryPanelSelectedFamily
@@ -44631,7 +45964,9 @@ function HomeContent(): React.JSX.Element {
                 : "PRISM directories and your shared Prism memory. Tap to drill in."
               : memoryPanelScope === "default"
                 ? "Prism short-term memories float here; protected long-term memories stack below by category."
-                : "Short-term memories float here; protected long-term memories stack below by category."}
+                : memoryPanelScope === "session"
+                  ? "Previous context stays; session checkpoints fade after about four days."
+                  : "Short-term memories float here; protected long-term memories stack below by category."}
           </p>
           {memoryPanelScope === "bot" ? renderMemoryConnectionMeter() : null}
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
@@ -44650,6 +45985,28 @@ function HomeContent(): React.JSX.Element {
                 <span className={styles.memoryDefaultGlyph} aria-hidden="true">
                   <PrismTriangleMark />
                 </span>
+              </button>
+              <button
+                type="button"
+                role="listitem"
+                className={styles.memoryFamilyCluster}
+                data-memory-session="true"
+                data-memory-physics-id="session:zen"
+                style={sessionMemoryDirectoryStyle}
+                onClick={() => void runMemoryTransition(openSessionMemoriesPanel, "forward")}
+                aria-label={`Zen session memory: ${zenSessionMemoryDisplayCount} item${zenSessionMemoryDisplayCount === 1 ? "" : "s"}. Open session memory.`}
+                title={`Zen session memory: ${zenSessionMemoryDisplayCount} item${zenSessionMemoryDisplayCount === 1 ? "" : "s"}`}
+              >
+                <span className={styles.memorySessionClusterGlyph} aria-hidden="true">
+                  S
+                </span>
+                {zenSessionMemories.length > 0 ? (
+                  <span className={styles.memorySessionClusterMotes} aria-hidden="true">
+                    {zenSessionMemories.map((memory) => (
+                      <span key={`session-mote:${memory.id}`} />
+                    ))}
+                  </span>
+                ) : null}
               </button>
               {memoryFamilyDirectories.map((family) => (
                 <button
@@ -44770,6 +46127,81 @@ function HomeContent(): React.JSX.Element {
                 <p>Add or recolor bots in this PRISM category to populate it.</p>
               </div>
             )
+          ) : memoryPanelScope === "session" ? (
+            <div className={styles.memoryPanelMemoryStacks}>
+              <section
+                className={styles.zenSessionPreviousCard}
+                data-empty={zenPreviousContext ? undefined : "true"}
+                aria-label="Previous context"
+              >
+                <div className={styles.zenSessionPreviousHeader}>
+                  <span>Previous Context</span>
+                  <strong>{zenPreviousContext ? zenPreviousContext.title : "Nothing stored yet"}</strong>
+                </div>
+                {zenPreviousContext ? (
+                  <>
+                    <p>{zenPreviousContext.summary}</p>
+                    <small>Non-expiring Zen context</small>
+                  </>
+                ) : (
+                  <>
+                    <p>Once Zen has a compacted thread summary, it can appear here for later resuming.</p>
+                    <small>Not counted in the three checkpoint slots</small>
+                  </>
+                )}
+              </section>
+              {zenSessionMemories.length > 0 ? (
+                <ul className={styles.zenSessionMemoryList} aria-label="Session checkpoints">
+                  {zenSessionMemories.map((memory) => {
+                    const deleteKey = zenSessionMemoryDeleteKey(memory.id);
+                    const isArmed = pendingDeleteKey === deleteKey;
+                    return (
+                      <li key={memory.id} className={styles.zenSessionMemoryItem}>
+                        <div className={styles.zenSessionMemoryOrb} aria-hidden="true">
+                          <span />
+                        </div>
+                        <div className={styles.zenSessionMemoryBody}>
+                          <div className={styles.zenSessionMemoryMeta}>
+                            <strong>{memory.title}</strong>
+                            <span>{formatZenSessionMemoryExpiry(memory.expiresAt)}</span>
+                          </div>
+                          <p>{memory.text}</p>
+                          {memory.trigger ? (
+                            <small>Saved from: {memory.trigger}</small>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className={`${styles.zenSessionMemoryDelete} ${
+                            isArmed ? styles.zenSessionMemoryDeleteArmed : ""
+                          }`}
+                          data-delete-affordance="true"
+                          onClick={() => {
+                            if (isArmed) {
+                              void deleteZenSessionMemory(memory.id);
+                              return;
+                            }
+                            armDelete(deleteKey);
+                          }}
+                          aria-label={
+                            isArmed
+                              ? `Confirm delete session memory: ${memory.title}`
+                              : `Delete session memory: ${memory.title}`
+                          }
+                        >
+                          {isArmed ? "Confirm" : "Delete"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className={styles.memoryEmptyState}>
+                  <strong>No session checkpoints</strong>
+                  <p>When you ask Zen to pause or finish something later, up to three short-lived checkpoints will appear here.</p>
+                </div>
+              )}
+            </div>
           ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 ? (
             <div className={styles.memoryPanelMemoryStacks}>
               {visibleMemoryBubbles.length > 0 ? (
@@ -45173,6 +46605,63 @@ function HomeContent(): React.JSX.Element {
                 : selectedCommandDraftDirty
                   ? "Unsaved"
                   : commandCenterSaveNotice ?? "Saved";
+            const selectedWildcardDeck =
+              commandCenterWildcardDecks.find(
+                (candidate) => candidate.id === commandCenterSelectedWildcardDeckId
+              ) ?? null;
+            const selectedWildcardDeckDraft =
+              selectedWildcardDeck && commandCenterWildcardDraft?.id === selectedWildcardDeck.id
+                ? commandCenterWildcardDraft
+                : selectedWildcardDeck
+                  ? wildcardDeckToDraft(selectedWildcardDeck)
+                  : null;
+            const selectedWildcardDeckName =
+              selectedWildcardDeckDraft?.name ?? selectedWildcardDeck?.name ?? "";
+            const selectedWildcardDeckDescription =
+              selectedWildcardDeckDraft?.description ?? selectedWildcardDeck?.description ?? "";
+            const selectedWildcardDeckColorTag = selectedWildcardDeckDraft
+              ? selectedWildcardDeckDraft.colorTag
+              : selectedWildcardDeck?.colorTag;
+            const selectedWildcardDeckAliases =
+              selectedWildcardDeckDraft?.aliases ?? selectedWildcardDeck?.aliases ?? [];
+            const selectedWildcardDeckValues = selectedWildcardDeckDraft
+              ? normalizeWildcardDeckValueList(selectedWildcardDeckDraft.valuesText)
+              : selectedWildcardDeck?.values ?? [];
+            const selectedWildcardDeckValuesMatch =
+              selectedWildcardDeckDraft && selectedWildcardDeck
+                ? selectedWildcardDeckValues.length === selectedWildcardDeck.values.length &&
+                  selectedWildcardDeckValues.every(
+                    (value, index) => value === selectedWildcardDeck.values[index]
+                  )
+                : true;
+            const selectedWildcardDeckAliasesMatch =
+              selectedWildcardDeckDraft && selectedWildcardDeck
+                ? selectedWildcardDeckAliases.length === selectedWildcardDeck.aliases.length &&
+                  selectedWildcardDeckAliases.every(
+                    (alias, index) => alias === selectedWildcardDeck.aliases[index]
+                  )
+                : true;
+            const selectedWildcardDeckDraftDirty = Boolean(
+              selectedWildcardDeckDraft &&
+                selectedWildcardDeck &&
+                (selectedWildcardDeckDraft.name !== selectedWildcardDeck.name ||
+                  selectedWildcardDeckDraft.description !== selectedWildcardDeck.description ||
+                  selectedWildcardDeckDraft.colorTag !== selectedWildcardDeck.colorTag ||
+                  !selectedWildcardDeckValuesMatch ||
+                  !selectedWildcardDeckAliasesMatch)
+            );
+            const selectedWildcardDeckDraftCanSave = Boolean(
+              selectedWildcardDeckDraft &&
+                normalizeWildcardDeckNameInput(selectedWildcardDeckDraft.name) &&
+                selectedWildcardDeckValues.length > 0
+            );
+            const selectedWildcardDeckStatusLabel = !selectedWildcardDeckDraftCanSave
+              ? selectedWildcardDeckName
+                ? "Values required"
+                : "Name required"
+              : selectedWildcardDeckDraftDirty
+                ? "Unsaved"
+                : commandCenterSaveNotice ?? "Saved";
             const updateSelectedCommandDraft = (
               updater: (draft: CommandCenterEditableDraft) => CommandCenterEditableDraft
             ): void => {
@@ -45228,6 +46717,70 @@ function HomeContent(): React.JSX.Element {
               setCommandCenterDraft(savedDraft);
               setCommandCenterSaveNotice("Saved");
             };
+            const updateSelectedWildcardDeckDraft = (
+              updater: (
+                draft: CommandCenterWildcardDeckDraft
+              ) => CommandCenterWildcardDeckDraft
+            ): void => {
+              if (!selectedWildcardDeck || !selectedWildcardDeckDraft) return;
+              setCommandCenterWildcardDraft((current) => {
+                const base =
+                  current && current.id === selectedWildcardDeck.id
+                    ? current
+                    : wildcardDeckToDraft(selectedWildcardDeck);
+                return updater(base);
+              });
+              setCommandCenterSaveNotice(null);
+            };
+            const saveSelectedWildcardDeckDraft = (): void => {
+              if (
+                !selectedWildcardDeck ||
+                !selectedWildcardDeckDraft ||
+                !selectedWildcardDeckDraftCanSave
+              ) {
+                return;
+              }
+              const savedName = uniqueWildcardDeckNameForList(
+                selectedWildcardDeckDraft.name,
+                commandCenterWildcardDecks,
+                selectedWildcardDeck.id
+              );
+              const savedValues = normalizeWildcardDeckValueList(
+                selectedWildcardDeckDraft.valuesText
+              );
+              if (savedValues.length === 0) return;
+              const savedAliases = normalizeWildcardDeckAliases(
+                selectedWildcardDeckDraft.aliases,
+                savedName
+              );
+              const now = new Date().toISOString();
+              const savedDeck: CommandCenterWildcardDeck = {
+                ...selectedWildcardDeck,
+                name: savedName,
+                description: selectedWildcardDeckDraft.description
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .slice(0, 220),
+                values: savedValues,
+                ...(selectedWildcardDeckDraft.colorTag
+                  ? { colorTag: selectedWildcardDeckDraft.colorTag }
+                  : {}),
+                aliases: savedAliases,
+                updatedAt: now,
+              };
+              if (!selectedWildcardDeckDraft.colorTag) {
+                delete savedDeck.colorTag;
+              }
+              setCommandCenterWildcardDecks((current) =>
+                sanitizeWildcardDeckAliases(
+                  current.map((entry) =>
+                    entry.id === selectedWildcardDeck.id ? savedDeck : entry
+                  )
+                )
+              );
+              setCommandCenterWildcardDraft(wildcardDeckToDraft(savedDeck));
+              setCommandCenterSaveNotice("Saved");
+            };
             const builtInCommandCenterCommands = commandCenterCommands.filter(
               (command) => command.builtIn || command.readOnly
             );
@@ -45244,6 +46797,16 @@ function HomeContent(): React.JSX.Element {
                 }).commands
               );
               setCommandCenterSelectedCommandId(draft.id);
+              setCommandCenterSelectedWildcardDeckId(null);
+            };
+            const addWildcardDeck = (): void => {
+              const draft = createWildcardDeckDraft(commandCenterWildcardDecks);
+              setCommandCenterWildcardDecks((current) => [...current, draft]);
+              setCommandCenterWildcardDraft(wildcardDeckToDraft(draft));
+              setCommandCenterSelectedWildcardDeckId(draft.id);
+              setCommandCenterSelectedCommandId(null);
+              setCommandCenterSpecsCommandId(null);
+              setCommandCenterSaveNotice(null);
             };
             const renderPromptCenterCommandRow = (
               command: CommandCenterCommand
@@ -45293,6 +46856,7 @@ function HomeContent(): React.JSX.Element {
                     style={commandCenterColorStyle(command.colorTag)}
                     onClick={() => {
                       setCommandCenterSelectedCommandId(command.id);
+                      setCommandCenterSelectedWildcardDeckId(null);
                       setCommandCenterSpecsCommandId(null);
                     }}
                   >
@@ -45346,12 +46910,108 @@ function HomeContent(): React.JSX.Element {
                 </div>
               );
             };
+            const renderPromptCenterWildcardDeckRow = (
+              deck: CommandCenterWildcardDeck
+            ): React.ReactNode => {
+              const deleteKey = commandCenterWildcardDeleteKey(deck.id);
+              const deleteArmed = pendingDeleteKey === deleteKey;
+              const deleteButtonClassName = [
+                styles.conversationDelete,
+                styles.promptCenterPromptDelete,
+                deleteArmed ? styles.conversationDeleteArmed : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const sampleValues = deck.values.slice(0, 3).join(", ");
+              const itemLabel = `${deck.values.length} item${deck.values.length === 1 ? "" : "s"}`;
+              const meta = deck.description
+                ? `${itemLabel} · ${deck.description}`
+                : sampleValues
+                  ? `${itemLabel} · ${sampleValues}`
+                  : itemLabel;
+              const deleteDeck = (): void => {
+                setCommandCenterWildcardDecks((current) =>
+                  current.filter((entry) => entry.id !== deck.id)
+                );
+                setCommandCenterSelectedWildcardDeckId((current) =>
+                  current === deck.id ? null : current
+                );
+              };
+              return (
+                <div
+                  key={deck.id}
+                  className={styles.promptCenterPromptRowFrame}
+                  data-deletable="true"
+                  role="listitem"
+                >
+                  <button
+                    type="button"
+                    className={styles.promptCenterPromptRow}
+                    data-active={
+                      deck.id === commandCenterSelectedWildcardDeckId ? "true" : undefined
+                    }
+                    data-color-tag={deck.colorTag ?? undefined}
+                    data-wildcard-deck="true"
+                    style={commandCenterColorStyle(deck.colorTag)}
+                    onClick={() => {
+                      setCommandCenterSelectedWildcardDeckId(deck.id);
+                      setCommandCenterWildcardDraft(wildcardDeckToDraft(deck));
+                      setCommandCenterSelectedCommandId(null);
+                      setCommandCenterSpecsCommandId(null);
+                    }}
+                  >
+                    <span className={styles.promptCenterPromptName}>
+                      <span
+                        className={styles.promptCenterPromptColorDot}
+                        aria-hidden="true"
+                      />
+                      <span>!{deck.name}</span>
+                    </span>
+                    <span className={styles.promptCenterPromptMeta}>{meta}</span>
+                    {deck.aliases.length > 0 ? (
+                      <span className={styles.promptCenterPromptMeta}>
+                        {deck.aliases.map((alias) => `!${alias}`).join(", ")}
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    className={deleteButtonClassName}
+                    data-delete-affordance="true"
+                    aria-label={
+                      deleteArmed
+                        ? `Confirm delete wildcard deck !${deck.name}`
+                        : `Delete wildcard deck !${deck.name}`
+                    }
+                    data-glyph-tooltip={deleteArmed ? `Confirm delete !${deck.name}` : "Delete deck"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (deleteArmed) {
+                        disarmDelete();
+                        deleteDeck();
+                        return;
+                      }
+                      armDelete(deleteKey);
+                    }}
+                  >
+                    {deleteArmed && (
+                      <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+                    )}
+                    <span className={styles.conversationDeleteGlyph}>
+                      {deleteArmed ? "✓" : "×"}
+                    </span>
+                  </button>
+                </div>
+              );
+            };
             return (
               <div
                 className={styles.promptCenterWorkspace}
-                data-has-selection={selectedCommand ? "true" : undefined}
+                data-has-selection={
+                  selectedCommand || selectedWildcardDeck ? "true" : undefined
+                }
               >
-                <aside className={styles.promptCenterSidebar} aria-label="Commands and prompts">
+                <aside className={styles.promptCenterSidebar} aria-label="Commands, prompts, and wildcards">
                   <section className={styles.promptCenterModelCard}>
                     <span className={styles.promptCenterEyebrow}>Model</span>
                     <div className={styles.promptCenterModelField}>
@@ -45395,6 +47055,21 @@ function HomeContent(): React.JSX.Element {
                         userPromptCenterCommands.map(renderPromptCenterCommandRow)
                       ) : (
                         <p className={styles.promptCenterListEmpty}>No prompts yet.</p>
+                      )}
+                    </div>
+                  </section>
+                  <section className={styles.promptCenterListSection} data-kind="wildcards">
+                    <div className={styles.promptCenterListHeader}>
+                      <span>Wildcards</span>
+                      <button type="button" onClick={addWildcardDeck}>
+                        New
+                      </button>
+                    </div>
+                    <div className={styles.promptCenterPromptList} role="list">
+                      {commandCenterWildcardDecks.length > 0 ? (
+                        commandCenterWildcardDecks.map(renderPromptCenterWildcardDeckRow)
+                      ) : (
+                        <p className={styles.promptCenterListEmpty}>No wildcard decks yet.</p>
                       )}
                     </div>
                   </section>
@@ -45660,10 +47335,245 @@ function HomeContent(): React.JSX.Element {
                         </div>
                       )}
                     </>
+                  ) : selectedWildcardDeck && selectedWildcardDeckDraft ? (
+                    <>
+                      <button
+                        type="button"
+                        className={styles.promptCenterMobileBack}
+                        onClick={() => setCommandCenterSelectedWildcardDeckId(null)}
+                      >
+                        Back to Prompt Center
+                      </button>
+                      <header className={styles.promptCenterEditorHeader}>
+                        <div>
+                          <span className={styles.promptCenterEyebrow}>Wildcard deck</span>
+                          <h4>{`!${selectedWildcardDeckName || selectedWildcardDeck.name}`}</h4>
+                        </div>
+                        <div className={styles.promptCenterEditorHeaderActions}>
+                          <span className={styles.promptCenterStatusBadge}>
+                            {selectedWildcardDeckStatusLabel}
+                          </span>
+                          <button
+                            type="button"
+                            className={styles.promptCenterSaveButton}
+                            onClick={saveSelectedWildcardDeckDraft}
+                            disabled={
+                              !selectedWildcardDeckDraftDirty ||
+                              !selectedWildcardDeckDraftCanSave
+                            }
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </header>
+                      <div className={styles.promptCenterEditorFields}>
+                        <label className={styles.promptCenterField}>
+                          <span>Deck name</span>
+                          <input
+                            type="text"
+                            value={
+                              selectedWildcardDeckName.length > 0
+                                ? `!${selectedWildcardDeckName}`
+                                : ""
+                            }
+                            onChange={(event) => {
+                              const draftName = normalizeWildcardDeckNameInput(
+                                event.currentTarget.value
+                              );
+                              updateSelectedWildcardDeckDraft((draft) => ({
+                                ...draft,
+                                name: draftName,
+                              }));
+                            }}
+                            onBlur={() => {
+                              updateSelectedWildcardDeckDraft((draft) => {
+                                const nextName = uniqueWildcardDeckNameForList(
+                                  draft.name,
+                                  commandCenterWildcardDecks,
+                                  selectedWildcardDeck.id
+                                );
+                                return {
+                                  ...draft,
+                                  name: nextName,
+                                  aliases: normalizeWildcardDeckAliases(
+                                    draft.aliases,
+                                    nextName
+                                  ),
+                                };
+                              });
+                            }}
+                            placeholder="!deck-name"
+                            spellCheck={false}
+                          />
+                        </label>
+                        <label className={styles.promptCenterField}>
+                          <span>Description</span>
+                          <input
+                            type="text"
+                            data-field-kind="description"
+                            value={selectedWildcardDeckDescription}
+                            onChange={(event) => {
+                              const description = event.currentTarget.value.slice(0, 220);
+                              updateSelectedWildcardDeckDraft((draft) => ({
+                                ...draft,
+                                description,
+                              }));
+                            }}
+                            placeholder="Shown under the deck name in the composer menu"
+                          />
+                        </label>
+                        <div className={styles.promptCenterField}>
+                          <span>Color tag</span>
+                          <div
+                            className={styles.promptCenterColorTagRow}
+                            role="radiogroup"
+                            aria-label="Wildcard deck color tag"
+                          >
+                            <button
+                              type="button"
+                              className={styles.promptCenterColorTagButton}
+                              data-active={!selectedWildcardDeckColorTag ? "true" : undefined}
+                              role="radio"
+                              aria-checked={!selectedWildcardDeckColorTag}
+                              onClick={() => {
+                                updateSelectedWildcardDeckDraft((draft) => ({
+                                  ...draft,
+                                  colorTag: undefined,
+                                }));
+                              }}
+                            >
+                              <span
+                                className={styles.promptCenterColorTagSwatch}
+                                data-default="true"
+                                aria-hidden="true"
+                              />
+                              <span>Default</span>
+                            </button>
+                            {COMMAND_CENTER_COLOR_TAGS.map((option) => (
+                              <button
+                                key={option.id}
+                                type="button"
+                                className={styles.promptCenterColorTagButton}
+                                data-active={
+                                  selectedWildcardDeckColorTag === option.id ? "true" : undefined
+                                }
+                                role="radio"
+                                aria-checked={selectedWildcardDeckColorTag === option.id}
+                                style={commandCenterColorStyle(option.id)}
+                                onClick={() => {
+                                  updateSelectedWildcardDeckDraft((draft) => ({
+                                    ...draft,
+                                    colorTag: option.id,
+                                  }));
+                                }}
+                              >
+                                <span
+                                  className={styles.promptCenterColorTagSwatch}
+                                  aria-hidden="true"
+                                />
+                                <span>{option.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className={styles.promptCenterFlagsHeader}>
+                          <span>Aliases</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateSelectedWildcardDeckDraft((draft) => ({
+                                ...draft,
+                                aliases: ["", ...draft.aliases],
+                              }));
+                            }}
+                          >
+                            Add alias
+                          </button>
+                        </div>
+                        <div className={styles.promptCenterFlagList}>
+                          {selectedWildcardDeckAliases.length === 0 && <p>No aliases yet.</p>}
+                          {selectedWildcardDeckAliases.map((alias, index) => (
+                            <div
+                              key={`${selectedWildcardDeck.id}-alias-${index}`}
+                              className={styles.promptCenterFlagRow}
+                            >
+                              <input
+                                type="text"
+                                value={alias ? `!${alias}` : ""}
+                                onChange={(event) => {
+                                  const nextAlias = normalizeWildcardDeckNameInput(
+                                    event.currentTarget.value
+                                  );
+                                  updateSelectedWildcardDeckDraft((draft) => ({
+                                    ...draft,
+                                    aliases: draft.aliases.map((item, itemIndex) =>
+                                      itemIndex === index ? nextAlias : item
+                                    ),
+                                  }));
+                                }}
+                                onBlur={() => {
+                                  updateSelectedWildcardDeckDraft((draft) => ({
+                                    ...draft,
+                                    aliases: normalizeWildcardDeckAliases(
+                                      draft.aliases,
+                                      draft.name
+                                    ),
+                                  }));
+                                }}
+                                placeholder="!alias"
+                                spellCheck={false}
+                              />
+                              <span className={styles.promptCenterAliasHint}>
+                                Alias for !{selectedWildcardDeckName}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateSelectedWildcardDeckDraft((draft) => ({
+                                    ...draft,
+                                    aliases: draft.aliases.filter(
+                                      (_, itemIndex) => itemIndex !== index
+                                    ),
+                                  }));
+                                }}
+                                aria-label={`Remove alias ${index + 1}`}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <label className={styles.promptCenterField}>
+                          <span>Values</span>
+                          <WildcardDeckValuesInput
+                            value={selectedWildcardDeckDraft.valuesText}
+                            onChange={(valuesText) => {
+                              updateSelectedWildcardDeckDraft((draft) => ({
+                                ...draft,
+                                valuesText,
+                              }));
+                            }}
+                          />
+                        </label>
+                        <div className={styles.promptCenterDangerRow}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCommandCenterWildcardDecks((current) =>
+                                current.filter((entry) => entry.id !== selectedWildcardDeck.id)
+                              );
+                              setCommandCenterSelectedWildcardDeckId(null);
+                            }}
+                          >
+                            Delete wildcard deck
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   ) : (
                     <div className={styles.promptCenterEmptyState}>
-                      <strong>Select a command or prompt</strong>
-                      <p>Choose a built-in command or create a prompt.</p>
+                      <strong>Select a command, prompt, or wildcard</strong>
+                      <p>Choose an existing item or create a reusable deck.</p>
                     </div>
                   )}
                 </section>
@@ -45709,20 +47619,6 @@ function HomeContent(): React.JSX.Element {
                 const customPrompts = commandCenterCommands.filter(
                   (command) => !command.builtIn && !command.readOnly
                 );
-                const devCommands = devSlashCommandsEnabled
-                  ? [
-                      {
-                        invocation: "/forget",
-                        description:
-                          "Forget memories for the current bot, or the Zen/default memory bucket.",
-                      },
-                      {
-                        invocation: "/forget-all",
-                        description:
-                          "Hard-reset all bot/default memories, summaries, and recall state.",
-                      },
-                    ]
-                  : [];
                 const renderCommandHelpRows = (
                   command: CommandCenterCommand,
                   kind: "command" | "prompt"
@@ -45756,30 +47652,6 @@ function HomeContent(): React.JSX.Element {
                         )}
                       </div>
                     </section>
-                    {devCommands.length > 0 && (
-                      <section className={styles.commandHelpSection}>
-                        <h5>Developer Commands</h5>
-                        <div className={styles.commandHelpList}>
-                          {devCommands.map((command) => (
-                            <button
-                              key={command.invocation}
-                              type="button"
-                              className={styles.commandHelpRow}
-                              onClick={() =>
-                                insertCommandCenterInvocation(command.invocation)
-                              }
-                            >
-                              <span className={styles.commandHelpSlash}>
-                                {command.invocation}
-                              </span>
-                              <span className={styles.commandHelpDescription}>
-                                {command.description}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </section>
-                    )}
                     <section className={styles.commandHelpSection}>
                       <h5>Prompts</h5>
                       {customPrompts.length > 0 ? (
@@ -45898,7 +47770,7 @@ function HomeContent(): React.JSX.Element {
                   onClick={() => setSettingsScope("zen")}
                 >
                   <strong>Zen Mode Settings</strong>
-                  <span>Session timing, recent context, and Atmosphere wallpaper.</span>
+                  <span>Session timing, mood sensitivity, recent context, and Atmosphere wallpaper.</span>
                 </button>
                 <button
                   type="button"
@@ -46027,12 +47899,29 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>Session</span>
                       <h4 id="zen-session-settings-title">Continuity</h4>
                     </div>
-                    <small>{zenRecentContextMessages} recent messages in live context</small>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>{zenRecentContextMessages} recent messages in live context</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-zen-continuity"
+                        label="About Zen continuity settings"
+                      >
+                        Controls how Zen keeps thread continuity after idle gaps, how much recent context stays live, and how strongly mood reacts.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   <div className={styles.settingsFieldGrid}>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Same session after idle</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Same session after idle</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-session-idle"
+                            label="About same session idle timing"
+                            variant="control"
+                          >
+                            Sets how long an idle gap can be before Zen marks a visible session break.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {formatZenDuration(settings.zenSessionIdleGapMs)}
                         </span>
@@ -46062,7 +47951,16 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Fresh start after idle</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Fresh start after idle</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-fresh-start"
+                            label="About fresh start timing"
+                            variant="control"
+                          >
+                            Sets the idle gap where Zen treats the return as a cleaner restart instead of a direct continuation.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {formatZenDuration(settings.zenFreshStartGapMs, "fresh")}
                         </span>
@@ -46086,7 +47984,16 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Recent context window</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Recent context window</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-recent-context"
+                            label="About recent context window"
+                            variant="control"
+                          >
+                            Controls how many recent Zen messages stay verbatim in live conversation context.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {zenRecentContextMessages} messages
                         </span>
@@ -46105,6 +48012,36 @@ function HomeContent(): React.JSX.Element {
                         }}
                       />
                     </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Mood sensitivity</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-mood-sensitivity"
+                            label="About mood sensitivity"
+                            variant="control"
+                          >
+                            Raises or lowers how sharply Zen mood reacts to interruptions and harsher turns.
+                          </PanelSectionInfo>
+                        </span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenMoodSensitivity(settings.zenMoodSensitivity)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_MOOD_SENSITIVITY}
+                        max={MAX_ZEN_MOOD_SENSITIVITY}
+                        step={0.05}
+                        value={zenMoodSensitivity}
+                        onChange={(event) => {
+                          const next = normalizeZenMoodSensitivitySetting(event.target.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenMoodSensitivity: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
                   </div>
                 </section>
 
@@ -46117,7 +48054,15 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>Atmosphere</span>
                       <h4 id="zen-atmosphere-settings-title">Wallpaper</h4>
                     </div>
-                    <small>Model picks save immediately.</small>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Model picks save immediately.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-zen-wallpaper"
+                        label="About Zen wallpaper settings"
+                      >
+                        Controls Zen Atmosphere wallpaper model choices, opacity, masking, and generation timing.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   <div className={styles.settingsModelControls}>
                     <div className={styles.settingsModelMatrix}>
@@ -46126,13 +48071,22 @@ function HomeContent(): React.JSX.Element {
                         <span>Offline</span>
                         <span>Online</span>
                       </div>
-                      {renderZenAtmosphereModelRow()}
+                      {renderZenAtmosphereModelRow("zen-settings-atmosphere")}
                     </div>
                   </div>
                   <div className={styles.settingsFieldGrid}>
                     <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Wallpaper opacity</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Wallpaper opacity</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-opacity"
+                            label="About wallpaper opacity"
+                            variant="control"
+                          >
+                            Controls how strongly the generated Zen Atmosphere image shows behind the conversation.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
                         </span>
@@ -46170,7 +48124,16 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Generate every</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Generate every</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-generate"
+                            label="About wallpaper generation interval"
+                            variant="control"
+                          >
+                            Sets how many messages pass before Zen queues a fresh Atmosphere wallpaper.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {zenWallpaperRegenMessageInterval} messages
                         </span>
@@ -46195,7 +48158,16 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Reveal delay</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Reveal delay</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-reveal-delay"
+                            label="About wallpaper reveal delay"
+                            variant="control"
+                          >
+                            Sets how many messages wait before a newly generated wallpaper begins fading in.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {zenWallpaperRevealDelayMessageCount} messages
                         </span>
@@ -46220,7 +48192,16 @@ function HomeContent(): React.JSX.Element {
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
-                        <span>Reveal span</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Reveal span</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-reveal-span"
+                            label="About wallpaper reveal span"
+                            variant="control"
+                          >
+                            Sets how many messages the wallpaper uses to fade from hidden to fully visible.
+                          </PanelSectionInfo>
+                        </span>
                         <span className={styles.settingsRangeValue}>
                           {zenWallpaperRevealSpanMessageCount} messages
                         </span>
@@ -46251,7 +48232,7 @@ function HomeContent(): React.JSX.Element {
                 {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
                 <div className={styles.settingsDockRow}>
-                  <span>Save Zen Mode timing, context, and Atmosphere settings.</span>
+                  <span>Save Zen Mode timing, mood, context, and Atmosphere settings.</span>
                   <div className={styles.settingsDockActions}>
                     <button
                       type="button"
@@ -46304,7 +48285,15 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>Connections</span>
                       <h4 id="settings-connections-title">API Keys &amp; Servers</h4>
                     </div>
-                    <small>Saved with Settings.</small>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Saved with Settings.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-connections"
+                        label="About connection settings"
+                      >
+                        Stores provider keys and local server endpoints Prism can use for models, images, and routing.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   <div className={styles.settingsFieldGrid}>
                     <label className={styles.settingsHostField}>
@@ -46493,7 +48482,15 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>Models</span>
                       <h4 id="settings-models-title">Defaults &amp; Fallbacks</h4>
                     </div>
-                    <small>Some image choices save immediately.</small>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Some image choices save immediately.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-models"
+                        label="About model default settings"
+                      >
+                        Sets default chat and image model choices, fallback behavior, and which models appear elsewhere.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   {renderDefaultsAndFallbacksControls("settings", {
                     includeZenAtmosphere: false,
@@ -46516,12 +48513,21 @@ function HomeContent(): React.JSX.Element {
                           data-model-provider={group.id}
                         >
                           <summary>
-                            <span className={styles.settingsModelProviderSummary}>
-                              <span
-                                className={styles.settingsModelProviderSwatch}
-                                aria-hidden="true"
-                              />
-                              <span>{group.label}</span>
+                            <span className={styles.settingsDropdownSummaryRow}>
+                              <span className={styles.settingsModelProviderSummary}>
+                                <span
+                                  className={styles.settingsModelProviderSwatch}
+                                  aria-hidden="true"
+                                />
+                                <span>{group.label}</span>
+                              </span>
+                              <PanelSectionInfo
+                                id={`settings-control-info-model-provider-${group.id}`}
+                                label={`About ${group.label} model visibility`}
+                                variant="control"
+                              >
+                                Controls which models from this provider appear in bot customizers and model pickers.
+                              </PanelSectionInfo>
                             </span>
                             <small>
                               {group.meta} - {visibleInGroup}/{group.models.length} visible
@@ -46568,7 +48574,16 @@ function HomeContent(): React.JSX.Element {
                   </div>
                   <details className={styles.settingsModelDropdown}>
                     <summary>
-                      <span>ComfyUI workflow list</span>
+                      <span className={styles.settingsDropdownSummaryRow}>
+                        <span>ComfyUI workflow list</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-comfyui-workflow-list"
+                          label="About ComfyUI workflow list"
+                          variant="control"
+                        >
+                          Controls which detected ComfyUI workflows appear in Images.
+                        </PanelSectionInfo>
+                      </span>
                       <small>
                         {allComfyUiWorkflowCatalogEntries.length === 0
                           ? "No workflows detected"
@@ -46617,6 +48632,14 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>Behavior</span>
                       <h4 id="settings-behavior-title">Memory &amp; Writing</h4>
                     </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <PanelSectionInfo
+                        id="settings-section-info-behavior"
+                        label="About behavior settings"
+                      >
+                        Toggles automatic memory capture, composer writing assistance, and mode tutorial reset controls.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   <div className={styles.settingsToggleStack}>
                     <label className={styles.checkbox}>
@@ -46663,6 +48686,14 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.settingsEyebrow}>About</span>
                       <h4 id="settings-about-title">Prism {PRISM_APP_VERSION}</h4>
                     </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <PanelSectionInfo
+                        id="settings-section-info-about"
+                        label="About this app section"
+                      >
+                        Shows Prism version details and app information.
+                      </PanelSectionInfo>
+                    </div>
                   </header>
                   <p className={styles.settingsCompactCopy}>
                     Personal AI workspace with offline-first controls, per-bot personality,
@@ -46688,6 +48719,14 @@ function HomeContent(): React.JSX.Element {
                     <div>
                       <span className={styles.settingsEyebrow}>Account</span>
                       <h4 id="settings-account-title">Data &amp; Security</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <PanelSectionInfo
+                        id="settings-section-info-account"
+                        label="About account data settings"
+                      >
+                        Contains account actions, profile naming, local data controls, and security-related options.
+                      </PanelSectionInfo>
                     </div>
                   </header>
                   <p className={styles.settingsCompactCopy}>
@@ -47906,7 +49945,16 @@ function HomeContent(): React.JSX.Element {
                       onBlur={hideFieldHelp}
                     >
                       <div className={styles.botParameterQuestionRow}>
-                        <span>Reply creativity</span>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Reply creativity</span>
+                          <PanelSectionInfo
+                            id="bot-parameter-info-reply-creativity-inline"
+                            label="About reply creativity"
+                            variant="control"
+                          >
+                            Controls how predictable or surprising this bot's replies should feel.
+                          </PanelSectionInfo>
+                        </span>
                         <strong>{botTemperatureLabel(newBotTemperature)}</strong>
                       </div>
                       <small className={styles.botParameterInlineHelp}>
@@ -48151,7 +50199,16 @@ function HomeContent(): React.JSX.Element {
                           <>
                             <div className={styles.botParameterField}>
                               <div className={styles.botParameterQuestionRow}>
-                                <span>Reply creativity</span>
+                                <span className={styles.controlLabelWithInfo}>
+                                  <span>Reply creativity</span>
+                                  <PanelSectionInfo
+                                    id="bot-parameter-info-reply-creativity-tuning"
+                                    label="About reply creativity"
+                                    variant="control"
+                                  >
+                                    Controls how predictable or surprising this bot's replies should feel.
+                                  </PanelSectionInfo>
+                                </span>
                                 <strong>{botTemperatureLabel(newBotTemperature)}</strong>
                               </div>
                               <small className={styles.botParameterInlineHelp}>
@@ -51396,7 +53453,14 @@ function HomeContent(): React.JSX.Element {
         <p className={styles.coffeeSettingsSectionLabel}>Replies</p>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-response-length`}>
-            Response length
+            <span>Response length</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-response-length`}
+              label="About Coffee response length"
+              variant="control"
+            >
+              Sets how much room each bot has before the Coffee table moves on.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             How much room each bot has before the table moves on.
@@ -51420,7 +53484,14 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-delay-bias`}>
-            Response delay bias
+            <span>Response delay bias</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-delay-bias`}
+              label="About Coffee response delay bias"
+              variant="control"
+            >
+              Nudges Coffee replies toward slower pauses or quicker back-and-forth.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             Nudge pauses toward calmer table talk or snappier banter.
@@ -51453,7 +53524,14 @@ function HomeContent(): React.JSX.Element {
         <p className={styles.coffeeSettingsSectionLabel}>Table feel</p>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-energy`}>
-            Table energy
+            <span>Table energy</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-table-energy`}
+              label="About Coffee table energy"
+              variant="control"
+            >
+              Sets whether the Coffee table feels quieter or more animated.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             Quieter circle versus a lively back-and-forth.
@@ -51477,7 +53555,14 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-crosstalk`}>
-            Cross-talk
+            <span>Cross-talk</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-crosstalk`}
+              label="About Coffee cross-talk"
+              variant="control"
+            >
+              Sets how often bots respond to each other instead of only to the whole group.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             How often bots react to each other versus the whole group.
@@ -51500,7 +53585,14 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-breathing-room`}>
-            Breathing room between lines
+            <span>Breathing room between lines</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-breathing-room`}
+              label="About Coffee breathing room"
+              variant="control"
+            >
+              Adds or removes cushion between one Coffee line and the next speaker.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             Extra cushion after a line before the next speaker.
@@ -51574,7 +53666,14 @@ function HomeContent(): React.JSX.Element {
         </div>
         <div className={styles.coffeeSettingsField}>
           <label className={styles.coffeeSettingsFieldLabel} htmlFor={`${idPrefix}-memory-callbacks`}>
-            Memory callbacks
+            <span>Memory callbacks</span>
+            <PanelSectionInfo
+              id={`${idPrefix}-control-info-memory-callbacks`}
+              label="About Coffee memory callbacks"
+              variant="control"
+            >
+              Sets how far back the Coffee table can reference previous conversation beats.
+            </PanelSectionInfo>
           </label>
           <p className={styles.coffeeSettingsHint}>
             How far back the table can reference earlier beats. &quot;Recent sessions&quot; uses the
@@ -53243,20 +55342,32 @@ function HomeContent(): React.JSX.Element {
                 </button>
               ))}
             </div>
-            <select
-              className={styles.coffeeSettingsSelect}
-              value={coffeeSelectedPresetId}
-              onChange={(event) => setCoffeeSelectedPresetId(event.target.value)}
-              aria-label="Coffee preset for new sessions"
-            >
-              <option value="">Group defaults</option>
-              <option value={COFFEE_AUTO_PRESET_ID}>Auto preset</option>
-              {coffeePresets.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.name}
-                </option>
-              ))}
-            </select>
+            <div className={styles.coffeeGroupPresetField}>
+              <span className={`${styles.coffeeGroupStartControlLabel} ${styles.controlLabelWithInfo}`}>
+                <span>Preset</span>
+                <PanelSectionInfo
+                  id="coffee-new-session-preset-info"
+                  label="About Coffee session presets"
+                  variant="control"
+                >
+                  Chooses the saved pacing and behavior defaults for the next Coffee session.
+                </PanelSectionInfo>
+              </span>
+              <select
+                className={styles.coffeeSettingsSelect}
+                value={coffeeSelectedPresetId}
+                onChange={(event) => setCoffeeSelectedPresetId(event.target.value)}
+                aria-label="Coffee preset for new sessions"
+              >
+                <option value="">Group defaults</option>
+                <option value={COFFEE_AUTO_PRESET_ID}>Auto preset</option>
+                {coffeePresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <label className={styles.coffeeAutoTopicToggle}>
               <input
                 type="checkbox"
@@ -55799,6 +57910,7 @@ function HomeContent(): React.JSX.Element {
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
                   promptShortcut={msg.promptShortcut}
+                  promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   onTogglePromptShortcut={() =>
@@ -55917,6 +58029,7 @@ function HomeContent(): React.JSX.Element {
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
               resolvedTheme={resolvedTheme}
+              infoId="compose-empty-hue-lens-info"
               onInteractionChange={setLensInteracting}
             />
           )}
@@ -55983,11 +58096,13 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
+                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
+                    wildcardPicks={composerWildcardDeckPicks}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -56007,11 +58122,13 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
+                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
+                wildcardPicks={composerWildcardDeckPicks}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
@@ -57238,6 +59355,7 @@ function HomeContent(): React.JSX.Element {
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
                   promptShortcut={msg.promptShortcut}
+                  promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   onTogglePromptShortcut={() =>
@@ -57358,6 +59476,7 @@ function HomeContent(): React.JSX.Element {
               trackGradient={hueLensTrackGradient}
               trackSegments={hueLensTrackSegments}
               resolvedTheme={resolvedTheme}
+              infoId="compose-chat-hue-lens-info"
               onInteractionChange={setLensInteracting}
             />
           )}
@@ -57413,11 +59532,13 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
+                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
+                    wildcardPicks={composerWildcardDeckPicks}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -57437,11 +59558,13 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
+                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
+                wildcardPicks={composerWildcardDeckPicks}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )

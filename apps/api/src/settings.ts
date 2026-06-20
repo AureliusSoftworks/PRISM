@@ -1,7 +1,11 @@
 import type { ComfyUiWorkflowRegistration } from "@localai/shared";
 import {
+  DEFAULT_PRISM_MOOD_SENSITIVITY,
   isComfyUiRemoteWorkflowModelId,
   isComfyUiWorkflowModelId,
+  MAX_PRISM_MOOD_SENSITIVITY,
+  MIN_PRISM_MOOD_SENSITIVITY,
+  normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
@@ -47,6 +51,9 @@ export const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
 export const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 export const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
 export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
+export const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
+export const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
+export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -88,6 +95,7 @@ export interface CurrentSettings {
   zenWallpaperRegenMessageInterval: number | null;
   zenWallpaperRevealDelayMessageCount: number | null;
   zenWallpaperRevealSpanMessageCount: number | null;
+  zenMoodSensitivity: number | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -127,6 +135,7 @@ export interface NextSettings {
   zenWallpaperRegenMessageInterval: number;
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
+  zenMoodSensitivity: number;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
@@ -489,6 +498,13 @@ export function normalizeZenWallpaperRevealSpanMessageCount(
   );
 }
 
+export function normalizeZenMoodSensitivity(
+  value: unknown,
+  fallback = DEFAULT_ZEN_MOOD_SENSITIVITY
+): number {
+  return normalizePrismMoodSensitivity(value, fallback);
+}
+
 function readDisplayName(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
@@ -715,6 +731,16 @@ export function resolveNextSettings(
           body.zenWallpaperRevealSpanMessageCount,
           currentZenWallpaperRevealSpanMessageCount
         );
+  const currentZenMoodSensitivity = normalizeZenMoodSensitivity(
+    current.zenMoodSensitivity
+  );
+  const zenMoodSensitivity =
+    body.zenMoodSensitivity === undefined
+      ? currentZenMoodSensitivity
+      : normalizeZenMoodSensitivity(
+          body.zenMoodSensitivity,
+          currentZenMoodSensitivity
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -795,6 +821,7 @@ export function resolveNextSettings(
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
+    zenMoodSensitivity,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,

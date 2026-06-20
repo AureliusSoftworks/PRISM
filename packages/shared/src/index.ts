@@ -9,12 +9,16 @@ export {
   clampPrismMoodValue,
   coffeeSocialSnapshotToPrismMoodState,
   createDefaultPrismMoodState,
+  DEFAULT_PRISM_MOOD_SENSITIVITY,
   debugPatchPrismMood,
   decayPrismMood,
   derivePrismMoodConfidence,
   derivePrismMoodKey,
   interruptionProgressWeight,
   isPrismMoodIgnoring,
+  MAX_PRISM_MOOD_SENSITIVITY,
+  MIN_PRISM_MOOD_SENSITIVITY,
+  normalizePrismMoodSensitivity,
   PRISM_MOOD_IGNORE_COOLDOWN_MS,
   PRISM_MOOD_IGNORE_FORGIVENESS_CHANCE,
   PRISM_MOOD_IGNORE_FORGIVENESS_STEP,
@@ -109,12 +113,22 @@ export {
 
 export {
   normalizePromptShortcutMetadata,
+  normalizeBuiltInPromptWildcardSlotKey,
+  normalizePromptWildcardRunMetadata,
   parseStoredPromptShortcutPayload,
+  parseStoredPromptWildcardPayload,
   serializePromptShortcutPayload,
+  serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
+  withPromptWildcardResolvedPrompt,
+  BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  getBuiltInPromptWildcardSlot,
+  type BuiltInPromptWildcardSlot,
+  type BuiltInPromptWildcardSlotKey,
   type PromptShortcutFlag,
   type PromptShortcutMetadata,
   type PromptShortcutWildcardReplacement,
+  type PromptWildcardRunMetadata,
 } from "./promptShortcut.js";
 
 export {
@@ -264,7 +278,10 @@ import type {
   SentGeneratedImagePayload,
   ZenDisplayMetadata,
 } from "./prismTool.js";
-import type { PromptShortcutMetadata } from "./promptShortcut.js";
+import type {
+  PromptShortcutMetadata,
+  PromptWildcardRunMetadata,
+} from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
 import type { ReasoningEffort } from "./reasoningEffort.js";
@@ -315,6 +332,8 @@ export interface ChatMessage {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
+  /** User-entered wildcard decks/options that resolved into this message content. */
+  promptWildcards?: PromptWildcardRunMetadata;
 }
 
 /**
@@ -630,6 +649,30 @@ export interface UserMemory {
 
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
+
+export interface ZenSessionMemoryItem {
+  id: string;
+  conversationId?: string;
+  title: string;
+  text: string;
+  trigger?: string;
+  sourceMessageIds?: string[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ZenPreviousContextSummary {
+  conversationId: string;
+  title: string;
+  summary: string;
+  internalSummary?: string;
+  updatedAt: string;
+}
+
+export interface ZenSessionMemoryOverview {
+  previousContext: ZenPreviousContextSummary | null;
+  sessionMemories: ZenSessionMemoryItem[];
+}
 
 export {
   REQUIRED_LOCAL_MODELS,

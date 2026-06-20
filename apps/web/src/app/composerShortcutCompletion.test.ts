@@ -14,6 +14,7 @@ describe("composer shortcut exact completion matching", () => {
   it("matches a fully typed command name", () => {
     assert.equal(composerShortcutQueryExactlyMatchesCommand("draft-reply", draftReply), true);
     assert.equal(composerShortcutQueryExactlyMatchesCommand("/draft-reply", draftReply), true);
+    assert.equal(composerShortcutQueryExactlyMatchesCommand("!draft-reply", draftReply), true);
   });
 
   it("matches aliases so typed aliases can send on Enter", () => {

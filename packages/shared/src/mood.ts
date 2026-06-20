@@ -2,6 +2,10 @@ export type PrismMoodMode = "zen" | "chat" | "sandbox" | "coffee";
 
 export type PrismMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
+export const DEFAULT_PRISM_MOOD_SENSITIVITY = 0.5;
+export const MIN_PRISM_MOOD_SENSITIVITY = 0;
+export const MAX_PRISM_MOOD_SENSITIVITY = 1;
+
 export type PrismMoodDeltaKind =
   | "interruption"
   | "negative_turn"
@@ -84,6 +88,28 @@ function isoNow(now?: string | Date): string {
 export function clampPrismMoodValue(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+export function normalizePrismMoodSensitivity(
+  value: unknown,
+  fallback = DEFAULT_PRISM_MOOD_SENSITIVITY
+): number {
+  const fallbackNumber =
+    typeof fallback === "number" && Number.isFinite(fallback)
+      ? fallback
+      : DEFAULT_PRISM_MOOD_SENSITIVITY;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallbackNumber;
+  const clamped = Math.min(
+    MAX_PRISM_MOOD_SENSITIVITY,
+    Math.max(MIN_PRISM_MOOD_SENSITIVITY, normalized)
+  );
+  return Math.round(clamped * 100) / 100;
 }
 
 function roundedUnit(value: number): number {
@@ -406,10 +432,30 @@ export function isPrismMoodIgnoring(
   return prismMoodIgnoreUntilMs(state, now) !== null;
 }
 
+function prismMoodSensitivityJumpWeight(sensitivity: unknown): number {
+  const normalized = normalizePrismMoodSensitivity(sensitivity);
+  return 0.55 + normalized * 0.9;
+}
+
+function prismMoodSensitivityThresholdOffset(sensitivity: unknown): number {
+  return (normalizePrismMoodSensitivity(sensitivity) - DEFAULT_PRISM_MOOD_SENSITIVITY) * 0.2;
+}
+
+function prismMoodSensitivityStreakThreshold(
+  sensitivity: unknown,
+  baseline: number
+): number {
+  const normalized = normalizePrismMoodSensitivity(sensitivity);
+  if (normalized >= 0.8) return Math.max(1, baseline - 1);
+  if (normalized <= 0.2) return baseline + 1;
+  return baseline;
+}
+
 export function applyPrismMoodInterruption(
   previous: PrismMoodState,
   input?: PrismMoodInterruptionInput,
-  now?: string | Date
+  now?: string | Date,
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
 ): PrismMoodState {
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
@@ -418,7 +464,8 @@ export function applyPrismMoodInterruption(
   const restraintRelief = 1 - base.restraint * 0.42;
   const streak = prismMoodInterruptionStreak(base);
   const streakWeight = 1 + Math.min(1.35, streak * 0.23);
-  const weight = severity * pendingReplyWeight * restraintRelief * streakWeight;
+  const weight = severity * pendingReplyWeight * restraintRelief * streakWeight *
+    prismMoodSensitivityJumpWeight(sensitivity);
   return withMoodDelta(base, {
     kind: "interruption",
     now,
@@ -435,11 +482,16 @@ export function applyPrismMoodInterruption(
 export function applyPrismMoodNegativeTurn(
   previous: PrismMoodState,
   intensity = 1,
-  now?: string | Date
+  now?: string | Date,
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
 ): PrismMoodState {
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
-  const weight = Math.min(0.65, clampPrismMoodValue(intensity));
+  const baseWeight = Math.min(0.65, clampPrismMoodValue(intensity));
+  const weight = Math.min(
+    0.95,
+    baseWeight * prismMoodSensitivityJumpWeight(sensitivity)
+  );
   return withMoodDelta(base, {
     kind: "negative_turn",
     now,
@@ -474,19 +526,23 @@ export function applyPrismMoodPositiveTurn(
   });
 }
 
-export function shouldPrismMoodStartIgnoreCooldown(state: PrismMoodState): boolean {
+export function shouldPrismMoodStartIgnoreCooldown(
+  state: PrismMoodState,
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
+): boolean {
   const mood = sanitizePrismMoodState(state, state.mode);
   if (mood.mode !== "zen") return false;
   if (isPrismMoodIgnoring(mood)) return false;
   const streak = prismMoodInterruptionStreak(mood);
+  const offset = prismMoodSensitivityThresholdOffset(sensitivity);
   const hardIgnore =
-    mood.annoyance >= 0.78 &&
-    mood.warmth <= 0.42 &&
-    mood.engagement <= 0.48;
+    mood.annoyance >= 0.78 - offset &&
+    mood.warmth <= 0.42 + offset * 0.5 &&
+    mood.engagement <= 0.48 + offset * 0.5;
   const interruptionIgnore =
-    streak >= 6 &&
-    mood.annoyance >= 0.72 &&
-    mood.warmth <= 0.46;
+    streak >= prismMoodSensitivityStreakThreshold(sensitivity, 6) &&
+    mood.annoyance >= 0.72 - offset &&
+    mood.warmth <= 0.46 + offset * 0.5;
   return hardIgnore || interruptionIgnore;
 }
 
@@ -640,15 +696,22 @@ export function resetPrismMood(
   };
 }
 
-export function shouldPrismMoodDeclineResponse(state: PrismMoodState): boolean {
+export function shouldPrismMoodDeclineResponse(
+  state: PrismMoodState,
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
+): boolean {
   const mood = sanitizePrismMoodState(state, state.mode);
   if (isPrismMoodIgnoring(mood)) return true;
-  const hardDecline = mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4;
+  const offset = prismMoodSensitivityThresholdOffset(sensitivity);
+  const hardDecline =
+    mood.annoyance >= 0.82 - offset &&
+    mood.engagement <= 0.42 + offset * 0.5 &&
+    mood.warmth <= 0.4 + offset * 0.5;
   const interruptionPause =
     mood.mode === "zen" &&
-    prismMoodInterruptionStreak(mood) >= 5 &&
-    mood.annoyance >= 0.58 &&
-    mood.warmth <= 0.52;
+    prismMoodInterruptionStreak(mood) >= prismMoodSensitivityStreakThreshold(sensitivity, 5) &&
+    mood.annoyance >= 0.58 - offset &&
+    mood.warmth <= 0.52 + offset * 0.5;
   return hardDecline || interruptionPause;
 }
 
