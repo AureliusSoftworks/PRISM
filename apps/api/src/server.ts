@@ -1973,6 +1973,13 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
           : undefined;
+      const promptOverride =
+        typeof body.promptOverride === "string"
+          ? clampWallpaperPromptText(body.promptOverride, 3000)
+          : "";
+      if (body.promptOverride !== undefined && promptOverride.length === 0) {
+        throw new HttpError(400, "Type a custom Atmosphere prompt before generating.");
+      }
       const conversation = db
         .prepare(
           `SELECT c.id, c.conversation_mode, c.bot_id,
@@ -2085,12 +2092,14 @@ function buildRoutes(): RouteDefinition[] {
         .slice(-8)
         .map((message) => `${message.role}: ${message.content}`)
         .join("\n");
-      const prompt = composeZenWallpaperPrompt({
-        initialUserPrompt: firstUserMessage,
-        recentContext,
-        botName: conversation.bot_name,
-        botSystemPrompt: conversation.bot_system_prompt,
-      });
+      const prompt =
+        promptOverride ||
+        composeZenWallpaperPrompt({
+          initialUserPrompt: firstUserMessage,
+          recentContext,
+          botName: conversation.bot_name,
+          botSystemPrompt: conversation.bot_system_prompt,
+        });
 
       const botForcesLocal = conversation.bot_online_enabled === 0;
       const effectiveProvider =
@@ -2126,7 +2135,9 @@ function buildRoutes(): RouteDefinition[] {
         mode: "zen",
         incognito: false,
         captionPrompt: prompt,
-        userMessage: `[Zen wallpaper] ${firstUserMessage.slice(0, 500)}`,
+        userMessage: promptOverride
+          ? `[Zen wallpaper custom prompt] ${promptOverride.slice(0, 500)}`
+          : `[Zen wallpaper] ${firstUserMessage.slice(0, 500)}`,
         source: "zen_wallpaper",
         requestedSize: ZEN_WALLPAPER_SIZE,
       });
