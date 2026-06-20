@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseStoredPromptShortcutPayload,
   serializePromptShortcutPayload,
+  withPromptShortcutResolvedPrompt,
 } from "./promptShortcut.ts";
 
 describe("prompt shortcut payloads", () => {
@@ -14,6 +15,11 @@ describe("prompt shortcut payloads", () => {
       invocation: "/help -v explain this",
       flags: [{ key: "v", value: "Please be verbose" }],
       passthrough: "explain this",
+      resolvedPrompt: "Choose luminous garden.",
+      wildcardReplacements: [
+        { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
+        { key: "PLACE", value: "garden", start: 16, end: 22 },
+      ],
     });
 
     assert.equal(typeof serialized, "string");
@@ -24,6 +30,11 @@ describe("prompt shortcut payloads", () => {
       invocation: "/help -v explain this",
       flags: [{ key: "v", value: "Please be verbose" }],
       passthrough: "explain this",
+      resolvedPrompt: "Choose luminous garden.",
+      wildcardReplacements: [
+        { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
+        { key: "PLACE", value: "garden", start: 16, end: 22 },
+      ],
     });
   });
 
@@ -33,6 +44,35 @@ describe("prompt shortcut payloads", () => {
     assert.equal(
       parseStoredPromptShortcutPayload(JSON.stringify({ v: 1, mood: { key: "warm" } })),
       undefined
+    );
+  });
+
+  it("adds the concrete prompt sent to the model", () => {
+    assert.deepEqual(
+      withPromptShortcutResolvedPrompt(
+        {
+          v: 1,
+          commandId: "custom:/blah",
+          name: "blah",
+          invocation: "/blah",
+          flags: [],
+          wildcardReplacements: [
+            { key: "ADJECTIVE", value: "luminous", start: 36, end: 44 },
+          ],
+        },
+        "Tell me a 5-paragraph story about a luminous garden."
+      ),
+      {
+        v: 1,
+        commandId: "custom:/blah",
+        name: "blah",
+        invocation: "/blah",
+        flags: [],
+        resolvedPrompt: "Tell me a 5-paragraph story about a luminous garden.",
+        wildcardReplacements: [
+          { key: "ADJECTIVE", value: "luminous", start: 36, end: 44 },
+        ],
+      }
     );
   });
 });

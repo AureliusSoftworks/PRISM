@@ -6,6 +6,10 @@ export type PrismMoodDeltaKind =
   | "interruption"
   | "negative_turn"
   | "positive_turn"
+  | "ignore_started"
+  | "ignored_turn"
+  | "ignore_forgiven"
+  | "ignore_expired"
   | "turn_decay"
   | "debug_nudge"
   | "reset";
@@ -32,6 +36,10 @@ export interface PrismMoodState {
   restraint: number;
   lastUpdatedAt: string;
   recentDeltas: PrismMoodDelta[];
+  ignoreUntil?: string;
+  ignoreCooldownMs?: number;
+  ignoreForgivenessChance?: number;
+  ignorePenaltyLevel?: number;
   frozen?: boolean;
 }
 
@@ -62,6 +70,10 @@ export interface CoffeeSocialLikeSnapshot {
 }
 
 const RECENT_DELTA_LIMIT = 12;
+export const PRISM_MOOD_IGNORE_COOLDOWN_MS = 45_000;
+export const PRISM_MOOD_IGNORE_FORGIVENESS_CHANCE = 0.1;
+export const PRISM_MOOD_IGNORE_FORGIVENESS_STEP = 0.02;
+const PRISM_MOOD_IGNORE_PENALTY_LIMIT = 5;
 
 function isoNow(now?: string | Date): string {
   if (typeof now === "string" && now.trim().length > 0) return now;
@@ -81,6 +93,34 @@ function roundedUnit(value: number): number {
 function roundedDelta(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 1000) / 1000;
+}
+
+function roundedChance(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(Math.max(0, Math.min(1, value)) * 1000) / 1000;
+}
+
+function normalizeIgnorePenaltyLevel(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(PRISM_MOOD_IGNORE_PENALTY_LIMIT, Math.floor(value)));
+}
+
+function normalizeIgnoreCooldownMs(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(1_000, Math.min(3_600_000, Math.round(value)));
+}
+
+function forgivenessChanceForPenaltyLevel(penaltyLevel: number): number {
+  return roundedChance(
+    PRISM_MOOD_IGNORE_FORGIVENESS_CHANCE -
+      normalizeIgnorePenaltyLevel(penaltyLevel) * PRISM_MOOD_IGNORE_FORGIVENESS_STEP
+  );
+}
+
+function cooldownMsForPenaltyLevel(penaltyLevel: number): number {
+  return Math.round(
+    PRISM_MOOD_IGNORE_COOLDOWN_MS * Math.pow(2, normalizeIgnorePenaltyLevel(penaltyLevel))
+  );
 }
 
 function normalizeMode(mode: unknown): PrismMoodMode {
@@ -158,6 +198,10 @@ function sanitizeDelta(input: unknown): PrismMoodDelta | null {
     kind !== "interruption" &&
     kind !== "negative_turn" &&
     kind !== "positive_turn" &&
+    kind !== "ignore_started" &&
+    kind !== "ignored_turn" &&
+    kind !== "ignore_forgiven" &&
+    kind !== "ignore_expired" &&
     kind !== "turn_decay" &&
     kind !== "debug_nudge" &&
     kind !== "reset"
@@ -208,6 +252,16 @@ export function sanitizePrismMoodState(
   const recentDeltas = Array.isArray(record.recentDeltas)
     ? record.recentDeltas.map(sanitizeDelta).filter((delta): delta is PrismMoodDelta => delta !== null)
     : [];
+  const ignoreUntil =
+    typeof record.ignoreUntil === "string" && !Number.isNaN(Date.parse(record.ignoreUntil))
+      ? record.ignoreUntil
+      : undefined;
+  const ignoreCooldownMs = normalizeIgnoreCooldownMs(record.ignoreCooldownMs);
+  const ignoreForgivenessChance =
+    typeof record.ignoreForgivenessChance === "number" && Number.isFinite(record.ignoreForgivenessChance)
+      ? roundedChance(record.ignoreForgivenessChance)
+      : undefined;
+  const ignorePenaltyLevel = normalizeIgnorePenaltyLevel(record.ignorePenaltyLevel);
   return finalizeMoodState({
     mode: normalizeMode(record.mode ?? fallbackMode),
     annoyance: typeof record.annoyance === "number" ? record.annoyance : base.annoyance,
@@ -219,6 +273,10 @@ export function sanitizePrismMoodState(
         ? record.lastUpdatedAt
         : base.lastUpdatedAt,
     recentDeltas,
+    ...(ignoreUntil ? { ignoreUntil } : {}),
+    ...(ignoreCooldownMs !== undefined ? { ignoreCooldownMs } : {}),
+    ...(ignoreForgivenessChance !== undefined ? { ignoreForgivenessChance } : {}),
+    ...(ignorePenaltyLevel > 0 ? { ignorePenaltyLevel } : {}),
     ...(record.frozen === true ? { frozen: true } : {}),
   });
 }
@@ -234,11 +292,35 @@ function withMoodDelta(
     engagementDelta?: number;
     restraintDelta?: number;
     frozenOverride?: boolean;
+    ignoreUntilOverride?: string | null;
+    ignoreCooldownMsOverride?: number | null;
+    ignoreForgivenessChanceOverride?: number | null;
+    ignorePenaltyLevelOverride?: number | null;
   }
 ): PrismMoodState {
   const now = isoNow(args.now);
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   const frozen = args.frozenOverride ?? base.frozen;
+  const ignoreUntil =
+    args.ignoreUntilOverride === undefined
+      ? base.ignoreUntil
+      : args.ignoreUntilOverride ?? undefined;
+  const ignoreCooldownMs =
+    args.ignoreCooldownMsOverride === undefined
+      ? base.ignoreCooldownMs
+      : normalizeIgnoreCooldownMs(args.ignoreCooldownMsOverride);
+  const ignoreForgivenessChance =
+    args.ignoreForgivenessChanceOverride === undefined
+      ? base.ignoreForgivenessChance
+      : args.ignoreForgivenessChanceOverride === null
+        ? undefined
+        : roundedChance(args.ignoreForgivenessChanceOverride);
+  const ignorePenaltyLevel =
+    args.ignorePenaltyLevelOverride === undefined
+      ? base.ignorePenaltyLevel
+      : args.ignorePenaltyLevelOverride === null
+        ? undefined
+        : normalizeIgnorePenaltyLevel(args.ignorePenaltyLevelOverride);
   const nextBase = finalizeMoodState({
     mode: base.mode,
     annoyance: base.annoyance + (args.annoyanceDelta ?? 0),
@@ -247,6 +329,10 @@ function withMoodDelta(
     restraint: base.restraint + (args.restraintDelta ?? 0),
     lastUpdatedAt: now,
     recentDeltas: base.recentDeltas,
+    ...(ignoreUntil ? { ignoreUntil } : {}),
+    ...(ignoreCooldownMs !== undefined ? { ignoreCooldownMs } : {}),
+    ...(ignoreForgivenessChance !== undefined ? { ignoreForgivenessChance } : {}),
+    ...(ignorePenaltyLevel !== undefined && ignorePenaltyLevel > 0 ? { ignorePenaltyLevel } : {}),
     ...(frozen ? { frozen } : {}),
   });
   const delta: PrismMoodDelta = {
@@ -292,6 +378,32 @@ export function prismMoodInterruptionStreak(state: PrismMoodState): number {
     break;
   }
   return streak;
+}
+
+function timeMs(value?: string | Date): number {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+  return Date.now();
+}
+
+export function prismMoodIgnoreUntilMs(
+  state: PrismMoodState,
+  now?: string | Date
+): number | null {
+  const mood = sanitizePrismMoodState(state, state.mode, now);
+  const untilMs = Date.parse(mood.ignoreUntil ?? "");
+  if (Number.isNaN(untilMs)) return null;
+  return untilMs > timeMs(now) ? untilMs : null;
+}
+
+export function isPrismMoodIgnoring(
+  state: PrismMoodState,
+  now?: string | Date
+): boolean {
+  return prismMoodIgnoreUntilMs(state, now) !== null;
 }
 
 export function applyPrismMoodInterruption(
@@ -356,6 +468,112 @@ export function applyPrismMoodPositiveTurn(
     warmthDelta: 0.07 * weight,
     engagementDelta: 0.04 * weight,
     restraintDelta: 0.035 * weight,
+    ignoreUntilOverride: null,
+    ignoreCooldownMsOverride: null,
+    ignoreForgivenessChanceOverride: null,
+  });
+}
+
+export function shouldPrismMoodStartIgnoreCooldown(state: PrismMoodState): boolean {
+  const mood = sanitizePrismMoodState(state, state.mode);
+  if (mood.mode !== "zen") return false;
+  if (isPrismMoodIgnoring(mood)) return false;
+  const streak = prismMoodInterruptionStreak(mood);
+  const hardIgnore =
+    mood.annoyance >= 0.78 &&
+    mood.warmth <= 0.42 &&
+    mood.engagement <= 0.48;
+  const interruptionIgnore =
+    streak >= 6 &&
+    mood.annoyance >= 0.72 &&
+    mood.warmth <= 0.46;
+  return hardIgnore || interruptionIgnore;
+}
+
+export function applyPrismMoodIgnoreCooldown(
+  previous: PrismMoodState,
+  now?: string | Date,
+  cooldownMs?: number
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (base.frozen) return base;
+  const nowMs = timeMs(now);
+  const penaltyLevel = normalizeIgnorePenaltyLevel(base.ignorePenaltyLevel);
+  const effectiveCooldownMs =
+    cooldownMs !== undefined
+      ? Math.max(1_000, Math.round(cooldownMs))
+      : cooldownMsForPenaltyLevel(penaltyLevel);
+  const forgivenessChance = forgivenessChanceForPenaltyLevel(penaltyLevel);
+  const ignoreUntil = new Date(nowMs + effectiveCooldownMs).toISOString();
+  return withMoodDelta(base, {
+    kind: "ignore_started",
+    now,
+    reason: "Prism stopped answering for a short cooldown.",
+    annoyanceDelta: 1 - base.annoyance,
+    ignoreUntilOverride: ignoreUntil,
+    ignoreCooldownMsOverride: effectiveCooldownMs,
+    ignoreForgivenessChanceOverride: forgivenessChance,
+    ignorePenaltyLevelOverride: penaltyLevel,
+  });
+}
+
+export function applyPrismMoodIgnoredTurn(
+  previous: PrismMoodState,
+  now?: string | Date
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  return withMoodDelta(base, {
+    kind: "ignored_turn",
+    now,
+    reason: "Prism ignored the user while the cooldown was active.",
+  });
+}
+
+export function prismMoodIgnoreForgivenessChance(state: PrismMoodState): number {
+  const mood = sanitizePrismMoodState(state, state.mode);
+  if (!isPrismMoodIgnoring(mood)) return 0;
+  if (typeof mood.ignoreForgivenessChance === "number") {
+    return roundedChance(mood.ignoreForgivenessChance);
+  }
+  return forgivenessChanceForPenaltyLevel(mood.ignorePenaltyLevel ?? 0);
+}
+
+export function applyPrismMoodForgivenessSuccess(
+  previous: PrismMoodState,
+  now?: string | Date
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (base.frozen) return base;
+  const nextPenaltyLevel = normalizeIgnorePenaltyLevel((base.ignorePenaltyLevel ?? 0) + 1);
+  return withMoodDelta(base, {
+    kind: "ignore_forgiven",
+    now,
+    reason: "The user made a repair attempt and Prism chose to answer again.",
+    annoyanceDelta: -0.05,
+    ignoreUntilOverride: null,
+    ignoreCooldownMsOverride: null,
+    ignoreForgivenessChanceOverride: null,
+    ignorePenaltyLevelOverride: nextPenaltyLevel,
+  });
+}
+
+export function applyPrismMoodExpiredIgnoreCooldown(
+  previous: PrismMoodState,
+  now?: string | Date
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (!base.ignoreUntil || isPrismMoodIgnoring(base, now)) return base;
+  if (base.frozen) return base;
+  const nextPenaltyLevel = normalizeIgnorePenaltyLevel((base.ignorePenaltyLevel ?? 0) + 1);
+  return withMoodDelta(base, {
+    kind: "ignore_expired",
+    now,
+    reason: "The ignore cooldown completed, so Prism calmed down a little.",
+    annoyanceDelta: -0.25,
+    ignoreUntilOverride: null,
+    ignoreCooldownMsOverride: null,
+    ignoreForgivenessChanceOverride: null,
+    ignorePenaltyLevelOverride: nextPenaltyLevel,
   });
 }
 
@@ -424,6 +642,7 @@ export function resetPrismMood(
 
 export function shouldPrismMoodDeclineResponse(state: PrismMoodState): boolean {
   const mood = sanitizePrismMoodState(state, state.mode);
+  if (isPrismMoodIgnoring(mood)) return true;
   const hardDecline = mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4;
   const interruptionPause =
     mood.mode === "zen" &&
@@ -435,6 +654,9 @@ export function shouldPrismMoodDeclineResponse(state: PrismMoodState): boolean {
 
 export function prismMoodDeclineReason(state: PrismMoodState): string | null {
   const mood = sanitizePrismMoodState(state, state.mode);
+  if (isPrismMoodIgnoring(mood)) {
+    return "Prism is ignoring messages until the cooldown expires.";
+  }
   if (mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4) {
     return "Annoyance is high while engagement and warmth are low; Prism may take a beat instead of replying.";
   }

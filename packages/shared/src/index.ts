@@ -1,5 +1,9 @@
 export {
+  applyPrismMoodExpiredIgnoreCooldown,
+  applyPrismMoodForgivenessSuccess,
   applyPrismMoodInterruption,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   clampPrismMoodValue,
@@ -10,11 +14,18 @@ export {
   derivePrismMoodConfidence,
   derivePrismMoodKey,
   interruptionProgressWeight,
+  isPrismMoodIgnoring,
+  PRISM_MOOD_IGNORE_COOLDOWN_MS,
+  PRISM_MOOD_IGNORE_FORGIVENESS_CHANCE,
+  PRISM_MOOD_IGNORE_FORGIVENESS_STEP,
   prismMoodDeclineReason,
+  prismMoodIgnoreForgivenessChance,
+  prismMoodIgnoreUntilMs,
   prismMoodInterruptionStreak,
   resetPrismMood,
   sanitizePrismMoodState,
   shouldPrismMoodDeclineResponse,
+  shouldPrismMoodStartIgnoreCooldown,
   type CoffeeSocialLikeSnapshot,
   type PrismMoodDebugPatch,
   type PrismMoodDelta,
@@ -100,8 +111,10 @@ export {
   normalizePromptShortcutMetadata,
   parseStoredPromptShortcutPayload,
   serializePromptShortcutPayload,
+  withPromptShortcutResolvedPrompt,
   type PromptShortcutFlag,
   type PromptShortcutMetadata,
+  type PromptShortcutWildcardReplacement,
 } from "./promptShortcut.js";
 
 export {
@@ -155,6 +168,15 @@ export {
   type ComfyUiWorkflowPatchMap,
   type ComfyUiWorkflowRegistration,
 } from "./comfyUiWorkflow.js";
+
+export {
+  REASONING_EFFORT_VALUES,
+  normalizeReasoningEffort,
+  openAiModelSupportsReasoningEffort,
+  reasoningEffortForRequest,
+  type ReasoningEffort,
+  type RequestReasoningEffort,
+} from "./reasoningEffort.js";
 
 export {
   PRISM_DEFAULT_STORY_THEME,
@@ -245,6 +267,7 @@ import type {
 import type { PromptShortcutMetadata } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
+import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
@@ -695,6 +718,7 @@ export interface ChatCompanionPreferences {
 export interface SandboxRuntimeControls {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
+  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
 }
 
@@ -712,6 +736,7 @@ export interface ChatRequestPayload {
   /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
+  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
@@ -860,6 +885,7 @@ export interface CoffeeContinueRequest {
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
   preferredProvider?: LlmProviderName;
+  reasoningEffort?: ReasoningEffort;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -892,6 +918,7 @@ export interface CoffeeTurnRequest {
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
   preferredProvider?: LlmProviderName;
+  reasoningEffort?: ReasoningEffort;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */

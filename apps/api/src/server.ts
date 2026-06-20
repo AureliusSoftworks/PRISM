@@ -145,7 +145,7 @@ import {
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
-import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
+import type { GenerateOptions, LlmProvider, ProviderMessage, ProviderName } from "./providers.ts";
 import {
   defaultHiddenModelIdsForCatalog,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
@@ -161,8 +161,11 @@ import {
   hydrateAssistantMessageParts,
   isAllowedInAppOllamaPullModelName,
   normalizePromptShortcutMetadata,
+  reasoningEffortForRequest,
   parseStoredPromptShortcutPayload,
   parseStoredComfyUiWorkflows,
+  withPromptShortcutResolvedPrompt,
+  applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodInterruption,
   createDefaultPrismMoodState,
   debugPatchPrismMood,
@@ -174,6 +177,7 @@ import {
   type ChatMessage,
   type OpinionBand,
   type OpinionTrend,
+  type PromptShortcutWildcardReplacement,
   type SessionOpinion,
 } from "@localai/shared";
 import { generateImage } from "./image-provider.ts";
@@ -258,6 +262,11 @@ const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
+const PROMPT_WILDCARD_SYSTEM_PROMPT =
+  "You fill prompt-template wildcards. Return JSON only. For each requested wildcard key, choose one concrete replacement value that fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces.";
+const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_]{1,63})\}/g;
+const PROMPT_WILDCARD_MAX_KEYS = 16;
+const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
 
 function scorePromptTags(promptLower: string, tags: readonly string[]): number {
   let score = 0;
@@ -760,6 +769,156 @@ function normalizeComposerRandomPromptResponse(raw: string): string {
   return normalized.length > COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS
     ? normalized.slice(0, COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS).trim()
     : normalized;
+}
+
+function promptWildcardNames(prompt: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
+    const name = match[1]?.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+    if (names.length >= PROMPT_WILDCARD_MAX_KEYS) break;
+  }
+  return names;
+}
+
+function parsePromptWildcardJson(raw: string): unknown {
+  const cleaned = raw.trim();
+  const fenced = cleaned.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/);
+  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
+  try {
+    return JSON.parse(unwrapped) as unknown;
+  } catch {
+    const start = unwrapped.indexOf("{");
+    const end = unwrapped.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(unwrapped.slice(start, end + 1)) as unknown;
+    }
+    throw new Error("Wildcard response was not JSON.");
+  }
+}
+
+function normalizePromptWildcardValue(value: unknown, wildcardName: string): string | null {
+  const raw =
+    typeof value === "string"
+      ? value
+      : typeof value === "number" || typeof value === "boolean"
+        ? String(value)
+        : "";
+  const normalized = raw
+    .replace(/[{}]/g, "")
+    .replace(/^["'“”]+|["'“”]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, PROMPT_WILDCARD_VALUE_MAX_CHARS)
+    .trim();
+  if (!normalized) return null;
+  if (normalized.toUpperCase() === wildcardName) return null;
+  return normalized;
+}
+
+function extractPromptWildcardValues(raw: string, names: readonly string[]): Map<string, string> {
+  const parsed = parsePromptWildcardJson(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return new Map();
+  }
+  const root = parsed as Record<string, unknown>;
+  const nested = ["wildcards", "values", "replacements"].find(
+    (key) => root[key] && typeof root[key] === "object" && !Array.isArray(root[key])
+  );
+  const record = nested ? root[nested] as Record<string, unknown> : root;
+  const values = new Map<string, string>();
+  for (const name of names) {
+    const candidate =
+      record[name] ??
+      record[name.toLowerCase()] ??
+      record[name.replace(/_/g, " ")] ??
+      record[name.toLowerCase().replace(/_/g, " ")];
+    const normalized = normalizePromptWildcardValue(candidate, name);
+    if (normalized) values.set(name, normalized);
+  }
+  return values;
+}
+
+interface PromptWildcardResolution {
+  prompt: string;
+  replacements: PromptShortcutWildcardReplacement[];
+}
+
+function applyPromptWildcardValues(
+  prompt: string,
+  values: ReadonlyMap<string, string>
+): PromptWildcardResolution {
+  if (values.size === 0) return { prompt, replacements: [] };
+  let resolved = "";
+  let cursor = 0;
+  const replacements: PromptShortcutWildcardReplacement[] = [];
+  for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
+    const matchText = match[0] ?? "";
+    const name = match[1] ?? "";
+    const matchIndex = match.index ?? 0;
+    resolved += prompt.slice(cursor, matchIndex);
+    const value = values.get(name);
+    if (value) {
+      const start = resolved.length;
+      resolved += value;
+      replacements.push({
+        key: name,
+        value,
+        start,
+        end: start + value.length,
+      });
+    } else {
+      resolved += matchText;
+    }
+    cursor = matchIndex + matchText.length;
+  }
+  resolved += prompt.slice(cursor);
+  return { prompt: resolved, replacements };
+}
+
+async function resolvePromptWildcardsWithModel(args: {
+  prompt: string;
+  provider: LlmProvider;
+  generationOverrides: GenerateOptions;
+  signal?: AbortSignal;
+}): Promise<PromptWildcardResolution> {
+  const names = promptWildcardNames(args.prompt);
+  if (names.length === 0) return { prompt: args.prompt, replacements: [] };
+  try {
+    const exampleKey = names[0] ?? "ADJECTIVE";
+    const promptMessages: ProviderMessage[] = [
+      { role: "system", content: PROMPT_WILDCARD_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          "Prompt template:",
+          args.prompt,
+          "",
+          `Wildcard keys: ${names.join(", ")}`,
+          `Return a single JSON object whose keys are exactly those wildcard keys, for example: {"${exampleKey}":"stinky"}.`,
+          "Choose values that make the prompt vivid and coherent. Do not rewrite the prompt.",
+        ].join("\n"),
+      },
+    ];
+    const raw = await args.provider.generateResponse(promptMessages, {
+      ...args.generationOverrides,
+      temperature: Math.max(0.6, args.generationOverrides.temperature ?? 0.72),
+      maxTokens: Math.min(900, Math.max(160, names.length * 70)),
+      jsonMode: true,
+      signal: args.signal,
+    });
+    const values = extractPromptWildcardValues(raw, names);
+    return applyPromptWildcardValues(args.prompt, values);
+  } catch (error) {
+    console.warn(
+      "[prompt-wildcards] leaving prompt wildcards unresolved:",
+      error instanceof Error ? error.message : error
+    );
+    return { prompt: args.prompt, replacements: [] };
+  }
 }
 
 function readBotSemanticFacetSummary(raw: string | null | undefined): string[] {
@@ -1508,6 +1667,7 @@ function buildRoutes(): RouteDefinition[] {
       let effectiveProvider: ProviderName =
         anyOfflineProtected ? "local" : requestedProvider ?? user.preferred_provider;
       const explicitModelOverride = anyOfflineProtected ? null : readOptionalString(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const storyModelOverride =
         effectiveProvider === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : explicitModelOverride;
       const userKey = decryptUserKey(userId);
@@ -1549,6 +1709,7 @@ function buildRoutes(): RouteDefinition[] {
         model: resolvedAuto.model,
         bots: storyBots,
         premise: readOptionalString(body.premise),
+        ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
       }).catch((error) => {
         console.warn("[story] generation job failed", error);
       });
@@ -1811,9 +1972,15 @@ function buildRoutes(): RouteDefinition[] {
         };
         if (row.role === "user") {
           const promptShortcut = parseStoredPromptShortcutPayload(row.tool_payload);
+          const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
+            promptShortcut,
+            row.content
+          );
           return {
             ...shared,
-            ...(promptShortcut ? { promptShortcut } : {}),
+            ...(promptShortcutWithResolvedPrompt
+              ? { promptShortcut: promptShortcutWithResolvedPrompt }
+              : {}),
           };
         }
         if (row.role !== "assistant") return shared;
@@ -1894,10 +2061,19 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
       const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
-      const prismMoodOut =
+      let prismMoodOut =
         conversationModeOut === "coffee"
           ? null
           : loadPrismMoodState(db, userId, conversation.id, conversationModeOut);
+      if (prismMoodOut && conversationModeOut === "zen") {
+        const settledMood = applyPrismMoodExpiredIgnoreCooldown(
+          prismMoodOut,
+          new Date().toISOString()
+        );
+        if (settledMood.recentDeltas[0]?.kind === "ignore_expired") {
+          prismMoodOut = upsertPrismMoodState(db, userId, conversation.id, settledMood);
+        }
+      }
       const coffeeSettingsOut =
         conversationModeOut === "coffee"
           ? parseStoredCoffeeSessionSettings(conversation.coffee_settings)
@@ -2761,6 +2937,29 @@ function buildRoutes(): RouteDefinition[] {
       const persisted = upsertPrismMoodState(db, userId, conversation.id, mood);
       json(ctx.res, 200, { ok: true, prismMood: persisted });
     }),
+    route("POST", "/api/conversations/:id/prism-mood/reset", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+        throw new Error("Only Zen conversations can reset Prism mood.");
+      }
+      const now = new Date().toISOString();
+      const mode = readPrismMoodMode(conversation.conversation_mode);
+      const persisted = upsertPrismMoodState(
+        db,
+        userId,
+        conversation.id,
+        resetPrismMood(mode, now)
+      );
+      json(ctx.res, 200, { ok: true, prismMood: persisted });
+    }),
     route("POST", "/api/conversations/:id/prism-mood/interrupt", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversation = db
@@ -3077,6 +3276,7 @@ function buildRoutes(): RouteDefinition[] {
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.
       const explicitModelOverride = readOptionalString(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
@@ -3170,6 +3370,9 @@ function buildRoutes(): RouteDefinition[] {
       });
       effectiveProvider = resolvedAuto.provider;
       generationOverrides.model = resolvedAuto.model;
+      if (requestedReasoningEffort) {
+        generationOverrides.reasoningEffort = requestedReasoningEffort;
+      }
       const botOverrides =
         Object.keys(generationOverrides).length > 0
           ? generationOverrides
@@ -3184,12 +3387,38 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onChatClientClose);
       ctx.req.once("aborted", onChatClientClose);
       ctx.res.once("close", onChatClientClose);
+      let messageForChat = message;
+      let promptShortcutForChat = promptShortcut;
+      if (!starterPrompt && commandCenterPrompt && promptWildcardNames(message).length > 0) {
+        const wildcardProvider = selectProvider(
+          effectiveProvider,
+          openAiApiKey,
+          user.secondary_ollama_host,
+          anthropicApiKey
+        );
+        const wildcardResolution = await resolvePromptWildcardsWithModel({
+          prompt: message,
+          provider: wildcardProvider,
+          generationOverrides,
+          signal: chatAbort.signal,
+        });
+        messageForChat = wildcardResolution.prompt;
+        promptShortcutForChat = withPromptShortcutResolvedPrompt(
+          promptShortcut
+            ? {
+                ...promptShortcut,
+                wildcardReplacements: wildcardResolution.replacements,
+              }
+            : undefined,
+          messageForChat
+        );
+      }
       let result: Awaited<ReturnType<typeof processChatMessage>>;
       try {
         result = await processChatMessage(
           db,
           userId,
-          message,
+          messageForChat,
           userKey,
           {
             preferredProvider: effectiveProvider,
@@ -3230,7 +3459,7 @@ function buildRoutes(): RouteDefinition[] {
             prismInterruption,
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
-            ...(promptShortcut ? { promptShortcut } : {}),
+            ...(promptShortcutForChat ? { promptShortcut: promptShortcutForChat } : {}),
           },
           conversationId
         );
@@ -3605,6 +3834,7 @@ function buildRoutes(): RouteDefinition[] {
           ? Math.max(0, body.sessionRemainingMs)
           : null;
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -3635,6 +3865,7 @@ function buildRoutes(): RouteDefinition[] {
           },
           sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
         },
         userIsComposing,
         directedSpeakerBotId
@@ -3649,6 +3880,7 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = readProvider(body.preferredProvider);
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -3670,6 +3902,7 @@ function buildRoutes(): RouteDefinition[] {
           userKey,
           prismDefaultLlmModel: user.prism_default_llm_model,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
         }
       );
       json(ctx.res, 200, {
@@ -3725,6 +3958,7 @@ function buildRoutes(): RouteDefinition[] {
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
       const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const result = await processCoffeeTurn(
         db,
         userId,
@@ -3754,6 +3988,7 @@ function buildRoutes(): RouteDefinition[] {
           },
           sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
         }
       );
       json(ctx.res, 200, {

@@ -181,9 +181,10 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
     assert.equal(
-      catalog.online.find((model) => model.id === "claude-3-5-haiku-latest")?.label,
-      "Claude Haiku 3.5"
+      catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
+      "Claude Haiku 4.5"
     );
+    assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });
 
   it("discovers Ollama models and filters OpenAI to chat-capable models", async () => {
@@ -253,6 +254,52 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "o5-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return new Response(JSON.stringify({ models: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("api.openai.com")) {
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("api.anthropic.com")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "claude-haiku-4-5-20251001" },
+              { id: "claude-haiku-4-5" },
+              { id: "claude-3-5-haiku-latest" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog("sk-test", undefined, "sk-ant-test");
+    const haikuModels = catalog.online.filter((model) =>
+      model.label.toLowerCase().includes("haiku")
+    );
+
+    assert.deepEqual(
+      haikuModels.map((model) => model.id).sort((a, b) => a.localeCompare(b)),
+      ["claude-haiku-4-5", "claude-3-5-haiku-latest"]
+        .sort((a, b) => a.localeCompare(b))
+    );
+    assert.equal(
+      catalog.online.filter((model) => model.id === "claude-haiku-4-5").length,
+      1
+    );
   });
 
   it("falls back to IPv4 loopback when catalog discovery hits unreachable localhost", async () => {
@@ -846,6 +893,87 @@ describe("OpenAiProvider request shape", () => {
     });
 
     assert.equal(body.temperature, 0.91);
+  });
+
+  it("sends reasoning_effort for supported OpenAI reasoning models", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.4",
+      reasoningEffort: "high",
+    });
+
+    assert.equal(body.reasoning_effort, "high");
+  });
+
+  it("omits reasoning_effort for auto and unsupported models", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.4",
+      reasoningEffort: "auto",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-4o-mini",
+      reasoningEffort: "high",
+    });
+
+    assert.equal("reasoning_effort" in (bodies[0] ?? {}), false);
+    assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+  });
+
+  it("retries once without reasoning_effort when OpenAI rejects it", async () => {
+    const originalConsoleWarn = console.warn;
+    const bodies: Array<Record<string, unknown>> = [];
+    console.warn = () => {};
+    try {
+      globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        if (bodies.length === 1) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Unknown parameter: 'reasoning_effort'.",
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }) as typeof fetch;
+
+      const provider = new OpenAiProvider({ apiKey: "sk-test" });
+      const response = await provider.generateResponse([{ role: "user", content: "hi" }], {
+        model: "gpt-5.4",
+        reasoningEffort: "xhigh",
+      });
+
+      assert.equal(response, "ok");
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0]?.reasoning_effort, "xhigh");
+      assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+    } finally {
+      console.warn = originalConsoleWarn;
+    }
   });
 
   it("requests JSON object output when jsonMode is enabled", async () => {

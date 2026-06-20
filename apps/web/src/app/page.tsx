@@ -104,6 +104,7 @@ import {
   isComfyUiModelId,
   isElevenLabsImageModelId,
   normalizeOpenAiImageModelId,
+  openAiModelSupportsReasoningEffort,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
@@ -131,6 +132,7 @@ import {
   type PrismMoodInterruptionInput,
   type PrismMoodSnapshot,
   type PromptShortcutMetadata,
+  type PromptShortcutWildcardReplacement,
   type SentGeneratedImagePayload,
   type ZenDisplayMetadata,
   type StoryEpisodeManifest,
@@ -140,6 +142,7 @@ import {
   type StorySessionDetail,
   type StorySessionSummary,
   type StoryTranscriptEntry,
+  type ReasoningEffort,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -723,6 +726,44 @@ const PRISM_COLORS = {
   s: "#2fd3e3",
   m: "#7b5cff",
 } as const;
+
+type CommandCenterColorTag = keyof typeof PRISM_COLORS;
+
+const COMMAND_CENTER_COLOR_TAGS: Array<{
+  id: CommandCenterColorTag;
+  letter: string;
+  label: string;
+  color: string;
+}> = [
+  { id: "p", letter: "P", label: "Rose", color: PRISM_COLORS.p },
+  { id: "r", letter: "R", label: "Amber", color: PRISM_COLORS.r },
+  { id: "i", letter: "I", label: "Lime", color: PRISM_COLORS.i },
+  { id: "s", letter: "S", label: "Cyan", color: PRISM_COLORS.s },
+  { id: "m", letter: "M", label: "Violet", color: PRISM_COLORS.m },
+];
+
+function normalizeCommandCenterColorTag(value: unknown): CommandCenterColorTag | undefined {
+  return value === "p" || value === "r" || value === "i" || value === "s" || value === "m"
+    ? value
+    : undefined;
+}
+
+function commandCenterColorForTag(colorTag: CommandCenterColorTag | undefined): string | null {
+  return colorTag ? PRISM_COLORS[colorTag] : null;
+}
+
+function commandCenterColorStyle(
+  colorTag: CommandCenterColorTag | undefined
+): React.CSSProperties | undefined {
+  const color = commandCenterColorForTag(colorTag);
+  return color
+      ? {
+          ["--command-color" as string]: color,
+          ["--bot-menu-color" as string]: color,
+          ["--prompt-command-color" as string]: color,
+        }
+    : undefined;
+}
 
 /** Five PRISM brand chromas for subtle completion pings (image-ready chip). */
 const PRISM_NOTICE_PALETTE = [
@@ -2823,6 +2864,13 @@ function formatCoffeeSessionRemainingMs(remainingMs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatMoodIgnoreRemainingMs(remainingMs: number): string {
+  const totalSec = Math.max(0, Math.ceil(remainingMs / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 function coffeeSessionDurationMs(
   conversation: Pick<CoffeeConversationState, "coffeeSessionDurationMinutes"> | null | undefined
 ): number {
@@ -3695,10 +3743,10 @@ const CHAT_MODE_PULL_QUOTE_MARKER_PATTERN = /^\s*\[!pull\]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_PREFIX_PATTERN = /^\s*pull\s+quote\s*[:\-–—]\s*/i;
 const CHAT_MODE_PULL_QUOTE_INLINE_LINE_PATTERN =
   /^\s*(?:\*\*|__)?\s*pull\s+quote\s*[:\-–—]/i;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 9.7;
-const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 30.7;
-const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 16.7;
-const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 38.7;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 15.8;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 27.2;
+const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18.4;
+const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 32.8;
 const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
 const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
 const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
@@ -5427,6 +5475,7 @@ interface CommandCenterCommand {
   name: string;
   title: string;
   command: string;
+  colorTag?: CommandCenterColorTag;
   aliases: string[];
   arguments: CommandCenterArgument[];
   builtIn: boolean;
@@ -5439,6 +5488,7 @@ interface CommandCenterEditableDraft {
   id: string;
   name: string;
   command: string;
+  colorTag?: CommandCenterColorTag;
   aliases: string[];
 }
 
@@ -5456,6 +5506,7 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "refresh",
   "restart",
   "new-session",
+  "forgive-me",
 ]);
 const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "help",
@@ -5467,6 +5518,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "refresh",
   "restart",
   "new-session",
+  "forgive-me",
   "dev",
   "forget",
   "forget-all",
@@ -5668,6 +5720,22 @@ function createBuiltInNewSessionCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInForgiveMeCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/forgive-me",
+    name: "forgive-me",
+    title: "forgive-me",
+    command: "Resets Prism's Zen mood, cooldown timer, and ignore penalties.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -5706,6 +5774,59 @@ function sanitizeCommandAliasesForList(
 
 function commandInvocationNames(command: CommandCenterCommand): string[] {
   return [command.name, ...command.aliases].filter(Boolean);
+}
+
+function splitPromptRandomizationOptions(source: string): string[] {
+  const options: string[] = [];
+  let current = "";
+  let escaped = false;
+  for (const char of source) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === "|") {
+      options.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  options.push(current.trim());
+  return options.filter(Boolean);
+}
+
+function resolvePromptRandomizationGroups(source: string): string {
+  let resolved = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf("{", cursor);
+    if (start < 0) {
+      resolved += source.slice(cursor);
+      break;
+    }
+    const end = source.indexOf("}", start + 1);
+    if (end < 0) {
+      resolved += source.slice(cursor);
+      break;
+    }
+    const body = source.slice(start + 1, end);
+    const options = body.includes("|") ? splitPromptRandomizationOptions(body) : [];
+    resolved += source.slice(cursor, start);
+    if (options.length > 0) {
+      resolved += options[Math.floor(Math.random() * options.length)] ?? options[0] ?? "";
+    } else {
+      resolved += source.slice(start, end + 1);
+    }
+    cursor = end + 1;
+  }
+  return resolved;
 }
 
 function isCommandCenterOperationalCommand(command: CommandCenterCommand): boolean {
@@ -5795,6 +5916,7 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInRefreshCommand(),
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
+    createBuiltInForgiveMeCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -5814,6 +5936,7 @@ function normalizeCommandCenterState(raw: unknown): {
     if (seen.has(normalizedName)) continue;
     seen.add(normalizedName);
     const now = new Date().toISOString();
+    const colorTag = normalizeCommandCenterColorTag(record.colorTag);
     commands.push({
       id:
         typeof record.id === "string" && record.id.trim().length > 0
@@ -5825,6 +5948,7 @@ function normalizeCommandCenterState(raw: unknown): {
           ? record.title.trim()
           : normalizedName,
       command: typeof record.command === "string" ? record.command : "",
+      ...(colorTag ? { colorTag } : {}),
       aliases: normalizeCommandAliasList(
         (record as Partial<CommandCenterCommand> & { aliases?: unknown }).aliases,
         normalizedName
@@ -5884,6 +6008,7 @@ function createUserCommandDraft(existingCommands: readonly CommandCenterCommand[
     name: nextName,
     title: nextName,
     command: "",
+    colorTag: undefined,
     aliases: [],
     arguments: [],
     builtIn: false,
@@ -5999,6 +6124,36 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
 const AUTO_MODEL_CHOICE = "auto";
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = "auto";
+const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  auto: "Auto",
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+};
+const REASONING_EFFORT_SLIDER_VALUES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ReasoningEffort[];
+const REASONING_EFFORT_ANCHOR_LABELS: Array<{
+  value: ReasoningEffort;
+  label: string;
+}> = [
+  { value: "none", label: "None" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Med" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+];
+const REASONING_EFFORT_SLIDER_MAX = 100;
+const DEFAULT_MANUAL_REASONING_EFFORT = "medium" as const;
 const AUTO_MODEL_SETTINGS_SUBTEXT = "define preferred model in settings";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
@@ -6451,6 +6606,52 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
   };
 }
 
+function modelChoiceSupportsReasoningEffort(
+  provider: Provider,
+  modelChoice: string
+): boolean {
+  return (
+    provider === "openai" &&
+    modelChoice !== AUTO_MODEL_CHOICE &&
+    openAiModelSupportsReasoningEffort(modelChoice)
+  );
+}
+
+function reasoningEffortForSend(
+  provider: Provider,
+  modelOverride: string | undefined,
+  effort: ReasoningEffort
+): ReasoningEffort | undefined {
+  if (effort === DEFAULT_REASONING_EFFORT) return undefined;
+  if (provider !== "openai" || !modelOverride) return undefined;
+  return openAiModelSupportsReasoningEffort(modelOverride) ? effort : undefined;
+}
+
+function reasoningEffortSliderPosition(value: ReasoningEffort): number {
+  const sliderValue = REASONING_EFFORT_SLIDER_VALUES.includes(
+    value as (typeof REASONING_EFFORT_SLIDER_VALUES)[number]
+  )
+    ? (value as (typeof REASONING_EFFORT_SLIDER_VALUES)[number])
+    : DEFAULT_MANUAL_REASONING_EFFORT;
+  const index = REASONING_EFFORT_SLIDER_VALUES.indexOf(sliderValue);
+  const safeIndex = Math.max(0, index);
+  return (safeIndex / (REASONING_EFFORT_SLIDER_VALUES.length - 1)) *
+    REASONING_EFFORT_SLIDER_MAX;
+}
+
+function reasoningEffortFromSliderPosition(position: number): ReasoningEffort {
+  const normalized = Number.isFinite(position) ? position : 0;
+  const clamped = Math.min(
+    REASONING_EFFORT_SLIDER_MAX,
+    Math.max(0, normalized)
+  );
+  const index = Math.round(
+    (clamped / REASONING_EFFORT_SLIDER_MAX) *
+      (REASONING_EFFORT_SLIDER_VALUES.length - 1)
+  );
+  return REASONING_EFFORT_SLIDER_VALUES[index] ?? DEFAULT_MANUAL_REASONING_EFFORT;
+}
+
 function normalizeZenModeSettingsFields(
   settings: Partial<ZenModeSettingsFields> | null | undefined
 ): ZenModeSettingsFields {
@@ -6663,7 +6864,7 @@ function anthropicTextModelLabelFromId(id: string): string | null {
   const normalized = id.trim().toLowerCase();
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
-  if (latest) return `Claude ${titleCaseModelToken(latest[3]!)} ${latest[1]}.${latest[2]}`;
+  if (latest) return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
@@ -11995,6 +12196,12 @@ function ImageBotDirectoryDropdown({
 
 type ComposerModelPickerProvider = Provider | "online";
 
+interface ComposerModelPickerEffortControl {
+  value: ReasoningEffort;
+  onChange: (nextValue: ReasoningEffort) => void;
+  disabled?: boolean;
+}
+
 interface ComposerModelPickerProps {
   value: string;
   onChange: (nextValue: string) => void;
@@ -12020,6 +12227,7 @@ interface ComposerModelPickerProps {
    * `null` = never badge a concrete row. Omit to fall back to catalog `isDefault`.
    */
   settingsDefaultModelId?: string | null;
+  effortControl?: ComposerModelPickerEffortControl;
   /** Increment to close floating picker menus from the parent shell. */
   dismissPopoversSignal?: number;
 }
@@ -12041,6 +12249,7 @@ function ComposerModelPicker({
   autoOptionLabel = "Auto",
   autoOptionMetaOverride,
   settingsDefaultModelId,
+  effortControl,
   dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -12067,6 +12276,16 @@ function ComposerModelPicker({
     COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
     placement
   );
+  const [effortSliderPosition, setEffortSliderPosition] = useState(() =>
+    reasoningEffortSliderPosition(effortControl?.value ?? DEFAULT_MANUAL_REASONING_EFFORT)
+  );
+  const lastManualReasoningEffortRef = useRef<ReasoningEffort>(
+    DEFAULT_MANUAL_REASONING_EFFORT
+  );
+  const lastEmittedReasoningEffortRef = useRef<ReasoningEffort | null>(null);
+  const effortAutoEnabled = effortControl?.value === DEFAULT_REASONING_EFFORT;
+  const effortSliderDisabled =
+    !effortControl || effortControl.disabled === true || effortAutoEnabled;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -12104,6 +12323,18 @@ function ComposerModelPicker({
     if (dismissPopoversSignal === undefined) return;
     setOpen(false);
   }, [dismissPopoversSignal]);
+
+  useEffect(() => {
+    if (!effortControl) return;
+    if (effortControl.value !== DEFAULT_REASONING_EFFORT) {
+      lastManualReasoningEffortRef.current = effortControl.value;
+    }
+    if (lastEmittedReasoningEffortRef.current === effortControl.value) {
+      lastEmittedReasoningEffortRef.current = null;
+      return;
+    }
+    setEffortSliderPosition(reasoningEffortSliderPosition(effortControl.value));
+  }, [effortControl?.value]);
 
   const pick = (nextValue: string): void => {
     if (formValueRef.current) {
@@ -12246,6 +12477,81 @@ function ComposerModelPicker({
                 </button>
               );
             })}
+            {effortControl ? (
+              <div
+                className={styles.composeModelEffortControl}
+                data-auto={effortAutoEnabled ? "true" : undefined}
+                role="group"
+                aria-label="Reasoning effort"
+              >
+                <div className={styles.composeModelEffortHeader}>
+                  <span>Effort</span>
+                  <span className={styles.composeModelEffortStatus}>
+                    <output>{REASONING_EFFORT_LABELS[effortControl.value]}</output>
+                    <button
+                      type="button"
+                      className={styles.composeModelEffortAutoToggle}
+                      data-active={effortAutoEnabled ? "true" : undefined}
+                      aria-pressed={effortAutoEnabled}
+                      disabled={effortControl.disabled}
+                      onClick={() => {
+                        if (effortAutoEnabled) {
+                          const nextValue =
+                            lastManualReasoningEffortRef.current === DEFAULT_REASONING_EFFORT
+                              ? DEFAULT_MANUAL_REASONING_EFFORT
+                              : lastManualReasoningEffortRef.current;
+                          lastEmittedReasoningEffortRef.current = nextValue;
+                          setEffortSliderPosition(
+                            reasoningEffortSliderPosition(nextValue)
+                          );
+                          effortControl.onChange(nextValue);
+                          return;
+                        }
+                        if (effortControl.value !== DEFAULT_REASONING_EFFORT) {
+                          lastManualReasoningEffortRef.current = effortControl.value;
+                        }
+                        const nextValue = DEFAULT_REASONING_EFFORT;
+                        lastEmittedReasoningEffortRef.current = nextValue;
+                        effortControl.onChange(nextValue);
+                      }}
+                    >
+                      <span>Auto</span>
+                      <span
+                        className={styles.composeModelEffortAutoToggleThumb}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </span>
+                </div>
+                <div className={styles.composeModelEffortSliderShell}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={REASONING_EFFORT_SLIDER_MAX}
+                    step="any"
+                    value={effortSliderPosition}
+                    disabled={effortSliderDisabled}
+                    aria-label="Reasoning effort"
+                    aria-valuetext={REASONING_EFFORT_LABELS[effortControl.value]}
+                    onChange={(event) => {
+                      const nextPosition = Number(event.currentTarget.value);
+                      const nextValue = reasoningEffortFromSliderPosition(nextPosition);
+                      setEffortSliderPosition(nextPosition);
+                      if (nextValue !== effortControl.value) {
+                        lastManualReasoningEffortRef.current = nextValue;
+                        lastEmittedReasoningEffortRef.current = nextValue;
+                        effortControl.onChange(nextValue);
+                      }
+                    }}
+                  />
+                  <div className={styles.composeModelEffortTicks} aria-hidden="true">
+                    {REASONING_EFFORT_ANCHOR_LABELS.map((tick) => (
+                      <span key={tick.value}>{tick.label}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>,
           document.body
@@ -13532,6 +13838,7 @@ interface MessageBodyProps {
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
   onOpenCommandMention?: (commandId: string) => void;
   promptShortcut?: PromptShortcutMetadata;
+  promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
   onTogglePromptShortcut?: () => void;
   onCollapsePromptShortcut?: () => void;
@@ -13560,9 +13867,90 @@ function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
   return invocation || `/${promptShortcut.name}`;
 }
 
+interface PromptShortcutWildcardRange {
+  start: number;
+  end: number;
+  value: string;
+}
+
+function promptShortcutWildcardColor(index: number | undefined): string {
+  const normalized =
+    typeof index === "number" && Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
+  return PRISM_NOTICE_PALETTE[normalized % PRISM_NOTICE_PALETTE.length] ?? PRISM_COLORS.p;
+}
+
+function normalizePromptShortcutWildcardRanges(
+  promptSent: string,
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+): PromptShortcutWildcardRange[] {
+  if (!promptSent || !Array.isArray(replacements) || replacements.length === 0) return [];
+  let lastEnd = 0;
+  return replacements
+    .map((replacement): PromptShortcutWildcardRange | null => {
+      const start = replacement.start;
+      const end = replacement.end;
+      if (
+        typeof start !== "number" ||
+        typeof end !== "number" ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end)
+      ) {
+        return null;
+      }
+      const normalizedStart = Math.floor(start);
+      const normalizedEnd = Math.floor(end);
+      if (
+        normalizedStart < 0 ||
+        normalizedEnd <= normalizedStart ||
+        normalizedEnd > promptSent.length
+      ) {
+        return null;
+      }
+      const value = replacement.value;
+      if (typeof value !== "string" || promptSent.slice(normalizedStart, normalizedEnd) !== value) {
+        return null;
+      }
+      return { start: normalizedStart, end: normalizedEnd, value };
+    })
+    .filter((range): range is PromptShortcutWildcardRange => Boolean(range))
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+    .filter((range) => {
+      if (range.start < lastEnd) return false;
+      lastEnd = range.end;
+      return true;
+    });
+}
+
+function renderPromptShortcutPromptSent(
+  promptSent: string,
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+): React.ReactNode {
+  if (!promptSent) return "(empty prompt)";
+  const ranges = normalizePromptShortcutWildcardRanges(promptSent, replacements);
+  if (ranges.length === 0) return promptSent;
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, range] of ranges.entries()) {
+    if (range.start > cursor) {
+      nodes.push(promptSent.slice(cursor, range.start));
+    }
+    nodes.push(
+      <span key={`${range.start}:${range.end}:${index}`} className={styles.promptShortcutWildcardFill}>
+        {promptSent.slice(range.start, range.end)}
+      </span>
+    );
+    cursor = range.end;
+  }
+  if (cursor < promptSent.length) {
+    nodes.push(promptSent.slice(cursor));
+  }
+  return nodes;
+}
+
 function PromptShortcutMessage({
   promptShortcut,
   fullPrompt,
+  colorIndex,
   expanded,
   onToggle,
   onCollapse,
@@ -13570,12 +13958,20 @@ function PromptShortcutMessage({
 }: {
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
+  colorIndex?: number;
   expanded: boolean;
   onToggle?: () => void;
   onCollapse?: () => void;
   onOpenPrompt?: (commandId: string) => void;
 }) {
   const label = promptShortcutLabel(promptShortcut);
+  const promptSent = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
+  const wildcardHighlightStyle =
+    promptShortcut.wildcardReplacements && promptShortcut.wildcardReplacements.length > 0
+      ? ({
+          ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
+        } as React.CSSProperties)
+      : undefined;
   return (
     <span
       className={styles.promptShortcutInline}
@@ -13597,7 +13993,6 @@ function PromptShortcutMessage({
         aria-expanded={expanded}
         aria-label={`${expanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
       >
-        <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
         <span>{label.replace(/^\/+/, "")}</span>
       </button>
       {expanded && (
@@ -13633,7 +14028,9 @@ function PromptShortcutMessage({
           )}
           <span className={styles.promptShortcutPreviewSection}>
             <span>Prompt sent</span>
-            <code>{fullPrompt.trim() || "(empty prompt)"}</code>
+            <code style={wildcardHighlightStyle}>
+              {renderPromptShortcutPromptSent(promptSent, promptShortcut.wildcardReplacements)}
+            </code>
           </span>
         </span>
       )}
@@ -14413,6 +14810,9 @@ function filterCommandPicksForShortcutQuery(
   });
   return candidates
     .sort((a, b) => {
+      const aCommand = isCommandCenterOperationalCommand(a);
+      const bCommand = isCommandCenterOperationalCommand(b);
+      if (aCommand !== bCommand) return aCommand ? -1 : 1;
       if (!normalizedQuery) return 0;
       const aNames = commandInvocationNames(a).map((name) => name.toLowerCase());
       const bNames = commandInvocationNames(b).map((name) => name.toLowerCase());
@@ -15082,6 +15482,9 @@ function ComposerCommandPopover({
   if (!open || !adjustedStyle || typeof document === "undefined") {
     return null;
   }
+  const hasCommandRows = commands.some(isCommandCenterOperationalCommand);
+  const hasPromptRows = commands.some((command) => !isCommandCenterOperationalCommand(command));
+  const showSectionHeaders = scope === "leading" && hasCommandRows && hasPromptRows;
 
   return createPortal(
     <div
@@ -15100,30 +15503,57 @@ function ComposerCommandPopover({
         {commands.map((command, index) => {
           const active = index === safeHighlight;
           const description = commandPickDescription(command);
+          const commandKind = isCommandCenterOperationalCommand(command) ? "command" : "prompt";
+          const previousCommand = index > 0 ? commands[index - 1] : null;
+          const previousKind =
+            previousCommand && isCommandCenterOperationalCommand(previousCommand)
+              ? "command"
+              : previousCommand
+                ? "prompt"
+                : null;
+          const sectionHeader =
+            showSectionHeaders && commandKind !== previousKind
+              ? commandKind === "command"
+                ? "Commands"
+                : "Prompts"
+              : null;
           return (
-            <button
-              key={command.id}
-              type="button"
-              data-command-index={index}
-              role="option"
-              aria-selected={active ? "true" : "false"}
-              className={`${styles.composeBotOption} ${styles.composeCommandOption}`}
-              onMouseEnter={() => onHighlightIndexChange(index)}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                onPickCommand(command);
-              }}
-            >
-              <span className={styles.composeCommandSlash} aria-hidden="true">
-                /
-              </span>
-              <span className={styles.composeCommandText}>
-                <span className={styles.composeBotOptionName}>{command.name}</span>
-                {description ? (
-                  <span className={styles.composeCommandMeta}>{description}</span>
-                ) : null}
-              </span>
-            </button>
+            <Fragment key={command.id}>
+              {sectionHeader ? (
+                <div
+                  className={styles.composeCommandSectionHeader}
+                  data-command-kind={commandKind}
+                  role="presentation"
+                >
+                  <span>{sectionHeader}</span>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                data-command-index={index}
+                data-command-kind={commandKind}
+                role="option"
+                aria-selected={active ? "true" : "false"}
+                className={`${styles.composeBotOption} ${styles.composeCommandOption}`}
+                data-color-tag={command.colorTag ?? undefined}
+                style={commandCenterColorStyle(command.colorTag)}
+                onMouseEnter={() => onHighlightIndexChange(index)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  onPickCommand(command);
+                }}
+              >
+                <span className={styles.composeCommandSlash} aria-hidden="true">
+                  /
+                </span>
+                <span className={styles.composeCommandText}>
+                  <span className={styles.composeBotOptionName}>{command.name}</span>
+                  {description ? (
+                    <span className={styles.composeCommandMeta}>{description}</span>
+                  ) : null}
+                </span>
+              </button>
+            </Fragment>
           );
         })}
       </div>
@@ -15154,6 +15584,7 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
       <PromptShortcutMessage
         promptShortcut={props.promptShortcut}
         fullPrompt={fullSource}
+        colorIndex={props.promptShortcutColorIndex}
         expanded={props.promptShortcutExpanded === true}
         onToggle={props.onTogglePromptShortcut}
         onCollapse={props.onCollapsePromptShortcut}
@@ -15503,7 +15934,6 @@ function MarkdownMessageBody({
               data-command-id={commandId}
               aria-label={`Open prompt ${label}`}
             >
-              <span className={styles.promptShortcutSlash} aria-hidden="true">/</span>
               <span>{label.replace(/^\/+/, "")}</span>
             </button>
           );
@@ -18683,6 +19113,7 @@ function HomeContent(): React.JSX.Element {
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
   const [devMoodVisualEnabled, setDevMoodVisualEnabled] = useState(false);
   const [devMoodVisualOpen, setDevMoodVisualOpen] = useState(false);
+  const [devMoodNowMs, setDevMoodNowMs] = useState(() => Date.now());
   const [devMoodDebugBusy, setDevMoodDebugBusy] = useState(false);
   const [devMoodDebugSnapshot, setDevMoodDebugSnapshot] = useState<{
     conversationId: string;
@@ -18777,29 +19208,51 @@ function HomeContent(): React.JSX.Element {
       openai: AUTO_MODEL_CHOICE,
       anthropic: AUTO_MODEL_CHOICE,
     });
+  const [chatReasoningEffort, setChatReasoningEffort] =
+    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   /** Per-session Coffee header model picks (LOCAL + ONLINE slots). */
   const [coffeeModelChoiceByProvider, setCoffeeModelChoiceByProvider] =
     useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  const [coffeeReasoningEffort, setCoffeeReasoningEffort] =
+    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   /** Remember picks when hopping Coffee threads or leaving Coffee view. */
   const coffeeModelChoiceByScopeRef = useRef<Map<string, Record<Provider, string>>>(
+    new Map()
+  );
+  const coffeeReasoningEffortByScopeRef = useRef<Map<string, ReasoningEffort>>(
     new Map()
   );
   const lastCoffeeModelScopeKeyRef = useRef<string | null>(null);
   const coffeeModelChoiceByProviderWriteRef = useRef(coffeeModelChoiceByProvider);
   coffeeModelChoiceByProviderWriteRef.current = coffeeModelChoiceByProvider;
+  const coffeeReasoningEffortWriteRef = useRef(coffeeReasoningEffort);
+  coffeeReasoningEffortWriteRef.current = coffeeReasoningEffort;
   /** Per-thread compose model picks (Chat + Sandbox); keyed by `conversationModelScopeKey`. */
   const conversationModelChoiceByScopeRef = useRef<
     Map<string, Record<Provider, string>>
   >(new Map());
+  const conversationReasoningEffortByScopeRef = useRef<Map<string, ReasoningEffort>>(
+    new Map()
+  );
   const lastConversationModelScopeKeyRef = useRef<string | null>(null);
   const chatModelChoiceByProviderWriteRef = useRef(chatModelChoiceByProvider);
   chatModelChoiceByProviderWriteRef.current = chatModelChoiceByProvider;
+  const chatReasoningEffortWriteRef = useRef(chatReasoningEffort);
+  chatReasoningEffortWriteRef.current = chatReasoningEffort;
 
   const persistChatModelChoicesForActiveScope = useCallback(
     (next: Record<Provider, string>) => {
       if (view !== "chat" && view !== "sandbox") return;
       const key = conversationModelScopeKey(selectedId, detail?.id);
       conversationModelChoiceByScopeRef.current.set(key, next);
+    },
+    [view, selectedId, detail?.id]
+  );
+  const persistChatReasoningEffortForActiveScope = useCallback(
+    (next: ReasoningEffort) => {
+      if (view !== "chat" && view !== "sandbox") return;
+      const key = conversationModelScopeKey(selectedId, detail?.id);
+      conversationReasoningEffortByScopeRef.current.set(key, next);
     },
     [view, selectedId, detail?.id]
   );
@@ -19635,6 +20088,17 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Local dev affordance only.
     }
+  }, [devMoodVisualEnabled]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    setDevMoodNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setDevMoodNowMs(Date.now());
+    }, 500);
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [devMoodVisualEnabled]);
 
   useEffect(() => {
@@ -21907,6 +22371,17 @@ function HomeContent(): React.JSX.Element {
           settings,
           isLocal ? "local" : "online"
         )}
+        effortControl={
+          modelChoiceSupportsReasoningEffort(modelProvider, visibleModelChoice)
+            ? {
+                value: coffeeReasoningEffort,
+                onChange: (next) => {
+                  setCoffeeReasoningEffort(next);
+                  persistCoffeeReasoningEffortForScope(next);
+                },
+              }
+            : undefined
+        }
       />
     );
   };
@@ -21991,6 +22466,17 @@ function HomeContent(): React.JSX.Element {
             settings,
             isLocal ? "local" : "online"
           )}
+          effortControl={
+            modelChoiceSupportsReasoningEffort(modelProvider, visibleModelChoice)
+              ? {
+                  value: chatReasoningEffort,
+                  onChange: (next) => {
+                    setChatReasoningEffort(next);
+                    persistChatReasoningEffortForActiveScope(next);
+                  },
+                }
+              : undefined
+          }
         />
         {view === "sandbox" && bots.length > 0 ? (
           <ComposerBotPicker
@@ -22323,6 +22809,7 @@ function HomeContent(): React.JSX.Element {
       id: selectedCommand.id,
       name: selectedCommand.name,
       command: selectedCommand.command,
+      colorTag: selectedCommand.colorTag,
       aliases: selectedCommand.aliases,
     });
     setCommandCenterSaveNotice(null);
@@ -22764,6 +23251,16 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode) return source;
     return source;
   }, [chatEphemeralMode, detail?.messages]);
+  const promptShortcutColorIndexByMessageId = useMemo(() => {
+    const colorIndexes = new Map<string, number>();
+    let promptShortcutIndex = 0;
+    for (const message of visibleDetailMessages) {
+      if (!message.promptShortcut) continue;
+      colorIndexes.set(message.id, promptShortcutIndex);
+      promptShortcutIndex += 1;
+    }
+    return colorIndexes;
+  }, [visibleDetailMessages]);
   const zenUserMessagePrismColorById = useMemo(() => {
     const colors = new Map<string, (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number]>();
     if (view !== "chat" || !detail) return colors;
@@ -24271,6 +24768,8 @@ function HomeContent(): React.JSX.Element {
   const [storyProviderTouched, setStoryProviderTouched] = useState(false);
   const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] =
     useState<Record<Provider, string>>(createDefaultChatModelChoiceByProvider());
+  const [storyReasoningEffort, setStoryReasoningEffort] =
+    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   useEffect(() => {
     const previousPanel = panelPopupCleanupLastPanelRef.current;
     panelPopupCleanupLastPanelRef.current = panel;
@@ -25114,12 +25613,18 @@ function HomeContent(): React.JSX.Element {
     setStoryMapOpen(false);
     setStoryInventoryOpen(false);
     setStoryTranscriptOpen(false);
+    setStoryReasoningEffort(DEFAULT_REASONING_EFFORT);
     setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
   }, []);
   const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
     if (!storySelectionValid || storyBusy) return;
     setStoryBusy(true);
     setStoryError(null);
+    const reasoningEffortOverride = reasoningEffortForSend(
+      storyModelProvider,
+      storyModelOverride,
+      storyReasoningEffort
+    );
     try {
       const response = await api<{ ok: true; session: StorySessionDetail }>(
         "/api/story/sessions",
@@ -25130,6 +25635,9 @@ function HomeContent(): React.JSX.Element {
             premise: storyPremise.trim() || undefined,
             preferredProvider: storyModelProvider,
             ...(storyModelOverride ? { modelOverride: storyModelOverride } : {}),
+            ...(reasoningEffortOverride
+              ? { reasoningEffort: reasoningEffortOverride }
+              : {}),
           }),
         }
       );
@@ -25155,6 +25663,7 @@ function HomeContent(): React.JSX.Element {
     storyBusy,
     storyModelProvider,
     storyModelOverride,
+    storyReasoningEffort,
     storyPremise,
     storySelectedBotIds,
     storySelectionValid,
@@ -25489,6 +25998,20 @@ function HomeContent(): React.JSX.Element {
       persistCoffeeGroupModelChoiceToServer,
     ]
   );
+  const persistCoffeeReasoningEffortForScope = useCallback(
+    (next: ReasoningEffort) => {
+      if (view !== "coffee") return;
+      const groupId = coffeeSelectedGroupId ?? coffeeConversation?.coffeeGroupId ?? null;
+      const key = coffeeModelScopeKey(groupId, coffeeConversation?.id ?? null);
+      coffeeReasoningEffortByScopeRef.current.set(key, next);
+    },
+    [
+      view,
+      coffeeConversation?.id,
+      coffeeConversation?.coffeeGroupId,
+      coffeeSelectedGroupId,
+    ]
+  );
 
   useEffect(() => {
     if (view !== "coffee") {
@@ -25497,6 +26020,10 @@ function HomeContent(): React.JSX.Element {
         coffeeModelChoiceByScopeRef.current.set(pk, {
           ...coffeeModelChoiceByProviderWriteRef.current,
         });
+        coffeeReasoningEffortByScopeRef.current.set(
+          pk,
+          coffeeReasoningEffortWriteRef.current
+        );
         lastCoffeeModelScopeKeyRef.current = null;
       }
       return;
@@ -25510,11 +26037,16 @@ function HomeContent(): React.JSX.Element {
       coffeeModelChoiceByScopeRef.current.set(prevKey, {
         ...coffeeModelChoiceByProviderWriteRef.current,
       });
+      coffeeReasoningEffortByScopeRef.current.set(
+        prevKey,
+        coffeeReasoningEffortWriteRef.current
+      );
     }
     lastCoffeeModelScopeKeyRef.current = nextKey;
     lastPersistedCoffeeModelChoiceRef.current = null;
 
     let stored = coffeeModelChoiceByScopeRef.current.get(nextKey);
+    let storedEffort = coffeeReasoningEffortByScopeRef.current.get(nextKey);
 
     // Server-persisted per-group memory wins over both stale in-memory cache
     // and the previous "coffee:none" carry-over so swapping groups never leaks.
@@ -25538,11 +26070,18 @@ function HomeContent(): React.JSX.Element {
       if (stored) {
         coffeeModelChoiceByScopeRef.current.set(nextKey, { ...stored });
       }
+      if (!storedEffort) {
+        storedEffort = coffeeReasoningEffortByScopeRef.current.get("coffee:none");
+        if (storedEffort) {
+          coffeeReasoningEffortByScopeRef.current.set(nextKey, storedEffort);
+        }
+      }
     }
 
     setCoffeeModelChoiceByProvider(
       stored ? { ...stored } : createDefaultChatModelChoiceByProvider()
     );
+    setCoffeeReasoningEffort(storedEffort ?? DEFAULT_REASONING_EFFORT);
   }, [
     view,
     coffeeConversation?.id,
@@ -25575,6 +26114,11 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionResolvedChoice.modelChoice !== AUTO_MODEL_CHOICE
       ? coffeeSessionResolvedChoice.modelChoice
       : undefined;
+  const coffeeSessionReasoningEffortOverride = reasoningEffortForSend(
+    coffeeSessionProvider,
+    coffeeSessionModelOverride,
+    coffeeReasoningEffort
+  );
 
   useEffect(() => {
     if (!coffeeConversation || coffeeSessionPhase !== "finished") return;
@@ -25591,6 +26135,9 @@ function HomeContent(): React.JSX.Element {
             method: "POST",
             body: JSON.stringify({
               preferredProvider: coffeeSessionProvider,
+              ...(coffeeSessionReasoningEffortOverride
+                ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
+                : {}),
               ...(coffeeSessionModelOverride
                 ? { modelOverride: coffeeSessionModelOverride }
                 : {}),
@@ -25611,7 +26158,13 @@ function HomeContent(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [coffeeConversation, coffeeSessionModelOverride, coffeeSessionPhase, coffeeSessionProvider]);
+  }, [
+    coffeeConversation,
+    coffeeSessionModelOverride,
+    coffeeSessionPhase,
+    coffeeSessionProvider,
+    coffeeSessionReasoningEffortOverride,
+  ]);
 
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
     const out: BotMentionPick[] = [];
@@ -26710,6 +27263,10 @@ function HomeContent(): React.JSX.Element {
         conversationModelChoiceByScopeRef.current.set(pk, {
           ...chatModelChoiceByProviderWriteRef.current,
         });
+        conversationReasoningEffortByScopeRef.current.set(
+          pk,
+          chatReasoningEffortWriteRef.current
+        );
         lastConversationModelScopeKeyRef.current = null;
       }
       return;
@@ -26722,14 +27279,25 @@ function HomeContent(): React.JSX.Element {
       conversationModelChoiceByScopeRef.current.set(prevKey, {
         ...chatModelChoiceByProviderWriteRef.current,
       });
+      conversationReasoningEffortByScopeRef.current.set(
+        prevKey,
+        chatReasoningEffortWriteRef.current
+      );
     }
     lastConversationModelScopeKeyRef.current = nextKey;
 
     let stored = conversationModelChoiceByScopeRef.current.get(nextKey);
+    let storedEffort = conversationReasoningEffortByScopeRef.current.get(nextKey);
     if (!stored && prevKey === "p:pending" && nextKey.startsWith("c:")) {
       stored = conversationModelChoiceByScopeRef.current.get("p:pending");
       if (stored) {
         conversationModelChoiceByScopeRef.current.set(nextKey, { ...stored });
+      }
+      if (!storedEffort) {
+        storedEffort = conversationReasoningEffortByScopeRef.current.get("p:pending");
+        if (storedEffort) {
+          conversationReasoningEffortByScopeRef.current.set(nextKey, storedEffort);
+        }
       }
     }
     if (!stored && prevKey === "p:none" && nextKey === "p:pending") {
@@ -26740,11 +27308,18 @@ function HomeContent(): React.JSX.Element {
       if (stored) {
         conversationModelChoiceByScopeRef.current.set("p:pending", { ...stored });
       }
+      if (!storedEffort) {
+        storedEffort = conversationReasoningEffortByScopeRef.current.get("p:none");
+        if (storedEffort) {
+          conversationReasoningEffortByScopeRef.current.set("p:pending", storedEffort);
+        }
+      }
     }
 
     setChatModelChoiceByProvider(
       stored ? { ...stored } : createDefaultChatModelChoiceByProvider()
     );
+    setChatReasoningEffort(storedEffort ?? DEFAULT_REASONING_EFFORT);
   }, [selectedId, view, detail?.id]);
 
   useEffect(() => {
@@ -28353,15 +28928,22 @@ function HomeContent(): React.JSX.Element {
     setDraft("");
     setError(null);
     setChatModelChoiceByProvider(modelDefaults);
+    setChatReasoningEffort(DEFAULT_REASONING_EFFORT);
     setCoffeeModelChoiceByProvider(modelDefaults);
+    setCoffeeReasoningEffort(DEFAULT_REASONING_EFFORT);
     setImageGenModelChoiceByProvider(modelDefaults);
     setStoryModelChoiceByProvider(modelDefaults);
+    setStoryReasoningEffort(DEFAULT_REASONING_EFFORT);
     conversationModelChoiceByScopeRef.current.clear();
+    conversationReasoningEffortByScopeRef.current.clear();
     lastConversationModelScopeKeyRef.current = null;
     chatModelChoiceByProviderWriteRef.current = modelDefaults;
+    chatReasoningEffortWriteRef.current = DEFAULT_REASONING_EFFORT;
     coffeeModelChoiceByScopeRef.current.clear();
+    coffeeReasoningEffortByScopeRef.current.clear();
     lastCoffeeModelScopeKeyRef.current = null;
     coffeeModelChoiceByProviderWriteRef.current = modelDefaults;
+    coffeeReasoningEffortWriteRef.current = DEFAULT_REASONING_EFFORT;
 
     setImages([]);
     setImageBotDirectorySnapshot([]);
@@ -28690,6 +29272,11 @@ function HomeContent(): React.JSX.Element {
       modelChoice !== AUTO_MODEL_CHOICE
         ? modelChoice
         : undefined;
+    const reasoningEffortOverride = reasoningEffortForSend(
+      providerForSend,
+      modelOverride,
+      chatReasoningEffort
+    );
     return {
       conversationId: selectedId ?? undefined,
       message,
@@ -28718,6 +29305,7 @@ function HomeContent(): React.JSX.Element {
           : undefined,
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
+      ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
     };
@@ -29336,6 +29924,40 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function resetPrismMoodFromSlashCommand(): Promise<void> {
+    if (view !== "chat") {
+      setError("/forgive-me is only available in Zen.");
+      return;
+    }
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending") {
+      setError("Open a saved Zen conversation before using /forgive-me.");
+      return;
+    }
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    try {
+      const result = await api<{ ok: true; prismMood?: PrismMoodSnapshot }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/prism-mood/reset`,
+        { method: "POST" }
+      );
+      if (result.prismMood) {
+        setDetail((current) =>
+          current?.id === conversationId
+            ? { ...current, prismMood: result.prismMood }
+            : current
+        );
+        setDevMoodDebugSnapshot({ conversationId, mood: result.prismMood });
+      }
+      setPanelNotice("Prism mood reset.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Prism mood reset failed.");
+    }
+  }
+
   // Wipes every per-user memory artifact (extracted facts, SQLite summary
   // rows, Qdrant vectors) so the next chat starts with no recall surface.
   // Mirrors the server-side `/api/dev/clear-session-memory` contract.
@@ -29473,6 +30095,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/refresh" &&
       normalizedCommand !== "/restart" &&
       normalizedCommand !== "/new-session" &&
+      normalizedCommand !== "/forgive-me" &&
       normalizedCommand !== "/help"
     ) {
       return false;
@@ -29506,6 +30129,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/new-session") {
       await startNewZenSessionFromSlashCommand();
+      return true;
+    }
+    if (normalizedCommand === "/forgive-me") {
+      await resetPrismMoodFromSlashCommand();
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -29601,7 +30228,7 @@ function HomeContent(): React.JSX.Element {
       const range = ranges[index]!;
       const command = commandByInvocation.get(range.name.toLowerCase());
       if (!command) continue;
-      const basePrompt = command.command.trim();
+      const basePrompt = resolvePromptRandomizationGroups(command.command.trim());
       if (!basePrompt) {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
@@ -29625,6 +30252,7 @@ function HomeContent(): React.JSX.Element {
           name: firstCommand.name,
           invocation: firstInvocation,
           flags: [],
+          resolvedPrompt: prompt.trim(),
         }
       : null;
     return {
@@ -42212,6 +42840,17 @@ function HomeContent(): React.JSX.Element {
       `${Math.round(Math.max(0, Math.min(1, value ?? 0)) * 100)}%`;
     const declineReason = mood ? prismMoodDeclineReason(mood) : null;
     const recentDeltas = mood?.recentDeltas ?? [];
+    const ignoreUntilMs = Date.parse(mood?.ignoreUntil ?? "");
+    const ignoreRemainingMs =
+      Number.isFinite(ignoreUntilMs) && ignoreUntilMs > devMoodNowMs
+        ? ignoreUntilMs - devMoodNowMs
+        : 0;
+    const ignoreRemainingLabel =
+      ignoreRemainingMs > 0 ? formatMoodIgnoreRemainingMs(ignoreRemainingMs) : null;
+    const ignoreForgivenessLabel =
+      ignoreRemainingLabel && typeof mood?.ignoreForgivenessChance === "number"
+        ? percent(mood.ignoreForgivenessChance)
+        : null;
     const debugControlsDisabled =
       devMoodDebugBusy || !debugConversationId || debugConversationId === "pending";
     return (
@@ -42246,6 +42885,11 @@ function HomeContent(): React.JSX.Element {
             voicePreset={coffeeSeatVoicePreset(activeBot)}
           />
         </button>
+        {ignoreRemainingLabel ? (
+          <span className={styles.devMoodCooldownBadge}>
+            Ignoring {ignoreRemainingLabel}
+          </span>
+        ) : null}
         {devMoodVisualOpen ? (
           <div className={styles.devMoodPanel} role="dialog" aria-label="Prism mood details">
             <div className={styles.devMoodPanelHeader}>
@@ -42289,9 +42933,23 @@ function HomeContent(): React.JSX.Element {
                     <small>Frozen</small>
                     <strong>{mood.frozen ? "Yes" : "No"}</strong>
                   </span>
+                  <span>
+                    <small>Ignore</small>
+                    <strong>{ignoreRemainingLabel ?? "No"}</strong>
+                  </span>
+                  <span>
+                    <small>Forgive</small>
+                    <strong>{ignoreForgivenessLabel ?? "No"}</strong>
+                  </span>
+                  <span>
+                    <small>Penalty</small>
+                    <strong>{mood.ignorePenaltyLevel ?? 0}</strong>
+                  </span>
                 </div>
                 <p className={styles.devMoodNote}>
-                  {declineReason ?? "Prism is available to answer normally."}
+                  {ignoreRemainingLabel
+                    ? `Prism is ignoring Zen messages for ${ignoreRemainingLabel}. Repair chance: ${ignoreForgivenessLabel ?? "0%"}.`
+                    : declineReason ?? "Prism is available to answer normally."}
                 </p>
                 <div className={styles.devMoodActions}>
                   <button
@@ -44478,6 +45136,7 @@ function HomeContent(): React.JSX.Element {
                       id: selectedCommand.id,
                       name: selectedCommand.name,
                       command: selectedCommand.command,
+                      colorTag: selectedCommand.colorTag,
                       aliases: selectedCommand.aliases,
                     }
                   : null;
@@ -44485,6 +45144,8 @@ function HomeContent(): React.JSX.Element {
               selectedCommandDraft?.name ?? selectedCommand?.name ?? "";
             const selectedCommandText =
               selectedCommandDraft?.command ?? selectedCommand?.command ?? "";
+            const selectedCommandColorTag =
+              selectedCommandDraft ? selectedCommandDraft.colorTag : selectedCommand?.colorTag;
             const selectedCommandAliases =
               selectedCommandDraft?.aliases ?? selectedCommand?.aliases ?? [];
             const selectedCommandAliasesMatch =
@@ -44499,6 +45160,7 @@ function HomeContent(): React.JSX.Element {
                 selectedCommand &&
                 (selectedCommandDraft.name !== selectedCommand.name ||
                   selectedCommandDraft.command !== selectedCommand.command ||
+                  selectedCommandDraft.colorTag !== selectedCommand.colorTag ||
                   !selectedCommandAliasesMatch)
             );
             const selectedCommandDraftCanSave = Boolean(
@@ -44536,6 +45198,7 @@ function HomeContent(): React.JSX.Element {
                 id: selectedCommand.id,
                 name: savedName,
                 command: selectedCommandDraft.command,
+                colorTag: selectedCommandDraft.colorTag,
                 aliases: savedAliases,
               };
               const now = new Date().toISOString();
@@ -44554,6 +45217,7 @@ function HomeContent(): React.JSX.Element {
                               ? savedName
                               : entry.title,
                           command: selectedCommandDraft.command,
+                          colorTag: selectedCommandDraft.colorTag,
                           aliases: savedAliases,
                           updatedAt: now,
                         }
@@ -44625,13 +45289,19 @@ function HomeContent(): React.JSX.Element {
                         : undefined
                     }
                     data-read-only={command.readOnly ? "true" : undefined}
+                    data-color-tag={command.colorTag ?? undefined}
+                    style={commandCenterColorStyle(command.colorTag)}
                     onClick={() => {
                       setCommandCenterSelectedCommandId(command.id);
                       setCommandCenterSpecsCommandId(null);
                     }}
                   >
                     <span className={styles.promptCenterPromptName}>
-                      /{command.name}
+                      <span
+                        className={styles.promptCenterPromptColorDot}
+                        aria-hidden="true"
+                      />
+                      <span>/{command.name}</span>
                     </span>
                     <span className={styles.promptCenterPromptMeta}>
                       {command.readOnly ? "Built-in" : "Custom"}
@@ -44829,6 +45499,60 @@ function HomeContent(): React.JSX.Element {
                               spellCheck={false}
                             />
                           </label>
+                          <div className={styles.promptCenterField}>
+                            <span>Color tag</span>
+                            <div
+                              className={styles.promptCenterColorTagRow}
+                              role="radiogroup"
+                              aria-label="Prompt color tag"
+                            >
+                              <button
+                                type="button"
+                                className={styles.promptCenterColorTagButton}
+                                data-active={!selectedCommandColorTag ? "true" : undefined}
+                                role="radio"
+                                aria-checked={!selectedCommandColorTag}
+                                onClick={() => {
+                                  updateSelectedCommandDraft((draft) => ({
+                                    ...draft,
+                                    colorTag: undefined,
+                                  }));
+                                }}
+                              >
+                                <span
+                                  className={styles.promptCenterColorTagSwatch}
+                                  data-default="true"
+                                  aria-hidden="true"
+                                />
+                                <span>Default</span>
+                              </button>
+                              {COMMAND_CENTER_COLOR_TAGS.map((option) => (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  className={styles.promptCenterColorTagButton}
+                                  data-active={
+                                    selectedCommandColorTag === option.id ? "true" : undefined
+                                  }
+                                  role="radio"
+                                  aria-checked={selectedCommandColorTag === option.id}
+                                  style={commandCenterColorStyle(option.id)}
+                                  onClick={() => {
+                                    updateSelectedCommandDraft((draft) => ({
+                                      ...draft,
+                                      colorTag: option.id,
+                                    }));
+                                  }}
+                                >
+                                  <span
+                                    className={styles.promptCenterColorTagSwatch}
+                                    aria-hidden="true"
+                                  />
+                                  <span>{option.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                           <label className={styles.promptCenterField}>
                             <span>Prompt text</span>
                             <textarea
@@ -45011,6 +45735,8 @@ function HomeContent(): React.JSX.Element {
                       key={`${command.id}:${name}`}
                       type="button"
                       className={styles.commandHelpRow}
+                      data-color-tag={command.colorTag ?? undefined}
+                      style={commandCenterColorStyle(command.colorTag)}
                       onClick={() => insertCommandCenterInvocation(`/${name}`)}
                     >
                       <span className={styles.commandHelpSlash}>/{name}</span>
@@ -49910,6 +50636,9 @@ function HomeContent(): React.JSX.Element {
           userIsComposing: coffeeDraftRef.current.trim().length > 0,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
+          ...(coffeeSessionReasoningEffortOverride
+            ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
+            : {}),
           ...(coffeeSessionModelOverride
             ? { modelOverride: coffeeSessionModelOverride }
             : {}),
@@ -50222,6 +50951,9 @@ function HomeContent(): React.JSX.Element {
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(playerInterruption ? { playerInterruption } : {}),
           ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
+          ...(coffeeSessionReasoningEffortOverride
+            ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
+            : {}),
           ...(coffeeSessionModelOverride
             ? { modelOverride: coffeeSessionModelOverride }
             : {}),
@@ -53392,6 +54124,14 @@ function HomeContent(): React.JSX.Element {
           settings,
           storyResponseMode === "local" ? "local" : "online"
         )}
+        effortControl={
+          modelChoiceSupportsReasoningEffort(storyModelProvider, storyVisibleModelChoice)
+            ? {
+                value: storyReasoningEffort,
+                onChange: setStoryReasoningEffort,
+              }
+            : undefined
+        }
         dismissPopoversSignal={composerPopoverDismissSignal}
       />
     </div>
@@ -54477,6 +55217,20 @@ function HomeContent(): React.JSX.Element {
                           settings,
                           isLocal ? "local" : "online"
                         )}
+                        effortControl={
+                          modelChoiceSupportsReasoningEffort(
+                            modelProvider,
+                            visibleModelChoice
+                          )
+                            ? {
+                                value: chatReasoningEffort,
+                                onChange: (next) => {
+                                  setChatReasoningEffort(next);
+                                  persistChatReasoningEffortForActiveScope(next);
+                                },
+                              }
+                            : undefined
+                        }
                         dismissPopoversSignal={composerPopoverDismissSignal}
                       />
                       {renderComposeUtilityActions()}
@@ -54897,6 +55651,7 @@ function HomeContent(): React.JSX.Element {
                 : msg.id === starterPromptSettlingMessageId
                   ? "settling"
                   : undefined;
+            const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -55044,6 +55799,7 @@ function HomeContent(): React.JSX.Element {
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
                   promptShortcut={msg.promptShortcut}
+                  promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>
@@ -56337,6 +57093,7 @@ function HomeContent(): React.JSX.Element {
                 : msg.id === starterPromptSettlingMessageId
                   ? "settling"
                   : undefined;
+            const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -56481,6 +57238,7 @@ function HomeContent(): React.JSX.Element {
                   commandMentionsById={commandCenterCommandById}
                   onOpenCommandMention={openCommandCenterCommandEditor}
                   promptShortcut={msg.promptShortcut}
+                  promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>
