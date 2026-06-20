@@ -4,6 +4,7 @@ export type PrismMoodKey = "joyful" | "warm" | "neutral" | "guarded" | "strained
 
 export type PrismMoodDeltaKind =
   | "interruption"
+  | "negative_turn"
   | "positive_turn"
   | "turn_decay"
   | "debug_nudge"
@@ -60,7 +61,7 @@ export interface CoffeeSocialLikeSnapshot {
   leavePressure: number;
 }
 
-const RECENT_DELTA_LIMIT = 8;
+const RECENT_DELTA_LIMIT = 12;
 
 function isoNow(now?: string | Date): string {
   if (typeof now === "string" && now.trim().length > 0) return now;
@@ -155,6 +156,7 @@ function sanitizeDelta(input: unknown): PrismMoodDelta | null {
   const moodKeyAfter = record.moodKeyAfter;
   if (
     kind !== "interruption" &&
+    kind !== "negative_turn" &&
     kind !== "positive_turn" &&
     kind !== "turn_decay" &&
     kind !== "debug_nudge" &&
@@ -276,6 +278,22 @@ export function interruptionProgressWeight(input?: PrismMoodInterruptionInput): 
   return edge + (1 - edge) * centered;
 }
 
+export function prismMoodInterruptionStreak(state: PrismMoodState): number {
+  const mood = sanitizePrismMoodState(state, state.mode);
+  let streak = 0;
+  for (const delta of mood.recentDeltas) {
+    if (delta.kind === "interruption") {
+      streak += 1;
+      continue;
+    }
+    if (delta.kind === "turn_decay" || delta.kind === "negative_turn") {
+      continue;
+    }
+    break;
+  }
+  return streak;
+}
+
 export function applyPrismMoodInterruption(
   previous: PrismMoodState,
   input?: PrismMoodInterruptionInput,
@@ -286,17 +304,38 @@ export function applyPrismMoodInterruption(
   const severity = interruptionProgressWeight(input);
   const pendingReplyWeight = input?.kind === "pending_reply" ? 0.62 : 1;
   const restraintRelief = 1 - base.restraint * 0.42;
-  const weight = severity * pendingReplyWeight * restraintRelief;
+  const streak = prismMoodInterruptionStreak(base);
+  const streakWeight = 1 + Math.min(1.35, streak * 0.23);
+  const weight = severity * pendingReplyWeight * restraintRelief * streakWeight;
   return withMoodDelta(base, {
     kind: "interruption",
     now,
     reason: input?.kind === "pending_reply"
       ? "The user interrupted before the reply became visible."
       : "The user interrupted the visible reply.",
-    annoyanceDelta: 0.11 * weight,
-    warmthDelta: -0.045 * weight,
-    engagementDelta: -0.025 * weight,
-    restraintDelta: -0.018 * weight,
+    annoyanceDelta: 0.135 * weight,
+    warmthDelta: -0.052 * weight,
+    engagementDelta: -0.035 * weight,
+    restraintDelta: -0.022 * weight,
+  });
+}
+
+export function applyPrismMoodNegativeTurn(
+  previous: PrismMoodState,
+  intensity = 1,
+  now?: string | Date
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (base.frozen) return base;
+  const weight = Math.min(0.65, clampPrismMoodValue(intensity));
+  return withMoodDelta(base, {
+    kind: "negative_turn",
+    now,
+    reason: "The user's wording brought harsher or less collaborative energy.",
+    annoyanceDelta: 0.045 * weight,
+    warmthDelta: -0.03 * weight,
+    engagementDelta: -0.012 * weight,
+    restraintDelta: -0.008 * weight,
   });
 }
 
@@ -308,11 +347,12 @@ export function applyPrismMoodPositiveTurn(
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
   const weight = clampPrismMoodValue(intensity);
+  const streak = prismMoodInterruptionStreak(base);
   return withMoodDelta(base, {
     kind: "positive_turn",
     now,
     reason: "The user brought warmer or more constructive energy.",
-    annoyanceDelta: -0.08 * weight,
+    annoyanceDelta: -(0.08 + Math.min(0.04, streak * 0.008)) * weight,
     warmthDelta: 0.07 * weight,
     engagementDelta: 0.04 * weight,
     restraintDelta: 0.035 * weight,
@@ -327,15 +367,18 @@ export function decayPrismMood(
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
   const weight = clampPrismMoodValue(intensity);
+  const streak = prismMoodInterruptionStreak(base);
+  const streakDecayRelief = streak > 0 ? Math.max(0.28, 1 - streak * 0.16) : 1;
+  const effectiveWeight = weight * streakDecayRelief;
   const target = createDefaultPrismMoodState(base.mode, now);
   return withMoodDelta(base, {
     kind: "turn_decay",
     now,
     reason: "Mood drifted gently toward baseline.",
-    annoyanceDelta: (target.annoyance - base.annoyance) * 0.2 * weight,
-    warmthDelta: (target.warmth - base.warmth) * 0.12 * weight,
-    engagementDelta: (target.engagement - base.engagement) * 0.1 * weight,
-    restraintDelta: (target.restraint - base.restraint) * 0.1 * weight,
+    annoyanceDelta: (target.annoyance - base.annoyance) * 0.2 * effectiveWeight,
+    warmthDelta: (target.warmth - base.warmth) * 0.12 * effectiveWeight,
+    engagementDelta: (target.engagement - base.engagement) * 0.1 * effectiveWeight,
+    restraintDelta: (target.restraint - base.restraint) * 0.1 * effectiveWeight,
   });
 }
 
@@ -381,13 +424,29 @@ export function resetPrismMood(
 
 export function shouldPrismMoodDeclineResponse(state: PrismMoodState): boolean {
   const mood = sanitizePrismMoodState(state, state.mode);
-  return mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4;
+  const hardDecline = mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4;
+  const interruptionPause =
+    mood.mode === "zen" &&
+    prismMoodInterruptionStreak(mood) >= 5 &&
+    mood.annoyance >= 0.58 &&
+    mood.warmth <= 0.52;
+  return hardDecline || interruptionPause;
 }
 
 export function prismMoodDeclineReason(state: PrismMoodState): string | null {
-  return shouldPrismMoodDeclineResponse(state)
-    ? "Annoyance is high while engagement and warmth are low; Prism may take a beat instead of replying."
-    : null;
+  const mood = sanitizePrismMoodState(state, state.mode);
+  if (mood.annoyance >= 0.82 && mood.engagement <= 0.42 && mood.warmth <= 0.4) {
+    return "Annoyance is high while engagement and warmth are low; Prism may take a beat instead of replying.";
+  }
+  if (
+    mood.mode === "zen" &&
+    prismMoodInterruptionStreak(mood) >= 5 &&
+    mood.annoyance >= 0.58 &&
+    mood.warmth <= 0.52
+  ) {
+    return "Recent interruptions have stacked up; Prism may pause with one quiet boundary line.";
+  }
+  return null;
 }
 
 export function coffeeSocialSnapshotToPrismMoodState(

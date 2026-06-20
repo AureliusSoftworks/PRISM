@@ -2373,6 +2373,86 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(repaired.prismMood?.recentDeltas[0]?.kind, "positive_turn");
   });
 
+  it("uses a one-line Zen mood pause once interruption pressure is high", async () => {
+    const db = createChatTestDb();
+    const conversationId = "pause-conversation";
+    const now = "2026-06-19T12:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(conversationId, "user-1", "Pause test", "zen", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "assistant-1",
+      conversationId,
+      "user-1",
+      "assistant",
+      "Previous assistant message.",
+      "2026-06-19T12:00:01.000Z"
+    );
+    const interruptionDelta = {
+      kind: "interruption",
+      at: now,
+      reason: "Interrupted.",
+      annoyanceDelta: 0.1,
+      warmthDelta: -0.04,
+      engagementDelta: -0.02,
+      restraintDelta: -0.01,
+      moodKeyBefore: "neutral",
+      moodKeyAfter: "guarded",
+    };
+    db.prepare(
+      `INSERT INTO prism_mood_state (
+        user_id, conversation_id, mode, mood_key, confidence, annoyance,
+        warmth, engagement, restraint, recent_deltas, frozen, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      conversationId,
+      "zen",
+      "guarded",
+      0.7,
+      0.62,
+      0.48,
+      0.5,
+      0.5,
+      JSON.stringify(Array.from({ length: 5 }, () => interruptionDelta)),
+      0,
+      now
+    );
+
+    const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/api/chat")) {
+        chatPayloads.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "This should not be used." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Are you still going to answer?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      },
+      conversationId
+    );
+
+    const assistant = result.conversation.messages.at(-1);
+    assert.equal(chatPayloads.length, 0, JSON.stringify(chatPayloads, null, 2));
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.content, "I’m going to pause here for a moment.");
+    assert.equal(result.prismMood?.moodKey, "guarded");
+  });
+
   it("keeps relationship and mood context out of the persona identity block", async () => {
     const db = createChatTestDb();
     const userKey = CHAT_TEST_USER_KEY;
@@ -2472,6 +2552,102 @@ describe("processChatMessage AskQuestion tool", () => {
     );
     assert.match(promptText, /Current Prism mood context for this turn \(not persona identity\)/);
     assert.doesNotMatch(promptText, /across every bot persona/i);
+  });
+
+  it("anchors extreme Prism mood values for direct self-report questions", async () => {
+    const runMoodPrompt = async (args: {
+      moodKey: string;
+      annoyance: number;
+      warmth: number;
+      engagement: number;
+      expectedAnchor: RegExp;
+      expectedVoice: RegExp;
+    }): Promise<string> => {
+      const db = createChatTestDb();
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
+      ).run("mood-extreme", "user-1", "Mood check", now, now);
+      db.prepare(
+        `INSERT INTO prism_mood_state (
+          user_id, conversation_id, mode, mood_key, confidence, annoyance,
+          warmth, engagement, restraint, recent_deltas, frozen, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "user-1",
+        "mood-extreme",
+        "zen",
+        args.moodKey,
+        1,
+        args.annoyance,
+        args.warmth,
+        args.engagement,
+        0.38,
+        "[]",
+        1,
+        now
+      );
+
+      const chatPayloads: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          messages?: Array<{ role: string; content: string }>;
+        };
+        if (String(input).includes("/api/chat")) {
+          chatPayloads.push(body);
+          return new Response(JSON.stringify({ message: { content: "Mood noted." } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+
+      await processChatMessage(
+        db,
+        "user-1",
+        "On a scale of 1 to 10, what is your current mood?",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          starterPrompt: false,
+          incognito: false,
+          mode: "chat",
+        },
+        "mood-extreme"
+      );
+
+      const promptText = (chatPayloads[0]?.messages ?? [])
+        .map((message) => `${message.role}: ${message.content}`)
+        .join("\n");
+      assert.match(promptText, args.expectedAnchor);
+      assert.match(promptText, args.expectedVoice);
+      assert.match(promptText, /Exact 1-10 self-report values:/);
+      assert.match(promptText, /90-100% should read as 9-10\/10/);
+      assert.match(promptText, /noticeably affect tone, pacing, and brevity/);
+      return promptText;
+    };
+
+    await runMoodPrompt({
+      moodKey: "strained",
+      annoyance: 1,
+      warmth: 0.12,
+      engagement: 0.28,
+      expectedAnchor: /Current self-report anchor: annoyance 10\/10/,
+      expectedVoice: /Voice: visibly strained, terse, cool/i,
+    });
+    await runMoodPrompt({
+      moodKey: "joyful",
+      annoyance: 0,
+      warmth: 1,
+      engagement: 1,
+      expectedAnchor: /Current self-report anchor: warmth 10\/10/,
+      expectedVoice: /Voice: openly warm, bright, and emotionally available/i,
+    });
   });
 
   it("skips AskQuestion payload when options are not synthesized", async () => {
@@ -3330,6 +3506,47 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(result.memoryLearned?.created[0]?.text, "You live on land.");
     assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
     assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
+  });
+
+  it("keeps Command Center prompt turns out of memories and mood state", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Prompt result.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Remember this: I prefer pistachios.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "chat",
+        commandCenterPrompt: true,
+        prismInterruption: {
+          kind: "pending_reply",
+        },
+      }
+    );
+
+    assert.equal(result.memoryLearned, undefined);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM prism_mood_state").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM session_opinions").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM bot_opinions").get() as { n: number }).n,
+      0
+    );
+    assert.equal(result.prismMood?.recentDeltas.length, 0);
   });
 
   it("saves funny-enough disclosures even when auto-memory is off", async () => {

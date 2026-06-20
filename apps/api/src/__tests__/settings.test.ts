@@ -513,10 +513,10 @@ describe("resolveNextSettings — image panel model picks", () => {
 
   it("stores preferred OpenAI image model id", () => {
     const next = resolveNextSettings(
-      { preferredOpenAiImageModel: "dall-e-2" },
+      { preferredOpenAiImageModel: "gpt-image-1-mini" },
       baseline()
     );
-    assert.equal(next.preferredOpenAiImageModel, "dall-e-2");
+    assert.equal(next.preferredOpenAiImageModel, "gpt-image-1-mini");
   });
 
   it("clears local image model when given empty string", () => {
@@ -530,11 +530,11 @@ describe("resolveNextSettings — image panel model picks", () => {
   it("keeps stored ids when the patch omits them", () => {
     const current = baseline({
       preferredLocalImageModel: "comfyui:abc.safetensors",
-      preferredOpenAiImageModel: "dall-e-3",
+      preferredOpenAiImageModel: "gpt-image-2",
     });
     const next = resolveNextSettings({ theme: "light" }, current);
     assert.equal(next.preferredLocalImageModel, "comfyui:abc.safetensors");
-    assert.equal(next.preferredOpenAiImageModel, "dall-e-3");
+    assert.equal(next.preferredOpenAiImageModel, "gpt-image-2");
   });
 });
 

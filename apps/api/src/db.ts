@@ -251,7 +251,7 @@ export function createDatabase(): DatabaseSync {
       quality TEXT NOT NULL DEFAULT 'standard',
       provider TEXT NOT NULL DEFAULT 'openai',
       local_rel_path TEXT,
-      model TEXT NOT NULL DEFAULT 'dall-e-3',
+      model TEXT NOT NULL DEFAULT 'gpt-image-2',
       purpose TEXT NOT NULL DEFAULT 'gallery',
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -1021,7 +1021,7 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasImageModelColumn) {
     db.exec(
-      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'dall-e-3';"
+      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'gpt-image-2';"
     );
   }
   const hasImagePurposeColumn = imageColumns.some(
