@@ -23991,10 +23991,16 @@ function HomeContent(): React.JSX.Element {
     sendValue?: string;
   };
 
+  const revealAskQuestionComposer = useCallback((): void => {
+    setAskQuestionComposerRevealed(true);
+    revealChatComposerChrome();
+    draftComposerRef.current?.focus();
+    requestAnimationFrame(() => draftComposerRef.current?.focus());
+  }, [revealChatComposerChrome]);
+
   function handleComposerChipPick(chip: ComposerChip): void {
     if (chip.action === "other") {
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      revealAskQuestionComposer();
       return;
     }
     setConversationStarterPrompts(null);
@@ -24208,10 +24214,7 @@ function HomeContent(): React.JSX.Element {
               aria-label="Hide suggested replies"
               title="Hide suggested replies"
               disabled={pendingReply}
-              onClick={() => {
-                setAskQuestionComposerRevealed(true);
-                requestAnimationFrame(() => draftComposerRef.current?.focus());
-              }}
+              onClick={revealAskQuestionComposer}
             >
               <X size={15} strokeWidth={2.4} aria-hidden="true" />
             </button>
@@ -24544,12 +24547,11 @@ function HomeContent(): React.JSX.Element {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      revealAskQuestionComposer();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]);
+  }, [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, revealAskQuestionComposer]);
 
   const handleAskQuestionOutsidePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -24559,10 +24561,9 @@ function HomeContent(): React.JSX.Element {
       /* Chip rail is a sibling below `.messages`; exclude it so option picks still work.
          Clicks anywhere else — including inside the scrollable thread — collapse. */
       if (askQuestionRailRef.current?.contains(target)) return;
-      setAskQuestionComposerRevealed(true);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
+      revealAskQuestionComposer();
     },
-    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed]
+    [pendingAskQuestionInteractiveKey, askQuestionComposerRevealed, revealAskQuestionComposer]
   );
 
   function handleMessagesPaneScroll(event: React.UIEvent<HTMLDivElement>): void {

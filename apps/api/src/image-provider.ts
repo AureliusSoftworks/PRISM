@@ -42,7 +42,6 @@ export async function generateImage(
     model: normalized.model,
     prompt,
     n: 1,
-    response_format: "url",
   };
 
   if (normalized.model === "dall-e-3") {
