@@ -14271,54 +14271,6 @@ function promptShortcutWildcardReplacementsForPromptText(
     );
 }
 
-function promptShortcutExpandedPromptBody(
-  fullPrompt: string,
-  promptShortcut: PromptShortcutMetadata
-): string {
-  const resolvedPrompt = promptShortcut.resolvedPrompt?.trim();
-  if (!resolvedPrompt) return fullPrompt.trim();
-  const visiblePrompt = fullPrompt.trim();
-  const invocationCandidates = [
-    promptShortcut.invocation.trim(),
-    `/${promptShortcut.name}`,
-  ].filter(Boolean);
-
-  for (const invocation of invocationCandidates) {
-    const start = visiblePrompt.toLowerCase().indexOf(invocation.toLowerCase());
-    if (start < 0) continue;
-    const before = visiblePrompt.slice(0, start).trim();
-    const after = visiblePrompt.slice(start + invocation.length).trim();
-    let promptBody = resolvedPrompt;
-    if (before && promptBody.toLowerCase().startsWith(before.toLowerCase())) {
-      promptBody = promptBody.slice(before.length).trimStart();
-    }
-    if (after && promptBody.toLowerCase().endsWith(after.toLowerCase())) {
-      promptBody = promptBody.slice(0, promptBody.length - after.length).trimEnd();
-    }
-    return promptBody.trim() || resolvedPrompt;
-  }
-
-  return resolvedPrompt;
-}
-
-function promptShortcutInvocationRange(
-  fullPrompt: string,
-  promptShortcut: PromptShortcutMetadata
-): { start: number; end: number } | null {
-  const invocationCandidates = [
-    promptShortcut.invocation.trim(),
-    `/${promptShortcut.name}`,
-  ].filter(Boolean);
-  const lowerPrompt = fullPrompt.toLowerCase();
-  for (const invocation of invocationCandidates) {
-    const start = lowerPrompt.indexOf(invocation.toLowerCase());
-    if (start >= 0) {
-      return { start, end: start + invocation.length };
-    }
-  }
-  return null;
-}
-
 function PromptShortcutUnfoldedMessage({
   promptShortcut,
   fullPrompt,
@@ -14326,11 +14278,7 @@ function PromptShortcutUnfoldedMessage({
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
 }) {
-  const promptBody = promptShortcutExpandedPromptBody(fullPrompt, promptShortcut);
-  const invocationRange = promptShortcutInvocationRange(fullPrompt, promptShortcut);
-  const before = invocationRange ? fullPrompt.slice(0, invocationRange.start) : "";
-  const after = invocationRange ? fullPrompt.slice(invocationRange.end) : "";
-  const displayPromptBody = withSentenceCasedPromptInsertion(promptBody, before);
+  const displayPromptBody = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
   const promptBodyHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
     displayPromptBody,
     promptShortcutWildcardReplacementsForPromptText(
@@ -14340,11 +14288,9 @@ function PromptShortcutUnfoldedMessage({
   );
   return (
     <p className={styles.promptShortcutUnfoldedText}>
-      {invocationRange ? before : null}
       <span className={styles.promptShortcutUnfoldedInsertion}>
         {renderPromptShortcutPromptSent(displayPromptBody, promptBodyHighlightRanges)}
       </span>
-      {invocationRange ? after : null}
     </p>
   );
 }
@@ -32333,13 +32279,14 @@ function HomeContent(): React.JSX.Element {
       }
     }
 
-    let prompt = rawDraft;
+    let prompt = "";
+    let cursor = 0;
     let firstCommand: CommandCenterCommand | null = null;
     let firstInvocation = "";
-    let firstPromptRandomizationReplacements: NonNullable<
+    const promptRandomizationReplacements: NonNullable<
       PromptShortcutMetadata["wildcardReplacements"]
     > = [];
-    for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    for (let index = 0; index < ranges.length; index += 1) {
       const range = ranges[index]!;
       const command = commandByInvocation.get(range.name.toLowerCase());
       if (!command) continue;
@@ -32350,30 +32297,63 @@ function HomeContent(): React.JSX.Element {
       if (!basePrompt) {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
-      const beforePrompt = prompt.slice(0, range.start);
-      const casedBasePrompt = withSentenceCasedPromptInsertion(basePrompt, beforePrompt);
+      prompt += rawDraft.slice(cursor, range.start);
+      const casedBasePrompt = withSentenceCasedPromptInsertion(basePrompt, prompt);
+      const replacementOffset = prompt.length;
       const casedBasePromptReplacements = promptShortcutWildcardReplacementsForPromptText(
         casedBasePrompt,
         basePromptResolution.replacements
-      );
-      if (index === 0) {
+      ).map((replacement) => ({
+        ...replacement,
+        start:
+          typeof replacement.start === "number"
+            ? replacementOffset + replacement.start
+            : replacement.start,
+        end:
+          typeof replacement.end === "number"
+            ? replacementOffset + replacement.end
+            : replacement.end,
+      }));
+      if (!firstCommand) {
         firstCommand = command;
         firstInvocation = rawDraft.slice(range.start, range.end);
-        firstPromptRandomizationReplacements = casedBasePromptReplacements;
       }
-      prompt = `${prompt.slice(0, range.start)}${casedBasePrompt}${prompt.slice(range.end)}`;
+      promptRandomizationReplacements.push(...casedBasePromptReplacements);
+      prompt += casedBasePrompt;
+      cursor = range.end;
     }
+    prompt += rawDraft.slice(cursor);
 
     if (!firstCommand) return { kind: "none" };
+    const resolvedPrompt = prompt.trim();
+    const trimStartOffset = prompt.length - prompt.trimStart().length;
+    const promptReplacements = promptShortcutWildcardReplacementsForPromptText(
+      prompt,
+      promptRandomizationReplacements
+    );
+    const wildcardReplacements = promptShortcutWildcardReplacementsForPromptText(
+      resolvedPrompt,
+      promptReplacements.map((replacement) => ({
+        ...replacement,
+        start:
+          typeof replacement.start === "number"
+            ? replacement.start - trimStartOffset
+            : replacement.start,
+        end:
+          typeof replacement.end === "number"
+            ? replacement.end - trimStartOffset
+            : replacement.end,
+      }))
+    );
     const promptShortcut: PromptShortcutMetadata = {
       v: 1,
       commandId: firstCommand.id,
       name: firstCommand.name,
       invocation: firstInvocation,
       flags: [],
-      resolvedPrompt: prompt.trim(),
-      ...(firstPromptRandomizationReplacements.length > 0
-        ? { wildcardReplacements: firstPromptRandomizationReplacements }
+      resolvedPrompt,
+      ...(wildcardReplacements.length > 0
+        ? { wildcardReplacements }
         : {}),
     };
     return {
