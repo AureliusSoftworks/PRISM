@@ -748,7 +748,7 @@ export async function checkDualOllamaWorkloadStatus(
       missingOnPrimary,
       missingOnSecondary,
     });
-  } else if (missingOnPrimary.length > 0 || missingOnSecondary.length > 0) {
+  } else if (sharedModelIds.length === 0) {
     status = disabledDualOllamaStatus("model_mismatch", {
       configured: true,
       primaryReachable: true,
@@ -769,8 +769,8 @@ export async function checkDualOllamaWorkloadStatus(
       primaryModelCount,
       secondaryModelCount,
       sharedModelIds,
-      missingOnPrimary: [],
-      missingOnSecondary: [],
+      missingOnPrimary,
+      missingOnSecondary,
       reason: "ready",
     };
   }
@@ -865,7 +865,10 @@ export async function buildModelCatalog(
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
+  const localLabelKeys = new Set(localIds.map(modelLabelKey));
+  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal).filter((id) =>
+    localLabelKeys.has(modelLabelKey(id))
+  );
   const onlineIds = openAiApiKey
     ? preferOpenAiChatVariants(
         uniqueModelIds([
@@ -892,9 +895,9 @@ export async function buildModelCatalog(
       ),
       ...secondaryLocalIds.map((id) =>
         toCatalogEntry(encodeSecondaryOllamaModelId(id), "local", config.ollamaModel, {
-          label: `${modelLabelFromId(id, "local")} (Second host)`,
+          label: `${modelLabelFromId(id, "local")} (Paired host)`,
           localHost: "secondary",
-          hostLabel: "Second host",
+          hostLabel: "Paired host",
         })
       ),
     ],
@@ -926,7 +929,7 @@ export class LocalOllamaProvider implements LlmProvider {
     const requestedModel = options?.model?.trim() || config.ollamaModel;
     const secondaryModel = parseSecondaryOllamaModelId(requestedModel);
     if (secondaryModel && !this.secondaryOllamaHost) {
-      throw new Error("Second Ollama host is not configured.");
+      throw new Error("Paired Ollama host is not configured.");
     }
     const dualWorkloadModel = secondaryModel
       ? null

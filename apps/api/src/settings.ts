@@ -179,10 +179,10 @@ function normalizeOllamaHostValue(input: string): string {
   try {
     parsed = new URL(normalized);
   } catch {
-    throw new Error("Second Ollama host must be a valid host or URL.");
+    throw new Error("Paired Ollama host must be a valid host or URL.");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("Second Ollama host must use http:// or https://.");
+    throw new Error("Paired Ollama host must use http:// or https://.");
   }
   return normalized;
 }
@@ -246,7 +246,7 @@ export function normalizeSecondaryOllamaHostInput(
   if (
     canonicalOllamaHostname(normalized) === canonicalOllamaHostname(primaryOllamaHost)
   ) {
-    throw new Error("Second Ollama host must use a different IP address than the primary host.");
+    throw new Error("Paired Ollama host must use a different IP address than the primary host.");
   }
   return normalized;
 }
