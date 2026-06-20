@@ -2,7 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
-import { normalizeZenWallpaperOpacity } from "./settings.ts";
+import {
+  normalizeZenWallpaperOpacity,
+  normalizeZenWallpaperTextMaskEnabled,
+} from "./settings.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -26,6 +29,7 @@ export interface BackupUserSettings {
   preferredZenWallpaperLocalImageModel: string;
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
+  zenWallpaperTextMaskEnabled: boolean;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
@@ -148,6 +152,7 @@ export function exportUserSnapshot(
          preferred_zen_wallpaper_local_image_model,
          preferred_zen_wallpaper_openai_image_model,
          zen_wallpaper_opacity,
+         zen_wallpaper_text_mask_enabled,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -187,6 +192,7 @@ export function exportUserSnapshot(
         preferred_zen_wallpaper_local_image_model: string | null;
         preferred_zen_wallpaper_openai_image_model: string | null;
         zen_wallpaper_opacity: number | null;
+        zen_wallpaper_text_mask_enabled: number | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -228,6 +234,9 @@ export function exportUserSnapshot(
           user.preferred_zen_wallpaper_openai_image_model ?? "",
         zenWallpaperOpacity: normalizeZenWallpaperOpacity(
           user.zen_wallpaper_opacity
+        ),
+        zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
+          user.zen_wallpaper_text_mask_enabled
         ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
@@ -500,6 +509,7 @@ export function importUserSnapshot(
         preferred_zen_wallpaper_local_image_model = ?,
         preferred_zen_wallpaper_openai_image_model = ?,
         zen_wallpaper_opacity = ?,
+        zen_wallpaper_text_mask_enabled = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -550,6 +560,7 @@ export function importUserSnapshot(
       settings.preferredZenWallpaperLocalImageModel?.trim() ?? "",
       settings.preferredZenWallpaperOpenAiImageModel?.trim() ?? "",
       normalizeZenWallpaperOpacity(settings.zenWallpaperOpacity),
+      normalizeZenWallpaperTextMaskEnabled(settings.zenWallpaperTextMaskEnabled) ? 1 : 0,
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,

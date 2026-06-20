@@ -27,7 +27,8 @@ export type Provider = "local" | "openai" | "anthropic";
 
 export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
-export const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
+export const MAX_ZEN_WALLPAPER_OPACITY = 1;
+export const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 export const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = 12 * 60 * 60 * 1000;
 export const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
 export const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
@@ -80,6 +81,7 @@ export interface CurrentSettings {
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number | null;
+  zenWallpaperTextMaskEnabled: number | null;
   zenSessionIdleGapMs: number | null;
   zenFreshStartGapMs: number | null;
   zenRecentContextMessages: number | null;
@@ -118,6 +120,7 @@ export interface NextSettings {
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number;
+  zenWallpaperTextMaskEnabled: boolean;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -381,6 +384,24 @@ export function normalizeZenWallpaperOpacity(
   return Number(clamped.toFixed(2));
 }
 
+export function normalizeZenWallpaperTextMaskEnabled(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED
+): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return Boolean(fallback);
+}
+
 function normalizeNumberSetting(
   value: unknown,
   fallback: number,
@@ -619,6 +640,15 @@ export function resolveNextSettings(
           body.zenWallpaperOpacity,
           currentZenWallpaperOpacity
         );
+  const currentZenWallpaperTextMaskEnabled =
+    normalizeZenWallpaperTextMaskEnabled(current.zenWallpaperTextMaskEnabled);
+  const zenWallpaperTextMaskEnabled =
+    body.zenWallpaperTextMaskEnabled === undefined
+      ? currentZenWallpaperTextMaskEnabled
+      : normalizeZenWallpaperTextMaskEnabled(
+          body.zenWallpaperTextMaskEnabled,
+          currentZenWallpaperTextMaskEnabled
+        );
   const currentZenSessionIdleGapMs = normalizeZenSessionIdleGapMs(
     current.zenSessionIdleGapMs
   );
@@ -758,6 +788,7 @@ export function resolveNextSettings(
     preferredZenWallpaperLocalImageModel,
     preferredZenWallpaperOpenAiImageModel,
     zenWallpaperOpacity,
+    zenWallpaperTextMaskEnabled,
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,

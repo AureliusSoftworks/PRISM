@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
   deleteAllConversations,
@@ -36,6 +37,12 @@ function createTestDb(): DatabaseSync {
       archived_at TEXT,
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_image_id TEXT,
+      zen_wallpaper_prompt_seed TEXT,
+      zen_wallpaper_message_count INTEGER,
+      zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -263,6 +270,91 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
         revealFullMessageCount: 5,
       },
     ]);
+  });
+});
+
+describe("buildZenWallpaperHistoryForGeneratedImage", () => {
+  it("replaces the scroll timeline with an immediately visible wallpaper", () => {
+    const history = buildZenWallpaperHistoryForGeneratedImage(
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 30,
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+      ]),
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 120,
+        revealStartMessageCount: 124,
+        revealFullMessageCount: 136,
+        createdAt: "2026-06-19T12:00:00.000Z",
+      },
+      {
+        latestMessageCount: 120,
+        restoreMessageLimit: 80,
+        replaceImmediately: true,
+      }
+    );
+
+    assert.deepEqual(history, [
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 120,
+        revealStartMessageCount: 0,
+        revealFullMessageCount: 0,
+        createdAt: "2026-06-19T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("keeps automatic wallpaper generations on the scroll reveal timeline", () => {
+    const history = buildZenWallpaperHistoryForGeneratedImage(
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 30,
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+      ]),
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "new prompt",
+        generationMessageCount: 70,
+        revealStartMessageCount: 74,
+        revealFullMessageCount: 86,
+      },
+      {
+        latestMessageCount: 70,
+        restoreMessageLimit: 80,
+      }
+    );
+
+    assert.deepEqual(
+      history.map((entry) => ({
+        imageId: entry.imageId,
+        revealStartMessageCount: entry.revealStartMessageCount,
+        revealFullMessageCount: entry.revealFullMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-old",
+          revealStartMessageCount: 34,
+          revealFullMessageCount: 46,
+        },
+        {
+          imageId: "wallpaper-new",
+          revealStartMessageCount: 74,
+          revealFullMessageCount: 86,
+        },
+      ]
+    );
   });
 });
 
@@ -720,6 +812,65 @@ describe("clearConversationMessages", () => {
       .prepare("SELECT conversation_id FROM memories WHERE id = ?")
       .get("memory-chat-1") as { conversation_id: string | null } | undefined;
     assert.equal(memory?.conversation_id, null);
+  });
+
+  it("clears stale Zen wallpaper metadata while preserving Atmosphere enablement", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "chat-1");
+    db.prepare(
+      `UPDATE conversations
+          SET conversation_mode = 'zen',
+              zen_wallpaper_enabled = 1,
+              zen_wallpaper_image_id = ?,
+              zen_wallpaper_prompt_seed = ?,
+              zen_wallpaper_message_count = ?,
+              zen_wallpaper_status = 'ready',
+              zen_wallpaper_history = ?
+        WHERE id = ? AND user_id = ?`
+    ).run(
+      "wallpaper-old",
+      "old prompt",
+      12,
+      JSON.stringify([
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "old prompt",
+          generationMessageCount: 12,
+          revealStartMessageCount: 16,
+          revealFullMessageCount: 28,
+        },
+      ]),
+      "chat-1",
+      "user-1"
+    );
+
+    clearConversationMessages(db, "user-1", "chat-1");
+
+    const conversation = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations
+          WHERE id = ? AND user_id = ?`
+      )
+      .get("chat-1", "user-1") as
+      | {
+          zen_wallpaper_enabled: number;
+          zen_wallpaper_image_id: string | null;
+          zen_wallpaper_prompt_seed: string | null;
+          zen_wallpaper_message_count: number | null;
+          zen_wallpaper_status: string;
+          zen_wallpaper_history: string;
+        }
+      | undefined;
+
+    assert.equal(conversation?.zen_wallpaper_enabled, 1);
+    assert.equal(conversation?.zen_wallpaper_image_id, null);
+    assert.equal(conversation?.zen_wallpaper_prompt_seed, null);
+    assert.equal(conversation?.zen_wallpaper_message_count, null);
+    assert.equal(conversation?.zen_wallpaper_status, "idle");
+    assert.equal(conversation?.zen_wallpaper_history, "[]");
   });
 
   it("leaves other users' chat context untouched", () => {

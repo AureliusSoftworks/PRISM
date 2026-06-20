@@ -76,7 +76,7 @@ import {
 import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
 import {
-  appendZenWallpaperHistoryEntry,
+  buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
   deleteAllConversations,
@@ -88,7 +88,6 @@ import {
   mapZenWallpaperMetadata,
   normalizeZenWallpaperStatus,
   pruneZenWallpaperHistoryForMessageCount,
-  pruneZenWallpaperHistoryForRestoreWindow,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
   rewindConversation,
@@ -130,6 +129,7 @@ import {
   normalizeZenWallpaperRegenMessageInterval,
   normalizeZenWallpaperRevealDelayMessageCount,
   normalizeZenWallpaperRevealSpanMessageCount,
+  normalizeZenWallpaperTextMaskEnabled,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
@@ -313,6 +313,7 @@ interface UserDbRow {
   preferred_zen_wallpaper_local_image_model: string | null;
   preferred_zen_wallpaper_openai_image_model: string | null;
   zen_wallpaper_opacity: number | null;
+  zen_wallpaper_text_mask_enabled: number | null;
   zen_session_idle_gap_ms: number | null;
   zen_fresh_start_gap_ms: number | null;
   zen_recent_context_messages: number | null;
@@ -460,7 +461,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1081,6 +1082,51 @@ function composeZenWallpaperPrompt(args: {
   return lines.join("\n");
 }
 
+type ZenWallpaperDbRow = {
+  zen_wallpaper_enabled?: number | null;
+  zen_wallpaper_image_id?: string | null;
+  zen_wallpaper_prompt_seed?: string | null;
+  zen_wallpaper_message_count?: number | null;
+  zen_wallpaper_status?: string | null;
+  zen_wallpaper_history?: string | null;
+};
+
+function resetZenWallpaperMetadataForEmptyConversation<T extends ZenWallpaperDbRow>(
+  conversationId: string,
+  row: T,
+  totalMessageCount: number
+): T {
+  if (totalMessageCount !== 0) return row;
+  const storedHistory = row.zen_wallpaper_history?.trim() ?? "";
+  const hasWallpaperMetadata = Boolean(
+    row.zen_wallpaper_image_id ||
+      row.zen_wallpaper_prompt_seed ||
+      (row.zen_wallpaper_message_count !== null &&
+        row.zen_wallpaper_message_count !== undefined) ||
+      row.zen_wallpaper_status === "ready" ||
+      row.zen_wallpaper_status === "generating" ||
+      (storedHistory.length > 0 && storedHistory !== "[]")
+  );
+  if (!hasWallpaperMetadata) return row;
+  db.prepare(
+    `UPDATE conversations
+        SET zen_wallpaper_image_id = NULL,
+            zen_wallpaper_prompt_seed = NULL,
+            zen_wallpaper_message_count = NULL,
+            zen_wallpaper_status = 'idle',
+            zen_wallpaper_history = '[]'
+      WHERE id = ?`
+  ).run(conversationId);
+  return {
+    ...row,
+    zen_wallpaper_image_id: null,
+    zen_wallpaper_prompt_seed: null,
+    zen_wallpaper_message_count: null,
+    zen_wallpaper_status: "idle",
+    zen_wallpaper_history: "[]",
+  };
+}
+
 function zenWallpaperResponseForConversation(conversationId: string): ReturnType<typeof mapZenWallpaperMetadata> {
   const row = db
     .prepare(
@@ -1091,21 +1137,22 @@ function zenWallpaperResponseForConversation(conversationId: string): ReturnType
         WHERE id = ?`
     )
     .get(conversationId) as
-    | {
-        zen_wallpaper_enabled: number | null;
-        zen_wallpaper_image_id: string | null;
-        zen_wallpaper_prompt_seed: string | null;
-        zen_wallpaper_message_count: number | null;
-        zen_wallpaper_status: string | null;
-        zen_wallpaper_history: string | null;
-      }
+    | ZenWallpaperDbRow
     | undefined;
-  const metadata = mapZenWallpaperMetadata(row ?? {});
   const totalMessageCount = (
     db
       .prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
       .get(conversationId) as { n?: number } | undefined
   )?.n ?? 0;
+  const metadata = mapZenWallpaperMetadata(
+    row
+      ? resetZenWallpaperMetadataForEmptyConversation(
+          conversationId,
+          row,
+          totalMessageCount
+        )
+      : {}
+  );
   return rebaseZenWallpaperMetadataForVisibleWindow(
     metadata,
     totalMessageCount,
@@ -1853,7 +1900,15 @@ function buildRoutes(): RouteDefinition[] {
         conversationModeOut === "coffee"
           ? parseStoredCoffeeSessionSettings(conversation.coffee_settings)
           : undefined;
-      const zenWallpaperOut = mapZenWallpaperMetadata(conversation);
+      const conversationForWallpaper =
+        conversationModeOut === "zen"
+          ? resetZenWallpaperMetadataForEmptyConversation(
+              conversation.id,
+              conversation,
+              totalMessageCount
+            )
+          : conversation;
+      const zenWallpaperOut = mapZenWallpaperMetadata(conversationForWallpaper);
       if (conversationModeOut === "zen") {
         Object.assign(
           zenWallpaperOut,
@@ -1908,7 +1963,8 @@ function buildRoutes(): RouteDefinition[] {
       recoverStaleZenWallpaperStatusForRequest(userId, conversationId);
       const body = ctx.body as Record<string, unknown>;
       const enabled = body.enabled !== false;
-      const force = body.force === true;
+      const replaceImmediately = body.replaceImmediately === true;
+      const force = body.force === true || replaceImmediately;
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
@@ -1977,13 +2033,14 @@ function buildRoutes(): RouteDefinition[] {
 
       const messages = db
         .prepare(
-          `SELECT role, content
+          `SELECT id, role, content
              FROM messages
             WHERE conversation_id = ? AND user_id = ?
             ORDER BY created_at ASC`
         )
-        .all(conversationId, userId) as Array<{ role: string; content: string }>;
+        .all(conversationId, userId) as Array<{ id: string; role: string; content: string }>;
       const messageCount = messages.length;
+      const latestMessageIdAtGeneration = messages[messages.length - 1]?.id ?? null;
       db.prepare(
         `UPDATE conversations
             SET zen_wallpaper_enabled = 1,
@@ -2099,25 +2156,92 @@ function buildRoutes(): RouteDefinition[] {
         );
       const nextWallpaperHistoryJson = (imageId: string, createdAt: string): string =>
         serializeZenWallpaperHistory(
-          pruneZenWallpaperHistoryForRestoreWindow(
-            serializeZenWallpaperHistory(
-              appendZenWallpaperHistoryEntry(conversation.zen_wallpaper_history, {
-                imageId,
-                promptSeed: prompt,
-                generationMessageCount: messageCount,
-                revealStartMessageCount:
-                  messageCount + zenWallpaperRevealDelayMessageCount,
-                revealFullMessageCount:
-                  messageCount +
-                  zenWallpaperRevealDelayMessageCount +
-                  zenWallpaperRevealSpanMessageCount,
-                createdAt,
-              })
-            ),
-            messageCount,
-            ZEN_RESTORE_MESSAGE_LIMIT
+          buildZenWallpaperHistoryForGeneratedImage(
+            conversation.zen_wallpaper_history,
+            {
+              imageId,
+              promptSeed: prompt,
+              generationMessageCount: messageCount,
+              revealStartMessageCount:
+                messageCount + zenWallpaperRevealDelayMessageCount,
+              revealFullMessageCount:
+                messageCount +
+                zenWallpaperRevealDelayMessageCount +
+                zenWallpaperRevealSpanMessageCount,
+              createdAt,
+            },
+            {
+              latestMessageCount: messageCount,
+              restoreMessageLimit: ZEN_RESTORE_MESSAGE_LIMIT,
+              replaceImmediately,
+            }
           )
         );
+      const sendGeneratedZenWallpaperResponse = (
+        imageId: string,
+        wallpaperCreatedAt: string
+      ): void => {
+        const currentTarget = db
+          .prepare(
+            `SELECT zen_wallpaper_enabled
+               FROM conversations
+              WHERE id = ? AND user_id = ?`
+          )
+          .get(conversationId, userId) as
+          | { zen_wallpaper_enabled: number | null }
+          | undefined;
+        const anchorStillPresent =
+          !latestMessageIdAtGeneration ||
+          Boolean(
+            db
+              .prepare(
+                `SELECT id
+                   FROM messages
+                  WHERE id = ? AND conversation_id = ? AND user_id = ?`
+              )
+              .get(latestMessageIdAtGeneration, conversationId, userId)
+          );
+        if (currentTarget?.zen_wallpaper_enabled !== 1 || !anchorStillPresent) {
+          db.prepare(
+            "UPDATE images SET conversation_id = NULL WHERE id = ? AND user_id = ?"
+          ).run(imageId, userId);
+          db.prepare(
+            `UPDATE conversations
+                SET zen_wallpaper_status = CASE
+                  WHEN zen_wallpaper_enabled = 1 AND zen_wallpaper_image_id IS NOT NULL THEN 'ready'
+                  ELSE 'idle'
+                END
+              WHERE id = ? AND user_id = ?`
+          ).run(conversationId, userId);
+          json(ctx.res, 200, {
+            ok: true,
+            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          });
+          return;
+        }
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_enabled = 1,
+                  zen_wallpaper_image_id = ?,
+                  zen_wallpaper_prompt_seed = ?,
+                  zen_wallpaper_message_count = ?,
+                  zen_wallpaper_history = ?,
+                  zen_wallpaper_status = 'ready'
+            WHERE id = ? AND user_id = ?`
+        ).run(
+          imageId,
+          prompt,
+          messageCount,
+          nextWallpaperHistoryJson(imageId, wallpaperCreatedAt),
+          conversationId,
+          userId
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          image: { id: imageId },
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+      };
 
       try {
         const imageId = randomId(12);
@@ -2182,28 +2306,7 @@ function buildRoutes(): RouteDefinition[] {
             tryUnlinkGeneratedImageFile(localRelPath);
             throw error;
           }
-          db.prepare(
-            `UPDATE conversations
-                SET zen_wallpaper_enabled = 1,
-                    zen_wallpaper_image_id = ?,
-                    zen_wallpaper_prompt_seed = ?,
-                    zen_wallpaper_message_count = ?,
-                    zen_wallpaper_history = ?,
-                    zen_wallpaper_status = 'ready'
-              WHERE id = ? AND user_id = ?`
-          ).run(
-            imageId,
-            prompt,
-            messageCount,
-            nextWallpaperHistoryJson(imageId, wallpaperCreatedAt),
-            conversationId,
-            userId
-          );
-          json(ctx.res, 200, {
-            ok: true,
-            image: { id: imageId },
-            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
-          });
+          sendGeneratedZenWallpaperResponse(imageId, wallpaperCreatedAt);
           return;
         }
 
@@ -2264,28 +2367,7 @@ function buildRoutes(): RouteDefinition[] {
               tryUnlinkGeneratedImageFile(localRelPath);
               throw error;
             }
-            db.prepare(
-              `UPDATE conversations
-                  SET zen_wallpaper_enabled = 1,
-                      zen_wallpaper_image_id = ?,
-                      zen_wallpaper_prompt_seed = ?,
-                      zen_wallpaper_message_count = ?,
-                      zen_wallpaper_history = ?,
-                      zen_wallpaper_status = 'ready'
-                WHERE id = ? AND user_id = ?`
-            ).run(
-              imageId,
-              prompt,
-              messageCount,
-              nextWallpaperHistoryJson(imageId, wallpaperCreatedAt),
-              conversationId,
-              userId
-            );
-            json(ctx.res, 200, {
-              ok: true,
-              image: { id: imageId },
-              zenWallpaper: zenWallpaperResponseForConversation(conversationId),
-            });
+            sendGeneratedZenWallpaperResponse(imageId, wallpaperCreatedAt);
             return;
           }
           throw primaryError;
@@ -2332,28 +2414,7 @@ function buildRoutes(): RouteDefinition[] {
           tryUnlinkGeneratedImageFile(localRelPath);
           throw error;
         }
-        db.prepare(
-          `UPDATE conversations
-              SET zen_wallpaper_enabled = 1,
-                  zen_wallpaper_image_id = ?,
-                  zen_wallpaper_prompt_seed = ?,
-                  zen_wallpaper_message_count = ?,
-                  zen_wallpaper_history = ?,
-                  zen_wallpaper_status = 'ready'
-            WHERE id = ? AND user_id = ?`
-        ).run(
-          imageId,
-          prompt,
-          messageCount,
-          nextWallpaperHistoryJson(imageId, wallpaperCreatedAt),
-          conversationId,
-          userId
-        );
-        json(ctx.res, 200, {
-          ok: true,
-          image: { id: imageId },
-          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
-        });
+        sendGeneratedZenWallpaperResponse(imageId, wallpaperCreatedAt);
       } catch (error) {
         db.prepare(
           `UPDATE conversations
@@ -4173,6 +4234,9 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperOpacity: normalizeZenWallpaperOpacity(
             user.zen_wallpaper_opacity
           ),
+          zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
+            user.zen_wallpaper_text_mask_enabled
+          ),
           zenSessionIdleGapMs: normalizeZenSessionIdleGapMs(
             user.zen_session_idle_gap_ms
           ),
@@ -4381,6 +4445,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredZenWallpaperOpenAiImageModel:
           user.preferred_zen_wallpaper_openai_image_model,
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
+        zenWallpaperTextMaskEnabled: user.zen_wallpaper_text_mask_enabled,
         zenSessionIdleGapMs: user.zen_session_idle_gap_ms,
         zenFreshStartGapMs: user.zen_fresh_start_gap_ms,
         zenRecentContextMessages: user.zen_recent_context_messages,
@@ -4448,7 +4513,7 @@ function buildRoutes(): RouteDefinition[] {
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
@@ -4479,6 +4544,7 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredZenWallpaperLocalImageModel,
         next.preferredZenWallpaperOpenAiImageModel,
         next.zenWallpaperOpacity,
+        next.zenWallpaperTextMaskEnabled ? 1 : 0,
         next.zenSessionIdleGapMs,
         next.zenFreshStartGapMs,
         next.zenRecentContextMessages,

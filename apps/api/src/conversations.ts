@@ -194,6 +194,45 @@ export function serializeZenWallpaperHistory(entries: readonly ZenWallpaperHisto
   return JSON.stringify(normalizeZenWallpaperHistory(entries));
 }
 
+export function buildZenWallpaperHistoryForGeneratedImage(
+  rawHistory: string | null | undefined,
+  entry: ZenWallpaperHistoryEntry,
+  options: {
+    latestMessageCount: number;
+    restoreMessageLimit: number;
+    replaceImmediately?: boolean;
+  }
+): ZenWallpaperHistoryEntry[] {
+  const normalizedEntry = normalizeZenWallpaperHistoryEntry(
+    options.replaceImmediately
+      ? {
+          ...entry,
+          revealStartMessageCount: 0,
+          revealFullMessageCount: 0,
+        }
+      : entry
+  );
+  if (!normalizedEntry) return parseZenWallpaperHistory(rawHistory);
+  if (options.replaceImmediately) {
+    return normalizeZenWallpaperHistory([normalizedEntry]);
+  }
+  const prunedHistory = pruneZenWallpaperHistoryForRestoreWindow(
+    serializeZenWallpaperHistory(
+      appendZenWallpaperHistoryEntry(rawHistory, normalizedEntry)
+    ),
+    options.latestMessageCount,
+    options.restoreMessageLimit
+  );
+  const generatedEntryIncluded = prunedHistory.some(
+    (historyEntry) =>
+      historyEntry.imageId === normalizedEntry.imageId ||
+      historyEntry.generationMessageCount === normalizedEntry.generationMessageCount
+  );
+  return generatedEntryIncluded
+    ? prunedHistory
+    : normalizeZenWallpaperHistory([...prunedHistory, normalizedEntry]);
+}
+
 export function pruneZenWallpaperHistoryForMessageCount(
   rawHistory: string | null | undefined,
   maxMessageCount: number
@@ -1087,6 +1126,8 @@ export function deleteConversation(
  * and thread-scoped summaries are removed so future model prompts cannot see
  * previous turns. User artifacts that may still matter outside this thread
  * (images and long-term memories) are preserved but detached from the chat.
+ * Conversation-scoped wallpaper metadata is cleared so a fresh Zen start does
+ * not keep rendering the prior session's Atmosphere.
  */
 export function clearConversationMessages(
   db: DatabaseSync,
@@ -1131,7 +1172,15 @@ export function clearConversationMessages(
       ).run(conversationId, userId);
     }
     db.prepare(
-      "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+      `UPDATE conversations
+          SET title = ?,
+              updated_at = ?,
+              zen_wallpaper_image_id = NULL,
+              zen_wallpaper_prompt_seed = NULL,
+              zen_wallpaper_message_count = NULL,
+              zen_wallpaper_status = 'idle',
+              zen_wallpaper_history = '[]'
+        WHERE id = ? AND user_id = ?`
     ).run("New chat", new Date().toISOString(), conversationId, userId);
     db.exec("COMMIT");
     return {

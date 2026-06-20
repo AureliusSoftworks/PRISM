@@ -64,6 +64,8 @@ import {
   Download,
   Image as ImageGlyph,
   LogOut,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   RotateCcw,
@@ -3578,8 +3580,10 @@ const CHAT_MODE_NEW_TURN_START_RATIO = 0.32;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.46;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 36;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 2;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 22;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.75;
+const CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS = 520;
+const CHAT_MODE_ASSISTANT_ANCHOR_SMOOTH_SCROLL_MS = 420;
 const CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX = 36;
 const CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE = 0.22;
 const CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE = 0.5;
@@ -5019,6 +5023,7 @@ interface UserSettings {
   preferredZenWallpaperLocalImageModel: string;
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
+  zenWallpaperTextMaskEnabled: boolean;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -5040,6 +5045,7 @@ interface UserSettings {
 type ZenModeSettingsFields = Pick<
   UserSettings,
   | "zenWallpaperOpacity"
+  | "zenWallpaperTextMaskEnabled"
   | "zenSessionIdleGapMs"
   | "zenFreshStartGapMs"
   | "zenRecentContextMessages"
@@ -5364,6 +5370,7 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "help",
   "compact",
   "clear",
+  "atmosphere",
   "refresh",
   "restart",
   "new-session",
@@ -5374,6 +5381,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "summarize",
   "clear",
   "cls",
+  "atmosphere",
   "refresh",
   "restart",
   "new-session",
@@ -5506,6 +5514,22 @@ function createBuiltInClearCommand(): CommandCenterCommand {
     command:
       "Clears the current chat transcript and saved thread context.",
     aliases: ["cls"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInAtmosphereCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/atmosphere",
+    name: "atmosphere",
+    title: "atmosphere",
+    command: "Generates a fresh Zen Atmosphere wallpaper immediately.",
+    aliases: [],
     arguments: [],
     builtIn: true,
     readOnly: true,
@@ -5685,6 +5709,7 @@ function normalizeCommandCenterState(raw: unknown): {
     fallbackHelp,
     createBuiltInCompactCommand(),
     createBuiltInClearCommand(),
+    createBuiltInAtmosphereCommand(),
     createBuiltInRefreshCommand(),
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
@@ -5913,7 +5938,8 @@ const SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD =
   "lenientLocalImageFallbackModel";
 const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
-const MAX_ZEN_WALLPAPER_OPACITY = 0.4;
+const MAX_ZEN_WALLPAPER_OPACITY = 1;
+const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -6231,6 +6257,21 @@ function normalizeZenWallpaperOpacitySetting(value: unknown): number {
   return Number(clamped.toFixed(2));
 }
 
+function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+}
+
 function formatZenWallpaperOpacity(value: unknown): string {
   return `${Math.round(normalizeZenWallpaperOpacitySetting(value) * 100)}%`;
 }
@@ -6316,6 +6357,7 @@ function normalizeZenWallpaperRevealSpanMessageCountSetting(value: unknown): num
 function defaultZenModeSettings(): ZenModeSettingsFields {
   return {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
+    zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -6336,6 +6378,9 @@ function normalizeZenModeSettingsFields(
   return {
     zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
       settings?.zenWallpaperOpacity
+    ),
+    zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskSetting(
+      settings?.zenWallpaperTextMaskEnabled
     ),
     zenSessionIdleGapMs,
     zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
@@ -14319,6 +14364,20 @@ function normalizeZenAtmosphereHistory(
   });
 }
 
+function resetZenWallpaperForFreshConversation(
+  zenWallpaper: ZenWallpaperMetadata | undefined
+): ZenWallpaperMetadata | undefined {
+  if (!zenWallpaper) return zenWallpaper;
+  return {
+    ...zenWallpaper,
+    imageId: null,
+    promptSeed: null,
+    generationMessageCount: null,
+    status: "idle",
+    history: [],
+  };
+}
+
 /** Imperative focus for plain textarea vs TipTap WYSIWYG compose field. */
 interface ComposerInputHandle {
   focus: (options?: FocusOptions) => void;
@@ -18117,6 +18176,7 @@ function HomeContent(): React.JSX.Element {
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,
+    zenWallpaperTextMaskEnabled,
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
@@ -18310,6 +18370,7 @@ function HomeContent(): React.JSX.Element {
   const [sandboxBotStatusSummary, setSandboxBotStatusSummary] = useState<string | null>(null);
   const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] = useState<string | null>(null);
   const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
+  const [compactedSummaryDebugMinimized, setCompactedSummaryDebugMinimized] = useState(false);
   const [pendingReplyConversationId, setPendingReplyConversationId] =
     useState<string | null>(null);
   const [pendingReplyIsNewConversation, setPendingReplyIsNewConversation] =
@@ -18393,6 +18454,8 @@ function HomeContent(): React.JSX.Element {
   const [modelRevealMessageId, setModelRevealMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [copiedAtmospherePromptText, setCopiedAtmospherePromptText] = useState<string | null>(null);
+  const copiedAtmospherePromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messageContextMenu, setMessageContextMenu] = useState<{
     message: Message;
     x: number;
@@ -19143,6 +19206,12 @@ function HomeContent(): React.JSX.Element {
   const chatLastScrollHeightByConversationRef = useRef<Map<string, number>>(new Map());
   const chatAutoscrollArmedByConversationRef = useRef<Map<string, boolean>>(new Map());
   const chatAutoscrollUserDisarmedByConversationRef = useRef<Map<string, boolean>>(new Map());
+  const chatSmoothScrollRef = useRef<{
+    frame: number;
+    root: HTMLDivElement;
+    conversationId: string | null;
+    targetTop: number;
+  } | null>(null);
   // True for any conversation where the user interrupted a streaming reply.
   // Survives the brief loop unmount/remount around the "...interrupted again."
   // follow-up so the cut-off text stays where the user paused it. Cleared
@@ -20217,6 +20286,10 @@ function HomeContent(): React.JSX.Element {
       if (copiedMessageTimerRef.current) {
         clearTimeout(copiedMessageTimerRef.current);
         copiedMessageTimerRef.current = null;
+      }
+      if (copiedAtmospherePromptTimerRef.current) {
+        clearTimeout(copiedAtmospherePromptTimerRef.current);
+        copiedAtmospherePromptTimerRef.current = null;
       }
       if (fieldHelpHideTimerRef.current) {
         clearTimeout(fieldHelpHideTimerRef.current);
@@ -23380,6 +23453,26 @@ function HomeContent(): React.JSX.Element {
     selectedId,
     view,
   ]);
+  const copyAtmospherePromptToClipboard = useCallback(async (promptText: string) => {
+    const trimmedPrompt = promptText.trim();
+    if (!trimmedPrompt) return;
+    try {
+      await writeClipboardText(trimmedPrompt);
+      setCopiedAtmospherePromptText(trimmedPrompt);
+      if (copiedAtmospherePromptTimerRef.current) {
+        clearTimeout(copiedAtmospherePromptTimerRef.current);
+      }
+      copiedAtmospherePromptTimerRef.current = setTimeout(() => {
+        setCopiedAtmospherePromptText((current) =>
+          current === trimmedPrompt ? null : current
+        );
+        copiedAtmospherePromptTimerRef.current = null;
+      }, MESSAGE_COPY_FEEDBACK_MS);
+    } catch {
+      setError("Copy failed. Select the Atmosphere prompt and copy it manually.");
+    }
+  }, []);
+
   const compactedSummaryDebugNode = useMemo(() => {
     if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
     if (view !== "chat" || !activeZenConversationId) return null;
@@ -23411,36 +23504,139 @@ function HomeContent(): React.JSX.Element {
       summaryDebugMatchesActiveZen
         ? summaryDebug.latestSummaryAt
         : manualCompactionStatus?.summaryAt ?? null;
+    const latestAtmosphereEntry = zenAtmosphereTimeline.reduce<ZenWallpaperHistoryEntry | null>(
+      (latest, entry) => {
+        if (!entry.promptSeed?.trim()) return latest;
+        if (!latest) return entry;
+        const countDelta = entry.generationMessageCount - latest.generationMessageCount;
+        if (countDelta !== 0) return countDelta > 0 ? entry : latest;
+        return (entry.createdAt ?? "").localeCompare(latest.createdAt ?? "") > 0
+          ? entry
+          : latest;
+      },
+      null
+    );
+    const atmospherePromptText =
+      latestAtmosphereEntry?.promptSeed?.trim() ||
+      detail?.zenWallpaper?.promptSeed?.trim() ||
+      null;
+    const atmospherePromptLabel =
+      latestAtmosphereEntry?.generationMessageCount !== undefined
+        ? `message ${latestAtmosphereEntry.generationMessageCount}`
+        : detail?.zenWallpaper?.generationMessageCount !== null &&
+            detail?.zenWallpaper?.generationMessageCount !== undefined
+          ? `message ${detail.zenWallpaper.generationMessageCount}`
+          : null;
     return (
       <div className={styles.compactedSummaryDebugDock} role="note">
         <div
           className={styles.compactedSummaryDebugBubble}
-          data-empty={!displaySummaryText && !internalSummaryText ? "true" : undefined}
+          data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
+          data-empty={
+            !displaySummaryText && !internalSummaryText && !atmospherePromptText
+              ? "true"
+              : undefined
+          }
         >
           <div className={styles.compactedSummaryDebugHeader}>
-            <strong>Compacted context</strong>
-            <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
-          </div>
-          <pre>{summaryText}</pre>
-          {showInternalSummary ? (
-            <div className={styles.compactedSummaryDebugDetails}>
-              <span>Internal compact</span>
-              <pre>{internalSummaryText}</pre>
+            <div className={styles.compactedSummaryDebugTitle}>
+              <strong>Compacted context</strong>
+              <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
             </div>
-          ) : null}
+            <button
+              type="button"
+              className={styles.compactedSummaryDebugMinimizeButton}
+              aria-label={
+                compactedSummaryDebugMinimized
+                  ? "Expand compacted context"
+                  : "Minimize compacted context"
+              }
+              aria-expanded={!compactedSummaryDebugMinimized}
+              title={
+                compactedSummaryDebugMinimized
+                  ? "Expand compacted context"
+                  : "Minimize compacted context"
+              }
+              data-glyph-tooltip={
+                compactedSummaryDebugMinimized
+                  ? "Expand compacted context"
+                  : "Minimize compacted context"
+              }
+              onClick={() => {
+                setCompactedSummaryDebugMinimized((current) => !current);
+              }}
+            >
+              {compactedSummaryDebugMinimized ? (
+                <Maximize2 aria-hidden="true" size={14} />
+              ) : (
+                <Minimize2 aria-hidden="true" size={14} />
+              )}
+            </button>
+          </div>
+          {compactedSummaryDebugMinimized ? null : (
+            <>
+              <pre>{summaryText}</pre>
+              {showInternalSummary ? (
+                <div className={styles.compactedSummaryDebugDetails}>
+                  <span>Internal compact</span>
+                  <pre>{internalSummaryText}</pre>
+                </div>
+              ) : null}
+              {atmospherePromptText ? (
+                <div
+                  className={styles.compactedSummaryDebugDetails}
+                  data-kind="atmosphere"
+                  data-copy-state={
+                    copiedAtmospherePromptText === atmospherePromptText ? "copied" : undefined
+                  }
+                  role="button"
+                  tabIndex={0}
+                  title="Copy Atmosphere prompt to clipboard"
+                  aria-label="Copy Atmosphere prompt to clipboard"
+                  onClick={() => {
+                    void copyAtmospherePromptToClipboard(atmospherePromptText);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    void copyAtmospherePromptToClipboard(atmospherePromptText);
+                  }}
+                >
+                  <span>
+                    <span>
+                      Atmosphere prompt
+                      {atmospherePromptLabel ? ` - ${atmospherePromptLabel}` : ""}
+                    </span>
+                    <span className={styles.compactedSummaryDebugCopyState}>
+                      {copiedAtmospherePromptText === atmospherePromptText
+                        ? "Copied"
+                        : "Click to copy"}
+                    </span>
+                  </span>
+                  <pre>{atmospherePromptText}</pre>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     );
   }, [
     activeZenConversationId,
+    compactedSummaryDebugMinimized,
+    copiedAtmospherePromptText,
+    copyAtmospherePromptToClipboard,
     currentZenDisplaySummary,
     currentZenInternalSummary,
+    detail?.zenWallpaper?.generationMessageCount,
+    detail?.zenWallpaper?.promptSeed,
     detail?.id,
     devShowCompactedSummaryInChat,
     manualCompactionStatus,
     summaryDebug,
     summaryDebugMatchesActiveZen,
     view,
+    zenAtmosphereTimeline,
     zenSessionBreak,
   ]);
   // Metrics now live in the floating developer terminal, not inside the chat transcript.
@@ -25593,6 +25789,85 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
+  function cancelChatModeSmoothScroll(): void {
+    const current = chatSmoothScrollRef.current;
+    if (!current) return;
+    window.cancelAnimationFrame(current.frame);
+    chatSmoothScrollRef.current = null;
+  }
+
+  function chatModeSmoothScrollIsActive(conversationId: string | null | undefined): boolean {
+    const current = chatSmoothScrollRef.current;
+    if (!current) return false;
+    return !conversationId || current.conversationId === conversationId;
+  }
+
+  function commitChatModeScrollTop(
+    scrollRoot: HTMLDivElement,
+    conversationId: string | null | undefined,
+    top: number,
+    programmaticHoldMs = 120
+  ): void {
+    chatProgrammaticScrollUntilMsRef.current = Date.now() + programmaticHoldMs;
+    scrollRoot.scrollTop = top;
+    if (!conversationId) return;
+    chatLastScrollTopByConversationRef.current.set(conversationId, scrollRoot.scrollTop);
+    chatLastScrollHeightByConversationRef.current.set(conversationId, scrollRoot.scrollHeight);
+  }
+
+  function smoothChatModeScrollTo(
+    scrollRoot: HTMLDivElement,
+    targetTop: number,
+    conversationId: string | null | undefined,
+    durationMs: number
+  ): void {
+    const maxScrollTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
+    const clampedTargetTop = Math.max(0, Math.min(maxScrollTop, targetTop));
+    const current = chatSmoothScrollRef.current;
+    if (
+      current?.root === scrollRoot &&
+      current.conversationId === (conversationId ?? null) &&
+      Math.abs(current.targetTop - clampedTargetTop) <= 0.5
+    ) {
+      return;
+    }
+    cancelChatModeSmoothScroll();
+    const startTop = scrollRoot.scrollTop;
+    const delta = clampedTargetTop - startTop;
+    if (
+      Math.abs(delta) <= 0.5 ||
+      durationMs <= 0 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      commitChatModeScrollTop(scrollRoot, conversationId, clampedTargetTop, 180);
+      return;
+    }
+    const startedAt = window.performance.now();
+    const holdMs = durationMs + 140;
+    const step = (nowMs: number): void => {
+      const progress = Math.max(0, Math.min(1, (nowMs - startedAt) / durationMs));
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const nextTop = startTop + delta * eased;
+      commitChatModeScrollTop(scrollRoot, conversationId, nextTop, holdMs);
+      if (progress >= 1) {
+        chatSmoothScrollRef.current = null;
+        commitChatModeScrollTop(scrollRoot, conversationId, clampedTargetTop, 180);
+        return;
+      }
+      const frame = window.requestAnimationFrame(step);
+      if (chatSmoothScrollRef.current) {
+        chatSmoothScrollRef.current.frame = frame;
+      }
+    };
+    const frame = window.requestAnimationFrame(step);
+    chatSmoothScrollRef.current = {
+      frame,
+      root: scrollRoot,
+      conversationId: conversationId ?? null,
+      targetTop: clampedTargetTop,
+    };
+  }
+
   useLayoutEffect(() => {
     if (!assistantRevealActive) return;
     if (!replyInFlightSignals) return;
@@ -25621,10 +25896,12 @@ function HomeContent(): React.JSX.Element {
       );
       if (Math.abs(targetTop - scrollRoot.scrollTop) <= 0.5) return;
       chatAutoscrollArmedByConversationRef.current.set(detail.id, true);
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
-      scrollRoot.scrollTop = targetTop;
-      chatLastScrollTopByConversationRef.current.set(detail.id, scrollRoot.scrollTop);
-      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
+      smoothChatModeScrollTo(
+        scrollRoot,
+        targetTop,
+        detail.id,
+        CHAT_MODE_ASSISTANT_ANCHOR_SMOOTH_SCROLL_MS
+      );
     };
 
     let frame = window.requestAnimationFrame(() => {
@@ -25673,7 +25950,7 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.42;
+    const EASE_FACTOR = 0.22;
     const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
@@ -25684,9 +25961,10 @@ function HomeContent(): React.JSX.Element {
       const scrollEl = messagesScrollRef.current;
       if (!scrollEl) return;
       if (chatAutoscrollArmedByConversationRef.current.get(conversationId) === false) return;
+      if (chatModeSmoothScrollIsActive(conversationId)) return;
 
       const maxScrollTop = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-      const activeAssistantRow = latestAssistantMessageId
+      const activeAssistantRow = latestMessageRole === "assistant" && latestAssistantMessageId
         ? findMessageRowById(scrollEl, latestAssistantMessageId)
         : null;
       const activeUserRow =
@@ -25727,8 +26005,7 @@ function HomeContent(): React.JSX.Element {
           : Math.max(targetTop, scrollEl.scrollTop - stepPx);
       // Tag this write as programmatic so the onScroll handler does not
       // interpret reflow-induced drops as a manual upward scroll.
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + 80;
-      scrollEl.scrollTop = nextTop;
+      commitChatModeScrollTop(scrollEl, conversationId, nextTop, 80);
     };
 
     frame = window.requestAnimationFrame(tick);
@@ -25739,6 +26016,7 @@ function HomeContent(): React.JSX.Element {
     assistantRevealActive,
     detail?.id,
     latestAssistantMessageId,
+    latestMessageRole,
     latestUserMessageId,
     replyInFlightSignals,
   ]);
@@ -25777,17 +26055,17 @@ function HomeContent(): React.JSX.Element {
       if (!scrollRoot) return;
       const target = findMessageRowById(scrollRoot, latestUserMessageId);
       if (!target) return;
-      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const useSmoothQuestionScroll = latestUserMessageAsQuestion && !prefersReducedMotion;
-      chatProgrammaticScrollUntilMsRef.current = Date.now() + (useSmoothQuestionScroll ? 900 : 180);
       const top = Math.max(
         0,
         resolveChatModeMessageFollowY(target, scrollRoot) -
           scrollRoot.clientHeight * CHAT_MODE_NEW_TURN_START_RATIO
       );
-      scrollRoot.scrollTo({ top, behavior: useSmoothQuestionScroll ? "smooth" : "auto" });
-      chatLastScrollTopByConversationRef.current.set(detail.id, top);
-      chatLastScrollHeightByConversationRef.current.set(detail.id, scrollRoot.scrollHeight);
+      smoothChatModeScrollTo(
+        scrollRoot,
+        top,
+        detail.id,
+        CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS
+      );
     });
   }, [
     chatEphemeralMode,
@@ -25896,6 +26174,7 @@ function HomeContent(): React.JSX.Element {
       chatAutoscrollArmedByConversationRef.current.clear();
       chatAutoscrollUserDisarmedByConversationRef.current.clear();
       chatScrollPinnedByConversationRef.current.clear();
+      cancelChatModeSmoothScroll();
       chatArchivePullPxByConversationRef.current.clear();
       chatArchiveParagraphQuotaByConversationRef.current.clear();
       for (const timer of chatArchiveLoadTimerByConversationRef.current.values()) {
@@ -28634,6 +28913,7 @@ function HomeContent(): React.JSX.Element {
               hasAssistantReply: false,
               lastBotId: null,
               lastBotColor: null,
+              zenWallpaper: resetZenWallpaperForFreshConversation(current.zenWallpaper),
               messages: [],
             }
           : current
@@ -28654,6 +28934,12 @@ function HomeContent(): React.JSX.Element {
         current?.conversationId === conversationId ? null : current
       );
       hardResetChatArchiveStateForConversation(conversationId);
+      zenWallpaperGenerationInFlightRef.current.delete(conversationId);
+      setZenWallpaperBusyConversationId((current) =>
+        current === conversationId ? null : current
+      );
+      setZenWallpaperError(null);
+      setZenAtmosphereLayerOpacities({});
       setForceNewConversationOnNextSend(false);
       setComposerPrimed(false);
       await refreshConversations();
@@ -28736,6 +29022,44 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function generateAtmosphereFromSlashCommand(): Promise<void> {
+    if (view !== "chat") {
+      setError("/atmosphere is only available in Zen.");
+      return;
+    }
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending" || detail?.mode !== "zen") {
+      setError("Open a saved Zen conversation before using /atmosphere.");
+      return;
+    }
+    if (detail.messages.length === 0) {
+      setError("Send a Zen message before generating Atmosphere.");
+      return;
+    }
+    if (
+      zenWallpaperBusyConversationId === conversationId ||
+      zenWallpaperGenerationInFlightRef.current.has(conversationId)
+    ) {
+      setError("Atmosphere is already generating.");
+      return;
+    }
+
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    await requestZenWallpaperUpdate(conversationId, {
+      enabled: true,
+      force: true,
+      replaceImmediately: true,
+    });
+  }
+
   /** Built-in operational slash commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
     const tokens = trimmedLine
@@ -28749,6 +29073,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/summarize" &&
       normalizedCommand !== "/clear" &&
       normalizedCommand !== "/cls" &&
+      normalizedCommand !== "/atmosphere" &&
       normalizedCommand !== "/refresh" &&
       normalizedCommand !== "/restart" &&
       normalizedCommand !== "/new-session" &&
@@ -28769,6 +29094,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/clear" || normalizedCommand === "/cls") {
       await clearConversationFromSlashCommand();
+      return true;
+    }
+    if (normalizedCommand === "/atmosphere") {
+      await generateAtmosphereFromSlashCommand();
       return true;
     }
     if (normalizedCommand === "/refresh") {
@@ -29187,6 +29516,7 @@ function HomeContent(): React.JSX.Element {
             hasAssistantReply: false,
             lastBotId: null,
             lastBotColor: null,
+            zenWallpaper: resetZenWallpaperForFreshConversation(current.zenWallpaper),
             messages: [],
           }
         : current
@@ -30996,6 +31326,9 @@ function HomeContent(): React.JSX.Element {
     }
     const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
     if (readerY < anchors[0].startY) {
+      if (anchors.length === 1) {
+        next[anchors[0].imageId] = 1;
+      }
       return next;
     }
     for (let index = 0; index < anchors.length; index += 1) {
@@ -31186,6 +31519,7 @@ function HomeContent(): React.JSX.Element {
       !probableReflow &&
       !programmaticScrollActive;
     if (scrolledUp) {
+      cancelChatModeSmoothScroll();
       chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
       chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
       hideAskQuestionComposerForReading();
@@ -31197,6 +31531,7 @@ function HomeContent(): React.JSX.Element {
   function disarmChatModeAutoscrollFromUserGesture(): void {
     if (zenEmptyHeroVisible) return;
     if (!chatEphemeralMode || !detail?.id) return;
+    cancelChatModeSmoothScroll();
     chatAutoscrollUserDisarmedByConversationRef.current.set(detail.id, true);
     chatAutoscrollArmedByConversationRef.current.set(detail.id, false);
     hideAskQuestionComposerForReading();
@@ -31578,19 +31913,12 @@ function HomeContent(): React.JSX.Element {
       !e.metaKey &&
       !e.ctrlKey
     ) {
-      const plainTextareaAtStart =
-        fromPlainTextarea &&
-        target.selectionStart === 0 &&
-        target.selectionEnd === 0;
-      const markdownReadyForHistory = fromMarkdownEditor && draft.trim().length === 0;
-      if (plainTextareaAtStart || markdownReadyForHistory) {
-        const recalled = recallPreviousComposerHistory();
-        if (recalled !== null) {
-          e.preventDefault();
-          setComposerPrimed(false);
-          setDraft(recalled);
-          setComposerSendTintActive(recalled.trim().length > 0);
-        }
+      const recalled = recallPreviousComposerHistory();
+      if (recalled !== null) {
+        e.preventDefault();
+        setComposerPrimed(false);
+        setDraft(recalled);
+        setComposerSendTintActive(recalled.trim().length > 0);
       }
       return;
     }
@@ -37613,7 +37941,7 @@ function HomeContent(): React.JSX.Element {
 
   async function requestZenWallpaperUpdate(
     conversationId: string,
-    options: { enabled: boolean; force?: boolean }
+    options: { enabled: boolean; force?: boolean; replaceImmediately?: boolean }
   ): Promise<void> {
     if (options.enabled && !zenWallpaperImageGenerationAvailable()) {
       setZenWallpaperError("Configure an image generation model before enabling Atmosphere.");
@@ -37629,6 +37957,9 @@ function HomeContent(): React.JSX.Element {
         enabled: options.enabled,
         force: options.force === true,
       };
+      if (options.replaceImmediately === true) {
+        body.replaceImmediately = true;
+      }
       if (options.enabled) {
         if (effectivePreferredProvider === "local") {
           body.preferredProvider = "local";
@@ -37649,6 +37980,13 @@ function HomeContent(): React.JSX.Element {
         }
       );
       applyZenWallpaperMetadata(conversationId, data.zenWallpaper);
+      const replacementImageId =
+        options.replaceImmediately === true
+          ? data.zenWallpaper.imageId ?? data.image?.id ?? null
+          : null;
+      if (replacementImageId) {
+        setZenAtmosphereLayerOpacities({ [replacementImageId]: 1 });
+      }
     } catch (err) {
       setZenWallpaperError(
         err instanceof Error ? err.message : "Zen Atmosphere failed to update."
@@ -44551,6 +44889,23 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
+                    </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenWallpaperTextMaskEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperTextMaskEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      Mask behind Zen text
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
@@ -53388,6 +53743,9 @@ function HomeContent(): React.JSX.Element {
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
   if (view === "chat") {
+    const zenAtmosphereWallpaperVisible = zenAtmosphereTimeline.some(
+      (entry) => (zenAtmosphereLayerOpacities[entry.imageId] ?? 0) > 0.01
+    );
     const zenAtmosphereBackdropStyle = {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
@@ -53402,8 +53760,10 @@ function HomeContent(): React.JSX.Element {
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
+      data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
       data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
       data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
+      data-zen-text-mask={zenWallpaperTextMaskEnabled ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onPointerMove={handleZenSurfacePointerMove}
@@ -53627,6 +53987,9 @@ function HomeContent(): React.JSX.Element {
                 );
               })}
             </div>
+          ) : null}
+          {zenAtmosphereWallpaperVisible && zenWallpaperTextMaskEnabled ? (
+            <div className={styles.zenAtmosphereTextCutout} aria-hidden="true" />
           ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
