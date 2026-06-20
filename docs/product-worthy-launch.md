@@ -1,52 +1,54 @@
-# Prism Product-Worthy Launch Checklist
+# Prism Product-Worthy Launch Tracker
 
 Prism should not be promoted broadly until the official downloads feel safe,
 understandable, and honest. The launch goal is not maximum noise; it is a
 trustworthy first public loop for people who want a private, local-first AI
 workspace.
 
-## Release Readiness
+Status: not ready for broad outreach until every Go/No-Go item is marked
+`pass` with evidence.
 
-- Mac, Windows, and Linux desktop artifacts are attached to the expected
-  `desktop/v<version>` GitHub Release.
-- Each installer launches on a clean environment.
-- First-run setup explains required local dependencies and recovery steps in
-  plain language.
-- The app can reach local API/web services after install without manual dev
-  commands.
-- Factory reset and reinstall behavior are documented.
+Related launch assets:
 
-## Product Trust
+- [`launch/support-copy-pack.md`](launch/support-copy-pack.md)
+- [`launch/outreach-workflow.md`](launch/outreach-workflow.md)
 
-- LOCAL mode is verified to stay local for chat, auxiliary work, embeddings,
-  and image-generation blocking.
-- The README and release notes explain when ONLINE mode may call configured
-  cloud providers.
-- No support, Patreon, analytics, or payment integration creates outbound
-  traffic from the local runtime.
-- Privacy claims are consistent across README, release notes, and docs.
+## Evidence Tracker
 
-## Support Copy
-
-- Public copy says Prism is free to download and use.
-- Optional support is one `$5/month` Patreon lane.
-- Copy avoids tiers, paid feature locks, purchase language, and supporter-only
-  core benefits.
-- Any future in-app entry point is quiet: Settings/About, labeled
-  `Support Prism`, opening Patreon externally.
-- No popup, onboarding prompt, badge, patron login, or telemetry is added for
-  the first support pass.
-
-## Launch Assets
-
-- GitHub Release notes include the download links, supported platforms, known
-  limitations, and a short privacy/local-mode summary.
-- README screenshots are current enough to avoid misleading first-time users.
-- A concise announcement draft exists for the first public post.
-- Patreon page copy is ready, matches the one-price model, and makes clear that
-  support is optional.
+| Area | Requirement | Evidence to record | Status |
+| --- | --- | --- | --- |
+| macOS artifact | DMG attached to `desktop/v<version>` release and launches on a clean Mac | Version, machine, install notes, screenshot/log path | pending |
+| Windows artifact | Installer attached to `desktop/v<version>` release and launches on a clean Windows environment | Version, VM/device, install notes, screenshot/log path | pending |
+| Linux artifact | AppImage attached to `desktop/v<version>` release and launches on a clean Linux environment | Version, distro, install notes, screenshot/log path | pending |
+| First-run setup | User can reach Prism without dev commands | Steps followed, confusing copy, recovery notes | pending |
+| Local services | App reaches local API/web services after install | Health check URL, app screenshot, logs | pending |
+| Factory reset | Reset/reinstall behavior is documented and works | Command/path used, data retained/deleted notes | pending |
+| LOCAL privacy | LOCAL mode stays local for chat, auxiliary work, embeddings, and image-generation blocking | Test command/log evidence; no unexpected outbound host | pending |
+| ONLINE clarity | README/release notes explain when online providers may be called | Doc links and reviewed copy | pending |
+| Support boundary | Support copy stays optional and non-gating | Link to reviewed support copy pack | pending |
+| Launch copy | Release notes include downloads, limitations, privacy summary, and optional support | Draft link or release notes path | pending |
+| Outreach packet | First public draft includes rule audit and manual-posting note | Link to outreach packet | pending |
 
 ## Go/No-Go
+
+| Gate | Pass condition | Status |
+| --- | --- | --- |
+| Downloads | Mac, Windows, and Linux artifacts install and launch cleanly enough for a first public audience | pending |
+| Trust | Privacy/local-mode claims are verified against the release candidate | pending |
+| Clarity | First-run setup and known limitations are written plainly | pending |
+| Support | Patreon copy uses `[PATREON_URL]` only in drafts or the real URL in public copy | pending |
+| Outreach | Every community draft has a live rule audit and Jared approval before posting | pending |
+
+## Known Gaps Log
+
+Add entries before launch rather than hiding them in release notes at the last
+minute.
+
+| Gap | User impact | Public wording needed? | Owner | Status |
+| --- | --- | --- | --- | --- |
+| `[GAP]` | `[IMPACT]` | `[YES/NO]` | `[OWNER]` | pending |
+
+## Launch Rule
 
 Launch only when:
 
