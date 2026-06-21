@@ -1,3 +1,5 @@
+import type { TellFictionalStoryPayload } from "./prismTool.js";
+
 export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
@@ -102,6 +104,7 @@ export {
   type ParsedAssistantTurn,
   type ParsedStoredAssistantToolPayload,
   type SentGeneratedImagePayload,
+  type TellFictionalStoryPayload,
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
@@ -328,6 +331,8 @@ export interface ChatMessage {
   zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
+  /** Story action rail metadata for long fictional prose. */
+  tellFictionalStory?: TellFictionalStoryPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */

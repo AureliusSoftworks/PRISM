@@ -1732,6 +1732,9 @@ function buildRoutes(): RouteDefinition[] {
             ? { moodConfidence: assembled.moodConfidence }
             : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+          ...(assembled.tellFictionalStory
+            ? { tellFictionalStory: assembled.tellFictionalStory }
+            : {}),
           ...(assembled.sentGeneratedImage
             ? { sentGeneratedImage: assembled.sentGeneratedImage }
             : {}),

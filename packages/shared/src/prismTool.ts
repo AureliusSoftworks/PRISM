@@ -29,6 +29,14 @@ export interface AskQuestionPayload {
   options: AskQuestionOption[];
 }
 
+export interface TellFictionalStoryPayload {
+  v: 1;
+  name: "tellFictionalStory";
+  continueLabel?: string;
+  bookmarkLabel?: string;
+  finishLabel?: string;
+}
+
 /**
  * Persisted attachment when the assistant runs image generation (`images` row).
  */
@@ -72,6 +80,7 @@ export interface StoredAssistantMoodPayload {
 export interface StoredAssistantToolEnvelope {
   v: 1;
   askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
   mood?: StoredAssistantMoodPayload;
   /** Display-only Zen layout hint. Ignored by non-Zen clients. */
   zenDisplay?: ZenDisplayMetadata;
@@ -87,6 +96,8 @@ export interface ParsedAssistantTurn {
   displayContent: string;
   /** Parsed AskQuestion when the envelope was valid and complete. */
   askQuestion?: AskQuestionPayload;
+  /** Story-continuation action rail shown after long fictional prose. */
+  tellFictionalStory?: TellFictionalStoryPayload;
   /** Optional display-only Zen layout hint. */
   zenDisplay?: ZenDisplayMetadata;
   /**
@@ -98,6 +109,7 @@ export interface ParsedAssistantTurn {
 
 export interface ParsedStoredAssistantToolPayload {
   askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
@@ -169,6 +181,48 @@ function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | und
       { id: "b", label: labels[1]! },
       { id: "c", label: labels[2]! },
     ],
+  };
+}
+
+function normalizeStoryChipLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const label = value.replace(/\s+/g, " ").trim();
+  if (!label) return undefined;
+  return label.length > 64 ? `${label.slice(0, 61).trimEnd()}...` : label;
+}
+
+function normalizeTellFictionalStoryEnvelope(
+  parsed: unknown
+): TellFictionalStoryPayload | undefined {
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const row = parsed as Record<string, unknown>;
+  const parsedVersion =
+    typeof row.v === "number"
+      ? row.v
+      : typeof row.v === "string"
+        ? Number(row.v.trim())
+        : Number.NaN;
+  if (!Number.isNaN(parsedVersion) && parsedVersion !== 1) return undefined;
+
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  if (rawName && rawName !== "tellfictionalstory") return undefined;
+
+  const continueLabel = normalizeStoryChipLabel(
+    row.continueLabel ?? row.continueStoryLabel ?? row.continue
+  );
+  const bookmarkLabel = normalizeStoryChipLabel(
+    row.bookmarkLabel ?? row.bookmarkStoryLabel ?? row.bookmark
+  );
+  const finishLabel = normalizeStoryChipLabel(
+    row.finishLabel ?? row.finishStoryLabel ?? row.finish
+  );
+
+  return {
+    v: 1,
+    name: "tellFictionalStory",
+    ...(continueLabel ? { continueLabel } : {}),
+    ...(bookmarkLabel ? { bookmarkLabel } : {}),
+    ...(finishLabel ? { finishLabel } : {}),
   };
 }
 
@@ -307,10 +361,12 @@ export function normalizeZenDisplayMetadata(value: unknown): ZenDisplayMetadata 
  */
 function normalizePrismToolBlockPayload(parsed: unknown): {
   askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
   sendGeneratedImage?: { prompt: string };
   zenDisplay?: ZenDisplayMetadata;
 } {
   const askFlat = normalizeAskQuestionEnvelope(parsed);
+  const storyFlat = normalizeTellFictionalStoryEnvelope(parsed);
   let pairSend: { prompt: string } | undefined;
   let zenDisplay: ZenDisplayMetadata | undefined;
   if (parsed && typeof parsed === "object") {
@@ -318,9 +374,10 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
     pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
     zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
   }
-  if (askFlat) {
+  if (askFlat || storyFlat) {
     return {
-      askQuestion: askFlat,
+      ...(askFlat ? { askQuestion: askFlat } : {}),
+      ...(storyFlat ? { tellFictionalStory: storyFlat } : {}),
       ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
     };
@@ -331,13 +388,16 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   if (row.askQuestion !== undefined) {
     askNested = normalizeAskQuestionEnvelope(row.askQuestion);
   }
+  const storyNested = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
   pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
   const out: {
     askQuestion?: AskQuestionPayload;
+    tellFictionalStory?: TellFictionalStoryPayload;
     sendGeneratedImage?: { prompt: string };
     zenDisplay?: ZenDisplayMetadata;
   } = {};
   if (askNested) out.askQuestion = askNested;
+  if (storyNested) out.tellFictionalStory = storyNested;
   if (pairSend) out.sendGeneratedImage = pairSend;
   if (zenDisplay) out.zenDisplay = zenDisplay;
   return out;
@@ -677,12 +737,13 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const jsonText = stripMarkdownFences(innerJson);
   try {
     const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
-    if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) {
+    if (!block.askQuestion && !block.tellFictionalStory && !block.sendGeneratedImage && !block.zenDisplay) {
       return { displayContent: cleanedProse };
     }
     return {
       displayContent: cleanedProse,
       ...(block.askQuestion ? { askQuestion: block.askQuestion } : {}),
+      ...(block.tellFictionalStory ? { tellFictionalStory: block.tellFictionalStory } : {}),
       ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
       ...(block.zenDisplay ? { zenDisplay: block.zenDisplay } : {}),
     };
@@ -714,9 +775,13 @@ export function parseStoredAssistantToolPayload(
           ? normalizeStoredSentGeneratedImagePayload(root.sentGeneratedImage)
           : undefined;
       const zenDisplay = root ? normalizeZenDisplayMetadata(root.zenDisplay) : undefined;
+      const story = root
+        ? normalizeTellFictionalStoryEnvelope(root.tellFictionalStory)
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
+        ...(story ? { tellFictionalStory: story } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
       };
     }
@@ -724,6 +789,7 @@ export function parseStoredAssistantToolPayload(
     const row = parsed as Record<string, unknown>;
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
+    const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
@@ -747,6 +813,7 @@ export function parseStoredAssistantToolPayload(
     }
     return {
       ...(askQuestion ? { askQuestion } : {}),
+      ...(story ? { tellFictionalStory: story } : {}),
       ...(moodKey ? { moodKey } : {}),
       ...(moodConfidence !== undefined ? { moodConfidence } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
@@ -763,6 +830,7 @@ export function hydrateAssistantMessageParts(args: {
 }): {
   content: string;
   askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
@@ -771,9 +839,12 @@ export function hydrateAssistantMessageParts(args: {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
   const askQuestion = stored.askQuestion ?? reparsed.askQuestion;
+  const tellFictionalStory =
+    stored.tellFictionalStory ?? reparsed.tellFictionalStory;
   return {
     content: reparsed.displayContent,
     ...(askQuestion ? { askQuestion } : {}),
+    ...(tellFictionalStory ? { tellFictionalStory } : {}),
     ...(stored.moodKey ? { moodKey: stored.moodKey } : {}),
     ...(stored.moodConfidence !== undefined
       ? { moodConfidence: stored.moodConfidence }
@@ -791,28 +862,31 @@ export function serializeAskQuestionTool(payload: AskQuestionPayload): string {
 
 export function serializeAssistantToolPayload(args: {
   askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
+  const hasStory = args.tellFictionalStory !== undefined;
   const hasMood = args.moodKey !== undefined;
   const hasImage = args.sentGeneratedImage !== undefined;
   const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
   const hasZen = zenDisplay !== undefined;
-  if (!hasAsk && !hasMood && !hasImage && !hasZen) return null;
+  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasZen) return null;
 
-  if (!hasAsk && !hasMood && !hasZen && hasImage) {
+  if (!hasAsk && !hasStory && !hasMood && !hasZen && hasImage) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasMood && !hasImage && !hasZen) {
+  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasZen) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
   const payload: StoredAssistantToolEnvelope = {
     v: 1,
     ...(hasAsk ? { askQuestion: args.askQuestion! } : {}),
+    ...(hasStory ? { tellFictionalStory: args.tellFictionalStory! } : {}),
     ...(hasMood
       ? {
           mood: {
