@@ -5519,11 +5519,11 @@
   z-index: 2147483646;
   box-sizing: border-box;
   width: min(980px, calc(100vw - 28px));
-  min-width: min(420px, calc(100vw - 28px));
+  min-width: min(260px, calc(100vw - 28px));
   max-width: calc(
     100vw - var(--dev-tools-panel-left) - var(--dev-tools-panel-viewport-margin)
   );
-  min-height: 360px;
+  min-height: 190px;
   max-height: calc(
     100dvh - var(--dev-tools-panel-top) - var(--dev-tools-panel-viewport-margin)
   );
@@ -5543,6 +5543,18 @@
     0 8px 22px rgba(0, 0, 0, 0.22);
   transform-origin: top right;
   animation: deleteAllPanelIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.devToolsFloatingPanel[data-console-only="true"] {
+  --dev-tools-console-resize-gutter: 14px;
+  min-width: min(280px, calc(100vw - 28px));
+  min-height: 180px;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, #061015 78%, var(--bg) 22%);
 }
 
 .devToolsHeader {
@@ -5706,6 +5718,13 @@
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   gap: 14px;
+  min-height: 0;
+}
+
+.devToolsConsoleOnlyContent {
+  display: grid;
+  position: absolute;
+  inset: 0 var(--dev-tools-console-resize-gutter) var(--dev-tools-console-resize-gutter) 0;
   min-height: 0;
 }
 
@@ -5934,6 +5953,12 @@
   overflow: hidden;
 }
 
+.devMetricsTerminalSection[data-console-only="true"] {
+  display: grid;
+  min-height: 0;
+  padding: 12px;
+}
+
 .devMetricsTerminalHeader {
   display: flex;
   align-items: start;
@@ -5992,6 +6017,19 @@
   background: color-mix(in srgb, #061015 72%, var(--bg) 28%);
 }
 
+.devMetricsTerminalSection[data-console-only="true"] .devMetricsTerminal {
+  min-height: 0;
+  max-height: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminal {
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .devMetricsTerminalEmpty {
   align-self: center;
   justify-self: center;
@@ -6001,18 +6039,46 @@
 }
 
 .devMetricsTerminalLine {
+  --dev-metrics-kind-color: #d8f6ff;
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 39px minmax(0, 1fr);
+  gap: 7px;
   align-items: baseline;
   min-width: 0;
-  color: color-mix(in srgb, #d8f6ff 80%, white 20%);
+  padding: 2px 5px 2px 4px;
+  border-left: 2px solid color-mix(in srgb, var(--dev-metrics-kind-color) 72%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--dev-metrics-kind-color) 8%, transparent);
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 82%, white 18%);
   font-size: 11px;
 }
 
-.devMetricsTerminalLine span {
-  color: color-mix(in srgb, #8eb3c0 82%, white 18%);
+.devMetricsTerminalLine[data-kind="backend"] {
+  --dev-metrics-kind-color: #8fd7ff;
+}
+
+.devMetricsTerminalLine[data-kind="tool"] {
+  --dev-metrics-kind-color: #ffd782;
+}
+
+.devMetricsTerminalLine[data-kind="summary"] {
+  --dev-metrics-kind-color: #c9adff;
+}
+
+.devMetricsTerminalLine[data-kind="memory"] {
+  --dev-metrics-kind-color: #9cf0aa;
+}
+
+.devMetricsTerminalLine[data-kind="opinion"] {
+  --dev-metrics-kind-color: #ffa4c8;
+}
+
+.devMetricsTerminalTime {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 62%, #7896a2 38%);
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.55;
 }
 
 .devMetricsTerminalLine code {
@@ -6023,16 +6089,57 @@
   white-space: pre-wrap;
 }
 
-.devMetricsTerminalLine[data-kind="error"] code {
-  color: #ff8ba0;
+.devMetricsTokenPrefix,
+.devMetricsTokenKeyword,
+.devMetricsTokenRoute,
+.devMetricsTokenMetric,
+.devMetricsTokenStatus,
+.devMetricsTokenQuote,
+.devMetricsTokenKeyValue {
+  font-weight: 800;
 }
 
-.devMetricsTerminalLine[data-kind="memory"] code {
-  color: #b8f7c6;
+.devMetricsTokenPrefix {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 48%, white 52%);
 }
 
-.devMetricsTerminalLine[data-kind="model"] code {
-  color: #9ee8ff;
+.devMetricsTokenKeyword {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 88%, white 12%);
+}
+
+.devMetricsTokenRoute {
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--dev-metrics-kind-color) 38%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--dev-metrics-kind-color) 13%, transparent);
+  color: #f4fdff;
+  white-space: nowrap;
+}
+
+.devMetricsTokenKeyValue {
+  white-space: nowrap;
+}
+
+.devMetricsTokenKey {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 56%, #9fb7c0 44%);
+}
+
+.devMetricsTokenKeyValue strong {
+  color: color-mix(in srgb, white 84%, var(--dev-metrics-kind-color) 16%);
+  font-weight: 850;
+}
+
+.devMetricsTokenMetric {
+  color: #ffe69a;
+}
+
+.devMetricsTokenStatus {
+  color: color-mix(in srgb, #ffb7c2 62%, var(--dev-metrics-kind-color) 38%);
+}
+
+.devMetricsTokenQuote {
+  color: #c8ffef;
+  font-style: italic;
 }
 
 .devToolsSection {
@@ -11366,9 +11473,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--zen-persona-ink-color, transparent) 54%, transparent) 50%,
       color-mix(in srgb, var(--zen-persona-ink-color, transparent) 36%, transparent) 84%,
       transparent
-    );
+  );
   filter: blur(56px) saturate(1.16);
-  mix-blend-mode: screen;
+  mix-blend-mode: color;
   opacity: var(--zen-persona-ink-opacity);
   animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
