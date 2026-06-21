@@ -12268,6 +12268,87 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--prompt-shortcut-wildcard-color) 28%, transparent);
 }
 
+.pendingWildcardShimmer {
+  display: inline-block;
+  position: relative;
+  inline-size: 5.6ch;
+  min-inline-size: 3.8ch;
+  block-size: 0.96em;
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: -0.12em;
+  isolation: isolate;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, currentColor 11%, transparent),
+      color-mix(in srgb, #2fd3e3 18%, transparent) 46%,
+      color-mix(in srgb, #7b5cff 16%, transparent)
+    ),
+    color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, currentColor 14%, transparent) inset,
+    0 0 14px color-mix(in srgb, #2fd3e3 16%, transparent);
+  filter: blur(0.18px);
+}
+
+.pendingWildcardShimmer::before {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  z-index: 1;
+  background: linear-gradient(
+    90deg,
+    transparent 18%,
+    color-mix(in srgb, #ffffff 52%, transparent) 48%,
+    transparent 74%
+  );
+  transform: translateX(-72%);
+  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
+}
+
+.pendingWildcardShimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 5px,
+      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    ),
+    radial-gradient(
+      circle at 24% 44%,
+      color-mix(in srgb, #ff4d6d 24%, transparent),
+      transparent 38%
+    );
+  opacity: 0.5;
+  filter: blur(2px);
+}
+
+.pendingPromptWildcardMessage {
+  margin: 0;
+  min-height: 1.2em;
+  color: currentColor;
+  white-space: pre-wrap;
+}
+
+.pendingPromptWildcardShimmer {
+  inline-size: min(22ch, 70vw);
+  max-inline-size: 100%;
+  block-size: 1.05em;
+}
+
+@keyframes pendingWildcardShimmerSweep {
+  from {
+    transform: translateX(-72%);
+  }
+  to {
+    transform: translateX(72%);
+  }
+}
+
 .promptShortcutUnfoldedText {
   margin: 0;
   color: currentColor;
@@ -16416,18 +16497,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   cursor: pointer;
 }
 
-.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.markdownRichEditorHost :global(.tiptapPrismWildcardSlotHiddenSyntax) {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-size: 0;
+  letter-spacing: 0;
+  line-height: 0;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismWildcardSlotToken) {
   border: 1px solid transparent;
   border-radius: 7px;
   padding: 1px 7px;
   background:
     linear-gradient(
         90deg,
-        color-mix(in srgb, #ffffff 16%, var(--bg-elevated)),
-        color-mix(in srgb, #2fd3e3 9%, var(--bg-elevated))
+        color-mix(in srgb, #ffffff 12%, #05070b),
+        color-mix(in srgb, #2fd3e3 11%, #05070b)
       )
       padding-box,
     linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
@@ -16435,19 +16521,79 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: #ffffff;
   -webkit-text-fill-color: #ffffff;
   font-weight: inherit;
+  text-transform: lowercase;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 18%, transparent) inset,
+    0 7px 18px -16px color-mix(in srgb, #7b5cff 72%, transparent);
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken) {
+  display: inline-block;
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 0.45em;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, #ffffff 9%, var(--bg-elevated)),
+        color-mix(in srgb, #2fd3e3 13%, var(--bg-elevated)),
+        color-mix(in srgb, #7b5cff 10%, var(--bg-elevated))
+      )
+      padding-box,
+    linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff)
+      border-box;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-weight: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
+    0 0 14px color-mix(in srgb, #2fd3e3 14%, transparent);
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::before,
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::before {
+  inset: 0;
+  z-index: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 5px,
+      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    ),
+    radial-gradient(
+      circle at 28% 46%,
+      color-mix(in srgb, #ff4d6d 24%, transparent),
+      transparent 42%
+    );
+  opacity: 0.54;
+  filter: blur(2px);
 }
 
 .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
-  content: "";
-  width: 8px;
-  height: 8px;
-  margin-left: 2px;
-  border-radius: 999px;
-  border: 2px solid color-mix(in srgb, #ffffff 28%, transparent);
-  border-top-color: #ffffff;
-  animation: wildcardPendingSpin 0.7s linear infinite;
+  inset: -35%;
+  z-index: 1;
+  background: linear-gradient(
+    90deg,
+    transparent 18%,
+    color-mix(in srgb, #ffffff 52%, transparent) 48%,
+    transparent 74%
+  );
+  transform: translateX(-72%);
+  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
@@ -16502,12 +16648,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pendingWildcardShimmer::before,
   .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
   .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
   .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled {
     animation: none;
+  }
+
+  .pendingWildcardShimmer::before,
+  .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
+    transform: none;
+    opacity: 0.44;
   }
 }
 
@@ -18610,7 +18763,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .composeTextareaToken[data-kind="wildcard-slot"] {
   border-color: transparent;
-  border-radius: 0;
+  border-radius: 7px;
   background:
     linear-gradient(
         90deg,
@@ -18625,6 +18778,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow:
     0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
     0 7px 18px -16px color-mix(in srgb, #7b5cff 72%, transparent);
+}
+
+.composeTextareaToken[data-kind="wildcard-slot"][data-pending="true"] {
+  border-color: transparent;
+  padding: 0;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  box-shadow: none;
+}
+
+.composeTextareaToken[data-kind="wildcard-slot"][data-pending="true"]
+  .pendingWildcardShimmer {
+  inline-size: calc(100% - 2px);
+  min-inline-size: calc(100% - 2px);
+  block-size: 1.06em;
+  border-radius: 3px;
 }
 
 .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {

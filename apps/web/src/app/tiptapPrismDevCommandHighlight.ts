@@ -6,6 +6,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
+const BUILT_IN_WILDCARD_BANG_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const TRUE_WILDCARD_SLOT_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
 
 export interface PendingWildcardSlotDecoration {
@@ -28,6 +29,8 @@ interface PrismDevCommandHighlightOptions {
   promptNames: readonly string[] | null;
   /** User-created wildcard decks. These are decorated inline after `!`. */
   wildcardNames: readonly string[] | null;
+  /** Built-in model-filled wildcard slots. These are decorated inline until send. */
+  wildcardSlotNames: readonly string[] | null;
   /** Temporary rich-composer hardcoded wildcard generations. */
   pendingWildcardSlots: (() => readonly PendingWildcardSlotDecoration[]) | null;
 }
@@ -52,6 +55,10 @@ export interface PromptShortcutTextRange {
   start: number;
   end: number;
   name: string;
+}
+
+export interface WildcardSlotTextRange extends PromptShortcutTextRange {
+  syntax: "bang" | "brace";
 }
 
 interface KnownDevCommand {
@@ -341,6 +348,48 @@ export function resolvePendingWildcardSlotTextRanges(
   return ranges;
 }
 
+export function resolveWildcardSlotTextRanges(
+  text: string,
+  options: {
+    wildcardSlotNames?: readonly string[] | null;
+    excludedBangNames?: readonly string[] | null;
+  } = {}
+): WildcardSlotTextRange[] {
+  const known = normalizedKnownNames(
+    options.wildcardSlotNames?.map(normalizeTrueWildcardSlotName) ?? null
+  );
+  if (known && known.size === 0) return [];
+  const excludedBangNames = normalizedKnownNameList(options.excludedBangNames);
+  const ranges: WildcardSlotTextRange[] = [];
+  for (const range of resolvePendingWildcardSlotTextRanges(text, {
+    pendingWildcardSlotNames: options.wildcardSlotNames,
+  })) {
+    ranges.push({ ...range, syntax: "brace" });
+  }
+  for (const match of text.matchAll(BUILT_IN_WILDCARD_BANG_RE)) {
+    const raw = match[0] ?? "";
+    const rawName = match[2] ?? "";
+    const matchIndex = match.index ?? -1;
+    if (matchIndex < 0 || !rawName) continue;
+    const delimiterLength = raw.startsWith("!") ? 0 : 1;
+    const start = matchIndex + delimiterLength;
+    const afterBang = text.slice(start + 1).toLowerCase();
+    if (excludedBangNames?.some((candidate) => afterBang.startsWith(candidate))) {
+      continue;
+    }
+    const name = normalizeTrueWildcardSlotName(rawName);
+    if (!name) continue;
+    if (known && !known.has(name.toLowerCase())) continue;
+    ranges.push({
+      start,
+      end: start + 1 + rawName.length,
+      name,
+      syntax: "bang",
+    });
+  }
+  return ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
 export function hasLeadingDevCommand(doc: ProseMirrorNode): boolean {
   return findLeadingDevCommandRanges(doc) !== null;
 }
@@ -444,6 +493,31 @@ export function findWildcardDeckTokenRanges(
   return ranges;
 }
 
+export function findWildcardSlotTokenRanges(
+  doc: ProseMirrorNode,
+  wildcardSlotNames?: readonly string[] | null,
+  excludedBangNames?: readonly string[] | null
+): Array<{ from: number; to: number; name: string; syntax: "bang" | "brace" }> {
+  const ranges: Array<{ from: number; to: number; name: string; syntax: "bang" | "brace" }> = [];
+  doc.descendants((node: ProseMirrorNode, pos: number) => {
+    if (!node.isTextblock) return true;
+    const textRanges = resolveWildcardSlotTextRanges(node.textContent, {
+      wildcardSlotNames,
+      excludedBangNames,
+    });
+    for (const range of textRanges) {
+      ranges.push({
+        from: pos + 1 + range.start,
+        to: pos + 1 + range.end,
+        name: range.name,
+        syntax: range.syntax,
+      });
+    }
+    return true;
+  });
+  return ranges;
+}
+
 function normalizePendingWildcardSlotRanges(
   doc: ProseMirrorNode,
   pendingSlots: readonly PendingWildcardSlotDecoration[] | null | undefined
@@ -479,6 +553,7 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
       commandNames: null,
       promptNames: null,
       wildcardNames: null,
+      wildcardSlotNames: null,
       pendingWildcardSlots: null,
     };
   },
@@ -497,6 +572,11 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
             );
             const wildcardRanges = findWildcardDeckTokenRanges(
               state.doc,
+              this.options.wildcardNames
+            );
+            const wildcardSlotRanges = findWildcardSlotTokenRanges(
+              state.doc,
+              this.options.wildcardSlotNames,
               this.options.wildcardNames
             );
             const pendingWildcardRanges = normalizePendingWildcardSlotRanges(
@@ -558,6 +638,33 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
               decorations.push(
                 Decoration.inline(wildcardRange.from + 1, wildcardRange.to, {
                   class: "tiptapPrismWildcardDeckToken",
+                })
+              );
+            }
+            for (const wildcardSlotRange of wildcardSlotRanges) {
+              const tokenStart =
+                wildcardSlotRange.syntax === "brace"
+                  ? wildcardSlotRange.from + 1
+                  : wildcardSlotRange.from + 1;
+              const tokenEnd =
+                wildcardSlotRange.syntax === "brace"
+                  ? wildcardSlotRange.to - 1
+                  : wildcardSlotRange.to;
+              decorations.push(
+                Decoration.inline(wildcardSlotRange.from, wildcardSlotRange.from + 1, {
+                  class: "tiptapPrismWildcardSlotHiddenSyntax",
+                })
+              );
+              if (wildcardSlotRange.syntax === "brace") {
+                decorations.push(
+                  Decoration.inline(wildcardSlotRange.to - 1, wildcardSlotRange.to, {
+                    class: "tiptapPrismWildcardSlotHiddenSyntax",
+                  })
+                );
+              }
+              decorations.push(
+                Decoration.inline(tokenStart, tokenEnd, {
+                  class: "tiptapPrismWildcardSlotToken",
                 })
               );
             }

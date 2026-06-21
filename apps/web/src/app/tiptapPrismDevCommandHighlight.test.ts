@@ -5,6 +5,7 @@ import {
   resolvePendingWildcardSlotTextRanges,
   resolvePromptShortcutTextRanges,
   resolveWildcardDeckTextRanges,
+  resolveWildcardSlotTextRanges,
 } from "./tiptapPrismDevCommandHighlight.ts";
 
 describe("resolveLeadingDevCommandTextRanges", () => {
@@ -331,6 +332,45 @@ describe("resolvePendingWildcardSlotTextRanges", () => {
         pendingWildcardSlotNames: ["NOUN"],
       }),
       [{ start: 0, end: 6, name: "NOUN" }]
+    );
+  });
+
+  it("recognizes the loading sentinel as a pending wildcard slot", () => {
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("draw {LOADING} with texture", {
+        pendingWildcardSlotNames: ["{LOADING}"],
+      }),
+      [{ start: 5, end: 14, name: "LOADING" }]
+    );
+  });
+});
+
+describe("resolveWildcardSlotTextRanges", () => {
+  it("recognizes built-in wildcard brace slots as composer chips", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it {ADJECTIVE} now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+      }),
+      [{ start: 8, end: 19, name: "ADJECTIVE", syntax: "brace" }]
+    );
+  });
+
+  it("recognizes built-in bang wildcard invocations as composer chips", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it !adjective now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+      }),
+      [{ start: 8, end: 18, name: "ADJECTIVE", syntax: "bang" }]
+    );
+  });
+
+  it("lets custom wildcard decks claim bang invocations first", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it !adjective now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+        excludedBangNames: ["adjective"],
+      }),
+      []
     );
   });
 });

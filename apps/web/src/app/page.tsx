@@ -167,8 +167,10 @@ import {
   findLeadingDevCommandTokenRange,
   findPromptShortcutTokenRanges,
   findWildcardDeckTokenRanges,
+  findWildcardSlotTokenRanges,
   type PendingWildcardSlotDecoration,
   PrismDevCommandHighlight,
+  resolvePendingWildcardSlotTextRanges,
   resolvePromptShortcutTextRanges,
   resolveWildcardDeckTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
@@ -178,6 +180,7 @@ import {
 } from "./promptShortcutPreviewHighlight";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   withSentenceCasedPromptInsertion,
 } from "./promptRandomization";
@@ -14214,6 +14217,7 @@ interface MessageBodyProps {
   onOpenCommandMention?: (commandId: string) => void;
   promptShortcut?: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
+  pendingPromptWildcardCleanup?: boolean;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
   renderPromptMetadataAsProse?: boolean;
@@ -14242,6 +14246,62 @@ function flattenMarkdownText(node: React.ReactNode): string {
 function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
   const invocation = promptShortcut.invocation.trim();
   return invocation || `/${promptShortcut.name}`;
+}
+
+function PendingWildcardShimmer({
+  className,
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <span
+      className={
+        className
+          ? `${styles.pendingWildcardShimmer} ${className}`
+          : styles.pendingWildcardShimmer
+      }
+      aria-hidden="true"
+    />
+  );
+}
+
+function PendingPromptWildcardCleanupMessage({
+  content,
+}: {
+  content: string;
+}): React.JSX.Element {
+  const source = content.trim();
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let matchCount = 0;
+  let index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT);
+  while (index >= 0) {
+    if (index > cursor) {
+      nodes.push(source.slice(cursor, index));
+    }
+    nodes.push(
+      <PendingWildcardShimmer
+        key={`pending-wildcard-${index}-${matchCount}`}
+        className={styles.pendingPromptWildcardShimmer}
+      />
+    );
+    matchCount += 1;
+    cursor = index + PENDING_COMPOSER_WILDCARD_SLOT_TEXT.length;
+    index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT, cursor);
+  }
+  if (matchCount > 0 && cursor < source.length) {
+    nodes.push(source.slice(cursor));
+  }
+
+  return (
+    <p className={styles.pendingPromptWildcardMessage} aria-label="Preparing prompt">
+      {matchCount > 0 ? (
+        nodes
+      ) : (
+        <PendingWildcardShimmer className={styles.pendingPromptWildcardShimmer} />
+      )}
+    </p>
+  );
 }
 
 function promptShortcutRendersAsStandalone(
@@ -15863,6 +15923,7 @@ interface ComposerTextareaChipRange {
   start: number;
   end: number;
   kind: ComposerTextareaChipKind;
+  pending?: boolean;
 }
 
 function addNonOverlappingComposerTextareaChipRanges(
@@ -15890,24 +15951,52 @@ function resolveBuiltInWildcardSlotTextRanges(
   const ranges: ComposerTextareaChipRange[] = [];
   const seenTokens = new Set<string>();
   const slotTokens = wildcardPicks
-    .filter(isComposerTrueWildcardSlotPick)
-    .map(composerTrueWildcardSlotFallback)
+    .flatMap((command) => {
+      if (!isComposerTrueWildcardSlotPick(command)) return [];
+      return [
+        composerTrueWildcardSlotFallback(command),
+        ...commandInvocationNames(command).map((name) => `!${name}`),
+      ];
+    })
     .filter((token) => {
-      if (!token || seenTokens.has(token)) return false;
-      seenTokens.add(token);
+      const normalized = token.toLowerCase();
+      if (!token || seenTokens.has(normalized)) return false;
+      seenTokens.add(normalized);
       return true;
     });
 
   for (const token of slotTokens) {
-    let index = value.indexOf(token);
+    const normalizedToken = token.toLowerCase();
+    const normalizedValue = value.toLowerCase();
+    let index = normalizedValue.indexOf(normalizedToken);
     while (index >= 0) {
-      ranges.push({
-        start: index,
-        end: index + token.length,
-        kind: "wildcard-slot",
-      });
-      index = value.indexOf(token, index + token.length);
+      const before = index > 0 ? value[index - 1] ?? "" : "";
+      const after = value[index + token.length] ?? "";
+      const bangToken = token.startsWith("!");
+      const hasValidBangBoundary =
+        !bangToken ||
+        ((!before || /[\s([{]/u.test(before)) &&
+          (!after || /[\s.,;:!?)}\]]/u.test(after)));
+      if (hasValidBangBoundary) {
+        ranges.push({
+          start: index,
+          end: index + token.length,
+          kind: "wildcard-slot",
+        });
+      }
+      index = normalizedValue.indexOf(normalizedToken, index + token.length);
     }
+  }
+
+  for (const range of resolvePendingWildcardSlotTextRanges(value, {
+    pendingWildcardSlotNames: [PENDING_COMPOSER_WILDCARD_SLOT_TEXT],
+  })) {
+    ranges.push({
+      start: range.start,
+      end: range.end,
+      kind: "wildcard-slot",
+      pending: true,
+    });
   }
 
   return ranges;
@@ -15963,9 +16052,11 @@ function composerTextareaChipLabel(value: string, range: ComposerTextareaChipRan
   const token = value.slice(range.start, range.end);
   if (range.kind === "wildcard-slot") {
     const trimmed = token.trim();
-    return trimmed.startsWith("{") && trimmed.endsWith("}")
-      ? trimmed.slice(1, -1)
-      : trimmed;
+    const label =
+      trimmed.startsWith("{") && trimmed.endsWith("}")
+        ? trimmed.slice(1, -1)
+        : trimmed.replace(/^!+/u, "");
+    return label.replace(/[-_]+/gu, " ").toLowerCase();
   }
   return token.replace(/^[!/]/u, "");
 }
@@ -15986,19 +16077,26 @@ function renderComposerTextareaOverlayContent(
     }
     const tokenText = value.slice(range.start, range.end);
     const tokenLabel = composerTextareaChipLabel(value, range);
+    const pending = range.kind === "wildcard-slot" && range.pending === true;
     nodes.push(
       <span
         key={`chip-slot-${range.kind}-${range.start}-${range.end}-${index}`}
         className={styles.composeTextareaTokenSlot}
         data-kind={range.kind}
+        data-pending={pending ? "true" : undefined}
       >
         <span className={styles.composeTextareaTokenMeasure}>{tokenText}</span>
         <span
           className={styles.composeTextareaToken}
           data-kind={range.kind}
+          data-pending={pending ? "true" : undefined}
           aria-hidden="true"
         >
-          <span className={styles.composeTextareaTokenText}>{tokenLabel}</span>
+          {pending ? (
+            <PendingWildcardShimmer />
+          ) : (
+            <span className={styles.composeTextareaTokenText}>{tokenLabel}</span>
+          )}
         </span>
       </span>
     );
@@ -16449,7 +16547,44 @@ function applyWildcardDeckChipBoundaryDelete(
   return false;
 }
 
-type ComposerShortcutChipKind = "command" | "prompt" | "wildcard";
+function applyWildcardSlotChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  wildcardSlotNames: readonly string[],
+  excludedBangNames: readonly string[]
+): boolean {
+  const ranges = findWildcardSlotTokenRanges(
+    editor.state.doc,
+    wildcardSlotNames,
+    excludedBangNames
+  );
+  if (ranges.length === 0) return false;
+  const sel = editor.state.selection;
+
+  for (const range of ranges) {
+    const chipFrom = range.from;
+    const chipTo = range.to;
+    let from = chipFrom;
+    let to = chipTo;
+
+    if (!sel.empty) {
+      if (sel.from >= chipTo || sel.to <= chipFrom) continue;
+      from = Math.min(sel.from, chipFrom);
+      to = Math.max(sel.to, chipTo);
+    } else if (direction === "backward") {
+      if (sel.from <= chipFrom || sel.from > chipTo) continue;
+    } else if (sel.from < chipFrom || sel.from >= chipTo) {
+      continue;
+    }
+
+    editor.chain().focus().deleteRange({ from, to }).run();
+    return true;
+  }
+
+  return false;
+}
+
+type ComposerShortcutChipKind = "command" | "prompt" | "wildcard" | "wildcard-slot";
 
 interface EditorComposerShortcutChipRange {
   kind: ComposerShortcutChipKind;
@@ -16471,7 +16606,8 @@ function findEditorComposerShortcutChipRanges(
   editor: Editor,
   commandNames: readonly string[],
   promptNames: readonly string[],
-  wildcardNames: readonly string[]
+  wildcardNames: readonly string[],
+  wildcardSlotNames: readonly string[]
 ): EditorComposerShortcutChipRange[] {
   const ranges: EditorComposerShortcutChipRange[] = [];
   const commandRange = findLeadingDevCommandTokenRange(editor.state.doc, commandNames);
@@ -16493,6 +16629,16 @@ function findEditorComposerShortcutChipRanges(
       ...editorChipTokenRange(wildcardRange),
     });
   }
+  for (const wildcardSlotRange of findWildcardSlotTokenRanges(
+    editor.state.doc,
+    wildcardSlotNames,
+    wildcardNames
+  )) {
+    ranges.push({
+      kind: "wildcard-slot",
+      ...editorChipTokenRange(wildcardSlotRange),
+    });
+  }
   return ranges.sort((a, b) => a.from - b.from);
 }
 
@@ -16507,11 +16653,12 @@ function composerShortcutChipKindFromClick(
         ? target.parentElement
         : null;
   const chip = element?.closest(
-    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken, .tiptapPrismWildcardDeckToken"
+    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken, .tiptapPrismWildcardDeckToken, .tiptapPrismWildcardSlotToken"
   );
   if (!chip) return null;
   if (chip.classList.contains("tiptapPrismDevCommandToken")) return "command";
   if (chip.classList.contains("tiptapPrismWildcardDeckToken")) return "wildcard";
+  if (chip.classList.contains("tiptapPrismWildcardSlotToken")) return "wildcard-slot";
   return "prompt";
 }
 
@@ -16521,13 +16668,15 @@ function applyComposerShortcutChipClickDelete(
   kind: ComposerShortcutChipKind,
   commandNames: readonly string[],
   promptNames: readonly string[],
-  wildcardNames: readonly string[]
+  wildcardNames: readonly string[],
+  wildcardSlotNames: readonly string[]
 ): boolean {
   const range = findEditorComposerShortcutChipRanges(
     editor,
     commandNames,
     promptNames,
-    wildcardNames
+    wildcardNames,
+    wildcardSlotNames
   ).find((candidate) => {
     return (
       candidate.kind === kind &&
@@ -16545,7 +16694,8 @@ function applyComposerShortcutChipArrowKey(
   direction: "left" | "right",
   commandNames: readonly string[],
   promptNames: readonly string[],
-  wildcardNames: readonly string[]
+  wildcardNames: readonly string[],
+  wildcardSlotNames: readonly string[]
 ): boolean {
   const sel = editor.state.selection;
   if (!sel.empty) return false;
@@ -16554,7 +16704,8 @@ function applyComposerShortcutChipArrowKey(
     editor,
     commandNames,
     promptNames,
-    wildcardNames
+    wildcardNames,
+    wildcardSlotNames
   );
   for (const range of ranges) {
     const shouldJump =
@@ -17012,6 +17163,9 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
     props.assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(props.content).displayContent
       : props.content;
+  if (props.messageRole === "user" && props.pendingPromptWildcardCleanup === true) {
+    return <PendingPromptWildcardCleanupMessage content={fullSource} />;
+  }
   if (
     props.messageRole === "user" &&
     props.renderPromptMetadataAsProse === true &&
@@ -17639,6 +17793,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
     const pendingValueRef = useRef<string | null>(null);
     const pendingValueTimerRef = useRef<number | null>(null);
+    const locallyEmittedValuesRef = useRef<string[]>([]);
     const mentionBotsRef = useRef(mentionBots);
     const commandPicksRef = useRef(commandPicks);
     const promptPicksRef = useRef(promptPicks);
@@ -17684,6 +17839,22 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       () => pendingWildcardDecorationsRef.current,
       []
     );
+
+    const rememberLocallyEmittedValue = useCallback((nextValue: string) => {
+      const queue = locallyEmittedValuesRef.current;
+      queue.push(nextValue);
+      if (queue.length > 24) {
+        queue.splice(0, queue.length - 24);
+      }
+    }, []);
+
+    const consumeLocallyEmittedValue = useCallback((nextValue: string): boolean => {
+      const queue = locallyEmittedValuesRef.current;
+      const index = queue.indexOf(nextValue);
+      if (index < 0) return false;
+      queue.splice(index, 1);
+      return true;
+    }, []);
 
     const refreshPendingWildcardSlotDecorations = useCallback((ed?: Editor | null) => {
       const activeEditor = ed ?? editorRef.current;
@@ -17982,6 +18153,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           .flatMap((command) => commandInvocationNames(command)),
       [wildcardPicks]
     );
+    const wildcardSlotNamesForHighlight = useMemo(
+      () =>
+        wildcardPicks
+          .filter(isComposerTrueWildcardSlotPick)
+          .flatMap((command) => commandInvocationNames(command)),
+      [wildcardPicks]
+    );
 
     const editor = useEditor(
       {
@@ -18000,6 +18178,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             commandNames: commandNamesForHighlight,
             promptNames: promptNamesForHighlight,
             wildcardNames: wildcardNamesForHighlight,
+            wildcardSlotNames: wildcardSlotNamesForHighlight,
             pendingWildcardSlots: pendingWildcardSlotsForDecoration,
           }),
           Placeholder.configure({ placeholder }),
@@ -18078,7 +18257,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 chipKind,
                 commandNamesForHighlight,
                 promptNamesForHighlight,
-                wildcardNamesForHighlight
+                wildcardNamesForHighlight,
+                wildcardSlotNamesForHighlight
               )
             ) {
               return false;
@@ -18099,6 +18279,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               !(event as globalThis.KeyboardEvent).isComposing
             ) {
               if (applyPrismBotLinkBackspace(activeEditor)) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyWildcardSlotChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  wildcardSlotNamesForHighlight,
+                  wildcardNamesForHighlight
+                )
+              ) {
                 event.preventDefault();
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
@@ -18147,6 +18339,18 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               !(event as globalThis.KeyboardEvent).isComposing
             ) {
               if (applyPrismBotLinkBoundaryDelete(activeEditor, "forward")) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyWildcardSlotChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  wildcardSlotNamesForHighlight,
+                  wildcardNamesForHighlight
+                )
+              ) {
                 event.preventDefault();
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
@@ -18234,7 +18438,8 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   dir,
                   commandNamesForHighlight,
                   promptNamesForHighlight,
-                  wildcardNamesForHighlight
+                  wildcardNamesForHighlight,
+                  wildcardSlotNamesForHighlight
                 )
               ) {
                 event.preventDefault();
@@ -18417,6 +18622,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             pendingValueRef.current = null;
             if (typeof nextMarkdown !== "string") return;
             if (nextMarkdown === lastEmittedRef.current) return;
+            rememberLocallyEmittedValue(nextMarkdown);
             lastEmittedRef.current = nextMarkdown;
             onValueChangeRef.current(nextMarkdown);
           }, 90);
@@ -18428,9 +18634,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         applyComposerCommandPickInEditor,
         pendingWildcardSlotsForDecoration,
         prunePendingWildcardSlots,
+        rememberLocallyEmittedValue,
         commandNamesForHighlight,
         promptNamesForHighlight,
         wildcardNamesForHighlight,
+        wildcardSlotNamesForHighlight,
         submitOnEnter,
       ]
     );
@@ -18504,6 +18712,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       if (!editor || editor.isDestroyed) return;
       // Most value updates come directly from this editor's own onUpdate path.
       // In that common case, skip re-serializing markdown back out of ProseMirror.
+      if (consumeLocallyEmittedValue(value)) {
+        const current = editor.getMarkdown();
+        if (current === value) {
+          lastEmittedRef.current = value;
+        }
+        return;
+      }
       if (value === lastEmittedRef.current) return;
       if (pendingValueTimerRef.current !== null) {
         window.clearTimeout(pendingValueTimerRef.current);
@@ -18516,8 +18731,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         return;
       }
       lastEmittedRef.current = value;
+      locallyEmittedValuesRef.current = [];
       editor.commands.setContent(value, { contentType: "markdown" });
-    }, [value, editor]);
+    }, [value, editor, consumeLocallyEmittedValue]);
 
     useEffect(() => {
       return () => {
@@ -21277,6 +21493,8 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterHelpModalOpen, setCommandCenterHelpModalOpen] = useState(false);
   const [expandedPromptShortcutMessageId, setExpandedPromptShortcutMessageId] =
     useState<string | null>(null);
+  const [pendingPromptWildcardCleanupMessageIds, setPendingPromptWildcardCleanupMessageIds] =
+    useState<Set<string>>(() => new Set());
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
@@ -32865,12 +33083,17 @@ function HomeContent(): React.JSX.Element {
     prompt: string;
     promptWildcards: PromptWildcardRunMetadata | null;
   } {
-    const resolution = resolvePromptRandomizationGroups(rawDraft, {
+    const deckResolution = resolvePromptRandomizationGroups(rawDraft, {
       decks: commandCenterWildcardDecks,
     });
+    const resolution = resolveBuiltInPromptWildcardInvocations(
+      deckResolution.prompt,
+      deckResolution.replacements
+    );
     const hasWildcardRun =
       resolution.replacements.length > 0 ||
       draftContainsTrueWildcardSlots(rawDraft) ||
+      deckResolution.prompt !== resolution.prompt ||
       draftContainsTrueWildcardSlots(resolution.prompt);
     return {
       prompt: resolution.prompt,
@@ -33498,6 +33721,7 @@ function HomeContent(): React.JSX.Element {
 
     const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
+    let optimisticPromptCleanupMessageId: string | null = null;
     const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
       detailForSend?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
@@ -33535,6 +33759,14 @@ function HomeContent(): React.JSX.Element {
         promptWildcardFillAwaitsServerCleanup && composerPromptWildcards
           ? rawDraft.trim()
           : displayTrimmed;
+      if (promptWildcardFillAwaitsServerCleanup) {
+        optimisticPromptCleanupMessageId = optimisticMessageId;
+        setPendingPromptWildcardCleanupMessageIds((current) => {
+          const next = new Set(current);
+          next.add(optimisticMessageId);
+          return next;
+        });
+      }
       const optimisticMessage: Message = {
         id: optimisticMessageId,
         role: "user",
@@ -33954,6 +34186,15 @@ function HomeContent(): React.JSX.Element {
         zenInitialStarterRequestRef.current = null;
       }
       clearPendingReplyVisuals();
+      if (optimisticPromptCleanupMessageId) {
+        const cleanupMessageId = optimisticPromptCleanupMessageId;
+        setPendingPromptWildcardCleanupMessageIds((current) => {
+          if (!current.has(cleanupMessageId)) return current;
+          const next = new Set(current);
+          next.delete(cleanupMessageId);
+          return next;
+        });
+      }
       if (successfulConversationId) {
         scheduleNextQueuedPrompt(successfulConversationId);
       }
@@ -34260,38 +34501,6 @@ function HomeContent(): React.JSX.Element {
     } catch {
       return fallbackPrompt;
     }
-  }
-
-  async function generateComposerWildcardSlotValue(
-    key: BuiltInPromptWildcardSlotKey
-  ): Promise<string> {
-    const commandCenterModelChoice = resolveCommandCenterModelChoiceForSend(
-      commandCenterPreferredModel,
-      settings,
-      modelCatalog
-    );
-    const parsedModelChoice = parseCommandCenterModelChoice(commandCenterModelChoice);
-    const response = await api<{
-      value?: string;
-      provider?: Provider;
-      model?: string;
-    }>("/api/composer/wildcard-value", {
-      method: "POST",
-      body: JSON.stringify({
-        key,
-        ...(parsedModelChoice
-          ? {
-              preferredProvider: parsedModelChoice.provider,
-              modelOverride: parsedModelChoice.modelId,
-            }
-          : {}),
-      }),
-    });
-    const value = response.value?.trim();
-    if (!value) {
-      throw new Error("Wildcard generator returned an empty value.");
-    }
-    return value;
   }
 
   /** Quick chips: Prism AskQuestion (if pending) beats server “Talk to me” prompts. Single UI path. */
@@ -59762,6 +59971,9 @@ function HomeContent(): React.JSX.Element {
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
+                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                    msg.id
+                  )}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   renderPromptMetadataAsProse={chatLikeSurface}
@@ -59950,7 +60162,6 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
-                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -59976,7 +60187,6 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
-                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -61218,6 +61428,9 @@ function HomeContent(): React.JSX.Element {
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
+                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                    msg.id
+                  )}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
                   renderPromptMetadataAsProse={chatLikeSurface}
@@ -61397,7 +61610,6 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
-                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -61423,7 +61635,6 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
-                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
