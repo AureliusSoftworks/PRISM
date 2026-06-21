@@ -2299,7 +2299,7 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
   "- Prefer the three-angle-bracket tokens above. Single-angle XML-style `<PRISM_TOOL>` … `</PRISM_TOOL>` is also accepted, but triple brackets are the reliable default.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
-  "- Inside JSON only: emit exactly three options with ids a, b, c (distinct).",
+  "- Inside JSON only: usually emit exactly three options with ids a, b, c (distinct). When the expected answer is simply yes or no (for example, \"Would you like a copy of that to download?\"), emit exactly two options with ids a and b labeled Yes and No.",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
   "",
@@ -3246,7 +3246,7 @@ function buildStarterPromptInstruction(forceIntroduction: boolean = false): stri
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
     "Choose exactly ONE opener shape: ask the user one question, present one AskQuestion chip row, or send one generated image.",
     "Ask exactly ONE direct question to the user if you choose the prose-question shape, and end that question with a question mark.",
-    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly three options after a brief natural lead-in.",
+    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly three options after a brief natural lead-in; use two Yes/No options only for a genuinely binary yes-or-no opener.",
     "If you choose a generated image, keep the visible prose to one short sentence and append one valid sendGeneratedImage tool block; do not force an extra question.",
     "If memory hints are available and you ask a question, weave ONE specific remembered detail into the question naturally.",
     "Vary the wording so the opener feels fresh, not canned.",
@@ -3927,14 +3927,14 @@ function buildPromptMessages(args: {
       role: "system",
       content:
         "The user's latest message explicitly asks for AskQuestion/multiple-choice. " +
-        "For this turn, ask exactly ONE multiple-choice question (not a quiz), keep exactly three options, and append one valid Prism AskQuestion tool block after your prose.",
+        "For this turn, ask exactly ONE multiple-choice question (not a quiz), usually keep exactly three options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
     });
   } else if (args.askQuestionMode === "continuation") {
     promptMessages.push({
       role: "system",
       content:
         "Continue the active AskQuestion flow from the prior turn. " +
-        "For this turn, ask exactly ONE follow-up multiple-choice question, keep exactly three options, and append one valid Prism AskQuestion tool block after your prose.",
+        "For this turn, ask exactly ONE follow-up multiple-choice question, usually keep exactly three options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
     });
   }
   if (args.memoryClarification && args.memoryClarification.trim().length > 0) {
