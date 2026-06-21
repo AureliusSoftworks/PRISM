@@ -45,8 +45,9 @@ export function getTextareaCaretClientRect(textarea: HTMLTextAreaElement): DOMRe
   mirror.style.visibility = "hidden";
   mirror.style.whiteSpace = "pre-wrap";
   mirror.style.wordWrap = "break-word";
-  mirror.style.top = "0";
-  mirror.style.left = "-9999px";
+  const textareaRect = textarea.getBoundingClientRect();
+  mirror.style.top = `${textareaRect.top + window.scrollY}px`;
+  mirror.style.left = `${textareaRect.left + window.scrollX}px`;
 
   for (const prop of properties) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,5 +67,10 @@ export function getTextareaCaretClientRect(textarea: HTMLTextAreaElement): DOMRe
   document.body.append(mirror);
   const rect = marker.getBoundingClientRect();
   mirror.remove();
-  return rect;
+  return new DOMRect(
+    rect.left - textarea.scrollLeft,
+    rect.top - textarea.scrollTop,
+    rect.width,
+    rect.height
+  );
 }
