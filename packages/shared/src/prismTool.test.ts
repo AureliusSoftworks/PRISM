@@ -197,6 +197,29 @@ describe("parseAssistantPrismTools", () => {
     assert.deepEqual(out.sendGeneratedImage, { prompt: "Soft watercolor hillside." });
   });
 
+  it("parses tellFictionalStory story action rail metadata", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      tellFictionalStory: {
+        v: 1,
+        name: "tellFictionalStory",
+        continueLabel: "Please, do continue...",
+        bookmarkLabel: "Mark this page",
+        finishLabel: "Bring it home",
+      },
+    });
+    const raw = `The lantern guttered at the stair.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "The lantern guttered at the stair.");
+    assert.deepEqual(out.tellFictionalStory, {
+      v: 1,
+      name: "tellFictionalStory",
+      continueLabel: "Please, do continue...",
+      bookmarkLabel: "Mark this page",
+      finishLabel: "Bring it home",
+    });
+  });
+
   it("strips outer markdown fences that wrapped the Prism tool block", () => {
     const inner = JSON.stringify({
       v: 1,
@@ -509,6 +532,22 @@ describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
       v: 1,
       placement: { x: 0, y: 1, align: "center" },
       lines: [{ index: 1, x: 0.333, y: 0.667, align: "end" }],
+    });
+  });
+
+  it("hydrates stored tellFictionalStory metadata", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      tellFictionalStory: {
+        v: 1,
+        name: "tellFictionalStory",
+        continueLabel: "Yes, then what?",
+      },
+    });
+    assert.deepEqual(parseStoredAssistantToolPayload(stored).tellFictionalStory, {
+      v: 1,
+      name: "tellFictionalStory",
+      continueLabel: "Yes, then what?",
     });
   });
 });
