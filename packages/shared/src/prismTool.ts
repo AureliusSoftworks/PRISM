@@ -169,18 +169,18 @@ function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | und
     })
     .filter((label) => label.length > 0);
 
-  // Keep UX deterministic: PRISM chips always expect 3 options.
-  if (labels.length < 3) return undefined;
+  // Keep UX deterministic: PRISM chips expect either a binary yes/no choice or three choices.
+  const optionCount = labels.length === 2 ? 2 : labels.length >= 3 ? 3 : 0;
+  if (optionCount === 0) return undefined;
 
   return {
     v: 1,
     name: "AskQuestion",
     prompt,
-    options: [
-      { id: "a", label: labels[0]! },
-      { id: "b", label: labels[1]! },
-      { id: "c", label: labels[2]! },
-    ],
+    options: labels.slice(0, optionCount).map((label, index) => ({
+      id: String.fromCharCode(97 + index),
+      label,
+    })),
   };
 }
 

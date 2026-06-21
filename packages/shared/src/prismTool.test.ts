@@ -84,6 +84,30 @@ describe("parseAssistantPrismTools", () => {
     assert.equal(out.askQuestion, undefined);
   });
 
+  it("accepts binary yes/no AskQuestion options", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      name: "AskQuestion",
+      prompt: "Would you like a copy of that to download?",
+      options: [
+        { id: "yes", label: "Yes" },
+        { id: "no", label: "No" },
+      ],
+    });
+    const raw = `P.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent, "P.");
+    assert.deepEqual(out.askQuestion, {
+      v: 1,
+      name: "AskQuestion",
+      prompt: "Would you like a copy of that to download?",
+      options: [
+        { id: "a", label: "Yes" },
+        { id: "b", label: "No" },
+      ],
+    });
+  });
+
   it("accepts extra options and normalizes to a/b/c chips", () => {
     const inner = JSON.stringify({
       v: 1,
