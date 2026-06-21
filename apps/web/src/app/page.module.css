@@ -6619,6 +6619,380 @@
   backdrop-filter: blur(18px);
 }
 
+.devZenPauseTester {
+  position: fixed;
+  right: max(16px, calc(env(safe-area-inset-right, 0px) + 16px));
+  bottom: max(126px, calc(env(safe-area-inset-bottom, 0px) + 112px));
+  z-index: 92;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  width: min(324px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.devZenPauseTester > * {
+  pointer-events: auto;
+}
+
+.devZenPauseTesterBubble {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.18), transparent 38%),
+    rgba(14, 17, 23, 0.88);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 50px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.devZenPauseTesterBubble:hover,
+.devZenPauseTesterBubble:focus-visible {
+  border-color: rgba(255, 255, 255, 0.42);
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 22px 58px rgba(0, 0, 0, 0.36);
+}
+
+.devZenPauseTesterBubble:active {
+  transform: translateY(0);
+}
+
+.devZenPauseTesterPanel {
+  order: -1;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(14, 17, 23, 0.93);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.devZenPauseTesterHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.devZenPauseTesterHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.devZenPauseTesterHeader strong {
+  font-size: 0.96rem;
+  letter-spacing: 0;
+}
+
+.devZenPauseTesterStatus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.devZenPauseTesterStatus[data-active="true"] {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 48%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--dev-tools-accent) 13%, rgba(255, 255, 255, 0.045));
+}
+
+.devZenPauseTesterStatus span,
+.devZenPauseTesterStatus small,
+.devZenPauseTesterControl > span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.devZenPauseTesterStatus strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.9rem;
+  letter-spacing: 0;
+}
+
+.devZenPauseTesterStatus small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devZenPauseTesterControls {
+  display: grid;
+  gap: 7px;
+}
+
+.devZenPauseTesterControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 9px;
+  align-items: center;
+}
+
+.devZenPauseTesterControl > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.devZenPauseTesterControl > span strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.76rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.devZenPauseTesterControl input {
+  width: 82px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 7px;
+  outline: none;
+}
+
+.devZenPauseTesterControl input:focus {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 74%, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dev-tools-accent) 18%, transparent);
+}
+
+.devZenPauseTesterReset {
+  width: 100%;
+}
+
+.devZenPauseTesterReset::after {
+  content: "";
+}
+
+.zenToolLabDock {
+  --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
+  position: fixed;
+  left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
+  bottom: max(126px, calc(env(safe-area-inset-bottom, 0px) + 112px));
+  z-index: 92;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  width: min(318px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.zenToolLabDock > * {
+  pointer-events: auto;
+}
+
+.zenToolLabBubble {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 52%, rgba(255, 255, 255, 0.2));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--dev-tools-accent) 24%, transparent), transparent 40%),
+    rgba(14, 17, 23, 0.88);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 50px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.zenToolLabBubble:hover,
+.zenToolLabBubble:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 78%, rgba(255, 255, 255, 0.36));
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 22px 58px rgba(0, 0, 0, 0.36);
+}
+
+.zenToolLabBubble:active {
+  transform: translateY(0);
+}
+
+.zenToolLabPanel {
+  order: -1;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 36%, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--dev-tools-accent) 14%, transparent), transparent 46%),
+    rgba(14, 17, 23, 0.94);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.zenToolLabHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.zenToolLabHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.zenToolLabHeader strong {
+  font-size: 0.96rem;
+  letter-spacing: 0;
+}
+
+.zenToolLabStatus {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.76rem;
+  line-height: 1.32;
+}
+
+.zenToolLabStatus[data-active="true"] {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 48%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--dev-tools-accent) 13%, rgba(255, 255, 255, 0.045));
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.zenToolLabGrid {
+  display: grid;
+  gap: 7px;
+}
+
+.zenToolLabToolButton {
+  appearance: none;
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.04));
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.zenToolLabToolButton:hover:not(:disabled),
+.zenToolLabToolButton:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 58%, rgba(255, 255, 255, 0.18));
+  background:
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--dev-tools-accent) 18%, transparent), transparent 58%),
+    rgba(255, 255, 255, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.zenToolLabToolButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.zenToolLabToolButton:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.zenToolLabToolButton > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.zenToolLabToolButton strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.84rem;
+  font-weight: 760;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zenToolLabToolButton small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zenToolLabToolIcon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 42%, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dev-tools-accent) 14%, rgba(255, 255, 255, 0.055));
+  color: color-mix(in srgb, var(--dev-tools-accent) 72%, rgba(255, 255, 255, 0.9));
+}
+
+@media (max-width: 620px) {
+  .zenToolLabDock {
+    left: max(12px, calc(env(safe-area-inset-left, 0px) + 12px));
+    right: max(12px, calc(env(safe-area-inset-right, 0px) + 12px));
+    bottom: max(142px, calc(env(safe-area-inset-bottom, 0px) + 126px));
+    width: auto;
+  }
+
+  .zenToolLabPanel {
+    max-height: min(52dvh, 420px);
+    overflow-y: auto;
+  }
+}
+
 .devMoodPanelHeader {
   display: flex;
   justify-content: space-between;
@@ -10594,6 +10968,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin-inline: auto;
   padding-inline: 0;
   transition: opacity 180ms linear;
+  isolation: isolate;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageChatManifesting {
@@ -10951,6 +11326,64 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: none;
   border-radius: 0;
   padding: 0;
+  overflow: visible;
+}
+
+.zenPersonaInkWash {
+  --zen-persona-ink-opacity: 0.62;
+  position: absolute;
+  left: 50%;
+  top: -1.35em;
+  width: 122vw;
+  height: calc(100% + 2.7em);
+  transform: translateX(-50%) scaleX(0.985);
+  pointer-events: none;
+  z-index: -1;
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      ellipse 70% 62% at 50% 50%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 78%, transparent) 0%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 42%, transparent) 48%,
+      transparent 78%
+    ),
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 42%, transparent) 24%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 54%, transparent) 50%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 38%, transparent) 76%,
+      transparent
+    );
+  filter: blur(42px) saturate(1.16);
+  mix-blend-mode: overlay;
+  opacity: var(--zen-persona-ink-opacity);
+  animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.themeLight .zenPersonaInkWash {
+  --zen-persona-ink-opacity: 0.28;
+  mix-blend-mode: multiply;
+}
+
+@keyframes zenPersonaInkWashIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scaleX(0.92);
+    filter: blur(54px) saturate(1.02);
+  }
+  to {
+    opacity: var(--zen-persona-ink-opacity);
+    transform: translateX(-50%) scaleX(0.985);
+    filter: blur(42px) saturate(1.16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenPersonaInkWash {
+    animation: none;
+    transform: translateX(-50%);
+  }
 }
 
 /* Keep an intentional scene break between the new prompt and any prior
@@ -12084,6 +12517,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
 }
 
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"] {
+  cursor: default;
+}
+
 .promptShortcutCapsule:hover,
 .promptShortcutCapsule:focus-visible,
 .commandMentionChip:hover,
@@ -12097,6 +12534,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, #2fd3e3 10%, transparent)
     ),
     var(--bg-elevated);
+}
+
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"]:hover,
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"]:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 28%, var(--line));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 10%, transparent),
+      color-mix(in srgb, #2fd3e3 7%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
 }
 
 .promptWildcardRunInline {
@@ -12334,19 +12783,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   to {
     transform: translateX(72%);
   }
-}
-
-.promptShortcutUnfoldedText {
-  margin: 0;
-  color: currentColor;
-  white-space: pre-wrap;
-}
-
-.promptShortcutUnfoldedInsertion {
-  color: color-mix(in srgb, currentColor 76%, var(--fg) 24%);
-  font-weight: inherit;
-  text-shadow: 0 0 12px
-    color-mix(in srgb, currentColor 18%, transparent);
 }
 
 .botMentionChip {

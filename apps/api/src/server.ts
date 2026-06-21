@@ -688,6 +688,25 @@ function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | und
   };
 }
 
+function readZenPersonaTransition(value: unknown): {
+  fromBotId: string | null;
+  toBotId: string | null;
+  source: "picker";
+} | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "picker") return undefined;
+  const fromBotId =
+    typeof record.fromBotId === "string" && record.fromBotId.trim().length > 0
+      ? record.fromBotId.trim()
+      : null;
+  const toBotId =
+    typeof record.toBotId === "string" && record.toBotId.trim().length > 0
+      ? record.toBotId.trim()
+      : null;
+  return { fromBotId, toBotId, source: "picker" };
+}
+
 function devMoodDebugAllowed(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.PRISM_DEV_TOOLS === "1";
 }
@@ -1643,7 +1662,7 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const messageRowsRaw = db
         .prepare(
-          `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+          `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
                   b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
@@ -1661,6 +1680,7 @@ function buildRoutes(): RouteDefinition[] {
         content: string;
         provider: string | null;
         model: string | null;
+        bot_id: string | null;
         tool_payload: string | null;
         bot_name: string | null;
         bot_color: string | null;
@@ -1694,6 +1714,7 @@ function buildRoutes(): RouteDefinition[] {
               ? row.provider
               : undefined,
           model: row.model ?? undefined,
+          botId: row.bot_id ?? null,
           botName: row.bot_name ?? undefined,
           botColor: row.bot_color ?? undefined,
           botGlyph: row.bot_glyph ?? undefined,
@@ -3071,13 +3092,31 @@ function buildRoutes(): RouteDefinition[] {
       const starterPrompt = body.starterPrompt === true;
       const starterPromptWarrantsIntro =
         starterPrompt && body.starterPromptWarrantsIntro === true;
-      const message = starterPrompt ? "" : readString(body.message, "message");
+      // Which post-auth surface this turn came from. Default to "sandbox"
+      // so that any client that forgets to send `mode` gets the safer
+      // no-side-effects posture (no memory writes) rather than silently
+      // leaking a sandbox turn into cross-session storage. processChatMessage
+      // enforces the same default as defense in depth.
+      const mode =
+        body.mode === "zen" || body.mode === "chat"
+          ? "zen"
+          : "sandbox";
+      const requestedPersonaTransition =
+        mode === "zen" ? readZenPersonaTransition(body.personaTransition) : undefined;
+      const message =
+        starterPrompt || requestedPersonaTransition
+          ? ""
+          : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
       const promptWildcards = normalizePromptWildcardRunMetadata(body.promptWildcards);
       const commandCenterPrompt = body.commandCenterPrompt === true || Boolean(promptShortcut);
       const resolvedCommandCenterPrompt =
         !starterPrompt && commandCenterPrompt
           ? readOptionalString(body.resolvedCommandCenterPrompt)
+          : null;
+      const promptInputOverride =
+        !starterPrompt && !commandCenterPrompt
+          ? readOptionalString(body.promptInputOverride)
           : null;
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
@@ -3093,15 +3132,6 @@ function buildRoutes(): RouteDefinition[] {
           : body.botId === null
             ? null
             : undefined;
-      // Which post-auth surface this turn came from. Default to "sandbox"
-      // so that any client that forgets to send `mode` gets the safer
-      // no-side-effects posture (no memory writes) rather than silently
-      // leaking a sandbox turn into cross-session storage. processChatMessage
-      // enforces the same default as defense in depth.
-      const mode =
-        body.mode === "zen" || body.mode === "chat"
-          ? "zen"
-          : "sandbox";
       // Zen is a continuous PRISM-only lane: no private/incognito turns.
       // Sandbox ignores incognito as before.
       const incognito = false;
@@ -3115,7 +3145,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const effectiveBotId = mode === "zen" ? null : botId;
+      const effectiveBotId = botId;
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
         : undefined;
@@ -3125,6 +3155,8 @@ function buildRoutes(): RouteDefinition[] {
           : null;
       const prismInterruption =
         mode === "zen" ? readPrismInterruption(body.prismInterruption) : undefined;
+      const personaTransition =
+        mode === "zen" ? requestedPersonaTransition : undefined;
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
@@ -3175,7 +3207,7 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
       }
-      if (!starterPromptLabel && effectiveBotId === null) {
+      if (!starterPromptLabel && mode === "zen" && effectiveBotId == null) {
         starterPromptLabel = "Prism";
       }
 
@@ -3220,7 +3252,7 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onChatClientClose);
       ctx.req.once("aborted", onChatClientClose);
       ctx.res.once("close", onChatClientClose);
-      let messageForChat = resolvedCommandCenterPrompt ?? message;
+      let messageForChat = resolvedCommandCenterPrompt ?? promptInputOverride ?? message;
       let promptShortcutForChat = promptShortcut;
       let promptWildcardsForChat = promptWildcards;
       let resolvedWildcardReplacements =
@@ -3337,6 +3369,7 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
             },
             botId: effectiveBotId,
+            ...(personaTransition ? { personaTransition } : {}),
             incognito,
             ephemeralMessages,
             botSystemPrompt,

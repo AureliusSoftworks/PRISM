@@ -3696,6 +3696,56 @@ describe("processChatMessage conversational memory cues", () => {
     assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
   });
 
+  it("scopes Zen Persona turns and memories to the active bot without locking the Zen conversation", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    installChatFetchStub("Good to know.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Fun fact: I live on land!",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.lastBotId, "bot-1");
+    assert.equal(result.conversation.lastBotColor, "#b11f2b");
+    assert.deepEqual(
+      result.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [
+        { role: "user", botId: "bot-1" },
+        { role: "assistant", botId: "bot-1" },
+      ]
+    );
+    assert.equal(result.memoryLearned?.created[0]?.botId, "bot-1");
+
+    const conversationRow = db
+      .prepare("SELECT bot_id FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { bot_id: string | null };
+    assert.equal(conversationRow.bot_id, null);
+    const messageRows = db
+      .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
+      .all() as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(messageRows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "user", bot_id: "bot-1" },
+      { role: "assistant", bot_id: "bot-1" },
+    ]);
+  });
+
   it("keeps Command Center prompt turns out of memories and mood state", async () => {
     const db = createChatTestDb();
     installChatFetchStub("Prompt result.");
@@ -5006,6 +5056,98 @@ describe("buildAssistantToolCallEvents", () => {
     assert.ok(detected, "expected a detected event");
     assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
     assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
+  });
+});
+
+describe("processChatMessage Zen Persona transitions", () => {
+  it("creates assistant-only attributed handoffs and returns to neutral PRISM", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    installChatFetchStub("Hello from the handoff.");
+
+    const personaResult = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        personaTransition: {
+          fromBotId: null,
+          toBotId: "bot-1",
+          source: "picker",
+        },
+      }
+    );
+
+    assert.equal(personaResult.conversation.botId, null);
+    assert.equal(personaResult.conversation.lastBotId, "bot-1");
+    assert.equal(personaResult.conversation.lastBotColor, "#b11f2b");
+    assert.deepEqual(
+      personaResult.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [{ role: "assistant", botId: "bot-1" }]
+    );
+
+    const defaultResult = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: null,
+        incognito: false,
+        mode: "chat",
+        personaTransition: {
+          fromBotId: "bot-1",
+          toBotId: null,
+          source: "picker",
+        },
+      },
+      personaResult.conversation.id
+    );
+
+    assert.equal(defaultResult.conversation.botId, null);
+    assert.equal(defaultResult.conversation.lastBotId, null);
+    assert.equal(defaultResult.conversation.lastBotColor, null);
+    assert.deepEqual(
+      defaultResult.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [
+        { role: "assistant", botId: "bot-1" },
+        { role: "assistant", botId: null },
+      ]
+    );
+
+    const rows = db
+      .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
+      .all() as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(rows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "assistant", bot_id: "bot-1" },
+      { role: "assistant", bot_id: null },
+    ]);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE role = 'user'").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM conversations WHERE id = ?").get(
+        defaultResult.conversation.id
+      ) as { bot_id: string | null }).bot_id,
+      null
+    );
   });
 });
 

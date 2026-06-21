@@ -36,6 +36,40 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 900 }), 3);
   });
 
+  it("recalculates the pending step when delay settings change", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const base = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+    };
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 0,
+        resolveStepDelayMs: () => 1000,
+      }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 400,
+        resolveStepDelayMs: () => 1000,
+      }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 450,
+        resolveStepDelayMs: () => 300,
+      }),
+      2
+    );
+  });
+
   it("resets pacing when the token signature changes", () => {
     const state = new Map<string, ChatRevealPaceState>();
     const base = {

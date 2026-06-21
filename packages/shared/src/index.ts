@@ -317,6 +317,8 @@ export interface ChatMessage {
   provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
+  /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
+  botId?: string | null;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -786,6 +788,12 @@ export interface ChatRequestPayload {
   modelOverride?: string;
   reasoningEffort?: ReasoningEffort;
   botId?: string | null;
+  /** Zen-only automatic Persona handoff turn. */
+  personaTransition?: {
+    fromBotId: string | null;
+    toBotId: string | null;
+    source: "picker";
+  };
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to

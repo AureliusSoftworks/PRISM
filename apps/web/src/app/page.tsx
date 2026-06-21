@@ -82,6 +82,7 @@ import {
   RotateCcw,
   SkipBack,
   SkipForward,
+  Timer,
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
@@ -162,6 +163,12 @@ import {
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
 } from "./prismDevChatCommands";
+import {
+  ZEN_TOOL_LAB_TOOLS,
+  buildZenToolLabMessageSample,
+  isZenToolLabDevImageId,
+  type ZenToolLabToolId,
+} from "./zenToolLab";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   findLeadingDevCommandTokenRange,
@@ -178,6 +185,11 @@ import {
   resolvePromptShortcutPreviewHighlightRanges,
   type PromptShortcutPreviewHighlightRange,
 } from "./promptShortcutPreviewHighlight";
+import {
+  promptShortcutChipLabel,
+  promptShortcutVisualSizingText,
+  type PromptShortcutPresentation,
+} from "./promptShortcutChipDisplay";
 import {
   collapseDeletedPromptWildcardDeckReferences,
   maskBuiltInWildcardSlotsForPending,
@@ -210,6 +222,7 @@ import {
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
+  findFirstBotMentionId,
   getBotMentionDisplayLength,
   type BotMentionPick,
 } from "./botMention";
@@ -255,6 +268,21 @@ import {
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
+import { buildZenPersonaInkSegmentMap } from "./zenPersonaInk";
+import {
+  DEFAULT_CHAT_REVEAL_TIMING,
+  formatChatRevealTokenDisplay,
+  isChatRevealEllipsisToken,
+  normalizeChatRevealFencedCodeBlockLeadingNewline,
+  normalizeChatRevealTimingSettings,
+  resolveChatRevealDurationMsForTokens,
+  resolveChatRevealPauseKind,
+  resolveChatRevealStepDelayMs,
+  resolveVisibleChatRevealTokenCountAtElapsedMs,
+  stripChatRevealThematicBreakLines,
+  tokenizeChatRevealText,
+  type ChatRevealTimingSettings,
+} from "./chatRevealTiming";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -632,8 +660,23 @@ const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_s
 const PRISM_DEV_MOOD_VISUAL_STORAGE_KEY = "prism_dev_mood_visual";
 /** Local position for the draggable Prism mood developer visual. */
 const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY = "prism_dev_mood_visual_position_v1";
+/** Dev-only Zen pause tester settings. */
+const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY = "prism_dev_zen_pause_tester_settings_v1";
+/** Dev-only Zen pause tester collapsed/open state. */
+const PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY = "prism_dev_zen_pause_tester_open_v1";
 const DEV_MOOD_VISUAL_DEFAULT_X = 22;
 const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
+const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
+  { key: "baseWordDelayMs", label: "Word", shortLabel: "word" },
+  { key: "clausePauseMs", label: "Clause", shortLabel: "clause" },
+  { key: "sentencePauseMs", label: "Sentence", shortLabel: "sentence" },
+  { key: "ellipsisHoldMs", label: "Ellipsis hold", shortLabel: "ellipsis" },
+  { key: "ellipsisDotStepMs", label: "Dot step", shortLabel: "dot" },
+] as const satisfies ReadonlyArray<{
+  key: keyof ChatRevealTimingSettings;
+  label: string;
+  shortLabel: string;
+}>;
 /** Local marker for the next/active Zen session boundary. */
 const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -3404,6 +3447,7 @@ interface Message {
   provider?: Provider;
   model?: string;
   fallbackUsed?: boolean;
+  botId?: string | null;
   botName?: string;
   botColor?: string;
   botGlyph?: string;
@@ -3793,27 +3837,12 @@ const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-const CHAT_MODE_WORD_REVEAL_MS = 78;
-const CHAT_MODE_LETTER_REVEAL_MS = 170;
-const CHAT_MODE_LETTER_REVEAL_STEP_MS = 18;
-const CHAT_MODE_WORD_REVEAL_SETTLE_MS = 12;
-const CHAT_MODE_COMMA_PAUSE_MS = 140;
-const CHAT_MODE_PERIOD_PAUSE_MS = 260;
-const CHAT_MODE_ELLIPSIS_PAUSE_MS = 720;
-const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 240;
-const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_PAUSE_MS;
-const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
-const CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN = /[)"'\]}»”’]+$/u;
-const CHAT_MODE_SENTENCE_PAUSE_PATTERN = /[.!?]$/u;
-const CHAT_MODE_CLAUSE_PAUSE_PATTERN = /[,;:]$/u;
-const CHAT_MODE_DASH_PAUSE_PATTERN = /(?:--|[–—])$/u;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
 const CHAT_MODE_STRONG_MARKER_PATTERN = /\*\*/g;
 const CHAT_MODE_EMPHASIS_MARKER_PATTERN = /(?<!\*)\*(?!\*)/g;
 const CHAT_MODE_QUOTE_MARKER_PATTERN = /["“”]/g;
 const CHAT_MODE_ALL_CAPS_WORD_PATTERN = /^(?=.*[A-Z])[A-Z0-9][A-Z0-9'’\-]*$/;
-const CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN = /^\s{0,3}([*_-])(?:\s*\1){2,}\s*$/;
 const CHAT_MODE_MARKDOWN_HEADING_PATTERN = /^\s{0,3}#{1,6}\s+\S/;
 const CHAT_MODE_HASH_HEADING_CAPTURE_PATTERN = /^\s{0,3}(#{1,5})\s+(.+?)\s*#*\s*$/;
 const CHAT_MODE_MARKDOWN_STRONG_LINE_PATTERN = /^\s*(\*\*|__)\S[\s\S]*\S\1\s*$/;
@@ -3836,13 +3865,6 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 // the auto-scroll target.
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
-const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
-  joyful: 58,
-  warm: 68,
-  neutral: CHAT_MODE_WORD_REVEAL_MS,
-  guarded: 104,
-  strained: 132,
-};
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
 
@@ -3879,27 +3901,6 @@ function isQuestionLikeChatTurn(content: string): boolean {
   const trimmed = content.trim();
   if (!trimmed) return false;
   return CHAT_MODE_USER_QUESTION_PATTERN.test(trimmed);
-}
-
-function isChatModeEllipsisToken(token: string): boolean {
-  return CHAT_MODE_ELLIPSIS_TOKEN_PATTERN.test(token);
-}
-
-function formatChatModeTypedTokenDisplay(token: string, isEllipsis: boolean): string {
-  const withoutMarkdownMarkers = token
-    .replace(CHAT_MODE_STRONG_MARKER_PATTERN, "")
-    .replace(CHAT_MODE_EMPHASIS_MARKER_PATTERN, "");
-  if (!isEllipsis) return withoutMarkdownMarkers;
-  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
-  return `. . .${trailingWhitespace}`;
-}
-
-function stripChatModeThematicBreakLines(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => (CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN.test(line) ? "" : line))
-    .join("\n");
 }
 
 function nodeStartsWithPullQuoteMarker(node: React.ReactNode): boolean {
@@ -4024,7 +4025,7 @@ function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta
     if (quoteMarkerCount % 2 === 1) {
       insideQuote = !insideQuote;
     }
-    const ellipsis = isChatModeEllipsisToken(token);
+    const ellipsis = isChatRevealEllipsisToken(token);
     const allCapsToken = isChatModeAllCapsToken(token);
     const instantRender = allCapsToken;
     const rainbowToken = allCapsToken;
@@ -4446,7 +4447,8 @@ function getConversationPendingAskQuestionState(
   const tail = lastUserIndex < 0 ? messages : messages.slice(lastUserIndex + 1);
   if (tail.some((m) => m.role === "user")) return undefined;
 
-  for (const m of tail) {
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const m = tail[i]!;
     if (m.role !== "assistant") continue;
     const qa = resolveAssistantAskQuestion(m);
     if (qa && qa.name === "AskQuestion" && (qa.options.length === 2 || qa.options.length === 3)) {
@@ -14282,6 +14284,8 @@ interface MessageBodyProps {
   forcedVisibleTokenCount?: number;
   /** Assistant typing cadence key for mood-based reveal speed. */
   revealMoodKey?: NonNullable<Message["moodKey"]>;
+  /** Live timing controls for word reveal and dynamic pauses. */
+  chatRevealTiming?: ChatRevealTimingSettings;
   /** When set, `prism-bot://…` markdown links render as glyph + colored name. */
   mentionRenderBots?: readonly BotMentionPick[];
   resolvedTheme?: "light" | "dark";
@@ -14292,6 +14296,7 @@ interface MessageBodyProps {
   pendingPromptWildcardCleanup?: boolean;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
+  promptShortcutPresentation?: PromptShortcutPresentation;
   renderPromptMetadataAsProse?: boolean;
   onTogglePromptShortcut?: () => void;
   onCollapsePromptShortcut?: () => void;
@@ -14313,11 +14318,6 @@ function flattenMarkdownText(node: React.ReactNode): string {
   if (!isValidElement(node)) return "";
   const element = node as React.ReactElement<{ children?: React.ReactNode }>;
   return flattenMarkdownText(element.props.children);
-}
-
-function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
-  const invocation = promptShortcut.invocation.trim();
-  return invocation || `/${promptShortcut.name}`;
 }
 
 function PendingWildcardShimmer({
@@ -14374,17 +14374,6 @@ function PendingPromptWildcardCleanupMessage({
       )}
     </p>
   );
-}
-
-function promptShortcutRendersAsStandalone(
-  content: string,
-  promptShortcut: PromptShortcutMetadata
-): boolean {
-  const visible = content.trim();
-  if (!visible) return false;
-  if (visible === promptShortcut.invocation.trim()) return true;
-  const resolvedPrompt = promptShortcut.resolvedPrompt?.trim() ?? "";
-  return resolvedPrompt.length > 0 && visible === resolvedPrompt;
 }
 
 function linkPromptShortcutTokensForMarkdown(
@@ -14531,34 +14520,11 @@ function promptShortcutWildcardReplacementsForPromptText(
     );
 }
 
-function PromptShortcutUnfoldedMessage({
-  promptShortcut,
-  fullPrompt,
-}: {
-  promptShortcut: PromptShortcutMetadata;
-  fullPrompt: string;
-}) {
-  const displayPromptBody = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
-  const promptBodyHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
-    displayPromptBody,
-    promptShortcutWildcardReplacementsForPromptText(
-      displayPromptBody,
-      promptShortcut.wildcardReplacements
-    )
-  );
-  return (
-    <p className={styles.promptShortcutUnfoldedText}>
-      <span className={styles.promptShortcutUnfoldedInsertion}>
-        {renderPromptShortcutPromptSent(displayPromptBody, promptBodyHighlightRanges)}
-      </span>
-    </p>
-  );
-}
-
 function PromptShortcutMessage({
   promptShortcut,
   fullPrompt,
   colorIndex,
+  presentation,
   expanded,
   onToggle,
   onCollapse,
@@ -14567,12 +14533,15 @@ function PromptShortcutMessage({
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
   colorIndex?: number;
+  presentation: PromptShortcutPresentation;
   expanded: boolean;
   onToggle?: () => void;
   onCollapse?: () => void;
   onOpenPrompt?: (commandId: string) => void;
 }) {
-  const label = promptShortcutLabel(promptShortcut);
+  const label = promptShortcutChipLabel(promptShortcut);
+  const expandable = presentation === "expandable";
+  const previewExpanded = expandable && expanded;
   const promptSent = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
   const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
     promptSent,
@@ -14590,27 +14559,38 @@ function PromptShortcutMessage({
   return (
     <span
       className={styles.promptShortcutInline}
-      data-prompt-shortcut-preview="true"
-      data-expanded={expanded ? "true" : undefined}
+      data-prompt-shortcut-preview={expandable ? "true" : undefined}
+      data-prompt-shortcut-presentation={presentation}
+      data-expanded={previewExpanded ? "true" : undefined}
     >
-      <button
-        type="button"
-        className={styles.promptShortcutCapsule}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
-      >
-        <span>{label.replace(/^\/+/, "")}</span>
-      </button>
-      {expanded && (
+      {expandable ? (
+        <button
+          type="button"
+          className={styles.promptShortcutCapsule}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle?.();
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggle?.();
+          }}
+          aria-expanded={previewExpanded}
+          aria-label={`${previewExpanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
+        >
+          <span>{label}</span>
+        </button>
+      ) : (
+        <span
+          className={styles.promptShortcutCapsule}
+          data-prompt-shortcut-locked="true"
+          aria-label={`Prompt shortcut ${label}`}
+        >
+          <span>{label}</span>
+        </span>
+      )}
+      {previewExpanded && (
         <span className={styles.promptShortcutPreview} role="group" aria-label="Prompt shortcut preview">
           <span className={styles.promptShortcutPreviewHeader}>
             <span className={styles.promptShortcutPreviewTitle}>{label}</span>
@@ -15110,10 +15090,6 @@ function buildProgressiveMarkdownSource(
   return output;
 }
 
-function normalizeFencedCodeBlockLeadingNewline(text: string): string {
-  return text.replace(/([^\n])(```[^\n\r]*\r?\n)/g, "$1\n$2");
-}
-
 function resolveMarkdownCodeLanguageAccent(language?: string): string | null {
   if (!language) return null;
   const normalized = language.toLowerCase().trim();
@@ -15447,102 +15423,40 @@ function resolveMessageDisplayContent(message: Message): string {
     : message.content;
 }
 
-function splitChatModeRevealTokenForEllipsis(token: string): string[] {
-  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
-  const core = trailingWhitespace ? token.slice(0, -trailingWhitespace.length) : token;
-  if (core.length === 0) return [token];
-  if (isChatModeEllipsisToken(token)) return [token];
-  if (core.endsWith("...") && core.length > 3) {
-    return [core.slice(0, -3), `...${trailingWhitespace}`];
+function resolveMessageVisualSizingContent(message: Message): string {
+  if (message.role === "user" && message.promptShortcut) {
+    return promptShortcutVisualSizingText(message.promptShortcut);
   }
-  if (core.endsWith("…") && core.length > 1) {
-    return [core.slice(0, -1), `…${trailingWhitespace}`];
-  }
-  return [token];
+  return resolveMessageDisplayContent(message);
 }
 
 function tokenizeMessageReveal(text: string): string[] {
-  const rawTokens = text.match(/\S+\s*/g) ?? [];
-  return rawTokens.flatMap(splitChatModeRevealTokenForEllipsis);
-}
-
-function resolveRevealWordDelayMsByMood(
-  moodKey: NonNullable<Message["moodKey"]> | undefined
-): number {
-  const normalizedMood = normalizeAssistantMoodKey(moodKey);
-  return CHAT_MODE_MOOD_WORD_REVEAL_MS[normalizedMood] ?? CHAT_MODE_WORD_REVEAL_MS;
-}
-
-function resolveTokenLetterRevealDurationMs(token: string): number {
-  const isEllipsis = isChatModeEllipsisToken(token);
-  const displayToken = formatChatModeTypedTokenDisplay(token, isEllipsis).trimEnd();
-  if (displayToken.length === 0) return 0;
-  if (isEllipsis) {
-    const dotCount = displayToken.match(/\./g)?.length ?? 1;
-    return CHAT_MODE_LETTER_REVEAL_MS + Math.max(0, dotCount - 1) * CHAT_MODE_ELLIPSIS_DOT_STEP_MS;
-  }
-  return (
-    CHAT_MODE_LETTER_REVEAL_MS +
-    Math.max(0, Array.from(displayToken).length - 1) * CHAT_MODE_LETTER_REVEAL_STEP_MS
-  );
-}
-
-function resolveTokenPunctuationPauseMs(token: string): number {
-  if (isChatModeEllipsisToken(token)) return CHAT_MODE_ELLIPSIS_PAUSE_MS;
-  const displayToken = formatChatModeTypedTokenDisplay(token, false)
-    .trimEnd()
-    .replace(CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN, "");
-  if (CHAT_MODE_SENTENCE_PAUSE_PATTERN.test(displayToken)) return CHAT_MODE_PERIOD_PAUSE_MS;
-  if (
-    CHAT_MODE_CLAUSE_PAUSE_PATTERN.test(displayToken) ||
-    CHAT_MODE_DASH_PAUSE_PATTERN.test(displayToken)
-  ) {
-    return CHAT_MODE_COMMA_PAUSE_MS;
-  }
-  return 0;
+  return tokenizeChatRevealText(text);
 }
 
 function resolveRevealStepDelayMs(
   previousToken: string,
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
 ): number {
-  if (isChatModeEllipsisToken(previousToken)) {
-    return CHAT_MODE_ELLIPSIS_WORD_HOLD_MS;
-  }
-  const minimumDelayMs = resolveRevealWordDelayMsByMood(moodKey);
-  return Math.max(
-    minimumDelayMs,
-    resolveTokenLetterRevealDurationMs(previousToken) + CHAT_MODE_WORD_REVEAL_SETTLE_MS
-  ) + resolveTokenPunctuationPauseMs(previousToken);
+  return resolveChatRevealStepDelayMs(previousToken, moodKey, timing);
 }
 
 function resolveVisibleTokenCountAtElapsedMs(
   tokens: string[],
   elapsedMs: number,
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
 ): number {
-  if (tokens.length <= 1) return 1;
-  let visible = 1;
-  let remaining = Math.max(0, elapsedMs);
-  while (visible < tokens.length) {
-    const delayMs = resolveRevealStepDelayMs(tokens[visible - 1] ?? "", moodKey);
-    if (remaining < delayMs) break;
-    remaining -= delayMs;
-    visible += 1;
-  }
-  return visible;
+  return resolveVisibleChatRevealTokenCountAtElapsedMs(tokens, elapsedMs, moodKey, timing);
 }
 
 function resolveRevealDurationMsForTokens(
   tokens: string[],
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
 ): number {
-  if (tokens.length <= 1) return 0;
-  let total = 0;
-  for (let i = 1; i < tokens.length; i += 1) {
-    total += resolveRevealStepDelayMs(tokens[i - 1] ?? "", moodKey);
-  }
-  return total;
+  return resolveChatRevealDurationMsForTokens(tokens, moodKey, timing);
 }
 
 function resolveChatModeMessageFontSizePx(
@@ -17241,14 +17155,12 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
   if (
     props.messageRole === "user" &&
     props.renderPromptMetadataAsProse === true &&
-    (props.promptShortcut || props.promptWildcards)
+    !props.promptShortcut &&
+    props.promptWildcards
   ) {
     const markdownProps: MessageBodyProps = {
       ...props,
-      content:
-        props.promptShortcut?.resolvedPrompt?.trim() ||
-        props.promptWildcards?.resolvedPrompt?.trim() ||
-        fullSource,
+      content: props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptShortcut: undefined,
       promptWildcards: undefined,
       renderPromptMetadataAsProse: false,
@@ -17256,23 +17168,17 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
     return <MarkdownMessageBody {...markdownProps} />;
   }
   if (props.messageRole === "user" && props.promptShortcut) {
-    if (promptShortcutRendersAsStandalone(fullSource, props.promptShortcut)) {
-      return (
-        <PromptShortcutMessage
-          promptShortcut={props.promptShortcut}
-          fullPrompt={fullSource}
-          colorIndex={props.promptShortcutColorIndex}
-          expanded={props.promptShortcutExpanded === true}
-          onToggle={props.onTogglePromptShortcut}
-          onCollapse={props.onCollapsePromptShortcut}
-          onOpenPrompt={props.onOpenCommandMention}
-        />
-      );
-    }
+    const presentation = props.promptShortcutPresentation ?? "expandable";
     return (
-      <PromptShortcutUnfoldedMessage
+      <PromptShortcutMessage
         promptShortcut={props.promptShortcut}
         fullPrompt={fullSource}
+        colorIndex={props.promptShortcutColorIndex}
+        presentation={presentation}
+        expanded={presentation === "expandable" && props.promptShortcutExpanded === true}
+        onToggle={props.onTogglePromptShortcut}
+        onCollapse={props.onCollapsePromptShortcut}
+        onOpenPrompt={props.onOpenCommandMention}
       />
     );
   }
@@ -17312,6 +17218,7 @@ function MarkdownMessageBody({
   chatCommittedLineCount,
   forcedVisibleTokenCount,
   revealMoodKey,
+  chatRevealTiming = DEFAULT_CHAT_REVEAL_TIMING,
   mentionRenderBots,
   resolvedTheme,
   commandMentionsById,
@@ -17329,14 +17236,14 @@ function MarkdownMessageBody({
   const normalizedSource = useMemo(
     () =>
       renderAsEphemeralLines
-        ? normalizeFencedCodeBlockLeadingNewline(source)
+        ? normalizeChatRevealFencedCodeBlockLeadingNewline(source)
         : source,
     [renderAsEphemeralLines, source]
   );
   const chatModeSource = useMemo(
     () =>
       renderAsEphemeralLines
-        ? stripChatModeThematicBreakLines(normalizedSource)
+        ? stripChatRevealThematicBreakLines(normalizedSource)
         : normalizedSource,
     [normalizedSource, renderAsEphemeralLines]
   );
@@ -17385,7 +17292,7 @@ function MarkdownMessageBody({
     if (clampedVisibleTokenCount >= tokens.length) return;
     let timer: number | null = null;
     const priorToken = tokens[clampedVisibleTokenCount - 1] ?? "";
-    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
+    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey, chatRevealTiming);
     timer = window.setTimeout(() => {
       setVisibleTokenCount((current) => Math.min(Math.max(1, current) + 1, tokens.length));
     }, delayMs);
@@ -17395,6 +17302,7 @@ function MarkdownMessageBody({
   }, [
     forcedVisibleTokenCount,
     clampedForcedVisibleTokenCount,
+    chatRevealTiming,
     preferLocalProgressiveReveal,
     revealMoodKey,
     revealWordByWord,
@@ -17550,10 +17458,18 @@ function MarkdownMessageBody({
               const globalTokenIndex = lineStartIndex + tokenIndex;
               if (globalTokenIndex >= visibleLimit) return null;
               const tokenMeta = typedTokenMeta[globalTokenIndex];
-              const renderedToken = formatChatModeTypedTokenDisplay(token, tokenMeta?.isEllipsis === true);
+              const ellipsisPhase =
+                tokenMeta?.isEllipsis === true && revealWordByWord && globalTokenIndex === latestVisibleTokenIndex
+                  ? "typing"
+                  : "complete";
+              const ellipsisComplete = tokenMeta?.isEllipsis === true && ellipsisPhase === "complete";
+              const renderedToken = formatChatRevealTokenDisplay(token, {
+                ellipsisPhase: tokenMeta?.isEllipsis === true ? ellipsisPhase : undefined,
+              });
               const chars = Array.from(renderedToken);
               const wordNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noFade;
-              const letterNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade;
+              const letterNoFade =
+                !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade || ellipsisComplete;
               const wordEffect = revealWordByWord ? tokenMeta?.effect : undefined;
               const wordClassName = [
                 styles.chatEphemeralTypedWord,
@@ -17591,7 +17507,7 @@ function MarkdownMessageBody({
                             {
                               ["--char-index" as string]: revealIndex,
                               ...(tokenMeta?.isEllipsis
-                                ? { ["--char-step-ms" as string]: `${CHAT_MODE_ELLIPSIS_DOT_STEP_MS}ms` }
+                                ? { ["--char-step-ms" as string]: `${chatRevealTiming.ellipsisDotStepMs}ms` }
                                 : {}),
                               ...(allowDecorativePrismText &&
                               tokenMeta?.style === "rainbow" &&
@@ -21499,6 +21415,14 @@ function HomeContent(): React.JSX.Element {
   const devMoodVisualRef = useRef<HTMLDivElement | null>(null);
   const devMoodVisualDragRef = useRef<DevMoodVisualDragState | null>(null);
   const devMoodVisualSuppressClickRef = useRef(false);
+  const [devZenPauseTesterOpen, setDevZenPauseTesterOpen] = useState(false);
+  const [zenToolLabOpen, setZenToolLabOpen] = useState(false);
+  const [devZenPauseTiming, setDevZenPauseTiming] = useState<ChatRevealTimingSettings>(
+    DEFAULT_CHAT_REVEAL_TIMING
+  );
+  const [devZenPauseTesterStorageLoaded, setDevZenPauseTesterStorageLoaded] = useState(
+    !DEV_TOOLS_ENABLED
+  );
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
   const closeDevTools = useCallback(() => {
@@ -21506,6 +21430,8 @@ function HomeContent(): React.JSX.Element {
     setDevTogglesOpen(false);
     setDevToolsMessage(null);
   }, []);
+  const effectiveChatRevealTiming =
+    DEV_TOOLS_ENABLED && view === "chat" ? devZenPauseTiming : DEFAULT_CHAT_REVEAL_TIMING;
 
   const closeBotContextMenu = useCallback(() => {
     setBotContextMenu(null);
@@ -21689,6 +21615,9 @@ function HomeContent(): React.JSX.Element {
   // (in sendMessage, once server truth has caught up to the pick).
   const [chatBotOverride, setChatBotOverride] =
     useState<string | null | undefined>(undefined);
+  const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
+  const zenPersonaBotIdRef = useRef<string | null>(null);
+  zenPersonaBotIdRef.current = zenPersonaBotId;
   const [images, setImages] = useState<ImageRecord[]>([]);
   /** Full-gallery fetch for bot tallies while the grid shows a filtered list. */
   const [imageBotDirectorySnapshot, setImageBotDirectorySnapshot] = useState<
@@ -22401,6 +22330,21 @@ function HomeContent(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, [chatOverflowMenuOpen]);
 
+  useEffect(() => {
+    if (!zenToolLabOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setZenToolLabOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zenToolLabOpen]);
+
+  useEffect(() => {
+    if (view !== "chat" && zenToolLabOpen) {
+      setZenToolLabOpen(false);
+    }
+  }, [view, zenToolLabOpen]);
+
   // When the chat-tools accordion collapses, hand focus back to the wrench so
   // keyboard users (Escape, outside-click, action click) don't get stranded
   // inside an inert subtree. Skip on mount + when the menu opens.
@@ -22416,6 +22360,47 @@ function HomeContent(): React.JSX.Element {
     const active = document.activeElement;
     if (accordionRoot?.contains(active)) wrench.focus();
   }, [chatOverflowMenuOpen]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED) return;
+    try {
+      const openRaw = window.localStorage.getItem(PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY);
+      setDevZenPauseTesterOpen(openRaw === "1");
+      const settingsRaw = window.localStorage.getItem(PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY);
+      if (settingsRaw) {
+        setDevZenPauseTiming(
+          normalizeChatRevealTimingSettings(JSON.parse(settingsRaw), DEFAULT_CHAT_REVEAL_TIMING)
+        );
+      }
+    } catch {
+      // Local dev affordance only.
+    }
+    setDevZenPauseTesterStorageLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
+    try {
+      window.localStorage.setItem(
+        PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY,
+        devZenPauseTesterOpen ? "1" : "0"
+      );
+    } catch {
+      // Local dev affordance only.
+    }
+  }, [devZenPauseTesterOpen, devZenPauseTesterStorageLoaded]);
+
+  useEffect(() => {
+    if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
+    try {
+      window.localStorage.setItem(
+        PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY,
+        JSON.stringify(devZenPauseTiming)
+      );
+    } catch {
+      // Local dev affordance only.
+    }
+  }, [devZenPauseTesterStorageLoaded, devZenPauseTiming]);
 
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return;
@@ -23432,11 +23417,16 @@ function HomeContent(): React.JSX.Element {
     sentGeneratedImage: SentGeneratedImagePayload
   ): React.ReactElement {
     const privateBlurred = isPrivateGeneratedImageHidden(sentGeneratedImage.imageId);
+    const imageSrc =
+      isZenToolLabDevImageId(sentGeneratedImage.imageId) &&
+      sentGeneratedImage.displayUrl?.trim()
+        ? sentGeneratedImage.displayUrl.trim()
+        : apiGeneratedImageThumbUrl(sentGeneratedImage.imageId);
     const image = (
       <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={apiGeneratedImageThumbUrl(sentGeneratedImage.imageId)}
+          src={imageSrc}
           alt={
             privateBlurred
               ? "Private generated image hidden"
@@ -23548,6 +23538,12 @@ function HomeContent(): React.JSX.Element {
     visualBotSelection.botId,
   ]);
 
+  const zenPersonaBot = useMemo<Bot | null>(() => {
+    return zenPersonaBotId
+      ? bots.find((bot) => bot.id === zenPersonaBotId) ?? null
+      : null;
+  }, [bots, zenPersonaBotId]);
+
   /**
    * Provider to actually treat as "preferred" for chat-side reads. When the
    * active chat bot is locked to "Offline only" (`online_enabled === 0`),
@@ -23560,9 +23556,10 @@ function HomeContent(): React.JSX.Element {
    * having to remember the rule independently.
    */
   const effectivePreferredProvider = useMemo<Provider>(() => {
-    if (activeBot?.online_enabled === 0) return "local";
+    const providerLockBot = view === "chat" ? zenPersonaBot : activeBot;
+    if (providerLockBot?.online_enabled === 0) return "local";
     return settings?.preferredProvider ?? "local";
-  }, [activeBot, settings?.preferredProvider]);
+  }, [activeBot, settings?.preferredProvider, view, zenPersonaBot]);
   /** Chat Images panel: visual bot is often null for Prism-default chats; use conversation locks instead. */
   const chatScopedGalleryBotId = useMemo(() => {
     if (view !== "chat") return null;
@@ -23570,6 +23567,7 @@ function HomeContent(): React.JSX.Element {
       return visualBotSelection.botId;
     }
     return (
+      zenPersonaBotId ??
       detail?.botId ??
       detail?.lastBotId ??
       selectedBotId ??
@@ -23579,6 +23577,7 @@ function HomeContent(): React.JSX.Element {
     view,
     privateChatActive,
     visualBotSelection.botId,
+    zenPersonaBotId,
     detail?.botId,
     detail?.lastBotId,
     selectedBotId,
@@ -23725,9 +23724,7 @@ function HomeContent(): React.JSX.Element {
       return detail?.botId ?? selectedBotId ?? null;
     }
     if (view === "chat") {
-      if (chatBotOverride !== undefined) return chatBotOverride;
-      if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
-      return detail?.botId ?? selectedBotId ?? null;
+      return zenPersonaBotId;
     }
     return selectedBotId;
   }, [
@@ -23736,6 +23733,7 @@ function HomeContent(): React.JSX.Element {
     chatBotOverride,
     privateChatActive,
     selectedBotId,
+    zenPersonaBotId,
   ]);
 
   const selectedComposeBotAccent = useMemo<string | null>(() => {
@@ -24931,6 +24929,9 @@ function HomeContent(): React.JSX.Element {
     );
     const botHasCommenced = !!detail && detail.messages.length > 0;
     const botDisabled = view === "chat" ? !detail : false;
+    const zenPersonaPickerDisabled =
+      view === "chat" &&
+      (pendingReplyVisible || (!detail && !forceNewConversationOnNextSend));
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     return (
       <div className={styles.chatHeaderModelPicker}>
@@ -24991,6 +24992,32 @@ function HomeContent(): React.JSX.Element {
               : undefined
           }
         />
+        {view === "chat" && zenPersonaPickerBots.length > 0 ? (
+          <ComposerBotPicker
+            value={zenPersonaBotId ?? ""}
+            onChange={handleZenPersonaSelectionChange}
+            bots={zenPersonaPickerBots}
+            resolvedTheme={resolvedTheme}
+            placement="down"
+            disabled={zenPersonaPickerDisabled}
+            title={
+              pendingReplyVisible
+                ? "Wait for the current reply before changing Persona."
+                : !detail && !forceNewConversationOnNextSend
+                ? "Zen is opening."
+                : "Persona for Zen replies"
+            }
+            ariaLabel="Zen Persona"
+            showName
+            enableFilters
+            hueFilterCenter={hueFilterCenter}
+            onHueChange={setHueFilterCenter}
+            hueLensAvailable={hueLensAvailable}
+            hueLensTrackGradient={hueLensTrackGradient}
+            hueLensTrackSegments={hueLensTrackSegments}
+            dismissPopoversSignal={composerPopoverDismissSignal}
+          />
+        ) : null}
         {view === "sandbox" && bots.length > 0 ? (
           <ComposerBotPicker
             value={selectedBotId ?? ""}
@@ -25443,6 +25470,10 @@ function HomeContent(): React.JSX.Element {
   const chatEphemeralMode = view === "chat";
   const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
+  const zenPersonaInkSegmentByMessageId = useMemo(
+    () => buildZenPersonaInkSegmentMap(detail?.messages ?? []),
+    [detail?.messages]
+  );
   const chatMentionsEnabled = true;
   /** Autoscroll + dynamic type on Zen's chat-like surface. */
   const assistantRevealActive = chatEphemeralMode;
@@ -25764,7 +25795,11 @@ function HomeContent(): React.JSX.Element {
       nowMs,
       stateByRevealKey: chatRevealPaceByKeyRef.current,
       resolveStepDelayMs: (previousTokenIndex) =>
-        resolveRevealStepDelayMs(revealTokens[previousTokenIndex] ?? "", moodKey),
+        resolveRevealStepDelayMs(
+          revealTokens[previousTokenIndex] ?? "",
+          moodKey,
+          effectiveChatRevealTiming
+        ),
     });
   }
   useEffect(() => {
@@ -25860,7 +25895,7 @@ function HomeContent(): React.JSX.Element {
       })();
       const messageIsOnScreen =
         messageViewportMeta !== false && messageViewportMeta.isOnScreen;
-      const lineCount = countEphemeralLines(resolveMessageDisplayContent(message));
+      const lineCount = countEphemeralLines(resolveMessageVisualSizingContent(message));
       const dissolveDurationMs =
         CHAT_MODE_OFFSCREEN_DISSOLVE_MS +
         Math.max(0, lineCount - 1) * CHAT_MODE_LINE_DISSOLVE_STAGGER_MS;
@@ -25889,7 +25924,8 @@ function HomeContent(): React.JSX.Element {
         ? firstSeenAt +
           resolveRevealDurationMsForTokens(
             tokenizeMessageReveal(resolveMessageDisplayContent(message)),
-            resolveMessageMoodKey(message)
+            resolveMessageMoodKey(message),
+            effectiveChatRevealTiming
           )
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
@@ -25918,6 +25954,7 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
     chatArchiveRevealEpoch,
   ]);
   const chatArchiveLoadingActive =
@@ -26173,7 +26210,7 @@ function HomeContent(): React.JSX.Element {
 
     let visualLineCount = 0;
     for (const message of activeMessages) {
-      const displayContent = resolveMessageDisplayContent(message);
+      const displayContent = resolveMessageVisualSizingContent(message);
       const sizingContent =
         chatAssistantTypingMechanicsActive &&
         message.role === "assistant" &&
@@ -26201,7 +26238,8 @@ function HomeContent(): React.JSX.Element {
                 resolveVisibleTokenCountAtElapsedMs(
                   revealTokens,
                   elapsedMs,
-                  resolveMessageMoodKey(message)
+                  resolveMessageMoodKey(message),
+                  effectiveChatRevealTiming
                 )
               );
               return revealTokens.slice(0, visibleTokenCount).join("");
@@ -26220,6 +26258,7 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
     latestAssistantMessageId,
     latestUserMessageIndex,
   ]);
@@ -26336,13 +26375,15 @@ function HomeContent(): React.JSX.Element {
     }
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      DEFAULT_MESSAGE_MOOD
+      DEFAULT_MESSAGE_MOOD,
+      effectiveChatRevealTiming
     );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
@@ -26385,7 +26426,8 @@ function HomeContent(): React.JSX.Element {
         : resolveVisibleTokenCountAtElapsedMs(
             revealTokens,
             Math.max(0, Date.now() - firstSeenAt),
-            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD
+            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+            effectiveChatRevealTiming
           )
     );
     const interruptionContent = interruptedMidWordSnippet(
@@ -28600,6 +28642,15 @@ function HomeContent(): React.JSX.Element {
         })),
     [bots, resolvedTheme, panelColorHarmonyActive]
   );
+  const zenPersonaPickerBots = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
   const chatEnabledBotMentionMap = useMemo(() => {
     const m = new Map<string, BotMentionPick>();
     for (const b of bots) {
@@ -28991,8 +29042,13 @@ function HomeContent(): React.JSX.Element {
     view === "chat" &&
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
-    !emptyStateSearchActive &&
-    !chatStartupSummaryVisible;
+    !emptyStateSearchActive;
+  const zenToolLabHasActiveThread = Boolean(
+    view === "chat" &&
+      detail?.id &&
+      detail.id !== "pending" &&
+      (visibleDetailMessages.length > 0 || pendingReplyVisible || zenInitialThinkingActive)
+  );
   const emptyStateTypingSearchAvailable =
     view !== "chat" &&
     pickerSourceBots.length > 0 &&
@@ -29172,7 +29228,19 @@ function HomeContent(): React.JSX.Element {
     if (chatBotOverride && !botIds.has(chatBotOverride)) {
       setChatBotOverride(undefined);
     }
-  }, [view, detail, selectedBotId, chatBotOverride, bots]);
+    if (zenPersonaBotId && !botIds.has(zenPersonaBotId)) {
+      setZenPersonaBotId(null);
+    }
+  }, [view, detail, selectedBotId, chatBotOverride, zenPersonaBotId, bots]);
+
+  useEffect(() => {
+    if (view !== "chat") return;
+    const nextPersonaBotId =
+      detail && detail.id !== "pending" ? detail.lastBotId ?? null : null;
+    setZenPersonaBotId((current) =>
+      current === nextPersonaBotId ? current : nextPersonaBotId
+    );
+  }, [view, detail?.id, detail?.lastBotId]);
 
   useEffect(() => {
     if (view !== "chat") return;
@@ -29907,7 +29975,8 @@ function HomeContent(): React.JSX.Element {
       chatRevealPaceByKeyRef.current.get(temporalKey)?.visibleTokenCount;
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      DEFAULT_MESSAGE_MOOD
+      DEFAULT_MESSAGE_MOOD,
+      effectiveChatRevealTiming
     );
     const visuallyComplete =
       typeof pacedVisibleTokenCount === "number"
@@ -29923,6 +29992,7 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
     pendingReplyVisible,
   ]);
   useEffect(() => {
@@ -30046,12 +30116,36 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    if (view === "chat") {
+      setZenPersonaBotId(null);
+    }
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
     }
     setError(null);
   }, [view]);
+
+  useEffect(() => {
+    if (
+      view !== "chat" ||
+      !detail ||
+      detail.id === "pending" ||
+      !detail.mode ||
+      detail.mode === "zen"
+    ) {
+      return;
+    }
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
+  }, [view, detail?.id, detail?.mode]);
 
   useEffect(() => {
     if (
@@ -30074,6 +30168,7 @@ function HomeContent(): React.JSX.Element {
         setSelectedBotId(null);
         setSandboxGridSelectedBotId(null);
         setChatBotOverride(undefined);
+        setZenPersonaBotId(null);
         setConversationStarterPrompts(null);
         const d = await api<{ conversationId: string }>("/api/conversations/zen/open", {
           method: "POST",
@@ -30598,9 +30693,14 @@ function HomeContent(): React.JSX.Element {
 
   async function openZenMode(): Promise<void> {
     setPendingIncognito(false);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     setConversationStarterPrompts(null);
     navigateToView("chat");
   }
@@ -31656,6 +31756,7 @@ function HomeContent(): React.JSX.Element {
     setCanvasSelectedBotIds(new Set());
     setCanvasBotMarqueeRect(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     setDraft("");
     setError(null);
     setChatModelChoiceByProvider(modelDefaults);
@@ -31973,9 +32074,16 @@ function HomeContent(): React.JSX.Element {
       commandCenterModelChoice?: string;
       commandCenterPrompt?: boolean;
       resolvedCommandCenterPrompt?: string;
+      promptInputOverride?: string;
       promptShortcut?: PromptShortcutMetadata;
       promptWildcards?: PromptWildcardRunMetadata;
       prismInterruption?: PrismMoodInterruptionInput;
+      zenPersonaBotId?: string | null;
+      personaTransition?: {
+        fromBotId: string | null;
+        toBotId: string | null;
+        source: "picker";
+      };
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
@@ -32010,6 +32118,16 @@ function HomeContent(): React.JSX.Element {
       modelOverride,
       chatReasoningEffort
     );
+    const hasZenPersonaBotOverride = Object.prototype.hasOwnProperty.call(
+      options,
+      "zenPersonaBotId"
+    );
+    const zenPersonaBotIdForRequest =
+      mode === "zen"
+        ? hasZenPersonaBotOverride
+          ? options.zenPersonaBotId
+          : zenPersonaBotId ?? undefined
+        : undefined;
     return {
       conversationId: options.forceNewConversation ? undefined : selectedId ?? undefined,
       message,
@@ -32035,7 +32153,7 @@ function HomeContent(): React.JSX.Element {
       botId:
         mode === "sandbox"
           ? (selectedBotId ?? undefined)
-          : undefined,
+          : zenPersonaBotIdForRequest,
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
@@ -32043,8 +32161,14 @@ function HomeContent(): React.JSX.Element {
       ...(options.resolvedCommandCenterPrompt
         ? { resolvedCommandCenterPrompt: options.resolvedCommandCenterPrompt }
         : {}),
+      ...(options.promptInputOverride
+        ? { promptInputOverride: options.promptInputOverride }
+        : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
       ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
+      ...(mode === "zen" && options.personaTransition
+        ? { personaTransition: options.personaTransition }
+        : {}),
     };
   }
 
@@ -32292,6 +32416,55 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text, options);
   }
 
+  function buildZenToolLabEphemeralMessage(toolId: ZenToolLabToolId): Message {
+    const sample = buildZenToolLabMessageSample(toolId);
+    return {
+      id: `dev-tool-lab-${toolId}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      role: "assistant",
+      createdAt: new Date().toISOString(),
+      provider: "local",
+      model: "dev/tool-lab",
+      content: sample.content,
+      ...(sample.askQuestion ? { askQuestion: sample.askQuestion } : {}),
+      ...(sample.tellFictionalStory
+        ? { tellFictionalStory: sample.tellFictionalStory }
+        : {}),
+      ...(sample.sentGeneratedImage
+        ? { sentGeneratedImage: sample.sentGeneratedImage }
+        : {}),
+      ...(sample.zenDisplay ? { zenDisplay: sample.zenDisplay } : {}),
+    };
+  }
+
+  function appendZenToolLabSample(toolId: ZenToolLabToolId): boolean {
+    const activeDetail = detail;
+    if (!activeDetail || !zenToolLabHasActiveThread) {
+      setError("Start a Zen thread before using Tool Lab.");
+      return false;
+    }
+    const message = buildZenToolLabEphemeralMessage(toolId);
+    setConversationStarterPrompts(null);
+    setAskQuestionComposerRevealed(false);
+    setStarterComposerRevealed(false);
+    setError(null);
+    setDetail((current) => {
+      if (!current || current.id !== activeDetail.id) return current;
+      const previousMessages = current.messages.map((existing) => {
+        if (!existing.id.startsWith("dev-tool-lab-")) return existing;
+        const rest = { ...existing };
+        delete rest.askQuestion;
+        delete rest.tellFictionalStory;
+        return rest;
+      });
+      return {
+        ...current,
+        hasAssistantReply: true,
+        messages: [...previousMessages, message],
+      };
+    });
+    return true;
+  }
+
   /** `/dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
   function consumePrismDevComposerCommand(trimmedLine: string): boolean {
     if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
@@ -32303,17 +32476,6 @@ function HomeContent(): React.JSX.Element {
     }
     setConversationStarterPrompts(null);
     setError(null);
-
-    const devAssistShell = (): Pick<Message, "id" | "role" | "createdAt"> & {
-      provider?: Message["provider"];
-      model?: string;
-    } => ({
-      id: `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      role: "assistant",
-      createdAt: new Date().toISOString(),
-      provider: "local",
-      model: "dev/ui",
-    });
 
     if (parsed.kind === "unknown") {
       setError(
@@ -32361,32 +32523,12 @@ function HomeContent(): React.JSX.Element {
       return true;
     }
 
-    if (!detail) {
+    if (!detail || detail.id === "pending") {
       setError("Open a chat first - then try /dev askquestion in the composer.");
       return true;
     }
 
-    const m: Message = {
-      ...devAssistShell(),
-      content:
-        "Sample **AskQuestion** rail preview from `/dev askquestion`.\n\n" +
-        "_Ephemeral — this row is only in memory in this browser tab._",
-      askQuestion: {
-        v: 1,
-        name: "AskQuestion",
-        prompt: "Dev preview (tap a chip)",
-        options: [
-          { id: "a", label: "🟢 Smoke A" },
-          { id: "b", label: "🟡 Smoke B" },
-          { id: "c", label: "🔴 Smoke C" },
-        ],
-      },
-    };
-    setDetail({
-      ...detail,
-      hasAssistantReply: true,
-      messages: [...detail.messages, m],
-    });
+    appendZenToolLabSample("ask-question");
     return true;
   }
 
@@ -33502,16 +33644,24 @@ function HomeContent(): React.JSX.Element {
       starterPrompt?: boolean;
       starterPromptWarrantsIntro?: boolean;
       draftOverride?: string;
+      promptInputOverride?: string;
       queuedConversationId?: string | null;
       skipComposerHistory?: boolean;
+      personaTransition?: {
+        fromBotId: string | null;
+        toBotId: string | null;
+        source: "picker";
+      };
     } = {}
   ) {
     e.preventDefault();
+    const isPersonaTransition = options.personaTransition !== undefined;
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isPersonaTransition &&
       await consumeBuiltInOperationalSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33522,6 +33672,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isPersonaTransition &&
       consumeGlobalClearCommand(rawTrimmed, "chat")
     ) {
       if (!options.skipComposerHistory) {
@@ -33532,6 +33683,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isPersonaTransition &&
       await consumeDevSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33542,6 +33694,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isPersonaTransition &&
       consumePrismDevComposerCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33552,7 +33705,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const commandCenterResolution =
-      rawTrimmed.length > 0 && !options.starterPrompt
+      rawTrimmed.length > 0 && !options.starterPrompt && !isPersonaTransition
         ? resolveCommandCenterPromptShortcuts(rawDraft)
         : { kind: "none" as const };
     if (commandCenterResolution.kind === "error") {
@@ -33577,7 +33730,9 @@ function HomeContent(): React.JSX.Element {
     const composerWildcardResolution =
       commandCenterResolution.kind === "resolved"
         ? { prompt: commandCenterResolution.prompt, promptWildcards: null }
-        : resolveComposerWildcardDraft(rawDraft);
+        : isPersonaTransition
+          ? { prompt: "", promptWildcards: null }
+          : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
     const trimmed = composerWildcardResolution.prompt.trim();
     const displayTrimmed = commandCenterPromptActive ? rawTrimmed : trimmed;
@@ -33614,7 +33769,7 @@ function HomeContent(): React.JSX.Element {
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
     const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
-    if (!trimmed && !isStarterPrompt) return;
+    if (!trimmed && !isStarterPrompt && !isPersonaTransition) return;
     let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
     if (
       commandCenterSubmitActive &&
@@ -33776,6 +33931,7 @@ function HomeContent(): React.JSX.Element {
 
     const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
+    const previousZenPersonaBotId = zenPersonaBotIdRef.current;
     let optimisticPromptCleanupMessageId: string | null = null;
     const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
@@ -33806,7 +33962,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingStarterDetail
         : initialZenStarterPendingDetail;
       setDetail(pendingStarterDetail);
-    } else if (!isStarterPrompt) {
+    } else if (!isStarterPrompt && !isPersonaTransition) {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -33914,6 +34070,19 @@ function HomeContent(): React.JSX.Element {
       pendingZenSessionBreak
         ? pendingZenSessionBreak
         : null;
+    const mentionedZenPersonaBotId =
+      view === "chat" && !isStarterPrompt && !isPersonaTransition
+        ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
+        : null;
+    const zenPersonaBotIdForSend =
+      view === "chat"
+        ? isPersonaTransition
+          ? options.personaTransition!.toBotId
+          : mentionedZenPersonaBotId ?? zenPersonaBotId
+        : undefined;
+    if (mentionedZenPersonaBotId) {
+      setZenPersonaBotId(mentionedZenPersonaBotId);
+    }
     const activeZenSessionBreakResumeContext =
       !isStarterPrompt &&
       view === "chat" &&
@@ -33962,6 +34131,15 @@ function HomeContent(): React.JSX.Element {
           : {}),
         ...(prismInterruptionForSend
           ? { prismInterruption: prismInterruptionForSend }
+          : {}),
+        ...(view === "chat"
+          ? { zenPersonaBotId: zenPersonaBotIdForSend ?? null }
+          : {}),
+        ...(options.personaTransition
+          ? { personaTransition: options.personaTransition }
+          : {}),
+        ...(options.promptInputOverride
+          ? { promptInputOverride: options.promptInputOverride }
           : {}),
       });
       appendDevChatRouteStart("send", chatBody);
@@ -34043,6 +34221,7 @@ function HomeContent(): React.JSX.Element {
         markLatestAssistantRevealEligible(patchedConversation);
         if (view === "chat") {
           hardResetChatArchiveStateForConversation(d.conversation.id);
+          setZenPersonaBotId(patchedConversation.lastBotId ?? null);
         }
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
@@ -34186,6 +34365,7 @@ function HomeContent(): React.JSX.Element {
         } else if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
           setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
+          setZenPersonaBotId(previousZenPersonaBotId);
           setDraft(
             isStarterPrompt || requestWasZenInitialThinkingCancelled
               ? ""
@@ -34220,6 +34400,7 @@ function HomeContent(): React.JSX.Element {
       if (stillViewingRequest) {
         setDetail(previousDetail);
         setPendingIncognito(previousPendingIncognito);
+        setZenPersonaBotId(previousZenPersonaBotId);
         setDraft(isStarterPrompt ? "" : restoreDraftAfterSendStops);
         setComposerSendTintActive(
           !isStarterPrompt && restoreDraftAfterSendStops.trim().length > 0
@@ -34267,6 +34448,7 @@ function HomeContent(): React.JSX.Element {
     action: "send" | "other";
     otherSource?: "askquestion" | "starter" | "story";
     sendValue?: string;
+    promptInputOverride?: string;
   };
 
   type AskQuestionInteraction = {
@@ -34304,20 +34486,23 @@ function HomeContent(): React.JSX.Element {
         id: "continue-story",
         label: continueLabel,
         action: "send",
-        sendValue: `${continueLabel} — continue the fictional story from exactly where you left off, preserving all established context, characters, tone, and continuity.`,
+        sendValue: continueLabel,
+        promptInputOverride: `${continueLabel}\n\nContinue the fictional story from the previous story passage. Start from where it left off; do not recap unless the story naturally needs a brief bridge.`,
       },
       {
         id: "bookmark-story",
         label: bookmarkLabel,
         sublabel: "Save my place",
         action: "send",
-        sendValue: `${bookmarkLabel} — bookmark my current place in this fictional story in session memory. Briefly note the current scene, key characters, unresolved threads, and where to resume.`,
+        sendValue: bookmarkLabel,
+        promptInputOverride: `${bookmarkLabel}\n\nBookmark the current place in the fictional story from the previous passage. Briefly note the current scene, key characters, unresolved threads, and where to resume.`,
       },
       {
         id: "finish-story",
         label: finishLabel,
         action: "send",
-        sendValue: `${finishLabel} — wrap up the fictional story cleanly. Resolve the active scene naturally, then provide the full prose of the story so far in one Markdown code block for easy copy-paste.`,
+        sendValue: finishLabel,
+        promptInputOverride: `${finishLabel}\n\nWrap up the fictional story from the previous passage. Resolve the active scene naturally, then provide the full prose of the story so far in one Markdown code block for easy copy-paste.`,
       },
     ];
   }
@@ -34484,7 +34669,12 @@ function HomeContent(): React.JSX.Element {
         /* no-op — used so sendMessage can share the submit pathway */
       },
     } as React.FormEvent<HTMLFormElement>;
-    void sendMessage(syntheticSubmit, { draftOverride: chip.sendValue ?? chip.label });
+    void sendMessage(syntheticSubmit, {
+      draftOverride: chip.sendValue ?? chip.label,
+      ...(chip.promptInputOverride
+        ? { promptInputOverride: chip.promptInputOverride }
+        : {}),
+    });
   }
 
   function resendUserMessage(msg: Message): void {
@@ -35205,7 +35395,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function revealChoiceComposerForOther(
-    source: "askquestion" | "starter" | undefined,
+    source: ComposerChip["otherSource"],
     options: { flushRender?: boolean } = {}
   ): void {
     hideZenHeaderForConversationAction();
@@ -35965,10 +36155,11 @@ function HomeContent(): React.JSX.Element {
     chatSummaryRefreshMarkerRef.current = null;
     setError(null);
     setDebugComposerDraft("");
-    const fallbackBotId = selectedBotId ?? null;
+    const fallbackBotId = zenPersonaBotId;
     const fallbackBot = fallbackBotId
       ? bots.find((bot) => bot.id === fallbackBotId) ?? null
       : null;
+    const debugBot = zenPersonaBot ?? fallbackBot;
     const nowIso = new Date().toISOString();
     const debugAssistantMessage: Message = {
       id: `debug-echo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -35977,24 +36168,21 @@ function HomeContent(): React.JSX.Element {
       createdAt: nowIso,
       provider: "local",
       model: "dev/debug-echo",
-      botName: activeBot?.name ?? fallbackBot?.name ?? DEFAULT_ASSISTANT_NAME,
-      botColor: activeBot?.color ?? fallbackBot?.color ?? undefined,
-      botGlyph: activeBot?.glyph ?? fallbackBot?.glyph ?? undefined,
+      botId: fallbackBotId,
+      botName: debugBot?.name ?? DEFAULT_ASSISTANT_NAME,
+      botColor: debugBot?.color ?? undefined,
+      botGlyph: debugBot?.glyph ?? undefined,
       moodKey: "neutral",
       moodConfidence: 1,
     };
     setDetail((current) => {
-      const conversationBotId = current?.botId ?? fallbackBotId;
-      const conversationBot = conversationBotId
-        ? bots.find((bot) => bot.id === conversationBotId) ?? null
-        : null;
-      const nextBotId = conversationBotId;
-      const nextBotColor = conversationBot?.color ?? null;
+      const nextBotId = fallbackBotId;
+      const nextBotColor = debugBot?.color ?? null;
       const baseMessages = current?.messages ?? [];
       return {
         id: current?.id ?? "pending",
         title: current?.title ?? "New chat",
-        botId: nextBotId,
+        botId: current?.botId ?? null,
         incognito: current?.incognito ?? pendingIncognito,
         lastBotId: nextBotId,
         lastBotColor: nextBotColor,
@@ -36190,6 +36378,7 @@ function HomeContent(): React.JSX.Element {
       setDetail(null);
       setSelectedBotId(null);
       setChatBotOverride(undefined);
+      setZenPersonaBotId(null);
       closeEmptyStateBotSearch();
       setHueFilterCenter(null);
       setPendingIncognito(privateMode);
@@ -38869,6 +39058,28 @@ function HomeContent(): React.JSX.Element {
     [view]
   );
 
+  function handleZenPersonaSelectionChange(next: string): void {
+    if (pendingReplyVisible) return;
+    const nextBotId = next || null;
+    const fromBotId = zenPersonaBotIdRef.current;
+    if (fromBotId === nextBotId) return;
+    setZenPersonaBotId(nextBotId);
+    const syntheticSubmit = {
+      preventDefault() {
+        // no-op; used so Persona transitions share the normal submit path
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    void sendMessage(syntheticSubmit, {
+      draftOverride: "",
+      skipComposerHistory: true,
+      personaTransition: {
+        fromBotId,
+        toBotId: nextBotId,
+        source: "picker",
+      },
+    });
+  }
+
   useEffect(() => {
     if (!emptyStateTypingSearchAvailable) return;
     function handlePageTyping(event: KeyboardEvent) {
@@ -41198,6 +41409,15 @@ function HomeContent(): React.JSX.Element {
 
   function handleHeaderHubClick() {
     pendingPrivateExitOnHubRef.current = true;
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
+    setConversationStarterPrompts(null);
     navigateToView("hub");
   }
 
@@ -41207,6 +41427,7 @@ function HomeContent(): React.JSX.Element {
     setDetail(null);
     setSelectedBotId(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     closeEmptyStateBotSearch();
     if (hueFilterCenter !== null) {
       startBotPickerReturnToAll();
@@ -46857,6 +47078,240 @@ function HomeContent(): React.JSX.Element {
             ) : (
               <p className={styles.devMoodNote}>No mood snapshot yet.</p>
             )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const updateDevZenPauseTiming = (
+    key: keyof ChatRevealTimingSettings,
+    valueSeconds: string
+  ): void => {
+    const seconds = Number.parseFloat(valueSeconds);
+    setDevZenPauseTiming((current) =>
+      normalizeChatRevealTimingSettings(
+        {
+          ...current,
+          [key]: Number.isFinite(seconds) ? seconds * 1000 : current[key],
+        },
+        current
+      )
+    );
+  };
+
+  const formatDevZenPauseSeconds = (ms: number): string => (ms / 1000).toFixed(3);
+  const formatDevZenPauseSummarySeconds = (ms: number): string =>
+    ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${(ms / 1000).toFixed(3)}s`;
+  const devZenPauseKindLabel = (kind: ReturnType<typeof resolveChatRevealPauseKind>): string => {
+    switch (kind) {
+      case "ellipsis":
+        return "Ellipsis";
+      case "sentence":
+        return "Sentence";
+      case "clause":
+        return "Clause";
+      case "base":
+      default:
+        return "Word";
+    }
+  };
+  const devZenPauseTokenPreview = (token: string): string => {
+    const display = formatChatRevealTokenDisplay(token, {
+      ellipsisPhase: isChatRevealEllipsisToken(token) ? "complete" : undefined,
+    }).trim();
+    if (!display) return "whitespace";
+    return display.length > 28 ? `${display.slice(0, 25)}...` : display;
+  };
+  const resolveDevZenPauseTesterStatus = (): {
+    active: boolean;
+    label: string;
+    delayMs: number;
+    token: string;
+  } => {
+    if (!detail?.id || !latestAssistantMessageId) {
+      return { active: false, label: "Idle", delayMs: 0, token: "No active reveal" };
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) {
+      return { active: false, label: "Idle", delayMs: 0, token: "No active reveal" };
+    }
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (
+      !chatAssistantRevealEligibleKeysRef.current.has(revealKey) ||
+      chatCompletedRevealKeysRef.current.has(revealKey) ||
+      chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)
+    ) {
+      return { active: false, label: "Idle", delayMs: 0, token: "Reveal complete" };
+    }
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const pacedVisibleTokenCount =
+      chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount ?? 1;
+    const previousTokenIndex = Math.max(
+      0,
+      Math.min(tokenTotal - 1, Math.max(1, pacedVisibleTokenCount) - 1)
+    );
+    const token = revealTokens[previousTokenIndex] ?? "";
+    const pauseKind = resolveChatRevealPauseKind(token);
+    return {
+      active: true,
+      label: devZenPauseKindLabel(pauseKind),
+      delayMs: resolveRevealStepDelayMs(token, DEFAULT_MESSAGE_MOOD, effectiveChatRevealTiming),
+      token: devZenPauseTokenPreview(token),
+    };
+  };
+
+  const renderDevZenPauseTester = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED || view !== "chat") return null;
+    const status = resolveDevZenPauseTesterStatus();
+    return (
+      <div
+        className={styles.devZenPauseTester}
+        data-open={devZenPauseTesterOpen ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={styles.devZenPauseTesterBubble}
+          onClick={() => setDevZenPauseTesterOpen((open) => !open)}
+          aria-label={devZenPauseTesterOpen ? "Collapse Zen pause tester" : "Open Zen pause tester"}
+          aria-expanded={devZenPauseTesterOpen}
+          data-glyph-tooltip={devZenPauseTesterOpen ? "Collapse pause tester" : "Zen pause tester"}
+        >
+          <Timer size={18} aria-hidden="true" />
+        </button>
+        {devZenPauseTesterOpen ? (
+          <div className={styles.devZenPauseTesterPanel} role="dialog" aria-label="Zen pause tester">
+            <div className={styles.devZenPauseTesterHeader}>
+              <div>
+                <span className={styles.devToolsKicker}>Zen timing</span>
+                <strong>Pause tester</strong>
+              </div>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={() => setDevZenPauseTesterOpen(false)}
+                aria-label="Collapse Zen pause tester"
+              >
+                ×
+              </button>
+            </div>
+            <p
+              className={styles.devZenPauseTesterStatus}
+              data-active={status.active ? "true" : undefined}
+              aria-live="polite"
+            >
+              <span>Current pause</span>
+              <strong>
+                {status.active
+                  ? `${status.label} · ${formatDevZenPauseSummarySeconds(status.delayMs)}`
+                  : "Idle"}
+              </strong>
+              <small>{status.token}</small>
+            </p>
+            <div className={styles.devZenPauseTesterControls}>
+              {DEV_ZEN_PAUSE_TESTER_CONTROLS.map((control) => (
+                <label key={control.key} className={styles.devZenPauseTesterControl}>
+                  <span>
+                    {control.label}
+                    <strong>{formatDevZenPauseSummarySeconds(effectiveChatRevealTiming[control.key])}</strong>
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.001}
+                    value={formatDevZenPauseSeconds(effectiveChatRevealTiming[control.key])}
+                    onChange={(event) =>
+                      updateDevZenPauseTiming(control.key, event.currentTarget.value)
+                    }
+                    aria-label={`${control.label} seconds`}
+                  />
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={`${styles.devToolsAction} ${styles.devZenPauseTesterReset}`}
+              onClick={() => setDevZenPauseTiming(DEFAULT_CHAT_REVEAL_TIMING)}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              Reset defaults
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderZenToolLab = (): React.JSX.Element | null => {
+    if (!DEV_TOOLS_ENABLED || view !== "chat") return null;
+    return (
+      <div
+        className={styles.zenToolLabDock}
+        data-open={zenToolLabOpen ? "true" : undefined}
+      >
+        <button
+          type="button"
+          className={styles.zenToolLabBubble}
+          onClick={() => setZenToolLabOpen((open) => !open)}
+          aria-label={zenToolLabOpen ? "Collapse Zen Tool Lab" : "Open Zen Tool Lab"}
+          aria-expanded={zenToolLabOpen}
+          aria-controls="zen-tool-lab-panel"
+          data-glyph-tooltip={zenToolLabOpen ? "Collapse Tool Lab" : "Zen Tool Lab"}
+        >
+          <Play size={17} aria-hidden="true" />
+        </button>
+        {zenToolLabOpen ? (
+          <div
+            id="zen-tool-lab-panel"
+            className={styles.zenToolLabPanel}
+            role="dialog"
+            aria-label="Zen Tool Lab"
+          >
+            <div className={styles.zenToolLabHeader}>
+              <div>
+                <span className={styles.devToolsKicker}>Zen tools</span>
+                <strong>Tool Lab</strong>
+              </div>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={() => setZenToolLabOpen(false)}
+                aria-label="Collapse Zen Tool Lab"
+              >
+                ×
+              </button>
+            </div>
+            <p
+              className={styles.zenToolLabStatus}
+              data-active={zenToolLabHasActiveThread ? "true" : undefined}
+              role="status"
+            >
+              {zenToolLabHasActiveThread
+                ? "Samples append to this thread only."
+                : "Start a Zen thread to enable tool samples."}
+            </p>
+            <div className={styles.zenToolLabGrid} aria-label="Zen Tool Lab samples">
+              {ZEN_TOOL_LAB_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className={styles.zenToolLabToolButton}
+                  disabled={!zenToolLabHasActiveThread}
+                  onClick={() => appendZenToolLabSample(tool.id)}
+                >
+                  <span className={styles.zenToolLabToolIcon} aria-hidden="true">
+                    <Play size={13} strokeWidth={2.4} />
+                  </span>
+                  <span>
+                    <strong>{tool.label}</strong>
+                    <small>{tool.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
@@ -59914,7 +60369,16 @@ function HomeContent(): React.JSX.Element {
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
     } as React.CSSProperties;
-    const zenSplashModelPickerActive = zenEmptyHeroVisible;
+    const zenFirstReplyPending =
+      pendingReplyVisible &&
+      pendingReplyStartMessageCount === 0 &&
+      detail?.hasAssistantReply !== true;
+    const zenHeroSurfaceVisible =
+      (!detail || detail.messages.length === 0) && !pendingReplyVisible;
+    const zenCanvasModelPickerActive =
+      zenHeroSurfaceVisible && !emptyStateSearchActive;
+    const zenHeaderModelPickerActive =
+      !zenCanvasModelPickerActive && !zenFirstReplyPending;
     return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
@@ -59982,7 +60446,7 @@ function HomeContent(): React.JSX.Element {
               ? renderMemoryToasts()
               : null}
           </div>
-          {zenSplashModelPickerActive ? null : renderHeaderModelPicker()}
+          {zenHeaderModelPickerActive ? renderHeaderModelPicker() : null}
           {renderChatOverflowGear()}
           {!chatLikeSurface ? (
             <div className={styles.chatHeaderComposeToolsRow}>
@@ -60223,7 +60687,7 @@ function HomeContent(): React.JSX.Element {
               }}
             />
           ) : null}
-          {chatStartupSummaryVisible ? (
+          {chatStartupSummaryVisible && !zenHeroSurfaceVisible ? (
             <div className={styles.chatCanvasSummaryContainer}>
               <div className={styles.chatSessionSummaryBubble} role="status" aria-live="polite">
                 <div className={styles.chatSummaryBubbleContent}>
@@ -60270,6 +60734,9 @@ function HomeContent(): React.JSX.Element {
             const heroStartLabel =
               "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
             const hint = (() => {
+              if (chatStartupSummaryVisible && chatStartupSummary) {
+                return chatStartupSummary;
+              }
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
@@ -60335,7 +60802,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
-                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummaryVisible ? (
+                {!emptyStateSearchActive && !suppressHeroCopy ? (
                   <button
                     type="button"
                     className={[
@@ -60351,11 +60818,11 @@ function HomeContent(): React.JSX.Element {
                     {renderHero()}
                   </button>
                 ) : null}
-                {!emptyStateSearchActive && !chatStartupSummaryVisible ? (
+                {!emptyStateSearchActive ? (
                   <div className={styles.emptyStateTitleBlock}>
                     <div className={styles.emptyStateTitle}>{title}</div>
                     <p className={styles.emptyStateHint}>{hint}</p>
-                    {zenSplashModelPickerActive ? (
+                    {zenCanvasModelPickerActive ? (
                       <div className={styles.zenSplashModelPicker}>
                         {renderHeaderModelPicker({
                           modelMenuClassName: styles.zenSplashModelMenu,
@@ -60496,7 +60963,7 @@ function HomeContent(): React.JSX.Element {
                     });
                   })()
                 : undefined;
-            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -60543,6 +61010,15 @@ function HomeContent(): React.JSX.Element {
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
+            const zenPersonaInkSegment =
+              chatLikeSurface && msg.role === "assistant"
+                ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
+                : null;
+            const zenPersonaInkStyle = zenPersonaInkSegment
+              ? ({
+                  "--zen-persona-ink-color": zenPersonaInkSegment.color,
+                } as React.CSSProperties)
+              : undefined;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -60582,6 +61058,8 @@ function HomeContent(): React.JSX.Element {
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
                 data-command-display={commandPromptDisplay ? "prompt" : undefined}
+                data-zen-persona-ink={zenPersonaInkSegment?.variant}
+                data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -60604,6 +61082,13 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
               >
+                {zenPersonaInkSegment ? (
+                  <span
+                    className={styles.zenPersonaInkWash}
+                    style={zenPersonaInkStyle}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {showMessageHeader && (
                   <h4>
                     {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
@@ -60686,6 +61171,7 @@ function HomeContent(): React.JSX.Element {
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  chatRevealTiming={effectiveChatRevealTiming}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
@@ -60697,6 +61183,7 @@ function HomeContent(): React.JSX.Element {
                   )}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  promptShortcutPresentation={chatLikeSurface ? "locked" : "expandable"}
                   renderPromptMetadataAsProse={chatLikeSurface}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>
@@ -60935,6 +61422,8 @@ function HomeContent(): React.JSX.Element {
       {renderSweepUndoToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
+      {renderZenToolLab()}
+      {renderDevZenPauseTester()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
@@ -61957,7 +62446,7 @@ function HomeContent(): React.JSX.Element {
                     });
                   })()
                 : undefined;
-            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -62144,6 +62633,7 @@ function HomeContent(): React.JSX.Element {
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  chatRevealTiming={effectiveChatRevealTiming}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
@@ -62155,6 +62645,7 @@ function HomeContent(): React.JSX.Element {
                   )}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
+                  promptShortcutPresentation={chatLikeSurface ? "locked" : "expandable"}
                   renderPromptMetadataAsProse={chatLikeSurface}
                   onTogglePromptShortcut={() =>
                     setExpandedPromptShortcutMessageId((current) =>

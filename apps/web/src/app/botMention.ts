@@ -553,6 +553,20 @@ export function tokenizeBotMentionSource(text: string): BotMentionSourceSegment[
   return segments;
 }
 
+export function findFirstBotMentionId(
+  text: string,
+  bots: readonly BotMentionPick[]
+): string | null {
+  if (!text || bots.length === 0) return null;
+  const validBotIds = new Set(bots.map((bot) => bot.id));
+  for (const segment of tokenizeBotMentionSource(text)) {
+    if (segment.kind === "mention" && validBotIds.has(segment.botId)) {
+      return segment.botId;
+    }
+  }
+  return null;
+}
+
 export interface AtMentionToken {
   /** Absolute index of `@` in full string. */
   atIndex: number;

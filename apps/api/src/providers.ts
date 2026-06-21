@@ -33,6 +33,17 @@ export interface GenerateOptions {
 
 export type ProviderName = "local" | "openai" | "anthropic";
 
+export type ApiKeyAuthSource = "account" | "server" | "none";
+
+export interface ProviderApiKeyAuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  source: ApiKeyAuthSource;
+  status: "missing" | "authenticated" | "invalid" | "unreachable";
+  modelCount: number;
+  message?: string;
+}
+
 export interface ModelCatalogEntry {
   id: string;
   label: string;
