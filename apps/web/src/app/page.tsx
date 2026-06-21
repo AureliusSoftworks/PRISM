@@ -5152,6 +5152,19 @@ interface BotOpinion {
 }
 
 type ApiKeySource = "saved" | "server" | "none";
+type ProviderApiKeyAuthSource = "account" | "server" | "none";
+type ProviderApiKeyAuthStatus = {
+  configured: boolean;
+  authenticated: boolean;
+  source: ProviderApiKeyAuthSource;
+  status: "missing" | "authenticated" | "invalid" | "unreachable";
+  modelCount: number;
+  message?: string;
+};
+type ProviderApiKeyStatusPayload = {
+  openai: ProviderApiKeyAuthStatus;
+  anthropic: ProviderApiKeyAuthStatus;
+};
 type ApiKeyValidationProvider = "openai" | "anthropic" | "elevenlabs";
 type ApiKeyDraftStatus = "idle" | "checking" | "connected" | "error";
 type ApiKeyVisualStatus =
@@ -7458,7 +7471,6 @@ function defaultOnlineModelChoice(
 function visibleConcreteOnlineModelChoice(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
-  provider: Provider,
   choice: string | null | undefined
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
@@ -14243,10 +14255,6 @@ function promptShortcutRendersAsStandalone(
   return resolvedPrompt.length > 0 && visible === resolvedPrompt;
 }
 
-function escapeMarkdownLinkLabel(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
-}
-
 function linkPromptShortcutTokensForMarkdown(
   source: string,
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
@@ -15370,12 +15378,21 @@ function resolveRevealDurationMsForTokens(
   return total;
 }
 
-function resolveChatModeMessageFontSizePx(lineCount: number): number {
-  if (lineCount <= 0) return CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
-  const band = CHAT_MODE_MESSAGE_FONT_BANDS.find(
-    (candidate) => lineCount <= candidate.maxVisualLines
-  );
-  return band?.fontSizePx ?? CHAT_MODE_MESSAGE_FONT_DEFAULT_PX;
+function resolveChatModeMessageFontSizePx(
+  lineCount: number,
+  role: "assistant" | "user" = "assistant"
+): number {
+  const minFontPx =
+    role === "user" ? CHAT_MODE_USER_MESSAGE_FONT_MIN_PX : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
+  const maxFontPx =
+    role === "user" ? CHAT_MODE_USER_MESSAGE_FONT_MAX_PX : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX;
+  if (lineCount <= CHAT_MODE_MESSAGE_FONT_MIN_LINES) return maxFontPx;
+  const normalized =
+    (Math.min(CHAT_MODE_MESSAGE_FONT_MAX_LINES, Math.max(CHAT_MODE_MESSAGE_FONT_MIN_LINES, lineCount)) -
+      CHAT_MODE_MESSAGE_FONT_MIN_LINES) /
+    Math.max(1, CHAT_MODE_MESSAGE_FONT_MAX_LINES - CHAT_MODE_MESSAGE_FONT_MIN_LINES);
+  const eased = Math.pow(normalized, CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT);
+  return maxFontPx - (maxFontPx - minFontPx) * eased;
 }
 
 function splitEphemeralDisplayLines(text: string): string[] {
@@ -17153,6 +17170,7 @@ function MarkdownMessageBody({
   );
   const typedLineRendererNode = useTypedLineRenderer ? (() => {
     const lines = splitEphemeralDisplayLines(renderedSource);
+    const finalLines = splitEphemeralDisplayLines(chatModeSource);
     const lineStartIndexes = resolveTypedLineStartIndexes(lines);
     const zenLinePlacements = resolveZenLineDisplayPlacements({
       content: chatModeSource,
@@ -20626,6 +20644,11 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerSendTintActive, setComposerSendTintActive] = useState(false);
+  const [chatHeaderChromeVisible, setChatHeaderChromeVisible] = useState(true);
+  const [chatComposerChromeVisible, setChatComposerChromeVisible] = useState(true);
+  const chatHeaderChromeVisibleRef = useRef(true);
+  const chatComposerChromeVisibleRef = useRef(true);
+  const chatChromeAutoHiddenRef = useRef(false);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
@@ -21710,6 +21733,9 @@ function HomeContent(): React.JSX.Element {
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const commandDisplayByMessageIdRef = useRef<
+    Map<string, { originalText: string; displayMarkdown: string }>
+  >(new Map());
   const zenSessionBreakAutoScrollKeyRef = useRef<string | null>(null);
   const zenAtmosphereScrollFrameRef = useRef<number | null>(null);
   /** Expanded AskQuestion chip rail; kept as a stable anchor for future rail-local gestures. */
@@ -22485,6 +22511,19 @@ function HomeContent(): React.JSX.Element {
     },
     []
   );
+
+  function rememberCommandDisplayAliasForLatestUserPrompt(
+    conversation: ConversationDetail,
+    _text: string,
+    alias: { originalText: string; displayMarkdown: string } | null | undefined
+  ): void {
+    if (!alias) return;
+    const latestUserMessage = [...conversation.messages]
+      .reverse()
+      .find((message) => message.role === "user");
+    if (!latestUserMessage) return;
+    commandDisplayByMessageIdRef.current.set(latestUserMessage.id, alias);
+  }
 
   const apiProxyLooksDown = useCallback((error: unknown): boolean => {
     const text = error instanceof Error ? error.message : String(error ?? "");
@@ -25738,6 +25777,13 @@ function HomeContent(): React.JSX.Element {
       if (source[i]?.role === "user") return source[i]!.id;
     }
     return null;
+  }, [detail?.messages]);
+  const latestUserMessageIndex = useMemo<number>(() => {
+    const source = detail?.messages ?? [];
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      if (source[i]?.role === "user") return i;
+    }
+    return -1;
   }, [detail?.messages]);
   const latestUserMessageAsQuestion = useMemo(() => {
     if (!detail?.messages || !latestUserMessageId) return false;
@@ -31771,14 +31817,11 @@ function HomeContent(): React.JSX.Element {
     const previousCommandAlias = commandDisplayByMessageIdRef.current.get(messageId);
     const rewoundMessages = previousDetail.messages.slice(0, cutoffIdx);
     commandDisplayByMessageIdRef.current.delete(messageId);
-    if (commandDisplayAlias) {
-      commandDisplayByMessageIdRef.current.set(messageId, commandDisplayAlias);
-    }
     setPendingReplyStartMessageCount(rewoundMessages.length);
     const optimisticEditedMessage: Message = {
       id: messageId,
       role: "user",
-      content: commandDisplayAlias?.displayMarkdown ?? text,
+      content: text,
       createdAt: new Date().toISOString(),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
       ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
@@ -31821,7 +31864,7 @@ function HomeContent(): React.JSX.Element {
         rememberCommandDisplayAliasForLatestUserPrompt(
           d.conversation,
           text,
-          commandDisplayAlias
+          null
         );
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
@@ -31866,7 +31909,7 @@ function HomeContent(): React.JSX.Element {
         rememberCommandDisplayAliasForLatestUserPrompt(
           d.conversation,
           text,
-          commandDisplayAlias
+          null
         );
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
@@ -33420,6 +33463,9 @@ function HomeContent(): React.JSX.Element {
         : initialZenStarterPendingDetail;
       setDetail(pendingStarterDetail);
     } else if (!isStarterPrompt) {
+      const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
       const optimisticMessage: Message = {
         id: optimisticMessageId,
         role: "user",
@@ -34290,7 +34336,7 @@ function HomeContent(): React.JSX.Element {
         aria-label="Suggested replies"
         className={railClassName}
       >
-        {rail.kind === "askquestion" ? (
+        {rail.source === "askquestion" ? (
           <div className={styles.conversationStarterHeadingRow}>
             {rail.heading ? (
               <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
@@ -34303,7 +34349,7 @@ function HomeContent(): React.JSX.Element {
               aria-label="Hide suggested replies"
               title="Hide suggested replies"
               disabled={pendingReply}
-              onClick={revealAskQuestionComposer}
+              onClick={() => setAskQuestionComposerRevealed(true)}
             >
               <X size={15} strokeWidth={2.4} aria-hidden="true" />
             </button>
@@ -36041,18 +36087,6 @@ function HomeContent(): React.JSX.Element {
       return false;
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function saveSettings(e: React.FormEvent) {
-    e.preventDefault();
-    await persistSettings();
-  }
-
-  async function saveSettingsHostsModal() {
-    const saved = await persistSettings();
-    if (saved) {
-      setSettingsHostsModalOpen(false);
     }
   }
 
