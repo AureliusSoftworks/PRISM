@@ -7797,14 +7797,22 @@
   height: 104%;
   object-fit: cover;
   opacity: calc(var(--zen-atmosphere-opacity, 0.15) * var(--zen-atmosphere-layer-opacity, 1));
-  filter: saturate(0.72) contrast(0.92) brightness(0.78);
+  filter:
+    saturate(0.72)
+    contrast(0.92)
+    brightness(0.78)
+    grayscale(var(--zen-atmosphere-grayscale, 0));
   transform: scale(1.01);
   transition: opacity 180ms linear;
   will-change: opacity;
 }
 
 .themeLight .zenAtmosphereBackdrop img {
-  filter: saturate(0.62) contrast(0.86) brightness(1.16);
+  filter:
+    saturate(0.62)
+    contrast(0.86)
+    brightness(1.16)
+    grayscale(var(--zen-atmosphere-grayscale, 0));
   mix-blend-mode: multiply;
 }
 
@@ -11330,40 +11338,44 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenPersonaInkWash {
-  --zen-persona-ink-opacity: 0.62;
+  --zen-persona-ink-opacity: 0.38;
   position: absolute;
   left: 50%;
-  top: -1.35em;
-  width: 122vw;
-  height: calc(100% + 2.7em);
+  top: calc(0px - var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px)));
+  width: 172vw;
+  height: calc(
+    100% +
+      var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px)) +
+      var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px))
+  );
   transform: translateX(-50%) scaleX(0.985);
   pointer-events: none;
   z-index: -1;
-  border-radius: 999px;
+  border-radius: 42vw / 260px;
   background:
     radial-gradient(
-      ellipse 70% 62% at 50% 50%,
+      ellipse 84% 78% at 50% 50%,
       color-mix(in srgb, var(--zen-persona-ink-color, transparent) 78%, transparent) 0%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 42%, transparent) 48%,
-      transparent 78%
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 44%, transparent) 56%,
+      transparent 86%
     ),
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 42%, transparent) 24%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 38%, transparent) 16%,
       color-mix(in srgb, var(--zen-persona-ink-color, transparent) 54%, transparent) 50%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 38%, transparent) 76%,
+      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 36%, transparent) 84%,
       transparent
     );
-  filter: blur(42px) saturate(1.16);
-  mix-blend-mode: overlay;
+  filter: blur(56px) saturate(1.16);
+  mix-blend-mode: screen;
   opacity: var(--zen-persona-ink-opacity);
   animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
 
 .themeLight .zenPersonaInkWash {
   --zen-persona-ink-opacity: 0.28;
-  mix-blend-mode: multiply;
+  mix-blend-mode: soft-light;
 }
 
 @keyframes zenPersonaInkWashIn {
@@ -11375,7 +11387,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   to {
     opacity: var(--zen-persona-ink-opacity);
     transform: translateX(-50%) scaleX(0.985);
-    filter: blur(42px) saturate(1.16);
+    filter: blur(56px) saturate(1.16);
   }
 }
 
@@ -14716,6 +14728,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-tone-gap-extra: 0px;
   --zen-tone-runway-extra: 0px;
   --zen-tone-scroll-margin-extra: 0px;
+  --zen-persona-ink-overlap: clamp(112px, calc(12dvh + var(--zen-tone-gap-extra)), 228px);
   --zen-prose-runway-top: clamp(240px, calc(38dvh + var(--zen-tone-runway-extra)), 672px);
   --zen-prose-runway-bottom: clamp(300px, calc(54dvh + var(--zen-tone-runway-extra)), 632px);
   --zen-text-top-fade-start: clamp(28px, 5dvh, 68px);
@@ -32963,6 +32976,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
+    --zen-persona-ink-overlap: clamp(88px, calc(10dvh + var(--zen-tone-gap-extra)), 184px);
     --zen-prose-runway-top: clamp(148px, calc(34dvh + var(--zen-tone-runway-extra)), 412px);
     --zen-prose-runway-bottom: clamp(220px, calc(46dvh + var(--zen-tone-runway-extra)), 492px);
     padding-top: var(--zen-prose-runway-top);

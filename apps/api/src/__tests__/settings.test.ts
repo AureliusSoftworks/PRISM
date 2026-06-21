@@ -5,6 +5,7 @@ import {
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+  DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
   DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
@@ -54,6 +55,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredZenWallpaperOpenAiImageModel: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+    zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -710,6 +712,35 @@ describe("resolveNextSettings — Zen Atmosphere text mask", () => {
         current
       ).zenWallpaperTextMaskEnabled,
       false
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
+  it("stores boolean grayscale values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperGrayscaleEnabled: true }, baseline())
+        .zenWallpaperGrayscaleEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperGrayscaleEnabled: false },
+        baseline({ zenWallpaperGrayscaleEnabled: 1 })
+      ).zenWallpaperGrayscaleEnabled,
+      false
+    );
+  });
+
+  it("keeps the stored grayscale setting when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperGrayscaleEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperGrayscaleEnabled, true);
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperGrayscaleEnabled: "sometimes" },
+        current
+      ).zenWallpaperGrayscaleEnabled,
+      true
     );
   });
 });

@@ -33,6 +33,7 @@ export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
 export const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
+export const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = false;
 export const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = 12 * 60 * 60 * 1000;
 export const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
 export const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
@@ -89,6 +90,7 @@ export interface CurrentSettings {
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number | null;
   zenWallpaperTextMaskEnabled: number | null;
+  zenWallpaperGrayscaleEnabled: number | null;
   zenSessionIdleGapMs: number | null;
   zenFreshStartGapMs: number | null;
   zenRecentContextMessages: number | null;
@@ -129,6 +131,7 @@ export interface NextSettings {
   preferredZenWallpaperOpenAiImageModel: string | null;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
+  zenWallpaperGrayscaleEnabled: boolean;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -411,6 +414,13 @@ export function normalizeZenWallpaperTextMaskEnabled(
   return Boolean(fallback);
 }
 
+export function normalizeZenWallpaperGrayscaleEnabled(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
+): boolean {
+  return normalizeZenWallpaperTextMaskEnabled(value, fallback);
+}
+
 function normalizeNumberSetting(
   value: unknown,
   fallback: number,
@@ -665,6 +675,15 @@ export function resolveNextSettings(
           body.zenWallpaperTextMaskEnabled,
           currentZenWallpaperTextMaskEnabled
         );
+  const currentZenWallpaperGrayscaleEnabled =
+    normalizeZenWallpaperGrayscaleEnabled(current.zenWallpaperGrayscaleEnabled);
+  const zenWallpaperGrayscaleEnabled =
+    body.zenWallpaperGrayscaleEnabled === undefined
+      ? currentZenWallpaperGrayscaleEnabled
+      : normalizeZenWallpaperGrayscaleEnabled(
+          body.zenWallpaperGrayscaleEnabled,
+          currentZenWallpaperGrayscaleEnabled
+        );
   const currentZenSessionIdleGapMs = normalizeZenSessionIdleGapMs(
     current.zenSessionIdleGapMs
   );
@@ -815,6 +834,7 @@ export function resolveNextSettings(
     preferredZenWallpaperOpenAiImageModel,
     zenWallpaperOpacity,
     zenWallpaperTextMaskEnabled,
+    zenWallpaperGrayscaleEnabled,
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,
