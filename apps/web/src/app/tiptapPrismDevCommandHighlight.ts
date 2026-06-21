@@ -54,6 +54,26 @@ export interface PromptShortcutTextRange {
   name: string;
 }
 
+interface KnownDevCommand {
+  name: string;
+  arguments?: readonly string[];
+}
+
+interface KnownCommandMatch extends RegExpMatchArray {
+  commandText: string;
+  argumentNames: readonly string[] | null;
+}
+
+const DEFAULT_DEV_COMMAND_ARGUMENTS = ["wait", "load"];
+
+function normalizeCommandName(value: string): string {
+  return value.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function normalizeArgumentName(value: string): string {
+  return value.trim().replace(/^-+/, "").toLowerCase();
+}
+
 function normalizedKnownNames(names: readonly string[] | null | undefined): Set<string> | null {
   if (!names) return null;
   return new Set(
@@ -61,6 +81,68 @@ function normalizedKnownNames(names: readonly string[] | null | undefined): Set<
       .map((name) => name.trim().replace(/^[!/]+/, "").toLowerCase())
       .filter(Boolean)
   );
+}
+
+function normalizedKnownCommands(
+  options: { commandNames?: readonly string[] | null; commands?: readonly KnownDevCommand[] | null }
+): Map<string, readonly string[] | null> | null {
+  const commandMap = new Map<string, readonly string[] | null>();
+  for (const command of options.commands ?? []) {
+    const name = normalizeCommandName(command.name);
+    if (!name) continue;
+    commandMap.set(name, command.arguments ?? []);
+  }
+  for (const name of options.commandNames ?? []) {
+    const normalized = normalizeCommandName(name);
+    if (!normalized || commandMap.has(normalized)) continue;
+    commandMap.set(normalized, null);
+  }
+  return commandMap.size > 0 ? commandMap : null;
+}
+
+function resolveKnownCommand(
+  text: string,
+  options: { commandNames?: readonly string[] | null; commands?: readonly KnownDevCommand[] | null } = {}
+): KnownCommandMatch | null {
+  const commandMatch = text.match(DEV_COMMAND_RE) as KnownCommandMatch | null;
+  if (!commandMatch) return null;
+  const commandText = commandMatch[0] ?? "";
+  const commandName = normalizeCommandName(commandText);
+  if (commandName.length < 3) return null;
+  const knownCommands = normalizedKnownCommands(options);
+  if (knownCommands && !knownCommands.has(commandName)) return null;
+  commandMatch.commandText = commandText;
+  commandMatch.argumentNames =
+    knownCommands?.get(commandName) ?? DEFAULT_DEV_COMMAND_ARGUMENTS;
+  return commandMatch;
+}
+
+function resolveKnownArgumentRange(
+  text: string,
+  cursor: number,
+  argumentNames: readonly string[] | null
+): { start: number; end: number } | null {
+  const known = normalizedKnownNames(argumentNames ?? DEFAULT_DEV_COMMAND_ARGUMENTS);
+  const includeTrailingValue = argumentNames === DEFAULT_DEV_COMMAND_ARGUMENTS || argumentNames === null;
+  if (!known || known.size === 0) return null;
+  let start = cursor;
+  while (start < text.length && /[\t ]/u.test(text[start] ?? "")) start += 1;
+  if (text[start] !== "-") return null;
+  let end = start + 1;
+  while (end < text.length && /[a-z0-9_-]/iu.test(text[end] ?? "")) end += 1;
+  const token = text.slice(start, end);
+  const name = normalizeArgumentName(token);
+  if (!name || !known.has(name)) return null;
+  if (includeTrailingValue) {
+    let valueStart = end;
+    while (valueStart < text.length && /[\t ]/u.test(text[valueStart] ?? "")) valueStart += 1;
+    if (valueStart > end && valueStart < text.length && !/[\r\n]/u.test(text[valueStart] ?? "")) {
+      let valueEnd = valueStart;
+      while (valueEnd < text.length && !/[\s]/u.test(text[valueEnd] ?? "")) valueEnd += 1;
+      if (valueEnd > valueStart) end = valueEnd;
+    }
+  }
+  return { start, end };
 }
 
 function normalizeTrueWildcardSlotName(value: unknown): string {
@@ -74,16 +156,15 @@ function normalizeTrueWildcardSlotName(value: unknown): string {
 
 export function resolveLeadingDevCommandTextRanges(
   firstTextBlockText: string,
-  options: { commandNames?: readonly string[] | null } = {}
+  options: {
+    commandNames?: readonly string[] | null;
+    commands?: readonly KnownDevCommand[] | null;
+  } = {}
 ): LeadingDevCommandTextRanges | null {
   const leadingWs = (firstTextBlockText.match(/^\s*/u)?.[0] ?? "").length;
   const tail = firstTextBlockText.slice(leadingWs);
   const commandMatch = resolveKnownCommand(tail, options);
   if (!commandMatch) return null;
-  const commandName = commandMatch[0].slice(1).toLowerCase();
-  const known = normalizedKnownNames(options.commandNames);
-  if (known && !known.has(commandName)) return null;
-
   const commandStart = leadingWs;
   const commandEnd = commandStart + commandMatch.commandText.length;
   const text = firstTextBlockText;
