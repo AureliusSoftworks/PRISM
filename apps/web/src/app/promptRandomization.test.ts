@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  maskBuiltInWildcardSlotsForPending,
+  promptContainsBuiltInWildcardSlots,
   promptInsertionStartsSentence,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
@@ -10,10 +12,11 @@ import {
 } from "./promptRandomization.ts";
 
 describe("withSentenceCasedPromptInsertion", () => {
-  it("capitalizes sentence-start insertions and lowercases mid-sentence insertions", () => {
+  it("capitalizes sentence-start insertions without lowercasing mid-sentence insertions", () => {
     assert.equal(withSentenceCasedPromptInsertion("moldy phrase", ""), "Moldy phrase");
     assert.equal(withSentenceCasedPromptInsertion("moldy phrase", "Wait. "), "Moldy phrase");
-    assert.equal(withSentenceCasedPromptInsertion("Moldy phrase", "a random "), "moldy phrase");
+    assert.equal(withSentenceCasedPromptInsertion("moldy phrase", "a random "), "moldy phrase");
+    assert.equal(withSentenceCasedPromptInsertion("Moldy phrase", "a random "), "Moldy phrase");
     assert.equal(promptInsertionStartsSentence("line one\n"), true);
   });
 
@@ -113,8 +116,25 @@ describe("resolvePromptRandomizationGroups", () => {
         ],
       }),
       {
-        prompt: "Pick alexson.",
-        replacements: [{ key: "NAME", value: "alex", start: 5, end: 9 }],
+        prompt: "Pick Alexson.",
+        replacements: [{ key: "NAME", value: "Alex", start: 5, end: 9 }],
+      }
+    );
+  });
+
+  it("preserves authored capitalization for custom names that touch prose", () => {
+    assert.deepEqual(
+      resolvePromptRandomizationGroups('lastname "!nameson"', {
+        decks: [
+          {
+            name: "name",
+            values: ["Heath"],
+          },
+        ],
+      }),
+      {
+        prompt: 'lastname "Heathson"',
+        replacements: [{ key: "NAME", value: "Heath", start: 10, end: 15 }],
       }
     );
   });
@@ -134,8 +154,8 @@ describe("resolvePromptRandomizationGroups", () => {
         ],
       }),
       {
-        prompt: "Pick morgan.",
-        replacements: [{ key: "NAMESON", value: "morgan", start: 5, end: 11 }],
+        prompt: "Pick Morgan.",
+        replacements: [{ key: "NAMESON", value: "Morgan", start: 5, end: 11 }],
       }
     );
   });
@@ -203,6 +223,24 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
       prompt: "Ask !mystery now.",
       replacements: [],
     });
+  });
+});
+
+describe("pending built-in wildcard slot masking", () => {
+  it("detects known brace slots without treating option groups as true wildcards", () => {
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {ADJECTIVE}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Pick {red|green}."), false);
+    assert.equal(promptContainsBuiltInWildcardSlots("Keep {MOOD RING} unknown."), false);
+  });
+
+  it("masks only known built-in brace slots for optimistic canvas placeholders", () => {
+    assert.equal(
+      maskBuiltInWildcardSlotsForPending(
+        "A {PLURAL NOUN} with {red|green} {ADJECTIVE}.",
+        "{LOADING}"
+      ),
+      "A {LOADING} with {red|green} {LOADING}."
+    );
   });
 });
 

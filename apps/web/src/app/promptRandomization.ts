@@ -27,11 +27,10 @@ export function withSentenceCasedPromptInsertion(value: string, before: string):
   for (let index = 0; index < chars.length; index += 1) {
     const char = chars[index]!;
     if (!/[A-Za-z]/u.test(char)) continue;
-    const word = chars.slice(index).join("").match(/^[A-Za-z]+/u)?.[0] ?? char;
-    if (!shouldStartSentence && (word === "I" || (word.length > 1 && /^[A-Z]+$/u.test(word)))) {
+    if (!shouldStartSentence) {
       return value;
     }
-    const nextChar = shouldStartSentence ? char.toLocaleUpperCase() : char.toLocaleLowerCase();
+    const nextChar = char.toLocaleUpperCase();
     if (nextChar === char) return value;
     chars[index] = nextChar;
     return chars.join("");
@@ -78,6 +77,24 @@ function deckReplacementKey(name: string): string {
 
 const BUILT_IN_WILDCARD_INVOCATION_RE =
   /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
+const BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+export function promptContainsBuiltInWildcardSlots(source: string): boolean {
+  for (const match of source.matchAll(BUILT_IN_WILDCARD_BRACE_RE)) {
+    if (getBuiltInPromptWildcardSlot(match[1] ?? "")) return true;
+  }
+  return false;
+}
+
+export function maskBuiltInWildcardSlotsForPending(
+  source: string,
+  pendingText: string
+): string {
+  if (!source || !pendingText) return source;
+  return source.replace(BUILT_IN_WILDCARD_BRACE_RE, (token, name: string) =>
+    getBuiltInPromptWildcardSlot(name) ? pendingText : token
+  );
+}
 
 function normalizedPromptRandomizationReplacementsForPrompt(
   prompt: string,
