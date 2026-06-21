@@ -14295,6 +14295,41 @@ function linkPromptShortcutTokensForMarkdown(
   return linked;
 }
 
+function linkWildcardDeckTokensForMarkdown(
+  source: string,
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): string {
+  if (!source || !commandMentionsById || commandMentionsById.size === 0) {
+    return source;
+  }
+  const commandByInvocationName = new Map<string, CommandCenterCommand>();
+  const wildcardNames: string[] = [];
+  for (const command of commandMentionsById.values()) {
+    if (!isComposerWildcardDeckPick(command)) continue;
+    for (const name of commandInvocationNames(command)) {
+      const normalized = name.trim().toLowerCase();
+      if (!normalized || commandByInvocationName.has(normalized)) continue;
+      commandByInvocationName.set(normalized, command);
+      wildcardNames.push(name);
+    }
+  }
+  const ranges = resolveWildcardDeckTextRanges(source, { wildcardNames });
+  if (ranges.length === 0) return source;
+
+  let linked = source;
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index]!;
+    const command = commandByInvocationName.get(range.name.toLowerCase());
+    if (!command) continue;
+    const token = source.slice(range.start, range.end);
+    const label = escapeMarkdownLinkLabel(token);
+    linked = `${linked.slice(0, range.start)}[${label}](${prismCommandMentionHref(
+      command.id
+    )})${linked.slice(range.end)}`;
+  }
+  return linked;
+}
+
 function promptShortcutWildcardColor(index: number | undefined): string {
   const normalized =
     typeof index === "number" && Number.isFinite(index) ? Math.max(0, Math.floor(index)) : 0;
@@ -17157,10 +17192,16 @@ function MarkdownMessageBody({
         : tokens.slice(0, renderVisibleTokenCount).join(""))
       : chatModeSource;
   const markdownSource = useMemo(
-    () =>
-      messageRole === "user" && promptShortcut
-        ? linkPromptShortcutTokensForMarkdown(renderedSource, commandMentionsById)
-        : renderedSource,
+    () => {
+      let source = renderedSource;
+      if (messageRole === "user" && promptShortcut) {
+        source = linkPromptShortcutTokensForMarkdown(source, commandMentionsById);
+      }
+      if (messageRole === "user") {
+        source = linkWildcardDeckTokensForMarkdown(source, commandMentionsById);
+      }
+      return source;
+    },
     [commandMentionsById, messageRole, promptShortcut, renderedSource]
   );
   const useTypedLineRenderer = Boolean(
@@ -17376,18 +17417,19 @@ function MarkdownMessageBody({
         if (commandId) {
           const command = commandMentionsById?.get(commandId);
           const label = flattenMarkdownText(children).trim() || `/${command?.name ?? "command"}`;
-          const labelParts = label.split(/\s+/).filter((part) => part.length > 0);
-          const commandLabel = labelParts[0] ?? label;
-          const flagLabel = labelParts.slice(1).join(" ");
+          const isWildcardDeck = command ? isComposerWildcardDeckPick(command) : false;
           return (
             <button
               type="button"
-              className={styles.promptShortcutCapsule}
+              className={`${styles.promptShortcutCapsule} ${
+                isWildcardDeck ? styles.promptWildcardCapsule : ""
+              }`}
               onClick={() => onOpenCommandMention?.(commandId)}
               data-command-id={commandId}
-              aria-label={`Open prompt ${label}`}
+              data-command-kind={isWildcardDeck ? "wildcard" : "prompt"}
+              aria-label={`${isWildcardDeck ? "Open wildcard deck" : "Open prompt"} ${label}`}
             >
-              <span>{label.replace(/^\/+/, "")}</span>
+              <span>{label.replace(/^[!/]+/, "")}</span>
             </button>
           );
         }
@@ -21221,10 +21263,6 @@ function HomeContent(): React.JSX.Element {
     CommandCenterWildcardDeck[]
   >(() => normalizeCommandCenterState(null).wildcardDecks);
   const promptCenterPromptComposerRef = useRef<ComposerInputHandle | null>(null);
-  const commandCenterCommandById = useMemo(
-    () => new Map(commandCenterCommands.map((command) => [command.id, command] as const)),
-    [commandCenterCommands]
-  );
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
   const [commandCenterSelectedWildcardDeckId, setCommandCenterSelectedWildcardDeckId] =
@@ -21918,6 +21956,15 @@ function HomeContent(): React.JSX.Element {
         .map(commandCenterWildcardDeckPick),
     [commandCenterWildcardDecks]
   );
+  const commandCenterMentionById = useMemo(
+    () =>
+      new Map(
+        [...commandCenterCommands, ...commandCenterWildcardDeckPicks].map(
+          (command) => [command.id, command] as const
+        )
+      ),
+    [commandCenterCommands, commandCenterWildcardDeckPicks]
+  );
   const composerWildcardDeckPicks = useMemo(
     () => [...BUILT_IN_WILDCARD_SLOT_PICKS, ...commandCenterWildcardDeckPicks],
     [commandCenterWildcardDeckPicks]
@@ -22485,6 +22532,20 @@ function HomeContent(): React.JSX.Element {
       setCommandCenterSpecsCommandId(commandId);
     },
     [openRightPanel]
+  );
+
+  const openCommandCenterMentionEditor = useCallback(
+    (commandId: string) => {
+      if (commandId.startsWith("wildcard:")) {
+        openRightPanel("command-center");
+        setCommandCenterSelectedCommandId(null);
+        setCommandCenterSelectedWildcardDeckId(commandId.slice("wildcard:".length));
+        setCommandCenterSpecsCommandId(null);
+        return;
+      }
+      openCommandCenterCommandEditor(commandId);
+    },
+    [openCommandCenterCommandEditor, openRightPanel]
   );
 
   const openCommandCenterHelpModal = useCallback(() => {
@@ -33254,6 +33315,10 @@ function HomeContent(): React.JSX.Element {
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
+    const promptWildcardFillAwaitsServerCleanup =
+      settings?.composerWritingAssist !== false &&
+      ((commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0 ||
+        (composerPromptWildcards?.wildcardReplacements?.length ?? 0) > 0);
     let detailForSend = detail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
     const isInitialZenStarterPrompt =
@@ -33466,17 +33531,27 @@ function HomeContent(): React.JSX.Element {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
+      const optimisticUserContent =
+        promptWildcardFillAwaitsServerCleanup && composerPromptWildcards
+          ? rawDraft.trim()
+          : displayTrimmed;
       const optimisticMessage: Message = {
         id: optimisticMessageId,
         role: "user",
-        content: displayTrimmed,
+        content: optimisticUserContent,
         createdAt: new Date().toISOString(),
-        ...(commandCenterPromptShortcut ? { promptShortcut: commandCenterPromptShortcut } : {}),
-        ...(composerPromptWildcards ? { promptWildcards: composerPromptWildcards } : {}),
+        ...(commandCenterPromptShortcut && !promptWildcardFillAwaitsServerCleanup
+          ? { promptShortcut: commandCenterPromptShortcut }
+          : {}),
+        ...(composerPromptWildcards && !promptWildcardFillAwaitsServerCleanup
+          ? { promptWildcards: composerPromptWildcards }
+          : {}),
       };
       const optimisticTitle =
         detailForSend?.title ??
-        (displayTrimmed.length > 42 ? `${displayTrimmed.slice(0, 39)}...` : displayTrimmed);
+        (optimisticUserContent.length > 42
+          ? `${optimisticUserContent.slice(0, 39)}...`
+          : optimisticUserContent);
       // Forward the chat-mode conversation-level settings (bot + privacy)
       // into the optimistic detail so the shell accent + privacy affordances
       // don't flicker between send and server reply. Once the server answers
@@ -59683,8 +59758,8 @@ function HomeContent(): React.JSX.Element {
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
-                  commandMentionsById={commandCenterCommandById}
-                  onOpenCommandMention={openCommandCenterCommandEditor}
+                  commandMentionsById={commandCenterMentionById}
+                  onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}
@@ -61139,8 +61214,8 @@ function HomeContent(): React.JSX.Element {
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
-                  commandMentionsById={commandCenterCommandById}
-                  onOpenCommandMention={openCommandCenterCommandEditor}
+                  commandMentionsById={commandCenterMentionById}
+                  onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
                   promptShortcutColorIndex={promptShortcutColorIndex}

@@ -101,6 +101,44 @@ describe("resolvePromptRandomizationGroups", () => {
     );
   });
 
+  it("resolves known deck prefixes when text touches the wildcard chip", () => {
+    assert.deepEqual(
+      resolvePromptRandomizationGroups("Pick !nameson.", {
+        decks: [
+          {
+            name: "name",
+            values: ["Alex"],
+          },
+        ],
+      }),
+      {
+        prompt: "Pick alexson.",
+        replacements: [{ key: "NAME", value: "alex", start: 5, end: 9 }],
+      }
+    );
+  });
+
+  it("prefers the longest deck name when touching prose", () => {
+    assert.deepEqual(
+      resolvePromptRandomizationGroups("Pick !nameson.", {
+        decks: [
+          {
+            name: "name",
+            values: ["Alex"],
+          },
+          {
+            name: "nameson",
+            values: ["Morgan"],
+          },
+        ],
+      }),
+      {
+        prompt: "Pick morgan.",
+        replacements: [{ key: "NAMESON", value: "morgan", start: 5, end: 11 }],
+      }
+    );
+  });
+
   it("sentence-cases deck and option replacements by placement", () => {
     const result = resolvePromptRandomizationGroups(
       "!mood begins. a !mood follows. Then. {soft|LOUD} lands.",
@@ -149,6 +187,16 @@ describe("collapseDeletedPromptWildcardDeckReferences", () => {
         values: ["joyful"],
       }),
       "Mix {moods} and !other."
+    );
+  });
+
+  it("keeps touching prose after collapsed deck prefixes", () => {
+    assert.equal(
+      collapseDeletedPromptWildcardDeckReferences("Mix !nameson.", {
+        name: "name",
+        values: ["Alex"],
+      }),
+      "Mix {name}son."
     );
   });
 });

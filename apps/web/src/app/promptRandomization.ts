@@ -88,27 +88,35 @@ function buildPromptRandomizationDeckLookup(
   return lookup;
 }
 
+function sortedPromptRandomizationDeckNames(
+  deckLookup: ReadonlyMap<string, PromptRandomizationDeck>
+): string[] {
+  return [...deckLookup.keys()].sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
 function findNextPromptRandomizationDeckToken(
   source: string,
   cursor: number,
   deckLookup: ReadonlyMap<string, PromptRandomizationDeck>
 ): { start: number; end: number; deck: PromptRandomizationDeck } | null {
   if (deckLookup.size === 0) return null;
-  const tokenRe = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
-  tokenRe.lastIndex = cursor;
-  for (const match of source.matchAll(tokenRe)) {
-    const raw = match[0] ?? "";
-    const delimiter = match[1] ?? "";
-    const name = match[2] ?? "";
-    const matchIndex = match.index ?? -1;
-    if (matchIndex < 0 || !name) continue;
-    const start = matchIndex + delimiter.length;
-    if (start < cursor) continue;
-    const deck = deckLookup.get(normalizePromptRandomizationDeckName(name));
+  const lowerSource = source.toLowerCase();
+  const names = sortedPromptRandomizationDeckNames(deckLookup);
+  let searchFrom = cursor;
+  while (searchFrom < source.length) {
+    const start = source.indexOf("!", searchFrom);
+    if (start < 0) return null;
+    const afterBang = lowerSource.slice(start + 1);
+    const name = names.find((candidate) => afterBang.startsWith(candidate));
+    if (!name) {
+      searchFrom = start + 1;
+      continue;
+    }
+    const deck = deckLookup.get(name);
     if (!deck) continue;
     return {
       start,
-      end: matchIndex + raw.length,
+      end: start + 1 + name.length,
       deck,
     };
   }
@@ -123,16 +131,27 @@ export function collapseDeletedPromptWildcardDeckReferences(
     .map(normalizePromptRandomizationDeckName)
     .filter(Boolean);
   if (invocationNames.length === 0) return source;
-  const names = new Set(invocationNames);
+  const names = invocationNames.sort((a, b) => b.length - a.length || a.localeCompare(b));
   const fallback = `{${normalizePromptRandomizationDeckName(deck.name) || "wildcard"}}`;
-  return source.replace(
-    /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu,
-    (match, delimiter: string, rawName: string) => {
-      return names.has(normalizePromptRandomizationDeckName(rawName))
-        ? `${delimiter}${fallback}`
-        : match;
+  const lowerSource = source.toLowerCase();
+  let output = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf("!", cursor);
+    if (start < 0) break;
+    const afterBang = lowerSource.slice(start + 1);
+    const name = names.find((candidate) => afterBang.startsWith(candidate));
+    if (!name) {
+      output += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
     }
-  );
+    output += source.slice(cursor, start);
+    output += fallback;
+    cursor = start + 1 + name.length;
+  }
+  output += source.slice(cursor);
+  return output;
 }
 
 export function resolvePromptRandomizationGroups(

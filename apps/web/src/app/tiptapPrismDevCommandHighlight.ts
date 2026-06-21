@@ -83,6 +83,12 @@ function normalizedKnownNames(names: readonly string[] | null | undefined): Set<
   );
 }
 
+function normalizedKnownNameList(names: readonly string[] | null | undefined): string[] | null {
+  const known = normalizedKnownNames(names);
+  if (!known) return null;
+  return [...known].sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
 function normalizedKnownCommands(
   options: { commandNames?: readonly string[] | null; commands?: readonly KnownDevCommand[] | null }
 ): Map<string, readonly string[] | null> | null {
@@ -271,15 +277,35 @@ export function resolveWildcardDeckTextRanges(
   text: string,
   options: { wildcardNames?: readonly string[] | null } = {}
 ): PromptShortcutTextRange[] {
-  const known = normalizedKnownNames(options.wildcardNames);
-  if (known && known.size === 0) return [];
+  const knownNames = normalizedKnownNameList(options.wildcardNames);
+  if (knownNames && knownNames.length === 0) return [];
   const ranges: PromptShortcutTextRange[] = [];
+  if (knownNames) {
+    const lowerText = text.toLowerCase();
+    let cursor = 0;
+    while (cursor < text.length) {
+      const bangIndex = text.indexOf("!", cursor);
+      if (bangIndex < 0) break;
+      const afterBang = lowerText.slice(bangIndex + 1);
+      const name = knownNames.find((candidate) => afterBang.startsWith(candidate));
+      if (!name) {
+        cursor = bangIndex + 1;
+        continue;
+      }
+      ranges.push({
+        start: bangIndex,
+        end: bangIndex + 1 + name.length,
+        name,
+      });
+      cursor = bangIndex + 1 + name.length;
+    }
+    return ranges;
+  }
   for (const match of text.matchAll(WILDCARD_DECK_RE)) {
     const raw = match[0] ?? "";
     const name = (match[2] ?? "").trim().toLowerCase();
     const matchIndex = match.index ?? -1;
     if (matchIndex < 0 || !name) continue;
-    if (known && !known.has(name)) continue;
     const delimiterLength = raw.startsWith("!") ? 0 : 1;
     const start = matchIndex + delimiterLength;
     ranges.push({

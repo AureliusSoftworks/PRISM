@@ -277,6 +277,33 @@ describe("resolveWildcardDeckTextRanges", () => {
       [{ start: 9, end: 20, name: "randomshit" }]
     );
   });
+
+  it("keeps known deck chips when touching following prose", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("!randomShitson", {
+        wildcardNames: ["randomShit"],
+      }),
+      [{ start: 0, end: 11, name: "randomshit" }]
+    );
+  });
+
+  it("keeps known deck chips when touching preceding prose", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("hello!randomShit", {
+        wildcardNames: ["randomShit"],
+      }),
+      [{ start: 5, end: 16, name: "randomshit" }]
+    );
+  });
+
+  it("prefers the longest known deck name when names overlap", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("!randomShitson", {
+        wildcardNames: ["randomShit", "randomShitson"],
+      }),
+      [{ start: 0, end: 14, name: "randomshitson" }]
+    );
+  });
 });
 
 describe("resolvePendingWildcardSlotTextRanges", () => {
