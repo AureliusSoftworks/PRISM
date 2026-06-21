@@ -4939,6 +4939,36 @@ function clampUnitInterval(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function waitForBotTransferPaint(): Promise<void> {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function formatBotTransferEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "Finishing up";
+  if (seconds < 2) return "Almost done";
+  if (seconds < 60) return `ETA ${Math.ceil(seconds)} sec`;
+  const minutes = Math.ceil(seconds / 60);
+  return `ETA ${minutes} min`;
+}
+
+function estimateBotTransferEtaSeconds(
+  transfer: BotTransferOverlayState,
+  nowMs: number
+): number | null {
+  if (!transfer.totalSteps || transfer.completedSteps <= 0) return null;
+  const remainingSteps = transfer.totalSteps - transfer.completedSteps;
+  if (remainingSteps <= 0) return 0;
+  const elapsedSeconds = Math.max(0, (nowMs - transfer.startedAt) / 1000);
+  if (elapsedSeconds < 1) return null;
+  const secondsPerStep = elapsedSeconds / transfer.completedSteps;
+  return remainingSteps * secondsPerStep;
+}
+
 function trimMessagesToActiveTurn(messages: Message[]): Message[] {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.role === "user") {
@@ -5708,6 +5738,8 @@ interface ImportBotOptions {
   suppressNotice?: boolean;
   suppressPanelReset?: boolean;
   selectInChat?: boolean;
+  deferRefresh?: boolean;
+  onProgress?: (event: ImportBotProgressEvent) => void;
 }
 
 interface ImportBotResult {
@@ -5717,8 +5749,51 @@ interface ImportBotResult {
   restoredMemories: number;
 }
 
+interface ImportBotProgressEvent {
+  kind: "bot-created" | "memory-restored";
+  importedName: string;
+  restoredMemories: number;
+  totalMemories: number;
+}
+
+type BotTransferMode = "import" | "export";
+
+interface BotTransferStats {
+  totalBots?: number;
+  completedBots?: number;
+  totalMemories?: number;
+  completedMemories?: number;
+  imported?: number;
+  exported?: number;
+  overwritten?: number;
+  skipped?: number;
+  failed?: number;
+}
+
+interface BotTransferOverlayState {
+  mode: BotTransferMode;
+  title: string;
+  subject: string;
+  detail: string;
+  currentStepLabel: string;
+  completedSteps: number;
+  totalSteps: number | null;
+  startedAt: number;
+  accentColor: string | null;
+  glyph: BotGlyphName;
+  stats: BotTransferStats;
+}
+
+interface PreparedBotCollectionImportEntry {
+  entryName: string;
+  raw: string;
+  parsed: Partial<BotExportPayloadV1>;
+  importedName: string;
+  memoryCount: number;
+}
+
 /** Max UTF-8 size for pasted or file-read bot export text before JSON parse. */
-const BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES = 512 * 1024;
+const BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES = 12 * 1024 * 1024;
 const BOT_COLLECTION_FILE_EXTENSION = ".bots";
 const BOT_COLLECTION_ARCHIVE_MIME = "application/vnd.prism.bots+zip";
 
@@ -22053,10 +22128,9 @@ function HomeContent(): React.JSX.Element {
   const [importBotPasteText, setImportBotPasteText] = useState("");
   const [importBotPasteError, setImportBotPasteError] = useState<string | null>(null);
   const [importBotPasteBusy, setImportBotPasteBusy] = useState(false);
-  const [importBotFileBusy, setImportBotFileBusy] = useState(false);
-  const [importBotFileBusyName, setImportBotFileBusyName] = useState("");
-  const [importBotFileBusyColor, setImportBotFileBusyColor] = useState<string | null>(null);
-  const [importBotFileBusyGlyph, setImportBotFileBusyGlyph] = useState<BotGlyphName>(DEFAULT_BOT_GLYPH);
+  const [botTransferOverlay, setBotTransferOverlay] = useState<BotTransferOverlayState | null>(null);
+  const [botTransferOverlayNowMs, setBotTransferOverlayNowMs] = useState(() => Date.now());
+  const botTransferBusy = botTransferOverlay !== null;
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
   const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
   const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
@@ -22646,6 +22720,14 @@ function HomeContent(): React.JSX.Element {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [importBotModalPhase, closeImportBotModal]);
+  useEffect(() => {
+    if (!botTransferOverlay) return;
+    setBotTransferOverlayNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setBotTransferOverlayNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [botTransferOverlay]);
   // Shared close helper for the right-hand panels. Also resets panel-specific
   // transient UI so reopening a panel doesn't resurrect stale state.
   const resetPanelTransientState = useCallback(() => {
@@ -37203,18 +37285,21 @@ function HomeContent(): React.JSX.Element {
     name: string | null;
     color: string | null;
     glyph: BotGlyphName;
+    memoryCount: number;
   } {
     try {
       const parsedUnknown = JSON.parse(extractBotExportJson(raw));
       if (typeof parsedUnknown !== "object" || parsedUnknown === null || Array.isArray(parsedUnknown)) {
-        return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH };
+        return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH, memoryCount: 0 };
       }
       const parsed = parsedUnknown as {
         bot?: { name?: unknown; color?: unknown; glyph?: unknown };
+        memories?: unknown;
       };
       const rawName = typeof parsed.bot?.name === "string" ? parsed.bot.name.trim() : "";
       const rawColor = typeof parsed.bot?.color === "string" ? parsed.bot.color.trim() : "";
       const rawGlyph = typeof parsed.bot?.glyph === "string" ? parsed.bot.glyph.trim() : "";
+      const memoryCount = Array.isArray(parsed.memories) ? parsed.memories.length : 0;
       const color = /^#?[0-9a-fA-F]{6}$/.test(rawColor)
         ? (rawColor.startsWith("#") ? rawColor : `#${rawColor}`)
         : null;
@@ -37223,10 +37308,26 @@ function HomeContent(): React.JSX.Element {
         name: rawName.length > 0 ? rawName : null,
         color,
         glyph,
+        memoryCount,
       };
     } catch {
-      return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH };
+      return { name: null, color: null, glyph: DEFAULT_BOT_GLYPH, memoryCount: 0 };
     }
+  }
+
+  function startBotTransferOverlay(
+    initial: Omit<BotTransferOverlayState, "startedAt">
+  ): void {
+    setBotTransferOverlay({
+      ...initial,
+      startedAt: Date.now(),
+    });
+  }
+
+  function updateBotTransferOverlay(
+    updater: (current: BotTransferOverlayState) => BotTransferOverlayState
+  ): void {
+    setBotTransferOverlay((current) => (current ? updater(current) : current));
   }
 
   async function buildBotExportFile(bot: Bot): Promise<{
@@ -37324,57 +37425,174 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function exportBotProfile(bot: Bot) {
+    if (botTransferBusy) return;
     setPanelError(null);
     setPanelNotice(null);
-    const built = await buildBotExportFile(bot);
-    const blob = new Blob([built.json], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `bot-${slugifyFileToken(built.trimmedName)}.bot`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setPanelNotice(
-      built.memoriesCount > 0
-        ? `${built.trimmedName} exported with ${built.memoriesCount} memories.`
-        : `${built.trimmedName} exported.`
-    );
+    startBotTransferOverlay({
+      mode: "export",
+      title: "Exporting bot",
+      subject: bot.name,
+      detail: "Gathering profile and memories.",
+      currentStepLabel: "Preparing export",
+      completedSteps: 0,
+      totalSteps: 3,
+      accentColor: bot.color ?? null,
+      glyph: isBotGlyphName(bot.glyph) ? bot.glyph : DEFAULT_BOT_GLYPH,
+      stats: { totalBots: 1, completedBots: 0, totalMemories: 0 },
+    });
+    try {
+      await waitForBotTransferPaint();
+      const built = await buildBotExportFile(bot);
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: built.trimmedName,
+        detail: built.memoriesCount > 0
+          ? `Prepared ${built.memoriesCount} memories.`
+          : "Profile prepared.",
+        currentStepLabel: "Building .bot file",
+        completedSteps: 1,
+        stats: {
+          ...current.stats,
+          completedBots: 1,
+          totalMemories: built.memoriesCount,
+          completedMemories: built.memoriesCount,
+        },
+      }));
+      await waitForBotTransferPaint();
+      const blob = new Blob([built.json], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bot-${slugifyFileToken(built.trimmedName)}.bot`;
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        detail: "Handing the file to your browser.",
+        currentStepLabel: "Starting download",
+        completedSteps: 2,
+      }));
+      await waitForBotTransferPaint();
+      a.click();
+      URL.revokeObjectURL(url);
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        detail: "Export complete.",
+        currentStepLabel: "Complete",
+        completedSteps: current.totalSteps ?? current.completedSteps,
+        stats: { ...current.stats, exported: 1 },
+      }));
+      setPanelNotice(
+        built.memoriesCount > 0
+          ? `${built.trimmedName} exported with ${built.memoriesCount} memories.`
+          : `${built.trimmedName} exported.`
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Bot export failed.");
+    } finally {
+      setBotTransferOverlay(null);
+    }
   }
 
   async function exportBotsAsCollection(selectedBots: Bot[]): Promise<void> {
     if (selectedBots.length === 0) return;
+    if (botTransferBusy) return;
     setPanelError(null);
     setPanelNotice(null);
+    startBotTransferOverlay({
+      mode: "export",
+      title: "Exporting bots",
+      subject:
+        selectedBots.length === 1
+          ? selectedBots[0]?.name ?? "1 bot"
+          : `${selectedBots.length} bots`,
+      detail: "Gathering profiles and memories.",
+      currentStepLabel: "Preparing collection",
+      completedSteps: 0,
+      totalSteps: selectedBots.length + 2,
+      accentColor: selectedBots[0]?.color ?? null,
+      glyph: isBotGlyphName(selectedBots[0]?.glyph) ? selectedBots[0].glyph : DEFAULT_BOT_GLYPH,
+      stats: { totalBots: selectedBots.length, completedBots: 0, totalMemories: 0 },
+    });
     const files: Record<string, Uint8Array> = {};
     const usedNames = new Set<string>();
     let totalMemories = 0;
-    for (const bot of selectedBots) {
-      const built = await buildBotExportFile(bot);
-      totalMemories += built.memoriesCount;
-      const base = `bot-${slugifyFileToken(built.trimmedName)}`;
-      let candidate = `${base}.bot`;
-      let suffix = 2;
-      while (usedNames.has(candidate)) {
-        candidate = `${base}-${suffix}.bot`;
-        suffix += 1;
+    try {
+      await waitForBotTransferPaint();
+      for (const [index, bot] of selectedBots.entries()) {
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: bot.name,
+          detail: `Gathering memories for bot ${index + 1} of ${selectedBots.length}.`,
+          currentStepLabel: `Exporting ${bot.name}`,
+          accentColor: bot.color ?? current.accentColor,
+          glyph: isBotGlyphName(bot.glyph) ? bot.glyph : current.glyph,
+        }));
+        const built = await buildBotExportFile(bot);
+        totalMemories += built.memoriesCount;
+        const base = `bot-${slugifyFileToken(built.trimmedName)}`;
+        let candidate = `${base}.bot`;
+        let suffix = 2;
+        while (usedNames.has(candidate)) {
+          candidate = `${base}-${suffix}.bot`;
+          suffix += 1;
+        }
+        usedNames.add(candidate);
+        files[candidate] = strToU8(built.json);
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          detail: built.memoriesCount > 0
+            ? `${built.trimmedName}: ${built.memoriesCount} memories prepared.`
+            : `${built.trimmedName}: profile prepared.`,
+          currentStepLabel: `${index + 1} of ${selectedBots.length} bots prepared`,
+          completedSteps: index + 1,
+          stats: {
+            ...current.stats,
+            completedBots: index + 1,
+            totalMemories,
+            completedMemories: totalMemories,
+          },
+        }));
       }
-      usedNames.add(candidate);
-      files[candidate] = strToU8(built.json);
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: `${selectedBots.length} bots`,
+        detail: "Compressing the bot collection.",
+        currentStepLabel: "Creating .bots file",
+        completedSteps: selectedBots.length,
+      }));
+      await waitForBotTransferPaint();
+      const zipped = zipSync(files, { level: 6 });
+      const blob = new Blob([zipped], { type: BOT_COLLECTION_ARCHIVE_MIME });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      anchor.href = url;
+      anchor.download = `bots-${selectedBots.length}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`;
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        detail: "Handing the collection to your browser.",
+        currentStepLabel: "Starting download",
+        completedSteps: selectedBots.length + 1,
+      }));
+      await waitForBotTransferPaint();
+      anchor.click();
+      URL.revokeObjectURL(url);
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        detail: "Export complete.",
+        currentStepLabel: "Complete",
+        completedSteps: current.totalSteps ?? current.completedSteps,
+        stats: { ...current.stats, exported: selectedBots.length },
+      }));
+      setPanelNotice(
+        totalMemories > 0
+          ? `${selectedBots.length} bots exported to .bots with ${totalMemories} memories.`
+          : `${selectedBots.length} bots exported to .bots.`
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Bot export failed.");
+    } finally {
+      setBotTransferOverlay(null);
     }
-    const zipped = zipSync(files, { level: 6 });
-    const blob = new Blob([zipped], { type: BOT_COLLECTION_ARCHIVE_MIME });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    anchor.href = url;
-    anchor.download = `bots-${selectedBots.length}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setPanelNotice(
-      totalMemories > 0
-        ? `${selectedBots.length} bots exported to .bots with ${totalMemories} memories.`
-        : `${selectedBots.length} bots exported to .bots.`
-    );
   }
 
   async function exportAccountAsPrismArchive(): Promise<void> {
@@ -37496,7 +37714,7 @@ function HomeContent(): React.JSX.Element {
     const normalized = stripOptionalLeadingUtf8Bom(raw);
     if (botImportUtf8ByteLength(normalized) > BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES) {
       throw new Error(
-        `That export is too large to import here (max ${Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024)} KB).`
+        `That export is too large to import here (max ${Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024 / 1024)} MB).`
       );
     }
     let parsedUnknown: unknown;
@@ -37599,6 +37817,12 @@ function HomeContent(): React.JSX.Element {
     }
 
     const memories = Array.isArray(parsed.memories) ? parsed.memories : [];
+    options?.onProgress?.({
+      kind: "bot-created",
+      importedName,
+      restoredMemories: 0,
+      totalMemories: memories.length,
+    });
     let restored = 0;
     for (const memory of memories) {
       if (!memory || typeof memory.text !== "string" || memory.text.trim().length === 0) continue;
@@ -37627,11 +37851,19 @@ function HomeContent(): React.JSX.Element {
         }),
       });
       restored += 1;
+      options?.onProgress?.({
+        kind: "memory-restored",
+        importedName,
+        restoredMemories: restored,
+        totalMemories: memories.length,
+      });
     }
 
-    await refreshBots();
-    await refreshMemories();
-    await refreshBotMemories(createdBotId);
+    if (!options?.deferRefresh) {
+      await refreshBots();
+      await refreshMemories();
+      await refreshBotMemories(createdBotId);
+    }
     if (options?.selectInChat !== false) {
       selectImportedBotInChatMode(createdBotId);
     }
@@ -37670,9 +37902,23 @@ function HomeContent(): React.JSX.Element {
   async function importBotCollectionBundle(file: File): Promise<void> {
     setPanelError(null);
     setPanelNotice(null);
+    updateBotTransferOverlay((current) => ({
+      ...current,
+      title: "Importing bot collection",
+      subject: file.name,
+      detail: "Reading collection file.",
+      currentStepLabel: "Opening .bots file",
+      totalSteps: null,
+    }));
     const archiveBytes = new Uint8Array(await file.arrayBuffer());
     let entries: Record<string, Uint8Array>;
     try {
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        detail: "Unpacking bot collection.",
+        currentStepLabel: "Reading bundled bots",
+      }));
+      await waitForBotTransferPaint();
       entries = unzipSync(archiveBytes);
     } catch {
       throw new Error("Could not read bot collection file.");
@@ -37688,6 +37934,58 @@ function HomeContent(): React.JSX.Element {
     const manifest = manifestEntry
       ? parseBotGroupManifest(strFromU8(manifestEntry[1]))
       : null;
+    const preparedEntries: PreparedBotCollectionImportEntry[] = [];
+    let failedCount = 0;
+    let totalMemoryEntries = 0;
+    for (const [entryName, bytes] of botEntries) {
+      try {
+        const raw = strFromU8(bytes);
+        const parsed = parseBotExportPayload(raw);
+        const importedName =
+          typeof parsed.bot?.name === "string" && parsed.bot.name.trim().length > 0
+            ? parsed.bot.name.trim()
+            : entryName;
+        const memoryCount = Array.isArray(parsed.memories) ? parsed.memories.length : 0;
+        totalMemoryEntries += memoryCount;
+        preparedEntries.push({
+          entryName,
+          raw,
+          parsed,
+          importedName,
+          memoryCount,
+        });
+      } catch {
+        failedCount += 1;
+      }
+    }
+    if (preparedEntries.length === 0 && failedCount > 0) {
+      throw new Error("Bot collection import failed. None of the .bot files could be imported.");
+    }
+    const totalWorkSteps =
+      preparedEntries.reduce((sum, entry) => sum + 1 + entry.memoryCount, 0) +
+      failedCount +
+      1;
+    let completedWorkSteps = failedCount;
+    let completedMemorySteps = 0;
+    updateBotTransferOverlay((current) => ({
+      ...current,
+      detail:
+        totalMemoryEntries > 0
+          ? `Found ${preparedEntries.length} bots and ${totalMemoryEntries} memories.`
+          : `Found ${preparedEntries.length} bots.`,
+      currentStepLabel: "Preparing import",
+      completedSteps: completedWorkSteps,
+      totalSteps: Math.max(1, totalWorkSteps),
+      stats: {
+        ...current.stats,
+        totalBots: botEntries.length,
+        completedBots: failedCount,
+        totalMemories: totalMemoryEntries,
+        completedMemories: 0,
+        failed: failedCount,
+      },
+    }));
+    await waitForBotTransferPaint();
     const botIdByHash = new Map<string, string>();
     for (const bot of bots) {
       const hash = normalizeImportedBotHash(bot.export_hash);
@@ -37698,50 +37996,159 @@ function HomeContent(): React.JSX.Element {
     let importedCount = 0;
     let overwrittenCount = 0;
     let skippedCount = 0;
-    let failedCount = 0;
     let restoredTotal = 0;
 
-    for (const [entryName, bytes] of botEntries) {
-      const raw = strFromU8(bytes);
+    for (const entry of preparedEntries) {
+      const entryTotalSteps = 1 + entry.memoryCount;
+      let entryCompletedSteps = 0;
+      let entryRestoredMemories = 0;
+      const completeRemainingEntrySteps = () => {
+        const remaining = Math.max(0, entryTotalSteps - entryCompletedSteps);
+        if (remaining === 0) return;
+        completedWorkSteps += remaining;
+        entryCompletedSteps += remaining;
+      };
       try {
-        const parsed = parseBotExportPayload(raw);
-        const importedHash = normalizeImportedBotHash(parsed.botHash);
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: entry.importedName,
+          detail: entry.memoryCount > 0
+            ? `Restoring ${entry.memoryCount} memories for ${entry.importedName}.`
+            : `Importing ${entry.importedName}.`,
+          currentStepLabel: `Importing ${entry.importedName}`,
+          stats: {
+            ...current.stats,
+            imported: importedCount,
+            overwritten: overwrittenCount,
+            skipped: skippedCount,
+            failed: failedCount,
+          },
+        }));
+        const importedHash = normalizeImportedBotHash(entry.parsed.botHash);
         let allowDuplicateHash = false;
         if (importedHash && botIdByHash.has(importedHash)) {
-          const duplicateName =
-            typeof parsed.bot?.name === "string" && parsed.bot.name.trim().length > 0
-              ? parsed.bot.name.trim()
-              : entryName;
           const shouldOverwrite = window.confirm(
-            `${duplicateName} already exists. Click OK to overwrite, or Cancel to skip it.`
+            `${entry.importedName} already exists. Click OK to overwrite, or Cancel to skip it.`
           );
           if (!shouldOverwrite) {
             skippedCount += 1;
+            completeRemainingEntrySteps();
+            updateBotTransferOverlay((current) => ({
+              ...current,
+              detail: `${entry.importedName} skipped.`,
+              currentStepLabel: `${skippedCount} skipped`,
+              completedSteps: Math.min(completedWorkSteps, current.totalSteps ?? completedWorkSteps),
+              stats: {
+                ...current.stats,
+                completedBots: importedCount + skippedCount + failedCount,
+                imported: importedCount,
+                overwritten: overwrittenCount,
+                skipped: skippedCount,
+                failed: failedCount,
+                completedMemories: completedMemorySteps,
+              },
+            }));
             continue;
           }
           const existingId = botIdByHash.get(importedHash);
           if (existingId) {
+            updateBotTransferOverlay((current) => ({
+              ...current,
+              detail: `Replacing existing ${entry.importedName}.`,
+              currentStepLabel: "Overwriting duplicate",
+            }));
             await api(`/api/bots/${encodeURIComponent(existingId)}`, { method: "DELETE" });
           }
           botIdByHash.delete(importedHash);
           allowDuplicateHash = true;
           overwrittenCount += 1;
         }
-        const result = await importBotFromExportRawText(raw, {
+        const result = await importBotFromExportRawText(entry.raw, {
           allowDuplicateHash,
           suppressNotice: true,
           suppressPanelReset: true,
           selectInChat: false,
+          deferRefresh: true,
+          onProgress: (event) => {
+            if (event.kind === "bot-created" && entryCompletedSteps === 0) {
+              entryCompletedSteps += 1;
+              completedWorkSteps += 1;
+            }
+            if (event.kind === "memory-restored") {
+              const memoryDelta = Math.max(0, event.restoredMemories - entryRestoredMemories);
+              entryRestoredMemories = event.restoredMemories;
+              entryCompletedSteps += memoryDelta;
+              completedWorkSteps += memoryDelta;
+              completedMemorySteps += memoryDelta;
+            }
+            updateBotTransferOverlay((current) => ({
+              ...current,
+              subject: event.importedName,
+              detail:
+                event.totalMemories > 0
+                  ? `${event.restoredMemories} of ${event.totalMemories} memories restored.`
+                  : "Profile restored.",
+              currentStepLabel:
+                event.kind === "memory-restored"
+                  ? `Restoring memories for ${event.importedName}`
+                  : `Created ${event.importedName}`,
+              completedSteps: Math.min(completedWorkSteps, current.totalSteps ?? completedWorkSteps),
+              stats: {
+                ...current.stats,
+                completedMemories: completedMemorySteps,
+                imported: importedCount,
+                overwritten: overwrittenCount,
+                skipped: skippedCount,
+                failed: failedCount,
+              },
+            }));
+          },
         });
+        completeRemainingEntrySteps();
         importedCount += 1;
         restoredTotal += result.restoredMemories;
         importedBotIds.push(result.botId);
-        importedBotIdByEntryName.set(entryName.trim().toLowerCase(), result.botId);
+        importedBotIdByEntryName.set(entry.entryName.trim().toLowerCase(), result.botId);
         if (result.importedBotHash) {
           botIdByHash.set(result.importedBotHash, result.botId);
         }
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: result.importedName,
+          detail:
+            result.restoredMemories > 0
+              ? `${result.importedName} imported with ${result.restoredMemories} memories.`
+              : `${result.importedName} imported.`,
+          currentStepLabel: `${importedCount} of ${preparedEntries.length} bots imported`,
+          completedSteps: Math.min(completedWorkSteps, current.totalSteps ?? completedWorkSteps),
+          stats: {
+            ...current.stats,
+            completedBots: importedCount + skippedCount + failedCount,
+            completedMemories: completedMemorySteps,
+            imported: importedCount,
+            overwritten: overwrittenCount,
+            skipped: skippedCount,
+            failed: failedCount,
+          },
+        }));
       } catch {
         failedCount += 1;
+        completeRemainingEntrySteps();
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          detail: `${entry.importedName} could not be imported.`,
+          currentStepLabel: `${failedCount} failed`,
+          completedSteps: Math.min(completedWorkSteps, current.totalSteps ?? completedWorkSteps),
+          stats: {
+            ...current.stats,
+            completedBots: importedCount + skippedCount + failedCount,
+            completedMemories: completedMemorySteps,
+            imported: importedCount,
+            overwritten: overwrittenCount,
+            skipped: skippedCount,
+            failed: failedCount,
+          },
+        }));
       }
     }
 
@@ -37793,6 +38200,36 @@ function HomeContent(): React.JSX.Element {
     if (importedCount === 0 && failedCount > 0) {
       throw new Error("Bot collection import failed. None of the .bot files could be imported.");
     }
+    if (importedBotIds.length > 0) {
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: `${importedBotIds.length} imported`,
+        detail: "Refreshing bot library and memories.",
+        currentStepLabel: "Refreshing Prism",
+        completedSteps: Math.min(completedWorkSteps, Math.max(0, (current.totalSteps ?? 1) - 1)),
+      }));
+      await refreshBots();
+      await refreshMemories();
+      if (importedBotIds.length === 1) {
+        await refreshBotMemories(importedBotIds[0]!);
+      }
+    }
+    completedWorkSteps = Math.max(completedWorkSteps, totalWorkSteps);
+    updateBotTransferOverlay((current) => ({
+      ...current,
+      detail: "Import complete.",
+      currentStepLabel: "Complete",
+      completedSteps: current.totalSteps ?? completedWorkSteps,
+      stats: {
+        ...current.stats,
+        completedBots: importedCount + skippedCount + failedCount,
+        completedMemories: completedMemorySteps,
+        imported: importedCount,
+        overwritten: overwrittenCount,
+        skipped: skippedCount,
+        failed: failedCount,
+      },
+    }));
     const summaryParts = [
       `${importedCount} imported`,
       `${overwrittenCount} overwritten`,
@@ -37813,6 +38250,7 @@ function HomeContent(): React.JSX.Element {
   ): Promise<void> {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
+    if (botTransferBusy) return;
     if (!file) return;
     const lower = file.name.trim().toLowerCase();
     const isBotFile = lower.endsWith(".bot");
@@ -37822,33 +38260,99 @@ function HomeContent(): React.JSX.Element {
       setPanelError("Only .bot or .bots files can be imported from disk.");
       return;
     }
-    setImportBotFileBusy(true);
-    setImportBotFileBusyName(file.name);
-    setImportBotFileBusyColor(null);
-    setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
+    startBotTransferOverlay({
+      mode: "import",
+      title: isBotCollectionFile || isLegacyZipFile ? "Importing bot collection" : "Importing bot",
+      subject: file.name,
+      detail: isBotCollectionFile || isLegacyZipFile
+        ? "Reading collection file."
+        : "Reading bot export.",
+      currentStepLabel: "Opening file",
+      completedSteps: 0,
+      totalSteps: null,
+      accentColor: null,
+      glyph: DEFAULT_BOT_GLYPH,
+      stats: {},
+    });
     try {
       if (isBotCollectionFile || isLegacyZipFile) {
-        setImportBotFileBusyName(file.name);
         await importBotCollectionBundle(file);
       } else {
         const raw = await file.text();
         const hint = parseImportBotLoadingHint(raw);
-        if (hint.name) setImportBotFileBusyName(hint.name);
-        setImportBotFileBusyColor(hint.color);
-        setImportBotFileBusyGlyph(hint.glyph);
-        await importBotFromExportRawText(raw);
+        const totalSteps = Math.max(2, hint.memoryCount + 2);
+        let completedSteps = 0;
+        let restoredMemories = 0;
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: hint.name ?? file.name,
+          detail:
+            hint.memoryCount > 0
+              ? `Restoring profile and ${hint.memoryCount} memories.`
+              : "Restoring profile.",
+          currentStepLabel: "Preparing import",
+          totalSteps,
+          accentColor: hint.color,
+          glyph: hint.glyph,
+          stats: { totalBots: 1, completedBots: 0, totalMemories: hint.memoryCount },
+        }));
+        await waitForBotTransferPaint();
+        const result = await importBotFromExportRawText(raw, {
+          onProgress: (event) => {
+            if (event.kind === "bot-created" && completedSteps === 0) {
+              completedSteps = 1;
+            }
+            if (event.kind === "memory-restored") {
+              const memoryDelta = Math.max(0, event.restoredMemories - restoredMemories);
+              restoredMemories = event.restoredMemories;
+              completedSteps += memoryDelta;
+            }
+            updateBotTransferOverlay((current) => ({
+              ...current,
+              subject: event.importedName,
+              detail:
+                event.totalMemories > 0
+                  ? `${event.restoredMemories} of ${event.totalMemories} memories restored.`
+                  : "Profile restored.",
+              currentStepLabel:
+                event.kind === "memory-restored"
+                  ? `Restoring memories for ${event.importedName}`
+                  : `Created ${event.importedName}`,
+              completedSteps: Math.min(completedSteps, current.totalSteps ?? completedSteps),
+              stats: {
+                ...current.stats,
+                completedBots: event.kind === "bot-created" ? 1 : current.stats.completedBots,
+                completedMemories: restoredMemories,
+              },
+            }));
+          },
+        });
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: result.importedName,
+          detail:
+            result.restoredMemories > 0
+              ? `${result.importedName} imported with ${result.restoredMemories} memories.`
+              : `${result.importedName} imported.`,
+          currentStepLabel: "Complete",
+          completedSteps: current.totalSteps ?? totalSteps,
+          stats: {
+            ...current.stats,
+            completedBots: 1,
+            completedMemories: result.restoredMemories,
+            imported: 1,
+          },
+        }));
       }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Bot import failed.");
     } finally {
-      setImportBotFileBusy(false);
-      setImportBotFileBusyName("");
-      setImportBotFileBusyColor(null);
-      setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
+      setBotTransferOverlay(null);
     }
   }
 
   function openImportBotModal(): void {
+    if (botTransferBusy) return;
     setPanelError(null);
     setImportBotPasteError(null);
     setImportBotPasteText("");
@@ -37871,15 +38375,82 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function handleConfirmImportBotPaste(): Promise<void> {
+    if (botTransferBusy) return;
     setImportBotPasteError(null);
     setImportBotPasteBusy(true);
+    const hint = parseImportBotLoadingHint(importBotPasteText);
+    const totalSteps = Math.max(2, hint.memoryCount + 2);
+    let completedSteps = 0;
+    let restoredMemories = 0;
+    startBotTransferOverlay({
+      mode: "import",
+      title: "Importing bot",
+      subject: hint.name ?? "Pasted bot",
+      detail:
+        hint.memoryCount > 0
+          ? `Restoring profile and ${hint.memoryCount} memories.`
+          : "Restoring pasted profile.",
+      currentStepLabel: "Preparing import",
+      completedSteps: 0,
+      totalSteps,
+      accentColor: hint.color,
+      glyph: hint.glyph,
+      stats: { totalBots: 1, completedBots: 0, totalMemories: hint.memoryCount },
+    });
     try {
-      await importBotFromExportRawText(importBotPasteText);
+      await waitForBotTransferPaint();
+      const result = await importBotFromExportRawText(importBotPasteText, {
+        onProgress: (event) => {
+          if (event.kind === "bot-created" && completedSteps === 0) {
+            completedSteps = 1;
+          }
+          if (event.kind === "memory-restored") {
+            const memoryDelta = Math.max(0, event.restoredMemories - restoredMemories);
+            restoredMemories = event.restoredMemories;
+            completedSteps += memoryDelta;
+          }
+          updateBotTransferOverlay((current) => ({
+            ...current,
+            subject: event.importedName,
+            detail:
+              event.totalMemories > 0
+                ? `${event.restoredMemories} of ${event.totalMemories} memories restored.`
+                : "Profile restored.",
+            currentStepLabel:
+              event.kind === "memory-restored"
+                ? `Restoring memories for ${event.importedName}`
+                : `Created ${event.importedName}`,
+            completedSteps: Math.min(completedSteps, current.totalSteps ?? completedSteps),
+            stats: {
+              ...current.stats,
+              completedBots: event.kind === "bot-created" ? 1 : current.stats.completedBots,
+              completedMemories: restoredMemories,
+            },
+          }));
+        },
+      });
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: result.importedName,
+        detail:
+          result.restoredMemories > 0
+            ? `${result.importedName} imported with ${result.restoredMemories} memories.`
+            : `${result.importedName} imported.`,
+        currentStepLabel: "Complete",
+        completedSteps: current.totalSteps ?? totalSteps,
+        stats: {
+          ...current.stats,
+          completedBots: 1,
+          completedMemories: result.restoredMemories,
+          imported: 1,
+        },
+      }));
       closeImportBotModal();
     } catch (err) {
       setImportBotPasteError(err instanceof Error ? err.message : "Bot import failed.");
     } finally {
       setImportBotPasteBusy(false);
+      setBotTransferOverlay(null);
     }
   }
 
@@ -45382,6 +45953,100 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function renderBotTransferOverlay(): React.JSX.Element | null {
+    if (!botTransferOverlay) return null;
+    const transfer = botTransferOverlay;
+    const progress =
+      transfer.totalSteps && transfer.totalSteps > 0
+        ? clampUnitInterval(transfer.completedSteps / transfer.totalSteps)
+        : null;
+    const progressPercent = progress !== null ? Math.round(progress * 100) : null;
+    const etaSeconds = estimateBotTransferEtaSeconds(transfer, botTransferOverlayNowMs);
+    const etaLabel = etaSeconds !== null ? formatBotTransferEta(etaSeconds) : "Calculating ETA";
+    const botCount =
+      typeof transfer.stats.totalBots === "number"
+        ? `${transfer.stats.completedBots ?? 0}/${transfer.stats.totalBots} bots`
+        : null;
+    const memoryCount =
+      typeof transfer.stats.totalMemories === "number" && transfer.stats.totalMemories > 0
+        ? `${transfer.stats.completedMemories ?? 0}/${transfer.stats.totalMemories} memories`
+        : null;
+    const resultCounts = [
+      transfer.stats.imported ? `${transfer.stats.imported} imported` : null,
+      transfer.stats.exported ? `${transfer.stats.exported} exported` : null,
+      transfer.stats.overwritten ? `${transfer.stats.overwritten} overwritten` : null,
+      transfer.stats.skipped ? `${transfer.stats.skipped} skipped` : null,
+      transfer.stats.failed ? `${transfer.stats.failed} failed` : null,
+    ].filter((item): item is string => Boolean(item));
+    const progressStyle = {
+      ["--bot-transfer-progress" as string]: `${progressPercent ?? 44}%`,
+      ...(transfer.accentColor
+        ? {
+            ["--import-bot-accent" as string]: normalizeAccentForTheme(
+              transfer.accentColor,
+              resolvedTheme
+            ),
+          }
+        : {}),
+    } as React.CSSProperties;
+    return (
+      <div
+        className={styles.importBotLoadingBackdrop}
+        aria-busy="true"
+      >
+        <div
+          className={styles.importBotLoadingCard}
+          style={progressStyle}
+          role="status"
+          aria-live="polite"
+          data-mode={transfer.mode}
+          data-determinate={progress !== null ? "true" : undefined}
+        >
+          <div className={styles.importBotLoadingOrb} aria-hidden="true">
+            <div className={styles.importBotLoadingOrbFill} />
+            <span className={styles.importBotLoadingGlyph}>
+              <BotGlyph name={transfer.glyph} size={30} strokeWidth={1.95} />
+            </span>
+          </div>
+          <p className={styles.importBotLoadingName}>{transfer.subject}</p>
+          <h4>{transfer.title}</h4>
+          <p>{transfer.detail}</p>
+          <div
+            className={styles.botTransferProgressBlock}
+            aria-label={
+              progressPercent !== null
+                ? `${progressPercent}% complete. ${etaLabel}.`
+                : `${transfer.currentStepLabel}. ${etaLabel}.`
+            }
+          >
+            <div className={styles.botTransferProgressMeta}>
+              <span>{transfer.currentStepLabel}</span>
+              <strong>{progressPercent !== null ? `${progressPercent}%` : "Working"}</strong>
+            </div>
+            <div
+              className={styles.botTransferProgressTrack}
+              data-indeterminate={progress === null ? "true" : undefined}
+            >
+              <span className={styles.botTransferProgressFill} />
+            </div>
+            <div className={styles.botTransferProgressFoot}>
+              <span>{botCount ?? "Preparing work"}</span>
+              <span>{etaLabel}</span>
+            </div>
+          </div>
+          {memoryCount || resultCounts.length > 0 ? (
+            <div className={styles.botTransferStats} aria-hidden="true">
+              {memoryCount ? <span>{memoryCount}</span> : null}
+              {resultCounts.map((item) => (
+                <span key={item}>{item}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   /** Right-click on empty Coffee shell — text equivalents of the Coffee header icons. */
   function renderCoffeeShellContextMenu(): React.JSX.Element | null {
     if (!coffeeShellContextMenu) return null;
@@ -47596,6 +48261,7 @@ function HomeContent(): React.JSX.Element {
           void handleBotImportFileSelection(event);
         }}
       />
+      {renderBotTransferOverlay()}
 
       {panel && (
         <div
@@ -51547,8 +52213,9 @@ function HomeContent(): React.JSX.Element {
               ? "Protected bot — toggle delete protection off in the form"
               : `Delete ${editingBot?.name ?? "bot"}`;
         const editorMode = !botPanelLibraryEnabled;
-        const saveExportDisabled = busy || !editingBotId || !editingBot;
-        const importFromBotFileDisabled = busy || (editorMode && editingBotId !== null);
+        const saveExportDisabled = busy || botTransferBusy || !editingBotId || !editingBot;
+        const importFromBotFileDisabled =
+          busy || botTransferBusy || (editorMode && editingBotId !== null);
 
         return (
           <div
@@ -51596,6 +52263,8 @@ function HomeContent(): React.JSX.Element {
                     aria-label={
                       busy
                         ? "Wait for the current action to finish"
+                        : botTransferBusy
+                          ? "Wait for the current bot import or export to finish"
                         : !editingBotId || !editingBot
                           ? "Export bot — available after you create this bot"
                           : "Export bot profile as .bot (JSON)"
@@ -51603,6 +52272,8 @@ function HomeContent(): React.JSX.Element {
                     data-glyph-tooltip={
                       busy
                         ? "Wait for the current action to finish"
+                        : botTransferBusy
+                          ? "Wait for the current bot import or export to finish"
                         : !editingBotId || !editingBot
                           ? "Save the bot first, then you can export a .bot file"
                           : "Export bot profile as .bot (JSON)"
@@ -51621,6 +52292,8 @@ function HomeContent(): React.JSX.Element {
                   aria-label={
                     busy
                       ? "Wait for the current action to finish"
+                      : botTransferBusy
+                        ? "Wait for the current bot import or export to finish"
                       : editorMode && editingBotId
                         ? "Import disabled while editing a bot"
                         : "Import bot from .bot or .bots file"
@@ -51628,6 +52301,8 @@ function HomeContent(): React.JSX.Element {
                   data-glyph-tooltip={
                     busy
                       ? "Wait for the current action to finish"
+                      : botTransferBusy
+                        ? "Wait for the current bot import or export to finish"
                       : editorMode && editingBotId
                         ? "Finish editing or go back to the list to import a .bot or .bots file"
                         : "Import Prism .bot or .bots file"
@@ -52817,7 +53492,7 @@ function HomeContent(): React.JSX.Element {
                           disabled={importBotPasteBusy}
                         />
                         <p id="import-bot-paste-json-hint" className={styles.muted}>
-                          Max about {Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024)} KB UTF-8. Only data is
+                          Max about {Math.round(BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES / 1024 / 1024)} MB UTF-8. Only data is
                           parsed — no scripts run.
                         </p>
                         {importBotPasteError && (
@@ -52849,35 +53524,6 @@ function HomeContent(): React.JSX.Element {
                       </>
                     )}
                   </div>
-                </div>
-              </div>
-            )}
-            {importBotFileBusy && (
-              <div className={styles.importBotLoadingBackdrop} role="presentation" aria-hidden="true">
-                <div
-                  className={styles.importBotLoadingCard}
-                  style={
-                    importBotFileBusyColor
-                      ? ({
-                        ["--import-bot-accent" as string]: normalizeAccentForTheme(
-                          importBotFileBusyColor,
-                          resolvedTheme
-                        ),
-                      } as React.CSSProperties)
-                      : undefined
-                  }
-                  role="status"
-                  aria-live="polite"
-                >
-                  <div className={styles.importBotLoadingOrb} aria-hidden="true">
-                    <div className={styles.importBotLoadingOrbFill} />
-                    <span className={styles.importBotLoadingGlyph}>
-                      <BotGlyph name={importBotFileBusyGlyph} size={30} strokeWidth={1.95} />
-                    </span>
-                  </div>
-                  <p className={styles.importBotLoadingName}>{importBotFileBusyName || "Importing bot"}</p>
-                  <h4>Importing…</h4>
-                  <p>Restoring profile + memories.</p>
                 </div>
               </div>
             )}

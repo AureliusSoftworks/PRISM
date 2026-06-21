@@ -24792,7 +24792,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .importBotLoadingBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 210;
+  z-index: 340;
   display: grid;
   place-items: center;
   padding:
@@ -24810,10 +24810,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .importBotLoadingCard {
   --import-bot-accent: var(--accent);
-  width: min(430px, 100%);
+  --bot-transfer-progress: 44%;
+  width: min(560px, 100%);
   border: 1px solid color-mix(in srgb, var(--line-strong) 82%, transparent);
-  border-radius: 18px;
-  padding: 20px 20px 18px;
+  border-radius: 16px;
+  padding: 22px;
   background:
     linear-gradient(
       150deg,
@@ -24824,7 +24825,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 28px 64px -36px color-mix(in srgb, #000 72%, transparent),
     0 0 0 1px color-mix(in srgb, var(--import-bot-accent) 20%, transparent) inset;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   justify-items: center;
   text-align: center;
 }
@@ -24883,6 +24884,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: importBotLoadingOrbFill 1.6s ease-in-out infinite;
 }
 
+.importBotLoadingCard[data-determinate="true"] .importBotLoadingOrbFill {
+  height: var(--bot-transfer-progress);
+  animation: none;
+  transition: height 180ms ease;
+}
+
 .importBotLoadingGlyph {
   position: absolute;
   inset: 0;
@@ -24890,6 +24897,91 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   place-items: center;
   color: color-mix(in srgb, var(--fg) 76%, var(--import-bot-accent) 24%);
   z-index: 1;
+}
+
+.botTransferProgressBlock {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.botTransferProgressMeta,
+.botTransferProgressFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.botTransferProgressMeta span,
+.botTransferProgressFoot span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botTransferProgressMeta strong {
+  color: color-mix(in srgb, var(--fg) 84%, var(--import-bot-accent) 16%);
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.botTransferProgressTrack {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 72%, transparent);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, #000 28%, transparent);
+}
+
+.botTransferProgressFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--bot-transfer-progress);
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--import-bot-accent) 72%, var(--fg) 8%),
+      color-mix(in srgb, #fff 18%, var(--import-bot-accent))
+    );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--import-bot-accent) 42%, transparent);
+  transition: width 180ms ease;
+}
+
+.botTransferProgressTrack[data-indeterminate="true"] .botTransferProgressFill {
+  width: 42%;
+  animation: botTransferProgressSweep 1.25s ease-in-out infinite;
+}
+
+.botTransferStats {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.botTransferStats span {
+  max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--import-bot-accent) 24%, var(--line) 76%);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--import-bot-accent) 9%, transparent);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 @keyframes importBotLoadingOrbPulse {
@@ -24915,6 +25007,31 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
   100% {
     height: 18%;
+  }
+}
+
+@keyframes botTransferProgressSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(75%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .importBotLoadingOrb,
+  .importBotLoadingOrbFill,
+  .botTransferProgressTrack[data-indeterminate="true"] .botTransferProgressFill {
+    animation: none;
+  }
+
+  .botTransferProgressFill,
+  .importBotLoadingCard[data-determinate="true"] .importBotLoadingOrbFill {
+    transition: none;
   }
 }
 
