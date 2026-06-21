@@ -207,6 +207,10 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import {
+  clampZenWallpaperPromptText,
+  composeZenWallpaperPrompt,
+} from "./zen-wallpaper-prompt.ts";
+import {
   buildGeneratedImageRelativePath,
   downloadRemoteImage,
   readGeneratedImageBytes,
@@ -992,124 +996,6 @@ function mapImageRowToClient(row: {
     displayUrl,
     hasLocalFile,
   };
-}
-
-function clampWallpaperPromptText(text: string | null | undefined, maxLen: number): string {
-  const normalized = (text ?? "").replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLen) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
-}
-
-const WALLPAPER_REFERENCE_STOPWORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "around",
-  "because",
-  "before",
-  "being",
-  "between",
-  "could",
-  "every",
-  "first",
-  "from",
-  "have",
-  "into",
-  "just",
-  "like",
-  "make",
-  "more",
-  "need",
-  "should",
-  "that",
-  "their",
-  "there",
-  "these",
-  "thing",
-  "this",
-  "those",
-  "through",
-  "what",
-  "when",
-  "where",
-  "which",
-  "while",
-  "with",
-  "would",
-]);
-
-function extractWallpaperReferenceTerms(text: string, maxTerms = 14): string[] {
-  const termScores = new Map<string, number>();
-  const addTerm = (raw: string, score: number): void => {
-    const term = raw
-      .replace(/[^a-zA-Z0-9\s-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (term.length < 4) return;
-    const key = term.toLowerCase();
-    if (WALLPAPER_REFERENCE_STOPWORDS.has(key)) return;
-    termScores.set(key, (termScores.get(key) ?? 0) + score);
-  };
-
-  const quotedMatches = text.match(/"([^"]{4,80})"|'([^']{4,80})'/g) ?? [];
-  for (const match of quotedMatches) {
-    addTerm(match.slice(1, -1), 4);
-  }
-
-  const phraseMatches = text.match(/\b[A-Z][a-z0-9]+(?:\s+[A-Z][a-z0-9]+){0,3}\b/g) ?? [];
-  for (const match of phraseMatches) {
-    addTerm(match, match.includes(" ") ? 3 : 1);
-  }
-
-  const words = text.toLowerCase().match(/[a-z0-9][a-z0-9-]{3,}/g) ?? [];
-  for (const word of words) {
-    addTerm(word, word.length > 7 ? 2 : 1);
-  }
-
-  return [...termScores.entries()]
-    .sort((a, b) => {
-      const scoreDelta = b[1] - a[1];
-      if (scoreDelta !== 0) return scoreDelta;
-      return a[0].localeCompare(b[0]);
-    })
-    .slice(0, maxTerms)
-    .map(([term]) => term);
-}
-
-function composeZenWallpaperPrompt(args: {
-  initialUserPrompt: string;
-  recentContext: string;
-  botName: string | null;
-  botSystemPrompt: string | null;
-}): string {
-  const topic = clampWallpaperPromptText(args.initialUserPrompt, 700);
-  const recent = clampWallpaperPromptText(args.recentContext, 900);
-  const botName = clampWallpaperPromptText(args.botName, 120) || "Prism";
-  const botContext = clampWallpaperPromptText(args.botSystemPrompt, 650);
-  const referenceTerms = extractWallpaperReferenceTerms(
-    `${args.initialUserPrompt}\n${args.recentContext}`
-  );
-  const lines = [
-    "Create an abstract ambient wallpaper for a calm Zen chat canvas.",
-    `Conversation seed: ${topic || "open-ended reflective conversation"}.`,
-    `Companion context: ${botName}${botContext ? ` — ${botContext}` : ""}.`,
-  ];
-  if (recent && recent !== topic) {
-    lines.push(`Recent conversation texture: ${recent}.`);
-  }
-  if (referenceTerms.length > 0) {
-    lines.push(
-      `Specific abstract motif cues to weave in subtly: ${referenceTerms.join(", ")}.`
-    );
-  }
-  lines.push(
-    "Visual direction: mostly charcoal, pearl, and mist-gray; soft gradients; atmospheric texture; spacious negative space; gentle depth; subtle shapes inspired by the conversation topic.",
-    "Reference handling: translate concrete nouns, places, objects, moods, and technical ideas into abstract materials, silhouettes, light behavior, terrain, weather, geometry, or texture; do not depict literal named people or characters.",
-    "Color direction: add faint prismatic rainbow accents only as restrained edge-light, refractions, haze, or thin spectral glints; keep color low-saturation and secondary to the neutral atmosphere.",
-    "Composition: suitable as a desktop and mobile chat background, no single focal subject, no busy detail behind text.",
-    "Absolute exclusions: no text, no letters, no numbers, no people, no faces, no bodies, no characters, no creatures, no logos, no icons, no symbols, no UI, no screenshots."
-  );
-  return lines.join("\n");
 }
 
 type ZenWallpaperDbRow = {
@@ -2018,8 +1904,9 @@ function buildRoutes(): RouteDefinition[] {
       recoverStaleZenWallpaperStatusForRequest(userId, conversationId);
       const body = ctx.body as Record<string, unknown>;
       const enabled = body.enabled !== false;
-      const replaceImmediately = body.replaceImmediately === true;
-      const force = body.force === true || replaceImmediately;
+      const generationRequested = body.generate !== false;
+      const replaceImmediately = generationRequested && body.replaceImmediately === true;
+      const force = generationRequested && (body.force === true || replaceImmediately);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
@@ -2030,7 +1917,7 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const promptOverride =
         typeof body.promptOverride === "string"
-          ? clampWallpaperPromptText(body.promptOverride, 3000)
+          ? clampZenWallpaperPromptText(body.promptOverride, 3000)
           : "";
       if (body.promptOverride !== undefined && promptOverride.length === 0) {
         throw new HttpError(400, "Type a custom Atmosphere prompt before generating.");
@@ -2113,6 +2000,13 @@ function buildRoutes(): RouteDefinition[] {
           WHERE id = ? AND user_id = ?`
       ).run(conversationId, userId);
       if (messageCount === 0) {
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+      if (!generationRequested) {
         json(ctx.res, 200, {
           ok: true,
           zenWallpaper: zenWallpaperResponseForConversation(conversationId),
