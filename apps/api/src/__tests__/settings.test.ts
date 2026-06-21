@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_ZEN_FRESH_START_GAP_MS,
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
@@ -11,7 +13,9 @@ import {
   DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+  MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
   MAX_ZEN_WALLPAPER_OPACITY,
+  MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
   MIN_ZEN_WALLPAPER_OPACITY,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
@@ -63,6 +67,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
     zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
+    zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    zenAutonomyEnabled: 0,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -854,6 +861,63 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(
       resolveNextSettings({ zenMoodSensitivity: "nope" }, current).zenMoodSensitivity,
       0.35
+    );
+  });
+
+  it("stores AskQuestion patience timer settings", () => {
+    const next = resolveNextSettings(
+      {
+        zenAskQuestionPatienceEnabled: true,
+        zenAskQuestionPatienceMs: 90_000,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenAskQuestionPatienceEnabled, true);
+    assert.equal(next.zenAskQuestionPatienceMs, 90_000);
+  });
+
+  it("clamps AskQuestion patience timing while preserving invalid values", () => {
+    const current = baseline({
+      zenAskQuestionPatienceEnabled: 1,
+      zenAskQuestionPatienceMs: 95_000,
+    });
+    const low = resolveNextSettings({ zenAskQuestionPatienceMs: 1_000 }, current);
+    const high = resolveNextSettings({ zenAskQuestionPatienceMs: 999_000 }, current);
+    const invalid = resolveNextSettings(
+      {
+        zenAskQuestionPatienceEnabled: "sometimes",
+        zenAskQuestionPatienceMs: "nope",
+      },
+      current
+    );
+
+    assert.equal(low.zenAskQuestionPatienceMs, MIN_ZEN_ASK_QUESTION_PATIENCE_MS);
+    assert.equal(high.zenAskQuestionPatienceMs, MAX_ZEN_ASK_QUESTION_PATIENCE_MS);
+    assert.equal(invalid.zenAskQuestionPatienceEnabled, true);
+    assert.equal(invalid.zenAskQuestionPatienceMs, 95_000);
+  });
+
+  it("stores Zen Autonomy while preserving current value for invalid input", () => {
+    assert.equal(
+      resolveNextSettings({ zenAutonomyEnabled: true }, baseline()).zenAutonomyEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings({ zenAutonomyEnabled: false }, baseline({ zenAutonomyEnabled: 1 }))
+        .zenAutonomyEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ zenAutonomyEnabled: 1 })).zenAutonomyEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenAutonomyEnabled: "nope" },
+        baseline({ zenAutonomyEnabled: 1 })
+      ).zenAutonomyEnabled,
+      true
     );
   });
 });

@@ -49,6 +49,12 @@ import {
   type ZenTextEffect,
 } from "./zenToneText";
 import {
+  advanceAskQuestionPatience,
+  normalizeAskQuestionPatienceDurationMs,
+  shouldPauseAskQuestionPatience,
+  shouldReportAskQuestionPatienceExpiry,
+} from "./askQuestionPatience";
+import {
   clampCoffeeReplayMessageIndex,
   coffeeReplayVisibleMessages,
   collectCoffeeReplayActionsForBot,
@@ -157,6 +163,9 @@ import {
   type ZenPreviousContextSummary,
   type ZenSessionMemoryItem,
   type ZenSessionMemoryOverview,
+  type ZenAutonomyDecision,
+  type ZenAutonomyInput,
+  type ZenPersonaTransitionInput,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
@@ -216,6 +225,7 @@ import {
 } from "./wildcardDecks";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
+  composeMentionPersonaPlainTextAction,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
   extractStageDirectionCues,
@@ -246,6 +256,7 @@ import {
 } from "./prismBotMarkdownNav";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
+  applyComposeMentionPersonaToEditor,
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
   editorInFenceLikeContext,
@@ -272,6 +283,15 @@ import {
   buildZenPersonaInkSegmentMap,
   countZenPrismUserMessages,
 } from "./zenPersonaInk";
+import {
+  ZEN_PERSONA_TRANSITION_CHOICES,
+  resolveZenPersonaTransitionStyle,
+  type ZenPersonaTransitionChoice,
+} from "./zenPersonaTransition";
+import {
+  nextZenAutonomyCooldownUntilMs,
+  resolveZenAutonomyEligibility,
+} from "./zenAutonomy";
 import {
   DEFAULT_CHAT_REVEAL_TIMING,
   formatChatRevealTokenDisplay,
@@ -312,6 +332,12 @@ const DELETE_ALL_KEY = "__delete_all__";
 const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
 /** Single Coffee Group delete — opens the same centered confirm modal as bulk deletes. */
 const DELETE_COFFEE_GROUP_KEY_PREFIX = "__delete_coffee_group__:";
+
+type PendingZenPersonaTransition = {
+  fromBotId: string | null;
+  toBotId: string;
+  origin: "picker" | "mention";
+};
 
 function coffeeGroupDeleteKey(groupId: string): string {
   return `${DELETE_COFFEE_GROUP_KEY_PREFIX}${groupId}`;
@@ -5131,6 +5157,8 @@ interface ChatPostEnvelope {
   };
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
+  zenAutonomyDecision?: ZenAutonomyDecision;
   /**
    * Per-turn tool-call diagnostics for the developer metrics stream. Empty/omitted on
    * turns where nothing tool-shaped was attempted. Used to surface what the assistant
@@ -5290,6 +5318,9 @@ interface UserSettings {
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
+  zenAskQuestionPatienceEnabled: boolean;
+  zenAskQuestionPatienceMs: number;
+  zenAutonomyEnabled: boolean;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -5314,6 +5345,9 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperRevealDelayMessageCount"
   | "zenWallpaperRevealSpanMessageCount"
   | "zenMoodSensitivity"
+  | "zenAskQuestionPatienceEnabled"
+  | "zenAskQuestionPatienceMs"
+  | "zenAutonomyEnabled"
 >;
 
 type SavedApiKeySettingsState = Pick<
@@ -6683,6 +6717,10 @@ const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = false;
 const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
+const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
+const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
+const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
+const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 180_000;
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -7120,6 +7158,49 @@ function formatZenMoodSensitivity(value: unknown): string {
   return `${Math.round(normalizeZenMoodSensitivitySetting(value) * 100)}%`;
 }
 
+function normalizeZenAskQuestionPatienceEnabledSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED;
+}
+
+function normalizeZenAutonomyEnabledSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return false;
+}
+
+function normalizeZenAskQuestionPatienceMsSetting(value: unknown): number {
+  return normalizeAskQuestionPatienceDurationMs(
+    value,
+    DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+    MAX_ZEN_ASK_QUESTION_PATIENCE_MS
+  );
+}
+
+function formatZenAskQuestionPatience(value: unknown): string {
+  return `${Math.round(normalizeZenAskQuestionPatienceMsSetting(value) / 1000)}s`;
+}
+
 function defaultZenModeSettings(): ZenModeSettingsFields {
   return {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
@@ -7134,6 +7215,9 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenWallpaperRevealSpanMessageCount:
       DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
+    zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    zenAutonomyEnabled: false,
   };
 }
 
@@ -7221,6 +7305,16 @@ function normalizeZenModeSettingsFields(
       ),
     zenMoodSensitivity: normalizeZenMoodSensitivitySetting(
       settings?.zenMoodSensitivity
+    ),
+    zenAskQuestionPatienceEnabled:
+      normalizeZenAskQuestionPatienceEnabledSetting(
+        settings?.zenAskQuestionPatienceEnabled
+      ),
+    zenAskQuestionPatienceMs: normalizeZenAskQuestionPatienceMsSetting(
+      settings?.zenAskQuestionPatienceMs
+    ),
+    zenAutonomyEnabled: normalizeZenAutonomyEnabledSetting(
+      settings?.zenAutonomyEnabled
     ),
   };
 }
@@ -15757,6 +15851,8 @@ interface ComposerInputHandle {
   insertTextAtCursor: (text: string) => void;
 }
 
+type ComposerMentionCommitMode = "insert-mention" | "select-persona";
+
 interface ComposerInputProps {
   enabled: boolean;
   value: string;
@@ -15774,6 +15870,9 @@ interface ComposerInputProps {
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
+  mentionCommitMode?: ComposerMentionCommitMode;
+  onMentionPersonaSelect?: (botId: string) => void;
+  onEmptyBackspace?: () => boolean;
   commandPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
   wildcardPicks?: readonly CommandCenterCommand[];
@@ -17858,6 +17957,9 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
+  mentionCommitMode?: ComposerMentionCommitMode;
+  onMentionPersonaSelect?: (botId: string) => void;
+  onEmptyBackspace?: () => boolean;
   /** Slash commands shown in the composer autocomplete menu at the first word. */
   commandPicks?: readonly CommandCenterCommand[];
   /** User prompt shortcuts shown in the composer autocomplete menu. */
@@ -17888,6 +17990,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       submitOnEnter = true,
       resolvedTheme,
       mentionBots,
+      mentionCommitMode = "insert-mention",
+      onMentionPersonaSelect,
+      onEmptyBackspace,
       commandPicks = [],
       promptPicks = [],
       wildcardPicks = [],
@@ -17907,6 +18012,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const pendingValueTimerRef = useRef<number | null>(null);
     const locallyEmittedValuesRef = useRef<string[]>([]);
     const mentionBotsRef = useRef(mentionBots);
+    const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
+    const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
+    const onEmptyBackspaceRef = useRef(onEmptyBackspace);
     const commandPicksRef = useRef(commandPicks);
     const promptPicksRef = useRef(promptPicks);
     const wildcardPicksRef = useRef(wildcardPicks);
@@ -17931,6 +18039,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
+    useLayoutEffect(() => {
+      mentionCommitModeRef.current = mentionCommitMode;
+    }, [mentionCommitMode]);
+    useLayoutEffect(() => {
+      onMentionPersonaSelectRef.current = onMentionPersonaSelect;
+    }, [onMentionPersonaSelect]);
+    useLayoutEffect(() => {
+      onEmptyBackspaceRef.current = onEmptyBackspace;
+    }, [onEmptyBackspace]);
     useLayoutEffect(() => {
       commandPicksRef.current = commandPicks;
     }, [commandPicks]);
@@ -18019,7 +18136,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const dismissMentionPopover = useCallback(() => {
       const ed = editorRef.current;
       const ui = mentionUiRef.current;
-      if (ed && ui.open && ui.filtered.length === 1) {
+      if (
+        ed &&
+        ui.open &&
+        ui.filtered.length === 1 &&
+        mentionCommitModeRef.current === "insert-mention"
+      ) {
         applyMentionTabToEditor(ed, mentionBotsRef.current);
       }
       setMentionUi((s) =>
@@ -18441,6 +18563,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
+              if (activeEditor.isEmpty && onEmptyBackspaceRef.current?.() === true) {
+                event.preventDefault();
+                return true;
+              }
             }
             if (
               activeEditor &&
@@ -18632,11 +18758,25 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               ) {
                 if (mentionUiRef.current.open) {
                   event.preventDefault();
-                  applyComposeMentionTabToEditor(
-                    activeEditor,
-                    mentionBotsRef.current,
-                    mentionUiRef.current.highlight
-                  );
+                  if (mentionCommitModeRef.current === "select-persona") {
+                    const action = applyComposeMentionPersonaToEditor(
+                      activeEditor,
+                      mentionBotsRef.current,
+                      mentionUiRef.current.highlight
+                    );
+                    if (action.kind === "select-persona") {
+                      setMentionUi((s) =>
+                        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                      );
+                      onMentionPersonaSelectRef.current?.(action.bot.id);
+                    }
+                  } else {
+                    applyComposeMentionTabToEditor(
+                      activeEditor,
+                      mentionBotsRef.current,
+                      mentionUiRef.current.highlight
+                    );
+                  }
                   queueMicrotask(() => syncComposerPopovers(activeEditor));
                   return true;
                 }
@@ -18998,6 +19138,23 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           onPickIndex={(index) => {
             const ed = editorRef.current;
             if (!ed) return;
+            if (mentionCommitModeRef.current === "select-persona") {
+              const action = applyComposeMentionPersonaToEditor(
+                ed,
+                mentionBotsRef.current,
+                index
+              );
+              if (action.kind === "select-persona") {
+                setMentionUi((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                onMentionPersonaSelectRef.current?.(action.bot.id);
+              }
+              queueMicrotask(() => {
+                syncComposerPopovers(ed);
+              });
+              return;
+            }
             if (applyComposeMentionTabToEditor(ed, mentionBotsRef.current, index)) {
               queueMicrotask(() => {
                 syncComposerPopovers(ed);
@@ -19061,6 +19218,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
+    mentionCommitMode = "insert-mention",
+    onMentionPersonaSelect,
+    onEmptyBackspace,
     commandPicks = [],
     promptPicks = [],
     wildcardPicks = [],
@@ -19073,6 +19233,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const composeEditorShellRef = useRef<HTMLDivElement | null>(null);
   const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const mentionBotsRef = useRef(mentionBots);
+  const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
+  const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
+  const onEmptyBackspaceRef = useRef(onEmptyBackspace);
   const commandPicksRef = useRef(commandPicks);
   const promptPicksRef = useRef(promptPicks);
   const wildcardPicksRef = useRef(wildcardPicks);
@@ -19132,6 +19295,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
+  useLayoutEffect(() => {
+    mentionCommitModeRef.current = mentionCommitMode;
+  }, [mentionCommitMode]);
+  useLayoutEffect(() => {
+    onMentionPersonaSelectRef.current = onMentionPersonaSelect;
+  }, [onMentionPersonaSelect]);
+  useLayoutEffect(() => {
+    onEmptyBackspaceRef.current = onEmptyBackspace;
+  }, [onEmptyBackspace]);
   useLayoutEffect(() => {
     commandPicksRef.current = commandPicks;
   }, [commandPicks]);
@@ -19506,6 +19678,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
+          mentionCommitMode={mentionCommitMode}
+          onMentionPersonaSelect={onMentionPersonaSelect}
+          onEmptyBackspace={onEmptyBackspace}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
           wildcardPicks={wildcardPicks}
@@ -19665,6 +19840,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       event.preventDefault();
                       pendingTextareaCaretRef.current = promptApplied.caret;
                       onValueChange(promptApplied.value);
+                      return;
+                    }
+                    if (
+                      el.value.length === 0 &&
+                      start === 0 &&
+                      end === 0 &&
+                      onEmptyBackspaceRef.current?.() === true
+                    ) {
+                      event.preventDefault();
                       return;
                     }
                   }
@@ -19881,6 +20065,24 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   ) {
                     event.preventDefault();
                     const mention = taMentionRef.current;
+                    if (mentionCommitModeRef.current === "select-persona") {
+                      const act = composeMentionPersonaPlainTextAction(
+                        el.value,
+                        el.selectionStart ?? 0,
+                        mentionBotsRef.current,
+                        mention.highlight
+                      );
+                      if (act.kind !== "none") {
+                        pendingTextareaCaretRef.current = act.caret;
+                        textareaValueRef.current = act.replacement;
+                        onValueChange(act.replacement);
+                        setTaMention((s) =>
+                          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                        );
+                        onMentionPersonaSelectRef.current?.(act.bot.id);
+                      }
+                      return;
+                    }
                     const act = composeMentionTabPlainTextAction(
                       el.value,
                       el.selectionStart ?? 0,
@@ -19973,6 +20175,23 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             onPickIndex={(index) => {
               const el = textareaRef.current;
               if (!el) return;
+              if (mentionCommitModeRef.current === "select-persona") {
+                const act = composeMentionPersonaPlainTextAction(
+                  el.value,
+                  el.selectionStart ?? 0,
+                  mentionBotsRef.current,
+                  index
+                );
+                if (act.kind === "none") return;
+                pendingTextareaCaretRef.current = act.caret;
+                textareaValueRef.current = act.replacement;
+                onValueChange(act.replacement);
+                setTaMention((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                onMentionPersonaSelectRef.current?.(act.bot.id);
+                return;
+              }
               const act = composeMentionTabPlainTextAction(
                 el.value,
                 el.selectionStart ?? 0,
@@ -21080,6 +21299,9 @@ function HomeContent(): React.JSX.Element {
   const chatHeaderChromeVisibleRef = useRef(true);
   const chatComposerChromeVisibleRef = useRef(true);
   const chatChromeAutoHiddenRef = useRef(false);
+  const [askQuestionPatienceElapsedMs, setAskQuestionPatienceElapsedMs] =
+    useState(0);
+  const askQuestionPatienceElapsedMsRef = useRef(0);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
@@ -21088,7 +21310,16 @@ function HomeContent(): React.JSX.Element {
     conversationId: string;
     prompts: string[];
   } | null>(null);
+  const askQuestionPatienceLastTickMsRef = useRef<number | null>(null);
+  const askQuestionPatienceLastTypingAtMsRef = useRef<number | null>(null);
+  const askQuestionPatienceReportedKeysRef = useRef<Set<string>>(new Set());
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
+  const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenAutonomyLastActivityAtMsRef = useRef(Date.now());
+  const zenAutonomyCooldownUntilMsRef = useRef(0);
+  const zenAutonomySpokenCountRef = useRef(0);
+  const zenAutonomyInFlightRef = useRef(false);
   const effectiveZenModeSettings = useMemo(
     () => normalizeZenModeSettingsFields(settings),
     [settings]
@@ -21103,6 +21334,9 @@ function HomeContent(): React.JSX.Element {
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
+    zenAskQuestionPatienceEnabled,
+    zenAskQuestionPatienceMs,
+    zenAutonomyEnabled,
   } = effectiveZenModeSettings;
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
@@ -21806,6 +22040,16 @@ function HomeContent(): React.JSX.Element {
   const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
   const zenPersonaBotIdRef = useRef<string | null>(null);
   zenPersonaBotIdRef.current = zenPersonaBotId;
+  const [
+    pendingZenPersonaTransition,
+    setPendingZenPersonaTransition,
+  ] = useState<PendingZenPersonaTransition | null>(null);
+  const pendingZenPersonaTransitionRef = useRef<PendingZenPersonaTransition | null>(null);
+  pendingZenPersonaTransitionRef.current = pendingZenPersonaTransition;
+  const [
+    zenPersonaTransitionChoiceIndex,
+    setZenPersonaTransitionChoiceIndex,
+  ] = useState(0);
   const [images, setImages] = useState<ImageRecord[]>([]);
   /** Full-gallery fetch for bot tallies while the grid shows a filtered list. */
   const [imageBotDirectorySnapshot, setImageBotDirectorySnapshot] = useState<
@@ -25824,6 +26068,137 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
+
+  useEffect(() => {
+    if (view === "chat" && zenAutonomyEnabled && user) return;
+    if (zenAutonomyTimerRef.current) {
+      clearTimeout(zenAutonomyTimerRef.current);
+      zenAutonomyTimerRef.current = null;
+    }
+    zenAutonomyInFlightRef.current = false;
+    zenAutonomySpokenCountRef.current = 0;
+    zenAutonomyCooldownUntilMsRef.current = 0;
+    zenAutonomyLastActivityAtMsRef.current = Date.now();
+    setZenAutonomyScheduleTick((tick) => tick + 1);
+  }, [user, view, zenAutonomyEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (view !== "chat" || !zenAutonomyEnabled || !user) return;
+    const markActivity = (): void => {
+      zenAutonomyLastActivityAtMsRef.current = Date.now();
+      setZenAutonomyScheduleTick((tick) => tick + 1);
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        zenAutonomySpokenCountRef.current = 0;
+        markActivity();
+      } else if (zenAutonomyTimerRef.current) {
+        clearTimeout(zenAutonomyTimerRef.current);
+        zenAutonomyTimerRef.current = null;
+      }
+    };
+    window.addEventListener("pointerdown", markActivity, { passive: true });
+    window.addEventListener("keydown", markActivity);
+    window.addEventListener("wheel", markActivity, { passive: true });
+    window.addEventListener("touchstart", markActivity, { passive: true });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointerdown", markActivity);
+      window.removeEventListener("keydown", markActivity);
+      window.removeEventListener("wheel", markActivity);
+      window.removeEventListener("touchstart", markActivity);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [user, view, zenAutonomyEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (zenAutonomyTimerRef.current) {
+      clearTimeout(zenAutonomyTimerRef.current);
+      zenAutonomyTimerRef.current = null;
+    }
+    const hasConversation = Boolean(detail?.id && detail.id !== "pending");
+    const nowMs = Date.now();
+    const eligibility = resolveZenAutonomyEligibility({
+      view,
+      enabled: zenAutonomyEnabled,
+      documentVisible: document.visibilityState === "visible",
+      hasConversation,
+      pendingReply: pendingReplyVisible,
+      editingMessageId,
+      draft,
+      inFlight: zenAutonomyInFlightRef.current,
+      spokenCount: zenAutonomySpokenCountRef.current,
+      nowMs,
+      lastActivityAtMs: zenAutonomyLastActivityAtMsRef.current,
+      cooldownUntilMs: zenAutonomyCooldownUntilMsRef.current,
+    });
+    if (!eligibility.eligible) {
+      if (
+        (eligibility.reason === "idle" || eligibility.reason === "cooldown") &&
+        eligibility.delayMs > 0 &&
+        eligibility.delayMs < 2 ** 31 - 1
+      ) {
+        zenAutonomyTimerRef.current = setTimeout(() => {
+          zenAutonomyTimerRef.current = null;
+          setZenAutonomyScheduleTick((tick) => tick + 1);
+        }, eligibility.delayMs);
+      }
+      return;
+    }
+    zenAutonomyInFlightRef.current = true;
+    const clientTurnId = `zen-auto-${nowMs.toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    let callbackCalled = false;
+    const finalizeDecision = (decision: ZenAutonomyDecision | null): void => {
+      callbackCalled = true;
+      const finishedAtMs = Date.now();
+      if (decision?.action === "speak") {
+        zenAutonomySpokenCountRef.current += 1;
+      }
+      zenAutonomyCooldownUntilMsRef.current = nextZenAutonomyCooldownUntilMs(
+        finishedAtMs,
+        decision
+      );
+    };
+    void sendMessage(
+      { preventDefault() {} } as React.FormEvent,
+      {
+        draftOverride: "",
+        skipComposerHistory: true,
+        zenAutonomy: {
+          source: "idle",
+          activeBotId: zenPersonaBotIdRef.current,
+          idleMs: eligibility.idleMs,
+          clientTurnId,
+        },
+        onZenAutonomyResult: finalizeDecision,
+      }
+    ).finally(() => {
+      if (!callbackCalled) {
+        finalizeDecision(null);
+      }
+      zenAutonomyInFlightRef.current = false;
+      setZenAutonomyScheduleTick((tick) => tick + 1);
+    });
+    return () => {
+      if (zenAutonomyTimerRef.current) {
+        clearTimeout(zenAutonomyTimerRef.current);
+        zenAutonomyTimerRef.current = null;
+      }
+    };
+  }, [
+    detail?.id,
+    draft,
+    editingMessageId,
+    pendingReplyVisible,
+    user,
+    view,
+    zenAutonomyEnabled,
+    zenAutonomyScheduleTick,
+  ]);
   /** Wordmark header only (Chat / Sandbox pre-thread): surface full bot grid when picker is narrowed or a bot is armed. */
   const showHeaderShowAllBotsLink = useMemo(() => {
     if (bots.length === 0 || pendingReplyVisible || detail) return false;
@@ -32277,11 +32652,8 @@ function HomeContent(): React.JSX.Element {
       promptWildcards?: PromptWildcardRunMetadata;
       prismInterruption?: PrismMoodInterruptionInput;
       zenPersonaBotId?: string | null;
-      personaTransition?: {
-        fromBotId: string | null;
-        toBotId: string | null;
-        source: "picker";
-      };
+      personaTransition?: ZenPersonaTransitionInput;
+      zenAutonomy?: ZenAutonomyInput;
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
@@ -32366,6 +32738,9 @@ function HomeContent(): React.JSX.Element {
       ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
       ...(mode === "zen" && options.personaTransition
         ? { personaTransition: options.personaTransition }
+        : {}),
+      ...(mode === "zen" && options.zenAutonomy
+        ? { zenAutonomy: options.zenAutonomy }
         : {}),
     };
   }
@@ -33845,21 +34220,21 @@ function HomeContent(): React.JSX.Element {
       promptInputOverride?: string;
       queuedConversationId?: string | null;
       skipComposerHistory?: boolean;
-      personaTransition?: {
-        fromBotId: string | null;
-        toBotId: string | null;
-        source: "picker";
-      };
+      personaTransition?: ZenPersonaTransitionInput;
+      zenAutonomy?: ZenAutonomyInput;
+      onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
     } = {}
   ) {
     e.preventDefault();
     const isPersonaTransition = options.personaTransition !== undefined;
+    const isZenAutonomy = options.zenAutonomy !== undefined;
+    const isAssistantOnlyTurn = isPersonaTransition || isZenAutonomy;
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
-      !isPersonaTransition &&
+      !isAssistantOnlyTurn &&
       await consumeBuiltInOperationalSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33870,7 +34245,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
-      !isPersonaTransition &&
+      !isAssistantOnlyTurn &&
       consumeGlobalClearCommand(rawTrimmed, "chat")
     ) {
       if (!options.skipComposerHistory) {
@@ -33881,7 +34256,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
-      !isPersonaTransition &&
+      !isAssistantOnlyTurn &&
       await consumeDevSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33892,7 +34267,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
-      !isPersonaTransition &&
+      !isAssistantOnlyTurn &&
       consumePrismDevComposerCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33903,7 +34278,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const commandCenterResolution =
-      rawTrimmed.length > 0 && !options.starterPrompt && !isPersonaTransition
+      rawTrimmed.length > 0 && !options.starterPrompt && !isAssistantOnlyTurn
         ? resolveCommandCenterPromptShortcuts(rawDraft)
         : { kind: "none" as const };
     if (commandCenterResolution.kind === "error") {
@@ -33930,6 +34305,8 @@ function HomeContent(): React.JSX.Element {
         ? { prompt: commandCenterResolution.prompt, promptWildcards: null }
         : isPersonaTransition
           ? { prompt: "", promptWildcards: null }
+          : isZenAutonomy
+            ? { prompt: "", promptWildcards: null }
           : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
     const trimmed = composerWildcardResolution.prompt.trim();
@@ -33966,8 +34343,9 @@ function HomeContent(): React.JSX.Element {
       clearZenInitialStarterReplyCache();
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
-    const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
-    if (!trimmed && !isStarterPrompt && !isPersonaTransition) return;
+    const forceNewConversation =
+      !isStarterPrompt && !isZenAutonomy && forceNewConversationOnNextSend;
+    if (!trimmed && !isStarterPrompt && !isAssistantOnlyTurn) return;
     let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
     if (
       commandCenterSubmitActive &&
@@ -34077,14 +34455,16 @@ function HomeContent(): React.JSX.Element {
       });
       return;
     }
-    hideZenHeaderForConversationAction();
-    // Any typed/chosen follow-up supersedes the starter quick-replies row.
-    if (!isStarterPrompt) {
-      setConversationStarterPrompts(null);
-    }
-    if (view === "chat") {
-      setChatStartupSummary(null);
-      chatSummaryRefreshMarkerRef.current = null;
+    if (!isZenAutonomy) {
+      hideZenHeaderForConversationAction();
+      // Any typed/chosen follow-up supersedes the starter quick-replies row.
+      if (!isStarterPrompt) {
+        setConversationStarterPrompts(null);
+      }
+      if (view === "chat") {
+        setChatStartupSummary(null);
+        chatSummaryRefreshMarkerRef.current = null;
+      }
     }
     const requestConversationId = options.queuedConversationId ?? (
       detailForSend?.id && detailForSend.id !== "pending"
@@ -34092,22 +34472,32 @@ function HomeContent(): React.JSX.Element {
         : selectedId
     );
     const requestStartedNewConversation = requestConversationId === null || forceNewConversation;
-    resumeChatModeAutoscrollForOutgoingTurn(
-      requestConversationId ??
-        detailForSend?.id ??
-        selectedId ??
-        (requestStartedNewConversation ? "pending" : null)
-    );
+    if (!isZenAutonomy) {
+      resumeChatModeAutoscrollForOutgoingTurn(
+        requestConversationId ??
+          detailForSend?.id ??
+          selectedId ??
+          (requestStartedNewConversation ? "pending" : null)
+      );
+    }
     const archiveConversationId =
       requestConversationId ??
       (detailForSend?.id && detailForSend.id !== "pending" ? detailForSend.id : null);
-    if (view === "chat" && archiveConversationId) {
+    if (!isZenAutonomy && view === "chat" && archiveConversationId) {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
     const chatRequestController = new AbortController();
-    pendingReplyAbortControllerRef.current = chatRequestController;
+    if (!isZenAutonomy) {
+      pendingReplyAbortControllerRef.current = chatRequestController;
+    }
     const clearPendingReplyVisuals = () => {
+      if (isZenAutonomy) {
+        if (pendingReplyAbortControllerRef.current === chatRequestController) {
+          pendingReplyAbortControllerRef.current = null;
+        }
+        return;
+      }
       setPendingReply(false);
       setPendingReplyStartedAtMs(null);
       setPendingReplyDenialRisk(false);
@@ -34117,24 +34507,28 @@ function HomeContent(): React.JSX.Element {
         pendingReplyAbortControllerRef.current = null;
       }
     };
-    setPendingReply(true);
-    setPendingReplyStartedAtMs(Date.now());
-    setPendingReplyDenialRisk(
-      promptLooksDenialProne(isStarterPrompt ? "" : trimmed)
-    );
-    setPendingReplyStartMessageCount(baselineMessageCount);
-    setPendingReplyConversationId(requestConversationId);
-    setPendingReplyIsNewConversation(requestStartedNewConversation);
+    if (!isZenAutonomy) {
+      setPendingReply(true);
+      setPendingReplyStartedAtMs(Date.now());
+      setPendingReplyDenialRisk(
+        promptLooksDenialProne(isStarterPrompt ? "" : trimmed)
+      );
+      setPendingReplyStartMessageCount(baselineMessageCount);
+      setPendingReplyConversationId(requestConversationId);
+      setPendingReplyIsNewConversation(requestStartedNewConversation);
+    }
     setError(null);
 
     const mentionedZenPersonaBotId =
-      view === "chat" && !isStarterPrompt && !isPersonaTransition
+      view === "chat" && !isStarterPrompt && !isAssistantOnlyTurn
         ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
         : null;
     const zenPersonaBotIdForSend =
       view === "chat"
         ? isPersonaTransition
           ? options.personaTransition!.toBotId
+          : isZenAutonomy
+            ? options.zenAutonomy!.activeBotId
           : mentionedZenPersonaBotId ?? zenPersonaBotId
         : undefined;
     const optimisticZenPersonaBot =
@@ -34178,7 +34572,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingStarterDetail
         : initialZenStarterPendingDetail;
       setDetail(pendingStarterDetail);
-    } else if (!isStarterPrompt && !isPersonaTransition) {
+    } else if (!isStarterPrompt && !isAssistantOnlyTurn) {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -34261,7 +34655,7 @@ function HomeContent(): React.JSX.Element {
       };
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
-    if (!isStarterPrompt && !editingMessageId && !options.skipComposerHistory) {
+    if (!isStarterPrompt && !isZenAutonomy && !editingMessageId && !options.skipComposerHistory) {
       appendComposerHistoryEntry(rawDraft);
     }
     setDraft("");
@@ -34314,7 +34708,9 @@ function HomeContent(): React.JSX.Element {
       activeZenSessionBreakResumeContext;
 
     try {
-      const chatBody = buildChatRequestBody(isStarterPrompt ? "" : displayTrimmed, {
+      const chatBody = buildChatRequestBody(
+        isStarterPrompt || isZenAutonomy ? "" : displayTrimmed,
+        {
         starterPrompt: isStarterPrompt,
         ...(options.starterPromptWarrantsIntro
           ? { starterPromptWarrantsIntro: true }
@@ -34345,10 +34741,14 @@ function HomeContent(): React.JSX.Element {
         ...(options.personaTransition
           ? { personaTransition: options.personaTransition }
           : {}),
+        ...(options.zenAutonomy
+          ? { zenAutonomy: options.zenAutonomy }
+          : {}),
         ...(options.promptInputOverride
           ? { promptInputOverride: options.promptInputOverride }
           : {}),
-      });
+        }
+      );
       appendDevChatRouteStart("send", chatBody);
       const d = await api<ChatPostEnvelope>("/api/chat", {
         method: "POST",
@@ -34379,6 +34779,7 @@ function HomeContent(): React.JSX.Element {
       captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
+      options.onZenAutonomyResult?.(d.zenAutonomyDecision ?? null);
       successfulConversationId = d.conversation.id;
       if (sessionResumeContextForSend) {
         if (pendingZenSessionResumeContextForSend) {
@@ -34415,6 +34816,8 @@ function HomeContent(): React.JSX.Element {
         ? selectedIdRef.current === requestConversationId ||
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
+      const zenAutonomySpoke =
+        isZenAutonomy && d.zenAutonomyDecision?.action === "speak";
       if (stillViewingRequest) {
         const patchedConversation = applyCommandDisplayAliases(
           applyExplicitAskQuestionFallback(d.conversation)
@@ -34425,10 +34828,20 @@ function HomeContent(): React.JSX.Element {
             conversation: patchedConversation,
           };
         }
-        markLatestAssistantRevealEligible(patchedConversation);
+        if (!isZenAutonomy || zenAutonomySpoke) {
+          markLatestAssistantRevealEligible(patchedConversation);
+        }
         if (view === "chat") {
-          hardResetChatArchiveStateForConversation(d.conversation.id);
-          setZenPersonaBotId(patchedConversation.lastBotId ?? null);
+          if (!isZenAutonomy || zenAutonomySpoke) {
+            hardResetChatArchiveStateForConversation(d.conversation.id);
+          }
+          setZenPersonaBotId(
+            options.personaTransition
+              ? options.personaTransition.toBotId
+              : isZenAutonomy && d.zenAutonomyDecision?.action !== "speak"
+                ? zenPersonaBotIdRef.current
+              : patchedConversation.lastBotId ?? null
+          );
         }
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
@@ -34539,7 +34952,8 @@ function HomeContent(): React.JSX.Element {
       }
       await refreshOpenMemoryViews();
       if (stillViewingRequest) {
-        const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
+        const nextBotId =
+          options.personaTransition?.toBotId ?? d.conversation.lastBotId ?? d.conversation.botId;
         if (memoryPanelScope === "default") {
           await refreshPrismMemoryPanel();
         } else if (memoryPanelScope === "session") {
@@ -35132,6 +35546,9 @@ function HomeContent(): React.JSX.Element {
           aria-live="polite"
         >
           <p className={styles.askQuestionCollapsedPromptText}>{prompt}</p>
+          {askQuestionPatienceAssistantMessageId
+            ? renderAskQuestionPatienceMeter(askQuestionPatienceAssistantMessageId, "dock")
+            : null}
         </div>
       );
     }
@@ -35165,6 +35582,9 @@ function HomeContent(): React.JSX.Element {
         ) : rail.heading ? (
           <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
         ) : null}
+        {askQuestionPatienceAssistantMessageId
+          ? renderAskQuestionPatienceMeter(askQuestionPatienceAssistantMessageId, "rail")
+          : null}
         {rail.chips.map((chip, chipIndex) => (
           <button
             key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
@@ -35220,6 +35640,7 @@ function HomeContent(): React.JSX.Element {
         {prompt ? (
           <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
         ) : null}
+        {renderAskQuestionPatienceMeter(interaction.assistantMessageId, "inline")}
         <div
           className={styles.askQuestionInlineChoices}
           data-choices-disabled={choicesDisabled ? "true" : undefined}
@@ -35568,6 +35989,169 @@ function HomeContent(): React.JSX.Element {
       : activeChoiceComposerSource === "starter"
         ? !starterComposerRevealed
         : false;
+  const askQuestionPatienceAssistantMessageId =
+    pendingAskQuestionInteractiveKey !== null
+      ? pendingAskQuestionState?.assistantMessageId ?? null
+      : null;
+  const askQuestionPatienceConversationId =
+    detail?.id && detail.id !== "pending" ? detail.id : null;
+  const askQuestionPatienceKey =
+    view === "chat" &&
+    zenAskQuestionPatienceEnabled &&
+    pendingAskQuestionInteractiveKey !== null &&
+    askQuestionPatienceConversationId !== null &&
+    askQuestionPatienceAssistantMessageId !== null
+      ? `${askQuestionPatienceConversationId}:${askQuestionPatienceAssistantMessageId}`
+      : null;
+  const askQuestionPatienceDurationMs =
+    normalizeZenAskQuestionPatienceMsSetting(zenAskQuestionPatienceMs);
+  const askQuestionPatienceProgress = askQuestionPatienceKey
+    ? Math.max(
+        0,
+        Math.min(
+          1,
+          1 -
+            askQuestionPatienceElapsedMs /
+              Math.max(1, askQuestionPatienceDurationMs)
+        )
+      )
+    : 1;
+
+  async function reportAskQuestionPatienceTimeout(args: {
+    key: string;
+    conversationId: string;
+    assistantMessageId: string;
+    timeoutMs: number;
+    activeElapsedMs: number;
+  }): Promise<void> {
+    try {
+      const result = await api<{
+        ok: true;
+        applied?: boolean;
+        duplicate?: boolean;
+        prismMood?: PrismMoodSnapshot;
+      }>(
+        `/api/conversations/${encodeURIComponent(args.conversationId)}/prism-mood/ask-question-timeout`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            assistantMessageId: args.assistantMessageId,
+            timeoutMs: args.timeoutMs,
+            activeElapsedMs: args.activeElapsedMs,
+          }),
+        }
+      );
+      if (result.prismMood) {
+        setDetail((current) =>
+          current?.id === args.conversationId
+            ? { ...current, prismMood: result.prismMood }
+            : current
+        );
+      }
+    } catch {
+      // Keep this quiet: a timer miss should not interrupt the conversation UI.
+    }
+  }
+
+  function renderAskQuestionPatienceMeter(
+    assistantMessageId: string,
+    placement: "inline" | "rail" | "dock"
+  ): React.ReactNode {
+    if (
+      !askQuestionPatienceKey ||
+      assistantMessageId !== askQuestionPatienceAssistantMessageId
+    ) {
+      return null;
+    }
+    const meterStyle = {
+      "--ask-question-patience-progress": askQuestionPatienceProgress.toFixed(4),
+    } as React.CSSProperties;
+    return (
+      <div
+        className={styles.askQuestionPatienceMeter}
+        data-placement={placement}
+        data-expired={askQuestionPatienceProgress <= 0 ? "true" : undefined}
+        style={meterStyle}
+        aria-hidden="true"
+      >
+        <span />
+      </div>
+    );
+  }
+
+  useEffect(() => {
+    askQuestionPatienceLastTickMsRef.current = null;
+    askQuestionPatienceLastTypingAtMsRef.current = null;
+    askQuestionPatienceElapsedMsRef.current = 0;
+    setAskQuestionPatienceElapsedMs(0);
+  }, [askQuestionPatienceKey, askQuestionPatienceDurationMs]);
+
+  useEffect(() => {
+    if (
+      !askQuestionPatienceKey ||
+      !askQuestionPatienceConversationId ||
+      !askQuestionPatienceAssistantMessageId
+    ) {
+      askQuestionPatienceLastTickMsRef.current = null;
+      return;
+    }
+    let frameId = 0;
+    let cancelled = false;
+    const tick = (nowMs: number): void => {
+      if (cancelled) return;
+      const fromMs = askQuestionPatienceLastTickMsRef.current ?? nowMs;
+      const paused = shouldPauseAskQuestionPatience({
+        active: true,
+        pendingReply: Boolean(pendingReply),
+        documentHidden: typeof document !== "undefined" ? document.hidden : false,
+        nowMs,
+        lastTypingAtMs: askQuestionPatienceLastTypingAtMsRef.current,
+      });
+      const result = advanceAskQuestionPatience({
+        durationMs: askQuestionPatienceDurationMs,
+        elapsedMs: askQuestionPatienceElapsedMsRef.current,
+        fromMs,
+        toMs: nowMs,
+        paused,
+      });
+      askQuestionPatienceLastTickMsRef.current = nowMs;
+      if (result.elapsedMs !== askQuestionPatienceElapsedMsRef.current) {
+        askQuestionPatienceElapsedMsRef.current = result.elapsedMs;
+        setAskQuestionPatienceElapsedMs(result.elapsedMs);
+      }
+      const alreadyReported =
+        askQuestionPatienceReportedKeysRef.current.has(askQuestionPatienceKey);
+      if (
+        shouldReportAskQuestionPatienceExpiry({
+          expired: result.expired,
+          alreadyReported,
+        })
+      ) {
+        askQuestionPatienceReportedKeysRef.current.add(askQuestionPatienceKey);
+        void reportAskQuestionPatienceTimeout({
+          key: askQuestionPatienceKey,
+          conversationId: askQuestionPatienceConversationId,
+          assistantMessageId: askQuestionPatienceAssistantMessageId,
+          timeoutMs: askQuestionPatienceDurationMs,
+          activeElapsedMs: result.elapsedMs,
+        });
+      }
+      if (!result.expired) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [
+    askQuestionPatienceAssistantMessageId,
+    askQuestionPatienceConversationId,
+    askQuestionPatienceDurationMs,
+    askQuestionPatienceKey,
+    pendingReply,
+  ]);
 
   useLayoutEffect(() => {
     if (!choiceComposerFocusAfterRevealRef.current || composerHiddenByChoiceChips) {
@@ -35651,6 +36235,7 @@ function HomeContent(): React.JSX.Element {
     setComposerFocused(true);
     setComposerSendTintActive(true);
     setComposerPrimed(false);
+    askQuestionPatienceLastTypingAtMsRef.current = performance.now();
     setDraft((current) => `${current}${text}`);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -36414,6 +36999,7 @@ function HomeContent(): React.JSX.Element {
     resetComposerHistoryCursor();
     if (normalizedNextDraft !== draft) {
       setComposerSendTintActive(true);
+      askQuestionPatienceLastTypingAtMsRef.current = performance.now();
     }
     startDraftTransition(() => {
       setDraft(normalizedNextDraft);
@@ -39265,12 +39851,51 @@ function HomeContent(): React.JSX.Element {
     [view]
   );
 
-  function handleZenPersonaSelectionChange(next: string): void {
+  function clearPendingZenPersonaTransition(): void {
+    const pendingTransition = pendingZenPersonaTransitionRef.current;
+    if (pendingTransition) {
+      setZenPersonaBotId(pendingTransition.fromBotId);
+    }
+    setPendingZenPersonaTransition(null);
+    setZenPersonaTransitionChoiceIndex(0);
+    focusDraftInput();
+  }
+
+  function commitZenPersonaOff(): void {
+    setPendingZenPersonaTransition(null);
+    setZenPersonaTransitionChoiceIndex(0);
+    setZenPersonaBotId(null);
+    focusDraftInput();
+  }
+
+  function stageZenPersonaTransition(nextBotId: string | null, origin: "picker" | "mention"): void {
     if (pendingReplyVisible) return;
-    const nextBotId = next || null;
     const fromBotId = zenPersonaBotIdRef.current;
     if (fromBotId === nextBotId) return;
+    if (nextBotId === null) {
+      commitZenPersonaOff();
+      return;
+    }
     setZenPersonaBotId(nextBotId);
+    setPendingZenPersonaTransition({
+      fromBotId,
+      toBotId: nextBotId,
+      origin,
+    });
+    setZenPersonaTransitionChoiceIndex(0);
+    focusDraftInput();
+  }
+
+  function commitPendingZenPersonaTransition(choice: ZenPersonaTransitionChoice): void {
+    const pendingTransition = pendingZenPersonaTransitionRef.current;
+    if (!pendingTransition || pendingReplyVisible) return;
+    const style = resolveZenPersonaTransitionStyle(choice, {
+      fromBotId: pendingTransition.fromBotId,
+      toBotId: pendingTransition.toBotId,
+    });
+    setPendingZenPersonaTransition(null);
+    setZenPersonaTransitionChoiceIndex(0);
+    setZenPersonaBotId(pendingTransition.toBotId);
     const syntheticSubmit = {
       preventDefault() {
         // no-op; used so Persona transitions share the normal submit path
@@ -39280,11 +39905,145 @@ function HomeContent(): React.JSX.Element {
       draftOverride: "",
       skipComposerHistory: true,
       personaTransition: {
-        fromBotId,
-        toBotId: nextBotId,
+        fromBotId: pendingTransition.fromBotId,
+        toBotId: pendingTransition.toBotId,
         source: "picker",
+        style,
       },
     });
+  }
+
+  function handleZenPersonaSelectionChange(next: string): void {
+    stageZenPersonaTransition(next || null, "picker");
+  }
+
+  function handleZenMentionPersonaSelection(botId: string): void {
+    stageZenPersonaTransition(botId, "mention");
+  }
+
+  function handleZenEmptyComposerBackspace(): boolean {
+    if (view !== "chat" || pendingReplyVisible || zenPersonaBotIdRef.current === null) {
+      return false;
+    }
+    commitZenPersonaOff();
+    return true;
+  }
+
+  useEffect(() => {
+    if (!pendingZenPersonaTransition) return;
+
+    function handleTransitionMenuKeyDown(event: KeyboardEvent): void {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        clearPendingZenPersonaTransition();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setZenPersonaTransitionChoiceIndex((current) =>
+          (current + 1) % ZEN_PERSONA_TRANSITION_CHOICES.length
+        );
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setZenPersonaTransitionChoiceIndex((current) =>
+          (current - 1 + ZEN_PERSONA_TRANSITION_CHOICES.length) %
+          ZEN_PERSONA_TRANSITION_CHOICES.length
+        );
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        const choice =
+          ZEN_PERSONA_TRANSITION_CHOICES[
+            Math.min(
+              Math.max(zenPersonaTransitionChoiceIndex, 0),
+              ZEN_PERSONA_TRANSITION_CHOICES.length - 1
+            )
+          ] ?? "auto";
+        commitPendingZenPersonaTransition(choice);
+      }
+    }
+
+    function handleTransitionMenuPointerDown(event: PointerEvent): void {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-zen-persona-transition-menu='true']")
+      ) {
+        return;
+      }
+      clearPendingZenPersonaTransition();
+    }
+
+    window.addEventListener("keydown", handleTransitionMenuKeyDown, true);
+    window.addEventListener("pointerdown", handleTransitionMenuPointerDown, true);
+    return () => {
+      window.removeEventListener("keydown", handleTransitionMenuKeyDown, true);
+      window.removeEventListener("pointerdown", handleTransitionMenuPointerDown, true);
+    };
+  }, [pendingZenPersonaTransition, zenPersonaTransitionChoiceIndex]);
+
+  function renderZenPersonaTransitionMenu(): React.ReactNode {
+    const pendingTransition = pendingZenPersonaTransition;
+    if (!pendingTransition) return null;
+    const fromBot = pendingTransition.fromBotId
+      ? bots.find((bot) => bot.id === pendingTransition.fromBotId) ?? null
+      : null;
+    const toBot = bots.find((bot) => bot.id === pendingTransition.toBotId) ?? null;
+    const fromLabel = fromBot?.name?.trim() || "PRISM";
+    const toLabel = toBot?.name?.trim() || "Persona";
+    const optionLabels: Record<ZenPersonaTransitionChoice, string> = {
+      auto: "Auto",
+      "new-speaks": "New persona speaks",
+      "previous-introduces":
+        pendingTransition.fromBotId === null ? "PRISM introduces" : "Previous introduces",
+    };
+
+    return (
+      <div
+        className={`${styles.composeBotMenu} ${styles.composeCommandMenu} ${styles.zenPersonaTransitionMenu}`}
+        role="dialog"
+        aria-label={`Switch to ${toLabel}`}
+        data-zen-persona-transition-menu="true"
+      >
+        <div className={styles.zenPersonaTransitionHeader}>
+          <span className={styles.zenPersonaTransitionKicker}>
+            {fromLabel} to {toLabel}
+          </span>
+          <button
+            type="button"
+            className={styles.zenPersonaTransitionClose}
+            onClick={clearPendingZenPersonaTransition}
+            aria-label="Cancel persona switch"
+            data-glyph-tooltip="Cancel"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+        <div className={styles.zenPersonaTransitionOptions} role="listbox">
+          {ZEN_PERSONA_TRANSITION_CHOICES.map((choice, index) => (
+            <button
+              key={choice}
+              type="button"
+              className={`${styles.composeCommandOption} ${styles.zenPersonaTransitionOption}`}
+              data-command-kind="mention"
+              aria-selected={zenPersonaTransitionChoiceIndex === index}
+              role="option"
+              onMouseEnter={() => setZenPersonaTransitionChoiceIndex(index)}
+              onClick={() => commitPendingZenPersonaTransition(choice)}
+            >
+              <span className={styles.zenPersonaTransitionOptionGlyph} aria-hidden="true">
+                {choice === "auto" ? "A" : choice === "new-speaks" ? "N" : "P"}
+              </span>
+              <span className={styles.composeBotOptionName}>{optionLabels[choice]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   useEffect(() => {
@@ -51538,6 +52297,85 @@ function HomeContent(): React.JSX.Element {
                         }}
                       />
                     </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenAskQuestionPatienceEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenAskQuestionPatienceEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      Question patience timer
+                    </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenAutonomyEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenAutonomyEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Let Zen reach out</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-autonomy"
+                          label="About Zen Autonomy"
+                          variant="control"
+                        >
+                          Allows Zen to occasionally initiate a brief idle message and choose a Persona while the Zen surface is open and visible.
+                        </PanelSectionInfo>
+                      </span>
+                    </label>
+                    {zenAskQuestionPatienceEnabled ? (
+                      <label className={styles.settingsRangeField}>
+                        <span className={styles.settingsRangeHeader}>
+                          <span className={styles.controlLabelWithInfo}>
+                            <span>Question patience</span>
+                            <PanelSectionInfo
+                              id="settings-control-info-zen-question-patience"
+                              label="About question patience"
+                              variant="control"
+                            >
+                              Sets how long a pending AskQuestion waits before Prism reads silence as hesitation.
+                            </PanelSectionInfo>
+                          </span>
+                          <span className={styles.settingsRangeValue}>
+                            {formatZenAskQuestionPatience(settings.zenAskQuestionPatienceMs)}
+                          </span>
+                        </span>
+                        <input
+                          type="range"
+                          min={MIN_ZEN_ASK_QUESTION_PATIENCE_MS}
+                          max={MAX_ZEN_ASK_QUESTION_PATIENCE_MS}
+                          step={5_000}
+                          value={zenAskQuestionPatienceMs}
+                          onChange={(event) => {
+                            const next = normalizeZenAskQuestionPatienceMsSetting(
+                              event.target.value
+                            );
+                            setSettings((previous) =>
+                              previous
+                                ? { ...previous, zenAskQuestionPatienceMs: next }
+                                : previous
+                            );
+                          }}
+                        />
+                      </label>
+                    ) : null}
                   </div>
                 </section>
 
@@ -51745,7 +52583,7 @@ function HomeContent(): React.JSX.Element {
                 {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
                 <div className={styles.settingsDockRow}>
-                  <span>Save Zen Mode timing, mood, context, and Atmosphere settings.</span>
+                  <span>Save Zen Mode timing, mood, autonomy, context, and Atmosphere settings.</span>
                   <div className={styles.settingsDockActions}>
                     <button
                       type="button"
@@ -61639,6 +62477,9 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    mentionCommitMode="select-persona"
+                    onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
@@ -61672,6 +62513,7 @@ function HomeContent(): React.JSX.Element {
             )
           ) : null}
         </form>
+        {renderZenPersonaTransitionMenu()}
         {renderMessageContextMenu()}
         {renderBotContextMenu()}
         {renderConversationGroupContextMenu()}
@@ -63111,6 +63953,9 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    mentionCommitMode="select-persona"
+                    onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}

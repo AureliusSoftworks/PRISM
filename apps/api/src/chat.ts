@@ -60,6 +60,10 @@ import type {
   PromptWildcardRunMetadata,
   SessionOpinion,
   SentGeneratedImagePayload,
+  ZenAutonomyDecision,
+  ZenAutonomyInput,
+  ZenPersonaTransitionInput,
+  ZenPersonaTransitionStyle,
   ZenSessionMemoryOverview,
 } from "@localai/shared";
 import {
@@ -219,6 +223,8 @@ export interface ProcessChatMessageResult {
   toolCalls?: ChatToolCallEvent[];
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
+  zenAutonomyDecision?: ZenAutonomyDecision;
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -1938,11 +1944,9 @@ export interface UserChatSettings {
   /** Optional user-facing wildcard metadata for resolved deck/option sends. */
   promptWildcards?: PromptWildcardRunMetadata;
   /** Zen-only assistant transition after a Persona picker change. */
-  personaTransition?: {
-    fromBotId: string | null;
-    toBotId: string | null;
-    source: "picker";
-  };
+  personaTransition?: ZenPersonaTransitionInput;
+  /** Zen-only idle autonomy turn. */
+  zenAutonomy?: ZenAutonomyInput;
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
   /** Optional resolved user prompt sent to the model while preserving display content. */
@@ -3505,11 +3509,28 @@ function buildZenPersonaTransitionInstruction(args: {
   fromBotId: string | null;
   toBotId: string | null;
   toPersonaLabel?: string | null;
+  style: ZenPersonaTransitionStyle;
 }): string {
   const fromName = readBotNameForZenPersona(args.db, args.userId, args.fromBotId);
   const toName =
     args.toPersonaLabel?.trim() ||
     readBotNameForZenPersona(args.db, args.userId, args.toBotId);
+  if (args.style === "previous-introduces") {
+    if (!args.toBotId) {
+      return [
+        "The user has turned off the active Zen Persona and returned Zen Mode to default PRISM.",
+        `The previous active Persona was ${fromName}.`,
+        `Write one brief, natural handoff as ${fromName} that yields the conversation back to PRISM.`,
+        "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+      ].join("\n");
+    }
+    return [
+      `The user is switching Zen Mode from ${fromName} to ${toName}.`,
+      `Write one brief, natural handoff as ${fromName} that introduces ${toName} or passes the conversation to them.`,
+      "Do not speak as the incoming Persona after the handoff.",
+      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+    ].join("\n");
+  }
   if (!args.toBotId) {
     return [
       "The user has returned Zen Mode to the default PRISM persona.",
@@ -3524,6 +3545,204 @@ function buildZenPersonaTransitionInstruction(args: {
     `Write one brief, natural first message as ${toName} that enters the ongoing conversation smoothly.`,
     "It may acknowledge the handoff or simply respond from the new perspective, whichever feels more natural from the recent context.",
     "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+  ].join("\n");
+}
+
+interface ZenAutonomyPersonaCandidate {
+  botId: string | null;
+  name: string;
+}
+
+function zenAutonomyPersonaCandidates(
+  db: DatabaseSync,
+  userId: string
+): ZenAutonomyPersonaCandidate[] {
+  const botColumns = new Set(
+    (db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>).map(
+      (column) => column.name
+    )
+  );
+  const chatEnabledPredicate = botColumns.has("chat_enabled")
+    ? "AND chat_enabled = 1"
+    : "";
+  const orderBy = botColumns.has("updated_at")
+    ? "updated_at DESC, name ASC"
+    : "name ASC";
+  const rows = db
+    .prepare(
+      `SELECT id, name
+         FROM bots
+        WHERE (user_id = ? OR visibility = 'public')
+          ${chatEnabledPredicate}
+        ORDER BY ${orderBy}
+        LIMIT 40`
+    )
+    .all(userId) as Array<{ id: string; name: string }>;
+  return [
+    { botId: null, name: "PRISM" },
+    ...rows
+      .map((row) => ({
+        botId: row.id,
+        name: row.name?.trim() || "Unnamed Persona",
+      }))
+      .filter((row) => row.botId && row.name.length > 0),
+  ];
+}
+
+function recentZenAutonomyContextLines(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT m.role, m.content, COALESCE(b.name, '') AS bot_name
+         FROM messages m
+         LEFT JOIN bots b ON b.id = m.bot_id
+        WHERE m.conversation_id = ?
+          AND m.user_id = ?
+          AND m.role IN ('user', 'assistant')
+        ORDER BY m.created_at DESC
+        LIMIT 14`
+    )
+    .all(conversationId, userId) as Array<{
+    role: string;
+    content: string;
+    bot_name: string | null;
+  }>;
+  return rows.reverse().map((row) => {
+    const speaker =
+      row.role === "assistant"
+        ? row.bot_name?.trim() || "PRISM"
+        : "User";
+    return `${speaker}: ${clampBoundaryContext(row.content, 420)}`;
+  });
+}
+
+function parseZenAutonomyDecision(
+  raw: string,
+  candidates: readonly ZenAutonomyPersonaCandidate[]
+): ZenAutonomyDecision {
+  const trimmed = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const candidateIds = new Set(
+    candidates
+      .map((candidate) => candidate.botId)
+      .filter((botId): botId is string => typeof botId === "string")
+  );
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object") return { action: "silent" };
+    const record = parsed as Record<string, unknown>;
+    if (record.action !== "speak") return { action: "silent" };
+    const botId =
+      typeof record.botId === "string" && record.botId.trim().length > 0
+        ? record.botId.trim()
+        : null;
+    if (botId !== null && !candidateIds.has(botId)) return { action: "silent" };
+    return { action: "speak", botId };
+  } catch {
+    return { action: "silent" };
+  }
+}
+
+export async function decideZenAutonomyTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  provider: LlmProvider;
+  activeBotId: string | null;
+  idleMs: number;
+  prismMood?: PrismMoodSnapshot | null;
+  signal?: AbortSignal;
+}): Promise<ZenAutonomyDecision> {
+  const candidates = zenAutonomyPersonaCandidates(args.db, args.userId);
+  const activeName =
+    candidates.find((candidate) => candidate.botId === args.activeBotId)?.name ?? "PRISM";
+  const recentLines = recentZenAutonomyContextLines(
+    args.db,
+    args.userId,
+    args.conversationId
+  );
+  const candidateLines = candidates.map((candidate) =>
+    candidate.botId
+      ? `- ${candidate.name}: ${candidate.botId}`
+      : "- PRISM: null"
+  );
+  const idleMinutes = Math.max(0, Math.round(args.idleMs / 60_000));
+  const promptMessages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You are the Zen Autonomy router for Prism.",
+        "Choose whether Zen should stay silent or initiate one brief assistant message after user idleness.",
+        "Silence is preferred unless a small, natural check-in would feel alive and welcome.",
+        "If speaking, choose PRISM/default or one chat-enabled Persona from the candidate list.",
+        "Never guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
+        "Return only JSON: {\"action\":\"silent\"} or {\"action\":\"speak\",\"botId\":null|string}.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Idle minutes: ${idleMinutes}.`,
+        `Active Persona: ${activeName} (${args.activeBotId ?? "PRISM"}).`,
+        args.prismMood
+          ? `PRISM mood: ${args.prismMood.moodKey}; annoyance=${args.prismMood.annoyance}; warmth=${args.prismMood.warmth}; engagement=${args.prismMood.engagement}.`
+          : "PRISM mood: unavailable.",
+        `Candidates:\n${candidateLines.join("\n")}`,
+        recentLines.length > 0
+          ? `Recent conversation:\n${recentLines.map((line) => `- ${line}`).join("\n")}`
+          : "Recent conversation: none.",
+      ].join("\n\n"),
+    },
+  ];
+  try {
+    const raw = await args.provider.generateResponse(promptMessages, {
+      temperature: 0.25,
+      maxTokens: 120,
+      jsonMode: true,
+      signal: args.signal,
+    });
+    return parseZenAutonomyDecision(raw, candidates);
+  } catch {
+    return { action: "silent" };
+  }
+}
+
+function normalizeZenPersonaTransition(
+  transition: ZenPersonaTransitionInput
+): Required<ZenPersonaTransitionInput> {
+  return {
+    fromBotId: transition.fromBotId,
+    toBotId: transition.toBotId,
+    source: "picker",
+    style:
+      transition.style === "previous-introduces"
+        ? "previous-introduces"
+        : "new-speaks",
+  };
+}
+
+function resolveZenPersonaTransitionSpeakerBotId(
+  transition: Required<ZenPersonaTransitionInput>
+): string | null {
+  return transition.style === "previous-introduces"
+    ? transition.fromBotId
+    : transition.toBotId;
+}
+
+function buildZenAutonomyInstruction(
+  autonomy: ZenAutonomyInput,
+  personaLabel: string | null | undefined
+): string {
+  const idleMinutes = Math.max(0, Math.round(autonomy.idleMs / 60_000));
+  const speaker = personaLabel?.trim() || "PRISM";
+  return [
+    `Zen Autonomy is enabled. The user has been quietly idle in Zen Mode for about ${idleMinutes} minutes.`,
+    `Write one brief, natural assistant message as ${speaker}.`,
+    "You may initiate a gentle new thread, make a small observation, or show mild boredom/frustration only as natural flavor.",
+    "Do not guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
+    "Do not use tools, AskQuestion JSON, image generation, or action rails.",
   ].join("\n");
 }
 
@@ -3745,6 +3964,9 @@ function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): str
   if (!mood) return null;
   const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
   const declineReason = prismMoodDeclineReason(snapshot);
+  const recentIgnoredQuestion = snapshot.recentDeltas
+    .slice(0, 3)
+    .some((delta) => delta.kind === "ignored_question");
   return [
     "Current Prism mood context for this turn (not persona identity):",
     "- Use this as short-term conversational state only; do not rewrite, redefine, or override the persona.",
@@ -3753,6 +3975,11 @@ function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): str
     `- Exact 1-10 self-report values: annoyance ${formatMoodScale(snapshot.annoyance)}, warmth ${formatMoodScale(snapshot.warmth)}, engagement ${formatMoodScale(snapshot.engagement)}, restraint ${formatMoodScale(snapshot.restraint)}.`,
     `- Current self-report anchor: ${prismMoodSelfReportAnchor(snapshot)}. If the user asks about your current mood or asks for a 1-10 rating, answer with these exact Prism mood values rather than inferring a higher or lower number from the conversation text; 90-100% should read as 9-10/10.`,
     `- ${prismMoodBehaviorGuidance(snapshot)}`,
+    ...(recentIgnoredQuestion
+      ? [
+          "- Recent behavior signal: the user left your explicit question unanswered long enough to read as hesitation or indecision; let this tint your tone lightly without scolding.",
+        ]
+      : []),
     "- Let the mood noticeably affect tone, pacing, and brevity while still responding to the user's actual message.",
     ...(declineReason
       ? [`- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`]
@@ -4296,7 +4523,7 @@ async function ensureAboutYouMemory(args: {
   });
 }
 
-function loadPersistedConversationForChatResponse(args: {
+export function loadPersistedConversationForChatResponse(args: {
   db: DatabaseSync;
   userId: string;
   activeConversationId: string;
@@ -4471,9 +4698,25 @@ export async function processChatMessage(
       : null;
   const personaTransition =
     isZenMode(mode) && settings.personaTransition?.source === "picker"
-      ? settings.personaTransition
+      ? normalizeZenPersonaTransition(settings.personaTransition)
       : null;
   const personaTransitionTurn = personaTransition !== null;
+  const zenAutonomy =
+    isZenMode(mode) && settings.zenAutonomy?.source === "idle"
+      ? settings.zenAutonomy
+      : null;
+  const zenAutonomyTurn = zenAutonomy !== null;
+  const transitionSpeakerBotId = personaTransitionTurn
+    ? resolveZenPersonaTransitionSpeakerBotId(personaTransition)
+    : activeMemoryBotId;
+  const assistantBotId = personaTransitionTurn
+    ? transitionSpeakerBotId
+    : activeBotId;
+  const assistantMemoryBotId =
+    typeof assistantBotId === "string" && assistantBotId.trim().length > 0
+      ? assistantBotId.trim()
+      : null;
+  const opinionBotIdForTurn = personaTransitionTurn ? assistantBotId : activeBotId;
   const effectiveBotSystemPrompt = isZenMode(mode)
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
     : settings.botSystemPrompt;
@@ -4488,6 +4731,7 @@ export async function processChatMessage(
   const explicitAskQuestionRequest =
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     userExplicitlyRequestedAskQuestion(modelUserMessage);
   const promptUserMessage = personaTransitionTurn
     ? buildZenPersonaTransitionInstruction({
@@ -4495,8 +4739,12 @@ export async function processChatMessage(
         userId,
         fromBotId: personaTransition.fromBotId,
         toBotId: activeMemoryBotId,
-        toPersonaLabel: settings.starterPromptLabel,
+        toPersonaLabel:
+          personaTransition.style === "new-speaks" ? settings.starterPromptLabel : null,
+        style: personaTransition.style,
       })
+    : zenAutonomyTurn
+    ? buildZenAutonomyInstruction(zenAutonomy, settings.starterPromptLabel)
     : isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : modelUserMessage;
@@ -4509,7 +4757,7 @@ export async function processChatMessage(
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
     }; retrieval=${retrievalMode}; memory=${
-      skipPersonalFacts || commandCenterPromptTurn ? "skipped" : "enabled"
+      skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
   const provider = selectProvider(
@@ -4666,7 +4914,7 @@ export async function processChatMessage(
       const acq = await tryAcquireImageSlot({
         userId,
         conversationId: conversationId ?? null,
-        botId: activeBotId ?? null,
+        botId: assistantBotId ?? null,
         mode,
         incognito: true,
         captionPrompt: sendImgPromptInc,
@@ -4744,8 +4992,8 @@ export async function processChatMessage(
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
     const assistantCreatedAt = new Date().toISOString();
-    const activeBotName =
-      typeof activeBotId === "string"
+    const assistantBotName =
+      typeof assistantBotId === "string"
         ? settings.starterPromptLabel?.trim() ?? ""
         : "";
     const assistantMessageProse: ChatMessage = {
@@ -4755,10 +5003,10 @@ export async function processChatMessage(
       createdAt: assistantCreatedAt,
       provider: providerNameUsed,
       model: modelUsed,
-      botId: activeBotId ?? null,
+      botId: assistantBotId ?? null,
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
-      ...(activeBotName ? { botName: activeBotName } : {}),
+      ...(assistantBotName ? { botName: assistantBotName } : {}),
       ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
       ...(parsedAssistant.tellFictionalStory
         ? { tellFictionalStory: parsedAssistant.tellFictionalStory }
@@ -4795,7 +5043,7 @@ export async function processChatMessage(
       mode,
       botId: activeBotId ?? null,
       incognito: true,
-      lastBotId: activeBotId ?? null,
+      lastBotId: assistantBotId ?? null,
       lastBotColor: null,
       hasAssistantReply: true,
       createdAt: nextMessages[0]?.createdAt ?? now,
@@ -4932,6 +5180,8 @@ export async function processChatMessage(
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : personaTransitionTurn
           ? "Zen"
+        : zenAutonomyTurn
+          ? "Zen"
         : generateConversationTitle(modelUserMessage),
       isZenMode(mode) ? "zen" : mode,
       isZenMode(mode) ? null : activeBotId ?? null,
@@ -4994,13 +5244,13 @@ export async function processChatMessage(
     db,
     userId,
     activeConversationId,
-    activeBotId
+    opinionBotIdForTurn
   );
-  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
-  const turnEvaluation = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
+  const existingBotOpinion = readBotOpinion(db, userId, opinionBotIdForTurn);
+  const turnEvaluation = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
+  const repairSignal = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   const zenMoodSensitivity = normalizePrismMoodSensitivity(
@@ -5013,7 +5263,7 @@ export async function processChatMessage(
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn) {
+  if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -5098,6 +5348,7 @@ export async function processChatMessage(
   const memoryIntent =
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn &&
     !skipMemoryForMoodCooldownTurn
       ? analyzeMemoryIntent(message)
@@ -5109,6 +5360,7 @@ export async function processChatMessage(
   if (
     !incognitoForTurn &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !skipMemoryForMoodCooldownTurn &&
     !prismMoodIgnoreTurn
   ) {
@@ -5149,7 +5401,7 @@ export async function processChatMessage(
 
   let userMessageId: string | null = null;
   const insertUserMessageForTurn = (): void => {
-    if (isStarterPrompt || personaTransitionTurn || userMessageId !== null) return;
+    if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || userMessageId !== null) return;
     userMessageId = randomId(12);
     const promptShortcutPayload = serializePromptToolPayload({
       promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
@@ -5209,6 +5461,7 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
@@ -5238,6 +5491,7 @@ export async function processChatMessage(
     isZenMode(mode) &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn &&
     userMessageRequestsZenSessionMemory(message)
       ? loadZenSessionMemoryOverview({
@@ -5384,13 +5638,16 @@ export async function processChatMessage(
   throwIfCancelledBeforeAssistantReply();
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
-    explicitAskQuestionRequest ||
-    assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
+    !zenAutonomyTurn &&
+    (explicitAskQuestionRequest ||
+      assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent));
   const askQuestionRaw =
-    parsedAssistant.askQuestion ??
-    (shouldBackfillAskQuestion
-      ? buildAskQuestionFallback(parsedAssistant.displayContent)
-      : undefined);
+    zenAutonomyTurn
+      ? undefined
+      : parsedAssistant.askQuestion ??
+        (shouldBackfillAskQuestion
+          ? buildAskQuestionFallback(parsedAssistant.displayContent)
+          : undefined);
   const askQuestionForTurn = askQuestionRaw
     ? refineAskQuestionPayloadFromDisplay(
         parsedAssistant.displayContent,
@@ -5415,7 +5672,7 @@ export async function processChatMessage(
         key: prismMood.moodKey,
         confidence: prismMood.confidence,
       }
-    : commandCenterPromptTurn || personaTransitionTurn
+    : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
         assistantContent: assistantDisplay,
@@ -5424,7 +5681,9 @@ export async function processChatMessage(
         botOpinion: existingBotOpinion,
         repairSignal,
       });
-  const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  const sendImgPromptPersistedRaw = zenAutonomyTurn
+    ? undefined
+    : parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
     userMessage: modelUserMessage,
@@ -5447,7 +5706,7 @@ export async function processChatMessage(
       acq = await tryAcquireImageSlot({
         userId,
         conversationId: activeConversationId,
-        botId: activeBotId ?? null,
+        botId: assistantBotId ?? null,
         mode,
         incognito: false,
         captionPrompt: sendImgPromptPersisted,
@@ -5514,29 +5773,32 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
-  const assistantAskQuestionForTurn =
-    askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
-  const persistedToolCallEvents = buildAssistantToolCallEvents({
-    rawReply: assistantReplyRaw,
-    ...((parsedAssistant.sendGeneratedImage ||
-      sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
-    sendImgPromptPersistedRequested
-      ? {
-          parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
-        }
-      : {}),
-    ...(assistantAskQuestionForTurn
-      ? { parsedAskQuestion: assistantAskQuestionForTurn }
-      : {}),
-    imageSlot: persistedImageSlot,
-    ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
-  });
+  const assistantAskQuestionForTurn = zenAutonomyTurn
+    ? undefined
+    : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
+  const persistedToolCallEvents = zenAutonomyTurn
+    ? []
+    : buildAssistantToolCallEvents({
+        rawReply: assistantReplyRaw,
+        ...((parsedAssistant.sendGeneratedImage ||
+          sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
+        sendImgPromptPersistedRequested
+          ? {
+              parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
+            }
+          : {}),
+        ...(assistantAskQuestionForTurn
+          ? { parsedAskQuestion: assistantAskQuestionForTurn }
+          : {}),
+        imageSlot: persistedImageSlot,
+        ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
+      });
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
-    tellFictionalStory: parsedAssistant.tellFictionalStory,
+    tellFictionalStory: zenAutonomyTurn ? undefined : parsedAssistant.tellFictionalStory,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
-    zenDisplay: parsedAssistant.zenDisplay,
+    zenDisplay: zenAutonomyTurn ? undefined : parsedAssistant.zenDisplay,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -5566,7 +5828,7 @@ export async function processChatMessage(
     assistantDisplay,
     providerNameUsed,
     modelUsed,
-    activeBotId ?? null,
+    assistantBotId ?? null,
     toolPayloadProseOnly,
     assistantCreatedAt
   );
@@ -5581,7 +5843,7 @@ export async function processChatMessage(
       "",
       providerNameUsed,
       sentGeneratedImagePersisted.imageModel?.trim() || modelUsed,
-      activeBotId ?? null,
+      assistantBotId ?? null,
       toolPayloadImageOnly,
       imageFollowUpCreatedAt
     );
@@ -5611,8 +5873,8 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
-    ? readSessionOpinion(db, userId, activeConversationId, activeBotId) ??
+  const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || commandCenterPromptTurn
+    ? readSessionOpinion(db, userId, activeConversationId, opinionBotIdForTurn) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
         "steady",
@@ -5624,16 +5886,16 @@ export async function processChatMessage(
         db,
         userId,
         conversationId: activeConversationId,
-        botId: activeBotId,
+        botId: opinionBotIdForTurn,
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
-    ? readBotOpinion(db, userId, activeBotId)
+  const botOpinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || commandCenterPromptTurn
+    ? readBotOpinion(db, userId, opinionBotIdForTurn)
     : upsertBotOpinionFromTurn({
         db,
         userId,
-        botId: activeBotId,
+        botId: opinionBotIdForTurn,
         message,
         updatedAt: assistantCreatedAt,
       });
@@ -5641,6 +5903,7 @@ export async function processChatMessage(
     isZenMode(mode) &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn &&
     userMessageId
   ) {
@@ -5695,7 +5958,7 @@ export async function processChatMessage(
       )
       .get(activeConversationId, userId) as { n: number }
   ).n;
-  if (assistantCountBefore === 0 && assistantMessageCount >= 1) {
+  if (assistantCountBefore === 0 && assistantMessageCount >= 1 && !zenAutonomyTurn) {
     const starterFallbackTitle = isStarterPrompt
       ? inferStarterConversationTitleFromOpening(assistantDisplay, settings.starterPromptLabel)
       : null;
@@ -5753,6 +6016,7 @@ export async function processChatMessage(
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
@@ -5956,6 +6220,7 @@ export async function processChatMessage(
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
+    !zenAutonomyTurn &&
     !commandCenterPromptTurn
   ) {
     await ensureAboutYouMemory({
@@ -6187,6 +6452,9 @@ export async function processChatMessage(
     ...(pendingImageJob ? { pendingImageJob } : {}),
     ...(persistedToolCallEvents.length > 0
       ? { toolCalls: persistedToolCallEvents }
+      : {}),
+    ...(zenAutonomyTurn
+      ? { zenAutonomyDecision: { action: "speak", botId: assistantMemoryBotId } satisfies ZenAutonomyDecision }
       : {}),
     backendEvents,
   };

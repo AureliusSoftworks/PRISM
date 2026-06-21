@@ -5,6 +5,7 @@ import {
   autoBackfillSendGeneratedImagePrompt,
   buildAssistantToolCallEvents,
   compactPreImageLeadMessage,
+  decideZenAutonomyTurn,
   extractPrismBotMentionIdsFromMessage,
   inferChatToolRequestedImageSize,
   parseTitleResponse,
@@ -5148,6 +5149,230 @@ describe("processChatMessage Zen Persona transitions", () => {
       ) as { bot_id: string | null }).bot_id,
       null
     );
+  });
+
+  it("attributes previous-introduces handoffs to the outgoing Persona", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-2", "user-1", "Sally", "#2f9eb8", "moon");
+    installChatFetchStub("Harry makes a graceful introduction.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-2",
+        incognito: false,
+        mode: "chat",
+        personaTransition: {
+          fromBotId: "bot-1",
+          toBotId: "bot-2",
+          source: "picker",
+          style: "previous-introduces",
+        },
+      }
+    );
+
+    assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.lastBotId, "bot-1");
+    assert.equal(result.conversation.lastBotColor, "#b11f2b");
+    assert.deepEqual(
+      result.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [{ role: "assistant", botId: "bot-1" }]
+    );
+
+    const rows = db
+      .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
+      .all() as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(rows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "assistant", bot_id: "bot-1" },
+    ]);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE role = 'user'").get() as { n: number }).n,
+      0
+    );
+  });
+
+  it("handles Default PRISM as a previous-introduces speaker", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-2", "user-1", "Sally", "#2f9eb8", "moon");
+    installChatFetchStub("PRISM introduces Sally.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-2",
+        incognito: false,
+        mode: "chat",
+        personaTransition: {
+          fromBotId: null,
+          toBotId: "bot-2",
+          source: "picker",
+          style: "previous-introduces",
+        },
+      }
+    );
+
+    assert.equal(result.conversation.lastBotId, null);
+    assert.equal(result.conversation.lastBotColor, null);
+    assert.deepEqual(
+      result.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [{ role: "assistant", botId: null }]
+    );
+  });
+
+  it("persists Zen Autonomy as one assistant row with Persona attribution", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-auto", "user-1", "Ruby", "#b11f2b", "spark");
+    installChatFetchStub(
+      [
+        "Still here, if you want a thread to tug on.",
+        "{\"askQuestion\":{\"prompt\":\"Pick?\",\"choices\":[\"A\",\"B\"]}}",
+        "{\"sendGeneratedImage\":{\"prompt\":\"paint a secret room\"}}",
+      ].join("\n")
+    );
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-auto",
+        incognito: false,
+        mode: "chat",
+        zenAutonomy: {
+          source: "idle",
+          activeBotId: "bot-auto",
+          idleMs: 10 * 60 * 1000,
+          clientTurnId: "turn-1",
+        },
+      }
+    );
+
+    assert.deepEqual(result.zenAutonomyDecision, {
+      action: "speak",
+      botId: "bot-auto",
+    });
+    assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.lastBotId, "bot-auto");
+    assert.equal(result.conversation.lastBotColor, "#b11f2b");
+    assert.equal(result.toolCalls, undefined);
+    assert.equal(result.pendingImageJob, undefined);
+    assert.deepEqual(
+      result.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+        askQuestion: message.askQuestion,
+      })),
+      [{ role: "assistant", botId: "bot-auto", askQuestion: undefined }]
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE role = 'user'").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT bot_id FROM conversations WHERE id = ?").get(
+        result.conversation.id
+      ) as { bot_id: string | null }).bot_id,
+      null
+    );
+  });
+
+  it("keeps PRISM/default Zen Autonomy attribution neutral", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("A quiet nudge from PRISM.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: null,
+        incognito: false,
+        mode: "chat",
+        zenAutonomy: {
+          source: "idle",
+          activeBotId: null,
+          idleMs: 12 * 60 * 1000,
+          clientTurnId: "turn-2",
+        },
+      }
+    );
+
+    assert.deepEqual(result.zenAutonomyDecision, { action: "speak", botId: null });
+    assert.equal(result.conversation.lastBotId, null);
+    assert.equal(result.conversation.lastBotColor, null);
+    assert.deepEqual(
+      result.conversation.messages.map((message) => ({
+        role: message.role,
+        botId: message.botId,
+      })),
+      [{ role: "assistant", botId: null }]
+    );
+  });
+
+  it("treats chat-disabled Persona autonomy decisions as silent", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, chat_enabled, visibility) VALUES (?, ?, ?, ?, ?)"
+    ).run("enabled-bot", "user-1", "Enabled", 1, "private");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, chat_enabled, visibility) VALUES (?, ?, ?, ?, ?)"
+    ).run("disabled-bot", "user-1", "Disabled", 0, "private");
+    let routerPrompt = "";
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        routerPrompt = messages.map((message) => message.content).join("\n");
+        return JSON.stringify({ action: "speak", botId: "disabled-bot" });
+      },
+    };
+
+    const decision = await decideZenAutonomyTurn({
+      db,
+      userId: "user-1",
+      conversationId: "conv-1",
+      provider,
+      activeBotId: null,
+      idleMs: 10 * 60 * 1000,
+    });
+
+    assert.deepEqual(decision, { action: "silent" });
+    assert.match(routerPrompt, /Enabled: enabled-bot/);
+    assert.doesNotMatch(routerPrompt, /Disabled: disabled-bot/);
   });
 });
 
