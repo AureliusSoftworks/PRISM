@@ -344,13 +344,13 @@ const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
-const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 292;
+const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 244;
 /** Single-row "delete group chats" menu — keep in sync with clamp padding. */
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 220;
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
 /** Text mirror of desktop `chatHeaderActions` — tall when every row is visible. */
 const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 280;
-const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 420;
+const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 464;
 
 // Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
 // threshold on any bot card ×. Kept separate so the confirmation modal can
@@ -43141,20 +43141,6 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               role="menuitem"
-              title="Import Bot[s]"
-              onClick={() => {
-                closeBotContextMenu();
-                openImportBotModal();
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">⇩</span>
-                <span>Import Bot[s]</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
               onClick={() => {
                 closeBotContextMenu();
                 void exportBotsAsCollection(multiSelectedBots);
@@ -43231,20 +43217,6 @@ function HomeContent(): React.JSX.Element {
           </>
         ) : (
           <>
-            <button
-              type="button"
-              role="menuitem"
-              title="Import Bot[s]"
-              onClick={() => {
-                closeBotContextMenu();
-                openImportBotModal();
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">⇩</span>
-                <span>Import Bot[s]</span>
-              </span>
-            </button>
             <button
               type="button"
               role="menuitem"
@@ -45370,6 +45342,17 @@ function HomeContent(): React.JSX.Element {
             {editBotsLabel}
           </button>
         ) : null}
+        <button
+          type="button"
+          role="menuitem"
+          title="Import Bot[s]"
+          onClick={() => runAndClose(openImportBotModal)}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">⇩</span>
+            <span>Import Bot[s]</span>
+          </span>
+        </button>
         {showChatThemeButton ? (
           <button
             type="button"
