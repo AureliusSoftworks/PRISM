@@ -55,6 +55,10 @@ export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 export const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 export const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
+export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
+export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
+export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
+export const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 180_000;
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -98,6 +102,9 @@ export interface CurrentSettings {
   zenWallpaperRevealDelayMessageCount: number | null;
   zenWallpaperRevealSpanMessageCount: number | null;
   zenMoodSensitivity: number | null;
+  zenAskQuestionPatienceEnabled: number | null;
+  zenAskQuestionPatienceMs: number | null;
+  zenAutonomyEnabled: number | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -139,6 +146,9 @@ export interface NextSettings {
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
+  zenAskQuestionPatienceEnabled: boolean;
+  zenAskQuestionPatienceMs: number;
+  zenAutonomyEnabled: boolean;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
@@ -515,6 +525,34 @@ export function normalizeZenMoodSensitivity(
   return normalizePrismMoodSensitivity(value, fallback);
 }
 
+export function normalizeZenAskQuestionPatienceEnabled(
+  value: unknown,
+  fallback = DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED
+): boolean {
+  return normalizeZenWallpaperTextMaskEnabled(value, fallback);
+}
+
+export function normalizeZenAskQuestionPatienceMs(
+  value: unknown,
+  fallback = DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS
+): number {
+  return normalizeNumberSetting(
+    value,
+    fallback,
+    MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+    MAX_ZEN_ASK_QUESTION_PATIENCE_MS
+  );
+}
+
+export function normalizeZenAutonomyEnabled(
+  value: unknown,
+  fallback = false
+): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  return fallback;
+}
+
 function readDisplayName(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
@@ -760,6 +798,36 @@ export function resolveNextSettings(
           body.zenMoodSensitivity,
           currentZenMoodSensitivity
         );
+  const currentZenAskQuestionPatienceEnabled =
+    normalizeZenAskQuestionPatienceEnabled(
+      current.zenAskQuestionPatienceEnabled
+    );
+  const zenAskQuestionPatienceEnabled =
+    body.zenAskQuestionPatienceEnabled === undefined
+      ? currentZenAskQuestionPatienceEnabled
+      : normalizeZenAskQuestionPatienceEnabled(
+          body.zenAskQuestionPatienceEnabled,
+          currentZenAskQuestionPatienceEnabled
+        );
+  const currentZenAskQuestionPatienceMs =
+    normalizeZenAskQuestionPatienceMs(current.zenAskQuestionPatienceMs);
+  const zenAskQuestionPatienceMs =
+    body.zenAskQuestionPatienceMs === undefined
+      ? currentZenAskQuestionPatienceMs
+      : normalizeZenAskQuestionPatienceMs(
+          body.zenAskQuestionPatienceMs,
+          currentZenAskQuestionPatienceMs
+        );
+  const currentZenAutonomyEnabled = normalizeZenAutonomyEnabled(
+    current.zenAutonomyEnabled
+  );
+  const zenAutonomyEnabled =
+    body.zenAutonomyEnabled === undefined
+      ? currentZenAutonomyEnabled
+      : normalizeZenAutonomyEnabled(
+          body.zenAutonomyEnabled,
+          currentZenAutonomyEnabled
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -842,6 +910,9 @@ export function resolveNextSettings(
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
+    zenAskQuestionPatienceEnabled,
+    zenAskQuestionPatienceMs,
+    zenAutonomyEnabled,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,

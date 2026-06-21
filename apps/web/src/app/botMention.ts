@@ -616,6 +616,15 @@ export type MentionTabAction =
   | { kind: "none" }
   | { kind: "stage2"; replacement: string; caret: number };
 
+export type MentionPersonaSelectAction =
+  | { kind: "none" }
+  | {
+      kind: "select-persona";
+      bot: BotMentionPick;
+      replacement: string;
+      caret: number;
+    };
+
 /**
  * Plain-text Tab handler: when exactly one bot matches the `@` query, inserts
  * the markdown mention link in one step (same end state as the old two-tab flow).
@@ -671,5 +680,32 @@ export function composeMentionTabPlainTextAction(
     kind: "stage2",
     replacement,
     caret: token.atIndex + md.length,
+  };
+}
+
+/**
+ * Zen Persona picker action: commits the highlighted bot as UI state and removes
+ * only the active `@...` token from the composer.
+ */
+export function composeMentionPersonaPlainTextAction(
+  text: string,
+  caret: number,
+  bots: readonly BotMentionPick[],
+  highlightedIndex: number
+): MentionPersonaSelectAction {
+  const token = findAtMentionTokenPlain(text, caret);
+  if (!token) return { kind: "none" };
+
+  const filtered = filterBotsForMentionQuery(bots, token.query);
+  if (filtered.length === 0) return { kind: "none" };
+
+  const hi = ((highlightedIndex % filtered.length) + filtered.length) % filtered.length;
+  const bot = filtered[hi]!;
+  const replacement = text.slice(0, token.atIndex) + text.slice(token.endIndex);
+  return {
+    kind: "select-persona",
+    bot,
+    replacement,
+    caret: token.atIndex,
   };
 }

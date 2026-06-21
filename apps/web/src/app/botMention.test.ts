@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   cleanBotMentionTextArtifacts,
+  composeMentionPersonaPlainTextAction,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
   extractStageDirectionCues,
@@ -168,6 +169,48 @@ describe("composeMentionTabPlainTextAction", () => {
     if (actPick1.kind === "stage2") {
       assert.equal(actPick1.replacement, "hey [Alex Two](prism-bot://2)");
     }
+  });
+});
+
+describe("composeMentionPersonaPlainTextAction", () => {
+  const bots = [
+    { id: "1", name: "Alex One", color: null, glyph: null },
+    { id: "2", name: "Alex Two", color: null, glyph: null },
+    { id: "3", name: "Sam", color: null, glyph: null },
+  ] as const;
+
+  it("selects the highlighted multi-match bot without inserting mention text", () => {
+    const text = "ask @alex";
+    const act = composeMentionPersonaPlainTextAction(text, text.length, bots, 1);
+    assert.equal(act.kind, "select-persona");
+    if (act.kind === "select-persona") {
+      assert.equal(act.bot.id, "2");
+      assert.equal(act.replacement, "ask ");
+      assert.equal(act.caret, 4);
+    }
+  });
+
+  it("selects a single match and removes only the active token", () => {
+    const text = "before @sam after";
+    const caret = "before @sam".length;
+    const act = composeMentionPersonaPlainTextAction(text, caret, bots, 0);
+    assert.equal(act.kind, "select-persona");
+    if (act.kind === "select-persona") {
+      assert.equal(act.bot.id, "3");
+      assert.equal(act.replacement, "before  after");
+      assert.equal(act.caret, "before ".length);
+    }
+  });
+
+  it("returns none when there is no active @ token or no match", () => {
+    assert.equal(
+      composeMentionPersonaPlainTextAction("ask Alex", "ask Alex".length, bots, 0).kind,
+      "none"
+    );
+    assert.equal(
+      composeMentionPersonaPlainTextAction("ask @zzz", "ask @zzz".length, bots, 0).kind,
+      "none"
+    );
   });
 });
 

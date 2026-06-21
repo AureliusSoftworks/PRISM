@@ -146,6 +146,9 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
       zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
+      zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 75000,
+      zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -415,6 +418,18 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS prism_mood_events (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (user_id, conversation_id, message_id, event_type),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS coffee_groups (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -655,6 +670,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenMoodSensitivity) {
     db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
+  }
+  const hasZenAskQuestionPatienceEnabled = userColumns.some(
+    (column) => column.name === "zen_ask_question_patience_enabled"
+  );
+  if (!hasZenAskQuestionPatienceEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenAskQuestionPatienceMs = userColumns.some(
+    (column) => column.name === "zen_ask_question_patience_ms"
+  );
+  if (!hasZenAskQuestionPatienceMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 75000;");
+  }
+  const hasZenAutonomyEnabled = userColumns.some(
+    (column) => column.name === "zen_autonomy_enabled"
+  );
+  if (!hasZenAutonomyEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
@@ -1209,6 +1242,9 @@ export function createDatabase(): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);"
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
   );
   db.exec(
@@ -1513,4 +1549,32 @@ export function upsertPrismMoodState(
     mood.lastUpdatedAt
   );
   return mood;
+}
+
+export function recordPrismMoodEventOnce(
+  db: DatabaseSync,
+  args: {
+    userId: string;
+    conversationId: string;
+    messageId: string;
+    eventType: string;
+    createdAt: string;
+    payload?: Record<string, unknown>;
+  }
+): boolean {
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO prism_mood_events (
+        user_id, conversation_id, message_id, event_type, created_at, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      args.userId,
+      args.conversationId,
+      args.messageId,
+      args.eventType,
+      args.createdAt,
+      JSON.stringify(args.payload ?? {})
+    ) as { changes?: number | bigint };
+  return Number(result.changes ?? 0) > 0;
 }

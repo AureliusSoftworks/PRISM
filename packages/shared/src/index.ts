@@ -3,6 +3,7 @@ import type { TellFictionalStoryPayload } from "./prismTool.js";
 export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
+  applyPrismMoodIgnoredQuestion,
   applyPrismMoodInterruption,
   applyPrismMoodIgnoreCooldown,
   applyPrismMoodIgnoredTurn,
@@ -789,11 +790,9 @@ export interface ChatRequestPayload {
   reasoningEffort?: ReasoningEffort;
   botId?: string | null;
   /** Zen-only automatic Persona handoff turn. */
-  personaTransition?: {
-    fromBotId: string | null;
-    toBotId: string | null;
-    source: "picker";
-  };
+  personaTransition?: ZenPersonaTransitionInput;
+  /** Zen-only idle autonomy check/turn. */
+  zenAutonomy?: ZenAutonomyInput;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
@@ -805,6 +804,27 @@ export interface ChatRequestPayload {
   /** Optional metadata when the latest Zen send interrupted Prism. */
   prismInterruption?: PrismMoodInterruptionInput;
 }
+
+export type ZenPersonaTransitionStyle = "new-speaks" | "previous-introduces";
+
+export interface ZenPersonaTransitionInput {
+  fromBotId: string | null;
+  toBotId: string | null;
+  source: "picker";
+  /** Missing style is treated as "new-speaks" for older clients. */
+  style?: ZenPersonaTransitionStyle;
+}
+
+export interface ZenAutonomyInput {
+  source: "idle";
+  activeBotId: string | null;
+  idleMs: number;
+  clientTurnId: string;
+}
+
+export type ZenAutonomyDecision =
+  | { action: "silent" }
+  | { action: "speak"; botId: string | null };
 
 /**
  * Optional quick-reply labels inferred from the assistant's opening turn when

@@ -61,6 +61,7 @@ export function ComposerBotMentionPopover({
   onDismiss,
 }: ComposerBotMentionPopoverProps): React.JSX.Element | null {
   const menuRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const portalStyle = useMemo(() => {
     if (!open || !caretRect) return null;
     return computeMentionMenuFixedStyle(caretRect, themeSource);
@@ -92,10 +93,15 @@ export function ComposerBotMentionPopover({
     const pad = COMPOSE_MENTION_MENU_VIEWPORT_PAD_PX;
     const vw = globalThis.window.innerWidth;
     const vh = globalThis.window.innerHeight;
+    const portalTop = portalStyle.top;
+    const portalLeft = portalStyle.left;
+    const portalLeftNum = typeof portalLeft === "number" ? portalLeft : Number(portalLeft);
+    const portalTopNum = typeof portalTop === "number" ? portalTop : Number(portalTop);
+    if (!Number.isFinite(portalLeftNum) || !Number.isFinite(portalTopNum)) {
+      return;
+    }
     let x = 0;
     let y = 0;
-    const portalTop = portalStyle.top;
-    const portalTopNum = typeof portalTop === "number" ? portalTop : Number(portalTop);
     const opensAbove = Number.isFinite(portalTopNum) && portalTopNum < caretRect.top;
     if (opensAbove) {
       const shellRect = excludeInteractionRef?.current?.getBoundingClientRect();
@@ -107,12 +113,16 @@ export function ComposerBotMentionPopover({
         pad,
         anchorTop - COMPOSE_MENTION_MENU_CARET_GAP_PX - r.height
       );
-      y += desiredTop - r.top;
+      y = desiredTop - portalTopNum;
     }
-    if (r.right + x > vw - pad) x += vw - pad - (r.right + x);
-    if (r.left + x < pad) x = pad - r.left;
-    if (r.bottom + y > vh - pad) y += vh - pad - (r.bottom + y);
-    if (r.top + y < pad) y = pad - r.top;
+    if (portalLeftNum + x + r.width > vw - pad) {
+      x += vw - pad - (portalLeftNum + x + r.width);
+    }
+    if (portalLeftNum + x < pad) x = pad - portalLeftNum;
+    if (portalTopNum + y + r.height > vh - pad) {
+      y += vh - pad - (portalTopNum + y + r.height);
+    }
+    if (portalTopNum + y < pad) y = pad - portalTopNum;
     const frame = window.requestAnimationFrame(() => {
       setViewportNudge((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
     });
@@ -123,12 +133,20 @@ export function ComposerBotMentionPopover({
 
   const safeHighlight = Math.max(0, Math.min(highlightIndex, Math.max(0, bots.length - 1)));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || bots.length === 0) return;
+    const listbox = listboxRef.current;
     const row = menuRef.current?.querySelector<HTMLElement>(
       `[data-mention-index="${safeHighlight}"]`
     );
-    row?.scrollIntoView({ block: "nearest" });
+    if (!listbox || !row) return;
+    const rowRect = row.getBoundingClientRect();
+    const listRect = listbox.getBoundingClientRect();
+    if (rowRect.top < listRect.top) {
+      listbox.scrollTop -= listRect.top - rowRect.top;
+    } else if (rowRect.bottom > listRect.bottom) {
+      listbox.scrollTop += rowRect.bottom - listRect.bottom;
+    }
   }, [open, bots.length, safeHighlight, viewportNudge]);
 
   useEffect(() => {
@@ -159,7 +177,7 @@ export function ComposerBotMentionPopover({
       role="listbox"
       aria-label="Mention a bot"
     >
-      <div className={styles.composeBotListbox}>
+      <div ref={listboxRef} className={styles.composeBotListbox}>
         {bots.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
             No bots match.

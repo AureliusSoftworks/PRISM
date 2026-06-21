@@ -8,6 +8,7 @@ export const MAX_PRISM_MOOD_SENSITIVITY = 1;
 
 export type PrismMoodDeltaKind =
   | "interruption"
+  | "ignored_question"
   | "negative_turn"
   | "positive_turn"
   | "ignore_started"
@@ -222,6 +223,7 @@ function sanitizeDelta(input: unknown): PrismMoodDelta | null {
   const moodKeyAfter = record.moodKeyAfter;
   if (
     kind !== "interruption" &&
+    kind !== "ignored_question" &&
     kind !== "negative_turn" &&
     kind !== "positive_turn" &&
     kind !== "ignore_started" &&
@@ -474,6 +476,27 @@ export function applyPrismMoodInterruption(
     warmthDelta: -0.052 * weight,
     engagementDelta: -0.035 * weight,
     restraintDelta: -0.022 * weight,
+  });
+}
+
+export function applyPrismMoodIgnoredQuestion(
+  previous: PrismMoodState,
+  now?: string | Date,
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (base.frozen) return base;
+  const sensitivityWeight = prismMoodSensitivityJumpWeight(sensitivity);
+  const patienceRelief = 1 - base.restraint * 0.28;
+  const weight = Math.min(1.35, sensitivityWeight * patienceRelief);
+  return withMoodDelta(base, {
+    kind: "ignored_question",
+    now,
+    reason: "The user left an explicit question unanswered long enough to read as hesitation.",
+    annoyanceDelta: 0.05 * weight,
+    warmthDelta: -0.024 * weight,
+    engagementDelta: -0.04 * weight,
+    restraintDelta: -0.012 * weight,
   });
 }
 
