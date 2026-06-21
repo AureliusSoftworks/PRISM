@@ -18081,9 +18081,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         const sameIds =
           sameLength &&
           prev.filtered.every((b, i) => b.id === filtered[i]?.id);
+        const lastIndex = Math.max(0, filtered.length - 1);
         const highlight = sameIds
-          ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
-          : 0;
+          ? Math.min(prev.highlight, lastIndex)
+          : lastIndex;
         return {
           open: true,
           caretRect,
@@ -18625,7 +18626,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 }
                 return true;
               }
-              if (event.key === "Tab") {
+              if (
+                (event.key === "Tab" || event.key === "Enter") &&
+                !event.shiftKey
+              ) {
                 if (mentionUiRef.current.open) {
                   event.preventDefault();
                   applyComposeMentionTabToEditor(
@@ -18991,10 +18995,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           onHighlightIndexChange={(next) =>
             setMentionUi((s) => ({ ...s, highlight: next }))
           }
-          onSingleMatchClick={() => {
+          onPickIndex={(index) => {
             const ed = editorRef.current;
             if (!ed) return;
-            if (applyMentionTabToEditor(ed, mentionBotsRef.current)) {
+            if (applyComposeMentionTabToEditor(ed, mentionBotsRef.current, index)) {
               queueMicrotask(() => {
                 syncComposerPopovers(ed);
               });
@@ -19361,17 +19365,61 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       const sameIds =
         sameLength &&
         prev.filtered.every((b, i) => b.id === filtered[i]?.id);
+      const lastIndex = Math.max(0, filtered.length - 1);
       const highlight = sameIds
-        ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
-        : 0;
+        ? Math.min(prev.highlight, lastIndex)
+        : lastIndex;
       return {
         open: true,
-        caretRect,
+        caretRect: caretRect ?? el.getBoundingClientRect(),
         filtered,
         highlight,
       };
     });
   }, []);
+
+  const textareaMentionSyncFrameRef = useRef<number | null>(null);
+  const textareaMentionSyncSnapshotRef = useRef("");
+  const scheduleTextareaMentionSync = useCallback(() => {
+    if (textareaMentionSyncFrameRef.current !== null) {
+      window.cancelAnimationFrame(textareaMentionSyncFrameRef.current);
+    }
+    textareaMentionSyncFrameRef.current = window.requestAnimationFrame(() => {
+      textareaMentionSyncFrameRef.current = null;
+      const el = textareaRef.current;
+      if (el) syncTextareaMention(el);
+    });
+  }, [syncTextareaMention]);
+
+  useEffect(() => {
+    return () => {
+      if (textareaMentionSyncFrameRef.current !== null) {
+        window.cancelAnimationFrame(textareaMentionSyncFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const el = textareaRef.current;
+      if (!el || document.activeElement !== el) return;
+      const snapshot = [
+        el.value,
+        el.selectionStart ?? 0,
+        el.selectionEnd ?? 0,
+        mentionBotsRef.current.length,
+        commandPicksRef.current.length,
+        promptPicksRef.current.length,
+        wildcardPicksRef.current.length,
+      ].join("\u0000");
+      if (snapshot === textareaMentionSyncSnapshotRef.current) return;
+      textareaMentionSyncSnapshotRef.current = snapshot;
+      syncTextareaMention(el);
+    }, 120);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [syncTextareaMention]);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -19497,29 +19545,22 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   onChange(event);
                   resizeTextareaToContent(event.currentTarget);
                   syncTextareaOverlayScroll(event.currentTarget);
-                  queueMicrotask(() => {
-                    const el = textareaRef.current;
-                    if (el) syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
                 }}
                 onSelect={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  queueMicrotask(() => {
-                    syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
                 }}
                 onClick={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  queueMicrotask(() => {
-                    syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
                 }}
                 onKeyUp={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  syncTextareaMention(el);
+                  scheduleTextareaMentionSync();
                 }}
                 onPaste={(event) => {
                   const el = textareaRef.current;
@@ -19541,6 +19582,17 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 onKeyDown={(event) => {
                   const el = textareaRef.current;
                   if (!el) return;
+                  if (
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.nativeEvent.isComposing &&
+                    (event.key.length === 1 ||
+                      event.key === "Backspace" ||
+                      event.key === "Delete")
+                  ) {
+                    window.setTimeout(scheduleTextareaMentionSync, 0);
+                  }
                   if (
                     event.key === "Backspace" &&
                     !event.altKey &&
@@ -19822,7 +19874,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     }
                     return;
                   }
-                  if (event.key === "Tab" && !event.shiftKey && taMentionRef.current.open) {
+                  if (
+                    (event.key === "Tab" || event.key === "Enter") &&
+                    !event.shiftKey &&
+                    taMentionRef.current.open
+                  ) {
                     event.preventDefault();
                     const mention = taMentionRef.current;
                     const act = composeMentionTabPlainTextAction(
@@ -19834,6 +19890,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     if (act.kind !== "none") {
                       pendingTextareaCaretRef.current = act.caret;
                       onValueChange(act.replacement);
+                      setTaMention((s) =>
+                        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                      );
                     }
                   }
                   if (event.key === "Escape" && taCommandRef.current.open) {
@@ -19904,25 +19963,28 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           <ComposerBotMentionPopover
             open={taMention.open}
             caretRect={taMention.caretRect}
-            themeSource={null}
+            themeSource={composeEditorShellRef.current}
             bots={taMention.filtered}
             resolvedTheme={resolvedTheme}
             highlightIndex={taMention.highlight}
             onHighlightIndexChange={(next) =>
               setTaMention((s) => ({ ...s, highlight: next }))
             }
-            onSingleMatchClick={() => {
+            onPickIndex={(index) => {
               const el = textareaRef.current;
               if (!el) return;
               const act = composeMentionTabPlainTextAction(
                 el.value,
                 el.selectionStart ?? 0,
                 mentionBotsRef.current,
-                taMentionRef.current.highlight
+                index
               );
               if (act.kind === "none") return;
               pendingTextareaCaretRef.current = act.caret;
               onValueChange(act.replacement);
+              setTaMention((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
             }}
             renderBotGlyph={(glyph) => (
               <BotGlyph name={glyph} size={14} strokeWidth={2.25} />
@@ -22664,7 +22726,7 @@ function HomeContent(): React.JSX.Element {
       sidebarEdgeSwipeRef.current = null;
     }
   }, []);
-  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const panel = devToolsPanelRef.current;
     if (!panel) return;
@@ -22683,7 +22745,7 @@ function HomeContent(): React.JSX.Element {
     }
     event.preventDefault();
   }, []);
-  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devToolsPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     const panel = devToolsPanelRef.current;
@@ -22702,7 +22764,7 @@ function HomeContent(): React.JSX.Element {
     panel.style.top = `${next.y}px`;
     setDevToolsPanelPosition(next);
   }, []);
-  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devToolsPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     devToolsPanelDragRef.current = null;
@@ -48263,9 +48325,20 @@ function HomeContent(): React.JSX.Element {
           ) : null}
 
           {devToolsConsoleOnly ? (
-            <main className={styles.devToolsConsoleOnlyContent}>
-              {renderDevMetricsTerminalLog()}
-            </main>
+            <>
+              <button
+                type="button"
+                className={styles.devToolsConsoleDragGrip}
+                onPointerDown={startDevToolsPanelDrag}
+                onPointerMove={dragDevToolsPanel}
+                onPointerUp={endDevToolsPanelDrag}
+                onPointerCancel={endDevToolsPanelDrag}
+                aria-label="Drag developer metrics terminal"
+              />
+              <main className={styles.devToolsConsoleOnlyContent}>
+                {renderDevMetricsTerminalLog()}
+              </main>
+            </>
           ) : (
             <>
               <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
