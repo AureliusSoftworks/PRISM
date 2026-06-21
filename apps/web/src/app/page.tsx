@@ -3418,6 +3418,14 @@ interface Message {
     prompt: string;
     options: Array<{ id: string; label: string }>;
   };
+  /** Story continuation controls for long fictional prose. */
+  tellFictionalStory?: {
+    v: 1;
+    name: "tellFictionalStory";
+    continueLabel?: string;
+    bookmarkLabel?: string;
+    finishLabel?: string;
+  };
   /** Assistant attached a generated image (also listed in the Images library). */
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
@@ -34257,7 +34265,7 @@ function HomeContent(): React.JSX.Element {
     /** Secondary line (e.g. AskQuestion “Other” affordance). */
     sublabel?: string;
     action: "send" | "other";
-    otherSource?: "askquestion" | "starter";
+    otherSource?: "askquestion" | "starter" | "story";
     sendValue?: string;
   };
 
@@ -34267,13 +34275,67 @@ function HomeContent(): React.JSX.Element {
     source: "askquestion" | "starter";
   };
 
+  type StoryActionInteraction = {
+    tellFictionalStory: NonNullable<Message["tellFictionalStory"]>;
+    assistantMessageId: string;
+  };
+
   type ComposerChipRail = {
     conversationId: string;
     chips: ComposerChip[];
     heading: string | null;
-    source: "askquestion" | "starter";
+    source: "askquestion" | "starter" | "story";
     collapsed: boolean;
   };
+
+  function storyChipLabel(label: string | null | undefined, fallback: string): string {
+    const cleaned = label?.replace(/\s+/g, " ").trim() ?? "";
+    return cleaned.length > 0 ? cleaned : fallback;
+  }
+
+  function buildTellFictionalStoryChips(
+    story: NonNullable<Message["tellFictionalStory"]>
+  ): ComposerChip[] {
+    const continueLabel = storyChipLabel(story.continueLabel, "Keep Going");
+    const bookmarkLabel = storyChipLabel(story.bookmarkLabel, "Bookmark");
+    const finishLabel = storyChipLabel(story.finishLabel, "End Story");
+    return [
+      {
+        id: "continue-story",
+        label: continueLabel,
+        action: "send",
+        sendValue: `${continueLabel} — continue the fictional story from exactly where you left off, preserving all established context, characters, tone, and continuity.`,
+      },
+      {
+        id: "bookmark-story",
+        label: bookmarkLabel,
+        sublabel: "Save my place",
+        action: "send",
+        sendValue: `${bookmarkLabel} — bookmark my current place in this fictional story in session memory. Briefly note the current scene, key characters, unresolved threads, and where to resume.`,
+      },
+      {
+        id: "finish-story",
+        label: finishLabel,
+        action: "send",
+        sendValue: `${finishLabel} — wrap up the fictional story cleanly. Resolve the active scene naturally, then provide the full prose of the story so far in one Markdown code block for easy copy-paste.`,
+      },
+    ];
+  }
+
+  function getStoryActionInteractionForMessage(msg: Message): StoryActionInteraction | null {
+    if (!detail || msg.role !== "assistant" || !msg.tellFictionalStory) return null;
+    const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
+    if (messageIndex < 0) return null;
+    const answerMessage =
+      detail.messages
+        .slice(messageIndex + 1)
+        .find((message) => message.role === "user") ?? null;
+    if (answerMessage) return null;
+    return {
+      tellFictionalStory: msg.tellFictionalStory,
+      assistantMessageId: msg.id,
+    };
+  }
 
   function buildAskQuestionChips(
     askQuestion: NonNullable<Message["askQuestion"]>,
@@ -34568,6 +34630,21 @@ function HomeContent(): React.JSX.Element {
         collapsed: false,
       };
     }
+    const latestAssistantForStory = [...detail.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    const storyInteraction = latestAssistantForStory
+      ? getStoryActionInteractionForMessage(latestAssistantForStory)
+      : null;
+    if (storyInteraction) {
+      return {
+        conversationId: id,
+        chips: buildTellFictionalStoryChips(storyInteraction.tellFictionalStory),
+        heading: "Story actions",
+        source: "story",
+        collapsed: false,
+      };
+    }
     if (
       conversationStarterPrompts &&
       conversationStarterPrompts.conversationId === id &&
@@ -34670,7 +34747,7 @@ function HomeContent(): React.JSX.Element {
         aria-label="Suggested replies"
         className={railClassName}
       >
-        {rail.source === "askquestion" ? (
+        {rail.source === "askquestion" || rail.source === "story" ? (
           <div className={styles.conversationStarterHeadingRow}>
             {rail.heading ? (
               <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
@@ -34768,6 +34845,46 @@ function HomeContent(): React.JSX.Element {
               onClick={() => handleComposerChipPick(chip)}
             >
               {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderStoryActionInlineCard(msg: Message): React.ReactNode {
+    if (viewportWidth <= PICKER_MOBILE_BREAKPOINT) return null;
+    const interaction = getStoryActionInteractionForMessage(msg);
+    if (!interaction) return null;
+    const chips = buildTellFictionalStoryChips(interaction.tellFictionalStory);
+    const choicesDisabled = pendingReply;
+    return (
+      <div
+        className={styles.askQuestionInlineCard}
+        data-story-action-panel="true"
+        data-story-action-assistant-id={interaction.assistantMessageId}
+        role="group"
+        aria-label="Story actions"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={styles.askQuestionInlineHeader}>
+          <span className={styles.askQuestionInlineEyebrow}>Story actions</span>
+        </div>
+        <div
+          className={styles.askQuestionInlineChoices}
+          data-choices-disabled={choicesDisabled ? "true" : undefined}
+        >
+          {chips.map((chip, chipIndex) => (
+            <button
+              key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
+              type="button"
+              disabled={choicesDisabled}
+              className={styles.conversationStarterChip}
+              data-chip-kind="story"
+              aria-label={`Story action: ${chip.label}`}
+              onClick={() => handleComposerChipPick(chip)}
+            >
+              {renderComposerChipContent(chip, { splitAskQuestionLabels: false })}
             </button>
           ))}
         </div>
@@ -60589,6 +60706,7 @@ function HomeContent(): React.JSX.Element {
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
                 {renderAskQuestionInlineCard(msg)}
+                {renderStoryActionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}
@@ -62046,6 +62164,7 @@ function HomeContent(): React.JSX.Element {
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
                 {renderAskQuestionInlineCard(msg)}
+                {renderStoryActionInlineCard(msg)}
                 {copied && (
                   <span
                     className={styles.messageCopyToast}

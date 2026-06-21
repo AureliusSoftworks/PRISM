@@ -2303,6 +2303,13 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
   "",
+  "Optional — tellFictionalStory action rail (for long fictional story prose):",
+  "- Use after a substantial fictional/story-form passage when the user likely wants frictionless story controls.",
+  "- Add a `tellFictionalStory` object with up to three short, in-character chip labels: `continueLabel`, `bookmarkLabel`, and `finishLabel`.",
+  "- The three actions are fixed by Prism: continue the story, bookmark the current place in session memory, or wrap up cleanly and include the complete prose in one copyable code block.",
+  "- Labels should feel authored for the current scene. If unsure, omit labels and Prism will use defaults.",
+  '- Example: {"v":1,"tellFictionalStory":{"v":1,"name":"tellFictionalStory","continueLabel":"Please, do continue...","bookmarkLabel":"Mark this page","finishLabel":"Bring it home"}}.',
+  "",
   "Optional — send a generated image for the user (saved to their library alongside manual images):",
   "- If you include sendGeneratedImage, keep the visible prose before it very short (one concise sentence).",
   "- Add a `sendGeneratedImage` object with a single `prompt` field: a concrete image-model description (scene, style, subject).",
@@ -3461,6 +3468,9 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ? { moodConfidence: assembled.moodConfidence }
         : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+      ...(assembled.tellFictionalStory
+        ? { tellFictionalStory: assembled.tellFictionalStory }
+        : {}),
       ...(assembled.zenDisplay ? { zenDisplay: assembled.zenDisplay } : {}),
       ...(assembled.sentGeneratedImage
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
@@ -4685,6 +4695,9 @@ export async function processChatMessage(
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
       ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
+      ...(parsedAssistant.tellFictionalStory
+        ? { tellFictionalStory: parsedAssistant.tellFictionalStory }
+        : {}),
       ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
@@ -5442,6 +5455,7 @@ export async function processChatMessage(
   });
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
+    tellFictionalStory: parsedAssistant.tellFictionalStory,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
     zenDisplay: parsedAssistant.zenDisplay,
