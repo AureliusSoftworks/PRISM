@@ -344,7 +344,7 @@ const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
-const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 244;
+const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 292;
 /** Single-row "delete group chats" menu — keep in sync with clamp padding. */
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 220;
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
@@ -385,19 +385,6 @@ function normalizeAuthUsername(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-function dedupeRecentAuthUsernames(usernames: string[]): string[] {
-  const seen = new Set<string>();
-  const next: string[] = [];
-  for (const candidate of usernames) {
-    const normalized = normalizeAuthUsername(candidate);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    next.push(normalized);
-    if (next.length >= MAX_RECENT_AUTH_USERNAMES) break;
-  }
-  return next;
-}
-
 function tutorialStorageKeyForUser(userId: string): string {
   return `${MODE_TUTORIAL_STORAGE_PREFIX}:${userId}`;
 }
@@ -430,8 +417,6 @@ const FLOATING_SHELL_APPLETS_ENABLED =
 const CLIENT_ACCESS_REQUIRED = process.env.NEXT_PUBLIC_PRISM_LEGACY_PAIRING_REQUIRED === "1";
 const DESKTOP_FIRST_RUN_CHECKLIST_KEY = "prism_desktop_first_run_complete_v2";
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
-const RECENT_AUTH_USERNAMES_KEY = "prism_recent_auth_usernames_v1";
-const MAX_RECENT_AUTH_USERNAMES = 12;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
 
 type TutorialMode = "zen" | "chat" | "sandbox" | "coffee";
@@ -5734,6 +5719,8 @@ interface ImportBotResult {
 
 /** Max UTF-8 size for pasted or file-read bot export text before JSON parse. */
 const BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES = 512 * 1024;
+const BOT_COLLECTION_FILE_EXTENSION = ".bots";
+const BOT_COLLECTION_ARCHIVE_MIME = "application/vnd.prism.bots+zip";
 
 function createFavoritesBotGroup(): BotLibraryGroup {
   const now = new Date().toISOString();
@@ -20856,7 +20843,6 @@ function HomeContent(): React.JSX.Element {
       </div>
     ) : null;
   const [username, setUsername] = useState("");
-  const [recentAuthUsernames, setRecentAuthUsernames] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -29218,28 +29204,6 @@ function HomeContent(): React.JSX.Element {
   }, [requestApiWithLoopbackFallback]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(RECENT_AUTH_USERNAMES_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return;
-      const normalized = dedupeRecentAuthUsernames(
-        parsed.filter((value): value is string => typeof value === "string")
-      );
-      setRecentAuthUsernames(normalized);
-    } catch {
-      // Ignore malformed local cache and start with empty recent usernames.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (authMode !== "login") return;
-    if (!recentAuthUsernames.length) return;
-    if (username.trim().length > 0) return;
-    setUsername(recentAuthUsernames[0]);
-  }, [authMode, recentAuthUsernames, username]);
-
-  useEffect(() => {
     if (!CLIENT_ACCESS_REQUIRED) {
       setClientAccessState("allowed");
       return;
@@ -31447,16 +31411,6 @@ function HomeContent(): React.JSX.Element {
           method: "POST",
           body: JSON.stringify({ username: normalizedUsername, password }),
         });
-      }
-      const updatedRecent = dedupeRecentAuthUsernames([
-        normalizedUsername,
-        ...recentAuthUsernames,
-      ]);
-      setRecentAuthUsernames(updatedRecent);
-      try {
-        localStorage.setItem(RECENT_AUTH_USERNAMES_KEY, JSON.stringify(updatedRecent));
-      } catch {
-        // Ignore local cache persistence failures.
       }
       clearNativeSessionToken();
       await bootstrap();
@@ -37387,7 +37341,7 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  async function exportBotsAsZip(selectedBots: Bot[]): Promise<void> {
+  async function exportBotsAsCollection(selectedBots: Bot[]): Promise<void> {
     if (selectedBots.length === 0) return;
     setPanelError(null);
     setPanelNotice(null);
@@ -37408,18 +37362,18 @@ function HomeContent(): React.JSX.Element {
       files[candidate] = strToU8(built.json);
     }
     const zipped = zipSync(files, { level: 6 });
-    const blob = new Blob([zipped], { type: "application/zip" });
+    const blob = new Blob([zipped], { type: BOT_COLLECTION_ARCHIVE_MIME });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     anchor.href = url;
-    anchor.download = `bots-${selectedBots.length}-${stamp}.zip`;
+    anchor.download = `bots-${selectedBots.length}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`;
     anchor.click();
     URL.revokeObjectURL(url);
     setPanelNotice(
       totalMemories > 0
-        ? `${selectedBots.length} bots exported to ZIP with ${totalMemories} memories.`
-        : `${selectedBots.length} bots exported to ZIP.`
+        ? `${selectedBots.length} bots exported to .bots with ${totalMemories} memories.`
+        : `${selectedBots.length} bots exported to .bots.`
     );
   }
 
@@ -37713,7 +37667,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function importBotZipBundle(file: File): Promise<void> {
+  async function importBotCollectionBundle(file: File): Promise<void> {
     setPanelError(null);
     setPanelNotice(null);
     const archiveBytes = new Uint8Array(await file.arrayBuffer());
@@ -37721,12 +37675,12 @@ function HomeContent(): React.JSX.Element {
     try {
       entries = unzipSync(archiveBytes);
     } catch {
-      throw new Error("Could not read ZIP archive.");
+      throw new Error("Could not read bot collection file.");
     }
     const allEntries = Object.entries(entries);
     const botEntries = allEntries.filter(([name]) => name.trim().toLowerCase().endsWith(".bot"));
     if (botEntries.length === 0) {
-      throw new Error("ZIP contains no .bot files.");
+      throw new Error("Bot collection contains no .bot files.");
     }
     const manifestEntry = allEntries.find(
       ([name]) => name.trim().toLowerCase().endsWith("manifest.json")
@@ -37837,7 +37791,7 @@ function HomeContent(): React.JSX.Element {
     }
 
     if (importedCount === 0 && failedCount > 0) {
-      throw new Error("ZIP import failed. None of the .bot files could be imported.");
+      throw new Error("Bot collection import failed. None of the .bot files could be imported.");
     }
     const summaryParts = [
       `${importedCount} imported`,
@@ -37848,7 +37802,7 @@ function HomeContent(): React.JSX.Element {
     if (restoredTotal > 0) {
       summaryParts.push(`${restoredTotal} memories restored`);
     }
-    setPanelNotice(`ZIP import complete: ${summaryParts.join(" · ")}.`);
+    setPanelNotice(`Bot collection import complete: ${summaryParts.join(" · ")}.`);
     if (importedBotIds.length === 1) {
       selectImportedBotInChatMode(importedBotIds[0]!);
     }
@@ -37862,9 +37816,10 @@ function HomeContent(): React.JSX.Element {
     if (!file) return;
     const lower = file.name.trim().toLowerCase();
     const isBotFile = lower.endsWith(".bot");
-    const isZipFile = lower.endsWith(".zip");
-    if (!isBotFile && !isZipFile) {
-      setPanelError("Only .bot files can be imported from disk.");
+    const isBotCollectionFile = lower.endsWith(BOT_COLLECTION_FILE_EXTENSION);
+    const isLegacyZipFile = lower.endsWith(".zip");
+    if (!isBotFile && !isBotCollectionFile && !isLegacyZipFile) {
+      setPanelError("Only .bot or .bots files can be imported from disk.");
       return;
     }
     setImportBotFileBusy(true);
@@ -37872,9 +37827,9 @@ function HomeContent(): React.JSX.Element {
     setImportBotFileBusyColor(null);
     setImportBotFileBusyGlyph(DEFAULT_BOT_GLYPH);
     try {
-      if (isZipFile) {
+      if (isBotCollectionFile || isLegacyZipFile) {
         setImportBotFileBusyName(file.name);
-        await importBotZipBundle(file);
+        await importBotCollectionBundle(file);
       } else {
         const raw = await file.text();
         const hint = parseImportBotLoadingHint(raw);
@@ -43186,9 +43141,23 @@ function HomeContent(): React.JSX.Element {
             <button
               type="button"
               role="menuitem"
+              title="Import Bot[s]"
               onClick={() => {
                 closeBotContextMenu();
-                void exportBotsAsZip(multiSelectedBots);
+                openImportBotModal();
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⇩</span>
+                <span>Import Bot[s]</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void exportBotsAsCollection(multiSelectedBots);
               }}
             >
               <span className={styles.contextMenuItemLabel}>
@@ -43262,6 +43231,20 @@ function HomeContent(): React.JSX.Element {
           </>
         ) : (
           <>
+            <button
+              type="button"
+              role="menuitem"
+              title="Import Bot[s]"
+              onClick={() => {
+                closeBotContextMenu();
+                openImportBotModal();
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⇩</span>
+                <span>Import Bot[s]</span>
+              </span>
+            </button>
             <button
               type="button"
               role="menuitem"
@@ -43605,30 +43588,7 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           <form onSubmit={submitAuth} className={styles.form}>
-            {authMode === "login" && recentAuthUsernames.length > 0 ? (
-              <label className={styles.authSelectField}>
-                <span>Username</span>
-                <select
-                  required
-                  value={username}
-                  onChange={(event) => {
-                    setUsername(event.target.value);
-                    setError(null);
-                  }}
-                >
-                  <option value="" disabled>
-                    Choose username
-                  </option>
-                  {recentAuthUsernames.map((candidate) => (
-                    <option key={candidate} value={candidate}>
-                      {candidate}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <input required value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" />
-            )}
+            <input required value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" />
             <input required type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
             {authMode === "register" && (
               <input
@@ -45823,7 +45783,7 @@ function HomeContent(): React.JSX.Element {
             <span>
               <strong>Allow paste JSON when importing</strong>
               <small>
-                Off opens the .bot file picker directly. On adds a paste-from-clipboard
+                Off opens the .bot/.bots file picker directly. On adds a paste-from-clipboard
                 import choice.
               </small>
             </span>
@@ -47011,7 +46971,7 @@ function HomeContent(): React.JSX.Element {
             </span>
           </summary>
           <p className={styles.devToolsSectionHint}>
-            Off (default): Import opens the file picker for .bot files only. On: Import shows upload plus paste-from-clipboard.
+            Off (default): Import opens the file picker for .bot/.bots files. On: Import shows upload plus paste-from-clipboard.
           </p>
           <div className={styles.devToolsActions}>
             <button
@@ -47644,6 +47604,16 @@ function HomeContent(): React.JSX.Element {
   // would perturb CSS grid/flex layout in the parent <main>.
   const renderSharedPanels = (): React.JSX.Element => (
     <>
+      <input
+        ref={botImportInputRef}
+        type="file"
+        accept=".bot,.bots"
+        className={styles.panelHiddenFileInput}
+        onChange={(event) => {
+          void handleBotImportFileSelection(event);
+        }}
+      />
+
       {panel && (
         <div
           className={styles.panelOverlay}
@@ -51631,15 +51601,6 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </div>
               <div className={styles.panelHeaderActions}>
-                <input
-                  ref={botImportInputRef}
-                  type="file"
-                  accept=".bot"
-                  className={styles.panelHiddenFileInput}
-                  onChange={(event) => {
-                    void handleBotImportFileSelection(event);
-                  }}
-                />
                 {!botPanelLibraryEnabled ? (
                   <button
                     type="button"
@@ -51679,14 +51640,14 @@ function HomeContent(): React.JSX.Element {
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
                         ? "Import disabled while editing a bot"
-                        : "Import bot from .bot file"
+                        : "Import bot from .bot or .bots file"
                   }
                   data-glyph-tooltip={
                     busy
                       ? "Wait for the current action to finish"
                       : editorMode && editingBotId
-                        ? "Finish editing or go back to the list to import a .bot file"
-                        : "Import Prism .bot file"
+                        ? "Finish editing or go back to the list to import a .bot or .bots file"
+                        : "Import Prism .bot or .bots file"
                   }
                 >
                   <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
@@ -52831,7 +52792,7 @@ function HomeContent(): React.JSX.Element {
                           onClick={() => handleImportBotChooseUpload()}
                         >
                           <strong>Upload from file</strong>
-                          <small>.bot file from disk</small>
+                          <small>.bot or .bots file from disk</small>
                         </button>
                         {devToolsBotImportPasteEnabled ? (
                           <button
