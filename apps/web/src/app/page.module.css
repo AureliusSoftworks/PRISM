@@ -2639,19 +2639,6 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-.authSelectField {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-}
-
-.authSelectField > span {
-  color: var(--fg-muted);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .settingsTutorialCard {
   border: 1px solid var(--line);
   border-radius: 12px;
