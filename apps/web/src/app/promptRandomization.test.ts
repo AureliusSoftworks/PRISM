@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   collapseDeletedPromptWildcardDeckReferences,
   promptInsertionStartsSentence,
+  resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   splitPromptRandomizationOptions,
   withSentenceCasedPromptInsertion,
@@ -165,6 +166,43 @@ describe("resolvePromptRandomizationGroups", () => {
         { value: "Soft", text: "Soft" },
       ]
     );
+  });
+});
+
+describe("resolveBuiltInPromptWildcardInvocations", () => {
+  it("converts built-in bang wildcard invocations to deferred brace slots", () => {
+    assert.deepEqual(
+      resolveBuiltInPromptWildcardInvocations("Make a !adjective apple and !plural-noun."),
+      {
+        prompt: "Make a {ADJECTIVE} apple and {PLURAL NOUN}.",
+        replacements: [],
+      }
+    );
+  });
+
+  it("preserves existing custom wildcard replacement ranges", () => {
+    const deckResolution = resolvePromptRandomizationGroups("Ask !mood about !adjective.", {
+      decks: [{ name: "mood", values: ["glowing"] }],
+      random: () => 0,
+    });
+
+    assert.deepEqual(
+      resolveBuiltInPromptWildcardInvocations(
+        deckResolution.prompt,
+        deckResolution.replacements
+      ),
+      {
+        prompt: "Ask glowing about {ADJECTIVE}.",
+        replacements: [{ key: "MOOD", value: "glowing", start: 4, end: 11 }],
+      }
+    );
+  });
+
+  it("leaves unknown bang tokens untouched", () => {
+    assert.deepEqual(resolveBuiltInPromptWildcardInvocations("Ask !mystery now."), {
+      prompt: "Ask !mystery now.",
+      replacements: [],
+    });
   });
 });
 

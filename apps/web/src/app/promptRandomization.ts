@@ -1,4 +1,7 @@
-import type { PromptShortcutWildcardReplacement } from "@localai/shared";
+import {
+  getBuiltInPromptWildcardSlot,
+  type PromptShortcutWildcardReplacement,
+} from "@localai/shared";
 
 export interface PromptRandomizationResolution {
   prompt: string;
@@ -71,6 +74,114 @@ function deckReplacementKey(name: string): string {
     .replace(/[^a-z0-9]+/giu, "_")
     .replace(/^_+|_+$/gu, "")
     .toUpperCase() || "DECK";
+}
+
+const BUILT_IN_WILDCARD_INVOCATION_RE =
+  /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
+
+function normalizedPromptRandomizationReplacementsForPrompt(
+  prompt: string,
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+): PromptShortcutWildcardReplacement[] {
+  if (!prompt || !Array.isArray(replacements) || replacements.length === 0) return [];
+  let lastEnd = 0;
+  return replacements
+    .map((replacement): PromptShortcutWildcardReplacement | null => {
+      const start = replacement.start;
+      const end = replacement.end;
+      if (
+        typeof start !== "number" ||
+        typeof end !== "number" ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end)
+      ) {
+        return null;
+      }
+      const normalizedStart = Math.floor(start);
+      const normalizedEnd = Math.floor(end);
+      if (
+        normalizedStart < 0 ||
+        normalizedEnd <= normalizedStart ||
+        normalizedEnd > prompt.length
+      ) {
+        return null;
+      }
+      const value = prompt.slice(normalizedStart, normalizedEnd);
+      if (!value) return null;
+      return {
+        key: replacement.key,
+        value,
+        start: normalizedStart,
+        end: normalizedEnd,
+      };
+    })
+    .filter((replacement): replacement is PromptShortcutWildcardReplacement =>
+      Boolean(replacement)
+    )
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0))
+    .filter((replacement) => {
+      const start = replacement.start ?? 0;
+      const end = replacement.end ?? 0;
+      if (start < lastEnd) return false;
+      lastEnd = end;
+      return true;
+    });
+}
+
+export function resolveBuiltInPromptWildcardInvocations(
+  source: string,
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
+): PromptRandomizationResolution {
+  const preservedReplacements = normalizedPromptRandomizationReplacementsForPrompt(
+    source,
+    existingReplacements
+  );
+  let prompt = "";
+  let cursor = 0;
+  let changed = false;
+  const replacements: PromptShortcutWildcardReplacement[] = [];
+  const preserveSegmentReplacements = (
+    segmentStart: number,
+    segmentEnd: number,
+    resolvedSegmentStart: number
+  ) => {
+    for (const replacement of preservedReplacements) {
+      const start = replacement.start ?? -1;
+      const end = replacement.end ?? -1;
+      if (start < segmentStart || end > segmentEnd) continue;
+      replacements.push({
+        ...replacement,
+        start: resolvedSegmentStart + (start - segmentStart),
+        end: resolvedSegmentStart + (end - segmentStart),
+      });
+    }
+  };
+
+  for (const match of source.matchAll(BUILT_IN_WILDCARD_INVOCATION_RE)) {
+    const raw = match[0] ?? "";
+    const name = match[2] ?? "";
+    const matchIndex = match.index ?? -1;
+    const slot = getBuiltInPromptWildcardSlot(name);
+    if (matchIndex < 0 || !raw || !name || !slot) continue;
+    const delimiterLength = raw.startsWith("!") ? 0 : 1;
+    const start = matchIndex + delimiterLength;
+    const end = start + 1 + name.length;
+    const resolvedSegmentStart = prompt.length;
+    prompt += source.slice(cursor, start);
+    preserveSegmentReplacements(cursor, start, resolvedSegmentStart);
+    prompt += `{${slot.label}}`;
+    cursor = end;
+    changed = true;
+  }
+
+  if (!changed) {
+    return { prompt: source, replacements: preservedReplacements };
+  }
+
+  const finalResolvedSegmentStart = prompt.length;
+  prompt += source.slice(cursor);
+  preserveSegmentReplacements(cursor, source.length, finalResolvedSegmentStart);
+  return { prompt, replacements };
 }
 
 function buildPromptRandomizationDeckLookup(
