@@ -153,6 +153,11 @@ import {
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
 import {
+  cleanupComposerTextWithModel,
+  cleanupResolvedPromptWithModel,
+  readComposerCleanupText,
+} from "./composer-cleanup.ts";
+import {
   normalizeComposerWildcardValueResponse,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
@@ -242,7 +247,6 @@ const backupAdapter = new LocalOnlyBackupAdapter();
 const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
 const memoryInferenceCheckedAtByScope = new Map<string, string>();
-const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
 const COMPOSER_RANDOM_PROMPT_MAX_CONTEXT_MESSAGES = 8;
 const COMPOSER_RANDOM_PROMPT_MAX_MESSAGE_CHARS = 900;
 const COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS = 220;
@@ -283,8 +287,6 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
     "ambient wallpaper",
   ],
 } as const;
-const COMPOSER_CLEANUP_SYSTEM_PROMPT =
-  "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
 const COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT =
@@ -688,35 +690,6 @@ function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | und
 
 function devMoodDebugAllowed(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.PRISM_DEV_TOOLS === "1";
-}
-
-function readComposerCleanupText(value: unknown): string {
-  if (typeof value !== "string") {
-    throw new Error("Composer text is required.");
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Composer text is required.");
-  }
-  if (trimmed.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS) {
-    throw new Error("Composer text is too long to clean up at once.");
-  }
-  return trimmed;
-}
-
-function normalizeComposerCleanupResponse(raw: string, original: string): string {
-  const cleaned = raw.trim();
-  if (!cleaned) {
-    throw new Error("Writing cleanup returned an empty result.");
-  }
-  const fenced = cleaned.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```$/);
-  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
-  if (!unwrapped) {
-    throw new Error("Writing cleanup returned an empty result.");
-  }
-  return unwrapped.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS
-    ? original
-    : unwrapped;
 }
 
 function readComposerRecentMessages(value: unknown): Array<{ role: "user" | "assistant"; content: string; botName?: string }> {
@@ -2804,20 +2777,12 @@ function buildRoutes(): RouteDefinition[] {
         user.secondary_ollama_host,
         anthropicApiKey
       );
-      const maxTokens = Math.min(1800, Math.max(160, Math.ceil(text.length / 2)));
       try {
-        const raw = await provider.generateResponse(
-          [
-            { role: "system", content: COMPOSER_CLEANUP_SYSTEM_PROMPT },
-            { role: "user", content: text },
-          ],
-          {
-            model: resolvedAuto.model,
-            temperature: 0.05,
-            maxTokens,
-          }
-        );
-        const cleanedText = normalizeComposerCleanupResponse(raw, text);
+        const cleanedText = await cleanupComposerTextWithModel({
+          text,
+          provider,
+          model: resolvedAuto.model,
+        });
         json(ctx.res, 200, {
           ok: true,
           text: cleanedText,
@@ -3255,10 +3220,13 @@ function buildRoutes(): RouteDefinition[] {
       let messageForChat = resolvedCommandCenterPrompt ?? message;
       let promptShortcutForChat = promptShortcut;
       let promptWildcardsForChat = promptWildcards;
+      let resolvedWildcardReplacements =
+        promptShortcut?.wildcardReplacements ?? promptWildcards?.wildcardReplacements ?? [];
+      const hasTrueWildcardSlots = promptWildcardNames(messageForChat).length > 0;
       if (
         !starterPrompt &&
         (commandCenterPrompt || promptWildcards) &&
-        promptWildcardNames(messageForChat).length > 0
+        hasTrueWildcardSlots
       ) {
         const wildcardProvider = selectProvider(
           effectiveProvider,
@@ -3275,25 +3243,59 @@ function buildRoutes(): RouteDefinition[] {
           signal: chatAbort.signal,
         });
         messageForChat = wildcardResolution.prompt;
-        promptShortcutForChat = withPromptShortcutResolvedPrompt(
-          promptShortcut
-            ? {
-                ...promptShortcut,
-                wildcardReplacements: wildcardResolution.replacements,
-              }
-            : undefined,
-          messageForChat
-        );
-        promptWildcardsForChat = withPromptWildcardResolvedPrompt(
-          promptWildcards
-            ? {
-                ...promptWildcards,
-                wildcardReplacements: wildcardResolution.replacements,
-              }
-            : undefined,
-          messageForChat
-        );
+        resolvedWildcardReplacements = wildcardResolution.replacements;
       }
+      if (
+        !starterPrompt &&
+        (commandCenterPrompt || promptWildcards) &&
+        user.composer_writing_assist !== 0 &&
+        resolvedWildcardReplacements.length > 0 &&
+        messageForChat.trim().length > 0
+      ) {
+        const cleanupProvider = selectProvider(
+          effectiveProvider,
+          openAiApiKey,
+          user.secondary_ollama_host,
+          anthropicApiKey
+        );
+        try {
+          const cleanup = await cleanupResolvedPromptWithModel({
+            prompt: messageForChat,
+            replacements: resolvedWildcardReplacements,
+            provider: cleanupProvider,
+            model: resolvedAuto.model,
+            signal: chatAbort.signal,
+          });
+          messageForChat = cleanup.prompt;
+          resolvedWildcardReplacements = cleanup.replacements;
+        } catch (error) {
+          if (chatAbort.signal.aborted) {
+            throw error;
+          }
+          console.warn(
+            "[composer-cleanup] leaving resolved prompt uncorrected:",
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+      promptShortcutForChat = withPromptShortcutResolvedPrompt(
+        promptShortcut
+          ? {
+              ...promptShortcut,
+              wildcardReplacements: resolvedWildcardReplacements,
+            }
+          : undefined,
+        messageForChat
+      );
+      promptWildcardsForChat = withPromptWildcardResolvedPrompt(
+        promptWildcards
+          ? {
+              ...promptWildcards,
+              wildcardReplacements: resolvedWildcardReplacements,
+            }
+          : undefined,
+        messageForChat
+      );
       let result: Awaited<ReturnType<typeof processChatMessage>>;
       try {
         result = await processChatMessage(
