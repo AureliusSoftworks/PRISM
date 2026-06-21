@@ -8,6 +8,7 @@ import {
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
+  findFirstBotMentionId,
   formatBotMentionMarkdown,
   normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
@@ -224,6 +225,25 @@ describe("tokenizeBotMentionSource", () => {
     assert.equal(segs[1]!.kind, "mention");
     assert.equal(segs[1]!.displayName, "B");
     assert.equal(segs[1]!.srcStart, segs[0]!.srcEnd);
+  });
+});
+
+describe("findFirstBotMentionId", () => {
+  const bots = [
+    { id: "bot-harry", name: "Harry", color: "#a11", glyph: null },
+    { id: "bot-strange", name: "Dr. Strange", color: "#15c", glyph: null },
+  ] as const;
+
+  it("returns the first valid markdown bot mention id", () => {
+    const text =
+      "Hi [Harry](prism-bot://bot-harry), meet [Dr. Strange](prism-bot://bot-strange).";
+    assert.equal(findFirstBotMentionId(text, bots), "bot-harry");
+  });
+
+  it("ignores unknown bot ids", () => {
+    const text =
+      "Hi [Unknown](prism-bot://missing), then [Dr. Strange](prism-bot://bot-strange).";
+    assert.equal(findFirstBotMentionId(text, bots), "bot-strange");
   });
 });
 

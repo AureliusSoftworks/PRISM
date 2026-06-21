@@ -2,6 +2,7 @@ export interface ChatRevealPaceState {
   tokenSignature: string;
   visibleTokenCount: number;
   nextAdvanceAtMs: number;
+  lastAdvanceAtMs: number;
   lastResolvedAtMs: number;
 }
 
@@ -34,6 +35,7 @@ export function resolvePacedChatRevealVisibleTokenCount({
       tokenSignature,
       visibleTokenCount: 1,
       nextAdvanceAtMs: now + firstStepDelayMs,
+      lastAdvanceAtMs: now,
       lastResolvedAtMs: now,
     };
     stateByRevealKey.set(revealKey, state);
@@ -53,11 +55,16 @@ export function resolvePacedChatRevealVisibleTokenCount({
   }
   state.lastResolvedAtMs = now;
 
+  state.nextAdvanceAtMs =
+    state.lastAdvanceAtMs +
+    Math.max(0, resolveStepDelayMs(state.visibleTokenCount - 1));
+
   if (now >= state.nextAdvanceAtMs) {
     state.visibleTokenCount = Math.min(
       state.visibleTokenCount + 1,
       normalizedTokenCount
     );
+    state.lastAdvanceAtMs = now;
     if (state.visibleTokenCount < normalizedTokenCount) {
       state.nextAdvanceAtMs =
         now + Math.max(0, resolveStepDelayMs(state.visibleTokenCount - 1));

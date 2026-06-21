@@ -1937,6 +1937,12 @@ export interface UserChatSettings {
   promptShortcut?: PromptShortcutMetadata;
   /** Optional user-facing wildcard metadata for resolved deck/option sends. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Zen-only assistant transition after a Persona picker change. */
+  personaTransition?: {
+    fromBotId: string | null;
+    toBotId: string | null;
+    source: "picker";
+  };
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
   /** Optional resolved user prompt sent to the model while preserving display content. */
@@ -3409,6 +3415,7 @@ type MessageRow = {
   content: string;
   provider: string | null;
   model: string | null;
+  bot_id: string | null;
   bot_name: string | null;
   bot_color: string | null;
   bot_glyph: string | null;
@@ -3428,6 +3435,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
           ? row.provider
           : undefined,
       model: row.model ?? undefined,
+      botId: row.bot_id ?? null,
       botName: row.bot_name ? row.bot_name : undefined,
       botColor: row.bot_color ? row.bot_color : undefined,
       botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
@@ -3477,6 +3485,46 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         : {}),
     };
   });
+}
+
+function readBotNameForZenPersona(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null
+): string {
+  if (!botId) return "PRISM";
+  const row = db
+    .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')")
+    .get(botId, userId) as { name?: string | null } | undefined;
+  return row?.name?.trim() || "the selected Persona";
+}
+
+function buildZenPersonaTransitionInstruction(args: {
+  db: DatabaseSync;
+  userId: string;
+  fromBotId: string | null;
+  toBotId: string | null;
+  toPersonaLabel?: string | null;
+}): string {
+  const fromName = readBotNameForZenPersona(args.db, args.userId, args.fromBotId);
+  const toName =
+    args.toPersonaLabel?.trim() ||
+    readBotNameForZenPersona(args.db, args.userId, args.toBotId);
+  if (!args.toBotId) {
+    return [
+      "The user has returned Zen Mode to the default PRISM persona.",
+      `The previous active Persona was ${fromName}.`,
+      "Write one brief, natural handoff as PRISM that gently re-centers the conversation.",
+      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+    ].join("\n");
+  }
+  return [
+    `The user has equipped the ${toName} Persona in Zen Mode.`,
+    `The previous active Persona was ${fromName}.`,
+    `Write one brief, natural first message as ${toName} that enters the ongoing conversation smoothly.`,
+    "It may acknowledge the handoff or simply respond from the new perspective, whichever feels more natural from the recent context.",
+    "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+  ].join("\n");
 }
 
 type OpinionRow = {
@@ -4328,7 +4376,7 @@ function loadPersistedConversationForChatResponse(args: {
         : "sandbox";
   const messageRowsDescOrAsc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -4409,6 +4457,23 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
+  // Incognito is a Chat-mode concept (see shared types): keeps the thread
+  // client-held and skips all memory. Provider choice remains the normal
+  // local/online user setting; Sandbox ignores `incognito` entirely.
+  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
+  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
+  // In Zen this is per-turn Persona attribution; the conversation row itself
+  // still reports botId null so Zen remains one continuous PRISM thread.
+  const activeBotId = incognitoForTurn ? null : settings.botId;
+  const activeMemoryBotId =
+    typeof activeBotId === "string" && activeBotId.trim().length > 0
+      ? activeBotId.trim()
+      : null;
+  const personaTransition =
+    isZenMode(mode) && settings.personaTransition?.source === "picker"
+      ? settings.personaTransition
+      : null;
+  const personaTransitionTurn = personaTransition !== null;
   const effectiveBotSystemPrompt = isZenMode(mode)
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
     : settings.botSystemPrompt;
@@ -4421,14 +4486,20 @@ export async function processChatMessage(
       : "";
   const modelUserMessage = promptInputOverride || message;
   const explicitAskQuestionRequest =
-    !isStarterPrompt && userExplicitlyRequestedAskQuestion(modelUserMessage);
-  const promptUserMessage = isStarterPrompt
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    userExplicitlyRequestedAskQuestion(modelUserMessage);
+  const promptUserMessage = personaTransitionTurn
+    ? buildZenPersonaTransitionInstruction({
+        db,
+        userId,
+        fromBotId: personaTransition.fromBotId,
+        toBotId: activeMemoryBotId,
+        toPersonaLabel: settings.starterPromptLabel,
+      })
+    : isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : modelUserMessage;
-  // Incognito is a Chat-mode concept (see shared types): keeps the thread
-  // client-held and skips all memory. Provider choice remains the normal
-  // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -4441,13 +4512,6 @@ export async function processChatMessage(
       skipPersonalFacts || commandCenterPromptTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
-  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
-  // UI surfaces can still choose to lock Chat mode by omitting that field.
-  const activeBotId = isZenMode(mode) ? null : settings.botId;
-  const activeMemoryBotId =
-    typeof activeBotId === "string" && activeBotId.trim().length > 0
-      ? activeBotId.trim()
-      : null;
   const provider = selectProvider(
     effectiveProvider,
     settings.openAiApiKey,
@@ -4691,6 +4755,7 @@ export async function processChatMessage(
       createdAt: assistantCreatedAt,
       provider: providerNameUsed,
       model: modelUsed,
+      botId: activeBotId ?? null,
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
       ...(activeBotName ? { botName: activeBotName } : {}),
@@ -4715,6 +4780,7 @@ export async function processChatMessage(
             role: "user" as const,
             content: message,
             createdAt: now,
+            botId: activeBotId ?? null,
             ...(promptShortcutWithResolvedPrompt
               ? { promptShortcut: promptShortcutWithResolvedPrompt }
               : {}),
@@ -4864,9 +4930,11 @@ export async function processChatMessage(
       userId,
       isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
+        : personaTransitionTurn
+          ? "Zen"
         : generateConversationTitle(modelUserMessage),
       isZenMode(mode) ? "zen" : mode,
-      activeBotId ?? null,
+      isZenMode(mode) ? null : activeBotId ?? null,
       incognitoForTurn ? 1 : 0,
       now,
       now
@@ -4900,7 +4968,7 @@ export async function processChatMessage(
   );
   const historyRowsDesc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -4929,10 +4997,10 @@ export async function processChatMessage(
     activeBotId
   );
   const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
-  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
+  const turnEvaluation = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || commandCenterPromptTurn
+  const repairSignal = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   const zenMoodSensitivity = normalizePrismMoodSensitivity(
@@ -4945,7 +5013,7 @@ export async function processChatMessage(
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || commandCenterPromptTurn) {
+  if (isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -5028,14 +5096,22 @@ export async function processChatMessage(
   }
 
   const memoryIntent =
-    !isStarterPrompt && !commandCenterPromptTurn && !skipMemoryForMoodCooldownTurn
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !commandCenterPromptTurn &&
+    !skipMemoryForMoodCooldownTurn
       ? analyzeMemoryIntent(message)
       : null;
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
-  if (!incognitoForTurn && !skipMemoryForMoodCooldownTurn && !prismMoodIgnoreTurn) {
+  if (
+    !incognitoForTurn &&
+    !personaTransitionTurn &&
+    !skipMemoryForMoodCooldownTurn &&
+    !prismMoodIgnoreTurn
+  ) {
     throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
       isZenMode(mode)
@@ -5073,7 +5149,7 @@ export async function processChatMessage(
 
   let userMessageId: string | null = null;
   const insertUserMessageForTurn = (): void => {
-    if (isStarterPrompt || userMessageId !== null) return;
+    if (isStarterPrompt || personaTransitionTurn || userMessageId !== null) return;
     userMessageId = randomId(12);
     const promptShortcutPayload = serializePromptToolPayload({
       promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
@@ -5132,6 +5208,7 @@ export async function processChatMessage(
   if (
     !skipPersonalFacts &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
     !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
@@ -5160,6 +5237,7 @@ export async function processChatMessage(
   const zenSessionMemoryContext =
     isZenMode(mode) &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
     !commandCenterPromptTurn &&
     userMessageRequestsZenSessionMemory(message)
       ? loadZenSessionMemoryOverview({
@@ -5337,7 +5415,7 @@ export async function processChatMessage(
         key: prismMood.moodKey,
         confidence: prismMood.confidence,
       }
-    : commandCenterPromptTurn
+    : commandCenterPromptTurn || personaTransitionTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
         assistantContent: assistantDisplay,
@@ -5519,7 +5597,7 @@ export async function processChatMessage(
   // key (legacy callers, Sandbox, scripts) so we leave bot_id alone.
   // Explicit null (client chose "Default") and strings (specific bot)
   // both flow through as real UPDATEs.
-  if (activeBotId !== undefined) {
+  if (!isZenMode(mode) && activeBotId !== undefined) {
     db.prepare(
       "UPDATE conversations SET updated_at = ?, bot_id = ? WHERE id = ? AND user_id = ?"
     ).run(
@@ -5533,7 +5611,7 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt || commandCenterPromptTurn
+  const opinion = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, activeBotId) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
@@ -5550,7 +5628,7 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt || commandCenterPromptTurn
+  const botOpinion = isStarterPrompt || personaTransitionTurn || commandCenterPromptTurn
     ? readBotOpinion(db, userId, activeBotId)
     : upsertBotOpinionFromTurn({
         db,
@@ -5562,6 +5640,7 @@ export async function processChatMessage(
   if (
     isZenMode(mode) &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
     !commandCenterPromptTurn &&
     userMessageId
   ) {
@@ -5673,6 +5752,7 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
     !commandCenterPromptTurn
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
@@ -5875,6 +5955,7 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
     !commandCenterPromptTurn
   ) {
     await ensureAboutYouMemory({
@@ -6030,7 +6111,7 @@ export async function processChatMessage(
         : "sandbox";
   const messageRowsDescOrAsc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
