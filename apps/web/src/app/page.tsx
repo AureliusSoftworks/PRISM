@@ -180,6 +180,8 @@ import {
 } from "./promptShortcutPreviewHighlight";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  maskBuiltInWildcardSlotsForPending,
+  promptContainsBuiltInWildcardSlots,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   withSentenceCasedPromptInsertion,
@@ -17269,6 +17271,7 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
   if (props.messageRole === "user" && props.promptWildcards) {
     const markdownProps: MessageBodyProps = {
       ...props,
+      content: props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptShortcut: undefined,
       promptWildcards: undefined,
     };
@@ -33112,7 +33115,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function draftContainsTrueWildcardSlots(value: string): boolean {
-    return /\{[A-Z][A-Z0-9_ ]{1,63}\}/g.test(value);
+    return promptContainsBuiltInWildcardSlots(value);
   }
 
   function resolveComposerWildcardDraft(rawDraft: string): {
@@ -33574,10 +33577,18 @@ function HomeContent(): React.JSX.Element {
     const isStarterPrompt =
       options.starterPrompt === true &&
       (!detail || detail.messages.length === 0);
-    const promptWildcardFillAwaitsServerCleanup =
+    const commandCenterPromptHasTrueWildcardSlots =
+      commandCenterPromptActive && draftContainsTrueWildcardSlots(trimmed);
+    const composerPromptHasTrueWildcardSlots =
+      composerPromptWildcards !== null && draftContainsTrueWildcardSlots(trimmed);
+    const promptWildcardCleanupAwaitsServer =
       settings?.composerWritingAssist !== false &&
       ((commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0 ||
         (composerPromptWildcards?.wildcardReplacements?.length ?? 0) > 0);
+    const promptWildcardFillAwaitsServerCleanup =
+      promptWildcardCleanupAwaitsServer ||
+      commandCenterPromptHasTrueWildcardSlots ||
+      composerPromptHasTrueWildcardSlots;
     let detailForSend = detail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
     const isInitialZenStarterPrompt =
@@ -33792,8 +33803,11 @@ function HomeContent(): React.JSX.Element {
         .toString(36)
         .slice(2, 8)}`;
       const optimisticUserContent =
-        promptWildcardFillAwaitsServerCleanup && composerPromptWildcards
-          ? rawDraft.trim()
+        promptWildcardFillAwaitsServerCleanup
+          ? maskBuiltInWildcardSlotsForPending(
+              trimmed,
+              PENDING_COMPOSER_WILDCARD_SLOT_TEXT
+            ).trim()
           : displayTrimmed;
       if (promptWildcardFillAwaitsServerCleanup) {
         optimisticPromptCleanupMessageId = optimisticMessageId;
