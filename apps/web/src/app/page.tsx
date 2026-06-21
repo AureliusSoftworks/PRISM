@@ -473,6 +473,8 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 300;
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 210;
 const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 24;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
@@ -1145,6 +1147,13 @@ function clampDevToolsPanelPosition(
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
   };
+}
+
+function shouldShowDevToolsConsoleOnly(width: number, height: number): boolean {
+  return (
+    width < DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH ||
+    height < DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT
+  );
 }
 
 function clampCompactedSummaryDebugPanelRect(
@@ -5393,6 +5402,95 @@ function formatBackendDebugLine(prefix: string, event: ChatBackendDebugEvent): s
   if (event.detail && event.detail.length > 0) parts.push(event.detail);
   parts.push(`${event.elapsedMs}ms`);
   return parts.join(" — ");
+}
+
+const DEV_METRICS_INLINE_TOKEN_PATTERN =
+  /(\[[^\]\n]+\]|\/api\/[^\s;,)]+|\/[A-Za-z][\w/-]*|(?:mode|chars|bot|provider|model|incognito|jobId|prompt)=("[^"]*"|[^\s;\u2014,)]+)|\b\d+(?:\.\d+)?(?:ms|%)\b|\b(?:backend|route|context|model|tool|summary|memories?|memory|opinion|provider|incognito|started|created|retracted|rejected|triggered|requested|failed|succeeded|detected|acquired|busy|dropped)\b|"[^"]*")/gi;
+
+function formatDevMetricsTimestamp(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function renderDevMetricsToken(token: string, key: string): React.JSX.Element {
+  const keyValue = token.match(/^([A-Za-z][\w-]*)=("[^"]*"|[^\s;\u2014,)]+)$/);
+  if (keyValue) {
+    return (
+      <span key={key} className={styles.devMetricsTokenKeyValue}>
+        <span className={styles.devMetricsTokenKey}>{keyValue[1]}=</span>
+        <strong>{keyValue[2]}</strong>
+      </span>
+    );
+  }
+
+  if (token.startsWith("[")) {
+    return (
+      <span key={key} className={styles.devMetricsTokenPrefix}>
+        {token}
+      </span>
+    );
+  }
+
+  if (token.startsWith("/")) {
+    return (
+      <span key={key} className={styles.devMetricsTokenRoute}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^".*"$/.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenQuote}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^\d+(?:\.\d+)?(?:ms|%)$/.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenMetric}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^(failed|dropped|busy|succeeded|created|retracted|rejected)$/i.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenStatus}>
+        {token}
+      </span>
+    );
+  }
+
+  return (
+    <span key={key} className={styles.devMetricsTokenKeyword}>
+      {token}
+    </span>
+  );
+}
+
+function renderDevMetricsInlineText(text: string): Array<string | React.JSX.Element> {
+  const nodes: Array<string | React.JSX.Element> = [];
+  DEV_METRICS_INLINE_TOKEN_PATTERN.lastIndex = 0;
+
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = DEV_METRICS_INLINE_TOKEN_PATTERN.exec(text)) !== null) {
+    const token = match[0];
+    const start = match.index;
+    if (start > cursor) nodes.push(text.slice(cursor, start));
+    nodes.push(renderDevMetricsToken(token, `token-${start}-${nodes.length}`));
+    cursor = start + token.length;
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length > 0 ? nodes : [text];
 }
 interface SummaryCompactionDebug {
   mode: "zen" | "chat" | "sandbox";
@@ -21409,6 +21507,7 @@ function HomeContent(): React.JSX.Element {
   const [devTogglesOpen, setDevTogglesOpen] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsConsoleOnly, setDevToolsConsoleOnly] = useState(false);
   const [devToolsActiveSection, setDevToolsActiveSection] =
     useState<DevToolsActiveSection>("observe");
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
@@ -21455,6 +21554,7 @@ function HomeContent(): React.JSX.Element {
     setDevToolsOpen(false);
     setDevTogglesOpen(false);
     setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
   }, []);
   const effectiveChatRevealTiming =
     DEV_TOOLS_ENABLED && view === "chat" ? devZenPauseTiming : DEFAULT_CHAT_REVEAL_TIMING;
@@ -22103,6 +22203,7 @@ function HomeContent(): React.JSX.Element {
   const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
     useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
+  const devChatMetricsTerminalActive = devToolsOpen || devChatMetricsEnabled;
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
     if (typeof window === "undefined") return;
@@ -23119,6 +23220,7 @@ function HomeContent(): React.JSX.Element {
     const panelNode = devToolsPanelRef.current;
     if (!panelNode) return;
     const rect = panelNode.getBoundingClientRect();
+    setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(rect.width, rect.height));
 
     setDevToolsPanelPosition((position) => {
       const next = clampDevToolsPanelPosition(
@@ -23149,6 +23251,7 @@ function HomeContent(): React.JSX.Element {
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
+      setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(width, height));
       setDevToolsPanelPosition((position) => {
         const next = clampDevToolsPanelPosition(
           position.x,
@@ -31195,7 +31298,7 @@ function HomeContent(): React.JSX.Element {
     kind: DevChatDebugEvent["kind"];
     text: string;
   }>) => {
-    if (!devChatMetricsEnabled || entries.length === 0) return;
+    if (!devChatMetricsTerminalActive || entries.length === 0) return;
     const createdAt = new Date().toISOString();
     const nextEvents = entries.map((entry, index) => ({
       id: `dev-metric-${createdAt}-${index}-${Math.random().toString(36).slice(2, 9)}`,
@@ -31204,7 +31307,7 @@ function HomeContent(): React.JSX.Element {
       text: entry.text,
     }));
     setDevChatDebugEvents((current) => [...current.slice(-60), ...nextEvents]);
-  }, [devChatMetricsEnabled]);
+  }, [devChatMetricsTerminalActive]);
 
   function collectDebugLinesFromEnvelope(
     envelope: ChatPostEnvelope,
@@ -46837,10 +46940,9 @@ function HomeContent(): React.JSX.Element {
               onChange={(event) => persistDevChatMetricsEnabled(event.currentTarget.checked)}
             />
             <span>
-              <strong>Show developer metrics terminal</strong>
+              <strong>Keep developer metrics terminal active</strong>
               <small>
-                Streams summary runs, memory updates, backend routes, model calls, and tool diagnostics
-                into the floating developer terminal.
+                The /dev panel turns it on while open; this keeps capture running after it closes.
               </small>
             </span>
           </label>
@@ -47421,6 +47523,73 @@ function HomeContent(): React.JSX.Element {
             ? "Zen session"
           : "All bots";
     const devToolsTraceCount = devChatDebugEvents.length;
+    const renderDevMetricsTerminalLog = (): React.JSX.Element => (
+      <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
+        {!devChatMetricsTerminalActive ? (
+          <div className={styles.devMetricsTerminalEmpty}>
+            Open this panel with /dev to stream backend traces here.
+          </div>
+        ) : devChatDebugEvents.length === 0 ? (
+          <div className={styles.devMetricsTerminalEmpty}>
+            Waiting for the next chat request...
+          </div>
+        ) : (
+          devChatDebugEvents.slice(-80).map((event) => {
+            const kind = inferDevChatDebugKind(event);
+            const eventDate = new Date(event.createdAt);
+            const timestampTitle = Number.isNaN(eventDate.getTime())
+              ? event.createdAt
+              : eventDate.toLocaleTimeString();
+            return (
+              <div
+                key={event.id}
+                className={styles.devMetricsTerminalLine}
+                data-kind={kind}
+              >
+                <time
+                  className={styles.devMetricsTerminalTime}
+                  dateTime={event.createdAt}
+                  title={timestampTitle}
+                >
+                  {formatDevMetricsTimestamp(event.createdAt)}
+                </time>
+                <code>{renderDevMetricsInlineText(event.text)}</code>
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+    const renderDevMetricsTerminal = (consoleOnly = false): React.JSX.Element => (
+      <section
+        className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
+        aria-labelledby="dev-metrics-terminal-title"
+        data-console-only={consoleOnly ? "true" : undefined}
+      >
+        <div className={styles.devMetricsTerminalHeader}>
+          <div>
+            <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
+            <p>
+              Backend route, model, memory, summary, and tool events for the current chat run.
+            </p>
+          </div>
+          <div className={styles.devMetricsTerminalActions}>
+            <span data-enabled={devChatMetricsTerminalActive ? "true" : "false"}>
+              {devChatMetricsTerminalActive ? "Live" : "Off"}
+            </span>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => setDevChatDebugEvents([])}
+              disabled={devChatDebugEvents.length === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        {renderDevMetricsTerminalLog()}
+      </section>
+    );
     const devToolsSectionContent = (() => {
       switch (devToolsActiveSection) {
         case "seed":
@@ -47835,7 +48004,7 @@ function HomeContent(): React.JSX.Element {
                   </span>
                   <span className={styles.devToolsStat}>
                     <small>Metrics</small>
-                    <strong>{devChatMetricsEnabled ? "On" : "Off"}</strong>
+                    <strong>{devChatMetricsTerminalActive ? "On" : "Off"}</strong>
                   </span>
                   <span className={styles.devToolsStat}>
                     <small>Debug composer</small>
@@ -47947,57 +48116,7 @@ function HomeContent(): React.JSX.Element {
         default:
           return (
             <div className={styles.devToolsCardGrid}>
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
-                aria-labelledby="dev-metrics-terminal-title"
-              >
-                <div className={styles.devMetricsTerminalHeader}>
-                  <div>
-                    <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
-                    <p>
-                      Backend route, model, memory, summary, and tool events for the current chat run.
-                    </p>
-                  </div>
-                  <div className={styles.devMetricsTerminalActions}>
-                    <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
-                      {devChatMetricsEnabled ? "Live" : "Off"}
-                    </span>
-                    <button
-                      type="button"
-                      className={styles.devToolsAction}
-                      onClick={() => setDevChatDebugEvents([])}
-                      disabled={devChatDebugEvents.length === 0}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-                <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
-                  {!devChatMetricsEnabled ? (
-                    <div className={styles.devMetricsTerminalEmpty}>
-                      Enable “Show developer metrics terminal” in System to stream backend traces here.
-                    </div>
-                  ) : devChatDebugEvents.length === 0 ? (
-                    <div className={styles.devMetricsTerminalEmpty}>
-                      Waiting for the next chat request...
-                    </div>
-                  ) : (
-                    devChatDebugEvents.slice(-80).map((event) => {
-                      const kind = inferDevChatDebugKind(event);
-                      return (
-                        <div
-                          key={event.id}
-                          className={styles.devMetricsTerminalLine}
-                          data-kind={kind}
-                        >
-                          <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
-                          <code>{event.text}</code>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </section>
+              {renderDevMetricsTerminal()}
 
               <section className={styles.devToolsCard}>
                 <div className={styles.devToolsCardHeader}>
@@ -48100,117 +48219,129 @@ function HomeContent(): React.JSX.Element {
           ref={devToolsPanelRef}
           className={styles.devToolsFloatingPanel}
           role="dialog"
-          aria-labelledby="dev-tools-title"
+          aria-label={devToolsConsoleOnly ? "Developer metrics terminal" : undefined}
+          aria-labelledby={devToolsConsoleOnly ? undefined : "dev-tools-title"}
           aria-busy={devToolsBusy ? "true" : undefined}
           data-section={devToolsActiveSection}
+          data-console-only={devToolsConsoleOnly ? "true" : undefined}
         >
-          <div
-            className={styles.devToolsHeader}
-            onPointerDown={startDevToolsPanelDrag}
-            onPointerMove={dragDevToolsPanel}
-            onPointerUp={endDevToolsPanelDrag}
-            onPointerCancel={endDevToolsPanelDrag}
-          >
-            <div className={styles.devToolsHeaderCopy}>
-              <span className={styles.devToolsKicker}>Local control center</span>
-              <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-                Developer tools
-              </h2>
-              <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+          {!devToolsConsoleOnly ? (
+            <div
+              className={styles.devToolsHeader}
+              onPointerDown={startDevToolsPanelDrag}
+              onPointerMove={dragDevToolsPanel}
+              onPointerUp={endDevToolsPanelDrag}
+              onPointerCancel={endDevToolsPanelDrag}
+            >
+              <div className={styles.devToolsHeaderCopy}>
+                <span className={styles.devToolsKicker}>Local control center</span>
+                <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+                  Developer tools
+                </h2>
+                <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+              </div>
+              <div className={styles.devToolsHeaderMeta}>
+                <span
+                  className={styles.devToolsPill}
+                  data-tone={devToolsBusy ? "busy" : "ready"}
+                >
+                  {devToolsBusy ? "Working" : "Ready"}
+                </span>
+                <span className={styles.devToolsDragHint} aria-hidden="true">
+                  drag
+                </span>
+                <button
+                  type="button"
+                  className={styles.devToolsIconButton}
+                  onClick={closeDevTools}
+                  aria-label="Close developer tools"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div className={styles.devToolsHeaderMeta}>
-              <span
-                className={styles.devToolsPill}
-                data-tone={devToolsBusy ? "busy" : "ready"}
-              >
-                {devToolsBusy ? "Working" : "Ready"}
-              </span>
-              <span className={styles.devToolsDragHint} aria-hidden="true">
-                drag
-              </span>
-              <button
-                type="button"
-                className={styles.devToolsIconButton}
-                onClick={closeDevTools}
-                aria-label="Close developer tools"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
-            <span className={styles.devToolsOverviewItem}>
-              <small>Surface</small>
-              <strong>{view}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Viewport</small>
-              <strong>{viewportWidth}×{viewportHeight}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Bots</small>
-              <strong>{bots.length.toLocaleString()}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Memories</small>
-              <strong>{memories.length.toLocaleString()}</strong>
-            </span>
-          </div>
-
-          {devToolsMessage ? (
-            <p className={styles.devToolsStatus} role="status">
-              {devToolsMessage}
-            </p>
           ) : null}
 
-          <div className={styles.devToolsLayout}>
-            <nav className={styles.devToolsNav} aria-label="Developer tool categories">
-              {DEV_TOOLS_NAV_ITEMS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={styles.devToolsNavButton}
-                  data-active={item.id === devToolsActiveSection ? "true" : undefined}
-                  onClick={() => setDevToolsActiveSection(item.id)}
-                  aria-pressed={item.id === devToolsActiveSection}
-                >
-                  <span>{item.label}</span>
-                  <small>{item.description}</small>
-                </button>
-              ))}
-            </nav>
-
-            <main className={styles.devToolsContent}>
-              <header className={styles.devToolsContentHeader}>
-                <div>
-                  <span className={styles.devToolsKicker}>Category</span>
-                  <h3>{activeDevToolsNavItem.label}</h3>
-                </div>
-                <p>{activeDevToolsNavItem.description}</p>
-              </header>
-              {devToolsSectionContent}
+          {devToolsConsoleOnly ? (
+            <main className={styles.devToolsConsoleOnlyContent}>
+              {renderDevMetricsTerminalLog()}
             </main>
-          </div>
+          ) : (
+            <>
+              <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Surface</small>
+                  <strong>{view}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Viewport</small>
+                  <strong>{viewportWidth}×{viewportHeight}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Bots</small>
+                  <strong>{bots.length.toLocaleString()}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Memories</small>
+                  <strong>{memories.length.toLocaleString()}</strong>
+                </span>
+              </div>
 
-          <footer className={styles.devToolsFooter}>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={sendRandomConversationNudge}
-              disabled={pendingReply && view !== "chat"}
-              data-glyph-tooltip="Send random suggested prompt"
-            >
-              Random prompt
-            </button>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={closeDevTools}
-            >
-              Close
-            </button>
-          </footer>
+              {devToolsMessage ? (
+                <p className={styles.devToolsStatus} role="status">
+                  {devToolsMessage}
+                </p>
+              ) : null}
+
+              <div className={styles.devToolsLayout}>
+                <nav className={styles.devToolsNav} aria-label="Developer tool categories">
+                  {DEV_TOOLS_NAV_ITEMS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={styles.devToolsNavButton}
+                      data-active={item.id === devToolsActiveSection ? "true" : undefined}
+                      onClick={() => setDevToolsActiveSection(item.id)}
+                      aria-pressed={item.id === devToolsActiveSection}
+                    >
+                      <span>{item.label}</span>
+                      <small>{item.description}</small>
+                    </button>
+                  ))}
+                </nav>
+
+                <main className={styles.devToolsContent}>
+                  <header className={styles.devToolsContentHeader}>
+                    <div>
+                      <span className={styles.devToolsKicker}>Category</span>
+                      <h3>{activeDevToolsNavItem.label}</h3>
+                    </div>
+                    <p>{activeDevToolsNavItem.description}</p>
+                  </header>
+                  {devToolsSectionContent}
+                </main>
+              </div>
+
+              <footer className={styles.devToolsFooter}>
+                <button
+                  type="button"
+                  className={styles.deleteAllModalCancel}
+                  onClick={sendRandomConversationNudge}
+                  disabled={pendingReply && view !== "chat"}
+                  data-glyph-tooltip="Send random suggested prompt"
+                >
+                  Random prompt
+                </button>
+                <button
+                  type="button"
+                  className={styles.deleteAllModalCancel}
+                  onClick={closeDevTools}
+                >
+                  Close
+                </button>
+              </footer>
+            </>
+          )}
         </div>
         {renderDevTogglesModal()}
       </>
