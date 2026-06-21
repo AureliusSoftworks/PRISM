@@ -3612,6 +3612,21 @@ function createZenSessionBreakState(args: {
   };
 }
 
+function createSessionResumeContextFromZenBreak(
+  sessionBreak: ZenSessionBreakState
+): SessionResumeContext {
+  const summary = sessionBreak.displaySummary ?? sessionBreak.internalSummary ?? undefined;
+  return {
+    ...(summary ? { summary } : {}),
+    resumedAt: new Date().toISOString(),
+    ...(sessionBreak.previousActiveAt
+      ? { previousActiveAt: sessionBreak.previousActiveAt }
+      : {}),
+    gapMs: effectiveZenSessionBreakGapMs(sessionBreak),
+    source: sessionBreak.source,
+  };
+}
+
 function collectGeneratedImageIds(messages: readonly Message[]): string[] {
   const ids: string[] = [];
   for (const message of messages) {
@@ -20827,6 +20842,10 @@ function HomeContent(): React.JSX.Element {
   const pendingCanvasBotUnfoldRef = useRef(false);
   const [chatStartupSummary, setChatStartupSummary] = useState<string | null>(null);
   const [zenSessionBreak, setZenSessionBreak] = useState<ZenSessionBreakState | null>(null);
+  const [pendingZenSessionBreak, setPendingZenSessionBreak] =
+    useState<ZenSessionBreakState | null>(null);
+  const [pendingZenSessionResumeContext, setPendingZenSessionResumeContext] =
+    useState<SessionResumeContext | null>(null);
   const [sandboxBotStatusSummary, setSandboxBotStatusSummary] = useState<string | null>(null);
   const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] = useState<string | null>(null);
   const [summaryDebug, setSummaryDebug] = useState<SummaryCompactionDebug | null>(null);
@@ -21330,6 +21349,7 @@ function HomeContent(): React.JSX.Element {
   const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
   const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
+  const zenWallpaperToggleAutoGenerationSuppressedRef = useRef<Map<string, number>>(new Map());
   const zenAtmosphereTimeline = useMemo(
     () => normalizeZenAtmosphereHistory(detail?.zenWallpaper),
     [detail?.zenWallpaper]
@@ -25282,6 +25302,8 @@ function HomeContent(): React.JSX.Element {
     setZenInitialStarterOverlayActive(false);
     setConversationStarterPrompts(null);
     setChatStartupSummary(null);
+    setPendingZenSessionBreak(null);
+    setPendingZenSessionResumeContext(null);
     zenInitialStarterLiveEnvelopeRef.current = null;
     chatSummaryRefreshMarkerRef.current = null;
     setError(null);
@@ -25618,17 +25640,16 @@ function HomeContent(): React.JSX.Element {
       visibleDetailMessages.length - 1
     );
   }, [activeZenSessionBreak, visibleDetailMessages]);
-  const zenSessionBreakNode = useMemo(() => {
-    if (!activeZenSessionBreak) return null;
-    const effectiveGapMs = effectiveZenSessionBreakGapMs(activeZenSessionBreak);
+  const renderZenSessionBreakNode = useCallback((sessionBreak: ZenSessionBreakState) => {
+    const effectiveGapMs = effectiveZenSessionBreakGapMs(sessionBreak);
     const awayLabel = formatZenSessionAwayLabel(
       effectiveGapMs,
-      activeZenSessionBreak.previousActiveAt
+      sessionBreak.previousActiveAt
     );
     return (
       <div
         className={styles.zenSessionBreak}
-        data-source={activeZenSessionBreak.source}
+        data-source={sessionBreak.source}
         role="note"
       >
         <div className={styles.zenSessionBreakRule}>
@@ -25641,7 +25662,15 @@ function HomeContent(): React.JSX.Element {
         />
       </div>
     );
-  }, [activeZenSessionBreak]);
+  }, []);
+  const zenSessionBreakNode = useMemo(() => {
+    if (!activeZenSessionBreak) return null;
+    return renderZenSessionBreakNode(activeZenSessionBreak);
+  }, [activeZenSessionBreak, renderZenSessionBreakNode]);
+  const pendingZenSessionBreakNode = useMemo(() => {
+    if (!pendingZenSessionBreak || detail?.id !== "pending") return null;
+    return renderZenSessionBreakNode(pendingZenSessionBreak);
+  }, [detail?.id, pendingZenSessionBreak, renderZenSessionBreakNode]);
   useLayoutEffect(() => {
     if (!activeZenSessionBreak) {
       zenSessionBreakAutoScrollKeyRef.current = null;
@@ -29689,6 +29718,8 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (view === "chat") return;
     setChatAutoRestoreSuppressed(false);
+    setPendingZenSessionBreak(null);
+    setPendingZenSessionResumeContext(null);
   }, [view]);
 
   const pulseConversationSurfaceLoading = useCallback((): void => {
@@ -31608,7 +31639,7 @@ function HomeContent(): React.JSX.Element {
       chatReasoningEffort
     );
     return {
-      conversationId: selectedId ?? undefined,
+      conversationId: options.forceNewConversation ? undefined : selectedId ?? undefined,
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
       ...(options.starterPromptWarrantsIntro
@@ -32001,6 +32032,8 @@ function HomeContent(): React.JSX.Element {
     const conversationId = activeConversationId ?? fallbackChatConversationId;
     // Clear the visible chat startup summary immediately for responsive feedback.
     setChatStartupSummary(null);
+    setPendingZenSessionBreak(null);
+    setPendingZenSessionResumeContext(null);
     chatSummaryRefreshMarkerRef.current = null;
     if (!conversationId || conversationId === "pending") return;
     try {
@@ -32225,9 +32258,35 @@ function HomeContent(): React.JSX.Element {
       sessionIdleGapMs: zenSessionIdleGapMs,
       freshStartGapMs: zenFreshStartGapMs,
     });
-    persistZenSessionBreak(nextBreak);
-    setZenSessionBreak(nextBreak);
-    window.location.reload();
+    const handoffSummary =
+      nextBreak.displaySummary ??
+      nextBreak.internalSummary ??
+      displaySummary ??
+      internalSummary ??
+      DEFAULT_CHAT_STARTUP_SUMMARY;
+    setPendingZenSessionBreak(nextBreak);
+    setPendingZenSessionResumeContext(
+      createSessionResumeContextFromZenBreak({
+        ...nextBreak,
+        displaySummary: nextBreak.displaySummary ?? clampZenSessionSummary(displaySummary),
+        internalSummary: nextBreak.internalSummary ?? clampZenSessionSummary(internalSummary),
+      })
+    );
+    persistZenSessionBreak(null);
+    setZenSessionBreak(null);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setChatAutoRestoreSuppressed(true);
+    setForceNewConversationOnNextSend(true);
+    setChatStartupSummary(handoffSummary);
+    chatSummaryRefreshMarkerRef.current = `${activeConversationId}:new-session:${nextBreak.createdAt}`;
+    setComposerPrimed(false);
+    setStarterComposerRevealed(false);
+    setAskQuestionComposerRevealed(false);
+    revealZenHeaderForFreshSurface();
+    void refreshConversations();
   }
 
   async function clearConversationFromSlashCommand(): Promise<void> {
@@ -32281,6 +32340,8 @@ function HomeContent(): React.JSX.Element {
       setSessionOpinion(null);
       setBotOpinion(null);
       setChatStartupSummary(null);
+      setPendingZenSessionBreak(null);
+      setPendingZenSessionResumeContext(null);
       chatSummaryRefreshMarkerRef.current = null;
       setSummaryDebug((current) =>
         current?.conversationId === conversationId ? null : current
@@ -33009,6 +33070,8 @@ function HomeContent(): React.JSX.Element {
     setSessionOpinion(null);
     setBotOpinion(null);
     setChatStartupSummary(null);
+    setPendingZenSessionBreak(null);
+    setPendingZenSessionResumeContext(null);
     chatSummaryRefreshMarkerRef.current = null;
     setSummaryDebug(null);
     setZenSessionBreak(null);
@@ -33289,7 +33352,7 @@ function HomeContent(): React.JSX.Element {
         ? detailForSend.id
         : selectedId
     );
-    const requestStartedNewConversation = requestConversationId === null;
+    const requestStartedNewConversation = requestConversationId === null || forceNewConversation;
     resumeChatModeAutoscrollForOutgoingTurn(
       requestConversationId ??
         detailForSend?.id ??
@@ -33426,7 +33489,21 @@ function HomeContent(): React.JSX.Element {
         activeZenSessionBreakGapMs,
         zenFreshStartGapMs
       );
-    const sessionResumeContextForSend =
+    const pendingZenSessionResumeContextForSend =
+      !isStarterPrompt &&
+      view === "chat" &&
+      forceNewConversation &&
+      pendingZenSessionResumeContext
+        ? pendingZenSessionResumeContext
+        : null;
+    const pendingZenSessionBreakForSend =
+      !isStarterPrompt &&
+      view === "chat" &&
+      forceNewConversation &&
+      pendingZenSessionBreak
+        ? pendingZenSessionBreak
+        : null;
+    const activeZenSessionBreakResumeContext =
       !isStarterPrompt &&
       view === "chat" &&
       activeZenSessionBreak &&
@@ -33445,6 +33522,9 @@ function HomeContent(): React.JSX.Element {
             source: activeZenSessionBreak.source,
           } satisfies SessionResumeContext
         : undefined;
+    const sessionResumeContextForSend: SessionResumeContext | undefined =
+      pendingZenSessionResumeContextForSend ??
+      activeZenSessionBreakResumeContext;
 
     try {
       const chatBody = buildChatRequestBody(isStarterPrompt ? "" : displayTrimmed, {
@@ -33505,12 +33585,28 @@ function HomeContent(): React.JSX.Element {
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       successfulConversationId = d.conversation.id;
       if (sessionResumeContextForSend) {
-        setZenSessionBreak((current) => {
-          if (!current || current.conversationId !== d.conversation.id) return current;
-          const next = { ...current, resumeHintConsumed: true };
-          persistZenSessionBreak(next);
-          return next;
-        });
+        if (pendingZenSessionResumeContextForSend) {
+          const nextSessionBreak = pendingZenSessionBreakForSend
+            ? {
+                ...pendingZenSessionBreakForSend,
+                conversationId: d.conversation.id,
+                anchorMessageId: null,
+                anchorMessageCount: 0,
+                resumeHintConsumed: true,
+              }
+            : null;
+          setPendingZenSessionBreak(null);
+          setPendingZenSessionResumeContext(null);
+          setZenSessionBreak(nextSessionBreak);
+          persistZenSessionBreak(nextSessionBreak);
+        } else {
+          setZenSessionBreak((current) => {
+            if (!current || current.conversationId !== d.conversation.id) return current;
+            const next = { ...current, resumeHintConsumed: true };
+            persistZenSessionBreak(next);
+            return next;
+          });
+        }
       }
       if (d.summaryCompaction?.mode === "sandbox" && d.summaryCompaction.triggered) {
         setSandboxSummaryBusy(true);
@@ -33702,6 +33798,13 @@ function HomeContent(): React.JSX.Element {
       }
       if (forceNewConversation) {
         setForceNewConversationOnNextSend(true);
+      }
+      if (pendingZenSessionResumeContextForSend) {
+        setChatAutoRestoreSuppressed(true);
+        setChatStartupSummary(
+          pendingZenSessionResumeContextForSend.summary ?? DEFAULT_CHAT_STARTUP_SUMMARY
+        );
+        chatSummaryRefreshMarkerRef.current = null;
       }
       if (stillViewingRequest) {
         setDetail(previousDetail);
@@ -35583,6 +35686,8 @@ function HomeContent(): React.JSX.Element {
       revealZenHeaderForFreshSurface();
       setConversationStarterPrompts(null);
       setChatStartupSummary(null);
+      setPendingZenSessionBreak(null);
+      setPendingZenSessionResumeContext(null);
       chatSummaryRefreshMarkerRef.current = null;
       setSelectedId(null);
       setDetail(null);
@@ -41702,11 +41807,13 @@ function HomeContent(): React.JSX.Element {
     options: {
       enabled: boolean;
       force?: boolean;
+      generate?: boolean;
       replaceImmediately?: boolean;
       promptOverride?: string;
     }
   ): Promise<void> {
-    if (options.enabled && !zenWallpaperImageGenerationAvailable()) {
+    const generationRequested = options.generate !== false;
+    if (options.enabled && generationRequested && !zenWallpaperImageGenerationAvailable()) {
       setZenWallpaperError("Configure an image generation model before enabling Atmosphere.");
       return;
     }
@@ -41720,13 +41827,16 @@ function HomeContent(): React.JSX.Element {
         enabled: options.enabled,
         force: options.force === true,
       };
+      if (!generationRequested) {
+        body.generate = false;
+      }
       if (options.replaceImmediately === true) {
         body.replaceImmediately = true;
       }
       if (options.promptOverride?.trim()) {
         body.promptOverride = options.promptOverride.trim();
       }
-      if (options.enabled) {
+      if (options.enabled && generationRequested) {
         if (effectivePreferredProvider === "local") {
           body.preferredProvider = "local";
           if (localModelId) body.model = localModelId;
@@ -41783,8 +41893,14 @@ function HomeContent(): React.JSX.Element {
     if (!zenWallpaperImageGenerationAvailable()) return;
     const messageCount = detail.messages.length;
     if (messageCount === 0) return;
+    const suppressedMessageCount =
+      zenWallpaperToggleAutoGenerationSuppressedRef.current.get(detail.id);
+    if (suppressedMessageCount !== undefined) {
+      if (suppressedMessageCount === messageCount) return;
+      zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
+    }
     const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
-    const shouldGenerateInitial = !zenWallpaper.imageId;
+    if (!zenWallpaper.imageId) return;
     const shouldGenerateForIdleEra =
       zenLatestIdleEraBoundaryMessageCount !== null &&
       lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
@@ -41793,10 +41909,9 @@ function HomeContent(): React.JSX.Element {
       zenWallpaperRegenMessageInterval - ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD
     );
     const shouldPreGenerateNext =
-      !shouldGenerateInitial &&
       !shouldGenerateForIdleEra &&
       messageCount - lastGeneratedAt >= preGenerationInterval;
-    if (!shouldGenerateInitial && !shouldGenerateForIdleEra && !shouldPreGenerateNext) return;
+    if (!shouldGenerateForIdleEra && !shouldPreGenerateNext) return;
     void requestZenWallpaperUpdate(detail.id, {
       enabled: true,
       force: shouldGenerateForIdleEra || shouldPreGenerateNext,
@@ -44165,7 +44280,6 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId
     );
-    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
     const zenAtmosphereBusy = Boolean(
       detail &&
       (zenWallpaperBusyConversationId === detail.id ||
@@ -44179,41 +44293,35 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisabled =
       headerActionsDisabled ||
       zenAtmosphereBusy ||
-      !zenAtmosphereHasConversation ||
-      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
+      !zenAtmosphereHasConversation;
     const zenAtmosphereTooltip = !zenAtmosphereHasConversation
       ? "Send a Zen message before enabling Atmosphere"
-      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
-        ? "Configure an image generation model to enable Atmosphere"
-        : zenAtmosphereBusy
+      : zenAtmosphereBusy
           ? "Generating Zen Atmosphere"
           : zenAtmosphereError
             ? `Atmosphere failed: ${zenAtmosphereError}`
           : zenAtmosphereEnabled
             ? "Turn off Zen Atmosphere"
-            : "Generate Zen Atmosphere";
+            : "Turn on Zen Atmosphere";
     const zenAtmosphereState = zenAtmosphereBusy
       ? "generating"
-      : !zenAtmosphereAvailable && !zenAtmosphereEnabled
-        ? "unavailable"
-        : zenAtmosphereEnabled
+      : zenAtmosphereEnabled
           ? "on"
           : "off";
     const toggleZenAtmosphere = () => {
       if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
       const nextEnabled = !zenAtmosphereEnabled;
-      const promptOverride =
-        nextEnabled && customAtmospherePromptEnabled
-          ? customAtmospherePromptDraft.trim()
-          : undefined;
-      if (nextEnabled && customAtmospherePromptEnabled && !promptOverride) {
-        setError("Type a custom Atmosphere prompt, or turn off Custom before generating.");
-        return;
+      if (nextEnabled) {
+        zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
+          detail.id,
+          detail.messages.length
+        );
+      } else {
+        zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
       }
       void requestZenWallpaperUpdate(detail.id, {
         enabled: nextEnabled,
-        force: nextEnabled,
-        promptOverride,
+        generate: false,
       });
     };
 
@@ -44616,7 +44724,7 @@ function HomeContent(): React.JSX.Element {
                   ? "Generating Atmosphere"
                   : zenAtmosphereEnabled
                     ? "Turn off Atmosphere"
-                    : "Generate Atmosphere"}
+                    : "Turn on Atmosphere"}
               </button>
             ) : null}
             {showToolbarMemoriesButton ? (
@@ -44806,7 +44914,6 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId
     );
-    const zenAtmosphereAvailable = zenWallpaperImageGenerationAvailable();
     const zenAtmosphereBusy = Boolean(
       detail &&
       (zenWallpaperBusyConversationId === detail.id ||
@@ -44816,8 +44923,7 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisabled =
       headerActionsDisabled ||
       zenAtmosphereBusy ||
-      !zenAtmosphereHasConversation ||
-      (!zenAtmosphereEnabled && !zenAtmosphereAvailable);
+      !zenAtmosphereHasConversation;
     const editBotsLabel = activeBot ? `Edit ${activeBot.name}` : "Bots";
     const themeLabel =
       effectiveThemeMode === "system"
@@ -44921,18 +45027,17 @@ function HomeContent(): React.JSX.Element {
               if (zenAtmosphereDisabled || !detail) return;
               runAndClose(() => {
                 const nextEnabled = !zenAtmosphereEnabled;
-                const promptOverride =
-                  nextEnabled && customAtmospherePromptEnabled
-                    ? customAtmospherePromptDraft.trim()
-                    : undefined;
-                if (nextEnabled && customAtmospherePromptEnabled && !promptOverride) {
-                  setError("Type a custom Atmosphere prompt, or turn off Custom before generating.");
-                  return;
+                if (nextEnabled) {
+                  zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
+                    detail.id,
+                    detail.messages.length
+                  );
+                } else {
+                  zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
                 }
                 void requestZenWallpaperUpdate(detail.id, {
                   enabled: nextEnabled,
-                  force: nextEnabled,
-                  promptOverride,
+                  generate: false,
                 });
               });
             }}
@@ -44941,7 +45046,7 @@ function HomeContent(): React.JSX.Element {
               ? "Generating Atmosphere"
               : zenAtmosphereEnabled
                 ? "Turn off Atmosphere"
-                : "Generate Atmosphere"}
+                : "Turn on Atmosphere"}
           </button>
         ) : null}
         {showToolbarMemoriesButton ? (
@@ -59231,7 +59336,8 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
+          {pendingZenSessionBreakNode ??
+            (zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null)}
           {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
@@ -60689,7 +60795,8 @@ function HomeContent(): React.JSX.Element {
               <span>Loading earlier messages...</span>
             </div>
           ) : null}
-          {zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null}
+          {pendingZenSessionBreakNode ??
+            (zenSessionBreakAnchorIndex === -1 ? zenSessionBreakNode : null)}
           {visibleDetailMessages.map((msg, messageIndex) => {
             const status = getMessageStatus(msg);
             const temporalKey = detail?.id ? `${detail.id}:${msg.id}` : null;
