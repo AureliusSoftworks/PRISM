@@ -3742,14 +3742,14 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
   if (
     direct?.name === "AskQuestion" &&
     Array.isArray(direct.options) &&
-    direct.options.length === 3
+    (direct.options.length === 2 || direct.options.length === 3)
   ) {
     return refineAskQuestionPayloadFromDisplayClient(msg.content, direct);
   }
   const parsed = parseAssistantPrismTools(msg.content);
   if (
     parsed.askQuestion?.name === "AskQuestion" &&
-    parsed.askQuestion.options.length === 3
+    (parsed.askQuestion.options.length === 2 || parsed.askQuestion.options.length === 3)
   ) {
     return refineAskQuestionPayloadFromDisplayClient(msg.content, parsed.askQuestion);
   }
@@ -4441,7 +4441,7 @@ function getConversationPendingAskQuestionState(
   for (const m of tail) {
     if (m.role !== "assistant") continue;
     const qa = resolveAssistantAskQuestion(m);
-    if (qa && qa.name === "AskQuestion" && qa.options.length === 3) {
+    if (qa && qa.name === "AskQuestion" && (qa.options.length === 2 || qa.options.length === 3)) {
       return { askQuestion: qa, assistantMessageId: m.id };
     }
   }
@@ -34367,7 +34367,7 @@ function HomeContent(): React.JSX.Element {
     if (
       askQuestion &&
       askQuestion.name === "AskQuestion" &&
-      askQuestion.options.length === 3
+      (askQuestion.options.length === 2 || askQuestion.options.length === 3)
     ) {
       const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
       if (messageIndex < 0) return null;

@@ -1925,6 +1925,46 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
+  it("persists binary yes/no AskQuestion choices", async () => {
+    const db = createChatTestDb();
+    const askPayload = {
+      v: 1 as const,
+      name: "AskQuestion" as const,
+      prompt: "Would you like a copy of that to download?",
+      options: [
+        { id: "a", label: "Yes" },
+        { id: "b", label: "No" },
+      ],
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify(askPayload)}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: { content: `I can package that for you.${prismTail}` },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Can you make this downloadable?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "I can package that for you.");
+    assert.deepEqual(lastAssistant?.askQuestion, askPayload);
+  });
+
   it("treats selected AskQuestion options as prose instead of forcing continuation", async () => {
     const db = createChatTestDb();
     const userId = "user-1";
