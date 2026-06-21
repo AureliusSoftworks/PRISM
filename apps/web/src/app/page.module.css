@@ -14822,6 +14822,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.46);
 }
 
+.appLayout[data-zen-surface="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-zen-persona-ink="persona"] {
+  --zen-user-prose: color-mix(
+    in srgb,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color)) 84%,
+    #fffaf2
+  );
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 76%, var(--fg-muted));
+  --zen-user-prose-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.36),
+    0 0 18px color-mix(in srgb, var(--zen-persona-ink-color, var(--zen-user-prose)) 16%, transparent);
+}
+
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-zen-persona-ink="persona"] {
+  --zen-user-prose: color-mix(
+    in srgb,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color)) 78%,
+    #15120f
+  );
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 80%, var(--fg-muted));
+  --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser,
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser p,
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .markdownBody,

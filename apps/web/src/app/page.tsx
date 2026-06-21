@@ -268,7 +268,10 @@ import {
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
-import { buildZenPersonaInkSegmentMap } from "./zenPersonaInk";
+import {
+  buildZenPersonaInkSegmentMap,
+  countZenPrismUserMessages,
+} from "./zenPersonaInk";
 import {
   DEFAULT_CHAT_REVEAL_TIMING,
   formatChatRevealTokenDisplay,
@@ -23747,15 +23750,14 @@ function HomeContent(): React.JSX.Element {
     (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number] | null
   >(() => {
     if (view !== "chat") return null;
-    const userMessageCount =
-      detail?.messages.reduce(
-        (count, message) => count + (message.role === "user" ? 1 : 0),
-        0
-      ) ?? 0;
+    if (composeBotAccentId !== null) return null;
+    const userMessageCount = detail
+      ? countZenPrismUserMessages(detail.messages)
+      : 0;
     return ZEN_USER_MESSAGE_PRISM_PALETTE[
       userMessageCount % ZEN_USER_MESSAGE_PRISM_PALETTE.length
     ]!;
-  }, [detail?.messages, view]);
+  }, [composeBotAccentId, detail?.messages, view]);
 
   const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (
@@ -25471,8 +25473,14 @@ function HomeContent(): React.JSX.Element {
   const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
   const zenPersonaInkSegmentByMessageId = useMemo(
-    () => buildZenPersonaInkSegmentMap(detail?.messages ?? []),
-    [detail?.messages]
+    () =>
+      buildZenPersonaInkSegmentMap(detail?.messages ?? [], {
+        trailingUserTarget:
+          view === "chat"
+            ? { botId: zenPersonaBot?.id ?? null, color: zenPersonaBot?.color ?? null }
+            : null,
+      }),
+    [detail?.messages, view, zenPersonaBot?.color, zenPersonaBot?.id]
   );
   const chatMentionsEnabled = true;
   /** Autoscroll + dynamic type on Zen's chat-like surface. */
@@ -25981,6 +25989,8 @@ function HomeContent(): React.JSX.Element {
     let userMessageIndex = 0;
     for (const message of detail.messages) {
       if (message.role !== "user") continue;
+      const personaInkSegment = zenPersonaInkSegmentByMessageId.get(message.id);
+      if (personaInkSegment?.variant !== "default") continue;
       colors.set(
         message.id,
         ZEN_USER_MESSAGE_PRISM_PALETTE[
@@ -25990,7 +26000,7 @@ function HomeContent(): React.JSX.Element {
       userMessageIndex += 1;
     }
     return colors;
-  }, [view, detail?.messages]);
+  }, [view, detail?.messages, zenPersonaInkSegmentByMessageId]);
   const zenEraBoundaryLabelByMessageId = useMemo(() => {
     const labels = new Map<string, string>();
     if (view !== "chat" || detail?.mode !== "zen") return labels;
@@ -33929,6 +33939,24 @@ function HomeContent(): React.JSX.Element {
     setPendingReplyIsNewConversation(requestStartedNewConversation);
     setError(null);
 
+    const mentionedZenPersonaBotId =
+      view === "chat" && !isStarterPrompt && !isPersonaTransition
+        ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
+        : null;
+    const zenPersonaBotIdForSend =
+      view === "chat"
+        ? isPersonaTransition
+          ? options.personaTransition!.toBotId
+          : mentionedZenPersonaBotId ?? zenPersonaBotId
+        : undefined;
+    const optimisticZenPersonaBot =
+      view === "chat" && zenPersonaBotIdForSend
+        ? bots.find((bot) => bot.id === zenPersonaBotIdForSend) ?? null
+        : null;
+    if (mentionedZenPersonaBotId) {
+      setZenPersonaBotId(mentionedZenPersonaBotId);
+    }
+
     const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
     const previousZenPersonaBotId = zenPersonaBotIdRef.current;
@@ -33986,6 +34014,10 @@ function HomeContent(): React.JSX.Element {
         role: "user",
         content: optimisticUserContent,
         createdAt: new Date().toISOString(),
+        ...(view === "chat" ? { botId: zenPersonaBotIdForSend ?? null } : {}),
+        ...(view === "chat" && optimisticZenPersonaBot?.color
+          ? { botColor: optimisticZenPersonaBot.color }
+          : {}),
         ...(commandCenterPromptShortcut && !promptWildcardFillAwaitsServerCleanup
           ? { promptShortcut: commandCenterPromptShortcut }
           : {}),
@@ -34070,19 +34102,6 @@ function HomeContent(): React.JSX.Element {
       pendingZenSessionBreak
         ? pendingZenSessionBreak
         : null;
-    const mentionedZenPersonaBotId =
-      view === "chat" && !isStarterPrompt && !isPersonaTransition
-        ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
-        : null;
-    const zenPersonaBotIdForSend =
-      view === "chat"
-        ? isPersonaTransition
-          ? options.personaTransition!.toBotId
-          : mentionedZenPersonaBotId ?? zenPersonaBotId
-        : undefined;
-    if (mentionedZenPersonaBotId) {
-      setZenPersonaBotId(mentionedZenPersonaBotId);
-    }
     const activeZenSessionBreakResumeContext =
       !isStarterPrompt &&
       view === "chat" &&
@@ -61011,7 +61030,7 @@ function HomeContent(): React.JSX.Element {
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
             const zenPersonaInkSegment =
-              chatLikeSurface && msg.role === "assistant"
+              chatLikeSurface
                 ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
                 : null;
             const zenPersonaInkStyle = zenPersonaInkSegment
@@ -61035,6 +61054,7 @@ function HomeContent(): React.JSX.Element {
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
+                  ...(zenPersonaInkStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -62493,6 +62513,15 @@ function HomeContent(): React.JSX.Element {
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
+            const zenPersonaInkSegment =
+              chatLikeSurface
+                ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
+                : null;
+            const zenPersonaInkStyle = zenPersonaInkSegment
+              ? ({
+                  "--zen-persona-ink-color": zenPersonaInkSegment.color,
+                } as React.CSSProperties)
+              : undefined;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -62509,6 +62538,7 @@ function HomeContent(): React.JSX.Element {
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
+                  ...(zenPersonaInkStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -62532,6 +62562,8 @@ function HomeContent(): React.JSX.Element {
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
                 data-command-display={commandPromptDisplay ? "prompt" : undefined}
+                data-zen-persona-ink={zenPersonaInkSegment?.variant}
+                data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -62554,6 +62586,13 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
               >
+                {zenPersonaInkSegment ? (
+                  <span
+                    className={styles.zenPersonaInkWash}
+                    style={zenPersonaInkStyle}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {showMessageHeader && (
                   <h4>
                     {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
