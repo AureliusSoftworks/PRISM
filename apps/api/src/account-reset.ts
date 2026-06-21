@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_ZEN_MOOD_SENSITIVITY,
+  DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
 } from "./settings.ts";
@@ -67,6 +68,7 @@ export function restoreFactoryDefaultsInDatabase(
           preferred_zen_wallpaper_openai_image_model = NULL,
           zen_wallpaper_opacity = ?,
           zen_wallpaper_text_mask_enabled = ?,
+          zen_wallpaper_grayscale_enabled = ?,
           zen_mood_sensitivity = ?,
           composer_writing_assist = 1,
           fallback_model_message_stripe = 1,
@@ -90,6 +92,7 @@ export function restoreFactoryDefaultsInDatabase(
       .run(
         DEFAULT_ZEN_WALLPAPER_OPACITY,
         DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+        DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
         DEFAULT_ZEN_MOOD_SENSITIVITY,
         nowIso,
         userId

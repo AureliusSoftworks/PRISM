@@ -85,6 +85,7 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
+      assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_grayscale_enabled"));
       const conversationColumns = reopened
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;

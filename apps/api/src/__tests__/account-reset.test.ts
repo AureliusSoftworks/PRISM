@@ -10,6 +10,7 @@ import {
 } from "../account-reset.ts";
 import {
   DEFAULT_ZEN_MOOD_SENSITIVITY,
+  DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
 } from "../settings.ts";
@@ -53,7 +54,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
             preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
-            zen_wallpaper_text_mask_enabled, zen_mood_sensitivity,
+            zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled,
+            zen_mood_sensitivity,
             composer_writing_assist, fallback_model_message_stripe,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
@@ -91,6 +93,10 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(
         user.zen_wallpaper_text_mask_enabled,
         DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0
+      );
+      assert.equal(
+        user.zen_wallpaper_grayscale_enabled,
+        DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0
       );
       assert.equal(user.zen_mood_sensitivity, DEFAULT_ZEN_MOOD_SENSITIVITY);
       assert.equal(user.composer_writing_assist, 1);
@@ -161,6 +167,7 @@ function seedResetFixture(db: DatabaseSync): void {
       preferred_zen_wallpaper_openai_image_model = 'wall-openai-a',
       zen_wallpaper_opacity = 0.33,
       zen_wallpaper_text_mask_enabled = 0,
+      zen_wallpaper_grayscale_enabled = 1,
       zen_mood_sensitivity = 0.88,
       composer_writing_assist = 0,
       fallback_model_message_stripe = 0,

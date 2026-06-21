@@ -5273,6 +5273,7 @@ interface UserSettings {
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
+  zenWallpaperGrayscaleEnabled: boolean;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -5296,6 +5297,7 @@ type ZenModeSettingsFields = Pick<
   UserSettings,
   | "zenWallpaperOpacity"
   | "zenWallpaperTextMaskEnabled"
+  | "zenWallpaperGrayscaleEnabled"
   | "zenSessionIdleGapMs"
   | "zenFreshStartGapMs"
   | "zenRecentContextMessages"
@@ -6579,6 +6581,7 @@ const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
+const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = false;
 const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
@@ -6914,6 +6917,21 @@ function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
   return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
 }
 
+function normalizeZenWallpaperGrayscaleSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
+}
+
 function formatZenWallpaperOpacity(value: unknown): string {
   return `${Math.round(normalizeZenWallpaperOpacitySetting(value) * 100)}%`;
 }
@@ -7008,6 +7026,7 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
   return {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+    zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -7078,6 +7097,9 @@ function normalizeZenModeSettingsFields(
     ),
     zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskSetting(
       settings?.zenWallpaperTextMaskEnabled
+    ),
+    zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleSetting(
+      settings?.zenWallpaperGrayscaleEnabled
     ),
     zenSessionIdleGapMs,
     zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
@@ -20916,6 +20938,7 @@ function HomeContent(): React.JSX.Element {
     zenFreshStartGapMs,
     zenRecentContextMessages,
     zenWallpaperTextMaskEnabled,
+    zenWallpaperGrayscaleEnabled,
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
@@ -51391,6 +51414,23 @@ function HomeContent(): React.JSX.Element {
                       />
                       Mask behind Zen text
                     </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenWallpaperGrayscaleEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperGrayscaleEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      Grayscale wallpaper
+                    </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -60387,6 +60427,7 @@ function HomeContent(): React.JSX.Element {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
+      "--zen-atmosphere-grayscale": zenWallpaperGrayscaleEnabled ? "1" : "0",
     } as React.CSSProperties;
     const zenFirstReplyPending =
       pendingReplyVisible &&

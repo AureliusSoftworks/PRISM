@@ -138,6 +138,7 @@ export function createDatabase(): DatabaseSync {
       preferred_zen_wallpaper_openai_image_model TEXT,
       zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
       zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 0,
       zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000,
       zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
       zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
@@ -606,6 +607,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenWallpaperTextMaskEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenWallpaperGrayscaleEnabled = userColumns.some(
+    (column) => column.name === "zen_wallpaper_grayscale_enabled"
+  );
+  if (!hasZenWallpaperGrayscaleEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 0;");
   }
   const hasZenSessionIdleGapMs = userColumns.some(
     (column) => column.name === "zen_session_idle_gap_ms"

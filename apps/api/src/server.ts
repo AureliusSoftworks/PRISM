@@ -130,6 +130,7 @@ import {
   normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
   normalizeZenSessionIdleGapMs,
+  normalizeZenWallpaperGrayscaleEnabled,
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperRegenMessageInterval,
   normalizeZenWallpaperRevealDelayMessageCount,
@@ -349,6 +350,7 @@ interface UserDbRow {
   preferred_zen_wallpaper_openai_image_model: string | null;
   zen_wallpaper_opacity: number | null;
   zen_wallpaper_text_mask_enabled: number | null;
+  zen_wallpaper_grayscale_enabled: number | null;
   zen_session_idle_gap_ms: number | null;
   zen_fresh_start_gap_ms: number | null;
   zen_recent_context_messages: number | null;
@@ -497,7 +499,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -4534,6 +4536,9 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
             user.zen_wallpaper_text_mask_enabled
           ),
+          zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleEnabled(
+            user.zen_wallpaper_grayscale_enabled
+          ),
           zenSessionIdleGapMs: normalizeZenSessionIdleGapMs(
             user.zen_session_idle_gap_ms
           ),
@@ -4746,6 +4751,7 @@ function buildRoutes(): RouteDefinition[] {
           user.preferred_zen_wallpaper_openai_image_model,
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
         zenWallpaperTextMaskEnabled: user.zen_wallpaper_text_mask_enabled,
+        zenWallpaperGrayscaleEnabled: user.zen_wallpaper_grayscale_enabled,
         zenSessionIdleGapMs: user.zen_session_idle_gap_ms,
         zenFreshStartGapMs: user.zen_fresh_start_gap_ms,
         zenRecentContextMessages: user.zen_recent_context_messages,
@@ -4814,7 +4820,7 @@ function buildRoutes(): RouteDefinition[] {
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
@@ -4846,6 +4852,7 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredZenWallpaperOpenAiImageModel,
         next.zenWallpaperOpacity,
         next.zenWallpaperTextMaskEnabled ? 1 : 0,
+        next.zenWallpaperGrayscaleEnabled ? 1 : 0,
         next.zenSessionIdleGapMs,
         next.zenFreshStartGapMs,
         next.zenRecentContextMessages,
