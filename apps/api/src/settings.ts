@@ -33,7 +33,7 @@ export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
 export const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
-export const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = false;
+export const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
 export const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = 12 * 60 * 60 * 1000;
 export const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
 export const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
@@ -425,10 +425,10 @@ export function normalizeZenWallpaperTextMaskEnabled(
 }
 
 export function normalizeZenWallpaperGrayscaleEnabled(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
+  _value: unknown,
+  _fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
 ): boolean {
-  return normalizeZenWallpaperTextMaskEnabled(value, fallback);
+  return true;
 }
 
 function normalizeNumberSetting(

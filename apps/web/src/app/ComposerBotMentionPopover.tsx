@@ -38,6 +38,8 @@ export interface ComposerBotMentionPopoverProps {
   excludeInteractionRef?: RefObject<Element | null>;
   /** Close the menu when the user presses outside the menu and outside {@link excludeInteractionRef}. */
   onDismiss?: () => void;
+  /** Optional compact controls shown below mention rows. */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -59,6 +61,7 @@ export function ComposerBotMentionPopover({
   ensureContrast,
   excludeInteractionRef,
   onDismiss,
+  footer,
 }: ComposerBotMentionPopoverProps): React.JSX.Element | null {
   const menuRef = useRef<HTMLDivElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
@@ -174,10 +177,13 @@ export function ComposerBotMentionPopover({
       ref={menuRef}
       className={`${styles.composeBotMenu} ${styles.composeCommandMenu}`}
       style={adjustedStyle}
-      role="listbox"
-      aria-label="Mention a bot"
     >
-      <div ref={listboxRef} className={styles.composeBotListbox}>
+      <div
+        ref={listboxRef}
+        className={styles.composeBotListbox}
+        role="listbox"
+        aria-label="Mention a bot"
+      >
         {bots.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
             No bots match.
@@ -228,6 +234,7 @@ export function ComposerBotMentionPopover({
           );
         })}
       </div>
+      {footer ? <div className={styles.composeBotMenuFooter}>{footer}</div> : null}
     </div>,
     document.body
   );

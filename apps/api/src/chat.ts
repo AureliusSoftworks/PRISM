@@ -4691,7 +4691,7 @@ export async function processChatMessage(
   // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
   // In Zen this is per-turn Persona attribution; the conversation row itself
   // still reports botId null so Zen remains one continuous PRISM thread.
-  const activeBotId = incognitoForTurn ? null : settings.botId;
+  const activeBotId = settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()

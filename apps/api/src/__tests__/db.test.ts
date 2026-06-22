@@ -77,7 +77,7 @@ describe("createDatabase bot export hash migration", () => {
         .all() as Array<{ name: string }>;
       const userColumns = reopened
         .prepare("PRAGMA table_info(users)")
-        .all() as Array<{ name: string }>;
+        .all() as Array<{ name: string; dflt_value: string | null }>;
       assert.ok(
         userColumns.some(
           (column) => column.name === "model_visibility_defaults_version"
@@ -85,7 +85,10 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
-      assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_grayscale_enabled"));
+      const grayscaleColumn = userColumns.find(
+        (column) => column.name === "zen_wallpaper_grayscale_enabled"
+      );
+      assert.equal(grayscaleColumn?.dflt_value, "1");
       const conversationColumns = reopened
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;
