@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   autoBackfillSendGeneratedImagePrompt,
   buildAssistantToolCallEvents,
+  buildAskQuestionFallback,
   compactPreImageLeadMessage,
   decideZenAutonomyTurn,
   extractPrismBotMentionIdsFromMessage,
@@ -171,6 +172,15 @@ function createChatTestDb(): DatabaseSync {
       frozen INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, mode)
+    );
+    CREATE TABLE prism_mood_events (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (user_id, conversation_id, message_id, event_type)
     );
   `);
   return db;
@@ -3502,6 +3512,7 @@ describe("processChatMessage AskQuestion tool", () => {
       "Sure — here's one. What do you think?",
       "How are you feeling about this?",
       "Tell me more?",
+      "I wonder, what piqued your interest in him?",
     ];
 
     for (const content of cases) {
@@ -6137,6 +6148,19 @@ describe("buildAssistantToolCallEvents", () => {
     assert.ok(detected, "expected a detected event");
     assert.ok(detected!.prompt!.length <= 201, "prompt should be capped to roughly 200 chars");
     assert.ok(detected!.prompt!.endsWith("…"), "long prompts should be marked with an ellipsis");
+  });
+});
+
+describe("buildAskQuestionFallback", () => {
+  it("does not split prefaced open-ended questions into fake choices", () => {
+    assert.equal(
+      buildAskQuestionFallback("I wonder, what piqued your interest in him?"),
+      undefined
+    );
+    assert.equal(
+      buildAskQuestionFallback("I'm curious, why did that stand out to you?"),
+      undefined
+    );
   });
 });
 

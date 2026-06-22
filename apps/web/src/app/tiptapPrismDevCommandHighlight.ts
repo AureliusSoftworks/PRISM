@@ -3,7 +3,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
-const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
+const DEV_COMMAND_RE = /^\/(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const BUILT_IN_WILDCARD_BANG_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
@@ -121,8 +121,8 @@ function resolveKnownCommand(
   if (!commandMatch) return null;
   const commandText = commandMatch[0] ?? "";
   const commandName = normalizeCommandName(commandText);
-  if (commandName.length < 3) return null;
   const knownCommands = normalizedKnownCommands(options);
+  if (commandName.length < 3 && !knownCommands?.has(commandName)) return null;
   if (knownCommands && !knownCommands.has(commandName)) return null;
   commandMatch.commandText = commandText;
   commandMatch.argumentNames =

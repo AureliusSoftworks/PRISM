@@ -115,6 +115,7 @@ function deckReplacementKey(name: string): string {
 const BUILT_IN_WILDCARD_INVOCATION_RE =
   /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+const MODEL_FILLED_WILDCARD_BRACE_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/gu;
 
 export function promptContainsBuiltInWildcardSlots(source: string): boolean {
   for (const match of source.matchAll(BUILT_IN_WILDCARD_BRACE_RE)) {
@@ -131,6 +132,28 @@ export function maskBuiltInWildcardSlotsForPending(
   return source.replace(BUILT_IN_WILDCARD_BRACE_RE, (token, name: string) =>
     getBuiltInPromptWildcardSlot(name) ? pendingText : token
   );
+}
+
+export function promptContainsModelFilledWildcardSlots(source: string): boolean {
+  MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
+  return MODEL_FILLED_WILDCARD_BRACE_RE.test(source);
+}
+
+export function maskModelFilledWildcardSlotsForPending(
+  source: string,
+  pendingText: string
+): string {
+  if (!source || !pendingText) return source;
+  MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
+  return source.replace(MODEL_FILLED_WILDCARD_BRACE_RE, pendingText);
+}
+
+export function isStandaloneWildcardComposerDraft(source: string): boolean {
+  const trimmed = source.trim();
+  if (!trimmed) return false;
+  if (/^![a-z0-9][a-z0-9_-]*[.!?]?$/iu.test(trimmed)) return true;
+  if (/^\{[^{}\r\n]*\|[^{}\r\n]*\}[.!?]?$/u.test(trimmed)) return true;
+  return /^\{[A-Z][A-Z0-9_ ]{1,63}\}[.!?]?$/u.test(trimmed);
 }
 
 function normalizedPromptRandomizationReplacementsForPrompt(
