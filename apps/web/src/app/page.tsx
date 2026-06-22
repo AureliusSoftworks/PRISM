@@ -62,6 +62,7 @@ import {
 import {
   advanceAskQuestionPatience,
   buildAskQuestionInteractionKey,
+  getPendingAskQuestionState,
   normalizeAskQuestionPatienceDurationMs,
   shouldPauseAskQuestionPatience,
   shouldReportAskQuestionPatienceExpiry,
@@ -106,6 +107,7 @@ import {
   Image as ImageGlyph,
   Info,
   LogOut,
+  Menu as MenuIcon,
   Maximize2,
   Minimize2,
   Pause,
@@ -192,6 +194,7 @@ import {
   type ZenPreviousContextSummary,
   type ZenSessionMemoryItem,
   type ZenSessionMemoryOverview,
+  type ZenAskQuestionPatienceInput,
   type ZenAutonomyDecision,
   type ZenAutonomyInput,
   type ZenPersonaTransitionInput,
@@ -231,16 +234,18 @@ import {
 } from "./promptShortcutChipDisplay";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  formatPromptShortcutInsertion,
   maskBuiltInWildcardSlotsForPending,
   promptContainsBuiltInWildcardSlots,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
-  withSentenceCasedPromptInsertion,
 } from "./promptRandomization";
 import {
   createWildcardDeckDraft,
   findDuplicateWildcardDeckValueIssues,
   formatWildcardDeckValuesText,
+  inferWildcardDeckValueInflectionMode,
+  inflectWildcardDeckValues,
   normalizeWildcardDeckAliases,
   normalizeWildcardDeckNameInput,
   normalizeWildcardDeckValueKey,
@@ -324,6 +329,11 @@ import {
   maxZenAtmosphereLayerOpacity,
 } from "./zenAtmosphere";
 import {
+  createZenFallbackWallpaperSeed,
+  resolveZenFallbackWallpaperVariant,
+  shouldShowZenFallbackWallpaper,
+} from "./zenFallbackWallpapers";
+import {
   nextZenAutonomyCooldownUntilMs,
   resolveZenAutonomyEligibility,
 } from "./zenAutonomy";
@@ -337,6 +347,7 @@ import {
   resolveChatRevealPauseKind,
   resolveChatRevealStepDelayMs,
   resolveVisibleChatRevealTokenCountAtElapsedMs,
+  scaleChatRevealTimingSettings,
   stripChatRevealThematicBreakLines,
   tokenizeChatRevealText,
   type ChatRevealTimingSettings,
@@ -1055,6 +1066,12 @@ type ZenRememberedWallpaperPreview = {
   createdAt: string;
 };
 
+type ZenRememberedWallpaperLookup = {
+  botId: string;
+  resolved: boolean;
+  hasWallpaper: boolean;
+};
+
 type ZenRememberedWallpaperApiResponse = {
   ok: true;
   wallpaper: null | {
@@ -1108,6 +1125,9 @@ const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT =
   ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
 const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
 const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
+const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
+const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
+const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -1834,6 +1854,7 @@ const DESKTOP_SIDEBAR_WIDTH = 280;
 const DESKTOP_MESSAGES_PADDING_X = 40;
 /** Sidebar drawer (single-column shell) through this width. */
 const SIDEBAR_DRAWER_BREAKPOINT = 1080;
+const APP_SIDEBAR_NAVIGATION_ID = "prism-sidebar-navigation";
 /**
  * Phone-only shell: fixed ☰ + floating wrench + compact header. Wider than
  * this (up to `PICKER_MOBILE_BREAKPOINT`) uses the › sidebar handle + looser
@@ -2888,6 +2909,37 @@ const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
   dark: "#151311",
 };
 const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
+const PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER = 0.16;
+
+function privateModeAccentHex(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark"
+): string | null {
+  const raw = rawHex?.trim();
+  if (!raw) return null;
+  const normalized = normalizeAccentForTheme(raw, resolvedTheme);
+  const { h, s, l } = hexToHsl(normalized);
+  const muted = hslToHex(h, s * PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER, l);
+  const neutralAnchor = resolvedTheme === "dark" ? "#d7cfc3" : "#332d27";
+  const neutralized = mixHex(
+    muted,
+    neutralAnchor,
+    resolvedTheme === "dark" ? 0.36 : 0.28
+  );
+  return ensureContrast(neutralized, THEME_BG[resolvedTheme], 4.5);
+}
+
+function displayAccentForMode(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark",
+  privateMode: boolean
+): string | null {
+  const raw = rawHex?.trim();
+  if (!raw) return null;
+  return privateMode
+    ? privateModeAccentHex(raw, resolvedTheme)
+    : normalizeAccentForTheme(raw, resolvedTheme);
+}
 
 function botAccentStyle(
   rawHex: string | null | undefined,
@@ -3537,10 +3589,17 @@ function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
   return { kind: "ok" };
 }
 
+const PRISM_COMMAND_MENTION_LEGACY_PROTOCOL = "prism-command://";
+const PRISM_COMMAND_MENTION_HASH_PREFIX = "#prism-command:";
+
 function parsePrismCommandMentionHref(href?: string | null): string | null {
   if (!href) return null;
-  if (!href.toLowerCase().startsWith("prism-command://")) return null;
-  const encoded = href.slice("prism-command://".length).trim();
+  const lowered = href.toLowerCase();
+  const encoded = lowered.startsWith(PRISM_COMMAND_MENTION_LEGACY_PROTOCOL)
+    ? href.slice(PRISM_COMMAND_MENTION_LEGACY_PROTOCOL.length).trim()
+    : lowered.startsWith(PRISM_COMMAND_MENTION_HASH_PREFIX)
+      ? href.slice(PRISM_COMMAND_MENTION_HASH_PREFIX.length).trim()
+      : "";
   if (!encoded) return null;
   try {
     const decoded = decodeURIComponent(encoded);
@@ -3551,7 +3610,7 @@ function parsePrismCommandMentionHref(href?: string | null): string | null {
 }
 
 function prismCommandMentionHref(commandId: string): string {
-  return `prism-command://${encodeURIComponent(commandId)}`;
+  return `${PRISM_COMMAND_MENTION_HASH_PREFIX}${encodeURIComponent(commandId)}`;
 }
 
 /**
@@ -3729,6 +3788,8 @@ interface Message {
     prompt: string;
     options: Array<{ id: string; label: string }>;
   };
+  /** True once an AskQuestion was closed by the patience timer. */
+  askQuestionTimedOut?: boolean;
   /** Story continuation controls for long fictional prose. */
   tellFictionalStory?: {
     v: 1;
@@ -4718,28 +4779,14 @@ function applyExplicitAskQuestionFallback(
 }
 
 function getConversationPendingAskQuestionState(
-  messages: Message[] | undefined
+  messages: Message[] | undefined,
+  locallyClosedAssistantMessageIds?: ReadonlySet<string>
 ): { askQuestion: NonNullable<Message["askQuestion"]>; assistantMessageId: string } | undefined {
-  if (!messages || messages.length === 0) return undefined;
-  let lastUserIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === "user") {
-      lastUserIndex = i;
-      break;
-    }
-  }
-  const tail = lastUserIndex < 0 ? messages : messages.slice(lastUserIndex + 1);
-  if (tail.some((m) => m.role === "user")) return undefined;
-
-  for (let i = tail.length - 1; i >= 0; i -= 1) {
-    const m = tail[i]!;
-    if (m.role !== "assistant") continue;
-    const qa = resolveAssistantAskQuestion(m);
-    if (qa && qa.name === "AskQuestion" && (qa.options.length === 2 || qa.options.length === 3)) {
-      return { askQuestion: qa, assistantMessageId: m.id };
-    }
-  }
-  return undefined;
+  return getPendingAskQuestionState(
+    messages,
+    resolveAssistantAskQuestion,
+    locallyClosedAssistantMessageIds
+  );
 }
 
 function stripEmojiFromAskQuestionLabel(label: string): string {
@@ -5653,6 +5700,7 @@ interface UserSettings {
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
+  zenCanvasTypingSpeed: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
@@ -5682,6 +5730,7 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperRevealDelayMessageCount"
   | "zenWallpaperRevealSpanMessageCount"
   | "zenMoodSensitivity"
+  | "zenCanvasTypingSpeed"
   | "zenAskQuestionPatienceEnabled"
   | "zenAskQuestionPatienceMs"
   | "zenAutonomyEnabled"
@@ -7731,6 +7780,22 @@ function formatZenMoodSensitivity(value: unknown): string {
   return `${Math.round(normalizeZenMoodSensitivitySetting(value) * 100)}%`;
 }
 
+function normalizeZenCanvasTypingSpeedSetting(value: unknown): number {
+  return normalizeDecimalSetting(
+    value,
+    DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    MIN_ZEN_CANVAS_TYPING_SPEED,
+    MAX_ZEN_CANVAS_TYPING_SPEED,
+    2
+  );
+}
+
+function formatZenCanvasTypingSpeed(value: unknown): string {
+  return `${normalizeZenCanvasTypingSpeedSetting(value)
+    .toFixed(2)
+    .replace(/\.?0+$/u, "")}x`;
+}
+
 function normalizeZenAskQuestionPatienceEnabledSetting(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
@@ -7791,6 +7856,7 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenWallpaperRevealSpanMessageCount:
       DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: false,
@@ -7895,6 +7961,9 @@ function normalizeZenModeSettingsFields(
       ),
     zenMoodSensitivity: normalizeZenMoodSensitivitySetting(
       settings?.zenMoodSensitivity
+    ),
+    zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeedSetting(
+      settings?.zenCanvasTypingSpeed
     ),
     zenAskQuestionPatienceEnabled:
       normalizeZenAskQuestionPatienceEnabledSetting(
@@ -12855,7 +12924,7 @@ function ComposerBotPicker({
 
   const selectedBot = value ? bots.find(b => b.id === value) ?? null : null;
   const selectedAccent = selectedBot?.color
-    ? normalizeAccentForTheme(selectedBot.color, resolvedTheme)
+    ? displayAccentForMode(selectedBot.color, resolvedTheme, privateTone)
     : null;
   const controlStyle: React.CSSProperties | undefined = selectedAccent
     ? ({ "--bot-color": selectedAccent } as React.CSSProperties)
@@ -13152,7 +13221,7 @@ function ComposerBotPicker({
             {visibleBots.map(b => {
               const isSelected = value === b.id;
               const accent = b.color
-                ? normalizeAccentForTheme(b.color, resolvedTheme)
+                ? displayAccentForMode(b.color, resolvedTheme, privateTone)
                 : null;
               const optionStyle: React.CSSProperties | undefined = accent
                 ? ({
@@ -13224,6 +13293,7 @@ interface ImageBotDirectoryDropdownProps {
   onPick: (botId: string) => void;
   /** Increment to close the floating menu from the parent shell. */
   dismissPopoversSignal?: number;
+  privateTone?: boolean;
 }
 
 function ImageBotDirectoryDropdown({
@@ -13233,6 +13303,7 @@ function ImageBotDirectoryDropdown({
   selectedBotId,
   onPick,
   dismissPopoversSignal,
+  privateTone = false,
 }: ImageBotDirectoryDropdownProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -13307,7 +13378,7 @@ function ImageBotDirectoryDropdown({
   const selectedTriggerName =
     selectedBot?.name ?? selectedEntry?.name ?? "Bot";
   const triggerAccent = selectedBot?.color
-    ? normalizeAccentForTheme(selectedBot.color, resolvedTheme)
+    ? displayAccentForMode(selectedBot.color, resolvedTheme, privateTone)
     : null;
   const controlStyle: React.CSSProperties | undefined = triggerAccent
     ? ({ "--bot-color": triggerAccent } as React.CSSProperties)
@@ -13397,7 +13468,7 @@ function ImageBotDirectoryDropdown({
               {entries.map((row) => {
                 const bot = bots.find((b) => b.id === row.botId) ?? null;
                 const accent = bot?.color
-                  ? normalizeAccentForTheme(bot.color, resolvedTheme)
+                  ? displayAccentForMode(bot.color, resolvedTheme, privateTone)
                   : null;
                 const optionStyle: React.CSSProperties | undefined = accent
                   ? ({
@@ -15143,9 +15214,20 @@ function flattenMarkdownText(node: React.ReactNode): string {
 
 function PendingWildcardShimmer({
   className,
+  sizeCh,
 }: {
   className?: string;
+  sizeCh?: number;
 }): React.JSX.Element {
+  const style =
+    typeof sizeCh === "number" && Number.isFinite(sizeCh) && sizeCh > 0
+      ? ({
+          ["--pending-wildcard-shimmer-size" as string]: `${Math.max(
+            3.8,
+            Math.min(22, sizeCh)
+          )}ch`,
+        } as React.CSSProperties)
+      : undefined;
   return (
     <span
       className={
@@ -15153,17 +15235,85 @@ function PendingWildcardShimmer({
           ? `${styles.pendingWildcardShimmer} ${className}`
           : styles.pendingWildcardShimmer
       }
+      style={style}
       aria-hidden="true"
     />
   );
 }
 
+function pendingPromptCleanupWildcardNames(
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): string[] {
+  if (!commandMentionsById || commandMentionsById.size === 0) return [];
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const command of commandMentionsById.values()) {
+    if (!isComposerWildcardDeckPick(command)) continue;
+    for (const name of commandInvocationNames(command)) {
+      const normalized = name.trim().toLowerCase();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+function resolveTrailingPendingWildcardInvocation(
+  source: string,
+  placeholderEnd: number,
+  ranges: readonly { start: number; end: number; name: string }[],
+  fallbackSizeCh?: number
+): { end: number; sizeCh: number } | null {
+  const range = ranges.find(
+    (candidate) =>
+      candidate.start >= placeholderEnd &&
+      /^[\t ]*$/u.test(source.slice(placeholderEnd, candidate.start))
+  );
+  if (!range) return null;
+  const token = source.slice(range.start, range.end).trim().replace(/^!+/u, "");
+  const measuredSizeCh = fallbackSizeCh ?? (token.length || range.name.length);
+  return {
+    end: range.end,
+    sizeCh: Math.max(3.8, measuredSizeCh),
+  };
+}
+
+function resolveTrailingPendingBangInvocation(
+  source: string,
+  placeholderEnd: number,
+  sizeCh: number
+): { end: number; sizeCh: number } | null {
+  const tail = source.slice(placeholderEnd);
+  const match = /^[\t ]*!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/iu.exec(tail);
+  if (!match) return null;
+  return {
+    end: placeholderEnd + (match[0]?.length ?? 0),
+    sizeCh,
+  };
+}
+
+function promptShortcutInvocationSizeCh(promptShortcut?: PromptShortcutMetadata): number | undefined {
+  const invocation = promptShortcut?.invocation.trim().replace(/^[!/]+/u, "");
+  return invocation ? Math.max(3.8, invocation.length) : undefined;
+}
+
 function PendingPromptWildcardCleanupMessage({
   content,
+  commandMentionsById,
+  promptShortcut,
 }: {
   content: string;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+  promptShortcut?: PromptShortcutMetadata;
 }): React.JSX.Element {
   const source = content.trim();
+  const wildcardNames = pendingPromptCleanupWildcardNames(commandMentionsById);
+  const wildcardRanges =
+    wildcardNames.length > 0
+      ? resolveWildcardDeckTextRanges(source, { wildcardNames })
+      : [];
+  const promptInvocationSizeCh = promptShortcutInvocationSizeCh(promptShortcut);
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
   let matchCount = 0;
@@ -15172,14 +15322,26 @@ function PendingPromptWildcardCleanupMessage({
     if (index > cursor) {
       nodes.push(source.slice(cursor, index));
     }
+    const placeholderEnd = index + PENDING_COMPOSER_WILDCARD_SLOT_TEXT.length;
+    const trailingInvocation = resolveTrailingPendingWildcardInvocation(
+      source,
+      placeholderEnd,
+      wildcardRanges,
+      promptInvocationSizeCh
+    ) ?? (
+      promptInvocationSizeCh
+        ? resolveTrailingPendingBangInvocation(source, placeholderEnd, promptInvocationSizeCh)
+        : null
+    );
     nodes.push(
       <PendingWildcardShimmer
         key={`pending-wildcard-${index}-${matchCount}`}
         className={styles.pendingPromptWildcardShimmer}
+        sizeCh={trailingInvocation?.sizeCh}
       />
     );
     matchCount += 1;
-    cursor = index + PENDING_COMPOSER_WILDCARD_SLOT_TEXT.length;
+    cursor = trailingInvocation?.end ?? placeholderEnd;
     index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT, cursor);
   }
   if (matchCount > 0 && cursor < source.length) {
@@ -15195,6 +15357,19 @@ function PendingPromptWildcardCleanupMessage({
       )}
     </p>
   );
+}
+
+function promptShortcutShouldRenderAsComposerText(
+  content: string,
+  promptShortcut: PromptShortcutMetadata,
+  forceComposerText: boolean
+): boolean {
+  const visibleContent = content.trim();
+  if (!visibleContent) return false;
+  const resolvedPrompt = promptShortcut.resolvedPrompt?.trim() ?? "";
+  if (resolvedPrompt && visibleContent === resolvedPrompt) return false;
+  const invocation = promptShortcut.invocation.trim();
+  return forceComposerText || visibleContent !== invocation;
 }
 
 function linkPromptShortcutTokensForMarkdown(
@@ -15567,6 +15742,12 @@ function WildcardDeckValuesInput({
   const duplicateMessage = draftDuplicateValue
     ? `Already added "${draftDuplicateValue}".`
     : duplicateNotice;
+  const valueInflectionMode = useMemo(
+    () => inferWildcardDeckValueInflectionMode(values),
+    [values]
+  );
+  const valueInflectionLabel =
+    valueInflectionMode === "plural" ? "Make plural" : "Make singular";
 
   const updateValues = useCallback(
     (nextValues: readonly string[]) => {
@@ -15611,6 +15792,12 @@ function WildcardDeckValuesInput({
     },
     [updateValues, values]
   );
+
+  const toggleValueInflection = useCallback(() => {
+    if (values.length === 0) return;
+    setDuplicateNotice(null);
+    updateValues(inflectWildcardDeckValues(values, valueInflectionMode));
+  }, [updateValues, valueInflectionMode, values]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const next = event.currentTarget.value;
@@ -15665,6 +15852,21 @@ function WildcardDeckValuesInput({
 
   return (
     <>
+      <div className={styles.promptCenterWildcardValuesHeader}>
+        <span>Values</span>
+        <button
+          type="button"
+          onClick={toggleValueInflection}
+          disabled={values.length === 0}
+          title={
+            values.length === 0
+              ? "Add values before changing singular or plural form"
+              : `${valueInflectionLabel} values`
+          }
+        >
+          {valueInflectionLabel}
+        </button>
+      </div>
       <div
         className={styles.promptCenterWildcardValueBox}
         data-invalid={duplicateMessage ? "true" : undefined}
@@ -15704,6 +15906,7 @@ function WildcardDeckValuesInput({
           }}
           placeholder={values.length > 0 ? "Add another value" : "lemon, potato; chicken"}
           spellCheck={true}
+          aria-label="Wildcard values"
           aria-invalid={duplicateMessage ? "true" : undefined}
         />
       </div>
@@ -16245,7 +16448,11 @@ function resolveMessageDisplayContent(message: Message): string {
 }
 
 function resolveMessageVisualSizingContent(message: Message): string {
-  if (message.role === "user" && message.promptShortcut) {
+  if (
+    message.role === "user" &&
+    message.promptShortcut &&
+    !promptShortcutShouldRenderAsComposerText(message.content, message.promptShortcut, false)
+  ) {
     return promptShortcutVisualSizingText(message.promptShortcut);
   }
   return resolveMessageDisplayContent(message);
@@ -17991,7 +18198,13 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
       ? parseAssistantPrismTools(props.content).displayContent
       : props.content;
   if (props.messageRole === "user" && props.pendingPromptWildcardCleanup === true) {
-    return <PendingPromptWildcardCleanupMessage content={fullSource} />;
+    return (
+      <PendingPromptWildcardCleanupMessage
+        content={fullSource}
+        commandMentionsById={props.commandMentionsById}
+        promptShortcut={props.promptShortcut}
+      />
+    );
   }
   if (
     props.messageRole === "user" &&
@@ -18009,6 +18222,15 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
     return <MarkdownMessageBody {...markdownProps} />;
   }
   if (props.messageRole === "user" && props.promptShortcut) {
+    if (
+      promptShortcutShouldRenderAsComposerText(
+        fullSource,
+        props.promptShortcut,
+        props.renderPromptMetadataAsProse === true
+      )
+    ) {
+      return <MarkdownMessageBody {...props} />;
+    }
     const presentation = props.promptShortcutPresentation ?? "expandable";
     return (
       <PromptShortcutMessage
@@ -21950,6 +22172,20 @@ function HomeContent(): React.JSX.Element {
   const askQuestionPatienceLastTickMsRef = useRef<number | null>(null);
   const askQuestionPatienceLastTypingAtMsRef = useRef<number | null>(null);
   const askQuestionPatienceReportedKeysRef = useRef<Set<string>>(new Set());
+  const [
+    askQuestionPatienceClosedAssistantMessageIds,
+    setAskQuestionPatienceClosedAssistantMessageIds,
+  ] = useState<Set<string>>(() => new Set());
+  const askQuestionPatienceClosedAssistantMessageIdsRef = useRef(
+    askQuestionPatienceClosedAssistantMessageIds
+  );
+  askQuestionPatienceClosedAssistantMessageIdsRef.current =
+    askQuestionPatienceClosedAssistantMessageIds;
+  const askQuestionPatienceActiveKeyRef = useRef<string | null>(null);
+  const askQuestionPatienceCurrentKeyRef = useRef<string | null>(null);
+  const askQuestionPatienceElapsedByKeyRef = useRef<Map<string, number>>(
+    new Map()
+  );
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
   const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -21969,6 +22205,7 @@ function HomeContent(): React.JSX.Element {
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
+    zenCanvasTypingSpeed,
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,
@@ -22536,8 +22773,17 @@ function HomeContent(): React.JSX.Element {
     setDevToolsMessage(null);
     setDevToolsConsoleOnly(false);
   }, []);
+  const zenCanvasTypingDelayMultiplier =
+    view === "chat" ? 1 / zenCanvasTypingSpeed : 1;
   const effectiveChatRevealTiming =
-    devToolsRuntimeActive && view === "chat" ? devZenPauseTiming : DEFAULT_CHAT_REVEAL_TIMING;
+    devToolsRuntimeActive && view === "chat"
+      ? devZenPauseTiming
+      : scaleChatRevealTimingSettings(
+          DEFAULT_CHAT_REVEAL_TIMING,
+          zenCanvasTypingDelayMultiplier
+        );
+  const effectiveChatRevealAnimationMultiplier =
+    devToolsRuntimeActive && view === "chat" ? 1 : zenCanvasTypingDelayMultiplier;
 
   const closeBotContextMenu = useCallback(() => {
     setBotContextMenu(null);
@@ -22744,6 +22990,27 @@ function HomeContent(): React.JSX.Element {
     zenRememberedWallpaperPreview,
     setZenRememberedWallpaperPreview,
   ] = useState<ZenRememberedWallpaperPreview | null>(null);
+  const [
+    zenRememberedWallpaperLookup,
+    setZenRememberedWallpaperLookup,
+  ] = useState<ZenRememberedWallpaperLookup | null>(null);
+  const [
+    zenFallbackWallpaperNewConversationSeed,
+    setZenFallbackWallpaperNewConversationSeed,
+  ] = useState(() => createZenFallbackWallpaperSeed());
+  const zenFallbackWallpaperNewConversationSeedRef = useRef(
+    zenFallbackWallpaperNewConversationSeed
+  );
+  zenFallbackWallpaperNewConversationSeedRef.current =
+    zenFallbackWallpaperNewConversationSeed;
+  const zenFallbackWallpaperSeedByConversationIdRef = useRef<Map<string, string>>(
+    new Map()
+  );
+  const rotateZenFallbackWallpaperSeed = useCallback(() => {
+    const nextSeed = createZenFallbackWallpaperSeed();
+    zenFallbackWallpaperNewConversationSeedRef.current = nextSeed;
+    setZenFallbackWallpaperNewConversationSeed(nextSeed);
+  }, []);
   const zenRememberedWallpaperRequestRef = useRef(0);
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
   const zenWallpaperToggleAutoGenerationSuppressedRef = useRef<Map<string, number>>(new Map());
@@ -25100,11 +25367,13 @@ function HomeContent(): React.JSX.Element {
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
     const raw = activeBot?.color?.trim();
     if (!raw) return undefined;
+    const accent = displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
+    if (!accent) return undefined;
     return deriveAccentStyle(
-      normalizeAccentForTheme(raw, resolvedTheme),
+      accent,
       resolvedTheme
     );
-  }, [activeBot, resolvedTheme]);
+  }, [activeBot, appWidePrivateMode, resolvedTheme]);
 
   const composeBotAccentId = useMemo<string | null>(() => {
     if (privateChatActive) {
@@ -25130,8 +25399,8 @@ function HomeContent(): React.JSX.Element {
     const raw = composeBotAccentId
       ? bots.find((bot) => bot.id === composeBotAccentId)?.color?.trim()
       : null;
-    return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
-  }, [bots, composeBotAccentId, resolvedTheme]);
+    return displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
+  }, [appWidePrivateMode, bots, composeBotAccentId, resolvedTheme]);
 
   const zenPersonaBackdropStyleVars = useMemo(
     () => zenPersonaBackdropCssVars(zenPersonaBackdropTuning),
@@ -30764,12 +31033,18 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     const requestId = zenRememberedWallpaperRequestRef.current + 1;
     zenRememberedWallpaperRequestRef.current = requestId;
-    if (!zenEmptyHeroVisible || appWidePrivateMode || !zenPersonaBotId) {
+    if (view !== "chat" || appWidePrivateMode || !zenPersonaBotId) {
       setZenRememberedWallpaperPreview(null);
+      setZenRememberedWallpaperLookup(null);
       return;
     }
     let cancelled = false;
     setZenRememberedWallpaperPreview(null);
+    setZenRememberedWallpaperLookup({
+      botId: zenPersonaBotId,
+      resolved: false,
+      hasWallpaper: false,
+    });
     void api<ZenRememberedWallpaperApiResponse>(
       `/api/bots/${encodeURIComponent(zenPersonaBotId)}/zen-wallpaper`
     )
@@ -30781,6 +31056,11 @@ function HomeContent(): React.JSX.Element {
           return;
         }
         const wallpaper = data.wallpaper;
+        setZenRememberedWallpaperLookup({
+          botId: zenPersonaBotId,
+          resolved: true,
+          hasWallpaper: Boolean(wallpaper),
+        });
         setZenRememberedWallpaperPreview(
           wallpaper
             ? {
@@ -30799,12 +31079,17 @@ function HomeContent(): React.JSX.Element {
         ) {
           return;
         }
+        setZenRememberedWallpaperLookup({
+          botId: zenPersonaBotId,
+          resolved: true,
+          hasWallpaper: false,
+        });
         setZenRememberedWallpaperPreview(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [appWidePrivateMode, zenEmptyHeroVisible, zenPersonaBotId]);
+  }, [appWidePrivateMode, view, zenPersonaBotId]);
   const zenToolLabHasActiveThread = Boolean(
     view === "chat" &&
       detail?.id &&
@@ -31899,9 +32184,10 @@ function HomeContent(): React.JSX.Element {
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
+      rotateZenFallbackWallpaperSeed();
     }
     setError(null);
-  }, [view]);
+  }, [rotateZenFallbackWallpaperSeed, view]);
 
   useEffect(() => {
     if (
@@ -32479,6 +32765,7 @@ function HomeContent(): React.JSX.Element {
     setZenPersonaBotId(null);
     setConversationStarterPrompts(null);
     navigateToView("chat");
+    rotateZenFallbackWallpaperSeed();
   }
 
   async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
@@ -33892,6 +34179,7 @@ function HomeContent(): React.JSX.Element {
       zenPersonaBotId?: string | null;
       personaTransition?: ZenPersonaTransitionInput;
       zenAutonomy?: ZenAutonomyInput;
+      zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
@@ -33993,6 +34281,9 @@ function HomeContent(): React.JSX.Element {
         : {}),
       ...(mode === "zen" && options.zenAutonomy
         ? { zenAutonomy: options.zenAutonomy }
+        : {}),
+      ...(mode === "zen" && options.zenAskQuestionPatience
+        ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
         : {}),
     };
   }
@@ -34628,6 +34919,7 @@ function HomeContent(): React.JSX.Element {
     setComposerPrimed(false);
     setStarterComposerRevealed(false);
     setAskQuestionComposerRevealed(false);
+    rotateZenFallbackWallpaperSeed();
     revealZenHeaderForFreshSurface();
     void refreshConversations();
   }
@@ -35091,7 +35383,11 @@ function HomeContent(): React.JSX.Element {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
       prompt += rawDraft.slice(cursor, range.start);
-      const casedBasePrompt = withSentenceCasedPromptInsertion(basePrompt, prompt);
+      const casedBasePrompt = formatPromptShortcutInsertion(
+        basePrompt,
+        prompt,
+        rawDraft.slice(range.end)
+      );
       const replacementOffset = prompt.length;
       const casedBasePromptReplacements = promptShortcutWildcardReplacementsForPromptText(
         casedBasePrompt,
@@ -35515,6 +35811,9 @@ function HomeContent(): React.JSX.Element {
           }
         : current
     );
+    if (view === "chat") {
+      rotateZenFallbackWallpaperSeed();
+    }
   }
 
   function consumeGlobalClearCommand(trimmedLine: string, source: "chat" | "coffee"): boolean {
@@ -35544,13 +35843,16 @@ function HomeContent(): React.JSX.Element {
       skipComposerHistory?: boolean;
       personaTransition?: ZenPersonaTransitionInput;
       zenAutonomy?: ZenAutonomyInput;
+      zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
       onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
     } = {}
   ) {
     e.preventDefault();
     const isPersonaTransition = options.personaTransition !== undefined;
     const isZenAutonomy = options.zenAutonomy !== undefined;
-    const isAssistantOnlyTurn = isPersonaTransition || isZenAutonomy;
+    const isAskQuestionPatienceTurn = options.zenAskQuestionPatience !== undefined;
+    const isAssistantOnlyTurn =
+      isPersonaTransition || isZenAutonomy || isAskQuestionPatienceTurn;
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
     if (
@@ -35629,6 +35931,8 @@ function HomeContent(): React.JSX.Element {
           ? { prompt: "", promptWildcards: null }
           : isZenAutonomy
             ? { prompt: "", promptWildcards: null }
+          : isAskQuestionPatienceTurn
+            ? { prompt: "", promptWildcards: null }
           : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
     const trimmed = composerWildcardResolution.prompt.trim();
@@ -35666,7 +35970,10 @@ function HomeContent(): React.JSX.Element {
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
     const forceNewConversation =
-      !isStarterPrompt && !isZenAutonomy && forceNewConversationOnNextSend;
+      !isStarterPrompt &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      forceNewConversationOnNextSend;
     if (!trimmed && !isStarterPrompt && !isAssistantOnlyTurn) return;
     let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
     if (
@@ -35851,6 +36158,8 @@ function HomeContent(): React.JSX.Element {
           ? options.personaTransition!.toBotId
           : isZenAutonomy
             ? options.zenAutonomy!.activeBotId
+          : isAskQuestionPatienceTurn
+            ? options.zenAskQuestionPatience!.activeBotId
           : mentionedZenPersonaBotId ?? zenPersonaBotId
         : undefined;
     const optimisticZenPersonaBot =
@@ -35927,7 +36236,7 @@ function HomeContent(): React.JSX.Element {
         ...(view === "chat" && optimisticZenPersonaBot?.color
           ? { botColor: optimisticZenPersonaBot.color }
           : {}),
-        ...(commandCenterPromptShortcut && !promptWildcardFillAwaitsServerCleanup
+        ...(commandCenterPromptShortcut
           ? { promptShortcut: commandCenterPromptShortcut }
           : {}),
         ...(composerPromptWildcards && !promptWildcardFillAwaitsServerCleanup
@@ -35982,7 +36291,13 @@ function HomeContent(): React.JSX.Element {
       };
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
-    if (!isStarterPrompt && !isZenAutonomy && !editingMessageId && !options.skipComposerHistory) {
+    if (
+      !isStarterPrompt &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      !editingMessageId &&
+      !options.skipComposerHistory
+    ) {
       appendComposerHistoryEntry(rawDraft);
     }
     setDraft("");
@@ -36036,44 +36351,49 @@ function HomeContent(): React.JSX.Element {
 
     try {
       const chatBody = buildChatRequestBody(
-        isStarterPrompt || isZenAutonomy ? "" : displayTrimmed,
+        isStarterPrompt || isZenAutonomy || isAskQuestionPatienceTurn
+          ? ""
+          : displayTrimmed,
         {
-        starterPrompt: isStarterPrompt,
-        ...(options.starterPromptWarrantsIntro
-          ? { starterPromptWarrantsIntro: true }
-          : {}),
-        ...(forceNewConversation ? { forceNewConversation: true } : {}),
-        ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
-          ? { commandCenterModelChoice }
-          : {}),
-        ...(commandCenterPromptActive ? { commandCenterPrompt: true } : {}),
-        ...(commandCenterPromptActive
-          ? { resolvedCommandCenterPrompt: trimmed }
-          : {}),
-        ...(commandCenterPromptShortcut
-          ? { promptShortcut: commandCenterPromptShortcut }
-          : {}),
-        ...(composerPromptWildcards
-          ? { promptWildcards: composerPromptWildcards }
-          : {}),
-        ...(sessionResumeContextForSend
-          ? { sessionResumeContext: sessionResumeContextForSend }
-          : {}),
-        ...(prismInterruptionForSend
-          ? { prismInterruption: prismInterruptionForSend }
-          : {}),
-        ...(view === "chat"
-          ? { zenPersonaBotId: zenPersonaBotIdForSend ?? null }
-          : {}),
-        ...(options.personaTransition
-          ? { personaTransition: options.personaTransition }
-          : {}),
-        ...(options.zenAutonomy
-          ? { zenAutonomy: options.zenAutonomy }
-          : {}),
-        ...(options.promptInputOverride
-          ? { promptInputOverride: options.promptInputOverride }
-          : {}),
+          starterPrompt: isStarterPrompt,
+          ...(options.starterPromptWarrantsIntro
+            ? { starterPromptWarrantsIntro: true }
+            : {}),
+          ...(forceNewConversation ? { forceNewConversation: true } : {}),
+          ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
+            ? { commandCenterModelChoice }
+            : {}),
+          ...(commandCenterPromptActive ? { commandCenterPrompt: true } : {}),
+          ...(commandCenterPromptActive
+            ? { resolvedCommandCenterPrompt: trimmed }
+            : {}),
+          ...(commandCenterPromptShortcut
+            ? { promptShortcut: commandCenterPromptShortcut }
+            : {}),
+          ...(composerPromptWildcards
+            ? { promptWildcards: composerPromptWildcards }
+            : {}),
+          ...(sessionResumeContextForSend
+            ? { sessionResumeContext: sessionResumeContextForSend }
+            : {}),
+          ...(prismInterruptionForSend
+            ? { prismInterruption: prismInterruptionForSend }
+            : {}),
+          ...(view === "chat"
+            ? { zenPersonaBotId: zenPersonaBotIdForSend ?? null }
+            : {}),
+          ...(options.personaTransition
+            ? { personaTransition: options.personaTransition }
+            : {}),
+          ...(options.zenAutonomy
+            ? { zenAutonomy: options.zenAutonomy }
+            : {}),
+          ...(options.zenAskQuestionPatience
+            ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
+            : {}),
+          ...(options.promptInputOverride
+            ? { promptInputOverride: options.promptInputOverride }
+            : {}),
         }
       );
       appendDevChatRouteStart("send", chatBody);
@@ -36108,6 +36428,16 @@ function HomeContent(): React.JSX.Element {
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       options.onZenAutonomyResult?.(d.zenAutonomyDecision ?? null);
       successfulConversationId = d.conversation.id;
+      if (
+        view === "chat" &&
+        requestStartedNewConversation &&
+        !d.conversation.incognito
+      ) {
+        zenFallbackWallpaperSeedByConversationIdRef.current.set(
+          d.conversation.id,
+          zenFallbackWallpaperNewConversationSeedRef.current
+        );
+      }
       if (sessionResumeContextForSend) {
         if (pendingZenSessionResumeContextForSend) {
           const nextSessionBreak = pendingZenSessionBreakForSend
@@ -37286,7 +37616,10 @@ function HomeContent(): React.JSX.Element {
   }
 
   const pendingAskQuestionState = detail
-    ? getConversationPendingAskQuestionState(detail.messages)
+    ? getConversationPendingAskQuestionState(
+        detail.messages,
+        askQuestionPatienceClosedAssistantMessageIds
+      )
     : undefined;
   const pendingAskQuestion = pendingAskQuestionState?.askQuestion;
   const pendingAskQuestionAssistantMessage =
@@ -37392,13 +37725,19 @@ function HomeContent(): React.JSX.Element {
       : null;
   const askQuestionPatienceDurationMs =
     normalizeZenAskQuestionPatienceMsSetting(zenAskQuestionPatienceMs);
+  askQuestionPatienceCurrentKeyRef.current = askQuestionPatienceKey;
+  const askQuestionPatienceElapsedForProgress = askQuestionPatienceKey
+    ? askQuestionPatienceActiveKeyRef.current === askQuestionPatienceKey
+      ? askQuestionPatienceElapsedMs
+      : askQuestionPatienceElapsedByKeyRef.current.get(askQuestionPatienceKey) ?? 0
+    : 0;
   const askQuestionPatienceProgress = askQuestionPatienceKey
     ? Math.max(
         0,
         Math.min(
           1,
           1 -
-            askQuestionPatienceElapsedMs /
+            askQuestionPatienceElapsedForProgress /
               Math.max(1, askQuestionPatienceDurationMs)
         )
       )
@@ -37408,6 +37747,8 @@ function HomeContent(): React.JSX.Element {
     key: string;
     conversationId: string;
     assistantMessageId: string;
+    askQuestion?: NonNullable<Message["askQuestion"]>;
+    activeBotId: string | null;
     timeoutMs: number;
     activeElapsedMs: number;
   }): Promise<void> {
@@ -37416,6 +37757,8 @@ function HomeContent(): React.JSX.Element {
         ok: true;
         applied?: boolean;
         duplicate?: boolean;
+        reason?: string;
+        penaltyLevel?: ZenAskQuestionPatienceInput["penaltyLevel"];
         prismMood?: PrismMoodSnapshot;
       }>(
         `/api/conversations/${encodeURIComponent(args.conversationId)}/prism-mood/ask-question-timeout`,
@@ -37435,6 +37778,50 @@ function HomeContent(): React.JSX.Element {
             : current
         );
       }
+      const stillViewingConversation =
+        selectedIdRef.current === args.conversationId ||
+        detailIdRef.current === args.conversationId;
+      const stillActiveOrLocallyClosed =
+        askQuestionPatienceCurrentKeyRef.current === args.key ||
+        askQuestionPatienceClosedAssistantMessageIdsRef.current.has(
+          args.assistantMessageId
+        );
+      if (
+        !stillViewingConversation ||
+        !stillActiveOrLocallyClosed ||
+        (result.applied !== true &&
+          !(result.reason === "missing_message" && args.assistantMessageId.startsWith("dev-tool-lab-")))
+      ) {
+        return;
+      }
+      const syntheticSubmit = {
+        preventDefault: () => {
+          /* no-op - used so sendMessage can share the assistant-only pathway */
+        },
+      } as React.FormEvent<HTMLFormElement>;
+      void sendMessage(syntheticSubmit, {
+        skipComposerHistory: true,
+        zenAskQuestionPatience: {
+          source: "ask_question_patience",
+          activeBotId: args.activeBotId,
+          assistantMessageId: args.assistantMessageId,
+          ...(args.askQuestion?.prompt
+            ? { prompt: args.askQuestion.prompt }
+            : {}),
+          ...(args.askQuestion?.options?.length
+            ? { options: args.askQuestion.options.map((option) => ({
+                id: option.id,
+                label: option.label,
+              })) }
+            : {}),
+          timeoutMs: args.timeoutMs,
+          activeElapsedMs: args.activeElapsedMs,
+          ...(result.penaltyLevel ? { penaltyLevel: result.penaltyLevel } : {}),
+          clientTurnId: `askq-patience-${Date.now().toString(36)}-${Math.random()
+            .toString(36)
+            .slice(2, 8)}`,
+        },
+      });
     } catch {
       // Keep this quiet: a timer miss should not interrupt the conversation UI.
     }
@@ -37452,6 +37839,9 @@ function HomeContent(): React.JSX.Element {
     }
     const meterStyle = {
       "--ask-question-patience-progress": askQuestionPatienceProgress.toFixed(4),
+      "--ask-question-patience-progress-width": `${(
+        askQuestionPatienceProgress * 100
+      ).toFixed(2)}%`,
     } as React.CSSProperties;
     return (
       <div
@@ -37469,8 +37859,38 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     askQuestionPatienceLastTickMsRef.current = null;
     askQuestionPatienceLastTypingAtMsRef.current = null;
-    askQuestionPatienceElapsedMsRef.current = 0;
-    setAskQuestionPatienceElapsedMs(0);
+
+    if (!askQuestionPatienceKey) {
+      return;
+    }
+
+    if (askQuestionPatienceActiveKeyRef.current !== askQuestionPatienceKey) {
+      askQuestionPatienceActiveKeyRef.current = askQuestionPatienceKey;
+      const restoredElapsedMs = Math.max(
+        0,
+        Math.min(
+          askQuestionPatienceDurationMs,
+          askQuestionPatienceElapsedByKeyRef.current.get(askQuestionPatienceKey) ??
+            0
+        )
+      );
+      askQuestionPatienceElapsedMsRef.current = restoredElapsedMs;
+      setAskQuestionPatienceElapsedMs(restoredElapsedMs);
+      return;
+    }
+
+    const clampedElapsedMs = Math.max(
+      0,
+      Math.min(askQuestionPatienceDurationMs, askQuestionPatienceElapsedMsRef.current)
+    );
+    if (clampedElapsedMs !== askQuestionPatienceElapsedMsRef.current) {
+      askQuestionPatienceElapsedMsRef.current = clampedElapsedMs;
+      askQuestionPatienceElapsedByKeyRef.current.set(
+        askQuestionPatienceKey,
+        clampedElapsedMs
+      );
+      setAskQuestionPatienceElapsedMs(clampedElapsedMs);
+    }
   }, [askQuestionPatienceKey, askQuestionPatienceDurationMs]);
 
   useEffect(() => {
@@ -37505,6 +37925,10 @@ function HomeContent(): React.JSX.Element {
       askQuestionPatienceLastTickMsRef.current = nowMs;
       if (result.elapsedMs !== askQuestionPatienceElapsedMsRef.current) {
         askQuestionPatienceElapsedMsRef.current = result.elapsedMs;
+        askQuestionPatienceElapsedByKeyRef.current.set(
+          askQuestionPatienceKey,
+          result.elapsedMs
+        );
         setAskQuestionPatienceElapsedMs(result.elapsedMs);
       }
       const alreadyReported =
@@ -37516,10 +37940,22 @@ function HomeContent(): React.JSX.Element {
         })
       ) {
         askQuestionPatienceReportedKeysRef.current.add(askQuestionPatienceKey);
+        setAskQuestionPatienceClosedAssistantMessageIds((current) => {
+          if (current.has(askQuestionPatienceAssistantMessageId)) {
+            askQuestionPatienceClosedAssistantMessageIdsRef.current = current;
+            return current;
+          }
+          const next = new Set(current);
+          next.add(askQuestionPatienceAssistantMessageId);
+          askQuestionPatienceClosedAssistantMessageIdsRef.current = next;
+          return next;
+        });
         void reportAskQuestionPatienceTimeout({
           key: askQuestionPatienceKey,
           conversationId: askQuestionPatienceConversationId,
           assistantMessageId: askQuestionPatienceAssistantMessageId,
+          ...(pendingAskQuestion ? { askQuestion: pendingAskQuestion } : {}),
+          activeBotId: zenPersonaBotIdRef.current ?? null,
           timeoutMs: askQuestionPatienceDurationMs,
           activeElapsedMs: result.elapsedMs,
         });
@@ -38526,6 +38962,7 @@ function HomeContent(): React.JSX.Element {
       setHueFilterCenter(null);
       setPendingIncognito(privateMode);
       setSidebarOpen(false);
+      rotateZenFallbackWallpaperSeed();
       return;
     }
     const normalStarterBotId = detail
@@ -41231,6 +41668,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function armFreshZenPersona(nextBotId: string | null): void {
+    if (zenSessionHasNotStarted() && zenPersonaBotIdRef.current !== nextBotId) {
+      rotateZenFallbackWallpaperSeed();
+    }
     setZenPersonaBotId(nextBotId);
     setSelectedBotId(nextBotId);
     setChatBotOverride(undefined);
@@ -43666,6 +44106,7 @@ function HomeContent(): React.JSX.Element {
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
+      rotateZenFallbackWallpaperSeed();
     }
   }
 
@@ -43688,6 +44129,7 @@ function HomeContent(): React.JSX.Element {
     startBotPickerReturnToAll();
     setSelectedBotId(spotlightBotId);
     if (view === "chat") {
+      rotateZenFallbackWallpaperSeed();
       setZenPersonaBotId(spotlightBotId);
     }
     setSandboxGridSelectedBotId(spotlightBotId);
@@ -46867,13 +47309,17 @@ function HomeContent(): React.JSX.Element {
     index: number
   ): React.CSSProperties => {
     const rawRowColor = resolveRowColor(c, bots);
-    const rowAccent = rawRowColor
+    const normalRowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
       : !c.incognito
         ? neutralRowColor(resolvedTheme)
         : null;
+    const rowAccent =
+      rawRowColor && appWidePrivateMode
+        ? privateModeAccentHex(rawRowColor, resolvedTheme) ?? normalRowAccent
+        : normalRowAccent;
     const privateRowTint =
-      privateChatActive && rowAccent
+      appWidePrivateMode && rowAccent
         ? mixHex(
             rowAccent,
             resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
@@ -46887,10 +47333,10 @@ function HomeContent(): React.JSX.Element {
             "--row-color": privateRowTint,
             "--row-glyph-color": rowAccent ?? privateRowTint,
             "--row-border-mix": `${rowBorderMixPercent(privateRowTint, resolvedTheme)}%`,
-            "--row-selected-text-color": privateChatActive
+            "--row-selected-text-color": appWidePrivateMode
               ? (rowAccent ?? privateRowTint)
               : selectedRowTextColor(privateRowTint, resolvedTheme),
-            ...(privateChatActive
+            ...(appWidePrivateMode
               ? { "--row-text-color": rowAccent ?? privateRowTint }
               : {}),
           }
@@ -46903,10 +47349,14 @@ function HomeContent(): React.JSX.Element {
     index: number
   ): React.CSSProperties => {
     const rawRowColor = group.color;
-    const rowAccent = rawRowColor
+    const normalRowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
       : neutralRowColor(resolvedTheme);
-    const privateRowTint = privateChatActive
+    const rowAccent =
+      rawRowColor && appWidePrivateMode
+        ? privateModeAccentHex(rawRowColor, resolvedTheme) ?? normalRowAccent
+        : normalRowAccent;
+    const privateRowTint = appWidePrivateMode
       ? mixHex(
           rowAccent,
           resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
@@ -47590,6 +48040,32 @@ function HomeContent(): React.JSX.Element {
   const renderZenMemoryToasts = () =>
     view === "chat" ? renderMemoryToasts("zen") : null;
 
+  const renderMobileSidebarMenuToggle = (): React.JSX.Element | null => {
+    if (!sidebarDrawerMode) return null;
+
+    const hidden = sidebarOpen || panel !== null;
+    const label = sidebarOpen ? "Close navigation menu" : "Open navigation menu";
+
+    return (
+      <button
+        type="button"
+        className={`${styles.menuToggle} ${hidden ? styles.menuToggleHidden : ""}`}
+        data-dev-panel-safe-area="top"
+        onClick={() => {
+          setSidebarOpen(open => !open);
+        }}
+        aria-controls={APP_SIDEBAR_NAVIGATION_ID}
+        aria-expanded={sidebarOpen}
+        aria-label={label}
+        data-glyph-tooltip={label}
+        aria-hidden={hidden}
+        tabIndex={hidden ? -1 : 0}
+      >
+        <MenuIcon className={styles.menuToggleGlyph} aria-hidden="true" />
+      </button>
+    );
+  };
+
   const renderPsychicModeToast = () => {
     if (!psychicModeToast) return null;
     return (
@@ -47647,37 +48123,34 @@ function HomeContent(): React.JSX.Element {
     const privateFocusedBotHeaderMode = privateChatActive && privateCustomBotActive;
     const privateFocusedBotBase =
       (activeBot?.color ?? headerIdentity?.color ?? PRISM_DEFAULT_ACCENT).trim();
-    const privateFocusedBotNormalized = normalizeAccentForTheme(
-      privateFocusedBotBase,
-      resolvedTheme
-    );
-    const privateFocusedBotHeaderTint = mixHex(
-      privateFocusedBotNormalized,
-      "#ffffff",
-      resolvedTheme === "dark" ? 0.52 : 0.4
+    const privateFocusedBotHeaderTint =
+      privateModeAccentHex(privateFocusedBotBase, resolvedTheme) ??
+      normalizeAccentForTheme(privateFocusedBotBase, resolvedTheme);
+    const privateHeaderToolTints = PRISM_WORDMARK_PALETTE.map(
+      (color) => privateModeAccentHex(color, resolvedTheme) ?? color
     );
     const privateDefaultMemoriesStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[0] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[0] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultAtmosphereStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[1] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[1] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultImagesStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[2] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[2] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultBotsStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[3] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[3] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultThemeStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[4] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[4] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
@@ -52721,8 +53194,7 @@ function HomeContent(): React.JSX.Element {
                             );
                           })}
                         </div>
-                        <label className={styles.promptCenterField}>
-                          <span>Values</span>
+                        <div className={styles.promptCenterField}>
                           <WildcardDeckValuesInput
                             value={selectedWildcardDeckDraft.valuesText}
                             onChange={(valuesText) => {
@@ -52732,7 +53204,7 @@ function HomeContent(): React.JSX.Element {
                               }));
                             }}
                           />
-                        </label>
+                        </div>
                         <div className={styles.promptCenterDangerRow}>
                           <button
                             type="button"
@@ -53210,6 +53682,36 @@ function HomeContent(): React.JSX.Element {
                           const next = normalizeZenRecentContextMessagesSetting(event.target.value);
                           setSettings((previous) =>
                             previous ? { ...previous, zenRecentContextMessages: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Canvas typing speed</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-canvas-typing-speed"
+                            label="About canvas typing speed"
+                            variant="control"
+                          >
+                            Adjusts how quickly Zen reveals assistant text on the canvas.
+                          </PanelSectionInfo>
+                        </span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenCanvasTypingSpeed(settings.zenCanvasTypingSpeed)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_CANVAS_TYPING_SPEED}
+                        max={MAX_ZEN_CANVAS_TYPING_SPEED}
+                        step={0.05}
+                        value={zenCanvasTypingSpeed}
+                        onChange={(event) => {
+                          const next = normalizeZenCanvasTypingSpeedSetting(event.target.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenCanvasTypingSpeed: next } : previous
                           );
                         }}
                       />
@@ -56319,7 +56821,10 @@ function HomeContent(): React.JSX.Element {
           imagePanelThemeBot != null
             ? (() => {
                 if (imagePrivateMode) {
-                  const accentNormalized = normalizeAccentForTheme(
+                  const accentNormalized = privateModeAccentHex(
+                    imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
+                    resolvedTheme
+                  ) ?? normalizeAccentForTheme(
                     imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
                     resolvedTheme
                   );
@@ -56369,18 +56874,22 @@ function HomeContent(): React.JSX.Element {
             : undefined;
         const imagesGenOverlayAccentHex = (() => {
           if (imagePanelScope === "bot" && imagePanelBot) {
-            return normalizeAccentForTheme(
+            return displayAccentForMode(
               imagePanelBot.color ?? PRISM_DEFAULT_ACCENT,
-              resolvedTheme
-            );
+              resolvedTheme,
+              imagePrivateMode
+            ) ?? normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
           }
           if (imagePanelScope === "general") {
-            return normalizeAccentForTheme("#2fd3e3", resolvedTheme);
+            return displayAccentForMode("#2fd3e3", resolvedTheme, imagePrivateMode) ??
+              normalizeAccentForTheme("#2fd3e3", resolvedTheme);
           }
           if (activeBot?.color?.trim()) {
-            return normalizeAccentForTheme(activeBot.color, resolvedTheme);
+            return displayAccentForMode(activeBot.color, resolvedTheme, imagePrivateMode) ??
+              normalizeAccentForTheme(activeBot.color, resolvedTheme);
           }
-          return normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
+          return displayAccentForMode(PRISM_DEFAULT_ACCENT, resolvedTheme, imagePrivateMode) ??
+            normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
         })();
         const imagesGenOverlayAccentStyle = deriveAccentStyle(
           imagesGenOverlayAccentHex,
@@ -56424,19 +56933,39 @@ function HomeContent(): React.JSX.Element {
         const privateOverlayGlyphStyle: React.CSSProperties | undefined =
           imagesGenOverlayPrivate && overlayTintBot?.color?.trim()
             ? ({
-                ["--private-overlay-glyph" as string]: normalizeAccentForTheme(
+                ["--private-overlay-glyph" as string]: privateModeAccentHex(
                   overlayTintBot.color,
                   resolvedTheme
-                ),
+                ) ?? normalizeAccentForTheme(overlayTintBot.color, resolvedTheme),
               } as React.CSSProperties)
             : undefined;
         const prismGenOverlayPaletteStyle = imagesGenOverlayPrismDefault
           ? ({
-              ["--prism-gen-c1" as string]: PRISM_WORDMARK_PALETTE[0],
-              ["--prism-gen-c2" as string]: PRISM_WORDMARK_PALETTE[1],
-              ["--prism-gen-c3" as string]: PRISM_WORDMARK_PALETTE[2],
-              ["--prism-gen-c4" as string]: PRISM_WORDMARK_PALETTE[3],
-              ["--prism-gen-c5" as string]: PRISM_WORDMARK_PALETTE[4],
+              ["--prism-gen-c1" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[0] ?? "#ff5f5f",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[0] ?? "#ff5f5f",
+              ["--prism-gen-c2" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[1] ?? "#f8c84a",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[1] ?? "#f8c84a",
+              ["--prism-gen-c3" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[2] ?? "#6bd97d",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[2] ?? "#6bd97d",
+              ["--prism-gen-c4" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[3] ?? "#5cc8ff",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[3] ?? "#5cc8ff",
+              ["--prism-gen-c5" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[4] ?? "#b07cff",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[4] ?? "#b07cff",
             } as React.CSSProperties)
           : undefined;
         const genOverlayPrimary =
@@ -56861,6 +57390,7 @@ function HomeContent(): React.JSX.Element {
                   resolvedTheme={resolvedTheme}
                   selectedBotId={imagePanelScope === "bot" ? imagePanelBotId : null}
                   dismissPopoversSignal={composerPopoverDismissSignal}
+                  privateTone={appWidePrivateMode}
                   onPick={(botId) => {
                     setImagePanelScope("bot");
                     setImagePanelBotId(botId);
@@ -62554,6 +63084,46 @@ function HomeContent(): React.JSX.Element {
       !appWidePrivateMode &&
       zenPersonaBotId !== null &&
       zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
+    const zenFallbackWallpaperBotId =
+      zenPersonaBotId ?? detail?.lastBotId ?? detail?.botId ?? null;
+    const zenFallbackWallpaperHasBot = Boolean(zenFallbackWallpaperBotId?.trim());
+    const zenRememberedWallpaperLookupMatches =
+      zenFallbackWallpaperHasBot &&
+      zenRememberedWallpaperLookup?.botId === zenFallbackWallpaperBotId;
+    const zenRememberedWallpaperResolved =
+      !zenFallbackWallpaperHasBot ||
+      appWidePrivateMode ||
+      Boolean(
+        zenRememberedWallpaperLookupMatches &&
+          zenRememberedWallpaperLookup?.resolved
+      );
+    const zenRememberedWallpaperHasWallpaper = Boolean(
+      !appWidePrivateMode &&
+      zenRememberedWallpaperLookupMatches &&
+        zenRememberedWallpaperLookup?.hasWallpaper
+    );
+    const zenFallbackWallpaperConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId && selectedId !== "pending"
+          ? selectedId
+          : null;
+    const zenFallbackWallpaperSeed = zenFallbackWallpaperConversationId
+      ? (zenFallbackWallpaperSeedByConversationIdRef.current.get(
+          zenFallbackWallpaperConversationId
+        ) ??
+        `${zenFallbackWallpaperConversationId}:${zenFallbackWallpaperBotId ?? ""}`)
+      : zenFallbackWallpaperNewConversationSeed;
+    const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
+      chatSurface: chatLikeSurface,
+      rememberedWallpaperResolved: zenRememberedWallpaperResolved,
+      hasRememberedWallpaper: zenRememberedWallpaperHasWallpaper,
+      atmosphereTimelineLength: zenAtmosphereTimeline.length,
+    });
+    const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
+      ? resolveZenFallbackWallpaperVariant(zenFallbackWallpaperSeed)
+      : null;
+    const zenFallbackWallpaperVisible = Boolean(zenFallbackWallpaperVariant);
     const zenRememberedAtmosphereEntry: ZenWallpaperHistoryEntry | null =
       zenRememberedWallpaperVisible && zenRememberedWallpaperPreview
         ? {
@@ -62573,9 +63143,11 @@ function HomeContent(): React.JSX.Element {
       : zenAtmosphereLayerOpacities;
     const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
       (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
-    );
+    ) || zenFallbackWallpaperVisible;
     const zenAtmosphereReadabilityOverlayOpacity = zenRememberedWallpaperVisible
       ? 0
+      : zenFallbackWallpaperVisible
+        ? 1
       : maxZenAtmosphereLayerOpacity(zenAtmosphereDisplayLayerOpacities);
     const zenAtmosphereBlurredEdgesEnabled =
       normalizeZenWallpaperBlurredEdgesSetting(
@@ -62587,7 +63159,10 @@ function HomeContent(): React.JSX.Element {
       ),
     } as React.CSSProperties;
     const zenPersonaFallbackAtmosphereVisible =
-      zenEmptyHeroVisible && Boolean(zenPersonaBot) && !zenRememberedWallpaperVisible;
+      zenEmptyHeroVisible &&
+      Boolean(zenPersonaBot) &&
+      !zenRememberedWallpaperVisible &&
+      !zenFallbackWallpaperVisible;
     const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
       ? botAccentStyle(zenPersonaBot.color, resolvedTheme)
       : undefined;
@@ -62619,6 +63194,7 @@ function HomeContent(): React.JSX.Element {
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
       data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
+      data-zen-fallback-wallpaper-active={zenFallbackWallpaperVisible ? "true" : undefined}
       data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
       data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
       style={appShellStyle}
@@ -62853,29 +63429,48 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {zenAtmosphereDisplayTimeline.length > 0 ? (
+          {zenAtmosphereDisplayTimeline.length > 0 || zenFallbackWallpaperVariant ? (
             <div
               className={styles.zenAtmosphereBackdrop}
               style={zenAtmosphereBackdropStyle}
               aria-hidden="true"
             >
-              {zenAtmosphereDisplayTimeline.map((entry) => {
-                const layerOpacity =
-                  zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0;
-                return (
-                  <img
-                    key={`${entry.imageId}:${entry.generationMessageCount}`}
-                    src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
-                    alt=""
-                    decoding="async"
-                    style={
-                      {
-                        "--zen-atmosphere-layer-opacity": String(layerOpacity),
-                      } as React.CSSProperties
-                    }
-                  />
-                );
-              })}
+              {zenFallbackWallpaperVariant ? (
+                <img
+                  key={`fallback:${zenFallbackWallpaperVariant.src}:${zenFallbackWallpaperSeed}`}
+                  src={zenFallbackWallpaperVariant.src}
+                  alt=""
+                  decoding="async"
+                  data-zen-fallback-wallpaper="true"
+                  style={
+                    {
+                      "--zen-atmosphere-layer-opacity": "1",
+                      "--zen-fallback-wallpaper-scale-x":
+                        zenFallbackWallpaperVariant.flipX ? "-1" : "1",
+                      "--zen-fallback-wallpaper-scale-y":
+                        zenFallbackWallpaperVariant.flipY ? "-1" : "1",
+                    } as React.CSSProperties
+                  }
+                />
+              ) : (
+                zenAtmosphereDisplayTimeline.map((entry) => {
+                  const layerOpacity =
+                    zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0;
+                  return (
+                    <img
+                      key={`${entry.imageId}:${entry.generationMessageCount}`}
+                      src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
+                      alt=""
+                      decoding="async"
+                      style={
+                        {
+                          "--zen-atmosphere-layer-opacity": String(layerOpacity),
+                        } as React.CSSProperties
+                      }
+                    />
+                  );
+                })
+              )}
             </div>
           ) : null}
           {zenAtmosphereWallpaperVisible && !zenRememberedWallpaperVisible ? (
@@ -63468,7 +64063,11 @@ function HomeContent(): React.JSX.Element {
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   chatRevealTiming={effectiveChatRevealTiming}
-                  chatRevealAnimationMultiplier={chatLikeSurface ? chatRevealDelayMultiplier : 1}
+                  chatRevealAnimationMultiplier={
+                    chatLikeSurface
+                      ? chatRevealDelayMultiplier * effectiveChatRevealAnimationMultiplier
+                      : 1
+                  }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
@@ -63740,47 +64339,35 @@ function HomeContent(): React.JSX.Element {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
-      {/* Mobile menu toggle — faded out while either drawer is open
-          (sidebar on the left, Settings/Bots/Images panel on the right)
-          so the fixed hamburger doesn't overlap the profile avatar or
-          poke through the panel overlay dimmer. */}
+      {renderMobileSidebarMenuToggle()}
+      {/* Mid-width drawer handle — faded out while either drawer is open
+          (sidebar on the left, Settings/Bots/Images panel on the right). */}
       {FLOATING_SHELL_APPLETS_ENABLED ? (
-        <>
-          <button
-            type="button"
-            className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-            data-dev-panel-safe-area="top"
-            onClick={() => {
-              setSidebarOpen(o => !o);
-            }}
-            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-            aria-hidden={sidebarOpen || panel !== null}
-            tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
-          >☰</button>
-          <button
-            type="button"
-            className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
-              panel !== null ? styles.sidebarHandleHidden : ""
-            }`}
-            data-dev-panel-safe-area="left"
-            onClick={() => {
-              setSidebarOpen(o => !o);
-            }}
-            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-            aria-pressed={sidebarOpen}
-            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-          >
-            <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-          </button>
-        </>
+        <button
+          type="button"
+          className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+            panel !== null ? styles.sidebarHandleHidden : ""
+          }`}
+          data-dev-panel-safe-area="left"
+          onClick={() => {
+            setSidebarOpen(o => !o);
+          }}
+          aria-controls={APP_SIDEBAR_NAVIGATION_ID}
+          aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+          aria-pressed={sidebarOpen}
+          data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
+        >
+          <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+        </button>
       ) : null}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
       <aside
+        id={APP_SIDEBAR_NAVIGATION_ID}
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
         data-dev-panel-safe-area="left"
+        aria-label="Primary navigation"
         aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
         inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
       >
@@ -63876,9 +64463,10 @@ function HomeContent(): React.JSX.Element {
                   style={
                     headerIdentity.color
                       ? ({
-                          "--header-identity-color": normalizeAccentForTheme(
+                          "--header-identity-color": displayAccentForMode(
                             headerIdentity.color,
-                            resolvedTheme
+                            resolvedTheme,
+                            appWidePrivateMode
                           ),
                         } as React.CSSProperties)
                       : undefined
@@ -64461,7 +65049,11 @@ function HomeContent(): React.JSX.Element {
                         const isProtected = b.delete_protected === 1;
                         const rawColor = b.color?.trim();
                         const accent = rawColor
-                          ? normalizeAccentForTheme(rawColor, resolvedTheme)
+                          ? displayAccentForMode(
+                              rawColor,
+                              resolvedTheme,
+                              appWidePrivateMode
+                            )
                           : null;
                         const tileStyle = accent
                           ? ({ "--bot-color": accent } as React.CSSProperties)
@@ -64686,7 +65278,11 @@ function HomeContent(): React.JSX.Element {
             // inherits the same in-range hex.
             const normalizedBotColor =
               msg.role === "assistant" && msg.botColor
-                ? normalizeAccentForTheme(msg.botColor, resolvedTheme)
+                ? displayAccentForMode(
+                    msg.botColor,
+                    resolvedTheme,
+                    detail?.incognito === true
+                  )
                 : null;
             const messageEdge =
               msg.role !== "assistant"
@@ -64982,7 +65578,11 @@ function HomeContent(): React.JSX.Element {
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   chatRevealTiming={effectiveChatRevealTiming}
-                  chatRevealAnimationMultiplier={chatLikeSurface ? chatRevealDelayMultiplier : 1}
+                  chatRevealAnimationMultiplier={
+                    chatLikeSurface
+                      ? chatRevealDelayMultiplier * effectiveChatRevealAnimationMultiplier
+                      : 1
+                  }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}

@@ -5,6 +5,7 @@ import {
   maskBuiltInWildcardSlotsForPending,
   promptContainsBuiltInWildcardSlots,
   promptInsertionStartsSentence,
+  formatPromptShortcutInsertion,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   splitPromptRandomizationOptions,
@@ -23,6 +24,25 @@ describe("withSentenceCasedPromptInsertion", () => {
   it("does not mangle acronyms or the pronoun I mid-sentence", () => {
     assert.equal(withSentenceCasedPromptInsertion("PRISM memory", "ask "), "PRISM memory");
     assert.equal(withSentenceCasedPromptInsertion("I remember this", "and "), "I remember this");
+  });
+});
+
+describe("formatPromptShortcutInsertion", () => {
+  it("lowercases inline prompt shortcuts and lets surrounding punctuation win", () => {
+    assert.equal(
+      formatPromptShortcutInsertion("Say you are a chicken.", "First, ", ", then "),
+      "say you are a chicken"
+    );
+    assert.equal(
+      formatPromptShortcutInsertion("Say you are a pig.", "First, say this, then ", "."),
+      "say you are a pig"
+    );
+  });
+
+  it("preserves sentence-start capitalization, acronyms, and standalone I", () => {
+    assert.equal(formatPromptShortcutInsertion("say hello.", "", ""), "Say hello.");
+    assert.equal(formatPromptShortcutInsertion("PRISM memory", "ask ", ""), "PRISM memory");
+    assert.equal(formatPromptShortcutInsertion("I remember this", "and ", ""), "I remember this");
   });
 });
 

@@ -57,6 +57,8 @@ export interface PrismMoodInterruptionInput {
   totalTokenCount?: number;
 }
 
+export type PrismMoodIgnoredQuestionPenaltyLevel = "light" | "normal" | "elevated";
+
 export interface PrismMoodDebugPatch {
   annoyanceDelta?: number;
   warmthDelta?: number;
@@ -482,13 +484,16 @@ export function applyPrismMoodInterruption(
 export function applyPrismMoodIgnoredQuestion(
   previous: PrismMoodState,
   now?: string | Date,
-  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY
+  sensitivity: unknown = DEFAULT_PRISM_MOOD_SENSITIVITY,
+  penaltyLevel: PrismMoodIgnoredQuestionPenaltyLevel = "normal"
 ): PrismMoodState {
   const base = sanitizePrismMoodState(previous, previous.mode, now);
   if (base.frozen) return base;
   const sensitivityWeight = prismMoodSensitivityJumpWeight(sensitivity);
   const patienceRelief = 1 - base.restraint * 0.28;
-  const weight = Math.min(1.35, sensitivityWeight * patienceRelief);
+  const penaltyWeight =
+    penaltyLevel === "elevated" ? 1.35 : penaltyLevel === "light" ? 0.55 : 1;
+  const weight = Math.min(1.6, sensitivityWeight * patienceRelief * penaltyWeight);
   return withMoodDelta(base, {
     kind: "ignored_question",
     now,

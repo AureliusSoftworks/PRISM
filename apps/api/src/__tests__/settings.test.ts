@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_ZEN_CANVAS_TYPING_SPEED,
   DEFAULT_ZEN_FRESH_START_GAP_MS,
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
@@ -16,9 +17,11 @@ import {
   DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
+  MAX_ZEN_CANVAS_TYPING_SPEED,
   MAX_ZEN_WALLPAPER_OPACITY,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
   MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+  MIN_ZEN_CANVAS_TYPING_SPEED,
   MIN_ZEN_WALLPAPER_OPACITY,
   normalizeZenWallpaperStyleNotes,
   parseHiddenBotModelIds,
@@ -76,6 +79,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
     zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: 0,
@@ -1012,6 +1016,32 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(
       resolveNextSettings({ zenMoodSensitivity: "nope" }, current).zenMoodSensitivity,
       0.35
+    );
+  });
+
+  it("stores Zen canvas typing speed", () => {
+    const next = resolveNextSettings({ zenCanvasTypingSpeed: 1.6 }, baseline());
+
+    assert.equal(next.zenCanvasTypingSpeed, 1.6);
+  });
+
+  it("clamps Zen canvas typing speed while preserving current value for invalid input", () => {
+    const current = baseline({ zenCanvasTypingSpeed: 1.25 });
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 0.1 }, current).zenCanvasTypingSpeed,
+      MIN_ZEN_CANVAS_TYPING_SPEED
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 5 }, current).zenCanvasTypingSpeed,
+      MAX_ZEN_CANVAS_TYPING_SPEED
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 1.234 }, current).zenCanvasTypingSpeed,
+      1.23
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: "nope" }, current).zenCanvasTypingSpeed,
+      1.25
     );
   });
 

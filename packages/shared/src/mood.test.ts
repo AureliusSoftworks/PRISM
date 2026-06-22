@@ -98,6 +98,35 @@ test("ignored AskQuestion respects mood sensitivity", () => {
   assert.ok(high.engagement < low.engagement);
 });
 
+test("ignored AskQuestion penalty levels stay modest but ordered", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const light = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "light"
+  );
+  const normal = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "normal"
+  );
+  const elevated = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "elevated"
+  );
+
+  assert.ok(light.annoyance < normal.annoyance);
+  assert.ok(normal.annoyance < elevated.annoyance);
+  assert.ok(light.warmth > normal.warmth);
+  assert.ok(normal.warmth > elevated.warmth);
+  assert.equal(shouldPrismMoodStartIgnoreCooldown(elevated), false);
+  assert.equal(shouldPrismMoodDeclineResponse(elevated), false);
+});
+
 test("high mood sensitivity crosses boundaries sooner", () => {
   const mood = {
     ...createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z"),

@@ -38,6 +38,43 @@ export function withSentenceCasedPromptInsertion(value: string, before: string):
   return value;
 }
 
+function promptShortcutFollowingPunctuation(after: string): string {
+  const match = /\S/u.exec(after);
+  return match?.[0] ?? "";
+}
+
+function withInlinePromptShortcutCasing(value: string, before: string): string {
+  if (promptInsertionStartsSentence(before)) {
+    return withSentenceCasedPromptInsertion(value, before);
+  }
+  const chars = Array.from(value);
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index]!;
+    if (!/[A-Za-z]/u.test(char)) continue;
+    const nextChar = chars[index + 1] ?? "";
+    if (char === "I" && !/[A-Za-z]/u.test(nextChar)) return value;
+    if (char === char.toLocaleUpperCase() && nextChar === nextChar.toLocaleUpperCase()) {
+      return value;
+    }
+    const lowered = char.toLocaleLowerCase();
+    if (lowered === char) return value;
+    chars[index] = lowered;
+    return chars.join("");
+  }
+  return value;
+}
+
+export function formatPromptShortcutInsertion(
+  value: string,
+  before: string,
+  after: string
+): string {
+  const cased = withInlinePromptShortcutCasing(value, before).trimEnd();
+  const following = promptShortcutFollowingPunctuation(after);
+  if (!/^[,.;:!?]$/u.test(following)) return cased;
+  return cased.replace(/[.!?,;:]+$/u, "").trimEnd();
+}
+
 export function splitPromptRandomizationOptions(source: string): string[] {
   const options: string[] = [];
   let current = "";

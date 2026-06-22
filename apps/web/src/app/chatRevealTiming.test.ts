@@ -6,6 +6,8 @@ import {
   isChatRevealEllipsisToken,
   resolveChatRevealPauseKind,
   resolveChatRevealStepDelayMs,
+  resolveChatRevealWordDelayMsByMood,
+  scaleChatRevealTimingSettings,
   tokenizeChatRevealText,
   type ChatRevealTimingSettings,
 } from "./chatRevealTiming.ts";
@@ -53,5 +55,19 @@ describe("chat reveal timing helpers", () => {
     assert.equal(resolveChatRevealStepDelayMs("I", "neutral", timing), 500);
     assert.equal(resolveChatRevealStepDelayMs("I,", "neutral", timing), 1200);
     assert.equal(resolveChatRevealStepDelayMs("I.", "neutral", timing), 1400);
+  });
+
+  it("scales every reveal delay by the provided multiplier", () => {
+    const scaled = scaleChatRevealTimingSettings(DEFAULT_CHAT_REVEAL_TIMING, 0.5);
+
+    assert.equal(scaled.baseWordDelayMs, DEFAULT_CHAT_REVEAL_TIMING.baseWordDelayMs * 0.5);
+    assert.equal(scaled.clausePauseMs, DEFAULT_CHAT_REVEAL_TIMING.clausePauseMs * 0.5);
+    assert.equal(scaled.sentencePauseMs, DEFAULT_CHAT_REVEAL_TIMING.sentencePauseMs * 0.5);
+    assert.equal(scaled.ellipsisHoldMs, DEFAULT_CHAT_REVEAL_TIMING.ellipsisHoldMs * 0.5);
+    assert.equal(scaled.ellipsisDotStepMs, DEFAULT_CHAT_REVEAL_TIMING.ellipsisDotStepMs * 0.5);
+    assert.equal(
+      resolveChatRevealWordDelayMsByMood("warm", scaled),
+      resolveChatRevealWordDelayMsByMood("warm", DEFAULT_CHAT_REVEAL_TIMING) * 0.5
+    );
   });
 });

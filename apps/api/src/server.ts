@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
 import {
   createDatabase,
+  loadPrismMoodEventMessageIds,
   loadPrismMoodState,
   recordPrismMoodEventOnce,
   upsertPrismMoodState,
@@ -17,7 +18,10 @@ import {
   requireValidSession,
   resolveSessionToken,
 } from "./auth.ts";
-import { resolveAskQuestionTimeoutApplicability } from "./ask-question-timeout.ts";
+import {
+  classifyAskQuestionTimeoutPenalty,
+  resolveAskQuestionTimeoutApplicability,
+} from "./ask-question-timeout.ts";
 import { buildHealthResponse } from "./health.ts";
 import {
   validateApiKeyCredential,
@@ -136,6 +140,7 @@ import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
   normalizeZenAutonomyEnabled,
+  normalizeZenCanvasTypingSpeed,
   normalizeZenFreshStartGapMs,
   normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenMoodSensitivity,
@@ -212,7 +217,9 @@ import {
   type ChatMessage,
   type OpinionBand,
   type OpinionTrend,
+  type PrismMoodIgnoredQuestionPenaltyLevel,
   type SessionOpinion,
+  type ZenAskQuestionPatienceInput,
   type ZenAutonomyInput,
   type ZenPersonaTransitionInput,
 } from "@localai/shared";
@@ -378,6 +385,7 @@ interface UserDbRow {
   zen_wallpaper_reveal_delay_message_count: number | null;
   zen_wallpaper_reveal_span_message_count: number | null;
   zen_mood_sensitivity: number | null;
+  zen_canvas_typing_speed: number | null;
   zen_ask_question_patience_enabled: number | null;
   zen_ask_question_patience_ms: number | null;
   zen_autonomy_enabled: number | null;
@@ -522,7 +530,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -749,6 +757,77 @@ function readZenAutonomy(value: unknown): ZenAutonomyInput | undefined {
       ? record.clientTurnId.trim().slice(0, 80)
       : randomId(8);
   return { source: "idle", activeBotId, idleMs, clientTurnId };
+}
+
+function readAskQuestionPenaltyLevel(
+  value: unknown
+): PrismMoodIgnoredQuestionPenaltyLevel | undefined {
+  return value === "light" || value === "normal" || value === "elevated"
+    ? value
+    : undefined;
+}
+
+function readZenAskQuestionPatience(
+  value: unknown
+): ZenAskQuestionPatienceInput | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "ask_question_patience") return undefined;
+  const activeBotId =
+    typeof record.activeBotId === "string" && record.activeBotId.trim().length > 0
+      ? record.activeBotId.trim()
+      : null;
+  const assistantMessageId =
+    typeof record.assistantMessageId === "string" &&
+    record.assistantMessageId.trim().length > 0
+      ? record.assistantMessageId.trim().slice(0, 120)
+      : undefined;
+  const prompt =
+    typeof record.prompt === "string" && record.prompt.trim().length > 0
+      ? record.prompt.trim().replace(/\s+/g, " ").slice(0, 500)
+      : undefined;
+  const options = Array.isArray(record.options)
+    ? record.options
+        .map((option) => {
+          if (!option || typeof option !== "object") return null;
+          const row = option as Record<string, unknown>;
+          const id =
+            typeof row.id === "string" && row.id.trim().length > 0
+              ? row.id.trim().slice(0, 80)
+              : null;
+          const label =
+            typeof row.label === "string" && row.label.trim().length > 0
+              ? row.label.trim().replace(/\s+/g, " ").slice(0, 160)
+              : null;
+          return id && label ? { id, label } : null;
+        })
+        .filter((option): option is { id: string; label: string } => option !== null)
+        .slice(0, 4)
+    : undefined;
+  const timeoutMs =
+    typeof record.timeoutMs === "number" && Number.isFinite(record.timeoutMs)
+      ? Math.max(0, Math.round(record.timeoutMs))
+      : undefined;
+  const activeElapsedMs =
+    typeof record.activeElapsedMs === "number" && Number.isFinite(record.activeElapsedMs)
+      ? Math.max(0, Math.round(record.activeElapsedMs))
+      : undefined;
+  const penaltyLevel = readAskQuestionPenaltyLevel(record.penaltyLevel);
+  const clientTurnId =
+    typeof record.clientTurnId === "string" && record.clientTurnId.trim().length > 0
+      ? record.clientTurnId.trim().slice(0, 80)
+      : randomId(8);
+  return {
+    source: "ask_question_patience",
+    activeBotId,
+    ...(assistantMessageId ? { assistantMessageId } : {}),
+    ...(prompt ? { prompt } : {}),
+    ...(options && options.length > 0 ? { options } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(activeElapsedMs !== undefined ? { activeElapsedMs } : {}),
+    ...(penaltyLevel ? { penaltyLevel } : {}),
+    clientTurnId,
+  };
 }
 
 function devMoodDebugAllowed(): boolean {
@@ -1745,6 +1824,12 @@ function buildRoutes(): RouteDefinition[] {
                 .get(conversationId, userId) as { n: number }
             ).n
           : messageRows.length;
+      const askQuestionTimedOutMessageIds = loadPrismMoodEventMessageIds(
+        db,
+        userId,
+        conversationId,
+        "ignored_question"
+      );
       // Match the shared ChatMessage shape used by POST /api/chat and the
       // web UI so both endpoints agree.
       const messages = messageRows.map((row): ChatMessage => {
@@ -1797,6 +1882,9 @@ function buildRoutes(): RouteDefinition[] {
             ? { moodConfidence: assembled.moodConfidence }
             : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+          ...(assembled.askQuestion && askQuestionTimedOutMessageIds.has(row.id)
+            ? { askQuestionTimedOut: true }
+            : {}),
           ...(assembled.tellFictionalStory
             ? { tellFictionalStory: assembled.tellFictionalStory }
             : {}),
@@ -2926,7 +3014,7 @@ function buildRoutes(): RouteDefinition[] {
       const assistantMessageId = readString(body.assistantMessageId, "assistantMessageId").trim();
       const message = db
         .prepare(
-          `SELECT id, conversation_id, role, created_at, tool_payload
+          `SELECT id, conversation_id, role, content, created_at, tool_payload
              FROM messages
             WHERE id = ? AND conversation_id = ? AND user_id = ?
             LIMIT 1`
@@ -2936,6 +3024,7 @@ function buildRoutes(): RouteDefinition[] {
             id: string;
             conversation_id: string;
             role: string;
+            content: string;
             created_at: string;
             tool_payload: string | null;
           }
@@ -2975,6 +3064,7 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       const timeoutMessageId = applicability.messageId;
+      const penaltyLevel = classifyAskQuestionTimeoutPenalty(message);
 
       const timeoutMs =
         typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
@@ -2998,6 +3088,7 @@ function buildRoutes(): RouteDefinition[] {
           payload: {
             ...(timeoutMs !== null ? { timeoutMs } : {}),
             ...(activeElapsedMs !== null ? { activeElapsedMs } : {}),
+            penaltyLevel,
           },
         });
         if (applied) {
@@ -3008,7 +3099,8 @@ function buildRoutes(): RouteDefinition[] {
             applyPrismMoodIgnoredQuestion(
               currentMood,
               now,
-              normalizeZenMoodSensitivity(user.zen_mood_sensitivity)
+              normalizeZenMoodSensitivity(user.zen_mood_sensitivity),
+              penaltyLevel
             )
           );
         }
@@ -3022,6 +3114,7 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         applied,
         duplicate: !applied,
+        penaltyLevel,
         prismMood: persistedMood,
       });
     }),
@@ -3368,8 +3461,13 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen" ? readZenPersonaTransition(body.personaTransition) : undefined;
       const requestedZenAutonomy =
         mode === "zen" ? readZenAutonomy(body.zenAutonomy) : undefined;
+      const requestedAskQuestionPatience =
+        mode === "zen" ? readZenAskQuestionPatience(body.zenAskQuestionPatience) : undefined;
       const message =
-        starterPrompt || requestedPersonaTransition || requestedZenAutonomy
+        starterPrompt ||
+        requestedPersonaTransition ||
+        requestedZenAutonomy ||
+        requestedAskQuestionPatience
           ? ""
           : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
@@ -3425,6 +3523,11 @@ function buildRoutes(): RouteDefinition[] {
       const personaTransition =
         mode === "zen" ? requestedPersonaTransition : undefined;
       const zenAutonomy = mode === "zen" ? requestedZenAutonomy : undefined;
+      const zenAskQuestionPatience =
+        mode === "zen" ? requestedAskQuestionPatience : undefined;
+      if (zenAskQuestionPatience && botId === undefined) {
+        effectiveBotId = zenAskQuestionPatience.activeBotId;
+      }
       if (zenAutonomy) {
         if (!normalizeZenAutonomyEnabled(user.zen_autonomy_enabled)) {
           throw new HttpError(403, "Zen Autonomy is disabled.");
@@ -3689,6 +3792,7 @@ function buildRoutes(): RouteDefinition[] {
             botId: effectiveBotId,
             ...(personaTransition ? { personaTransition } : {}),
             ...(zenAutonomy ? { zenAutonomy } : {}),
+            ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
             incognito,
             ephemeralMessages,
             botSystemPrompt,
@@ -4896,6 +5000,9 @@ function buildRoutes(): RouteDefinition[] {
           zenMoodSensitivity: normalizeZenMoodSensitivity(
             user.zen_mood_sensitivity
           ),
+          zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeed(
+            user.zen_canvas_typing_speed
+          ),
           zenAskQuestionPatienceEnabled: normalizeZenAskQuestionPatienceEnabled(
             user.zen_ask_question_patience_enabled
           ),
@@ -5109,6 +5216,7 @@ function buildRoutes(): RouteDefinition[] {
         zenWallpaperRevealSpanMessageCount:
           user.zen_wallpaper_reveal_span_message_count,
         zenMoodSensitivity: user.zen_mood_sensitivity,
+        zenCanvasTypingSpeed: user.zen_canvas_typing_speed,
         zenAskQuestionPatienceEnabled: user.zen_ask_question_patience_enabled,
         zenAskQuestionPatienceMs: user.zen_ask_question_patience_ms,
         zenAutonomyEnabled: user.zen_autonomy_enabled,
@@ -5171,7 +5279,7 @@ function buildRoutes(): RouteDefinition[] {
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -5214,6 +5322,7 @@ function buildRoutes(): RouteDefinition[] {
         next.zenWallpaperRevealDelayMessageCount,
         next.zenWallpaperRevealSpanMessageCount,
         next.zenMoodSensitivity,
+        next.zenCanvasTypingSpeed,
         next.zenAskQuestionPatienceEnabled ? 1 : 0,
         next.zenAskQuestionPatienceMs,
         next.zenAutonomyEnabled ? 1 : 0,

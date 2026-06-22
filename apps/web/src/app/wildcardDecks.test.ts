@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   findDuplicateWildcardDeckValueIssues,
   formatWildcardDeckValuesText,
+  inferWildcardDeckValueInflectionMode,
+  inflectWildcardDeckValues,
   normalizeWildcardDeckNameInput,
   normalizeWildcardDeckValueList,
   normalizeWildcardDecks,
@@ -31,6 +33,32 @@ describe("wildcard deck helpers", () => {
       formatWildcardDeckValuesText(["lemon", "potato; chicken", "lemon"]),
       "lemon\npotato\nchicken"
     );
+  });
+
+  it("inflects wildcard values between singular and plural forms", () => {
+    assert.deepEqual(
+      inflectWildcardDeckValues(
+        ["lemon", "potato", "berry", "box", "knife", "person"],
+        "plural"
+      ),
+      ["lemons", "potatoes", "berries", "boxes", "knives", "people"]
+    );
+    assert.deepEqual(
+      inflectWildcardDeckValues(
+        ["lemons", "potatoes", "berries", "boxes", "knives", "people"],
+        "singular"
+      ),
+      ["lemon", "potato", "berry", "box", "knife", "person"]
+    );
+  });
+
+  it("inflects the final word in phrase values and infers the toggle target", () => {
+    assert.deepEqual(
+      inflectWildcardDeckValues(["red apple", "Blue City", "SHEEP"], "plural"),
+      ["red apples", "Blue Cities", "SHEEP"]
+    );
+    assert.equal(inferWildcardDeckValueInflectionMode(["cat", "dog"]), "plural");
+    assert.equal(inferWildcardDeckValueInflectionMode(["cats", "dogs"]), "singular");
   });
 
   it("finds duplicate deck values with the same normalization as saving", () => {

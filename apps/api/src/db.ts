@@ -152,6 +152,7 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
       zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
+      zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 75000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
@@ -715,6 +716,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenMoodSensitivity) {
     db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
+  }
+  const hasZenCanvasTypingSpeed = userColumns.some(
+    (column) => column.name === "zen_canvas_typing_speed"
+  );
+  if (!hasZenCanvasTypingSpeed) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;");
   }
   const hasZenAskQuestionPatienceEnabled = userColumns.some(
     (column) => column.name === "zen_ask_question_patience_enabled"
@@ -1620,6 +1627,24 @@ export function recordPrismMoodEventOnce(
       args.eventType,
       args.createdAt,
       JSON.stringify(args.payload ?? {})
-    ) as { changes?: number | bigint };
+  ) as { changes?: number | bigint };
   return Number(result.changes ?? 0) > 0;
+}
+
+export function loadPrismMoodEventMessageIds(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  eventType: string
+): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT message_id
+         FROM prism_mood_events
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND event_type = ?`
+    )
+    .all(userId, conversationId, eventType) as Array<{ message_id: string }>;
+  return new Set(rows.map((row) => row.message_id));
 }
