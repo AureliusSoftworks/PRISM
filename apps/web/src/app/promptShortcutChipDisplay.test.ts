@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   promptShortcutChipLabel,
+  promptShortcutResolvedPromptText,
   promptShortcutVisualSizingText,
 } from "./promptShortcutChipDisplay.ts";
 
@@ -30,5 +31,24 @@ describe("promptShortcutVisualSizingText", () => {
     };
 
     assert.equal(promptShortcutVisualSizingText(promptShortcut), "/big-prompt");
+  });
+});
+
+describe("promptShortcutResolvedPromptText", () => {
+  it("uses the concrete prompt stored after wildcard resolution", () => {
+    assert.equal(
+      promptShortcutResolvedPromptText(
+        { resolvedPrompt: "Tell me about the luminous garden." },
+        "/story {PLACE}"
+      ),
+      "Tell me about the luminous garden."
+    );
+  });
+
+  it("falls back to the visible prompt when no resolved prompt is stored", () => {
+    assert.equal(
+      promptShortcutResolvedPromptText({ resolvedPrompt: "   " }, "  /story {PLACE}  "),
+      "/story {PLACE}"
+    );
   });
 });

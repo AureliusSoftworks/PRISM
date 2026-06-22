@@ -24,7 +24,7 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
       { id: "gpt-4o-mini", label: "GPT 4o Mini", provider: "openai", isDefault: true },
       { id: "gpt-4o", label: "GPT 4o", provider: "openai" },
       { id: "gpt-4.1-mini", label: "GPT 4.1 Mini", provider: "openai" },
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
+      { id: "claude-sonnet-4-6", label: "Sonnet 4.6", provider: "anthropic" },
     ],
     defaults: {
       local: REQUIRED_PRIMARY_LOCAL_MODEL_ID,

@@ -2,8 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   collapseDeletedPromptWildcardDeckReferences,
+  isStandaloneWildcardComposerDraft,
   maskBuiltInWildcardSlotsForPending,
+  maskModelFilledWildcardSlotsForPending,
   promptContainsBuiltInWildcardSlots,
+  promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
   formatPromptShortcutInsertion,
   resolveBuiltInPromptWildcardInvocations,
@@ -261,6 +264,45 @@ describe("pending built-in wildcard slot masking", () => {
       ),
       "A {LOADING} with {red|green} {LOADING}."
     );
+  });
+
+  it("detects model-filled uppercase brace slots beyond the built-in list", () => {
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {WORD}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {MOOD RING}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Pick {red|green}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Keep {word} literal."), false);
+  });
+
+  it("masks model-filled brace slots for optimistic canvas placeholders", () => {
+    assert.equal(
+      maskModelFilledWildcardSlotsForPending(
+        "A {WORD} with {red|green} and {MOOD RING}.",
+        "{LOADING}"
+      ),
+      "A {LOADING} with {red|green} and {LOADING}."
+    );
+  });
+});
+
+describe("isStandaloneWildcardComposerDraft", () => {
+  it("recognizes one-off bang wildcard calls", () => {
+    assert.equal(isStandaloneWildcardComposerDraft("!individually"), true);
+    assert.equal(isStandaloneWildcardComposerDraft(" !plural-noun. "), true);
+  });
+
+  it("recognizes one-off uppercase brace wildcard calls", () => {
+    assert.equal(isStandaloneWildcardComposerDraft("{WORD}"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{MOOD RING}!"), true);
+  });
+
+  it("recognizes one-off hardcoded option groups", () => {
+    assert.equal(isStandaloneWildcardComposerDraft("{red|green}"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{ soft | sharp }."), true);
+  });
+
+  it("ignores wildcard calls embedded in prose", () => {
+    assert.equal(isStandaloneWildcardComposerDraft("tell me about !topic"), false);
+    assert.equal(isStandaloneWildcardComposerDraft("use {WORD} here"), false);
   });
 });
 

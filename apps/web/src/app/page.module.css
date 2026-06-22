@@ -9331,7 +9331,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Empty-state icon — Default/private Prism variants.
  *
  * Regular preview/engaged states use the bare Prism triangle. Private
- * chats get their own hub-style black tile below so the user sees the
+ * chats get their own hub-style silver tile below so the user sees the
  * same account/avatar object from the Hub without reintroducing hue. */
 .emptyStateBrand {
   position: relative;
@@ -9413,6 +9413,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .emptyStatePrivateHero .brandIcon {
   transform: scaleY(-1);
+  filter:
+    grayscale(1)
+    contrast(1.15)
+    drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
 }
 
 /* Empty-state icon — Bot variant.
@@ -13777,6 +13781,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   vertical-align: baseline;
 }
 
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"] {
+  position: relative;
+  z-index: 20;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"][data-expanded="true"] {
+  z-index: 90;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="expandable"][data-expanded="true"] {
+  display: grid;
+  width: min(620px, 100%);
+  vertical-align: top;
+}
+
 .promptShortcutCapsule,
 .commandMentionChip {
   display: inline-flex;
@@ -13819,6 +13838,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .promptShortcutCapsule:hover,
 .promptShortcutCapsule:focus-visible,
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"][data-expanded="true"]
+  .promptShortcutCapsule,
 .commandMentionChip:hover,
 .commandMentionChip:focus-visible {
   outline: none;
@@ -13897,6 +13918,61 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg);
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   white-space: normal;
+}
+
+.promptShortcutPopout {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(520px, calc(100vw - 36px));
+  max-width: min(520px, calc(100vw - 36px));
+  z-index: 95;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #000 28%, transparent),
+    0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent) inset;
+  animation: promptShortcutPopoutIn 130ms ease-out both;
+}
+
+.promptShortcutPopout::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent-ink) 4%);
+  transform: rotate(45deg);
+}
+
+.messageUser .promptShortcutPopout {
+  right: 0;
+  left: auto;
+}
+
+.messageUser .promptShortcutPopout::before {
+  right: 18px;
+  left: auto;
+}
+
+@keyframes promptShortcutPopoutIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptShortcutPopout {
+    animation: none;
+  }
 }
 
 .promptShortcutPreviewHeader,
@@ -13982,6 +14058,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 8px;
   background: color-mix(in srgb, var(--bg-surface) 90%, #000 10%);
   white-space: pre-wrap;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="expandable"][data-expanded="true"]
+  .promptShortcutPreviewSection code {
+  max-height: none;
+  overflow: visible;
+}
+
+.promptShortcutPopout .promptShortcutPreviewSection code {
+  max-height: min(260px, 44vh);
 }
 
 .promptShortcutWildcardFill {
@@ -16267,7 +16353,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: min(680px, calc(100vw - 36px));
   justify-items: center;
   gap: clamp(10px, 1.7vh, 16px);
-  margin-top: 6px;
+  margin-top: clamp(-173px, -18dvh, -96px);
   padding:
     clamp(20px, 3.2vw, 30px)
     clamp(18px, 4vw, 36px)
@@ -16303,6 +16389,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-shadow:
     0 0 28px color-mix(in srgb, var(--accent) 22%, transparent),
     0 1px 1px rgba(0, 0, 0, 0.26);
+}
+
+.appLayout[data-zen-surface="true"]
+  .messagesEmptyState
+  .emptyStateTitle[data-zen-title-with-hero="true"] {
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  justify-items: center;
+  gap: clamp(5px, 0.9dvh, 10px);
+  line-height: 0.95;
+  letter-spacing: 0.04em;
+  white-space: normal;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitlePhrase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(7px, 0.9vw, 12px);
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleLead {
+  display: inline;
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleSubject {
+  display: block;
+  max-width: min(100%, 9.2em);
+  overflow: hidden;
+  font-size: min(1em, var(--zen-title-subject-font-cap, 1em));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .zenInlineHeroGlyph {
+  position: relative;
+  inset-block-start: auto;
+  left: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  transform: scale(0.88);
+  transform-origin: 50% 50%;
+  z-index: 1;
 }
 
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateHint {
@@ -16407,7 +16540,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeBotMenu.zenSplashModelMenu {
   min-width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(260px, calc(100vw - 24px));
-  max-height: min(228px, calc(100vh - 340px));
+  max-height: min(280px, var(--compose-menu-available-height, calc(100dvh - 180px)));
   border-radius: 9px;
   box-shadow:
     0 16px 34px rgba(0, 0, 0, 0.26),
@@ -16415,7 +16548,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenSplashModelMenu .composeBotListbox {
-  max-height: min(222px, calc(100vh - 346px));
+  max-height: min(
+    166px,
+    max(96px, calc(var(--compose-menu-available-height, 280px) - 114px))
+  );
   padding: 4px;
   gap: 1px;
   border-radius: 7px;
@@ -16425,6 +16561,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(300px, calc(100vw - 24px));
   max-height: min(380px, var(--compose-menu-available-height, calc(100dvh - 96px)));
+  margin-top: clamp(0px, 0.18dvh, 2px);
   border-radius: 9px;
   box-shadow:
     0 16px 34px rgba(0, 0, 0, 0.26),
@@ -18346,6 +18483,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
 .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea {
+  --composer-random-rainbow-period: 52rem;
   border-color: transparent;
   background:
     linear-gradient(
@@ -18369,7 +18507,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       #ff4dcb,
       #ff4d6d
     ) border-box;
-  background-size: 260% 100%, 260% 100%;
+  background-repeat: repeat-x;
+  background-size:
+    var(--composer-random-rainbow-period) 100%,
+    var(--composer-random-rainbow-period) 100%;
   box-shadow:
     0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
     0 0 26px -14px color-mix(in srgb, #2fd3e3 70%, transparent),
@@ -18715,7 +18856,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 0 0, 0 0;
   }
   to {
-    background-position: 260% 0, 260% 0;
+    background-position:
+      var(--composer-random-rainbow-period) 0,
+      var(--composer-random-rainbow-period) 0;
   }
 }
 
@@ -18724,7 +18867,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 0 0;
   }
   to {
-    background-position: 260% 0;
+    background-position: var(--composer-random-rainbow-period) 0;
   }
 }
 
@@ -19062,6 +19205,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
 .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled {
+  --composer-random-rainbow-period: 18rem;
   border-color: transparent;
   background:
     linear-gradient(
@@ -19075,7 +19219,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       #ff4dcb,
       #ff4d6d
     );
-  background-size: 260% 100%;
+  background-repeat: repeat-x;
+  background-size: var(--composer-random-rainbow-period) 100%;
   color: #111111;
   filter: none;
   opacity: 0.92;
@@ -19215,6 +19360,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: max(100%, 300px);
 }
 
+.composeModelMenu > .composeBotListbox {
+  flex: 1 1 auto;
+}
+
+.composeModelMenuFooter {
+  flex: 0 0 auto;
+  padding: 6px 7px 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+}
+
+.composeModelMenuFooter .composeModelEffortControl {
+  margin: 0;
+}
+
 .composeModelOption {
   justify-content: space-between;
   gap: 14px;
@@ -19274,6 +19434,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+}
+
+.composeModelEffortControl[data-disabled="true"] {
+  border-color: color-mix(in srgb, var(--line) 86%, var(--fg-muted) 14%);
 }
 
 .composeModelEffortHeader {
@@ -19362,6 +19526,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateY(-1px);
 }
 
+.composeModelEffortControl[data-disabled="true"] .composeModelEffortSliderShell {
+  filter: saturate(0.2);
+  opacity: 0.28;
+}
+
 .composeModelEffortControl input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
@@ -19380,6 +19549,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.composeModelEffortHint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
   color: var(--fg-subtle);
 }
 
@@ -21466,6 +21642,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 18px;
 }
 
+.promptCenterPanelTop {
+  display: grid;
+  gap: 8px;
+}
+
+.promptCenterPanelMessages {
+  display: grid;
+  gap: 6px;
+}
+
+.promptCenterPanelMessages .panelNotice,
+.promptCenterPanelMessages .error {
+  margin-top: 0;
+}
+
 .promptCenterWorkspace {
   min-height: 0;
   display: grid;
@@ -21642,6 +21833,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: text;
 }
 
+.promptCenterWildcardValueBox[data-selecting="true"] {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.promptCenterWildcardValueBox[data-selecting="true"] .promptCenterWildcardValueChip {
+  user-select: none;
+}
+
 .promptCenterWildcardValueBox::-webkit-scrollbar {
   width: 8px;
 }
@@ -21778,6 +21978,38 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     var(--bg-elevated);
 }
 
+.promptCenterWildcardValueChip[data-selected="true"] {
+  border-color: color-mix(in srgb, #2fd3e3 72%, var(--accent-ink));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 26%, transparent),
+      color-mix(in srgb, #2fd3e3 22%, transparent)
+    ),
+    color-mix(in srgb, var(--accent-ink) 14%, var(--bg-elevated));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #2fd3e3 18%, transparent),
+    0 1px 0 color-mix(in srgb, #ffffff 18%, transparent) inset,
+    0 8px 16px color-mix(in srgb, #000 10%, transparent);
+}
+
+.promptCenterWildcardSelectionMarquee {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, #2fd3e3 76%, var(--accent-ink));
+  border-radius: 6px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 12%, transparent),
+      color-mix(in srgb, #2fd3e3 14%, transparent)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
+    0 8px 24px color-mix(in srgb, #000 12%, transparent);
+}
+
 .promptCenterListSection {
   min-height: 0;
   display: grid;
@@ -21906,6 +22138,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterPromptRowFrame {
   min-width: 0;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
@@ -21914,6 +22147,48 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterPromptRowFrame[data-deletable="true"] {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.promptCenterPromptRowActions {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.promptCenterPromptRowFrame[data-draggable="true"] .promptCenterPromptRow {
+  cursor: grab;
+}
+
+.promptCenterPromptRowFrame[data-dragging="true"] {
+  opacity: 0.48;
+}
+
+.promptCenterPromptRowFrame[data-dragging="true"] .promptCenterPromptRow {
+  cursor: grabbing;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement]::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent-ink) 34%, transparent);
+  pointer-events: none;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement="before"]::before {
+  top: -5px;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement="after"]::before {
+  bottom: -5px;
 }
 
 .promptCenterPromptRow {
@@ -22079,6 +22354,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   word-break: break-word;
 }
 
+.promptCenterEditorTitleBlock {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
 .promptCenterEditorHeaderActions {
   flex: 0 0 auto;
   display: flex;
@@ -22090,24 +22373,68 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterStatusBadge {
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--line));
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: color-mix(in srgb, var(--accent-ink) 8%, transparent);
-  color: color-mix(in srgb, var(--accent-ink) 78%, var(--fg));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
   font-size: 11px;
   font-weight: 800;
 }
 
-.promptCenterStatusBadge[data-read-only="true"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
-  background: color-mix(in srgb, var(--bg-hover) 82%, transparent);
+.promptCenterStatusBadge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-muted) 66%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg-muted) 11%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="dirty"] {
+  color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
+}
+
+.promptCenterStatusBadge[data-state="dirty"]::before {
+  background: #ff9f1c;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff9f1c 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="invalid"] {
+  color: color-mix(in srgb, #ff4d6d 74%, var(--fg));
+}
+
+.promptCenterStatusBadge[data-state="invalid"]::before {
+  background: #ff4d6d;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff4d6d 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="saved"]::before {
+  background: #b7e63a;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #b7e63a 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="readonly"] {
   color: var(--fg-muted);
 }
 
 .promptCenterSaveButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.promptCenterCloneButton {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.promptCenterCloneButton :where(svg) {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
 }
 
 .promptCenterReadonlyBody,
@@ -22297,6 +22624,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterDangerRow button {
   border-color: color-mix(in srgb, #ff4d6d 40%, var(--line));
   color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
+}
+
+.promptCenterDangerRow .promptCenterClearDeckButton {
+  border-color: color-mix(in srgb, #ff9f1c 34%, var(--line));
+  color: color-mix(in srgb, #ffbe55 74%, var(--fg));
 }
 
 .promptCenterPromptWildcardDock {
@@ -25178,6 +25510,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--bg-hover);
 }
 
+.commandHelpNames {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
 .commandHelpSlash {
   min-width: 0;
   overflow: hidden;
@@ -25185,6 +25523,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
   color: color-mix(in srgb, var(--command-color, var(--accent-ink)) 78%, var(--fg));
   font: 800 13px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.commandHelpAliases {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font: 750 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .commandHelpDescription {

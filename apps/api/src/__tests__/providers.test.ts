@@ -277,7 +277,7 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
     assert.equal(
       catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
-      "Claude Haiku 4.5"
+      "Haiku 4.5"
     );
     assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });

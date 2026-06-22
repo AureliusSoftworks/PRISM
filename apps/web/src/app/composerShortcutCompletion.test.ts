@@ -21,6 +21,12 @@ describe("composer shortcut exact completion matching", () => {
     assert.equal(composerShortcutQueryExactlyMatchesCommand("dr", draftReply), true);
   });
 
+  it("matches punctuation-only aliases", () => {
+    const help = { name: "help", aliases: ["?"] };
+    assert.equal(composerShortcutQueryExactlyMatchesCommand("?", help), true);
+    assert.equal(composerShortcutQueryExactlyMatchesCommand("/?", help), true);
+  });
+
   it("does not match partial command names", () => {
     assert.equal(composerShortcutQueryExactlyMatchesCommand("draft", draftReply), false);
     assert.equal(composerShortcutQueryExactlyMatchesCommand("draft-repl", draftReply), false);

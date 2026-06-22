@@ -71,6 +71,18 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
+  it("recognizes known punctuation-only slash aliases", () => {
+    const out = resolveLeadingDevCommandTextRanges("/?", {
+      commandNames: ["help", "?"],
+    });
+    assert.deepEqual(out, {
+      commandStart: 0,
+      commandEnd: 2,
+      quotedStringRanges: [],
+      actionTokenRanges: [],
+    });
+  });
+
   it("resolves command bounds for a leading slash command", () => {
     const out = resolveLeadingDevCommandTextRanges('  /echo "hello"');
     assert.deepEqual(out, {

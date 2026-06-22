@@ -3525,6 +3525,15 @@ function splitAskQuestionAlternativeList(raw: string): string[] {
     : [];
 }
 
+function stripAskQuestionOpenEndedPreface(question: string): string {
+  return question
+    .replace(
+      /^(?:(?:i\s+wonder|i['’]?m\s+curious|curious|tell\s+me|i\s+want\s+to\s+know|i['’]?d\s+like\s+to\s+know|can\s+i\s+ask|may\s+i\s+ask)[,;:]\s*)/i,
+      ""
+    )
+    .trim();
+}
+
 function extractAlternativeAskQuestionOptions(question: string): string[] {
   const core = stripAskQuestionCandidateLine(question).replace(/[?!.]+$/u, "").trim();
   if (!core) return [];
@@ -3555,6 +3564,14 @@ function extractAlternativeAskQuestionOptions(question: string): string[] {
     if (options.length >= 2) return options;
   }
 
+  const coreWithoutOpenEndedPreface = stripAskQuestionOpenEndedPreface(core);
+  if (
+    coreWithoutOpenEndedPreface !== core &&
+    /^(?:what|why|how)\b/i.test(coreWithoutOpenEndedPreface)
+  ) {
+    return [];
+  }
+
   if (
     !/^(?:who|what|when|where|why|how|which|do|does|did|would|could|should|can|is|are|will|have|has|may|might)\b/i.test(
       core
@@ -3569,12 +3586,13 @@ function extractAlternativeAskQuestionOptions(question: string): string[] {
 
 function questionLooksOpenEndedForChips(question: string): boolean {
   const cleaned = stripAskQuestionCandidateLine(question);
-  const normalized = normalizeAskQuestionComparisonText(cleaned);
+  const openEndedCandidate = stripAskQuestionOpenEndedPreface(cleaned);
+  const normalized = normalizeAskQuestionComparisonText(openEndedCandidate);
   if (!normalized) return true;
   if (ASKQUESTION_OPEN_ENDED_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return true;
   }
-  return /^(?:what|why|how)\b/i.test(cleaned);
+  return /^(?:what|why|how)\b/i.test(openEndedCandidate);
 }
 
 function extractClosedChoiceAskQuestion(displayContent: string): AskQuestionPayload | undefined {
@@ -3762,7 +3780,7 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
   };
 }
 
-function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
+export function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
   return (
     extractDynamicAskQuestion(displayContent) ??
     extractClosedChoiceAskQuestion(displayContent)

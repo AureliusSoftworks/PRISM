@@ -411,14 +411,14 @@ function anthropicModelLabelFromId(id: string): string | null {
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
   if (latest) {
-    return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+    return `${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   }
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
   if (named) {
     const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
-    return `Claude ${titleCaseModelToken(named[1]!)} ${version}${formatOpenAiSnapshotSuffix(named[4])}`;
+    return `${titleCaseModelToken(named[1]!)} ${version}${formatOpenAiSnapshotSuffix(named[4])}`;
   }
   return null;
 }
