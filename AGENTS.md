@@ -88,6 +88,8 @@ generateImage()           → OpenAI DALL-E 3 (only when effective mode is ONLIN
 2. Otherwise, add a server-side guard that returns an error when `preferredProvider === "local"`, and reflect this in the UI.
 3. Add a test to pin the mode gate.
 
+For experimental simulated-effort / Psychic planning validation, use `docs/experimental-effort-eval-runbook.md`.
+
 ## UX Lanes
 
 Chat, Zen, and Coffee are hard-separated — server guardrails enforce the split:

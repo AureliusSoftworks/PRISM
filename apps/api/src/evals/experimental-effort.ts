@@ -57,6 +57,13 @@ interface EvalRunResult {
     provider: ProviderName;
     model?: string;
     simulated: boolean;
+    passCount?: number;
+    passes?: Array<{
+      name: "plan" | "draft" | "audit" | "revision";
+      chars: number;
+      warning?: string;
+    }>;
+    guidanceChars?: number;
     scratchpadChars: number;
     scratchpad?: string;
   };
@@ -109,7 +116,7 @@ function printHelp(): void {
 Runs the same prompt through:
   1. local baseline (${DEFAULT_OPTIONS.localModel}, no simulated effort)
   2. thinking reference (${DEFAULT_OPTIONS.thinkingModel}, native effort)
-  3. local simulated effort (${DEFAULT_OPTIONS.localModel}, planning pass + final pass)
+  3. local simulated effort (${DEFAULT_OPTIONS.localModel}, tiered private passes + final pass)
 
 Usage:
   npm run eval:experimental-effort -- [options]
@@ -330,6 +337,17 @@ function markdownReport(report: EvalReport): string {
       lines.push(`- Psychic summary: ${run.psychicThought.summary}`);
     }
     if (run.psychicDebug) {
+      lines.push(`- Private pass count: ${run.psychicDebug.passCount ?? 0}`);
+      lines.push(`- Guidance chars: ${run.psychicDebug.guidanceChars ?? 0}`);
+      if (run.psychicDebug.passes && run.psychicDebug.passes.length > 0) {
+        for (const pass of run.psychicDebug.passes) {
+          lines.push(
+            `- Private pass: ${pass.name}; chars=${pass.chars}${
+              pass.warning ? `; warning=${pass.warning}` : ""
+            }`
+          );
+        }
+      }
       lines.push(`- Planning scratchpad chars: ${run.psychicDebug.scratchpadChars}`);
     }
     if (run.planningWarnings && run.planningWarnings.length > 0) {
@@ -515,6 +533,9 @@ async function main(): Promise<void> {
                   provider: result.psychicDebug.provider,
                   ...(result.psychicDebug.model ? { model: result.psychicDebug.model } : {}),
                   simulated: result.psychicDebug.simulated,
+                  passCount: result.psychicDebug.passCount,
+                  passes: result.psychicDebug.passes,
+                  guidanceChars: result.psychicDebug.guidanceChars,
                   scratchpadChars: scratchpad.length,
                   ...(options.includeScratchpad ? { scratchpad } : {}),
                 },

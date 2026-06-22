@@ -200,6 +200,13 @@ export interface PsychicDebugPayload {
   provider: ProviderName;
   model?: string;
   simulated: boolean;
+  passCount?: number;
+  passes?: Array<{
+    name: "plan" | "draft" | "audit" | "revision";
+    chars: number;
+    warning?: string;
+  }>;
+  guidanceChars?: number;
 }
 
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
@@ -1116,13 +1123,30 @@ interface PsychicPlanningTrace {
   shouldGuideFinalAnswer: boolean;
 }
 
+type PsychicPrivatePassName = "plan" | "draft" | "audit" | "revision";
+
+interface PsychicPrivatePassDiagnostic {
+  name: PsychicPrivatePassName;
+  chars: number;
+  warning?: string;
+}
+
+interface PsychicPrivateTextPassResult {
+  name: Exclude<PsychicPrivatePassName, "plan">;
+  content: string;
+  diagnostic: PsychicPrivatePassDiagnostic;
+}
+
 const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
   "You are Prism's private planning pass for the next assistant reply.",
   "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
   "All three fields must be non-empty.",
   "summary: one concise user-visible reasoning summary under 80 words.",
   "scratchpad: 2-4 short private planning notes about constraints, risks, and answer shape. This is a developer-only simulated planning artifact, not hidden chain-of-thought from a provider.",
-  "answerGuidance: 2-4 concrete instructions for the final reply. Do not include secrets or long reasoning.",
+  "answerGuidance: 2-4 concrete instructions for the final reply. Preserve exact requested formats, labels, word limits, and forbidden-word rules. If the user asks for labels like S1-S6, use those exact labels and do not convert them to 1-6. Do not include secrets or long reasoning.",
+  "When the user assigns requirements to rows, bullets, or labels, restate those label requirements in answerGuidance and preserve required key terms.",
+  "If the user says local-only, prefer local machine, local device, local provider, or Ollama wording; never replace local-only with infrastructure-only wording.",
+  "If the user asks for a UI indicator, prefer concrete indicator words like toast, badge, line, or label instead of turning the indicator into a settings toggle.",
 ].join("\n");
 
 const PSYCHIC_PLANNING_JSON_SCHEMA = {
@@ -1148,6 +1172,17 @@ const PSYCHIC_PLANNING_JSON_SCHEMA = {
   required: ["summary", "scratchpad", "answerGuidance"],
 } satisfies Record<string, unknown>;
 
+function psychicPlanPromptForEffort(effort: ReasoningEffort): string {
+  if (effort === "minimal") {
+    return PSYCHIC_PLANNING_SYSTEM_PROMPT;
+  }
+  return [
+    PSYCHIC_PLANNING_SYSTEM_PROMPT,
+    "For this effort level, make the scratchpad more useful: explicitly note required constraints, forbidden words, likely failure modes, and the answer structure.",
+    "Keep it concise, but do not leave the final answer to rediscover the constraints.",
+  ].join("\n");
+}
+
 function clampPsychicPlanningText(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
@@ -1172,6 +1207,39 @@ function psychicPlanningTokenBudget(effort: ReasoningEffort): number {
   }
 }
 
+function psychicPrivateTextPassTokenBudget(
+  effort: ReasoningEffort,
+  passName: Exclude<PsychicPrivatePassName, "plan">
+): number {
+  switch (passName) {
+    case "draft":
+      return effort === "xhigh" ? 1100 : 900;
+    case "audit":
+      return effort === "medium" ? 420 : effort === "xhigh" ? 760 : 620;
+    case "revision":
+      return 760;
+  }
+}
+
+function simulatedEffortTextPasses(
+  effort: ReasoningEffort
+): Array<Exclude<PsychicPrivatePassName, "plan">> {
+  switch (effort) {
+    case "medium":
+      return ["audit"];
+    case "high":
+      return ["draft", "audit"];
+    case "xhigh":
+      return ["draft", "audit", "revision"];
+    case "minimal":
+    case "low":
+    case "none":
+    case "auto":
+    default:
+      return [];
+  }
+}
+
 function providerModelSupportsNativeReasoningEffort(
   provider: LlmProvider,
   botOverrides: GenerateOptions | undefined
@@ -1180,15 +1248,30 @@ function providerModelSupportsNativeReasoningEffort(
   return openAiModelSupportsReasoningEffort(describeRequestedModel(provider, botOverrides));
 }
 
-function shouldSimulateReasoningEffort(args: {
+function simulatedEffortNoticeDetail(args: {
   experimentalAllModelEffortEnabled?: boolean;
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
+}): string | null {
+  if (args.experimentalAllModelEffortEnabled !== true) return null;
+  if (args.effort === "auto" || args.effort === "none") return null;
+  if (args.provider.name === "local") return null;
+  const model = describeRequestedModel(args.provider, args.botOverrides);
+  if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
+    return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
+  }
+  return `online_simulated_effort_disabled; provider=${args.provider.name}; model=${model}; effort=${args.effort}; reason=local_only`;
+}
+
+function shouldSimulateReasoningEffort(args: {
+  experimentalAllModelEffortEnabled?: boolean;
+  provider: LlmProvider;
+  effort: ReasoningEffort;
 }): boolean {
   if (args.experimentalAllModelEffortEnabled !== true) return false;
   if (args.effort === "auto" || args.effort === "none") return false;
-  return !providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides);
+  return args.provider.name === "local";
 }
 
 function parsePsychicPlanningResponse(raw: string): {
@@ -1209,6 +1292,225 @@ function parsePsychicPlanningResponse(raw: string): {
   }
 }
 
+function buildPsychicDraftPrompt(plan: {
+  summary: string;
+  scratchpad: string;
+  answerGuidance: string;
+}): string {
+  return [
+    "You are Prism's private draft pass for the next assistant reply.",
+    "Write a private draft answer that follows the plan. This draft is never shown to the user.",
+    "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
+    "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes or summaries.",
+    "If the user says local-only, use local machine, local device, local provider, or Ollama wording; do not replace local-only with infrastructure-only wording.",
+    "If Psychic mode needs a visible indicator, name a toast, badge, subtle line, or label, not a toggle.",
+    "Do not reveal chain-of-thought. Do not mention that this is a draft.",
+    "",
+    `Planning summary: ${plan.summary}`,
+    `Planning notes: ${plan.scratchpad}`,
+    `Answer guidance: ${plan.answerGuidance}`,
+  ].join("\n");
+}
+
+function buildPsychicAuditPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  draft?: string;
+}): string {
+  return [
+    "You are Prism's private audit pass for the next assistant reply.",
+    "Return ONLY 3-5 short bullet lines of guidance, no more than 120 words total.",
+    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
+    "Each bullet must start with '- Fix:' or '- Keep:'.",
+    "Check missing constraints, privacy issues, answer shape, and likely user-facing mistakes.",
+    "Specifically check exact row/step labels, forbidden words, word limits, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
+    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
+    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
+    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    "Do not include raw chain-of-thought.",
+    "",
+    "User request to audit against:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    "",
+    `Planning summary: ${args.plan.summary}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    `Planning notes to audit: ${args.plan.scratchpad}`,
+    args.draft
+      ? "A private draft was produced. Audit it against the user request and plan, but do not quote or copy it."
+      : "",
+  ].join("\n");
+}
+
+function buildPsychicRevisionPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  draft?: string;
+  audit?: string;
+}): string {
+  return [
+    "You are Prism's private revision-guidance pass for the next assistant reply.",
+    "Return ONLY 3-5 short bullet lines of final-answer guidance, no more than 120 words total.",
+    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
+    "Each bullet must start with '- Final:'.",
+    "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
+    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
+    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
+    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    "",
+    "User request to revise against:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    "",
+    `Planning summary: ${args.plan.summary}`,
+    `Initial guidance: ${args.plan.answerGuidance}`,
+    args.audit ? `Audit guidance: ${clampPsychicPlanningText(args.audit, 1800)}` : "",
+    args.draft
+      ? "A private draft was produced. Use the audit to improve final-answer instructions, but do not quote or copy the draft."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function appendPsychicPrivateArtifactsToScratchpad(args: {
+  planScratchpad: string;
+  draft?: string;
+  audit?: string;
+  revision?: string;
+}): string {
+  const parts = [
+    `Plan scratchpad:\n${args.planScratchpad}`,
+    args.draft ? `Private draft:\n${args.draft}` : "",
+    args.audit ? `Private audit:\n${args.audit}` : "",
+    args.revision ? `Private revision guidance:\n${args.revision}` : "",
+  ].filter(Boolean);
+  return clampPsychicPlanningText(parts.join("\n\n"), 8000);
+}
+
+function composePsychicFinalGuidance(args: {
+  planGuidance: string;
+  audit?: string;
+  revision?: string;
+}): string {
+  const latestGuidance = args.revision || args.audit;
+  const parts = [
+    "Non-negotiable final-answer rules: follow the user's exact requested format, labels, word limits, and forbidden-word rules; preserve required key terms; if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase; if labels like S1-S6 are requested, use those exact labels and do not convert them to 1-6; include every named item; never add a Note or summary after an exact table/list request; do not mention private planning; if Psychic mode needs an indicator, use toast, badge, line, or label.",
+    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 520)}`,
+    latestGuidance
+      ? `Latest checklist: ${clampPsychicPlanningText(latestGuidance, 520)}`
+      : "",
+  ].filter(Boolean);
+  return clampPsychicPlanningText(parts.join("\n"), 1100);
+}
+
+function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): string {
+  for (let index = promptMessages.length - 1; index >= 0; index -= 1) {
+    const message = promptMessages[index];
+    if (message?.role === "user") return message.content;
+  }
+  return "";
+}
+
+function sanitizeExplicitConstraintLine(line: string): string {
+  return line
+    .replace(/^\s*[-*]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(
+      /\bwithout using the word\s+["'`]?([A-Za-z0-9_-]+)["'`]?/gi,
+      "without using the forbidden word"
+    );
+}
+
+function extractExplicitUserConstraints(
+  promptMessages: readonly ProviderMessage[]
+): string[] {
+  const latestUserMessage = latestUserPromptContent(promptMessages);
+  if (!latestUserMessage.trim()) return [];
+  const constraints: string[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of latestUserMessage.split(/\r?\n/)) {
+    const line = sanitizeExplicitConstraintLine(rawLine);
+    if (!line || /^constraints:?$/i.test(line)) continue;
+    const isConstraint =
+      /^S\d+\s+must\b/i.test(line) ||
+      /^(?:do not|keep\b|use columns:)/i.test(line) ||
+      /\bexactly\s+\d+\b.*\blabeled\s+S\d+/i.test(line);
+    if (!isConstraint || seen.has(line.toLowerCase())) continue;
+    seen.add(line.toLowerCase());
+    constraints.push(line);
+    if (constraints.length >= 10) break;
+  }
+  return constraints;
+}
+
+async function runPsychicPrivateTextPass(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+  passName: Exclude<PsychicPrivatePassName, "plan">;
+  systemPrompt: string;
+  includeOriginalPromptAsUser?: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+}): Promise<PsychicPrivateTextPassResult> {
+  const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
+  let raw = "";
+  try {
+    raw = await args.provider.generateResponse(
+      [
+        { role: "system", content: args.systemPrompt },
+        ...(args.includeOriginalPromptAsUser === false
+          ? []
+          : args.promptMessages.filter((message) => message.role !== "system")),
+      ],
+      {
+        ...args.botOverrides,
+        maxTokens: psychicPrivateTextPassTokenBudget(args.effort, args.passName),
+        temperature: 0,
+        reasoningEffort: args.effort === "auto" ? undefined : args.effort,
+        jsonMode: false,
+        jsonSchema: undefined,
+        jsonSchemaName: undefined,
+        ...(args.signal ? { signal: args.signal } : {}),
+      }
+    );
+    throwIfChatRequestCancelled(args.signal);
+  } catch (error) {
+    const warning = `${args.passName}_failed; provider=${
+      args.provider.name
+    }; model=${requestedModel}; detail=${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    args.onPlanningWarning?.(warning);
+    return {
+      name: args.passName,
+      content: "",
+      diagnostic: { name: args.passName, chars: 0, warning },
+    };
+  }
+
+  const content = clampPsychicPlanningText(raw, 3200);
+  if (!content) {
+    const warning = `${args.passName}_empty; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`;
+    args.onPlanningWarning?.(warning);
+    return {
+      name: args.passName,
+      content: "",
+      diagnostic: { name: args.passName, chars: 0, warning },
+    };
+  }
+  return {
+    name: args.passName,
+    content,
+    diagnostic: { name: args.passName, chars: content.length },
+  };
+}
+
 function appendPsychicAnswerGuidance(
   promptMessages: ProviderMessage[],
   planningTrace: PsychicPlanningTrace | null
@@ -1216,10 +1518,31 @@ function appendPsychicAnswerGuidance(
   if (!planningTrace?.shouldGuideFinalAnswer || !planningTrace.answerGuidance) {
     return promptMessages;
   }
+  const latestUserMessage = latestUserPromptContent(promptMessages);
+  const explicitConstraints = extractExplicitUserConstraints(promptMessages);
+  const targetedConstraintHints = [
+    /\blocal[-\s]?only\b/i.test(latestUserMessage)
+      ? "Local-only wording: use the word local plus machine, device, provider, or Ollama; do not replace local-only with infrastructure-only wording."
+      : "",
+    /\bprivate planning pass\b/i.test(latestUserMessage)
+      ? "Private planning wording: use the exact phrase private planning pass where that requirement applies."
+      : "",
+    /\bscratchpads?\s+are\s+not\s+persisted\b/i.test(latestUserMessage)
+      ? "Scratchpad wording: use the exact phrase scratchpads are not persisted where that requirement applies."
+      : "",
+  ].filter(Boolean);
   const content = [
     "Private guidance from Prism's simulated planning pass. Use this to answer well, but do not mention the planning pass.",
+    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 are requested, use S1-S6 and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
     `Reasoning summary: ${planningTrace.debug.summary}`,
     `Answer guidance: ${planningTrace.answerGuidance}`,
+    ...targetedConstraintHints,
+    ...(explicitConstraints.length > 0
+      ? [
+          "Explicit user constraints to obey exactly:",
+          ...explicitConstraints.map((constraint) => `- ${constraint}`),
+        ]
+      : []),
   ].join("\n");
   return [...promptMessages, { role: "system", content }];
 }
@@ -1234,12 +1557,49 @@ async function runPsychicPlanningPass(args: {
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
 }): Promise<PsychicPlanningTrace | null> {
-  const shouldPlan = args.simulated || args.psychicModeEnabled === true;
-  if (!shouldPlan) return null;
-
   const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
+  const shouldPlan =
+    args.simulated || (args.psychicModeEnabled === true && args.provider.name === "local");
+  if (!shouldPlan) {
+    if (args.psychicModeEnabled === true) {
+      const nativeReasoning = providerModelSupportsNativeReasoningEffort(
+        args.provider,
+        args.botOverrides
+      );
+      const summary = nativeReasoning
+        ? "Psychic mode is active. This online model keeps reasoning provider-side, so Prism did not run local simulated private passes."
+        : "Psychic mode is active. Online model selected, so Prism did not run local simulated private passes.";
+      const createdAt = new Date().toISOString();
+      const debug: PsychicDebugPayload = {
+        summary,
+        scratchpad: "",
+        effort: args.effort,
+        provider: args.provider.name,
+        model: requestedModel,
+        simulated: false,
+        passCount: 0,
+        passes: [],
+        guidanceChars: 0,
+      };
+      return {
+        psychicThought: {
+          v: 1,
+          summary,
+          effort: args.effort,
+          provider: args.provider.name,
+          model: requestedModel,
+          createdAt,
+        },
+        debug,
+        answerGuidance: "",
+        shouldGuideFinalAnswer: false,
+      };
+    }
+    return null;
+  }
+
   const planningMessages: ProviderMessage[] = [
-    { role: "system", content: PSYCHIC_PLANNING_SYSTEM_PROMPT },
+    { role: "system", content: psychicPlanPromptForEffort(args.effort) },
     ...args.promptMessages.filter((message) => message.role !== "system"),
   ];
   let raw = "";
@@ -1272,13 +1632,65 @@ async function runPsychicPlanningPass(args: {
     return null;
   }
   const createdAt = new Date().toISOString();
+  const latestUserRequest = latestUserPromptContent(args.promptMessages);
+  const passDiagnostics: PsychicPrivatePassDiagnostic[] = [
+    { name: "plan", chars: parsed.scratchpad.length },
+  ];
+  let draft = "";
+  let audit = "";
+  let revision = "";
+  if (args.simulated) {
+    for (const passName of simulatedEffortTextPasses(args.effort)) {
+      const systemPrompt =
+        passName === "draft"
+          ? buildPsychicDraftPrompt(parsed)
+        : passName === "audit"
+          ? buildPsychicAuditPrompt({ plan: parsed, userRequest: latestUserRequest, draft })
+          : buildPsychicRevisionPrompt({
+              plan: parsed,
+              userRequest: latestUserRequest,
+              draft,
+              audit,
+            });
+      const result = await runPsychicPrivateTextPass({
+        provider: args.provider,
+        promptMessages: args.promptMessages,
+        botOverrides: args.botOverrides,
+        effort: args.effort,
+        passName,
+        systemPrompt,
+        includeOriginalPromptAsUser: passName === "draft",
+        signal: args.signal,
+        onPlanningWarning: args.onPlanningWarning,
+      });
+      passDiagnostics.push(result.diagnostic);
+      if (!result.content) continue;
+      if (passName === "draft") draft = result.content;
+      if (passName === "audit") audit = result.content;
+      if (passName === "revision") revision = result.content;
+    }
+  }
+  const answerGuidance = composePsychicFinalGuidance({
+    planGuidance: parsed.answerGuidance,
+    audit,
+    revision,
+  });
+  const liveScratchpad = appendPsychicPrivateArtifactsToScratchpad({
+    planScratchpad: parsed.scratchpad,
+    draft,
+    audit,
+    revision,
+  });
   const debug: PsychicDebugPayload = {
     summary: parsed.summary,
-    scratchpad: parsed.scratchpad,
+    scratchpad: liveScratchpad,
     effort: args.effort,
     provider: args.provider.name,
     model: requestedModel,
     simulated: args.simulated,
+    passCount: passDiagnostics.filter((pass) => pass.chars > 0).length,
+    passes: passDiagnostics,
+    guidanceChars: answerGuidance.length,
   };
   return {
     ...(args.psychicModeEnabled
@@ -1294,7 +1706,7 @@ async function runPsychicPlanningPass(args: {
         }
       : {}),
     debug,
-    answerGuidance: parsed.answerGuidance,
+    answerGuidance,
     shouldGuideFinalAnswer: args.simulated,
   };
 }
@@ -1313,6 +1725,7 @@ async function generateWithLenientLocalFallback(args: {
   userMessage?: string;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
+  onSimulatedEffortNotice?: (detail: string) => void;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
@@ -1343,9 +1756,17 @@ async function generateWithLenientLocalFallback(args: {
   const simulatedEffort = shouldSimulateReasoningEffort({
     experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
     provider: args.provider,
+    effort: requestedEffort,
+  });
+  const simulatedEffortNotice = simulatedEffortNoticeDetail({
+    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
+    provider: args.provider,
     botOverrides: args.botOverrides,
     effort: requestedEffort,
   });
+  if (simulatedEffortNotice) {
+    args.onSimulatedEffortNotice?.(simulatedEffortNotice);
+  }
   const planningTrace = await runPsychicPlanningPass({
     provider: args.provider,
     promptMessages: args.promptMessages,
@@ -5332,6 +5753,8 @@ export async function processChatMessage(
       signal: settings.signal,
       onPlanningWarning: (detail) =>
         pushBackendEvent("model", "Psychic planning unavailable", detail),
+      onSimulatedEffortNotice: (detail) =>
+        pushBackendEvent("model", "Simulated effort skipped", detail),
     });
     throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
@@ -6215,6 +6638,8 @@ export async function processChatMessage(
         signal: settings.signal,
         onPlanningWarning: (detail) =>
           pushBackendEvent("model", "Psychic planning unavailable", detail),
+        onSimulatedEffortNotice: (detail) =>
+          pushBackendEvent("model", "Simulated effort skipped", detail),
       }));
     } catch (error) {
       rollbackIfCancelledBeforeAssistantReply(error);

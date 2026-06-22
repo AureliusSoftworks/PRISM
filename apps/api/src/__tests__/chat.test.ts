@@ -296,7 +296,7 @@ describe("processChatMessage Psychic planning", () => {
         mode: "sandbox",
         experimentalAllModelEffortEnabled: true,
         psychicModeEnabled: true,
-        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+        botOverrides: { model: "llama3.2", reasoningEffort: "minimal" },
       }
     );
 
@@ -307,9 +307,14 @@ describe("processChatMessage Psychic planning", () => {
       userMessage?.psychicThought?.summary,
       "I weighed the request and chose a practical sequence."
     );
-    assert.equal(userMessage?.psychicThought?.effort, "high");
-    assert.equal(result.psychicDebug?.scratchpad, "developer-only hidden sketch");
+    assert.equal(userMessage?.psychicThought?.effort, "minimal");
+    assert.match(result.psychicDebug?.scratchpad ?? "", /developer-only hidden sketch/);
     assert.equal(result.psychicDebug?.simulated, true);
+    assert.equal(result.psychicDebug?.passCount, 1);
+    assert.deepEqual(
+      result.psychicDebug?.passes?.map((pass) => pass.name),
+      ["plan"]
+    );
     assert.doesNotMatch(JSON.stringify(userMessage), /developer-only hidden sketch/);
 
     const storedUserPayload = db
@@ -324,7 +329,211 @@ describe("processChatMessage Psychic planning", () => {
     });
     assert.ok(finalRequest);
     assert.doesNotMatch(JSON.stringify(finalRequest?.body), /developer-only hidden sketch/);
-    assert.ok(requests.every((request) => !request.url.includes("api.openai.com")));
+    assert.ok(
+      requests.every(
+        (request) =>
+          !request.url.includes("api.openai.com") &&
+          !request.url.includes("api.anthropic.com")
+      )
+    );
+    await flushBackgroundTitleJobs();
+  });
+
+  it("scales simulated effort provider passes by effort", async () => {
+    const cases: Array<{
+      effort: ReasoningEffort;
+      passes: Array<"plan" | "draft" | "audit" | "revision">;
+    }> = [
+      { effort: "none", passes: [] },
+      { effort: "minimal", passes: ["plan"] },
+      { effort: "low", passes: ["plan"] },
+      { effort: "medium", passes: ["plan", "audit"] },
+      { effort: "high", passes: ["plan", "draft", "audit"] },
+      { effort: "xhigh", passes: ["plan", "draft", "audit", "revision"] },
+    ];
+
+    for (const testCase of cases) {
+      const db = createChatTestDb();
+      const requests: Array<{ url: string; messages?: Array<{ content: string }> }> = [];
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          messages?: Array<{ content: string }>;
+        };
+        requests.push({
+          url: input instanceof Request ? input.url : String(input),
+          ...body,
+        });
+        const content = body.messages?.map((message) => message.content).join("\n") ?? "";
+        if (content.includes("Prism's private planning pass")) {
+          return new Response(
+            JSON.stringify({
+              message: {
+                content: JSON.stringify({
+                  summary: "I mapped the constraints.",
+                  scratchpad: "private plan secret",
+                  answerGuidance: "Use the mapped constraints.",
+                }),
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (content.includes("Prism's private draft pass")) {
+          return new Response(
+            JSON.stringify({ message: { content: "private draft secret" } }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (content.includes("Prism's private audit pass")) {
+          return new Response(
+            JSON.stringify({ message: { content: "private audit guidance" } }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (content.includes("Prism's private revision-guidance pass")) {
+          return new Response(
+            JSON.stringify({ message: { content: "private revision guidance" } }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ message: { content: "Final answer." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }) as typeof fetch;
+
+      const result = await processChatMessage(
+        db,
+        `user-${testCase.effort}`,
+        "Help me plan this.",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          incognito: true,
+          mode: "sandbox",
+          experimentalAllModelEffortEnabled: true,
+          botOverrides: { model: "llama3.2", reasoningEffort: testCase.effort },
+        }
+      );
+
+      const privatePassRequests = requests.filter((request) =>
+        request.messages?.some((message) => message.content.includes("Prism's private"))
+      );
+      const turnGenerationRequests = requests.filter(
+        (request) =>
+          !request.messages?.some((message) =>
+            message.content.includes("You title chats for a conversation sidebar")
+          )
+      );
+      assert.equal(turnGenerationRequests.length, testCase.passes.length + 1);
+      assert.equal(privatePassRequests.length, testCase.passes.length);
+      if (testCase.passes.length === 0) {
+        assert.equal(result.psychicDebug, undefined);
+      } else {
+        assert.deepEqual(
+          result.psychicDebug?.passes?.map((pass) => pass.name),
+          testCase.passes
+        );
+        assert.equal(result.psychicDebug?.passCount, testCase.passes.length);
+      }
+      assert.ok(
+        requests.every(
+          (request) =>
+            !request.url.includes("api.openai.com") &&
+            !request.url.includes("api.anthropic.com")
+        )
+      );
+      await flushBackgroundTitleJobs();
+    }
+  });
+
+  it("continues with prior guidance when a later simulated pass fails", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ messages?: Array<{ content: string }> }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      requests.push(body);
+      const content = body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's private planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the constraints.",
+                scratchpad: "private plan secret",
+                answerGuidance: "Use the mapped constraints.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private draft pass")) {
+        return new Response(
+          JSON.stringify({ message: { content: "private draft secret" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(JSON.stringify({ message: { content: "" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Final answer." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help me plan this.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Final answer."
+    );
+    assert.match(result.psychicDebug?.scratchpad ?? "", /private draft secret/);
+    assert.ok(
+      result.psychicDebug?.passes?.some(
+        (pass) =>
+          pass.name === "audit" &&
+          (pass.warning?.includes("audit_empty") ||
+            pass.warning?.includes("audit_failed"))
+      )
+    );
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Psychic planning unavailable" &&
+          (event.detail?.includes("audit_empty") ||
+            event.detail?.includes("audit_failed"))
+      )
+    );
+    const finalRequest = requests.find((request) =>
+      request.messages?.some((message) =>
+        message.content.includes("Private guidance from Prism's simulated planning pass")
+      )
+    );
+    assert.ok(finalRequest);
+    assert.doesNotMatch(JSON.stringify(finalRequest), /private draft secret/);
+    assert.doesNotMatch(JSON.stringify(finalRequest), /private plan secret/);
+    assert.match(JSON.stringify(finalRequest), /Use the mapped constraints/);
     await flushBackgroundTitleJobs();
   });
 
@@ -371,6 +580,202 @@ describe("processChatMessage Psychic planning", () => {
       )
     );
     await flushBackgroundTitleJobs();
+  });
+
+  it("does not simulate effort for online non-reasoning OpenAI models", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ url, body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Online answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help me online.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Online answer."
+    );
+    assert.equal(result.psychicDebug, undefined);
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Simulated effort skipped" &&
+          event.detail?.includes("online_simulated_effort_disabled") &&
+          event.detail?.includes("provider=openai")
+      )
+    );
+  });
+
+  it("preserves native OpenAI reasoning without simulated private passes", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Native reasoning answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Use native reasoning.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.body.reasoning_effort, "high");
+    assert.equal(result.psychicDebug, undefined);
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Simulated effort skipped" &&
+          event.detail?.includes("native_reasoning_preserved") &&
+          event.detail?.includes("provider=openai")
+      )
+    );
+  });
+
+  it("keeps online Psychic mode summary-only without extra online effort calls", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      assert.doesNotMatch(JSON.stringify(body), /Private guidance from Prism/);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Online psychic answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help with Psychic on.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: true,
+        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(result.psychicDebug?.simulated, false);
+    assert.equal(result.psychicDebug?.passCount, 0);
+    assert.deepEqual(result.psychicDebug?.passes, []);
+    assert.equal(result.psychicDebug?.scratchpad, "");
+    const userMessage = result.conversation.messages.find(
+      (message) => message.role === "user"
+    );
+    assert.match(
+      userMessage?.psychicThought?.summary ?? "",
+      /did not run local simulated private passes/
+    );
+  });
+
+  it("does not run simulated effort passes for Anthropic models", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ url, body });
+      assert.equal(url, "https://api.anthropic.com/v1/messages");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "Anthropic answer." }],
+          stop_reason: "end_turn",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help with Opus.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "anthropic",
+        anthropicApiKey: "sk-ant-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: true,
+        botOverrides: { model: "claude-opus-4-8", reasoningEffort: "xhigh" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Anthropic answer."
+    );
+    assert.equal(result.psychicDebug?.simulated, false);
+    assert.equal(result.psychicDebug?.passCount, 0);
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Simulated effort skipped" &&
+          event.detail?.includes("online_simulated_effort_disabled") &&
+          event.detail?.includes("provider=anthropic")
+      )
+    );
   });
 });
 
