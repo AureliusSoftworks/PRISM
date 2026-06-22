@@ -58,6 +58,9 @@ export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 export const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 export const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
+export const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
+export const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
+export const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
 export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
 export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
 export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
@@ -109,6 +112,7 @@ export interface CurrentSettings {
   zenWallpaperRevealDelayMessageCount: number | null;
   zenWallpaperRevealSpanMessageCount: number | null;
   zenMoodSensitivity: number | null;
+  zenCanvasTypingSpeed: number | null;
   zenAskQuestionPatienceEnabled: number | null;
   zenAskQuestionPatienceMs: number | null;
   zenAutonomyEnabled: number | null;
@@ -157,6 +161,7 @@ export interface NextSettings {
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
+  zenCanvasTypingSpeed: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
@@ -563,6 +568,28 @@ export function normalizeZenMoodSensitivity(
   return normalizePrismMoodSensitivity(value, fallback);
 }
 
+export function normalizeZenCanvasTypingSpeed(
+  value: unknown,
+  fallback = DEFAULT_ZEN_CANVAS_TYPING_SPEED
+): number {
+  const fallbackNumber =
+    typeof fallback === "number" && Number.isFinite(fallback)
+      ? fallback
+      : DEFAULT_ZEN_CANVAS_TYPING_SPEED;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallbackNumber;
+  const clamped = Math.min(
+    MAX_ZEN_CANVAS_TYPING_SPEED,
+    Math.max(MIN_ZEN_CANVAS_TYPING_SPEED, normalized)
+  );
+  return Number(clamped.toFixed(2));
+}
+
 export function normalizeZenAskQuestionPatienceEnabled(
   value: unknown,
   fallback = DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED
@@ -865,6 +892,16 @@ export function resolveNextSettings(
           body.zenMoodSensitivity,
           currentZenMoodSensitivity
         );
+  const currentZenCanvasTypingSpeed = normalizeZenCanvasTypingSpeed(
+    current.zenCanvasTypingSpeed
+  );
+  const zenCanvasTypingSpeed =
+    body.zenCanvasTypingSpeed === undefined
+      ? currentZenCanvasTypingSpeed
+      : normalizeZenCanvasTypingSpeed(
+          body.zenCanvasTypingSpeed,
+          currentZenCanvasTypingSpeed
+        );
   const currentZenAskQuestionPatienceEnabled =
     normalizeZenAskQuestionPatienceEnabled(
       current.zenAskQuestionPatienceEnabled
@@ -981,6 +1018,7 @@ export function resolveNextSettings(
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
+    zenCanvasTypingSpeed,
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,

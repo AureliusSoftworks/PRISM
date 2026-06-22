@@ -3,10 +3,43 @@ import assert from "node:assert/strict";
 import {
   advanceAskQuestionPatience,
   buildAskQuestionInteractionKey,
+  getPendingAskQuestionState,
   normalizeAskQuestionPatienceDurationMs,
   shouldPauseAskQuestionPatience,
   shouldReportAskQuestionPatienceExpiry,
 } from "./askQuestionPatience.ts";
+
+type TestAskQuestion = {
+  name: "AskQuestion";
+  prompt: string;
+  options: Array<{ id: string; label: string }>;
+};
+
+type TestMessage = {
+  id: string;
+  role: "user" | "assistant";
+  askQuestion?: TestAskQuestion;
+  askQuestionTimedOut?: boolean;
+};
+
+function testQuestion(prompt = "Choose a route:"): TestAskQuestion {
+  return {
+    name: "AskQuestion",
+    prompt,
+    options: [
+      { id: "a", label: "A" },
+      { id: "b", label: "B" },
+    ],
+  };
+}
+
+function pendingAskQuestion(messages: TestMessage[], closed = new Set<string>()) {
+  return getPendingAskQuestionState(
+    messages,
+    (message) => message.askQuestion,
+    closed
+  );
+}
 
 describe("AskQuestion patience timer", () => {
   it("counts down only while active", () => {
@@ -136,5 +169,56 @@ describe("AskQuestion patience timer", () => {
     assert.equal(expired.expired, true);
     assert.equal(shouldReportAskQuestionPatienceExpiry({ expired: true, alreadyReported: false }), true);
     assert.equal(shouldReportAskQuestionPatienceExpiry({ expired: true, alreadyReported: true }), false);
+  });
+
+  it("keeps the latest unanswered AskQuestion selectable", () => {
+    const askQuestion = testQuestion();
+
+    assert.deepEqual(
+      pendingAskQuestion([
+        { id: "user-1", role: "user" },
+        { id: "assistant-1", role: "assistant", askQuestion },
+      ]),
+      { askQuestion, assistantMessageId: "assistant-1" }
+    );
+  });
+
+  it("closes an AskQuestion once a later assistant turn exists", () => {
+    assert.equal(
+      pendingAskQuestion([
+        { id: "user-1", role: "user" },
+        { id: "assistant-1", role: "assistant", askQuestion: testQuestion() },
+        { id: "assistant-2", role: "assistant" },
+      ]),
+      undefined
+    );
+  });
+
+  it("closes a persisted timed-out AskQuestion", () => {
+    assert.equal(
+      pendingAskQuestion([
+        { id: "user-1", role: "user" },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          askQuestion: testQuestion(),
+          askQuestionTimedOut: true,
+        },
+      ]),
+      undefined
+    );
+  });
+
+  it("closes a locally expired AskQuestion before refresh", () => {
+    assert.equal(
+      pendingAskQuestion(
+        [
+          { id: "user-1", role: "user" },
+          { id: "assistant-1", role: "assistant", askQuestion: testQuestion() },
+        ],
+        new Set(["assistant-1"])
+      ),
+      undefined
+    );
   });
 });

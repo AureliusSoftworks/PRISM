@@ -230,6 +230,8 @@ function normalizeTellFictionalStoryEnvelope(
     row.finishLabel ?? row.finishStoryLabel ?? row.finish
   );
 
+  if (!rawName && !continueLabel && !bookmarkLabel && !finishLabel) return undefined;
+
   return {
     v: 1,
     name: "tellFictionalStory",

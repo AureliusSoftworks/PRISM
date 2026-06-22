@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { recordPrismMoodEventOnce } from "../db.ts";
+import {
+  loadPrismMoodEventMessageIds,
+  recordPrismMoodEventOnce,
+} from "../db.ts";
 
 function createMoodEventTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -40,6 +43,15 @@ describe("recordPrismMoodEventOnce", () => {
           .get() as { n: number }
       ).n,
       1
+    );
+    assert.deepEqual(
+      loadPrismMoodEventMessageIds(
+        db,
+        args.userId,
+        args.conversationId,
+        args.eventType
+      ),
+      new Set([args.messageId])
     );
   });
 });

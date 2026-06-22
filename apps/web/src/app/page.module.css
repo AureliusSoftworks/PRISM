@@ -4013,8 +4013,42 @@
   filter: brightness(0);
 }
 
-.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark {
-  filter: brightness(0) invert(1);
+.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight) .hubHomeWordmark {
+  filter: grayscale(1) brightness(0) invert(1);
+}
+
+.themeLight.appLayout[data-private-active="true"] .hubHomeWordmark,
+.themeLight.appLayout[data-zen-private-tone="true"] .hubHomeWordmark {
+  filter: grayscale(1) brightness(0);
+}
+
+.appLayout[data-private-active="true"]
+  :where(
+    .brandIconShell,
+    .brandWordmark,
+    .chatBotTileBotGlyph,
+    .composeBotTriggerGlyph,
+    .emptyStateBotGlyph,
+    .conversationGroupGlyph,
+    .messageMoodBadge,
+    .providerDot,
+    .imageReadyNoticeChip
+  ),
+.appLayout[data-zen-private-tone="true"]
+  :where(
+    .brandIconShell,
+    .brandWordmark,
+    .chatBotTileBotGlyph,
+    .composeBotTriggerGlyph,
+    .emptyStateBotGlyph,
+    .conversationGroupGlyph,
+    .messageMoodBadge,
+    .providerDot,
+    .imageReadyNoticeChip
+  ),
+.composeBotMenu[data-private-tone="true"] :where(.composeBotOptionGlyph, .composeBotOptionName) {
+  filter: saturate(0.18) contrast(0.96);
 }
 
 /* ── App shell ── */
@@ -8367,10 +8401,12 @@
 
 .zenAtmosphereBackdrop img {
   position: absolute;
-  inset: -2%;
+  /* Image models sometimes bake letterbox/pillarbox gutters into odd aspect
+     outputs. The extra bleed crops those edges while keeping the center calm. */
+  inset: -6%;
   z-index: 0;
-  width: 104%;
-  height: 104%;
+  width: 112%;
+  height: 112%;
   object-fit: cover;
   opacity: calc(var(--zen-atmosphere-opacity, 0.15) * var(--zen-atmosphere-layer-opacity, 1));
   filter:
@@ -8378,11 +8414,18 @@
     contrast(0.92)
     brightness(0.78)
     grayscale(var(--zen-atmosphere-grayscale-amount));
-  transform: scale(1.01);
+  transform: scale(1.02);
   transition:
     opacity 180ms linear,
     filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
   will-change: opacity, filter;
+}
+
+.zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
+  transform:
+    scale(1.02)
+    scaleX(var(--zen-fallback-wallpaper-scale-x, 1))
+    scaleY(var(--zen-fallback-wallpaper-scale-y, 1));
 }
 
 .themeLight .zenAtmosphereBackdrop img {
@@ -12301,6 +12344,25 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
 }
 
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaInkWash {
+  --zen-persona-ink-opacity: 0.32;
+}
+
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenAtmosphereReadabilityOverlay {
+  --zen-atmosphere-readability-width: 100%;
+  left: 0;
+  right: 0;
+  width: auto;
+  transform: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaContinuityWash,
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaComposerBrushWash {
+  --zen-persona-ink-opacity: 0.24;
+}
+
 @keyframes zenPersonaContinuityWashOut {
   from {
     opacity: var(--zen-persona-ink-opacity);
@@ -13916,7 +13978,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .pendingPromptWildcardShimmer {
-  inline-size: min(22ch, 70vw);
+  inline-size: var(--pending-wildcard-shimmer-size, min(22ch, 70vw));
   max-inline-size: 100%;
   block-size: 1.05em;
 }
@@ -17179,6 +17241,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .askQuestionPatienceMeter {
   --ask-question-patience-progress: 1;
+  --ask-question-patience-progress-width: 100%;
   grid-column: 1 / -1;
   position: relative;
   width: 100%;
@@ -17200,7 +17263,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .askQuestionPatienceMeter span {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--ask-question-patience-progress-width);
   border-radius: inherit;
   background:
     linear-gradient(
@@ -17210,9 +17276,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--accent) 30%, transparent)
     );
   opacity: 0.78;
-  transform: scaleX(var(--ask-question-patience-progress));
-  transform-origin: left center;
-  transition: transform 120ms linear;
+  transform: translateX(-50%);
 }
 
 .askQuestionPatienceMeter[data-placement="rail"] {
@@ -17231,12 +17295,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .askQuestionPatienceMeter[data-expired="true"] span {
   opacity: 0.42;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .askQuestionPatienceMeter span {
-    transition: none;
-  }
 }
 
 @keyframes askQuestionPromptDockIn {
@@ -21327,6 +21385,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterModelCard label span,
 .promptCenterModelField > span,
 .promptCenterField > span,
+.promptCenterWildcardValuesHeader span,
 .promptCenterFlagsHeader span,
 .promptCenterReadonlyBlock > span {
   color: var(--fg-muted);
@@ -21510,6 +21569,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: color-mix(in srgb, #ff9f1c 78%, var(--fg));
 }
 
+.promptCenterWildcardValuesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.promptCenterWildcardValuesHeader button {
+  flex: 0 0 auto;
+}
+
 .promptCenterWildcardValueChip {
   max-width: 100%;
   min-width: 0;
@@ -21576,6 +21646,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader,
+.promptCenterWildcardValuesHeader,
 .promptCenterFlagsHeader,
 .promptCenterDangerRow {
   display: flex;
@@ -21591,6 +21662,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader button,
+.promptCenterWildcardValuesHeader button,
 .promptCenterFlagsHeader button,
 .promptCenterDangerRow button,
 .promptCenterMobileBack,
@@ -21607,6 +21679,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterListHeader button:hover,
 .promptCenterListHeader button:focus-visible,
+.promptCenterWildcardValuesHeader button:hover,
+.promptCenterWildcardValuesHeader button:focus-visible,
 .promptCenterFlagsHeader button:hover,
 .promptCenterFlagsHeader button:focus-visible,
 .promptCenterDangerRow button:hover,
@@ -21621,6 +21695,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader button:disabled,
+.promptCenterWildcardValuesHeader button:disabled,
 .promptCenterFlagsHeader button:disabled,
 .promptCenterDangerRow button:disabled {
   opacity: 0.46;
@@ -31924,6 +31999,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: none;
 }
 
+.menuToggleGlyph {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
 .sidebarHandle {
   display: none;
 }
@@ -33300,45 +33381,56 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   @media (max-width: 560px) {
-  /* On phone widths (≤560px): ☰ + fixed wrench live outside the chat header.
+  /* On phone widths (≤560px): top-right navigation + fixed wrench live outside the chat header.
      561–720px uses the › sidebar handle + desktop-style header (see nested
      gutter rule below). */
   .menuToggle {
     display: inline-flex;
     position: fixed;
     top: calc(env(safe-area-inset-top) + 12px);
-    left: max(12px, calc(env(safe-area-inset-left) + 12px));
+    right: max(12px, calc(env(safe-area-inset-right) + 12px));
+    left: auto;
     z-index: 201;
-    border: 0;
-    background: transparent;
+    width: 34px;
+    height: 34px;
+    border: 1px solid color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+    background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
     color: var(--accent-ink);
     border-radius: 10px;
-    padding: 8px 12px;
+    padding: 0;
     cursor: pointer;
     font: inherit;
-    font-size: 16px;
-    box-shadow: none;
+    box-shadow:
+      0 8px 22px -18px color-mix(in srgb, var(--accent-ink) 44%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent);
+    backdrop-filter: blur(8px);
     align-items: center;
     justify-content: center;
-    transition: color 0.18s ease, opacity 0.2s ease, background 0.18s ease;
+    transition:
+      color 0.18s ease,
+      opacity 0.2s ease,
+      background 0.18s ease,
+      border-color 0.18s ease;
   }
 
   .menuToggle:focus-visible {
-    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 14%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line));
     outline: none;
   }
 
   @media (hover: hover) and (pointer: fine) {
     .menuToggle:hover:not(:focus-visible) {
-      background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+      background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg-surface));
+      border-color: color-mix(in srgb, var(--accent-ink) 36%, var(--line));
     }
   }
 
-  /* Mirror ☰ — fixed top-right overflow gear + shared hide-with-drawers behavior. */
+  /* Fixed overflow gear sits beside the top-right navigation button. */
   .chatGearAnchor {
     position: fixed;
     top: calc(env(safe-area-inset-top) + 12px);
-    right: max(12px, calc(env(safe-area-inset-right) + 12px));
+    right: max(54px, calc(env(safe-area-inset-right) + 54px));
     left: auto;
     margin-left: 0;
     z-index: 860;

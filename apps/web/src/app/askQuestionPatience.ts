@@ -32,6 +32,52 @@ export interface AskQuestionInteractionKeyInput {
   options: Array<{ id: string; label: string }>;
 }
 
+export interface PendingAskQuestionMessageLike {
+  id: string;
+  role: string;
+  askQuestionTimedOut?: boolean;
+}
+
+export interface PendingAskQuestionLike {
+  name: "AskQuestion";
+  options: readonly unknown[];
+}
+
+export function getPendingAskQuestionState<
+  TMessage extends PendingAskQuestionMessageLike,
+  TAskQuestion extends PendingAskQuestionLike,
+>(
+  messages: readonly TMessage[] | undefined,
+  resolveAskQuestion: (message: TMessage) => TAskQuestion | undefined,
+  locallyClosedAssistantMessageIds?: ReadonlySet<string>
+): { askQuestion: TAskQuestion; assistantMessageId: string } | undefined {
+  if (!messages || messages.length === 0) return undefined;
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  const tail = lastUserIndex < 0 ? messages : messages.slice(lastUserIndex + 1);
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const message = tail[i]!;
+    if (message.role !== "assistant") continue;
+    const askQuestion = resolveAskQuestion(message);
+    if (
+      !askQuestion ||
+      askQuestion.name !== "AskQuestion" ||
+      (askQuestion.options.length !== 2 && askQuestion.options.length !== 3) ||
+      message.askQuestionTimedOut === true ||
+      locallyClosedAssistantMessageIds?.has(message.id)
+    ) {
+      return undefined;
+    }
+    return { askQuestion, assistantMessageId: message.id };
+  }
+  return undefined;
+}
+
 export function normalizeAskQuestionPatienceDurationMs(
   value: unknown,
   fallback = 75_000,

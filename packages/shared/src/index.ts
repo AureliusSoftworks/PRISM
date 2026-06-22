@@ -1,4 +1,5 @@
 import type { TellFictionalStoryPayload } from "./prismTool.js";
+import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 
 export {
   applyPrismMoodExpiredIgnoreCooldown,
@@ -37,6 +38,7 @@ export {
   type PrismMoodDebugPatch,
   type PrismMoodDelta,
   type PrismMoodDeltaKind,
+  type PrismMoodIgnoredQuestionPenaltyLevel,
   type PrismMoodInterruptionInput,
   type PrismMoodKey,
   type PrismMoodMode,
@@ -341,6 +343,8 @@ export interface ChatMessage {
   zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
+  /** True once the pending AskQuestion was closed by the Zen patience timer. */
+  askQuestionTimedOut?: boolean;
   /** Story action rail metadata for long fictional prose. */
   tellFictionalStory?: TellFictionalStoryPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
@@ -805,6 +809,8 @@ export interface ChatRequestPayload {
   personaTransition?: ZenPersonaTransitionInput;
   /** Zen-only idle autonomy check/turn. */
   zenAutonomy?: ZenAutonomyInput;
+  /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
+  zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
@@ -831,6 +837,18 @@ export interface ZenAutonomyInput {
   source: "idle";
   activeBotId: string | null;
   idleMs: number;
+  clientTurnId: string;
+}
+
+export interface ZenAskQuestionPatienceInput {
+  source: "ask_question_patience";
+  activeBotId: string | null;
+  assistantMessageId?: string;
+  prompt?: string;
+  options?: Array<{ id: string; label: string }>;
+  timeoutMs?: number;
+  activeElapsedMs?: number;
+  penaltyLevel?: PrismMoodIgnoredQuestionPenaltyLevel;
   clientTurnId: string;
 }
 

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  classifyAskQuestionTimeoutPenalty,
   resolveAskQuestionTimeoutApplicability,
   type AskQuestionTimeoutMessage,
 } from "../ask-question-timeout.ts";
@@ -21,6 +22,7 @@ function assistantMessage(
   return {
     id: "assistant-1",
     role: "assistant",
+    content: "Quick check: pick a direction.",
     created_at: "2026-06-21T12:00:00.000Z",
     tool_payload: askQuestionPayload,
     ...overrides,
@@ -80,6 +82,41 @@ describe("resolveAskQuestionTimeoutApplicability", () => {
         undefined
       ),
       { applies: false, reason: "not_askquestion" }
+    );
+  });
+});
+
+describe("classifyAskQuestionTimeoutPenalty", () => {
+  it("uses a light penalty for simple practical choices", () => {
+    assert.equal(
+      classifyAskQuestionTimeoutPenalty(
+        assistantMessage({ content: "Quick check: pick a direction." })
+      ),
+      "light"
+    );
+  });
+
+  it("uses the normal penalty for medium context without elevated stakes", () => {
+    assert.equal(
+      classifyAskQuestionTimeoutPenalty(
+        assistantMessage({
+          content:
+            "We have a few competing implementation tradeoffs here, and either route can work depending on how much churn is acceptable. One path keeps the current flow compact, while the other adds a bit more structure for future changes. I can keep it focused or make the model a bit richer.",
+        })
+      ),
+      "normal"
+    );
+  });
+
+  it("uses an elevated penalty for story-like or involved context", () => {
+    assert.equal(
+      classifyAskQuestionTimeoutPenalty(
+        assistantMessage({
+          content:
+            "The story has been building across this scene for a while: the character is at the threshold, the room has gone quiet, and the next choice decides whether the chapter turns toward trust or retreat.",
+        })
+      ),
+      "elevated"
     );
   });
 });

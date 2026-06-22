@@ -40,6 +40,7 @@ describe("composeZenWallpaperPrompt", () => {
     assert.doesNotMatch(prompt, /\bLuna\b/i);
     assert.doesNotMatch(prompt, /\bSarah\b/i);
     assert.doesNotMatch(prompt, /\bEestiotamm\b/i);
+    assert.match(prompt, /no borders, frames, mats, letterboxing, pillarboxing, side gutters, or empty bars/i);
     assert.match(prompt, /No text, letters, numbers, people, faces, bodies/);
   });
 

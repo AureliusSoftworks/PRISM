@@ -32,6 +32,8 @@ const CHAT_REVEAL_STRONG_MARKER_PATTERN = /\*\*/g;
 const CHAT_REVEAL_EMPHASIS_MARKER_PATTERN = /(?<!\*)\*(?!\*)/g;
 const CHAT_REVEAL_MARKDOWN_THEMATIC_BREAK_PATTERN = /^\s{0,3}([*_-])(?:\s*\1){2,}\s*$/;
 const CHAT_REVEAL_TIMING_MAX_MS = 5000;
+const CHAT_REVEAL_TIMING_MIN_MULTIPLIER = 0.05;
+const CHAT_REVEAL_TIMING_MAX_MULTIPLIER = 20;
 const CHAT_REVEAL_MOOD_WORD_REVEAL_MS: Record<ChatRevealMoodKey, number> = {
   joyful: 58,
   warm: 68,
@@ -72,6 +74,29 @@ export function normalizeChatRevealTimingSettings(
     ellipsisHoldMs: finiteMs(record.ellipsisHoldMs, fallback.ellipsisHoldMs),
     ellipsisDotStepMs: finiteMs(record.ellipsisDotStepMs, fallback.ellipsisDotStepMs),
   };
+}
+
+export function scaleChatRevealTimingSettings(
+  timing: ChatRevealTimingSettings,
+  delayMultiplier: number
+): ChatRevealTimingSettings {
+  const normalizedTiming = normalizeChatRevealTimingSettings(timing);
+  const multiplier = Number.isFinite(delayMultiplier)
+    ? Math.min(
+        CHAT_REVEAL_TIMING_MAX_MULTIPLIER,
+        Math.max(CHAT_REVEAL_TIMING_MIN_MULTIPLIER, delayMultiplier)
+      )
+    : 1;
+  return normalizeChatRevealTimingSettings(
+    {
+      baseWordDelayMs: normalizedTiming.baseWordDelayMs * multiplier,
+      clausePauseMs: normalizedTiming.clausePauseMs * multiplier,
+      sentencePauseMs: normalizedTiming.sentencePauseMs * multiplier,
+      ellipsisHoldMs: normalizedTiming.ellipsisHoldMs * multiplier,
+      ellipsisDotStepMs: normalizedTiming.ellipsisDotStepMs * multiplier,
+    },
+    normalizedTiming
+  );
 }
 
 export function normalizeChatRevealFencedCodeBlockLeadingNewline(text: string): string {
@@ -143,9 +168,12 @@ export function resolveChatRevealWordDelayMsByMood(
   timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
 ): number {
   const normalizedMood = normalizeMoodKey(moodKey);
-  return normalizedMood === "neutral"
-    ? timing.baseWordDelayMs
-    : CHAT_REVEAL_MOOD_WORD_REVEAL_MS[normalizedMood];
+  if (normalizedMood === "neutral") return timing.baseWordDelayMs;
+  const baseScale =
+    DEFAULT_CHAT_REVEAL_TIMING.baseWordDelayMs > 0
+      ? timing.baseWordDelayMs / DEFAULT_CHAT_REVEAL_TIMING.baseWordDelayMs
+      : 1;
+  return CHAT_REVEAL_MOOD_WORD_REVEAL_MS[normalizedMood] * baseScale;
 }
 
 export function resolveChatRevealTokenLetterDurationMs(

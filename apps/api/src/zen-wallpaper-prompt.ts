@@ -204,6 +204,7 @@ export function composeZenWallpaperPrompt(args: ZenWallpaperPromptArgs): string 
       ? `User atmosphere style notes: ${styleNotes}. Treat these as mood, material, texture, and composition guidance only; do not let them override PRISM's color, safety, or negative-space rules.`
       : null,
     "Add faint prismatic rainbow accents only as restrained edge-light, refractions, haze, or thin spectral glints.",
+    "Full-bleed edge-to-edge composition with atmosphere continuing past all four edges; no borders, frames, mats, letterboxing, pillarboxing, side gutters, or empty bars.",
     "No single focal subject, no busy detail, suitable for desktop and mobile chat backgrounds.",
     "No text, letters, numbers, people, faces, bodies, characters, creatures, logos, icons, symbols, UI, or screenshots.",
   ].filter((part): part is string => Boolean(part)).join(" ");

@@ -2524,6 +2524,106 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.deepEqual(lastAssistant?.askQuestion, askPayload);
   });
 
+  it("drops story action rails from story setup questions", async () => {
+    const db = createChatTestDb();
+    const storyPayload = {
+      v: 1 as const,
+      name: "tellFictionalStory" as const,
+    };
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify({ v: 1, tellFictionalStory: storyPayload })}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: `What vibe are you feeling for our story?${prismTail}`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "create a story",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "What vibe are you feeling for our story?");
+    assert.equal(lastAssistant?.tellFictionalStory, undefined);
+
+    const row = db.prepare(
+      "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
+    ).get("assistant") as { tool_payload: string | null };
+    const storedToolPayload = JSON.parse(row.tool_payload ?? "{}") as {
+      tellFictionalStory?: unknown;
+      mood?: unknown;
+    };
+    assert.equal(storedToolPayload.tellFictionalStory, undefined);
+    assert.ok(storedToolPayload.mood);
+  });
+
+  it("keeps story action rails after substantial story prose", async () => {
+    const db = createChatTestDb();
+    const storyPayload = {
+      v: 1 as const,
+      name: "tellFictionalStory" as const,
+      continueLabel: "Follow the lantern",
+      bookmarkLabel: "Mark the crossing",
+      finishLabel: "Close the tale",
+    };
+    const storyProse = [
+      "The lantern woke before the town did, breathing a small gold circle onto the fogged window.",
+      "Mira followed it through alleys that should have ended in brick, but each wall opened like a curtain when the light touched it.",
+      "By dawn she found a bridge made of rain, and beneath it the river was whispering her name in the voice of someone she had not met yet.",
+    ].join(" ");
+    const prismTail =
+      `\n<<<PRISM_TOOL>>>\n${JSON.stringify({ v: 1, tellFictionalStory: storyPayload })}\n<<<END_PRISM_TOOL>>>`;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: `${storyProse}${prismTail}`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Tell me a tiny story.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, storyProse);
+    assert.deepEqual(lastAssistant?.tellFictionalStory, storyPayload);
+
+    const row = db.prepare(
+      "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
+    ).get("assistant") as { tool_payload: string | null };
+    const storedToolPayload = JSON.parse(row.tool_payload ?? "{}") as {
+      tellFictionalStory?: typeof storyPayload;
+    };
+    assert.deepEqual(storedToolPayload.tellFictionalStory, storyPayload);
+  });
+
   it("treats selected AskQuestion options as prose instead of forcing continuation", async () => {
     const db = createChatTestDb();
     const userId = "user-1";
