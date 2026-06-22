@@ -315,6 +315,20 @@ describe("processChatMessage Psychic planning", () => {
       result.psychicDebug?.passes?.map((pass) => pass.name),
       ["plan"]
     );
+    const planningRequest = requests.find(({ body }) => {
+      const messages = body.messages as Array<{ content: string }> | undefined;
+      return messages?.some((message) =>
+        message.content.includes("Prism's private planning pass")
+      );
+    });
+    assert.match(
+      JSON.stringify(planningRequest?.body ?? {}),
+      /first-person perspective/
+    );
+    assert.match(
+      JSON.stringify(planningRequest?.body ?? {}),
+      /I've decided it makes the most sense/
+    );
     assert.doesNotMatch(JSON.stringify(userMessage), /developer-only hidden sketch/);
 
     const storedUserPayload = db
@@ -722,7 +736,7 @@ describe("processChatMessage Psychic planning", () => {
     );
     assert.match(
       userMessage?.psychicThought?.summary ?? "",
-      /did not run local simulated private passes/
+      /^I'm helping with this turn using the selected online model/
     );
   });
 

@@ -12746,7 +12746,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline;
   opacity: 0;
   --char-step-ms: 42ms;
-  animation: chatEphemeralLetterIn 0.34s ease-out both;
+  --chat-letter-fade-duration: 340ms;
+  animation: chatEphemeralLetterIn var(--chat-letter-fade-duration, 340ms) ease-out both;
   animation-delay: calc(var(--char-index, 0) * var(--char-step-ms, 42ms));
 }
 
@@ -13126,12 +13127,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
-  color: color-mix(in srgb, currentColor 76%, transparent);
+  color: color-mix(in srgb, currentColor 86%, transparent);
   font-size: 12px;
 }
 
 .psychicThoughtBlock[data-psychic-state="thinking"] {
-  color: color-mix(in srgb, currentColor 68%, transparent);
+  color: color-mix(in srgb, currentColor 88%, transparent);
 }
 
 .psychicThoughtLabel {
@@ -13160,6 +13161,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .psychicThoughtText {
+  position: relative;
   color: inherit;
 }
 
@@ -13180,22 +13182,77 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   opacity: 0.34;
 }
 
-.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtText {
+.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtText::after {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  height: 1px;
+  content: "";
   background:
     linear-gradient(
       100deg,
-      currentColor 0%,
-      color-mix(in srgb, currentColor 36%, transparent) 24%,
-      currentColor 48%,
-      color-mix(in srgb, currentColor 38%, transparent) 72%,
-      currentColor 100%
+      transparent 0%,
+      color-mix(in srgb, currentColor 28%, transparent) 26%,
+      color-mix(in srgb, currentColor 78%, transparent) 48%,
+      color-mix(in srgb, currentColor 28%, transparent) 70%,
+      transparent 100%
     );
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  background-size: 240% 100%;
+  opacity: 0.72;
   animation: psychicThoughtTextShimmer 2.1s ease-in-out infinite;
+}
+
+.psychicScratchpadBlock {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: color-mix(in srgb, currentColor 88%, transparent);
+}
+
+.psychicScratchpadHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.psychicScratchpadLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.psychicScratchpadMeta {
+  min-width: 0;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.psychicScratchpadText {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  color: inherit;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
+  font-size: 11px;
+  line-height: 1.52;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtShimmer span {
@@ -13233,17 +13290,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText,
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText::after,
   .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtShimmer span {
     animation: none !important;
   }
 
-  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText {
-    background: none;
-    color: inherit;
-    -webkit-background-clip: initial;
-    background-clip: initial;
-    -webkit-text-fill-color: currentColor;
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText::after {
+    opacity: 0.35;
   }
 
   .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtShimmer span {
@@ -17158,7 +17211,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
   opacity: 0.78;
   transform: scaleX(var(--ask-question-patience-progress));
-  transform-origin: center center;
+  transform-origin: left center;
   transition: transform 120ms linear;
 }
 

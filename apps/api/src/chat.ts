@@ -1141,7 +1141,9 @@ const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
   "You are Prism's private planning pass for the next assistant reply.",
   "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
   "All three fields must be non-empty.",
-  "summary: one concise user-visible reasoning summary under 80 words.",
+  "summary: one concise user-visible reasoning summary under 80 words, written from the assistant's first-person perspective.",
+  "The summary should sound like a short intent line, not a system caption. Prefer forms like \"I've decided it makes the most sense to ___ based on ___ in regard to ___\" or \"I'm helping the user ___, so I'm going to tell them ___\".",
+  "Do not write the summary as raw chain-of-thought, a detached label, or a third-person sentence about Prism.",
   "scratchpad: 2-4 short private planning notes about constraints, risks, and answer shape. This is a developer-only simulated planning artifact, not hidden chain-of-thought from a provider.",
   "answerGuidance: 2-4 concrete instructions for the final reply. Preserve exact requested formats, labels, word limits, and forbidden-word rules. If the user asks for labels like S1-S6, use those exact labels and do not convert them to 1-6. Do not include secrets or long reasoning.",
   "When the user assigns requirements to rows, bullets, or labels, restate those label requirements in answerGuidance and preserve required key terms.",
@@ -1156,7 +1158,8 @@ const PSYCHIC_PLANNING_JSON_SCHEMA = {
     summary: {
       type: "string",
       minLength: 1,
-      description: "Concise user-visible reasoning summary under 80 words.",
+      description:
+        "Concise user-visible first-person assistant intent summary under 80 words.",
     },
     scratchpad: {
       type: "string",
@@ -1567,8 +1570,8 @@ async function runPsychicPlanningPass(args: {
         args.botOverrides
       );
       const summary = nativeReasoning
-        ? "Psychic mode is active. This online model keeps reasoning provider-side, so Prism did not run local simulated private passes."
-        : "Psychic mode is active. Online model selected, so Prism did not run local simulated private passes.";
+        ? "I'm using the selected online reasoning model here, so I'll keep the reasoning provider-side instead of running local private passes."
+        : "I'm helping with this turn using the selected online model, so I won't run extra local Psychic passes here.";
       const createdAt = new Date().toISOString();
       const debug: PsychicDebugPayload = {
         summary,

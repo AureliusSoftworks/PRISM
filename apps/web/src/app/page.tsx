@@ -15,7 +15,6 @@ import {
   useImperativeHandle,
   forwardRef,
   useSyncExternalStore,
-  useTransition,
   type HTMLAttributes,
   type CSSProperties,
   type RefObject,
@@ -42,6 +41,17 @@ import {
   coffeeShouldQueueAssistantRevealAfterUserTyping,
 } from "./coffee-user-reveal-flow";
 import {
+  DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  DEV_PANEL_SAFE_AREA_SIDES,
+  clampDevPanelPositionToSafeArea,
+  clampDevPanelRectToSafeArea,
+  devPanelSafeAreaInsetsEqual,
+  resolveDevPanelSafeAreaInsets,
+  type DevPanelSafeAreaBlocker,
+  type DevPanelSafeAreaInsets,
+  type DevPanelSafeAreaSide,
+} from "./devPanelSafeArea";
+import {
   resolveZenLineDisplayPlacements,
   resolveZenMessageDisplayPlacement,
   resolveZenToneSpaceFromAnnoyance,
@@ -51,6 +61,7 @@ import {
 } from "./zenToneText";
 import {
   advanceAskQuestionPatience,
+  buildAskQuestionInteractionKey,
   normalizeAskQuestionPatienceDurationMs,
   shouldPauseAskQuestionPatience,
   shouldReportAskQuestionPatienceExpiry,
@@ -66,7 +77,10 @@ import {
   PSYCHIC_SLASH_COMMAND,
   parsePsychicSlashCommand,
 } from "./psychicCommand";
-import { psychicThoughtDisplayLineForMessage } from "./psychicThoughtDisplay";
+import {
+  psychicThoughtDisplayLineForMessage,
+  type PsychicCanvasScratchpadPayload,
+} from "./psychicThoughtDisplay";
 import {
   createStoryDialogState,
   createStoryInventoryViewState,
@@ -292,6 +306,7 @@ import {
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
 import {
+  resolveChatRevealDelayMultiplierForTyping,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
@@ -568,6 +583,7 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const DEV_PANEL_SAFE_AREA_ATTRIBUTE = "data-dev-panel-safe-area";
 const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
 const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 380;
 const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
@@ -1270,25 +1286,83 @@ function clampDevToolsPanelPosition(
   panelWidth: number,
   panelHeight: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): DevToolsPanelPosition {
-  const maxX = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportWidth - panelWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
-  const maxY = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportHeight - panelHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
-
-  return {
-    x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
-    y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
-  };
+  return clampDevPanelPositionToSafeArea({
+    x,
+    y,
+    panelWidth,
+    panelHeight,
+    viewportWidth,
+    viewportHeight,
+    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    safeAreaInsets,
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseDevPanelSafeAreaSides(value: string | null | undefined): DevPanelSafeAreaSide[] {
+  if (!value) return [];
+  const rawSides = value.split(/\s+/).filter(Boolean);
+  if (rawSides.includes("all")) return [...DEV_PANEL_SAFE_AREA_SIDES];
+  const sides = new Set<DevPanelSafeAreaSide>();
+  for (const side of rawSides) {
+    if (DEV_PANEL_SAFE_AREA_SIDES.includes(side as DevPanelSafeAreaSide)) {
+      sides.add(side as DevPanelSafeAreaSide);
+    }
+  }
+  return [...sides];
+}
+
+function devPanelSafeAreaRectFromDomRect(rect: DOMRect): DevPanelSafeAreaBlocker["rect"] {
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function collectDevPanelSafeAreaInsets(
+  viewportWidth: number,
+  viewportHeight: number
+): DevPanelSafeAreaInsets {
+  if (typeof document === "undefined") return DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
+  const blockers: DevPanelSafeAreaBlocker[] = [];
+  document
+    .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
+    .forEach((node) => {
+      const sides = parseDevPanelSafeAreaSides(
+        node.getAttribute(DEV_PANEL_SAFE_AREA_ATTRIBUTE)
+      );
+      if (sides.length === 0) return;
+      if (node.getAttribute("aria-hidden") === "true" || node.inert) return;
+      const style = window.getComputedStyle(node);
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.opacity === "0" ||
+        style.pointerEvents === "none"
+      ) {
+        return;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 && rect.height <= 0) return;
+      blockers.push({
+        sides,
+        rect: devPanelSafeAreaRectFromDomRect(rect),
+      });
+    });
+
+  return resolveDevPanelSafeAreaInsets({
+    blockers,
+    viewportWidth,
+    viewportHeight,
+  });
 }
 
 function normalizeStoredDevToolsPosition(
@@ -1296,13 +1370,22 @@ function normalizeStoredDevToolsPosition(
   panelWidth: number,
   panelHeight: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): DevToolsPanelPosition | null {
   if (!isRecord(value)) return null;
   const { x, y } = value;
   if (typeof x !== "number" || typeof y !== "number") return null;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return clampDevToolsPanelPosition(x, y, panelWidth, panelHeight, viewportWidth, viewportHeight);
+  return clampDevToolsPanelPosition(
+    x,
+    y,
+    panelWidth,
+    panelHeight,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
 }
 
 function initialDevLayerOrbPosition(side: "left" | "right"): DevToolsPanelPosition {
@@ -1328,39 +1411,20 @@ function shouldShowDevToolsConsoleOnly(width: number, height: number): boolean {
 function clampCompactedSummaryDebugPanelRect(
   rect: CompactedSummaryDebugPanelRect,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): CompactedSummaryDebugPanelRect {
-  const availableWidth = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
-    viewportWidth - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
-  );
-  const availableHeight = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
-    viewportHeight - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
-  );
-  const width = Math.min(
-    Math.max(rect.width, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH),
-    Math.min(COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH, availableWidth)
-  );
-  const height = Math.min(
-    Math.max(rect.height, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT),
-    availableHeight
-  );
-  const maxX = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
-    viewportWidth - width - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
-  );
-  const maxY = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
-    viewportHeight - height - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
-  );
-
-  return {
-    x: Math.min(Math.max(rect.x, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxX),
-    y: Math.min(Math.max(rect.y, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxY),
-    width,
-    height,
-  };
+  return clampDevPanelRectToSafeArea({
+    rect,
+    viewportWidth,
+    viewportHeight,
+    margin: COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
+    minWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
+    minHeight: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
+    maxWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH,
+    maxHeight: viewportHeight,
+    safeAreaInsets,
+  });
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -3234,13 +3298,20 @@ function clampCoffeePollPanelPosition(
   width: number,
   height: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): CoffeePollPanelPosition {
   const margin = 12;
-  return {
-    x: Math.max(margin, Math.min(viewportWidth - width - margin, x)),
-    y: Math.max(margin, Math.min(viewportHeight - height - margin, y)),
-  };
+  return clampDevPanelPositionToSafeArea({
+    x,
+    y,
+    panelWidth: width,
+    panelHeight: height,
+    viewportWidth,
+    viewportHeight,
+    margin,
+    safeAreaInsets,
+  });
 }
 
 function emptyCoffeeSeatBotIds(): Array<string | null> {
@@ -3674,6 +3745,8 @@ interface Message {
   promptWildcards?: PromptWildcardRunMetadata;
   /** Concise simulated reasoning summary shown when Psychic mode is enabled. */
   psychicThought?: PsychicThoughtPayload;
+  /** Live-only verbose Psychic scratchpad shown in the active canvas when Psychic is enabled. */
+  psychicScratchpad?: PsychicCanvasScratchpadPayload;
 }
 
 function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
@@ -4039,6 +4112,11 @@ const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_HEADER_REVEAL_RATIO = 0.3;
 const CHAT_MODE_COMPOSER_REVEAL_RATIO = 0.34;
+const CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER = 2;
+const CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS = 1000;
+const CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS = 1200;
+const CHAT_MODE_TYPED_LETTER_STEP_MS = 42;
+const CHAT_MODE_TYPED_LETTER_FADE_MS = 340;
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
@@ -5361,6 +5439,64 @@ interface ChatPostEnvelope {
    * and whether the parser silently dropped a tool-shaped reply.
    */
   toolCalls?: ChatToolCallEvent[];
+}
+
+type ChatPsychicDebugPayload = NonNullable<ChatPostEnvelope["psychicDebug"]>;
+
+function livePsychicScratchpadFromDebug(
+  debug: ChatPsychicDebugPayload | undefined,
+  enabled: boolean,
+  createdAt: string
+): PsychicCanvasScratchpadPayload | null {
+  if (!enabled || !debug) return null;
+  const scratchpad = debug.scratchpad.trim();
+  if (!scratchpad) return null;
+  return {
+    v: 1,
+    scratchpad,
+    effort: debug.effort,
+    provider: debug.provider,
+    ...(debug.model ? { model: debug.model } : {}),
+    simulated: debug.simulated,
+    ...(typeof debug.passCount === "number" ? { passCount: debug.passCount } : {}),
+    ...(typeof debug.guidanceChars === "number"
+      ? { guidanceChars: debug.guidanceChars }
+      : {}),
+    createdAt,
+  };
+}
+
+function attachLivePsychicScratchpadToConversation(
+  conversation: ConversationDetail,
+  debug: ChatPsychicDebugPayload | undefined,
+  enabled: boolean
+): ConversationDetail {
+  if (!enabled || !debug?.scratchpad.trim()) return conversation;
+  const targetIndex = (() => {
+    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+      const message = conversation.messages[i];
+      if (message?.role === "user" && message.psychicThought) return i;
+    }
+    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+      if (conversation.messages[i]?.role === "user") return i;
+    }
+    return -1;
+  })();
+  if (targetIndex < 0) return conversation;
+  const target = conversation.messages[targetIndex];
+  if (!target) return conversation;
+  const scratchpad = livePsychicScratchpadFromDebug(
+    debug,
+    enabled,
+    target.psychicThought?.createdAt ?? new Date().toISOString()
+  );
+  if (!scratchpad) return conversation;
+  return {
+    ...conversation,
+    messages: conversation.messages.map((message, index) =>
+      index === targetIndex ? { ...message, psychicScratchpad: scratchpad } : message
+    ),
+  };
 }
 
 interface ZenInitialStarterCachedReply {
@@ -14969,6 +15105,8 @@ interface MessageBodyProps {
   revealMoodKey?: NonNullable<Message["moodKey"]>;
   /** Live timing controls for word reveal and dynamic pauses. */
   chatRevealTiming?: ChatRevealTimingSettings;
+  /** Scales typed-word fade and letter stagger to match live reveal pacing. */
+  chatRevealAnimationMultiplier?: number;
   /** When set, `prism-bot://…` markdown links render as glyph + colored name. */
   mentionRenderBots?: readonly BotMentionPick[];
   resolvedTheme?: "light" | "dark";
@@ -16125,21 +16263,35 @@ function resolveRevealStepDelayMs(
   return resolveChatRevealStepDelayMs(previousToken, moodKey, timing);
 }
 
+function normalizeRevealDelayMultiplier(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+}
+
 function resolveVisibleTokenCountAtElapsedMs(
   tokens: string[],
   elapsedMs: number,
   moodKey?: NonNullable<Message["moodKey"]>,
-  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING,
+  delayMultiplier?: number
 ): number {
-  return resolveVisibleChatRevealTokenCountAtElapsedMs(tokens, elapsedMs, moodKey, timing);
+  return resolveVisibleChatRevealTokenCountAtElapsedMs(
+    tokens,
+    elapsedMs / normalizeRevealDelayMultiplier(delayMultiplier),
+    moodKey,
+    timing
+  );
 }
 
 function resolveRevealDurationMsForTokens(
   tokens: string[],
   moodKey?: NonNullable<Message["moodKey"]>,
-  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING,
+  delayMultiplier?: number
 ): number {
-  return resolveChatRevealDurationMsForTokens(tokens, moodKey, timing);
+  return (
+    resolveChatRevealDurationMsForTokens(tokens, moodKey, timing) *
+    normalizeRevealDelayMultiplier(delayMultiplier)
+  );
 }
 
 function resolveChatModeMessageFontSizePx(
@@ -17908,6 +18060,7 @@ function MarkdownMessageBody({
   forcedVisibleTokenCount,
   revealMoodKey,
   chatRevealTiming = DEFAULT_CHAT_REVEAL_TIMING,
+  chatRevealAnimationMultiplier,
   mentionRenderBots,
   resolvedTheme,
   commandMentionsById,
@@ -18001,6 +18154,9 @@ function MarkdownMessageBody({
   ]);
   const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
   const allowDecorativePrismText = suppressDecorativePrismText !== true;
+  const typedRevealAnimationMultiplier = normalizeRevealDelayMultiplier(
+    chatRevealAnimationMultiplier
+  );
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
   const shouldProgressiveFenceReveal = Boolean(
     renderAsEphemeralLines &&
@@ -18156,6 +18312,14 @@ function MarkdownMessageBody({
                 ellipsisPhase: tokenMeta?.isEllipsis === true ? ellipsisPhase : undefined,
               });
               const chars = Array.from(renderedToken);
+              const typedLetterStepMs = Math.round(
+                (tokenMeta?.isEllipsis
+                  ? chatRevealTiming.ellipsisDotStepMs
+                  : CHAT_MODE_TYPED_LETTER_STEP_MS) * typedRevealAnimationMultiplier
+              );
+              const typedLetterFadeDurationMs = Math.round(
+                CHAT_MODE_TYPED_LETTER_FADE_MS * typedRevealAnimationMultiplier
+              );
               const wordNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noFade;
               const letterNoFade =
                 !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade || ellipsisComplete;
@@ -18195,9 +18359,8 @@ function MarkdownMessageBody({
                           style={
                             {
                               ["--char-index" as string]: revealIndex,
-                              ...(tokenMeta?.isEllipsis
-                                ? { ["--char-step-ms" as string]: `${chatRevealTiming.ellipsisDotStepMs}ms` }
-                                : {}),
+                              ["--char-step-ms" as string]: `${typedLetterStepMs}ms`,
+                              ["--chat-letter-fade-duration" as string]: `${typedLetterFadeDurationMs}ms`,
                               ...(allowDecorativePrismText &&
                               tokenMeta?.style === "rainbow" &&
                               char.trim().length > 0
@@ -21755,7 +21918,6 @@ function HomeContent(): React.JSX.Element {
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
-  const [, startDraftTransition] = useTransition();
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
   const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
@@ -21767,6 +21929,8 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerSendTintActive, setComposerSendTintActive] = useState(false);
+  const [chatComposerLastTypedAtMs, setChatComposerLastTypedAtMs] =
+    useState<number | null>(null);
   const [chatHeaderChromeVisible, setChatHeaderChromeVisible] = useState(true);
   const [chatComposerChromeVisible, setChatComposerChromeVisible] = useState(true);
   const chatHeaderChromeVisibleRef = useRef(true);
@@ -23151,6 +23315,8 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const [devPanelSafeAreaInsets, setDevPanelSafeAreaInsets] =
+    useState<DevPanelSafeAreaInsets>(DEV_PANEL_SAFE_AREA_DEFAULT_INSETS);
   const sidebarDrawerMode = viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT;
   const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
   const comfyUiDraftHost = settings?.comfyUiHost?.trim() ?? "";
@@ -23158,6 +23324,69 @@ function HomeContent(): React.JSX.Element {
   const mobileKeyboardInset = useMobileKeyboardInset(
     composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
   );
+  useLayoutEffect(() => {
+    if (!DEV_TOOLS_ENABLED || typeof document === "undefined") return;
+
+    let frame: number | null = null;
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => scheduleMeasure());
+
+    function observeSafeAreaNodes() {
+      resizeObserver?.disconnect();
+      document
+        .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
+        .forEach((node) => resizeObserver?.observe(node));
+    }
+
+    function measure() {
+      frame = null;
+      observeSafeAreaNodes();
+      const next = collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight);
+      setDevPanelSafeAreaInsets((current) =>
+        devPanelSafeAreaInsetsEqual(current, next) ? current : next
+      );
+    }
+
+    function scheduleMeasure() {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(measure);
+    }
+
+    observeSafeAreaNodes();
+    scheduleMeasure();
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => scheduleMeasure());
+    mutationObserver?.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "class",
+        "style",
+        DEV_PANEL_SAFE_AREA_ATTRIBUTE,
+        "data-chat-sidebar-hidden",
+        "data-choice-composer-hidden",
+        "data-session-active",
+        "data-transcript-open",
+        "data-zen-header-hidden",
+      ],
+    });
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("transitionend", scheduleMeasure, true);
+
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("transitionend", scheduleMeasure, true);
+    };
+  }, [viewportHeight, viewportWidth]);
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
@@ -23512,10 +23741,11 @@ function HomeContent(): React.JSX.Element {
         devMoodVisualRef.current?.offsetWidth ?? 280,
         devMoodVisualRef.current?.offsetHeight ?? 220,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       )
     );
-  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
+  }, [devPanelSafeAreaInsets, devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   useEffect(() => {
     if (!devToolsRuntimeActive) return;
@@ -23526,7 +23756,8 @@ function HomeContent(): React.JSX.Element {
         devZenPauseTesterRef.current?.offsetWidth ?? 46,
         devZenPauseTesterRef.current?.offsetHeight ?? 46,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       )
     );
     setZenToolLabPosition((current) =>
@@ -23536,10 +23767,11 @@ function HomeContent(): React.JSX.Element {
         zenToolLabRef.current?.offsetWidth ?? 46,
         zenToolLabRef.current?.offsetHeight ?? 46,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       )
     );
-  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
+  }, [devPanelSafeAreaInsets, devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     if (!sidebarDrawerMode) return;
@@ -23626,12 +23858,13 @@ function HomeContent(): React.JSX.Element {
       rect.width,
       rect.height,
       window.innerWidth,
-      window.innerHeight
+      window.innerHeight,
+      devPanelSafeAreaInsets
     );
     panel.style.left = `${next.x}px`;
     panel.style.top = `${next.y}px`;
     setDevToolsPanelPosition(next);
-  }, []);
+  }, [devPanelSafeAreaInsets]);
   const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devToolsPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -23688,13 +23921,14 @@ function HomeContent(): React.JSX.Element {
         rect.width,
         rect.height,
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
+        devPanelSafeAreaInsets
       );
       panel.style.left = `${next.x}px`;
       panel.style.top = `${next.y}px`;
       setPosition(next);
     },
-    []
+    [devPanelSafeAreaInsets]
   );
   const endDevLayerOrbDrag = useCallback(
     <T extends HTMLElement,>(
@@ -23758,10 +23992,11 @@ function HomeContent(): React.JSX.Element {
         rect.width,
         rect.height,
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
+        devPanelSafeAreaInsets
       )
     );
-  }, []);
+  }, [devPanelSafeAreaInsets]);
   const endDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devMoodVisualDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -23817,12 +24052,13 @@ function HomeContent(): React.JSX.Element {
       rect.width,
       rect.height,
       window.innerWidth,
-      window.innerHeight
+      window.innerHeight,
+      devPanelSafeAreaInsets
     );
     panel.style.left = `${next.x}px`;
     panel.style.top = `${next.y}px`;
     setCoffeePollPanelPosition(next);
-  }, []);
+  }, [devPanelSafeAreaInsets]);
   const endCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -24222,11 +24458,14 @@ function HomeContent(): React.JSX.Element {
   }, [panel, editingBotId, bots]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsRuntimeActive) return;
     const panelNode = devToolsPanelRef.current;
-    if (!panelNode) return;
-    const rect = panelNode.getBoundingClientRect();
-    setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(rect.width, rect.height));
+    const node = panelNode ?? devToolsBubbleRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (panelNode) {
+      setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(rect.width, rect.height));
+    }
 
     setDevToolsPanelPosition((position) => {
       const next = clampDevToolsPanelPosition(
@@ -24235,11 +24474,19 @@ function HomeContent(): React.JSX.Element {
         rect.width,
         rect.height,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       );
       return next.x === position.x && next.y === position.y ? position : next;
     });
-  }, [devToolsOpen, viewportHeight, viewportWidth]);
+  }, [
+    devPanelSafeAreaInsets,
+    devToolsMinimized,
+    devToolsOpen,
+    devToolsRuntimeActive,
+    viewportHeight,
+    viewportWidth,
+  ]);
 
   useEffect(() => {
     const panelNode = devToolsPanelRef.current;
@@ -24265,7 +24512,8 @@ function HomeContent(): React.JSX.Element {
           width,
           height,
           viewportWidth,
-          viewportHeight
+          viewportHeight,
+          devPanelSafeAreaInsets
         );
         return next.x === position.x && next.y === position.y ? position : next;
       });
@@ -24273,7 +24521,7 @@ function HomeContent(): React.JSX.Element {
 
     resizeObserver.observe(panelNode);
     return () => resizeObserver.disconnect();
-  }, [devToolsOpen, viewportHeight, viewportWidth]);
+  }, [devPanelSafeAreaInsets, devToolsOpen, viewportHeight, viewportWidth]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -26719,8 +26967,17 @@ function HomeContent(): React.JSX.Element {
   /**
    * Word-at-a-time / token-scheduled reveals, fenced-code progressive unveil,
    * and the tap-to-interrupt typing pill — Zen chat mode only.
-   */
+  */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
+  const chatRevealDelayMultiplier = resolveChatRevealDelayMultiplierForTyping({
+    active: chatAssistantTypingMechanicsActive,
+    hasDraft: draft.trim().length > 0,
+    nowMs: chatEphemeralNowMs,
+    lastTypingAtMs: chatComposerLastTypedAtMs,
+    maxMultiplier: CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER,
+    idleHoldMs: CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS,
+    recoveryMs: CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS,
+  });
   const chatComposerChromePinned =
     composerFocused ||
     draft.trim().length > 0 ||
@@ -27140,6 +27397,7 @@ function HomeContent(): React.JSX.Element {
     completed,
     cancelledTokenCount,
     moodKey,
+    delayMultiplier,
   }: {
     revealKey: string;
     displayContent: string;
@@ -27147,6 +27405,7 @@ function HomeContent(): React.JSX.Element {
     completed: boolean;
     cancelledTokenCount?: number;
     moodKey: NonNullable<Message["moodKey"]>;
+    delayMultiplier?: number;
   }): number {
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
@@ -27170,6 +27429,7 @@ function HomeContent(): React.JSX.Element {
           moodKey,
           effectiveChatRevealTiming
         ),
+      delayMultiplier,
     });
   }
   useEffect(() => {
@@ -27295,7 +27555,8 @@ function HomeContent(): React.JSX.Element {
           resolveRevealDurationMsForTokens(
             tokenizeMessageReveal(resolveMessageDisplayContent(message)),
             resolveMessageMoodKey(message),
-            effectiveChatRevealTiming
+            effectiveChatRevealTiming,
+            chatRevealDelayMultiplier
           )
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
@@ -27325,6 +27586,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    chatRevealDelayMultiplier,
     chatArchiveRevealEpoch,
   ]);
   const chatArchiveLoadingActive =
@@ -27632,7 +27894,8 @@ function HomeContent(): React.JSX.Element {
                   revealTokens,
                   elapsedMs,
                   resolveMessageMoodKey(message),
-                  effectiveChatRevealTiming
+                  effectiveChatRevealTiming,
+                  chatRevealDelayMultiplier
                 )
               );
               return revealTokens.slice(0, visibleTokenCount).join("");
@@ -27652,6 +27915,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    chatRevealDelayMultiplier,
     latestAssistantMessageId,
     latestUserMessageIndex,
   ]);
@@ -27769,7 +28033,8 @@ function HomeContent(): React.JSX.Element {
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
       DEFAULT_MESSAGE_MOOD,
-      effectiveChatRevealTiming
+      effectiveChatRevealTiming,
+      chatRevealDelayMultiplier
     );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
@@ -27777,6 +28042,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    chatRevealDelayMultiplier,
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
@@ -27820,7 +28086,8 @@ function HomeContent(): React.JSX.Element {
             revealTokens,
             Math.max(0, Date.now() - firstSeenAt),
             latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
-            effectiveChatRevealTiming
+            effectiveChatRevealTiming,
+            chatRevealDelayMultiplier
           )
     );
     const interruptionContent = interruptedMidWordSnippet(
@@ -28256,6 +28523,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={`${styles.askQuestionRecallBubbleDock} ${styles.manualCompactionDock}`}
+        data-dev-panel-safe-area="bottom"
         data-compaction-state={manualCompactionStatus.state}
       >
         <div
@@ -28355,7 +28623,8 @@ function HomeContent(): React.JSX.Element {
           height: rect.height,
         },
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
+        devPanelSafeAreaInsets
       );
       panel.style.setProperty("--compacted-summary-debug-left", `${next.x}px`);
       panel.style.setProperty("--compacted-summary-debug-top", `${next.y}px`);
@@ -28363,7 +28632,7 @@ function HomeContent(): React.JSX.Element {
       panel.style.setProperty("--compacted-summary-debug-height", `${next.height}px`);
       setCompactedSummaryDebugPanelRect(next);
     },
-    []
+    [devPanelSafeAreaInsets]
   );
   const endCompactedSummaryDebugPanelDrag = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -28386,7 +28655,8 @@ function HomeContent(): React.JSX.Element {
       const next = clampCompactedSummaryDebugPanelRect(
         current,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       );
       return next.x === current.x &&
         next.y === current.y &&
@@ -28395,7 +28665,12 @@ function HomeContent(): React.JSX.Element {
         ? current
         : next;
     });
-  }, [compactedSummaryDebugFloatingEnabled, viewportHeight, viewportWidth]);
+  }, [
+    compactedSummaryDebugFloatingEnabled,
+    devPanelSafeAreaInsets,
+    viewportHeight,
+    viewportWidth,
+  ]);
 
   useEffect(() => {
     if (
@@ -28418,7 +28693,8 @@ function HomeContent(): React.JSX.Element {
         return clampCompactedSummaryDebugPanelRect(
           { ...current, width, height },
           viewportWidth,
-          viewportHeight
+          viewportHeight,
+          devPanelSafeAreaInsets
         );
       });
     });
@@ -28427,6 +28703,7 @@ function HomeContent(): React.JSX.Element {
   }, [
     compactedSummaryDebugFloatingEnabled,
     compactedSummaryDebugMinimized,
+    devPanelSafeAreaInsets,
     devToolsRuntimeActive,
     viewportHeight,
     viewportWidth,
@@ -28816,6 +29093,33 @@ function HomeContent(): React.JSX.Element {
   const coffeePollBubbleRef = useRef<HTMLButtonElement | null>(null);
   const coffeePollPanelDragRef = useRef<CoffeePollPanelDragState | null>(null);
   const coffeePollPanelSuppressClickRef = useRef(false);
+  useEffect(() => {
+    if (view !== "coffee" && !coffeeActivePoll) return;
+    const node = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
+    const fallbackSize = coffeePollResultsOpen && !coffeePollPanelMinimized ? 360 : 58;
+    const width = node?.offsetWidth ?? fallbackSize;
+    const height = node?.offsetHeight ?? fallbackSize;
+    setCoffeePollPanelPosition((current) => {
+      const next = clampCoffeePollPanelPosition(
+        current.x,
+        current.y,
+        width,
+        height,
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      );
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [
+    coffeeActivePoll,
+    coffeePollPanelMinimized,
+    coffeePollResultsOpen,
+    devPanelSafeAreaInsets,
+    view,
+    viewportHeight,
+    viewportWidth,
+  ]);
   const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
   const [coffeeSettingsDraft, setCoffeeSettingsDraft] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
@@ -31435,7 +31739,8 @@ function HomeContent(): React.JSX.Element {
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
       DEFAULT_MESSAGE_MOOD,
-      effectiveChatRevealTiming
+      effectiveChatRevealTiming,
+      chatRevealDelayMultiplier
     );
     const visuallyComplete =
       typeof pacedVisibleTokenCount === "number"
@@ -31452,6 +31757,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    chatRevealDelayMultiplier,
     pendingReplyVisible,
   ]);
   useEffect(() => {
@@ -33838,8 +34144,10 @@ function HomeContent(): React.JSX.Element {
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -33883,8 +34191,10 @@ function HomeContent(): React.JSX.Element {
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -35035,8 +35345,10 @@ function HomeContent(): React.JSX.Element {
     envelope: ChatPostEnvelope,
     options: { consumeCache: boolean }
   ): void {
-    const patchedConversation = applyCommandDisplayAliases(
-      applyExplicitAskQuestionFallback(envelope.conversation)
+    const patchedConversation = attachLivePsychicScratchpadToConversation(
+      applyCommandDisplayAliases(applyExplicitAskQuestionFallback(envelope.conversation)),
+      envelope.psychicDebug,
+      settings?.psychicModeEnabled === true
     );
     if (options.consumeCache) {
       clearZenInitialStarterReplyCache();
@@ -35834,8 +36146,10 @@ function HomeContent(): React.JSX.Element {
       const zenAutonomySpoke =
         isZenAutonomy && d.zenAutonomyDecision?.action === "speak";
       if (stillViewingRequest) {
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         if (isInitialZenStarterPrompt) {
           zenInitialStarterLiveEnvelopeRef.current = {
@@ -36524,7 +36838,7 @@ function HomeContent(): React.JSX.Element {
       } as React.CSSProperties;
 
       return (
-        <div className={styles.askQuestionRecallBubbleDock}>
+        <div className={styles.askQuestionRecallBubbleDock} data-dev-panel-safe-area="bottom">
           <button
             type="button"
             className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
@@ -36556,6 +36870,7 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={askQuestionRailRef}
           className={styles.askQuestionCollapsedPromptDock}
+          data-dev-panel-safe-area="bottom"
           data-ask-question-collapsed-prompt="true"
           role="status"
           aria-live="polite"
@@ -36575,6 +36890,7 @@ function HomeContent(): React.JSX.Element {
         role="group"
         aria-label="Suggested replies"
         className={railClassName}
+        data-dev-panel-safe-area="bottom"
       >
         {rail.source === "askquestion" || rail.source === "story" ? (
           <div className={styles.conversationStarterHeadingRow}>
@@ -36631,6 +36947,7 @@ function HomeContent(): React.JSX.Element {
     const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
       pendingThinking,
       pendingDelayElapsed: pendingThinking,
+      showScratchpad: devToolsRuntimeActive,
     });
     if (!psychicLine) return null;
     return (
@@ -36653,6 +36970,21 @@ function HomeContent(): React.JSX.Element {
             </span>
           ) : null}
         </p>
+        {psychicLine.scratchpad ? (
+          <div className={styles.psychicScratchpadBlock}>
+            <div className={styles.psychicScratchpadHeader}>
+              <span className={styles.psychicScratchpadLabel}>Scratchpad</span>
+              {psychicLine.scratchpadMeta ? (
+                <span className={styles.psychicScratchpadMeta}>
+                  {psychicLine.scratchpadMeta}
+                </span>
+              ) : null}
+            </div>
+            <pre className={styles.psychicScratchpadText}>
+              {psychicLine.scratchpad}
+            </pre>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -36782,7 +37114,10 @@ function HomeContent(): React.JSX.Element {
       "--memory-bubble-line-count": 1,
     } as React.CSSProperties;
     return (
-      <div className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}>
+      <div
+        className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}
+        data-dev-panel-safe-area="bottom"
+      >
         <div
           className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
           style={bubbleStyle}
@@ -36945,6 +37280,7 @@ function HomeContent(): React.JSX.Element {
       nowMs: chatEphemeralNowMs,
       completed: false,
       moodKey: DEFAULT_MESSAGE_MOOD,
+      delayMultiplier: chatRevealDelayMultiplier,
     });
     return visibleTokenCount < tokenTotal;
   }
@@ -36980,16 +37316,21 @@ function HomeContent(): React.JSX.Element {
           nowMs: chatEphemeralNowMs,
           completed: false,
           moodKey: DEFAULT_MESSAGE_MOOD,
+          delayMultiplier: chatRevealDelayMultiplier,
         });
         return visibleTokenCount < tokenTotal;
       })()
     );
   const askQuestionInteractive = pendingAskQuestion !== undefined && !pendingAskQuestionWaitingForReveal;
-  const pendingAskQuestionKey = pendingAskQuestion
-    ? `${detail?.id ?? ""}:${pendingAskQuestion.prompt}:${pendingAskQuestion.options
-        .map((opt) => `${opt.id}:${opt.label}`)
-        .join("|")}`
-    : null;
+  const pendingAskQuestionKey =
+    pendingAskQuestion && pendingAskQuestionState && detail?.id
+      ? buildAskQuestionInteractionKey({
+          conversationId: detail.id,
+          assistantMessageId: pendingAskQuestionState.assistantMessageId,
+          prompt: pendingAskQuestion.prompt,
+          options: pendingAskQuestion.options,
+        })
+      : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
   const starterPromptsAvailable =
     conversationStarterPrompts !== null &&
@@ -37150,6 +37491,7 @@ function HomeContent(): React.JSX.Element {
         active: true,
         pendingReply: Boolean(pendingReply),
         documentHidden: typeof document !== "undefined" ? document.hidden : false,
+        composerRevealed: choiceChipRailComposerRevealed,
         nowMs,
         lastTypingAtMs: askQuestionPatienceLastTypingAtMsRef.current,
       });
@@ -37196,6 +37538,7 @@ function HomeContent(): React.JSX.Element {
     askQuestionPatienceConversationId,
     askQuestionPatienceDurationMs,
     askQuestionPatienceKey,
+    choiceChipRailComposerRevealed,
     pendingReply,
   ]);
 
@@ -37281,7 +37624,7 @@ function HomeContent(): React.JSX.Element {
     setComposerFocused(true);
     setComposerSendTintActive(true);
     setComposerPrimed(false);
-    askQuestionPatienceLastTypingAtMsRef.current = performance.now();
+    markComposerTypingActivity();
     setDraft((current) => `${current}${text}`);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -37994,6 +38337,11 @@ function HomeContent(): React.JSX.Element {
     }
   }, [detail]);
 
+  function markComposerTypingActivity(): void {
+    askQuestionPatienceLastTypingAtMsRef.current = performance.now();
+    setChatComposerLastTypedAtMs(Date.now());
+  }
+
   function updateComposerDraft(nextDraft: string) {
     const normalizedNextDraft = clampTextAfterLeadingCommandChip(
       nextDraft,
@@ -38002,11 +38350,9 @@ function HomeContent(): React.JSX.Element {
     resetComposerHistoryCursor();
     if (normalizedNextDraft !== draft) {
       setComposerSendTintActive(true);
-      askQuestionPatienceLastTypingAtMsRef.current = performance.now();
+      markComposerTypingActivity();
     }
-    startDraftTransition(() => {
-      setDraft(normalizedNextDraft);
-    });
+    setDraft(normalizedNextDraft);
     if (normalizedNextDraft !== draft) {
       snapAskQuestionComposerToChatBottom();
     }
@@ -48769,6 +49115,7 @@ function HomeContent(): React.JSX.Element {
         nowMs: chatEphemeralNowMs,
         completed: false,
         moodKey: DEFAULT_MESSAGE_MOOD,
+        delayMultiplier: chatRevealDelayMultiplier,
       });
       return revealTokens.slice(0, visibleTokenCount).join("").length;
     })();
@@ -50442,6 +50789,7 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={memoryPanelRef}
           className={`${styles.panel} ${styles.panelMemories}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           data-memory-scope={memoryPanelScope}
           data-memory-physics-active={memoryPhysicsActive ? "true" : undefined}
@@ -51046,6 +51394,7 @@ function HomeContent(): React.JSX.Element {
       {panel === "command-center" && (
         <div
           className={`${styles.panel} ${styles.panelPromptCenter}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
@@ -52504,6 +52853,7 @@ function HomeContent(): React.JSX.Element {
       {panel === "settings" && (
         <div
           className={`${styles.panel} ${styles.panelSettings}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
@@ -54607,6 +54957,7 @@ function HomeContent(): React.JSX.Element {
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
+            data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
@@ -56121,6 +56472,7 @@ function HomeContent(): React.JSX.Element {
           <>
           <div
             className={`${styles.panel} ${styles.panelImages}`}
+            data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-image-scope={imagePanelScope}
             data-private-mode={appWidePrivateMode ? "true" : undefined}
@@ -58769,6 +59121,7 @@ function HomeContent(): React.JSX.Element {
         />
         <aside
           className={styles.coffeeTranscriptPanel}
+          data-dev-panel-safe-area="right"
           data-closing={coffeeTranscriptClosing ? "true" : undefined}
           aria-label="Coffee Session transcript"
         >
@@ -58849,6 +59202,7 @@ function HomeContent(): React.JSX.Element {
         />
         <aside
           className={styles.coffeeTranscriptPanel}
+          data-dev-panel-safe-area="right"
           data-closing={coffeeTranscriptClosing ? "true" : undefined}
           data-blank="true"
           aria-label="Coffee settings"
@@ -59989,7 +60343,7 @@ function HomeContent(): React.JSX.Element {
           ) : null}
         </div>
         {coffeeSessionJoinedDock ? (
-          <div className={styles.coffeeAutoplayDock}>
+          <div className={styles.coffeeAutoplayDock} data-dev-panel-safe-area="bottom">
             <p className={styles.coffeeAutoplayDockCaption}>
               {coffeeReplayActive
                 ? "Replay mode — watching the saved session back with shorter pauses."
@@ -60663,7 +61017,7 @@ function HomeContent(): React.JSX.Element {
         onContextMenu={handleCoffeeShellContextMenu}
       >
         {!coffeeSessionJoined && (
-        <aside className={styles.coffeeSidebar}>
+        <aside className={styles.coffeeSidebar} data-dev-panel-safe-area="left">
           <button
             type="button"
             className={styles.coffeeHubButton}
@@ -60725,7 +61079,7 @@ function HomeContent(): React.JSX.Element {
         )}
 
         <section className={styles.coffeeMain}>
-          <header className={styles.coffeeHeader}>
+          <header className={styles.coffeeHeader} data-dev-panel-safe-area="top">
             <div className={styles.coffeeTitleBlock}>
               <div>
                 <p className={styles.coffeeEyebrow}>Coffee Mode</p>
@@ -60950,6 +61304,7 @@ function HomeContent(): React.JSX.Element {
           {coffeeFinishedControlsVisible && (
             <section
               className={`${styles.coffeeComposer} ${styles.coffeeReplayComposerControls}`}
+              data-dev-panel-safe-area="bottom"
               aria-label="Coffee replay controls"
             >
               <div className={styles.coffeeReplayTimelineRow}>
@@ -61096,6 +61451,7 @@ function HomeContent(): React.JSX.Element {
             <form
               ref={coffeeComposerFormRef}
               className={styles.coffeeComposer}
+              data-dev-panel-safe-area="bottom"
               data-prism-compose-field="true"
               onKeyDown={handleCoffeeComposerKeyDown}
               onSubmit={(event) => {
@@ -61488,7 +61844,11 @@ function HomeContent(): React.JSX.Element {
   const renderStoryMapPanel = (episode: StoryEpisodeManifest): React.JSX.Element | null => {
     if (!storyMapOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story map">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story map"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Map</p>
@@ -61533,7 +61893,11 @@ function HomeContent(): React.JSX.Element {
   const renderStoryInventoryPanel = (): React.JSX.Element | null => {
     if (!storyInventoryOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story inventory">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story inventory"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Inventory</p>
@@ -61570,7 +61934,11 @@ function HomeContent(): React.JSX.Element {
   ): React.JSX.Element | null => {
     if (!storyTranscriptOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story transcript">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story transcript"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Log</p>
@@ -61785,7 +62153,7 @@ function HomeContent(): React.JSX.Element {
         style={appShellStyle ?? undefined}
         onContextMenu={handleStoryShellContextMenu}
       >
-        <aside className={styles.storySidebar}>
+        <aside className={styles.storySidebar} data-dev-panel-safe-area="left">
           <button
             type="button"
             className={styles.storyHomeButton}
@@ -62268,6 +62636,7 @@ function HomeContent(): React.JSX.Element {
       >
         <header
           className={styles.chatHeader}
+          data-dev-panel-safe-area="top"
           onPointerEnter={handleZenHeaderPointerEnter}
           onPointerLeave={handleZenHeaderPointerLeave}
           onFocusCapture={handleZenHeaderFocusCapture}
@@ -62872,6 +63241,7 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
+                      delayMultiplier: chatRevealDelayMultiplier,
                     });
                   })()
                 : undefined;
@@ -63098,6 +63468,7 @@ function HomeContent(): React.JSX.Element {
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   chatRevealTiming={effectiveChatRevealTiming}
+                  chatRevealAnimationMultiplier={chatLikeSurface ? chatRevealDelayMultiplier : 1}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
@@ -63206,6 +63577,7 @@ function HomeContent(): React.JSX.Element {
 
         <form
           className={styles.compose}
+          data-dev-panel-safe-area="bottom"
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
@@ -63377,6 +63749,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
+            data-dev-panel-safe-area="top"
             onClick={() => {
               setSidebarOpen(o => !o);
             }}
@@ -63390,6 +63763,7 @@ function HomeContent(): React.JSX.Element {
             className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
               panel !== null ? styles.sidebarHandleHidden : ""
             }`}
+            data-dev-panel-safe-area="left"
             onClick={() => {
               setSidebarOpen(o => !o);
             }}
@@ -63406,6 +63780,7 @@ function HomeContent(): React.JSX.Element {
       {/* Sidebar */}
       <aside
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
+        data-dev-panel-safe-area="left"
         aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
         inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
       >
@@ -63481,6 +63856,7 @@ function HomeContent(): React.JSX.Element {
       >
         <header
           className={styles.chatHeader}
+          data-dev-panel-safe-area="top"
           onPointerEnter={revealChatHeaderChrome}
           onFocusCapture={revealChatHeaderChrome}
         >
@@ -64382,6 +64758,7 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
+                      delayMultiplier: chatRevealDelayMultiplier,
                     });
                   })()
                 : undefined;
@@ -64605,6 +64982,7 @@ function HomeContent(): React.JSX.Element {
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   chatRevealTiming={effectiveChatRevealTiming}
+                  chatRevealAnimationMultiplier={chatLikeSurface ? chatRevealDelayMultiplier : 1}
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
@@ -64715,6 +65093,7 @@ function HomeContent(): React.JSX.Element {
 
         <form
           className={styles.compose}
+          data-dev-panel-safe-area="bottom"
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}

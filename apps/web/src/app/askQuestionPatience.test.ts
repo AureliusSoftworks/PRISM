@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   advanceAskQuestionPatience,
+  buildAskQuestionInteractionKey,
   normalizeAskQuestionPatienceDurationMs,
   shouldPauseAskQuestionPatience,
   shouldReportAskQuestionPatienceExpiry,
@@ -82,6 +83,42 @@ describe("AskQuestion patience timer", () => {
         lastTypingAtMs: null,
       }),
       true
+    );
+  });
+
+  it("pauses once the user opens the answer composer", () => {
+    assert.equal(
+      shouldPauseAskQuestionPatience({
+        active: true,
+        pendingReply: false,
+        documentHidden: false,
+        composerRevealed: true,
+        nowMs: 10_000,
+        lastTypingAtMs: null,
+      }),
+      true
+    );
+  });
+
+  it("keys repeated questions by assistant message id", () => {
+    const sharedQuestion = {
+      conversationId: "zen-1",
+      prompt: "Which route feels right?",
+      options: [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+    };
+
+    assert.notEqual(
+      buildAskQuestionInteractionKey({
+        ...sharedQuestion,
+        assistantMessageId: "assistant-1",
+      }),
+      buildAskQuestionInteractionKey({
+        ...sharedQuestion,
+        assistantMessageId: "assistant-2",
+      })
     );
   });
 
