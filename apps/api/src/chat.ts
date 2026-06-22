@@ -54,10 +54,12 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PsychicThoughtPayload,
   PrismMoodInterruptionInput,
   PrismMoodSnapshot,
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
+  ReasoningEffort,
   SessionOpinion,
   SentGeneratedImagePayload,
   ZenAutonomyDecision,
@@ -78,12 +80,15 @@ import {
   decayPrismMood,
   hydrateAssistantMessageParts,
   isPrismMoodIgnoring,
+  normalizeReasoningEffort,
+  openAiModelSupportsReasoningEffort,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
+  parseStoredPsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   sanitizePrismMoodState,
@@ -103,9 +108,12 @@ import {
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
 import {
+  buildRememberedZenWallpaperHistory,
+  getLatestRememberedZenWallpaperForBot,
   mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
+  serializeZenWallpaperHistory,
 } from "./conversations.ts";
 import {
   loadPrismMoodState,
@@ -113,6 +121,8 @@ import {
 } from "./db.ts";
 import {
   buildZenSessionMemoryPromptContext,
+  buildZenPersonaContinuityPromptContext,
+  createZenPersonaSessionMemoryCheckpoint,
   createZenSessionMemoryCheckpoint,
   loadZenSessionMemoryOverview,
   pruneExpiredZenSessionMemories,
@@ -183,6 +193,15 @@ export interface ChatBackendDebugEvent {
   elapsedMs: number;
 }
 
+export interface PsychicDebugPayload {
+  summary: string;
+  scratchpad: string;
+  effort: ReasoningEffort;
+  provider: ProviderName;
+  model?: string;
+  simulated: boolean;
+}
+
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
 export interface ProcessChatMessageResult {
   conversation: Conversation;
@@ -223,6 +242,8 @@ export interface ProcessChatMessageResult {
   toolCalls?: ChatToolCallEvent[];
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Live-only planning artifact for the developer metrics terminal. */
+  psychicDebug?: PsychicDebugPayload;
   /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
   zenAutonomyDecision?: ZenAutonomyDecision;
   memoryLearned?: {
@@ -1088,21 +1109,216 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   };
 }
 
+interface PsychicPlanningTrace {
+  psychicThought?: PsychicThoughtPayload;
+  debug: PsychicDebugPayload;
+  answerGuidance: string;
+  shouldGuideFinalAnswer: boolean;
+}
+
+const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
+  "You are Prism's private planning pass for the next assistant reply.",
+  "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
+  "All three fields must be non-empty.",
+  "summary: one concise user-visible reasoning summary under 80 words.",
+  "scratchpad: 2-4 short private planning notes about constraints, risks, and answer shape. This is a developer-only simulated planning artifact, not hidden chain-of-thought from a provider.",
+  "answerGuidance: 2-4 concrete instructions for the final reply. Do not include secrets or long reasoning.",
+].join("\n");
+
+const PSYCHIC_PLANNING_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: {
+      type: "string",
+      minLength: 1,
+      description: "Concise user-visible reasoning summary under 80 words.",
+    },
+    scratchpad: {
+      type: "string",
+      minLength: 1,
+      description: "Developer-only simulated planning notes.",
+    },
+    answerGuidance: {
+      type: "string",
+      minLength: 1,
+      description: "Concise private guidance for the final reply.",
+    },
+  },
+  required: ["summary", "scratchpad", "answerGuidance"],
+} satisfies Record<string, unknown>;
+
+function clampPsychicPlanningText(value: unknown, maxLength: number): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function psychicPlanningTokenBudget(effort: ReasoningEffort): number {
+  switch (effort) {
+    case "xhigh":
+      return 900;
+    case "high":
+      return 720;
+    case "medium":
+      return 560;
+    case "low":
+      return 420;
+    case "minimal":
+      return 300;
+    case "none":
+    case "auto":
+    default:
+      return 260;
+  }
+}
+
+function providerModelSupportsNativeReasoningEffort(
+  provider: LlmProvider,
+  botOverrides: GenerateOptions | undefined
+): boolean {
+  if (provider.name !== "openai") return false;
+  return openAiModelSupportsReasoningEffort(describeRequestedModel(provider, botOverrides));
+}
+
+function shouldSimulateReasoningEffort(args: {
+  experimentalAllModelEffortEnabled?: boolean;
+  provider: LlmProvider;
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+}): boolean {
+  if (args.experimentalAllModelEffortEnabled !== true) return false;
+  if (args.effort === "auto" || args.effort === "none") return false;
+  return !providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides);
+}
+
+function parsePsychicPlanningResponse(raw: string): {
+  summary: string;
+  scratchpad: string;
+  answerGuidance: string;
+} | null {
+  try {
+    const parsed = JSON.parse(extractJsonObjectPayload(raw)) as unknown;
+    if (!isRecord(parsed)) return null;
+    const summary = clampPsychicPlanningText(parsed.summary, 1200);
+    const scratchpad = clampPsychicPlanningText(parsed.scratchpad, 4000);
+    const answerGuidance = clampPsychicPlanningText(parsed.answerGuidance, 1400);
+    if (!summary || !scratchpad || !answerGuidance) return null;
+    return { summary, scratchpad, answerGuidance };
+  } catch {
+    return null;
+  }
+}
+
+function appendPsychicAnswerGuidance(
+  promptMessages: ProviderMessage[],
+  planningTrace: PsychicPlanningTrace | null
+): ProviderMessage[] {
+  if (!planningTrace?.shouldGuideFinalAnswer || !planningTrace.answerGuidance) {
+    return promptMessages;
+  }
+  const content = [
+    "Private guidance from Prism's simulated planning pass. Use this to answer well, but do not mention the planning pass.",
+    `Reasoning summary: ${planningTrace.debug.summary}`,
+    `Answer guidance: ${planningTrace.answerGuidance}`,
+  ].join("\n");
+  return [...promptMessages, { role: "system", content }];
+}
+
+async function runPsychicPlanningPass(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+  simulated: boolean;
+  psychicModeEnabled?: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+}): Promise<PsychicPlanningTrace | null> {
+  const shouldPlan = args.simulated || args.psychicModeEnabled === true;
+  if (!shouldPlan) return null;
+
+  const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
+  const planningMessages: ProviderMessage[] = [
+    { role: "system", content: PSYCHIC_PLANNING_SYSTEM_PROMPT },
+    ...args.promptMessages.filter((message) => message.role !== "system"),
+  ];
+  let raw = "";
+  try {
+    raw = await args.provider.generateResponse(planningMessages, {
+      ...args.botOverrides,
+      maxTokens: psychicPlanningTokenBudget(args.effort),
+      temperature: 0,
+      reasoningEffort: args.effort === "auto" ? undefined : args.effort,
+      jsonMode: true,
+      jsonSchema: PSYCHIC_PLANNING_JSON_SCHEMA,
+      jsonSchemaName: "psychic_planning",
+      ...(args.signal ? { signal: args.signal } : {}),
+    });
+    throwIfChatRequestCancelled(args.signal);
+  } catch (error) {
+    args.onPlanningWarning?.(
+      `planning_failed; provider=${args.provider.name}; model=${requestedModel}; detail=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return null;
+  }
+
+  const parsed = parsePsychicPlanningResponse(raw);
+  if (!parsed) {
+    args.onPlanningWarning?.(
+      `invalid_json; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`
+    );
+    return null;
+  }
+  const createdAt = new Date().toISOString();
+  const debug: PsychicDebugPayload = {
+    summary: parsed.summary,
+    scratchpad: parsed.scratchpad,
+    effort: args.effort,
+    provider: args.provider.name,
+    model: requestedModel,
+    simulated: args.simulated,
+  };
+  return {
+    ...(args.psychicModeEnabled
+      ? {
+          psychicThought: {
+            v: 1,
+            summary: parsed.summary,
+            effort: args.effort,
+            provider: args.provider.name,
+            model: requestedModel,
+            createdAt,
+          },
+        }
+      : {}),
+    debug,
+    answerGuidance: parsed.answerGuidance,
+    shouldGuideFinalAnswer: args.simulated,
+  };
+}
+
 async function generateWithLenientLocalFallback(args: {
   provider: LlmProvider;
   promptMessages: ProviderMessage[];
   botOverrides: GenerateOptions | undefined;
   secondaryOllamaHost?: string | null;
   lenientLocalFallbackModel?: string | null;
+  experimentalAllModelEffortEnabled?: boolean;
+  psychicModeEnabled?: boolean;
   denialBoundaryProvider?: LlmProvider;
   denialBoundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
   signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
   modelUsed: string;
+  psychicThought?: PsychicThoughtPayload;
+  psychicDebug?: PsychicDebugPayload;
   fallbackInvocation?: {
     trigger:
       | "copyright_refusal_text"
@@ -1123,15 +1339,51 @@ async function generateWithLenientLocalFallback(args: {
   const canAttemptFallback =
     fallbackModel !== null &&
     !(args.provider.name === "local" && requestedModel === fallbackModel);
+  const requestedEffort = normalizeReasoningEffort(args.botOverrides?.reasoningEffort);
+  const simulatedEffort = shouldSimulateReasoningEffort({
+    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
+    provider: args.provider,
+    botOverrides: args.botOverrides,
+    effort: requestedEffort,
+  });
+  const planningTrace = await runPsychicPlanningPass({
+    provider: args.provider,
+    promptMessages: args.promptMessages,
+    botOverrides: args.botOverrides,
+    effort: requestedEffort,
+    simulated: simulatedEffort,
+    psychicModeEnabled: args.psychicModeEnabled,
+    signal: args.signal,
+    onPlanningWarning: args.onPlanningWarning,
+  });
+  const promptMessagesForFinalAnswer = appendPsychicAnswerGuidance(
+    args.promptMessages,
+    planningTrace
+  );
 
-  const runOrganicBoundary = () =>
-    generateOrganicTextBoundaryReply({
+  const withPlanningTrace = <T extends {
+    assistantReplyRaw: string;
+    providerNameUsed: ProviderName;
+    modelUsed: string;
+  }>(result: T): T & {
+    psychicThought?: PsychicThoughtPayload;
+    psychicDebug?: PsychicDebugPayload;
+  } => ({
+    ...result,
+    ...(planningTrace?.psychicThought
+      ? { psychicThought: planningTrace.psychicThought }
+      : {}),
+    ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
+  });
+
+  const runOrganicBoundary = async () =>
+    withPlanningTrace(await generateOrganicTextBoundaryReply({
       boundaryProvider: args.denialBoundaryProvider,
       boundaryModel: args.denialBoundaryModel,
       botSystemPrompt: args.botSystemPrompt,
       userMessage: args.userMessage,
       signal: args.signal,
-    });
+    }));
 
   const runLenientFallback = async (
     trigger:
@@ -1144,6 +1396,8 @@ async function generateWithLenientLocalFallback(args: {
     assistantReplyRaw: string;
     providerNameUsed: ProviderName;
     modelUsed: string;
+    psychicThought?: PsychicThoughtPayload;
+    psychicDebug?: PsychicDebugPayload;
     fallbackInvocation?: {
       trigger:
         | "copyright_refusal_text"
@@ -1164,7 +1418,7 @@ async function generateWithLenientLocalFallback(args: {
     });
     let reply = "";
     try {
-      reply = await fallbackProvider.generateResponse(args.promptMessages, {
+      reply = await fallbackProvider.generateResponse(promptMessagesForFinalAnswer, {
         ...args.botOverrides,
         model: fallbackModel,
         ...(args.signal ? { signal: args.signal } : {}),
@@ -1182,7 +1436,7 @@ async function generateWithLenientLocalFallback(args: {
     if (shouldSuppressAssistantReply(reply)) {
       return runOrganicBoundary();
     }
-    return {
+    return withPlanningTrace({
       assistantReplyRaw: reply,
       providerNameUsed: "local",
       modelUsed: fallbackModel,
@@ -1192,12 +1446,12 @@ async function generateWithLenientLocalFallback(args: {
         primaryModel,
         fallbackModel,
       },
-    };
+    });
   };
 
   try {
     const assistantReplyRaw = await args.provider.generateResponse(
-      args.promptMessages,
+      promptMessagesForFinalAnswer,
       withGenerationSignal(args.botOverrides, args.signal)
     );
     if (shouldSuppressAssistantReply(assistantReplyRaw)) {
@@ -1207,11 +1461,11 @@ async function generateWithLenientLocalFallback(args: {
       if (canAttemptFallback) return runLenientFallback(trigger);
       return runOrganicBoundary();
     }
-    return {
+    return withPlanningTrace({
       assistantReplyRaw,
       providerNameUsed: args.provider.name,
       modelUsed: primaryModel,
-    };
+    });
   } catch (error) {
     const isDenialError =
       isCopyrightRefusalError(error) ||
@@ -1900,6 +2154,10 @@ export interface UserChatSettings {
   secondaryOllamaHost?: string | null;
   /** Experimental: route Prism-owned local work to a matching second Ollama host. */
   experimentalDualOllamaEnabled?: boolean;
+  /** Experimental: allow non-reasoning models to simulate effort with a planning pass. */
+  experimentalAllModelEffortEnabled?: boolean;
+  /** Show concise simulated reasoning summaries below future user turns. */
+  psychicModeEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
   /**
@@ -1969,6 +2227,17 @@ function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
   if (mode === "coffee") return "coffee";
   return "sandbox";
+}
+
+function normalizeChatBotId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function sameChatBotId(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  return normalizeChatBotId(left) === normalizeChatBotId(right);
 }
 
 function readResumeContextString(value: unknown, maxChars = SESSION_RESUME_SUMMARY_MAX_CHARS): string | undefined {
@@ -2309,6 +2578,7 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
   "- Prefer the three-angle-bracket tokens above. Single-angle XML-style `<PRISM_TOOL>` … `</PRISM_TOOL>` is also accepted, but triple brackets are the reliable default.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
+  "- When your visible reply asks the user to choose between two or three concrete next actions or preferences, prefer AskQuestion chips instead of leaving the choice only in prose.",
   "- Inside JSON only: usually emit exactly three options with ids a, b, c (distinct). When the expected answer is simply yes or no (for example, \"Would you like a copy of that to download?\"), emit exactly two options with ids a and b labeled Yes and No.",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
@@ -2618,6 +2888,23 @@ function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
   return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
 }
 
+const ASKQUESTION_CLOSED_QUESTION_LOOKBACK_LINES = 3;
+const ASKQUESTION_CLOSED_QUESTION_MAX_CHARS = 180;
+const ASKQUESTION_OPTION_MAX_CHARS = 48;
+const ASKQUESTION_OPTION_MAX_WORDS = 6;
+const YES_NO_QUESTION_START_PATTERN =
+  /^(?:do|does|did|can|could|should|would|will|is|are|was|were|have|has|had|may|might)\b/i;
+const ASKQUESTION_OPEN_ENDED_PATTERNS = [
+  /^what do you think\??$/i,
+  /^what are your thoughts\??$/i,
+  /^why\??$/i,
+  /^tell me more\??$/i,
+  /^how (?:are you feeling|do you feel|does that feel|does this feel|does it feel)\b/i,
+  /\bhow does (?:that|this|it) (?:feel|land|sit|sound)\b/i,
+  /\bdoes (?:that|this|it) make sense\b/i,
+  /\bis (?:that|this|it) okay\b/i,
+];
+
 const INTERRUPTED_ASSISTANT_CUTOFF_PATTERN = /—\s*$/u;
 const INTERRUPTED_REPLY_CONTINUE_PATTERN =
   /\b(?:continue|go on|carry on|keep going|finish(?: your thought)?|resume|pick (?:it|that|this)?\s*back up|where were you|what were you saying|as you were|go ahead)\b/i;
@@ -2681,10 +2968,198 @@ function buildInterruptedReplyContinuationHint(
   ].join("\n");
 }
 
+function stripAskQuestionCandidateLine(line: string): string {
+  return normalizeAskQuestionText(
+    line
+      .replace(/^[\s>#-]+/u, "")
+      .replace(/^["“”'‘’]+|["“”'‘’]+$/gu, "")
+      .trim()
+  );
+}
+
+function extractFinalQuestionSentence(line: string): string | undefined {
+  const cleaned = stripAskQuestionCandidateLine(line);
+  const questionEnd = cleaned.lastIndexOf("?");
+  if (questionEnd < 0) return undefined;
+  if (cleaned.slice(questionEnd + 1).trim().length > 0) return undefined;
+  const beforeQuestion = cleaned.slice(0, questionEnd + 1);
+  const sentenceStart = Math.max(
+    beforeQuestion.lastIndexOf(". "),
+    beforeQuestion.lastIndexOf("! "),
+    beforeQuestion.lastIndexOf("\n")
+  );
+  const question =
+    sentenceStart >= 0
+      ? beforeQuestion.slice(sentenceStart + 2).trim()
+      : beforeQuestion.trim();
+  if (!question || (question.match(/\?/g) ?? []).length !== 1) return undefined;
+  if (question.length > ASKQUESTION_CLOSED_QUESTION_MAX_CHARS) return undefined;
+  return question;
+}
+
+function extractNearFinalQuestionLine(displayContent: string): string | undefined {
+  const lines = displayContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const start = Math.max(0, lines.length - ASKQUESTION_CLOSED_QUESTION_LOOKBACK_LINES);
+  for (let i = lines.length - 1; i >= start; i -= 1) {
+    const question = extractFinalQuestionSentence(lines[i]!);
+    if (question) return question;
+  }
+  return undefined;
+}
+
+function titleCaseAskQuestionOption(label: string): string {
+  const words = label.split(/\s+/).filter((word) => word.length > 0);
+  if (
+    words.length === 0 ||
+    !/^[a-z][a-z\s-]*$/u.test(label) ||
+    words.length > ASKQUESTION_OPTION_MAX_WORDS
+  ) {
+    return label;
+  }
+  return words
+    .map((word) =>
+      word
+        .split("-")
+        .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+        .join("-")
+    )
+    .join(" ");
+}
+
+function cleanAskQuestionAlternativeLabel(raw: string): string | undefined {
+  const cleaned = normalizeAskQuestionText(raw)
+    .replace(/^(?:and|or|versus|vs\.?)\s+/i, "")
+    .replace(
+      /^(?:go\s+with|go|use|try|choose|pick|make|keep|turn|set|lean(?:\s+into)?)\s+/i,
+      ""
+    )
+    .replace(/[?!.;:]+$/u, "")
+    .trim();
+  if (!cleaned) return undefined;
+  if (cleaned.length > ASKQUESTION_OPTION_MAX_CHARS) return undefined;
+  if (cleaned.split(/\s+/).length > ASKQUESTION_OPTION_MAX_WORDS) return undefined;
+  if (/^(?:it|this|that|we|you|i|me|the|a|an)$/i.test(cleaned)) return undefined;
+  if (/^(?:me|us|you)\s+to\b/i.test(cleaned)) return undefined;
+  if (/[?]/u.test(cleaned)) return undefined;
+  return titleCaseAskQuestionOption(cleaned);
+}
+
+function splitAskQuestionAlternativeList(raw: string): string[] {
+  const prepared = raw
+    .replace(/\s+(?:vs\.?|versus)\s+/gi, " or ")
+    .replace(/\s*\/\s*/g, " or ")
+    .replace(/[?!.;:]+$/u, "")
+    .trim();
+  if (!prepared) return [];
+  let parts = prepared.includes(",")
+    ? prepared.split(",")
+    : prepared.split(/\s+or\s+/i);
+  if (prepared.includes(",") && parts.length === 2 && /\s+or\s+/i.test(parts[1] ?? "")) {
+    parts = [parts[0]!, ...(parts[1] ?? "").split(/\s+or\s+/i)];
+  }
+  if (parts.length < 2 || parts.length > 3) return [];
+  const options = parts
+    .map((part) => cleanAskQuestionAlternativeLabel(part))
+    .filter((part): part is string => Boolean(part));
+  const distinct = new Set(options.map((option) => normalizeAskQuestionComparisonText(option)));
+  return options.length >= 2 && options.length <= 3 && distinct.size === options.length
+    ? options
+    : [];
+}
+
+function extractAlternativeAskQuestionOptions(question: string): string[] {
+  const core = stripAskQuestionCandidateLine(question).replace(/[?!.]+$/u, "").trim();
+  if (!core) return [];
+
+  const colonIdx = core.lastIndexOf(":");
+  if (colonIdx >= 0 && colonIdx < core.length - 1) {
+    const options = splitAskQuestionAlternativeList(core.slice(colonIdx + 1));
+    if (options.length >= 2) return options;
+  }
+
+  const commaChoice = core.match(/^(?:which|what)\b[^,]*,\s*(.+)$/i);
+  if (commaChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(commaChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  const betweenChoice = core.match(/\bbetween\s+(.+)$/i);
+  if (betweenChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(betweenChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  const modalChoice = core.match(
+    /^(?:(?:should|would|could|can)\s+(?:we|i|you)\s+(?:make|keep|use|try|choose|pick|go with|lean(?: into)?|take|set|turn)\s+(?:it|this|that)?\s*|(?:do|does|did|would|could|should|can)\s+(?:you|we|i)\s+(?:prefer|want|like|choose|pick|use|try|go with|rather)\s+)(.+)$/i
+  );
+  if (modalChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(modalChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  if (
+    !/^(?:who|what|when|where|why|how|which|do|does|did|would|could|should|can|is|are|will|have|has|may|might)\b/i.test(
+      core
+    )
+  ) {
+    const options = splitAskQuestionAlternativeList(core);
+    if (options.length >= 2) return options;
+  }
+
+  return [];
+}
+
+function questionLooksOpenEndedForChips(question: string): boolean {
+  const cleaned = stripAskQuestionCandidateLine(question);
+  const normalized = normalizeAskQuestionComparisonText(cleaned);
+  if (!normalized) return true;
+  if (ASKQUESTION_OPEN_ENDED_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
+  return /^(?:what|why|how)\b/i.test(cleaned);
+}
+
+function extractClosedChoiceAskQuestion(displayContent: string): AskQuestionPayload | undefined {
+  const question = extractNearFinalQuestionLine(displayContent);
+  if (!question) return undefined;
+
+  const alternativeOptions = extractAlternativeAskQuestionOptions(question);
+  if (alternativeOptions.length >= 2) {
+    return {
+      v: 1,
+      name: "AskQuestion",
+      prompt: question,
+      options: alternativeOptions.map((label, index) => ({
+        id: String.fromCharCode(97 + index),
+        label,
+      })),
+    };
+  }
+
+  if (questionLooksOpenEndedForChips(question)) return undefined;
+  if (!YES_NO_QUESTION_START_PATTERN.test(question)) return undefined;
+  if (/\bor\b/i.test(question)) return undefined;
+  if ((question.match(/[;,]/g) ?? []).length > 0) return undefined;
+
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt: question,
+    options: [
+      { id: "a", label: "Yes" },
+      { id: "b", label: "No" },
+    ],
+  };
+}
+
 function assistantLikelyIntendedAskQuestion(displayContent: string): boolean {
   const text = displayContent.trim();
   if (!text) return false;
   if (extractDynamicAskQuestion(text)) return true;
+  if (extractClosedChoiceAskQuestion(text)) return true;
   return (
     /\bone block below\b/i.test(text) ||
     /\b(?:choose|pick|select)\s+(?:one|an?\s+option)\b/i.test(text) ||
@@ -2833,7 +3308,10 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
 }
 
 function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
-  return extractDynamicAskQuestion(displayContent);
+  return (
+    extractDynamicAskQuestion(displayContent) ??
+    extractClosedChoiceAskQuestion(displayContent)
+  );
 }
 
 function normalizeAskQuestionComparisonText(text: string): string {
@@ -3435,7 +3913,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       content: row.content,
       createdAt: row.created_at,
       provider:
-        row.provider === "local" || row.provider === "openai"
+        row.provider === "local" || row.provider === "openai" || row.provider === "anthropic"
           ? row.provider
           : undefined,
       model: row.model ?? undefined,
@@ -3455,6 +3933,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         promptWildcards,
         promptWildcards?.resolvedPrompt ?? row.content
       );
+      const psychicThought = parseStoredPsychicThoughtPayload(row.tool_payload);
       return {
         ...base,
         ...(promptShortcutWithResolvedPrompt
@@ -3463,6 +3942,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ...(promptWildcardsWithResolvedPrompt
           ? { promptWildcards: promptWildcardsWithResolvedPrompt }
           : {}),
+        ...(psychicThought ? { psychicThought } : {}),
       };
     }
     if (row.role !== "assistant") {
@@ -4144,6 +4624,8 @@ function buildPromptMessages(args: {
   moodBoundaryHint?: string | null;
   threadSummary?: string | null;
   zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
+  zenPersonaContinuityContext?: ZenSessionMemoryOverview | null;
+  zenPersonaContinuityLabel?: string | null;
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
@@ -4229,6 +4711,13 @@ function buildPromptMessages(args: {
   );
   if (zenSessionMemoryHint) {
     promptMessages.push({ role: "system", content: zenSessionMemoryHint });
+  }
+  const zenPersonaContinuityHint = buildZenPersonaContinuityPromptContext(
+    args.zenPersonaContinuityContext,
+    args.zenPersonaContinuityLabel
+  );
+  if (zenPersonaContinuityHint) {
+    promptMessages.push({ role: "system", content: zenPersonaContinuityHint });
   }
   if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
@@ -4826,17 +5315,23 @@ export async function processChatMessage(
       providerNameUsed,
       modelUsed,
       fallbackInvocation,
+      psychicThought,
+      psychicDebug,
     } = await generateWithLenientLocalFallback({
       provider: primaryProvider,
       promptMessages,
       botOverrides: primaryBotOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+      experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+      psychicModeEnabled: settings.psychicModeEnabled,
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
       botSystemPrompt: effectiveBotSystemPrompt,
       userMessage: modelUserMessage,
       signal: settings.signal,
+      onPlanningWarning: (detail) =>
+        pushBackendEvent("model", "Psychic planning unavailable", detail),
     });
     throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
@@ -5032,6 +5527,7 @@ export async function processChatMessage(
             ...(promptShortcutWithResolvedPrompt
               ? { promptShortcut: promptShortcutWithResolvedPrompt }
               : {}),
+            ...(psychicThought ? { psychicThought } : {}),
           }]
       ),
       ...assistantTail,
@@ -5085,6 +5581,7 @@ export async function processChatMessage(
         ? { toolCalls: incognitoToolCallEvents }
         : {}),
       backendEvents,
+      ...(psychicDebug ? { psychicDebug } : {}),
       ...(conversationStartersIncognito
         ? { conversationStarters: conversationStartersIncognito }
         : {}),
@@ -5168,27 +5665,79 @@ export async function processChatMessage(
     }
   }
   throwIfChatRequestCancelled(settings.signal);
+  const rememberedZenWallpaperForNewConversation =
+    !activeConversationId && isZenMode(mode) && !incognitoForTurn
+      ? getLatestRememberedZenWallpaperForBot(db, userId, activeMemoryBotId)
+      : null;
   if (!activeConversationId) {
     activeConversationId = randomId(12);
     createdConversationForTurn = true;
-    db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(
-      activeConversationId,
-      userId,
-      isStarterPrompt
+    const conversationTitle = isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : personaTransitionTurn
           ? "Zen"
         : zenAutonomyTurn
           ? "Zen"
-        : generateConversationTitle(modelUserMessage),
-      isZenMode(mode) ? "zen" : mode,
-      isZenMode(mode) ? null : activeBotId ?? null,
-      incognitoForTurn ? 1 : 0,
-      now,
-      now
-    );
+        : generateConversationTitle(modelUserMessage);
+    const conversationMode = isZenMode(mode) ? "zen" : mode;
+    const conversationBotId = isZenMode(mode) ? null : activeBotId ?? null;
+    if (rememberedZenWallpaperForNewConversation) {
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          zen_wallpaper_enabled, zen_wallpaper_image_id,
+          zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+          zen_wallpaper_status, zen_wallpaper_history,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0, 'ready', ?, ?, ?)`
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        rememberedZenWallpaperForNewConversation.imageId,
+        rememberedZenWallpaperForNewConversation.promptSeed,
+        serializeZenWallpaperHistory(
+          buildRememberedZenWallpaperHistory(
+            rememberedZenWallpaperForNewConversation
+          )
+        ),
+        now,
+        now
+      );
+    } else if (isZenMode(mode) && !incognitoForTurn && activeMemoryBotId) {
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          zen_wallpaper_enabled, zen_wallpaper_status,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, 'idle', ?, ?)`
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        now,
+        now
+      );
+    } else {
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        now,
+        now
+      );
+    }
   } else {
     const owned = db
       .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
@@ -5239,6 +5788,35 @@ export async function processChatMessage(
   // Only an explicit user request should start another AskQuestion turn.
   const askQuestionMode: "off" | "explicit" | "continuation" =
     explicitAskQuestionRequest ? "explicit" : "off";
+
+  let outgoingZenPersonaCheckpointBotId: string | null | undefined;
+  if (isZenMode(mode) && !incognitoForTurn && personaTransitionTurn) {
+    outgoingZenPersonaCheckpointBotId = personaTransition.fromBotId;
+  } else if (
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    zenAutonomyTurn &&
+    !sameChatBotId(zenAutonomy.activeBotId, activeMemoryBotId)
+  ) {
+    outgoingZenPersonaCheckpointBotId = zenAutonomy.activeBotId;
+  }
+  if (outgoingZenPersonaCheckpointBotId !== undefined) {
+    const checkpoint = await createZenPersonaSessionMemoryCheckpoint({
+      db,
+      provider: auxiliaryProvider,
+      userId,
+      conversationId: activeConversationId,
+      botId: outgoingZenPersonaCheckpointBotId,
+      userKey,
+    });
+    if (checkpoint) {
+      pushBackendEvent(
+        "memory",
+        "Zen Persona checkpoint saved",
+        `bot=${checkpoint.botId ?? "default"}; title=${checkpoint.title}; expiresAt=${checkpoint.expiresAt}`
+      );
+    }
+  }
 
   const existingSessionOpinion = readSessionOpinion(
     db,
@@ -5400,13 +5978,18 @@ export async function processChatMessage(
   );
 
   let userMessageId: string | null = null;
+  const buildUserMessageToolPayload = (
+    psychicThought?: PsychicThoughtPayload
+  ): string | null =>
+    serializePromptToolPayload({
+      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
+      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
+      ...(psychicThought ? { psychicThought } : {}),
+    });
   const insertUserMessageForTurn = (): void => {
     if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || userMessageId !== null) return;
     userMessageId = randomId(12);
-    const promptShortcutPayload = serializePromptToolPayload({
-      promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
-      promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
-    });
+    const promptShortcutPayload = buildUserMessageToolPayload();
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
     ).run(
@@ -5501,11 +6084,31 @@ export async function processChatMessage(
           activeConversationId,
         })
       : null;
+  const zenPersonaContinuityContext =
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+      ? loadZenSessionMemoryOverview({
+          db,
+          userId,
+          userKey,
+          activeConversationId,
+          botId: activeMemoryBotId,
+        })
+      : null;
   if (zenSessionMemoryContext) {
     pushBackendEvent(
       "context",
       "Loaded Zen session memory context",
       `previousContext=${zenSessionMemoryContext.previousContext ? "yes" : "no"}; checkpoints=${zenSessionMemoryContext.sessionMemories.length}`
+    );
+  }
+  if (zenPersonaContinuityContext?.sessionMemories.length) {
+    pushBackendEvent(
+      "context",
+      "Loaded Zen Persona continuity",
+      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
     );
   }
   const promptMessages = buildPromptMessages({
@@ -5519,6 +6122,8 @@ export async function processChatMessage(
     moodBoundaryHint: prismMoodForgivenessSystemHint,
     threadSummary,
     zenSessionMemoryContext,
+    zenPersonaContinuityContext,
+    zenPersonaContinuityLabel: settings.starterPromptLabel,
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
@@ -5557,6 +6162,8 @@ export async function processChatMessage(
   let providerNameUsed: ProviderName = provider.name;
   let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
   let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+  let psychicThoughtForTurn: PsychicThoughtPayload | undefined;
+  let psychicDebugForTurn: PsychicDebugPayload | undefined;
   if (prismMoodPauseTurn) {
     assistantReplyRaw = ZEN_MOOD_PAUSE_REPLY;
     pushBackendEvent(
@@ -5591,17 +6198,23 @@ export async function processChatMessage(
         providerNameUsed,
         modelUsed,
         fallbackInvocation,
+        psychicThought: psychicThoughtForTurn,
+        psychicDebug: psychicDebugForTurn,
       } = await generateWithLenientLocalFallback({
         provider: primaryProvider,
         promptMessages,
         botOverrides: primaryBotOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
         lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+        experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+        psychicModeEnabled: settings.psychicModeEnabled,
         denialBoundaryProvider: auxiliaryProvider,
         denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
         userMessage: modelUserMessage,
         signal: settings.signal,
+        onPlanningWarning: (detail) =>
+          pushBackendEvent("model", "Psychic planning unavailable", detail),
       }));
     } catch (error) {
       rollbackIfCancelledBeforeAssistantReply(error);
@@ -5636,6 +6249,16 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
+  if (userMessageId && psychicThoughtForTurn) {
+    db.prepare(
+      "UPDATE messages SET tool_payload = ? WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'user'"
+    ).run(
+      buildUserMessageToolPayload(psychicThoughtForTurn),
+      userMessageId,
+      activeConversationId,
+      userId
+    );
+  }
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
     !zenAutonomyTurn &&
@@ -5793,12 +6416,27 @@ export async function processChatMessage(
         imageSlot: persistedImageSlot,
         ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
       });
+  const zenTurnMarker = personaTransitionTurn
+    ? {
+        kind: "persona-transition" as const,
+        fromBotId: personaTransition.fromBotId,
+        toBotId: personaTransition.toBotId,
+        style: personaTransition.style,
+      }
+    : zenAutonomyTurn
+      ? {
+          kind: "zen-autonomy" as const,
+          activeBotId: zenAutonomy.activeBotId,
+          toBotId: assistantMemoryBotId,
+        }
+      : undefined;
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
     tellFictionalStory: zenAutonomyTurn ? undefined : parsedAssistant.tellFictionalStory,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
     zenDisplay: zenAutonomyTurn ? undefined : parsedAssistant.zenDisplay,
+    zenTurn: zenTurnMarker,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -5912,6 +6550,7 @@ export async function processChatMessage(
       provider: auxiliaryProvider,
       userId,
       conversationId: activeConversationId,
+      botId: activeMemoryBotId,
       userKey,
       history,
       userMessage: {
@@ -6453,6 +7092,7 @@ export async function processChatMessage(
     ...(persistedToolCallEvents.length > 0
       ? { toolCalls: persistedToolCallEvents }
       : {}),
+    ...(psychicDebugForTurn ? { psychicDebug: psychicDebugForTurn } : {}),
     ...(zenAutonomyTurn
       ? { zenAutonomyDecision: { action: "speak", botId: assistantMemoryBotId } satisfies ZenAutonomyDecision }
       : {}),

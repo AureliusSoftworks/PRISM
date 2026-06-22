@@ -5,12 +5,15 @@ import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
+  dedupeActiveZenWallpaperGeneration,
   deleteAllConversations,
   deleteConversation,
   deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
+  getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
+  mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
   rewindConversation,
@@ -79,6 +82,7 @@ function createTestDb(): DatabaseSync {
       bot_id TEXT,
       prompt TEXT NOT NULL,
       url TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'gallery',
       created_at TEXT NOT NULL
     );
     CREATE TABLE memory_summaries (
@@ -92,6 +96,7 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -200,6 +205,68 @@ function seedBotChat(
     "UPDATE conversations SET bot_id = ? WHERE id = ? AND user_id = ?"
   ).run(botId, conversationId, userId);
 }
+
+describe("getLatestRememberedZenWallpaperForBot", () => {
+  it("returns the newest wallpaper for one bot and ignores gallery/other bot images", () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-old",
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      "older shore",
+      "/old",
+      "wallpaper",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-gallery",
+      "user-1",
+      "conversation-2",
+      "bot-1",
+      "gallery shore",
+      "/gallery",
+      "gallery",
+      "2026-03-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "other-new",
+      "user-1",
+      "conversation-3",
+      "bot-2",
+      "other shore",
+      "/other",
+      "wallpaper",
+      "2026-04-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-new",
+      "user-1",
+      "conversation-4",
+      "bot-1",
+      "newer shore",
+      "/new",
+      "wallpaper",
+      "2026-02-01T00:00:00.000Z"
+    );
+
+    assert.deepEqual(getLatestRememberedZenWallpaperForBot(db, "user-1", "bot-1"), {
+      imageId: "bot-new",
+      promptSeed: "newer shore",
+      createdAt: "2026-02-01T00:00:00.000Z",
+    });
+    assert.equal(getLatestRememberedZenWallpaperForBot(db, "user-1", "missing"), null);
+    assert.equal(getLatestRememberedZenWallpaperForBot(db, "user-1", null), null);
+  });
+});
 
 describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
   it("rebases absolute wallpaper reveal counts to the restored message window", () => {
@@ -375,7 +442,11 @@ describe("recoverStaleZenWallpaperGenerationStatus", () => {
       CREATE TABLE conversations (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
+        zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
         zen_wallpaper_image_id TEXT,
+        zen_wallpaper_prompt_seed TEXT,
+        zen_wallpaper_message_count INTEGER,
+        zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
         zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle'
       );
     `);
@@ -415,6 +486,163 @@ describe("recoverStaleZenWallpaperGenerationStatus", () => {
       .prepare("SELECT zen_wallpaper_status FROM conversations WHERE id = ?")
       .get("conv-1") as { zen_wallpaper_status: string };
     assert.equal(row.zen_wallpaper_status, "generating");
+    db.close();
+  });
+});
+
+describe("dedupeActiveZenWallpaperGeneration", () => {
+  function createActiveWallpaperDb(): DatabaseSync {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+        zen_wallpaper_image_id TEXT,
+        zen_wallpaper_prompt_seed TEXT,
+        zen_wallpaper_message_count INTEGER,
+        zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+        zen_wallpaper_history TEXT NOT NULL DEFAULT '[]'
+      );
+    `);
+    return db;
+  }
+
+  it("keeps the previous wallpaper metadata while marking the active job generating", () => {
+    const db = createActiveWallpaperDb();
+    const history = JSON.stringify([
+      {
+        imageId: "wallpaper-old",
+        promptSeed: "blue dusk",
+        generationMessageCount: 7,
+        revealStartMessageCount: 7,
+        revealFullMessageCount: 9,
+        createdAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_image_id,
+         zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+         zen_wallpaper_status, zen_wallpaper_history)
+       VALUES (?, ?, 1, ?, ?, ?, 'ready', ?)`
+    ).run("conv-1", "user-1", "wallpaper-old", "blue dusk", 7, history);
+
+    const deduped = dedupeActiveZenWallpaperGeneration(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: "conv-1",
+      enabled: true,
+    });
+
+    assert.equal(deduped, true);
+    const row = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations WHERE id = ?`
+      )
+      .get("conv-1") as {
+      zen_wallpaper_enabled: number;
+      zen_wallpaper_image_id: string | null;
+      zen_wallpaper_prompt_seed: string | null;
+      zen_wallpaper_message_count: number | null;
+      zen_wallpaper_status: string;
+      zen_wallpaper_history: string;
+    };
+    assert.equal(row.zen_wallpaper_enabled, 1);
+    assert.equal(row.zen_wallpaper_image_id, "wallpaper-old");
+    assert.equal(row.zen_wallpaper_prompt_seed, "blue dusk");
+    assert.equal(row.zen_wallpaper_message_count, 7);
+    assert.equal(row.zen_wallpaper_status, "generating");
+    assert.equal(row.zen_wallpaper_history, history);
+    assert.deepEqual(mapZenWallpaperMetadata(row), {
+      enabled: true,
+      imageId: "wallpaper-old",
+      promptSeed: "blue dusk",
+      generationMessageCount: 7,
+      status: "generating",
+      history: [
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "blue dusk",
+          generationMessageCount: 7,
+          revealStartMessageCount: 7,
+          revealFullMessageCount: 9,
+          createdAt: "2026-06-20T00:00:00.000Z",
+        },
+      ],
+    });
+    db.close();
+  });
+
+  it("marks an active first wallpaper generation without inventing an image", () => {
+    const db = createActiveWallpaperDb();
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_status)
+       VALUES (?, ?, 1, 'idle')`
+    ).run("conv-1", "user-1");
+
+    const deduped = dedupeActiveZenWallpaperGeneration(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: "conv-1",
+      enabled: true,
+    });
+
+    assert.equal(deduped, true);
+    const row = db
+      .prepare(
+        `SELECT zen_wallpaper_image_id, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations WHERE id = ?`
+      )
+      .get("conv-1") as {
+      zen_wallpaper_image_id: string | null;
+      zen_wallpaper_message_count: number | null;
+      zen_wallpaper_status: string;
+      zen_wallpaper_history: string;
+    };
+    assert.equal(row.zen_wallpaper_image_id, null);
+    assert.equal(row.zen_wallpaper_message_count, null);
+    assert.equal(row.zen_wallpaper_status, "generating");
+    assert.equal(row.zen_wallpaper_history, "[]");
+    db.close();
+  });
+
+  it("dedupes enabled requests, including forced-style retries, but not disable requests", () => {
+    const db = createActiveWallpaperDb();
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_image_id,
+         zen_wallpaper_status)
+       VALUES (?, ?, 1, ?, 'ready')`
+    ).run("conv-1", "user-1", "wallpaper-old");
+
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "conv-1",
+        enabled: true,
+      }),
+      true
+    );
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "conv-1",
+        enabled: false,
+      }),
+      false
+    );
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "other-conv",
+        enabled: true,
+      }),
+      false
+    );
     db.close();
   });
 });

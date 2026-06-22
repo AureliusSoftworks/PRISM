@@ -34,6 +34,9 @@ export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
 export const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 export const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
+export const DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED = true;
+export const DEFAULT_ZEN_WALLPAPER_STYLE_NOTES = "";
+export const MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH = 320;
 export const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = 12 * 60 * 60 * 1000;
 export const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
 export const MAX_ZEN_SESSION_IDLE_GAP_MS = 30 * 24 * 60 * 60 * 1000;
@@ -44,7 +47,7 @@ export const DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES = 30;
 export const MIN_ZEN_RECENT_CONTEXT_MESSAGES = 10;
 export const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
 export const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
-export const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 5;
+export const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 export const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
 export const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
 export const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
@@ -78,6 +81,8 @@ export interface CurrentSettings {
   autoMemory: number;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
+  experimentalAllModelEffortEnabled: number;
+  psychicModeEnabled: number;
   /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string;
@@ -95,6 +100,8 @@ export interface CurrentSettings {
   zenWallpaperOpacity: number | null;
   zenWallpaperTextMaskEnabled: number | null;
   zenWallpaperGrayscaleEnabled: number | null;
+  zenWallpaperBlurredEdgesEnabled: number | null;
+  zenWallpaperStyleNotes: string | null;
   zenSessionIdleGapMs: number | null;
   zenFreshStartGapMs: number | null;
   zenRecentContextMessages: number | null;
@@ -123,6 +130,8 @@ export interface NextSettings {
   autoMemory: number;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
+  experimentalAllModelEffortEnabled: number;
+  psychicModeEnabled: number;
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -139,6 +148,8 @@ export interface NextSettings {
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
   zenWallpaperGrayscaleEnabled: boolean;
+  zenWallpaperBlurredEdgesEnabled: boolean;
+  zenWallpaperStyleNotes: string;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -406,10 +417,7 @@ export function normalizeZenWallpaperOpacity(
   return Number(clamped.toFixed(2));
 }
 
-export function normalizeZenWallpaperTextMaskEnabled(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED
-): boolean {
+function normalizeBooleanLikeSetting(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
   if (typeof value === "string") {
@@ -424,11 +432,41 @@ export function normalizeZenWallpaperTextMaskEnabled(
   return Boolean(fallback);
 }
 
+export function normalizeZenWallpaperTextMaskEnabled(
+  _value: unknown,
+  _fallback = DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED
+): boolean {
+  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+}
+
 export function normalizeZenWallpaperGrayscaleEnabled(
   _value: unknown,
   _fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
 ): boolean {
   return true;
+}
+
+export function normalizeZenWallpaperBlurredEdgesEnabled(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED
+): boolean {
+  return normalizeBooleanLikeSetting(value, fallback);
+}
+
+export function normalizeZenWallpaperStyleNotes(
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_STYLE_NOTES
+): string {
+  if (value === undefined || typeof value !== "string") {
+    return normalizeZenWallpaperStyleNotes(fallback, DEFAULT_ZEN_WALLPAPER_STYLE_NOTES);
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH) {
+    return normalized;
+  }
+  return normalized
+    .slice(0, MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
+    .trimEnd();
 }
 
 function normalizeNumberSetting(
@@ -529,7 +567,7 @@ export function normalizeZenAskQuestionPatienceEnabled(
   value: unknown,
   fallback = DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED
 ): boolean {
-  return normalizeZenWallpaperTextMaskEnabled(value, fallback);
+  return normalizeBooleanLikeSetting(value, fallback);
 }
 
 export function normalizeZenAskQuestionPatienceMs(
@@ -637,6 +675,14 @@ export function resolveNextSettings(
     typeof body.experimentalDualOllamaEnabled === "boolean"
       ? Number(body.experimentalDualOllamaEnabled)
       : current.experimentalDualOllamaEnabled;
+  const experimentalAllModelEffortEnabled =
+    typeof body.experimentalAllModelEffortEnabled === "boolean"
+      ? Number(body.experimentalAllModelEffortEnabled)
+      : current.experimentalAllModelEffortEnabled;
+  const psychicModeEnabled =
+    typeof body.psychicModeEnabled === "boolean"
+      ? Number(body.psychicModeEnabled)
+      : current.psychicModeEnabled;
   const fallbackModelMessageStripe =
     typeof body.fallbackModelMessageStripe === "boolean"
       ? Number(body.fallbackModelMessageStripe)
@@ -721,6 +767,27 @@ export function resolveNextSettings(
       : normalizeZenWallpaperGrayscaleEnabled(
           body.zenWallpaperGrayscaleEnabled,
           currentZenWallpaperGrayscaleEnabled
+        );
+  const currentZenWallpaperBlurredEdgesEnabled =
+    normalizeZenWallpaperBlurredEdgesEnabled(
+      current.zenWallpaperBlurredEdgesEnabled
+    );
+  const zenWallpaperBlurredEdgesEnabled =
+    body.zenWallpaperBlurredEdgesEnabled === undefined
+      ? currentZenWallpaperBlurredEdgesEnabled
+      : normalizeZenWallpaperBlurredEdgesEnabled(
+          body.zenWallpaperBlurredEdgesEnabled,
+          currentZenWallpaperBlurredEdgesEnabled
+        );
+  const currentZenWallpaperStyleNotes = normalizeZenWallpaperStyleNotes(
+    current.zenWallpaperStyleNotes
+  );
+  const zenWallpaperStyleNotes =
+    body.zenWallpaperStyleNotes === undefined
+      ? currentZenWallpaperStyleNotes
+      : normalizeZenWallpaperStyleNotes(
+          body.zenWallpaperStyleNotes,
+          currentZenWallpaperStyleNotes
         );
   const currentZenSessionIdleGapMs = normalizeZenSessionIdleGapMs(
     current.zenSessionIdleGapMs
@@ -887,6 +954,8 @@ export function resolveNextSettings(
     autoMemory,
     composerWritingAssist,
     experimentalDualOllamaEnabled,
+    experimentalAllModelEffortEnabled,
+    psychicModeEnabled,
     fallbackModelMessageStripe,
     hiddenBotModelIds,
     hiddenComfyUiWorkflowIds,
@@ -903,6 +972,8 @@ export function resolveNextSettings(
     zenWallpaperOpacity,
     zenWallpaperTextMaskEnabled,
     zenWallpaperGrayscaleEnabled,
+    zenWallpaperBlurredEdgesEnabled,
+    zenWallpaperStyleNotes,
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,

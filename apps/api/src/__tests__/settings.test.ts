@@ -7,16 +7,20 @@ import {
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+  DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
   DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
   DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
   MAX_ZEN_WALLPAPER_OPACITY,
+  MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
   MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
   MIN_ZEN_WALLPAPER_OPACITY,
+  normalizeZenWallpaperStyleNotes,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
@@ -44,6 +48,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     autoMemory: 1,
     composerWritingAssist: 1,
     experimentalDualOllamaEnabled: 0,
+    experimentalAllModelEffortEnabled: 0,
+    psychicModeEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
@@ -60,6 +66,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
     zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
+    zenWallpaperBlurredEdgesEnabled:
+      DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED ? 1 : 0,
+    zenWallpaperStyleNotes: DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -258,6 +267,68 @@ describe("resolveNextSettings — experimentalDualOllamaEnabled", () => {
         { experimentalDualOllamaEnabled: "true" as unknown as boolean },
         current
       ).experimentalDualOllamaEnabled,
+      1
+    );
+  });
+});
+
+describe("resolveNextSettings — experimentalAllModelEffortEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: true },
+        baseline({ experimentalAllModelEffortEnabled: 0 })
+      ).experimentalAllModelEffortEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: false },
+        baseline({ experimentalAllModelEffortEnabled: 1 })
+      ).experimentalAllModelEffortEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ experimentalAllModelEffortEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).experimentalAllModelEffortEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: "true" as unknown as boolean },
+        current
+      ).experimentalAllModelEffortEnabled,
+      1
+    );
+  });
+});
+
+describe("resolveNextSettings — psychicModeEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: true },
+        baseline({ psychicModeEnabled: 0 })
+      ).psychicModeEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: false },
+        baseline({ psychicModeEnabled: 1 })
+      ).psychicModeEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ psychicModeEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).psychicModeEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: "true" as unknown as boolean },
+        current
+      ).psychicModeEnabled,
       1
     );
   });
@@ -695,11 +766,11 @@ describe("resolveNextSettings — Zen Atmosphere opacity", () => {
 });
 
 describe("resolveNextSettings — Zen Atmosphere text mask", () => {
-  it("stores boolean text-mask values", () => {
+  it("enforces the text-mask compatibility field even when clients send false", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperTextMaskEnabled: false }, baseline())
         .zenWallpaperTextMaskEnabled,
-      false
+      true
     );
     assert.equal(
       resolveNextSettings(
@@ -710,15 +781,15 @@ describe("resolveNextSettings — Zen Atmosphere text mask", () => {
     );
   });
 
-  it("keeps the stored text-mask setting when omitted or invalid", () => {
+  it("ignores stored false and invalid text-mask values", () => {
     const current = baseline({ zenWallpaperTextMaskEnabled: 0 });
-    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, false);
+    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, true);
     assert.equal(
       resolveNextSettings(
         { zenWallpaperTextMaskEnabled: "sometimes" },
         current
       ).zenWallpaperTextMaskEnabled,
-      false
+      true
     );
   });
 });
@@ -748,6 +819,86 @@ describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
         current
       ).zenWallpaperGrayscaleEnabled,
       true
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere blurred edges", () => {
+  it("stores the edge blur preference", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperBlurredEdgesEnabled: false }, baseline())
+        .zenWallpaperBlurredEdgesEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperBlurredEdgesEnabled: true },
+        baseline({ zenWallpaperBlurredEdgesEnabled: 0 })
+      ).zenWallpaperBlurredEdgesEnabled,
+      true
+    );
+  });
+
+  it("keeps the stored edge blur value when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperBlurredEdgesEnabled: 0 });
+    assert.equal(
+      resolveNextSettings({}, current).zenWallpaperBlurredEdgesEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperBlurredEdgesEnabled: "sometimes" },
+        current
+      ).zenWallpaperBlurredEdgesEnabled,
+      false
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere style notes", () => {
+  it("stores normalized style notes", () => {
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: "  misty\n glass,   paper grain  " },
+      baseline()
+    );
+
+    assert.equal(next.zenWallpaperStyleNotes, "misty glass, paper grain");
+  });
+
+  it("clamps style notes to the configured limit", () => {
+    const longNotes = "a".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 25);
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: longNotes },
+      baseline()
+    );
+
+    assert.equal(
+      next.zenWallpaperStyleNotes.length,
+      MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH
+    );
+    assert.equal(
+      normalizeZenWallpaperStyleNotes(longNotes),
+      "a".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
+    );
+  });
+
+  it("clears style notes with an empty string", () => {
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: "   " },
+      baseline({ zenWallpaperStyleNotes: "misty glass" })
+    );
+
+    assert.equal(next.zenWallpaperStyleNotes, "");
+  });
+
+  it("keeps stored style notes when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperStyleNotes: "woven texture" });
+
+    assert.equal(resolveNextSettings({}, current).zenWallpaperStyleNotes, "woven texture");
+    assert.equal(
+      resolveNextSettings({ zenWallpaperStyleNotes: false }, current)
+        .zenWallpaperStyleNotes,
+      "woven texture"
     );
   });
 });
@@ -844,7 +995,7 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     );
 
     assert.equal(low.zenRecentContextMessages, 10);
-    assert.equal(low.zenWallpaperRegenMessageInterval, 5);
+    assert.equal(low.zenWallpaperRegenMessageInterval, 3);
     assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
     assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
     assert.equal(high.zenRecentContextMessages, 80);

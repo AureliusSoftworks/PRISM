@@ -95,6 +95,7 @@ export {
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
   normalizeZenDisplayMetadata,
+  normalizeStoredZenAssistantTurnPayload,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -109,6 +110,8 @@ export {
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
+  type StoredZenAssistantTurnKind,
+  type StoredZenAssistantTurnPayload,
   type ZenDisplayAlign,
   type ZenDisplayLinePlacement,
   type ZenDisplayMetadata,
@@ -119,8 +122,10 @@ export {
   normalizePromptShortcutMetadata,
   normalizeBuiltInPromptWildcardSlotKey,
   normalizePromptWildcardRunMetadata,
+  normalizePsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
+  parseStoredPsychicThoughtPayload,
   serializePromptShortcutPayload,
   serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
@@ -133,6 +138,7 @@ export {
   type PromptShortcutMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  type PsychicThoughtPayload,
 } from "./promptShortcut.js";
 
 export {
@@ -285,6 +291,7 @@ import type {
 import type {
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
+  PsychicThoughtPayload,
 } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
@@ -342,6 +349,8 @@ export interface ChatMessage {
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Concise visible summary from Psychic mode for this user turn. */
+  psychicThought?: PsychicThoughtPayload;
 }
 
 /**
@@ -661,6 +670,7 @@ export type MemoryTier = "short_term" | "long_term";
 export interface ZenSessionMemoryItem {
   id: string;
   conversationId?: string;
+  botId?: string | null;
   title: string;
   text: string;
   trigger?: string;

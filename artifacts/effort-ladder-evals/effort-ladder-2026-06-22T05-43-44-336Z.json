@@ -1,0 +1,181 @@
+{
+  "schema": "prism-effort-ladder-eval-v1",
+  "createdAt": "2026-06-22T05:43:44.336Z",
+  "prompt": "Create a rollout plan as a compact Markdown table with exactly 6 body rows labeled S1 through S6.\nUse columns: ID, Plan.\n\nConstraints:\n- S1 must name the user-facing effort setting.\n- S2 must explain the local-only guarantee without using the word cloud.\n- S3 must describe the private planning pass.\n- S4 must say what happens if planning JSON fails.\n- S5 must mention that scratchpads are not persisted.\n- S6 must name one UI indicator for Psychic mode.\n- Do not expose raw chain-of-thought.\n- Keep the answer under 180 words.",
+  "options": {
+    "model": "llama3.2",
+    "outDir": "artifacts/effort-ladder-evals",
+    "temperature": 0.25,
+    "maxTokens": 900,
+    "includeScratchpad": false
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "effort": "none",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 1341,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout of \"Conversational Flow Enhancements\" |\n| S2 | Local-only guarantee ensures data is stored only on user's device, without syncing with external services. |\n| S3 | Private planning pass allows for secure and isolated planning process, preventing external interference or modification. |\n| S4 | If planning JSON fails, the system will revert to a default plan and notify the user of the error. |\n| S5 | Scratchpads are not persisted across sessions, requiring users to recreate their work from scratch each time. |\n| S6 | Psychic mode indicator: A glowing purple \"P\" symbol on the bottom right corner of the chat interface.",
+      "assistantChars": 664,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 120,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 2511,
+      "planningBudgetTokens": 300,
+      "assistant": "assistant\n\n| ID | Plan |\n| --- | --- |\n| S1 | Rollout of \"Prism Assistant\" as our new user-facing effort setting |\n| S2 | Local-only guarantee ensures that only the user's device can access and process their data, without any external servers or third-party services |\n| S3 | Private planning pass is a simulated planning mechanism used to generate responses before they are sent to the user, ensuring more accurate and personalized answers |\n| S4 | If planning JSON fails, the system will revert to a default response plan to avoid providing incorrect information |\n| S5 | Scratchpads are not persisted across sessions, so any notes or ideas generated during a conversation will be lost when the session ends |\n| S6 | Psychic mode will be indicated by a glowing blue \"psi\" symbol in the top-right corner of the chat interface |",
+      "assistantChars": 828,
+      "psychicSummary": "Rollout plan for private planning pass",
+      "scratchpadChars": 69,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 150,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": false,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 3132,
+      "planningBudgetTokens": 420,
+      "assistant": "assistant\n\n| ID | Plan |\n| --- | --- |\n| S1 | \"Private Planning Pass\" effort setting |\n| S2 | Our planning system stores data locally to ensure security and performance, but this means that data is not shared with external services. This local-only approach helps protect user information and maintain control over our systems. |\n| S3 | The private planning pass is a developer-only feature used for internal testing and iteration of our planning algorithms. It allows us to refine our models without exposing sensitive user data. |\n| S4 | If the planning JSON fails, users will receive error messages indicating that there was an issue with the system's ability to generate content. We apologize for any inconvenience this may cause and are working to resolve the issue as soon as possible. |\n| S5 | Scratchpads are not persisted across sessions, so any work done in a scratchpad is lost when the user closes their session. We recommend saving important notes or ideas before closing your session to avoid losing them. |\n| S6 | The Psychic mode indicator will be displayed in the UI as a small, glowing orb icon next to the chat interface. This visual cue signals that our system is in Psychic mode and ready to generate content. |",
+      "assistantChars": 1232,
+      "psychicSummary": "Rollout plan for private planning pass",
+      "scratchpadChars": 69,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 220,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": false,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 2411,
+      "planningBudgetTokens": 560,
+      "assistant": "assistant\n\n| ID | Plan |\n| --- | --- |\n| S1 | \"Private Planning Pass\" effort setting to be rolled out |\n| S2 | Data storage limitations mean planning data is only accessible within this system, not shared with other devices or services |\n| S3 | Private planning pass is a developer-only artifact used for internal testing and refinement of the planning pass feature |\n| S4 | If planning JSON fails, users will receive error messages indicating the issue and suggesting alternative solutions |\n| S5 | Scratchpads are not persisted across sessions, so any changes made during a session will be lost when the user closes the application |\n| S6 | Psychic mode indicator to be displayed in the UI as a visual cue for users with enabled planning pass features |",
+      "assistantChars": 755,
+      "psychicSummary": "Rollout plan for private planning pass",
+      "scratchpadChars": 69,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 139,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 2430,
+      "planningBudgetTokens": 720,
+      "assistant": "assistant\n\n| ID | Plan |\n| --- | --- |\n| S1 | \"Private Planning Pass\" effort setting |\n| S2 | Data storage limitations mean planning data is only accessible within this environment, ensuring user privacy and security. |\n| S3 | Private planning pass is a developer-only artifact used to improve the model's performance and accuracy through simulated planning passes. |\n| S4 | If planning JSON fails, users will receive error messages indicating that the system is unable to generate a response. |\n| S5 | Scratchpads are not persisted across sessions, so any work done in a session will be lost when the user closes the conversation. |\n| S6 | The Psychic mode indicator will be displayed in the UI as a visual cue to indicate when the model is using its planning pass capabilities. |",
+      "assistantChars": 781,
+      "psychicSummary": "Rollout plan for private planning pass",
+      "scratchpadChars": 69,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 142,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "llama3.2",
+      "status": "ok",
+      "durationMs": 2952,
+      "planningBudgetTokens": 900,
+      "assistant": "assistant\n\n| ID | Plan |\n| --- | --- |\n| S1 | \"Private Planning Pass\" effort setting |\n| S2 | Our planning system stores data locally, ensuring that sensitive information remains secure and is not shared with external services. This approach provides an added layer of protection for our users' data. |\n| S3 | The private planning pass is a developer-only artifact used to test and refine the planning functionality before it's released to users. It allows developers to simulate real-world scenarios without exposing sensitive user data. |\n| S4 | If the planning JSON fails, users will receive error messages indicating that there was an issue with the system. We apologize for any inconvenience this may cause and are working to resolve the issue as soon as possible. |\n| S5 | Scratchpads used during planning sessions are not persisted across sessions, so any work completed in a scratchpad is lost when the session ends. |\n| S6 | The Psychic mode indicator will be displayed in the UI, providing users with an easy way to identify when the system is in a sensitive or critical state.",
+      "assistantChars": 1087,
+      "psychicSummary": "Rollout plan for private planning pass",
+      "scratchpadChars": 69,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 192,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": false,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    }
+  ]
+}

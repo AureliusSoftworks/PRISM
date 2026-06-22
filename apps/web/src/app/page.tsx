@@ -17,6 +17,7 @@ import {
   useSyncExternalStore,
   useTransition,
   type HTMLAttributes,
+  type CSSProperties,
   type RefObject,
   type UIEvent,
 } from "react";
@@ -61,6 +62,12 @@ import {
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
 import {
+  PSYCHIC_COMMAND_NAME,
+  PSYCHIC_SLASH_COMMAND,
+  parsePsychicSlashCommand,
+} from "./psychicCommand";
+import { psychicThoughtDisplayLineForMessage } from "./psychicThoughtDisplay";
+import {
   createStoryDialogState,
   createStoryInventoryViewState,
   storyNpcFaceExpressionForPose,
@@ -78,7 +85,10 @@ import {
 } from "./providerMode";
 import {
   CircleHelp,
+  Brush,
+  Building2,
   Download,
+  Droplets,
   Image as ImageGlyph,
   Info,
   LogOut,
@@ -87,9 +97,12 @@ import {
   Pause,
   Play,
   RotateCcw,
+  ScanLine,
   SkipBack,
   SkipForward,
+  Sparkles,
   Timer,
+  Waves,
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
@@ -150,6 +163,7 @@ import {
   type PromptShortcutMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  type PsychicThoughtPayload,
   type BuiltInPromptWildcardSlotKey,
   type SentGeneratedImagePayload,
   type ZenDisplayMetadata,
@@ -290,6 +304,10 @@ import {
   resolveZenPersonaTransitionStyle,
   type ZenPersonaTransitionChoice,
 } from "./zenPersonaTransition";
+import {
+  calculateZenAtmosphereLayerOpacitiesForReader,
+  maxZenAtmosphereLayerOpacity,
+} from "./zenAtmosphere";
 import {
   nextZenAutonomyCooldownUntilMs,
   resolveZenAutonomyEligibility,
@@ -895,6 +913,7 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const PSYCHIC_MODE_TOAST_DISMISS_MS = 3600;
 const ZEN_HEADER_REVEAL_EDGE_PX = 72;
 const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
@@ -1013,6 +1032,22 @@ type ZenWallpaperApiResponse = {
   image?: { id: string };
 };
 
+type ZenRememberedWallpaperPreview = {
+  botId: string;
+  imageId: string;
+  promptSeed: string | null;
+  createdAt: string;
+};
+
+type ZenRememberedWallpaperApiResponse = {
+  ok: true;
+  wallpaper: null | {
+    imageId: string;
+    promptSeed: string | null;
+    createdAt: string;
+  };
+};
+
 type ImageGenerationVariant = "portrait" | "letterbox" | "landscape";
 
 const IMAGE_GENERATION_VARIANT_OPTIONS: ReadonlyArray<{
@@ -1031,7 +1066,7 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
   landscape: "1536x1024",
 };
 const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
-const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 8;
+const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 0;
 const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
 const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
@@ -1047,7 +1082,7 @@ const MIN_ZEN_RECENT_CONTEXT_MESSAGES = 10;
 const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
 const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL =
   ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
-const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 5;
+const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
 const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT =
   ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
@@ -3637,6 +3672,8 @@ interface Message {
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Concise simulated reasoning summary shown when Psychic mode is enabled. */
+  psychicThought?: PsychicThoughtPayload;
 }
 
 function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
@@ -3843,6 +3880,14 @@ type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
 /** How many typewriter characters advance before swapping open/closed mouth. */
 const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 3;
+
+function coffeeSeatMouthOpenFromVisibleLength(visibleLength: number): boolean {
+  return (
+    Math.floor(
+      Math.max(0, visibleLength) / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE
+    ) % 2 === 0
+  );
+}
 
 function lastCoffeeAssistantMoodKeyForBotName(
   threadMessages: readonly CoffeeConversationMessage[],
@@ -5290,6 +5335,15 @@ interface ChatPostEnvelope {
   };
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Live-only Psychic/planning detail for the developer metrics stream. */
+  psychicDebug?: {
+    summary: string;
+    scratchpad: string;
+    effort: ReasoningEffort;
+    provider: Provider;
+    model?: string;
+    simulated: boolean;
+  };
   /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
   zenAutonomyDecision?: ZenAutonomyDecision;
   /**
@@ -5412,6 +5466,8 @@ interface UserSettings {
   autoMemory: boolean;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
+  experimentalAllModelEffortEnabled: boolean;
+  psychicModeEnabled: boolean;
   /**
    * When true (default), assistant bubbles that used the configured copyright
    * lenient local fallback get the striped left-edge treatment.
@@ -5444,6 +5500,8 @@ interface UserSettings {
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
   zenWallpaperGrayscaleEnabled: boolean;
+  zenWallpaperBlurredEdgesEnabled: boolean;
+  zenWallpaperStyleNotes: string;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -5471,6 +5529,8 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperOpacity"
   | "zenWallpaperTextMaskEnabled"
   | "zenWallpaperGrayscaleEnabled"
+  | "zenWallpaperBlurredEdgesEnabled"
+  | "zenWallpaperStyleNotes"
   | "zenSessionIdleGapMs"
   | "zenFreshStartGapMs"
   | "zenRecentContextMessages"
@@ -5764,6 +5824,12 @@ type MemoryToast =
       rejected: MemoryRejectedEventPayload;
       expiresAt: number;
     };
+interface PsychicModeToast {
+  id: string;
+  enabled: boolean;
+  source: "chat" | "coffee";
+  expiresAt: number;
+}
 interface ModelCatalogEntry {
   id: string;
   label: string;
@@ -5992,6 +6058,7 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "restart",
   "new-session",
   "forgive-me",
+  PSYCHIC_COMMAND_NAME,
 ]);
 const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "help",
@@ -6004,6 +6071,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "restart",
   "new-session",
   "forgive-me",
+  PSYCHIC_COMMAND_NAME,
   "dev",
   "forget",
   "forget-all",
@@ -6268,6 +6336,22 @@ function createBuiltInForgiveMeCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInPsychicCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/psychic",
+    name: PSYCHIC_COMMAND_NAME,
+    title: PSYCHIC_COMMAND_NAME,
+    command: "Switches Psychic mode on or off for future turns.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -6487,6 +6571,7 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
     createBuiltInForgiveMeCommand(),
+    createBuiltInPsychicCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -6850,6 +6935,63 @@ const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
+const DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED = true;
+const MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH = 320;
+const ZEN_WALLPAPER_STYLE_OPTIONS = [
+  {
+    id: "default",
+    label: "Default",
+    color: "#fffdf4",
+    glyph: Sparkles,
+    notes: "",
+    ariaLabel: "Default PRISM atmosphere style",
+  },
+  {
+    id: "glass",
+    label: "Glass",
+    color: PRISM_COLORS.s,
+    glyph: Droplets,
+    notes:
+      "style preset: misted glass abstraction; translucent panes, condensation haze, soft refraction, layered depth, quiet gallery light",
+    ariaLabel: "Glass atmosphere style",
+  },
+  {
+    id: "ink",
+    label: "Ink",
+    color: PRISM_COLORS.m,
+    glyph: Brush,
+    notes:
+      "style preset: ink wash abstraction; diluted brush washes, feathered edges, handmade paper grain, pooled pigment, open negative space",
+    ariaLabel: "Ink atmosphere style",
+  },
+  {
+    id: "shadow",
+    label: "Shadow",
+    color: PRISM_COLORS.r,
+    glyph: Building2,
+    notes:
+      "style preset: architectural shadow abstraction; minimal interior planes, slatted light, threshold geometry, long soft shadows, measured spatial rhythm",
+    ariaLabel: "Shadow atmosphere style",
+  },
+  {
+    id: "grain",
+    label: "Grain",
+    color: PRISM_COLORS.p,
+    glyph: ScanLine,
+    notes:
+      "style preset: analog film grain abstraction; subtle 35mm texture, low contrast halation, soft vignette, gentle bloom, lightly worn emulsion",
+    ariaLabel: "Grain atmosphere style",
+  },
+  {
+    id: "tide",
+    label: "Tide",
+    color: PRISM_COLORS.i,
+    glyph: Waves,
+    notes:
+      "style preset: slow ocean light abstraction; horizon shimmer, tidal blur, glassy reflections, calm wave bands, liquid atmospheric depth",
+    ariaLabel: "Tide atmosphere style",
+  },
+] as const;
 const ZEN_ATMOSPHERE_COLOR_TRANSITION_MS = 720;
 const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
@@ -7209,7 +7351,15 @@ function normalizeZenWallpaperOpacitySetting(value: unknown): number {
   return Number(clamped.toFixed(2));
 }
 
-function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
+function normalizeZenWallpaperTextMaskSetting(_value: unknown): boolean {
+  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+}
+
+function normalizeZenWallpaperGrayscaleSetting(_value: unknown): boolean {
+  return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
+}
+
+function normalizeZenWallpaperBlurredEdgesSetting(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
   if (typeof value === "string") {
@@ -7221,11 +7371,34 @@ function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
       return false;
     }
   }
-  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+  return DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED;
 }
 
-function normalizeZenWallpaperGrayscaleSetting(_value: unknown): boolean {
-  return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
+function normalizeZenWallpaperStyleNotesSetting(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH) {
+    return normalized;
+  }
+  return normalized
+    .slice(0, MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
+    .trimEnd();
+}
+
+function resolveZenWallpaperStyleOptionNotes(value: unknown): string {
+  const normalized = normalizeZenWallpaperStyleNotesSetting(value).toLowerCase();
+  const matchedOption = ZEN_WALLPAPER_STYLE_OPTIONS.find(
+    (option) =>
+      normalizeZenWallpaperStyleNotesSetting(option.notes).toLowerCase() === normalized
+  );
+  return matchedOption?.notes ?? "";
+}
+
+function zenWallpaperStyleOptionSelected(currentValue: string, optionNotes: string): boolean {
+  return (
+    resolveZenWallpaperStyleOptionNotes(currentValue).toLowerCase() ===
+    normalizeZenWallpaperStyleNotesSetting(optionNotes).toLowerCase()
+  );
 }
 
 function formatZenWallpaperOpacity(value: unknown): string {
@@ -7462,6 +7635,9 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
     zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
+    zenWallpaperBlurredEdgesEnabled:
+      DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
+    zenWallpaperStyleNotes: "",
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -7479,8 +7655,14 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
 
 function modelChoiceSupportsReasoningEffort(
   provider: Provider,
-  modelChoice: string
+  modelChoice: string,
+  allModelEffortEnabled = false
 ): boolean {
+  if (allModelEffortEnabled) {
+    return provider === "local" || provider === "anthropic" || modelChoice === AUTO_MODEL_CHOICE
+      ? true
+      : provider === "openai";
+  }
   return (
     provider === "openai" &&
     modelChoice !== AUTO_MODEL_CHOICE &&
@@ -7491,9 +7673,11 @@ function modelChoiceSupportsReasoningEffort(
 function reasoningEffortForSend(
   provider: Provider,
   modelOverride: string | undefined,
-  effort: ReasoningEffort
+  effort: ReasoningEffort,
+  allModelEffortEnabled = false
 ): ReasoningEffort | undefined {
   if (effort === DEFAULT_REASONING_EFFORT) return undefined;
+  if (allModelEffortEnabled) return effort;
   if (provider !== "openai" || !modelOverride) return undefined;
   return openAiModelSupportsReasoningEffort(modelOverride) ? effort : undefined;
 }
@@ -7538,6 +7722,12 @@ function normalizeZenModeSettingsFields(
     ),
     zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleSetting(
       settings?.zenWallpaperGrayscaleEnabled
+    ),
+    zenWallpaperBlurredEdgesEnabled: normalizeZenWallpaperBlurredEdgesSetting(
+      settings?.zenWallpaperBlurredEdgesEnabled
+    ),
+    zenWallpaperStyleNotes: resolveZenWallpaperStyleOptionNotes(
+      settings?.zenWallpaperStyleNotes
     ),
     zenSessionIdleGapMs,
     zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
@@ -9444,12 +9634,14 @@ function MessageMoodFace(props: {
   placement?: "leading" | "trailing";
   color?: string | null;
   voicePreset?: BotVoicePreset;
+  isTalking?: boolean;
+  mouthOpen?: boolean;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
   const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(moodKey);
-  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, false);
+  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, props.mouthOpen === true);
   const color = props.color?.trim();
   const style = color
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
@@ -9466,7 +9658,7 @@ function MessageMoodFace(props: {
     >
       <CoffeeSeatPlateEmoji
         enabled={variant === "prism"}
-        isTalking={false}
+        isTalking={props.isTalking === true}
         scheduleKey={`message-mood-${variant}-${moodKey}`}
         baseText={seatPlateGlyph.text}
         rotateDeg={seatPlateGlyph.rotateDeg}
@@ -21601,7 +21793,6 @@ function HomeContent(): React.JSX.Element {
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,
-    zenWallpaperTextMaskEnabled,
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
@@ -21732,6 +21923,8 @@ function HomeContent(): React.JSX.Element {
     useState<ZenPreviousContextSummary | null>(null);
   const [zenSessionMemories, setZenSessionMemories] = useState<ZenSessionMemoryItem[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
+  const [psychicModeToast, setPsychicModeToast] =
+    useState<PsychicModeToast | null>(null);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -22375,6 +22568,11 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
   const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
+  const [
+    zenRememberedWallpaperPreview,
+    setZenRememberedWallpaperPreview,
+  ] = useState<ZenRememberedWallpaperPreview | null>(null);
+  const zenRememberedWallpaperRequestRef = useRef(0);
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
   const zenWallpaperToggleAutoGenerationSuppressedRef = useRef<Map<string, number>>(new Map());
   const zenAtmosphereTimeline = useMemo(
@@ -26003,7 +26201,11 @@ function HomeContent(): React.JSX.Element {
             isLocal ? "local" : "online"
           )}
           effortControl={
-            modelChoiceSupportsReasoningEffort(modelProvider, visibleModelChoice)
+            modelChoiceSupportsReasoningEffort(
+              modelProvider,
+              visibleModelChoice,
+              settings?.experimentalAllModelEffortEnabled === true
+            )
               ? {
                   value: chatReasoningEffort,
                   onChange: (next) => {
@@ -27908,10 +28110,19 @@ function HomeContent(): React.JSX.Element {
     const onActivate = compactPhase
       ? handleZenInitialReplyRevealCancel
       : handleZenInitialThinkingCancel;
+    const personaBot =
+      composeBotAccentId !== null
+        ? bots.find((bot) => bot.id === composeBotAccentId) ?? null
+        : zenPersonaBot;
+    const personaStyle = personaBot
+      ? botAccentStyle(personaBot.color, resolvedTheme)
+      : undefined;
     return (
       <div
         className={styles.zenInitialThinkingOverlay}
         data-phase={compactPhase ? "compact" : "thinking"}
+        data-persona={personaBot ? "bot" : "prism"}
+        style={personaStyle}
         role="status"
         aria-live="polite"
       >
@@ -27940,7 +28151,15 @@ function HomeContent(): React.JSX.Element {
           title={compactPhase ? "Stop reply" : "Cancel reply"}
         >
           <span className={styles.zenInitialThinkingGlyphHalo} aria-hidden="true">
-            <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+            {personaBot ? (
+              <BotGlyph
+                name={personaBot.glyph}
+                size={compactPhase ? 24 : 58}
+                className={styles.zenInitialThinkingGlyph}
+              />
+            ) : (
+              <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+            )}
           </span>
           <span className={styles.zenInitialThinkingLabel}>{label}</span>
         </button>
@@ -27949,11 +28168,15 @@ function HomeContent(): React.JSX.Element {
   }, [
     handleZenInitialReplyRevealCancel,
     handleZenInitialThinkingCancel,
+    bots,
+    composeBotAccentId,
     detail?.id,
     detail?.messages.length,
     latestAssistantMessageId,
     pendingReplyConversationId,
     pendingReplyStartedAtMs,
+    resolvedTheme,
+    zenPersonaBot,
     zenInitialReplyRevealActive,
     zenInitialThinkingActive,
   ]);
@@ -30205,6 +30428,50 @@ function HomeContent(): React.JSX.Element {
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
     !emptyStateSearchActive;
+  useEffect(() => {
+    const requestId = zenRememberedWallpaperRequestRef.current + 1;
+    zenRememberedWallpaperRequestRef.current = requestId;
+    if (!zenEmptyHeroVisible || appWidePrivateMode || !zenPersonaBotId) {
+      setZenRememberedWallpaperPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setZenRememberedWallpaperPreview(null);
+    void api<ZenRememberedWallpaperApiResponse>(
+      `/api/bots/${encodeURIComponent(zenPersonaBotId)}/zen-wallpaper`
+    )
+      .then((data) => {
+        if (
+          cancelled ||
+          zenRememberedWallpaperRequestRef.current !== requestId
+        ) {
+          return;
+        }
+        const wallpaper = data.wallpaper;
+        setZenRememberedWallpaperPreview(
+          wallpaper
+            ? {
+                botId: zenPersonaBotId,
+                imageId: wallpaper.imageId,
+                promptSeed: wallpaper.promptSeed,
+                createdAt: wallpaper.createdAt,
+              }
+            : null
+        );
+      })
+      .catch(() => {
+        if (
+          cancelled ||
+          zenRememberedWallpaperRequestRef.current !== requestId
+        ) {
+          return;
+        }
+        setZenRememberedWallpaperPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appWidePrivateMode, zenEmptyHeroVisible, zenPersonaBotId]);
   const zenToolLabHasActiveThread = Boolean(
     view === "chat" &&
       detail?.id &&
@@ -31257,6 +31524,17 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
+  useEffect(() => {
+    if (!psychicModeToast) return;
+    const remainingMs = Math.max(0, psychicModeToast.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setPsychicModeToast((current) =>
+        current?.id === psychicModeToast.id ? null : current
+      );
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [psychicModeToast]);
+
   // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
   // clears stale mode state too, then the restore effect below opens the
   // user's single continuous PRISM conversation.
@@ -31927,6 +32205,9 @@ function HomeContent(): React.JSX.Element {
       displayName,
       composerWritingAssist: d.settings.composerWritingAssist !== false,
       experimentalDualOllamaEnabled: d.settings.experimentalDualOllamaEnabled === true,
+      experimentalAllModelEffortEnabled:
+        d.settings.experimentalAllModelEffortEnabled === true,
+      psychicModeEnabled: d.settings.psychicModeEnabled === true,
       fallbackModelMessageStripe: d.settings.fallbackModelMessageStripe !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
@@ -32400,6 +32681,22 @@ function HomeContent(): React.JSX.Element {
           `${prefix} lenient fallback invoked (${invocation.trigger}). ` +
           `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
       });
+    }
+    if (envelope.psychicDebug) {
+      const debug = envelope.psychicDebug;
+      lines.push({
+        kind: "summary",
+        text:
+          `${prefix} psychic ${debug.simulated ? "simulated effort" : "summary"} ` +
+          `(${debug.provider}${debug.model ? `:${debug.model}` : ""}, effort=${debug.effort}): ` +
+          debug.summary,
+      });
+      if (debug.scratchpad.trim().length > 0) {
+        lines.push({
+          kind: "summary",
+          text: `${prefix} psychic scratchpad: ${debug.scratchpad}`,
+        });
+      }
     }
     const toolCallEvents = envelope.toolCalls ?? [];
     for (const event of toolCallEvents) {
@@ -33281,7 +33578,8 @@ function HomeContent(): React.JSX.Element {
     const reasoningEffortOverride = reasoningEffortForSend(
       providerForSend,
       modelOverride,
-      chatReasoningEffort
+      chatReasoningEffort,
+      settings?.experimentalAllModelEffortEnabled === true
     );
     const hasZenPersonaBotOverride = Object.prototype.hasOwnProperty.call(
       options,
@@ -34215,6 +34513,61 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function showPsychicModeToast(
+    enabled: boolean,
+    source: "chat" | "coffee"
+  ): void {
+    const now = Date.now();
+    setPsychicModeToast({
+      id: `psychic-mode:${now}`,
+      enabled,
+      source,
+      expiresAt: now + PSYCHIC_MODE_TOAST_DISMISS_MS,
+    });
+  }
+
+  async function togglePsychicModeFromSlashCommand(
+    options: { clearChatComposer?: boolean; source?: "chat" | "coffee" } = {}
+  ): Promise<void> {
+    const source = options.source ?? "chat";
+    const nextEnabled = settings?.psychicModeEnabled === true ? false : true;
+    setError(null);
+    if (options.clearChatComposer !== false) {
+      setConversationStarterPrompts(null);
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
+    }
+    setSettings((previous) =>
+      previous ? { ...previous, psychicModeEnabled: nextEnabled } : previous
+    );
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ psychicModeEnabled: nextEnabled }),
+      });
+      await refreshSettings();
+      showPsychicModeToast(nextEnabled, source);
+      const stateText = nextEnabled ? "enabled" : "disabled";
+      appendDevChatDebugLines([
+        {
+          kind: "backend",
+          text: `[/psychic] Psychic mode ${stateText}${
+            source === "coffee" ? " from Coffee" : ""
+          }.`,
+        },
+      ]);
+    } catch (err) {
+      setSettings((previous) =>
+        previous ? { ...previous, psychicModeEnabled: !nextEnabled } : previous
+      );
+      setError(err instanceof Error ? err.message : "Could not update Psychic mode.");
+    }
+  }
+
   /** Built-in operational slash commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
     const tokens = trimmedLine
@@ -34233,10 +34586,12 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand !== "/restart" &&
       normalizedCommand !== "/new-session" &&
       normalizedCommand !== "/forgive-me" &&
+      normalizedCommand !== PSYCHIC_SLASH_COMMAND &&
       normalizedCommand !== "/help"
     ) {
       return false;
     }
+    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
     if (normalizedCommand === "/help") {
       setDraft("");
       setComposerSendTintActive(false);
@@ -34270,6 +34625,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/forgive-me") {
       await resetPrismMoodFromSlashCommand();
+      return true;
+    }
+    if (psychicCommand.kind === "ok") {
+      await togglePsychicModeFromSlashCommand({ source: "chat" });
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -37093,57 +37452,14 @@ function HomeContent(): React.JSX.Element {
       );
       return scrollRoot.scrollHeight + (count - messages.length) * averageMessageHeight;
     };
-    const anchors = zenAtmosphereTimeline
-      .map((entry) => {
-        const revealStartMessageCount =
-          entry.revealStartMessageCount ??
-          entry.generationMessageCount + zenWallpaperRevealDelayMessageCount;
-        const revealFullMessageCount = Math.max(
-          revealStartMessageCount,
-          entry.revealFullMessageCount ??
-            revealStartMessageCount + zenWallpaperRevealSpanMessageCount
-        );
-        const startY = messageCountToY(revealStartMessageCount);
-        const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
-        return { ...entry, startY, fullY, revealStartMessageCount, revealFullMessageCount };
-      })
-      .sort((a, b) => {
-        const yDelta = a.startY - b.startY;
-        if (Math.abs(yDelta) > 0.5) return yDelta;
-        return a.revealStartMessageCount - b.revealStartMessageCount;
-      });
-
-    const next: Record<string, number> = {};
-    for (const entry of zenAtmosphereTimeline) {
-      next[entry.imageId] = 0;
-    }
     const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
-    if (readerY < anchors[0].startY) {
-      if (anchors.length === 1) {
-        next[anchors[0].imageId] = 1;
-      }
-      return next;
-    }
-    for (let index = 0; index < anchors.length; index += 1) {
-      const current = anchors[index];
-      const previous = anchors[index - 1] ?? null;
-      const upcoming = anchors[index + 1] ?? null;
-      if (readerY >= current.startY && readerY <= current.fullY) {
-        const progress = Math.max(
-          0,
-          Math.min(1, (readerY - current.startY) / Math.max(1, current.fullY - current.startY))
-        );
-        if (previous) next[previous.imageId] = 1 - progress;
-        next[current.imageId] = progress;
-        return next;
-      }
-      if (readerY > current.fullY && (!upcoming || readerY < upcoming.startY)) {
-        next[current.imageId] = 1;
-        return next;
-      }
-    }
-    next[anchors[anchors.length - 1].imageId] = 1;
-    return next;
+    return calculateZenAtmosphereLayerOpacitiesForReader({
+      timeline: zenAtmosphereTimeline,
+      readerY,
+      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
+      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      messageCountToY,
+    });
   }
 
   function updateZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
@@ -44590,7 +44906,13 @@ function HomeContent(): React.JSX.Element {
       zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
     }
     const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
-    if (!zenWallpaper.imageId) return;
+    if (!zenWallpaper.imageId) {
+      void requestZenWallpaperUpdate(detail.id, {
+        enabled: true,
+        force: true,
+      });
+      return;
+    }
     const shouldGenerateForIdleEra =
       zenLatestIdleEraBoundaryMessageCount !== null &&
       lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
@@ -46846,6 +47168,28 @@ function HomeContent(): React.JSX.Element {
   const renderZenMemoryToasts = () =>
     view === "chat" ? renderMemoryToasts("zen") : null;
 
+  const renderPsychicModeToast = () => {
+    if (!psychicModeToast) return null;
+    return (
+      <div
+        className={styles.psychicModeToast}
+        data-psychic-active={psychicModeToast.enabled ? "true" : "false"}
+        role="status"
+        aria-live="polite"
+      >
+        <span className={styles.psychicModeToastDot} aria-hidden="true" />
+        <span className={styles.psychicModeToastCopy}>
+          <strong>{psychicModeToast.enabled ? "Psychic on" : "Psychic off"}</strong>
+          <small>
+            {psychicModeToast.enabled
+              ? "Summaries will appear under new sends."
+              : "Summaries hidden for new sends."}
+          </small>
+        </span>
+      </div>
+    );
+  };
+
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
@@ -48332,6 +48676,48 @@ function HomeContent(): React.JSX.Element {
         : null;
     const debugControlsDisabled =
       devMoodDebugBusy || !debugConversationId || debugConversationId === "pending";
+    const chatRevealVisibleLength = (() => {
+      if (!chatAssistantRevealInProgress || !detail?.id || !latestAssistantMessageId) {
+        return null;
+      }
+      const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+      if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return null;
+      const latestAssistant =
+        detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+      if (!latestAssistant) return null;
+      const displayContent = resolveMessageDisplayContent(latestAssistant);
+      const revealTokens = tokenizeMessageReveal(displayContent);
+      const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
+        revealKey,
+        displayContent,
+        nowMs: chatEphemeralNowMs,
+        completed: false,
+        moodKey: DEFAULT_MESSAGE_MOOD,
+      });
+      return revealTokens.slice(0, visibleTokenCount).join("").length;
+    })();
+    const coffeeRevealVisibleLength = (() => {
+      if (view !== "coffee") return null;
+      if (coffeeTurnRhythmState === "tableTyping" && coffeePendingSpeakerBotId) {
+        return coffeeTypewriterLength;
+      }
+      if (!coffeeReplayActive || !coffeeConversation || coffeeConversation.messages.length === 0) {
+        return null;
+      }
+      const replayIndex = Math.max(
+        0,
+        Math.min(coffeeReplayMessageIndex, coffeeConversation.messages.length - 1)
+      );
+      const replayMessage = coffeeConversation.messages[replayIndex] ?? null;
+      if (!replayMessage || replayMessage.role !== "assistant") return null;
+      const displayLength = coffeeReplayDisplayLengthForMessage(replayMessage);
+      if (displayLength <= 0 || coffeeReplayTypewriterLength >= displayLength) return null;
+      return coffeeReplayTypewriterLength;
+    })();
+    const devMoodFaceVisibleLength = chatRevealVisibleLength ?? coffeeRevealVisibleLength;
+    const devMoodFaceTalking = devMoodFaceVisibleLength !== null;
+    const devMoodFaceMouthOpen =
+      devMoodFaceTalking && coffeeSeatMouthOpenFromVisibleLength(devMoodFaceVisibleLength);
     return (
       <div
         ref={devMoodVisualRef}
@@ -48362,6 +48748,8 @@ function HomeContent(): React.JSX.Element {
             variant="prism"
             color={activeBot?.color}
             voicePreset={coffeeSeatVoicePreset(activeBot)}
+            isTalking={devMoodFaceTalking}
+            mouthOpen={devMoodFaceMouthOpen}
           />
         </button>
         {ignoreRemainingLabel ? (
@@ -52311,6 +52699,32 @@ function HomeContent(): React.JSX.Element {
                         }}
                       />
                     </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={effectiveZenModeSettings.zenWallpaperBlurredEdgesEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperBlurredEdgesEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Blurred edges</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-wallpaper-blurred-edges"
+                          label="About blurred edges"
+                          variant="control"
+                        >
+                          Softens the sides of the Zen Atmosphere readability layer.
+                        </PanelSectionInfo>
+                      </span>
+                    </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -52501,7 +52915,7 @@ function HomeContent(): React.JSX.Element {
                         id="settings-section-info-zen-wallpaper"
                         label="About Zen wallpaper settings"
                       >
-                        Controls Zen Atmosphere wallpaper model choices, opacity, masking, and generation timing.
+                        Controls Zen Atmosphere wallpaper model choices, opacity, style, and generation timing.
                       </PanelSectionInfo>
                     </div>
                   </header>
@@ -52516,6 +52930,75 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </div>
                   <div className={styles.settingsFieldGrid}>
+                    <div
+                      className={`${styles.settingsTextField} ${styles.settingsFieldFull}`}
+                      role="group"
+                      aria-labelledby="zen-wallpaper-style-title"
+                    >
+                      <span className={styles.settingsRangeHeader}>
+                        <span
+                          id="zen-wallpaper-style-title"
+                          className={`${styles.controlLabelWithInfo} ${styles.settingsTextFieldLabel}`}
+                        >
+                          <span>Atmosphere style</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-style-notes"
+                            label="About atmosphere style"
+                            variant="control"
+                          >
+                            Chooses a visual style preset for normal Zen Atmosphere wallpaper prompts.
+                          </PanelSectionInfo>
+                        </span>
+                      </span>
+                      <div
+                        className={styles.zenWallpaperStyleOptionGrid}
+                        aria-label="Atmosphere style presets"
+                      >
+                        {ZEN_WALLPAPER_STYLE_OPTIONS.map((option) => {
+                          const selected = zenWallpaperStyleOptionSelected(
+                            settings.zenWallpaperStyleNotes,
+                            option.notes
+                          );
+                          const StyleGlyph = option.glyph;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              className={styles.zenWallpaperStyleOptionButton}
+                              data-selected={selected ? "true" : undefined}
+                              data-default={option.id === "default" ? "true" : undefined}
+                              aria-pressed={selected}
+                              aria-label={option.ariaLabel}
+                              style={
+                                {
+                                  "--zen-wallpaper-style-color": option.color,
+                                } as CSSProperties
+                              }
+                              onClick={() => {
+                                setSettings((previous) =>
+                                  previous
+                                    ? {
+                                        ...previous,
+                                        zenWallpaperStyleNotes: option.notes,
+                                      }
+                                    : previous
+                                );
+                              }}
+                            >
+                              <span
+                                className={styles.zenWallpaperStyleOrb}
+                                aria-hidden="true"
+                              >
+                                <StyleGlyph size={28} strokeWidth={1.8} />
+                              </span>
+                              <span className={styles.zenWallpaperStyleOptionLabel}>
+                                {option.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -52545,23 +53028,6 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
-                    </label>
-                    <label
-                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={zenWallpaperTextMaskEnabled}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperTextMaskEnabled: next }
-                              : previous
-                          );
-                        }}
-                      />
-                      Mask behind Zen text
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
@@ -52915,6 +53381,51 @@ function HomeContent(): React.JSX.Element {
                         </span>
                       </span>
                     </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="settings-experimental-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Experimental</span>
+                      <h4 id="settings-experimental-title">Experimental Features</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Saved with Settings.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-experimental"
+                        label="About experimental features"
+                      >
+                        Enables opt-in behavior that may change as Prism learns what belongs in the main experience.
+                      </PanelSectionInfo>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <div className={styles.settingsHostField}>
+                      <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                        <input
+                          type="checkbox"
+                          checked={settings.experimentalAllModelEffortEnabled === true}
+                          onChange={(event) =>
+                            setSettings((previous) =>
+                              previous
+                                ? {
+                                    ...previous,
+                                    experimentalAllModelEffortEnabled: event.target.checked,
+                                  }
+                                : previous
+                            )
+                          }
+                        />
+                        Give all models effort customization
+                      </label>
+                      <small className={styles.settingsHostHint}>
+                        Shows the effort slider for local, Anthropic, non-reasoning OpenAI, and Auto choices.
+                      </small>
+                    </div>
                   </div>
                 </section>
 
@@ -53490,6 +54001,29 @@ function HomeContent(): React.JSX.Element {
                           Prism checks this address live and lists detected workflows in Images.
                         </small>
                       </label>
+                      <div className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>Experimental features</span>
+                        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                          <input
+                            type="checkbox"
+                            checked={settings.experimentalAllModelEffortEnabled === true}
+                            onChange={(event) =>
+                              setSettings((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      experimentalAllModelEffortEnabled: event.target.checked,
+                                    }
+                                  : previous
+                              )
+                            }
+                          />
+                          Give all models effort customization
+                        </label>
+                        <small className={styles.settingsHostHint}>
+                          Shows the effort slider for local, Anthropic, non-reasoning OpenAI, and Auto choices.
+                        </small>
+                      </div>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
                         When Prism can reach this address, each workflow <code>.json</code> under ComfyUI’s user
                         folders appears in the <strong>Images</strong> model list. The usual <strong>Save</strong>{" "}
@@ -57212,11 +57746,29 @@ function HomeContent(): React.JSX.Element {
     event.preventDefault();
     setCoffeeDraft(recalled);
   };
+  const consumeCoffeePsychicCommand = async (trimmedLine: string): Promise<boolean> => {
+    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
+    if (psychicCommand.kind === "none") return false;
+    setCoffeeDraft("");
+    setCoffeeError(null);
+    if (psychicCommand.kind === "error") {
+      setCoffeeError(psychicCommand.error);
+      return true;
+    }
+    await togglePsychicModeFromSlashCommand({
+      clearChatComposer: false,
+      source: "coffee",
+    });
+    return true;
+  };
   const triggerDirectedCoffeeTurn = async (botId: string) => {
     if (!coffeeConversation || !coffeeAutoplayPaused || coffeeSessionPhase !== "live") return;
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmedLiveDraft = liveDraft.trim();
     if (trimmedLiveDraft.length > 0 && consumeGlobalClearCommand(trimmedLiveDraft, "coffee")) {
+      return;
+    }
+    if (await consumeCoffeePsychicCommand(trimmedLiveDraft)) {
       return;
     }
     const echoCommand = parseCoffeeDevCommand(liveDraft);
@@ -57271,6 +57823,7 @@ function HomeContent(): React.JSX.Element {
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
+    if (await consumeCoffeePsychicCommand(trimmed)) return;
     if (liveDraft !== coffeeDraft) {
       setCoffeeDraft(liveDraft);
     }
@@ -59159,8 +59712,7 @@ function HomeContent(): React.JSX.Element {
                   )
                 : moodDevSlot;
             const mouthOpenWhileTyping = isTableTypingThisSeat
-              ? Math.floor(activeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
-                0
+              ? coffeeSeatMouthOpenFromVisibleLength(activeTypewriterLength)
               : false;
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
@@ -60530,6 +61082,7 @@ function HomeContent(): React.JSX.Element {
         {renderCoffeeGroupSettingsModal()}
 
         {renderSharedPanels()}
+        {renderPsychicModeToast()}
         {renderViewSwitchOverlay()}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
@@ -61552,9 +62105,48 @@ function HomeContent(): React.JSX.Element {
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
   if (view === "chat") {
-    const zenAtmosphereWallpaperVisible = zenAtmosphereTimeline.some(
-      (entry) => (zenAtmosphereLayerOpacities[entry.imageId] ?? 0) > 0.01
+    const zenRememberedWallpaperVisible =
+      zenEmptyHeroVisible &&
+      !appWidePrivateMode &&
+      zenPersonaBotId !== null &&
+      zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
+    const zenRememberedAtmosphereEntry: ZenWallpaperHistoryEntry | null =
+      zenRememberedWallpaperVisible && zenRememberedWallpaperPreview
+        ? {
+            imageId: zenRememberedWallpaperPreview.imageId,
+            promptSeed: zenRememberedWallpaperPreview.promptSeed,
+            generationMessageCount: 0,
+            revealStartMessageCount: 0,
+            revealFullMessageCount: 0,
+            createdAt: zenRememberedWallpaperPreview.createdAt,
+          }
+        : null;
+    const zenAtmosphereDisplayTimeline = zenRememberedAtmosphereEntry
+      ? [zenRememberedAtmosphereEntry]
+      : zenAtmosphereTimeline;
+    const zenAtmosphereDisplayLayerOpacities = zenRememberedAtmosphereEntry
+      ? { [zenRememberedAtmosphereEntry.imageId]: 1 }
+      : zenAtmosphereLayerOpacities;
+    const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
+      (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
     );
+    const zenAtmosphereReadabilityOverlayOpacity = zenRememberedWallpaperVisible
+      ? 0
+      : maxZenAtmosphereLayerOpacity(zenAtmosphereDisplayLayerOpacities);
+    const zenAtmosphereBlurredEdgesEnabled =
+      normalizeZenWallpaperBlurredEdgesSetting(
+        settings?.zenWallpaperBlurredEdgesEnabled
+      );
+    const zenAtmosphereReadabilityOverlayStyle = {
+      "--zen-atmosphere-overlay-opacity": String(
+        zenAtmosphereReadabilityOverlayOpacity
+      ),
+    } as React.CSSProperties;
+    const zenPersonaFallbackAtmosphereVisible =
+      zenEmptyHeroVisible && Boolean(zenPersonaBot) && !zenRememberedWallpaperVisible;
+    const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
+      ? botAccentStyle(zenPersonaBot.color, resolvedTheme)
+      : undefined;
     const zenAtmospherePrismColorActive =
       !appWidePrivateMode && composeBotAccentId === null;
     const zenAtmosphereBackdropStyle = {
@@ -61585,7 +62177,6 @@ function HomeContent(): React.JSX.Element {
       data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
       data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
       data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
-      data-zen-text-mask={zenWallpaperTextMaskEnabled ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onPointerMove={handleZenSurfacePointerMove}
@@ -61768,7 +62359,8 @@ function HomeContent(): React.JSX.Element {
                         effortControl={
                           modelChoiceSupportsReasoningEffort(
                             modelProvider,
-                            visibleModelChoice
+                            visibleModelChoice,
+                            settings?.experimentalAllModelEffortEnabled === true
                           )
                             ? {
                                 value: chatReasoningEffort,
@@ -61816,15 +62408,15 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {zenAtmosphereTimeline.length > 0 ? (
+          {zenAtmosphereDisplayTimeline.length > 0 ? (
             <div
               className={styles.zenAtmosphereBackdrop}
               style={zenAtmosphereBackdropStyle}
               aria-hidden="true"
             >
-              {zenAtmosphereTimeline.map((entry) => {
+              {zenAtmosphereDisplayTimeline.map((entry) => {
                 const layerOpacity =
-                  zenAtmosphereLayerOpacities[entry.imageId] ?? 0;
+                  zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0;
                 return (
                   <img
                     key={`${entry.imageId}:${entry.generationMessageCount}`}
@@ -61841,8 +62433,22 @@ function HomeContent(): React.JSX.Element {
               })}
             </div>
           ) : null}
-          {zenAtmosphereWallpaperVisible && zenWallpaperTextMaskEnabled ? (
-            <div className={styles.zenAtmosphereTextCutout} aria-hidden="true" />
+          {zenAtmosphereWallpaperVisible && !zenRememberedWallpaperVisible ? (
+            <div
+              className={styles.zenAtmosphereReadabilityOverlay}
+              data-edge-mode={
+                zenAtmosphereBlurredEdgesEnabled ? "soft" : "hard"
+              }
+              style={zenAtmosphereReadabilityOverlayStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {zenPersonaFallbackAtmosphereVisible && zenPersonaBot ? (
+            <div
+              className={styles.zenPersonaStartupAtmosphere}
+              style={zenPersonaFallbackAtmosphereStyle}
+              aria-hidden="true"
+            />
           ) : null}
           {zenPersonaContinuityWashStyle ? (
             <div
@@ -61973,9 +62579,6 @@ function HomeContent(): React.JSX.Element {
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
             })();
-            const emptyStateStyle = heroBot
-              ? botAccentStyle(heroBot.color, resolvedTheme)
-              : undefined;
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
@@ -62012,7 +62615,6 @@ function HomeContent(): React.JSX.Element {
             return (
               <div
                 className={emptyStateClassName}
-                style={emptyStateStyle}
                 onClick={handleEmptyStateBackgroundClick}
               >
                 {/* Tap any hero (armed bot or default Prism) to dispatch a
@@ -62440,6 +63042,17 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {(() => {
+                  const psychicLine = psychicThoughtDisplayLineForMessage(msg);
+                  return psychicLine ? (
+                    <div className={styles.psychicThoughtBlock}>
+                      <span className={styles.psychicThoughtLabel}>
+                        {psychicLine.label}
+                      </span>
+                      <p>{psychicLine.summary}</p>
+                    </div>
+                  ) : null;
+                })()}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -62647,6 +63260,7 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
+      {renderPsychicModeToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {renderZenToolLab()}
@@ -63945,6 +64559,17 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
+                {(() => {
+                  const psychicLine = psychicThoughtDisplayLineForMessage(msg);
+                  return psychicLine ? (
+                    <div className={styles.psychicThoughtBlock}>
+                      <span className={styles.psychicThoughtLabel}>
+                        {psychicLine.label}
+                      </span>
+                      <p>{psychicLine.summary}</p>
+                    </div>
+                  ) : null;
+                })()}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -64143,6 +64768,7 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
+      {renderPsychicModeToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {touchPreview && (

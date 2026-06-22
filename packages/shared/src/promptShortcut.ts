@@ -159,6 +159,31 @@ export interface PromptWildcardRunMetadata {
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
+export interface PsychicThoughtPayload {
+  v: 1;
+  summary: string;
+  effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  provider: "local" | "openai" | "anthropic";
+  model?: string;
+  createdAt: string;
+}
+
+const PSYCHIC_THOUGHT_EFFORT_VALUES = new Set<PsychicThoughtPayload["effort"]>([
+  "auto",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+
+function normalizePsychicThoughtEffort(value: unknown): PsychicThoughtPayload["effort"] {
+  if (typeof value !== "string") return "auto";
+  const normalized = value.trim().toLowerCase() as PsychicThoughtPayload["effort"];
+  return PSYCHIC_THOUGHT_EFFORT_VALUES.has(normalized) ? normalized : "auto";
+}
+
 function readPromptShortcutString(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
@@ -254,6 +279,27 @@ export function normalizePromptWildcardRunMetadata(
   };
 }
 
+export function normalizePsychicThoughtPayload(value: unknown): PsychicThoughtPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const summary = readPromptShortcutString(row.summary, 1200);
+  const provider = readPromptShortcutString(row.provider, 32);
+  const createdAt = readPromptShortcutString(row.createdAt, 96);
+  if (!summary || !createdAt) return undefined;
+  if (provider !== "local" && provider !== "openai" && provider !== "anthropic") {
+    return undefined;
+  }
+  const model = readPromptShortcutString(row.model, 200);
+  return {
+    v: 1,
+    summary,
+    effort: normalizePsychicThoughtEffort(row.effort),
+    provider,
+    ...(model ? { model } : {}),
+    createdAt,
+  };
+}
+
 export function parseStoredPromptShortcutPayload(
   raw: string | null | undefined
 ): PromptShortcutMetadata | undefined {
@@ -277,6 +323,20 @@ export function parseStoredPromptWildcardPayload(
     if (!parsed || typeof parsed !== "object") return undefined;
     const row = parsed as Record<string, unknown>;
     return normalizePromptWildcardRunMetadata(row.promptWildcards ?? parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseStoredPsychicThoughtPayload(
+  raw: string | null | undefined
+): PsychicThoughtPayload | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const row = parsed as Record<string, unknown>;
+    return normalizePsychicThoughtPayload(row.psychicThought ?? parsed);
   } catch {
     return undefined;
   }
@@ -312,13 +372,16 @@ export function serializePromptShortcutPayload(
 export function serializePromptToolPayload(options: {
   promptShortcut?: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
+  psychicThought?: PsychicThoughtPayload;
 }): string | null {
   const promptShortcut = normalizePromptShortcutMetadata(options.promptShortcut);
   const promptWildcards = normalizePromptWildcardRunMetadata(options.promptWildcards);
-  if (!promptShortcut && !promptWildcards) return null;
+  const psychicThought = normalizePsychicThoughtPayload(options.psychicThought);
+  if (!promptShortcut && !promptWildcards && !psychicThought) return null;
   return JSON.stringify({
     v: 1 as const,
     ...(promptShortcut ? { promptShortcut } : {}),
     ...(promptWildcards ? { promptWildcards } : {}),
+    ...(psychicThought ? { psychicThought } : {}),
   });
 }

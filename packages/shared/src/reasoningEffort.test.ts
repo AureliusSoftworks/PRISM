@@ -13,6 +13,7 @@ describe("reasoning effort helpers", () => {
     assert.equal(normalizeReasoningEffort(" xhigh "), "xhigh");
     assert.equal(normalizeReasoningEffort("fast"), "auto");
     assert.equal(reasoningEffortForRequest("auto"), null);
+    assert.equal(reasoningEffortForRequest("none"), null);
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
   });
 

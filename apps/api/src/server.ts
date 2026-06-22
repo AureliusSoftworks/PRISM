@@ -80,6 +80,7 @@ import {
 import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
 import {
+  createZenPersonaSessionMemoryCheckpoint,
   deleteZenSessionMemoryById,
   loadZenSessionMemoryOverview,
 } from "./zen-session-memory.ts";
@@ -87,11 +88,13 @@ import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
+  dedupeActiveZenWallpaperGeneration,
   deleteAllConversations,
   deleteConversation,
   deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
+  getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
   mapZenWallpaperMetadata,
   normalizeZenWallpaperStatus,
@@ -134,6 +137,7 @@ import {
   normalizeZenAskQuestionPatienceMs,
   normalizeZenAutonomyEnabled,
   normalizeZenFreshStartGapMs,
+  normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
   normalizeZenSessionIdleGapMs,
@@ -142,6 +146,7 @@ import {
   normalizeZenWallpaperRegenMessageInterval,
   normalizeZenWallpaperRevealDelayMessageCount,
   normalizeZenWallpaperRevealSpanMessageCount,
+  normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
@@ -224,8 +229,8 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import {
-  clampZenWallpaperPromptText,
   composeZenWallpaperPrompt,
+  normalizeZenWallpaperPromptOverride,
 } from "./zen-wallpaper-prompt.ts";
 import {
   buildGeneratedImageRelativePath,
@@ -354,6 +359,8 @@ interface UserDbRow {
   lenient_local_image_fallback_model: string | null;
   secondary_ollama_host: string | null;
   experimental_dual_ollama_enabled: number;
+  experimental_all_model_effort_enabled: number;
+  psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
   preferred_openai_image_model: string | null;
@@ -362,6 +369,8 @@ interface UserDbRow {
   zen_wallpaper_opacity: number | null;
   zen_wallpaper_text_mask_enabled: number | null;
   zen_wallpaper_grayscale_enabled: number | null;
+  zen_wallpaper_blurred_edges_enabled: number | null;
+  zen_wallpaper_style_notes: string | null;
   zen_session_idle_gap_ms: number | null;
   zen_fresh_start_gap_ms: number | null;
   zen_recent_context_messages: number | null;
@@ -513,7 +522,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1949,7 +1958,7 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const promptOverride =
         typeof body.promptOverride === "string"
-          ? clampZenWallpaperPromptText(body.promptOverride, 3000)
+          ? normalizeZenWallpaperPromptOverride(body.promptOverride, 3000)
           : "";
       if (body.promptOverride !== undefined && promptOverride.length === 0) {
         throw new HttpError(400, "Type a custom Atmosphere prompt before generating.");
@@ -1960,6 +1969,13 @@ function buildRoutes(): RouteDefinition[] {
                   c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
                   c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
                   c.zen_wallpaper_status, c.zen_wallpaper_history,
+                  (SELECT m.bot_id
+                     FROM messages m
+                    WHERE m.conversation_id = c.id
+                      AND m.user_id = c.user_id
+                      AND m.role = 'assistant'
+                    ORDER BY m.created_at DESC
+                    LIMIT 1) AS last_assistant_bot_id,
                   b.name AS bot_name, b.system_prompt AS bot_system_prompt,
                   b.local_image_model AS bot_local_image_model,
                   b.openai_image_model AS bot_openai_image_model,
@@ -1979,6 +1995,7 @@ function buildRoutes(): RouteDefinition[] {
             zen_wallpaper_message_count: number | null;
             zen_wallpaper_status: string | null;
             zen_wallpaper_history: string | null;
+            last_assistant_bot_id: string | null;
             bot_name: string | null;
             bot_system_prompt: string | null;
             bot_local_image_model: string | null;
@@ -1997,6 +2014,47 @@ function buildRoutes(): RouteDefinition[] {
           "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
         ).run(conversationId, userId);
       }
+      const activeImageJob = peekActiveImageJobForUser(userId);
+      if (
+        dedupeActiveZenWallpaperGeneration(db, userId, {
+          conversationId,
+          activeZenWallpaperConversationId:
+            activeImageJob?.source === "zen_wallpaper"
+              ? activeImageJob.conversationId
+              : null,
+          enabled,
+        })
+      ) {
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+      const wallpaperBotId =
+        conversation.last_assistant_bot_id?.trim() ||
+        conversation.bot_id?.trim() ||
+        null;
+      const wallpaperBot = wallpaperBotId
+        ? (db
+            .prepare(
+              `SELECT id, name, system_prompt, local_image_model,
+                      openai_image_model, online_enabled
+                 FROM bots
+                WHERE id = ? AND user_id = ?`
+            )
+            .get(wallpaperBotId, userId) as
+            | {
+                id: string;
+                name: string | null;
+                system_prompt: string | null;
+                local_image_model: string | null;
+                openai_image_model: string | null;
+                online_enabled: number | null;
+              }
+            | undefined)
+        : undefined;
+      const wallpaperPersonaBotId = wallpaperBot?.id ?? null;
 
       if (!enabled) {
         db.prepare(
@@ -2078,22 +2136,27 @@ function buildRoutes(): RouteDefinition[] {
         composeZenWallpaperPrompt({
           initialUserPrompt: firstUserMessage,
           recentContext,
-          botName: conversation.bot_name,
-          botSystemPrompt: conversation.bot_system_prompt,
+          botName: wallpaperBot?.name ?? conversation.bot_name,
+          botSystemPrompt:
+            wallpaperBot?.system_prompt ?? conversation.bot_system_prompt,
+          styleNotes: user.zen_wallpaper_style_notes,
         });
 
-      const botForcesLocal = conversation.bot_online_enabled === 0;
+      const botForcesLocal =
+        (wallpaperBot?.online_enabled ?? conversation.bot_online_enabled) === 0;
       const effectiveProvider =
         botForcesLocal
           ? "local"
           : requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
       const resolvedLocalImageModel =
         (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
+        (wallpaperBot?.local_image_model?.trim() ?? "") ||
         (conversation.bot_local_image_model?.trim() ?? "") ||
         (user.preferred_zen_wallpaper_local_image_model?.trim() ?? "") ||
         (user.preferred_local_image_model?.trim() ?? "");
       const resolvedOpenAiImageModel =
         (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
+        (wallpaperBot?.openai_image_model?.trim() ?? "") ||
         (conversation.bot_openai_image_model?.trim() ?? "") ||
         (user.preferred_zen_wallpaper_openai_image_model?.trim() ?? "") ||
         (user.preferred_openai_image_model?.trim() ?? "");
@@ -2112,7 +2175,7 @@ function buildRoutes(): RouteDefinition[] {
       const acqWallpaper = await tryAcquireImageSlot({
         userId,
         conversationId,
-        botId: null,
+        botId: wallpaperPersonaBotId,
         mode: "zen",
         incognito: false,
         captionPrompt: prompt,
@@ -2123,6 +2186,19 @@ function buildRoutes(): RouteDefinition[] {
         requestedSize: ZEN_WALLPAPER_SIZE,
       });
       if (!acqWallpaper.ok) {
+        if (
+          acqWallpaper.busyJob.source === "zen_wallpaper" &&
+          dedupeActiveZenWallpaperGeneration(db, userId, {
+            conversationId,
+            activeZenWallpaperConversationId: acqWallpaper.busyJob.conversationId,
+          })
+        ) {
+          json(ctx.res, 200, {
+            ok: true,
+            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          });
+          return;
+        }
         throw new HttpError(
           503,
           "Another image is generating right now. Wait for it to finish, then try Atmosphere again."
@@ -2283,7 +2359,7 @@ function buildRoutes(): RouteDefinition[] {
               imageId,
               userId,
               conversationId,
-              null,
+              wallpaperPersonaBotId,
               prompt,
               prompt,
               storedUrl,
@@ -2344,7 +2420,7 @@ function buildRoutes(): RouteDefinition[] {
                 imageId,
                 userId,
                 conversationId,
-                null,
+                wallpaperPersonaBotId,
                 prompt,
                 prompt,
                 storedUrl,
@@ -2392,7 +2468,7 @@ function buildRoutes(): RouteDefinition[] {
             imageId,
             userId,
             conversationId,
-            null,
+            wallpaperPersonaBotId,
             prompt,
             result.revisedPrompt,
             storedUrl,
@@ -2446,6 +2522,20 @@ function buildRoutes(): RouteDefinition[] {
         summary: getLatestThreadDisplaySummary(db, userId, conversationId, mode),
         internalSummary: getLatestThreadSummary(db, userId, conversationId, mode),
         latestSummaryAt: debug.latestSummaryAt,
+      });
+    }),
+    route("GET", "/api/bots/:id/zen-wallpaper", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      if (!botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        wallpaper: getLatestRememberedZenWallpaperForBot(db, userId, botId),
       });
     }),
     route("GET", "/api/bots/:id/summary", async (ctx) => {
@@ -2537,16 +2627,41 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       const user = getUserRow(userId);
+      const auxiliaryProvider = getAuxiliaryProvider(
+        user.prism_default_llm_model,
+        dualOllamaWorkloadOptions(user)
+      );
       const compacted = await summarizeThreadCompact(
         db,
-        getAuxiliaryProvider(
-          user.prism_default_llm_model,
-          dualOllamaWorkloadOptions(user)
-        ),
+        auxiliaryProvider,
         userId,
         conversationId,
         { mode, reason, force: true }
       );
+      if (mode === "zen" && reason === "mode_exit") {
+        const conversation = db
+          .prepare("SELECT incognito FROM conversations WHERE id = ? AND user_id = ?")
+          .get(conversationId, userId) as { incognito: number } | undefined;
+        if (conversation?.incognito !== 1) {
+          const latest = db
+            .prepare(
+              `SELECT bot_id
+                 FROM messages
+                WHERE conversation_id = ? AND user_id = ? AND role IN ('user', 'assistant')
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1`
+            )
+            .get(conversationId, userId) as { bot_id: string | null } | undefined;
+          await createZenPersonaSessionMemoryCheckpoint({
+            db,
+            provider: auxiliaryProvider,
+            userId,
+            conversationId,
+            botId: latest?.bot_id ?? null,
+            userKey: decryptUserKey(userId),
+          });
+        }
+      }
       if (mode === "sandbox" && reason === "mode_exit") {
         const conversation = db
           .prepare("SELECT bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?")
@@ -2562,10 +2677,7 @@ function buildRoutes(): RouteDefinition[] {
           const userKey = decryptUserKey(userId);
           await summarizeSandboxBotStatus(
             db,
-            getAuxiliaryProvider(
-              user.prism_default_llm_model,
-              dualOllamaWorkloadOptions(user)
-            ),
+            auxiliaryProvider,
             userId,
             conversationBotId,
             { reason: "mode_exit", userKey }
@@ -3561,6 +3673,9 @@ function buildRoutes(): RouteDefinition[] {
               user.zen_mood_sensitivity
             ),
             experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+            experimentalAllModelEffortEnabled:
+              user.experimental_all_model_effort_enabled === 1,
+            psychicModeEnabled: user.psychic_mode_enabled === 1,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
             assistantImageUserPrefs: {
@@ -3615,6 +3730,7 @@ function buildRoutes(): RouteDefinition[] {
         pendingImageJob,
         toolCalls,
         backendEvents,
+        psychicDebug,
         zenAutonomyDecision: resultZenAutonomyDecision,
       } = result;
       json(ctx.res, 200, {
@@ -3630,6 +3746,7 @@ function buildRoutes(): RouteDefinition[] {
         ...(pendingImageJob ? { pendingImageJob } : {}),
         ...(toolCalls ? { toolCalls } : {}),
         ...(backendEvents ? { backendEvents } : {}),
+        ...(psychicDebug ? { psychicDebug } : {}),
         ...(resultZenAutonomyDecision ?? zenAutonomyDecision
           ? { zenAutonomyDecision: resultZenAutonomyDecision ?? zenAutonomyDecision }
           : {}),
@@ -4698,6 +4815,9 @@ function buildRoutes(): RouteDefinition[] {
           autoMemory: Boolean(user.auto_memory),
           composerWritingAssist: user.composer_writing_assist !== 0,
           experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+          experimentalAllModelEffortEnabled:
+            user.experimental_all_model_effort_enabled === 1,
+          psychicModeEnabled: user.psychic_mode_enabled === 1,
           fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
@@ -4744,6 +4864,12 @@ function buildRoutes(): RouteDefinition[] {
           ),
           zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleEnabled(
             user.zen_wallpaper_grayscale_enabled
+          ),
+          zenWallpaperBlurredEdgesEnabled: normalizeZenWallpaperBlurredEdgesEnabled(
+            user.zen_wallpaper_blurred_edges_enabled
+          ),
+          zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+            user.zen_wallpaper_style_notes
           ),
           zenSessionIdleGapMs: normalizeZenSessionIdleGapMs(
             user.zen_session_idle_gap_ms
@@ -4949,6 +5075,9 @@ function buildRoutes(): RouteDefinition[] {
         autoMemory: user.auto_memory,
         composerWritingAssist: user.composer_writing_assist,
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled,
+        experimentalAllModelEffortEnabled:
+          user.experimental_all_model_effort_enabled,
+        psychicModeEnabled: user.psychic_mode_enabled,
         fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
@@ -4967,6 +5096,9 @@ function buildRoutes(): RouteDefinition[] {
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
         zenWallpaperTextMaskEnabled: user.zen_wallpaper_text_mask_enabled,
         zenWallpaperGrayscaleEnabled: user.zen_wallpaper_grayscale_enabled,
+        zenWallpaperBlurredEdgesEnabled:
+          user.zen_wallpaper_blurred_edges_enabled,
+        zenWallpaperStyleNotes: user.zen_wallpaper_style_notes,
         zenSessionIdleGapMs: user.zen_session_idle_gap_ms,
         zenFreshStartGapMs: user.zen_fresh_start_gap_ms,
         zenRecentContextMessages: user.zen_recent_context_messages,
@@ -5037,8 +5169,8 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
@@ -5058,6 +5190,8 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.hiddenComfyUiWorkflowIds),
         modelVisibilityDefaultsVersion,
         next.experimentalDualOllamaEnabled,
+        next.experimentalAllModelEffortEnabled,
+        next.psychicModeEnabled,
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalFallbackModel,
@@ -5071,6 +5205,8 @@ function buildRoutes(): RouteDefinition[] {
         next.zenWallpaperOpacity,
         next.zenWallpaperTextMaskEnabled ? 1 : 0,
         next.zenWallpaperGrayscaleEnabled ? 1 : 0,
+        next.zenWallpaperBlurredEdgesEnabled ? 1 : 0,
+        next.zenWallpaperStyleNotes,
         next.zenSessionIdleGapMs,
         next.zenFreshStartGapMs,
         next.zenRecentContextMessages,
@@ -5101,6 +5237,9 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         settings: {
           displayName: next.displayName,
+          experimentalAllModelEffortEnabled:
+            next.experimentalAllModelEffortEnabled === 1,
+          psychicModeEnabled: next.psychicModeEnabled === 1,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   composeZenWallpaperPrompt,
   extractZenWallpaperVisualCues,
+  normalizeZenWallpaperPromptOverride,
 } from "../zen-wallpaper-prompt.ts";
 
 describe("composeZenWallpaperPrompt", () => {
@@ -57,6 +58,41 @@ describe("composeZenWallpaperPrompt", () => {
     assert.doesNotMatch(prompt, /\buser:/i);
     assert.doesNotMatch(prompt, /\bassistant:/i);
   });
+
+  it("keeps blank style notes equivalent to the default prompt", () => {
+    const args = {
+      initialUserPrompt: "quiet evening",
+      recentContext: "user: quiet evening\nassistant: of course",
+      botName: null,
+      botSystemPrompt: null,
+    };
+
+    assert.equal(
+      composeZenWallpaperPrompt(args),
+      composeZenWallpaperPrompt({ ...args, styleNotes: "   " })
+    );
+  });
+
+  it("includes style notes before PRISM brand and safety constraints", () => {
+    const prompt = composeZenWallpaperPrompt({
+      initialUserPrompt: "let's sit by the ocean",
+      recentContext: "user: ocean light\nassistant: slowly",
+      botName: null,
+      botSystemPrompt: null,
+      styleNotes: "  slow ocean light, paper\n grain  ",
+    });
+
+    assert.match(
+      prompt,
+      /User atmosphere style notes: slow ocean light, paper grain\./
+    );
+    assert.ok(
+      prompt.indexOf("User atmosphere style notes") <
+        prompt.indexOf("Add faint prismatic rainbow accents")
+    );
+    assert.match(prompt, /Mostly charcoal, pearl, and mist-gray/);
+    assert.match(prompt, /No text, letters, numbers, people, faces, bodies/);
+  });
 });
 
 describe("extractZenWallpaperVisualCues", () => {
@@ -67,5 +103,18 @@ describe("extractZenWallpaperVisualCues", () => {
       ),
       ["soft signal geometry"]
     );
+  });
+});
+
+describe("normalizeZenWallpaperPromptOverride", () => {
+  it("preserves custom Atmosphere prompt whitespace while rejecting blank input", () => {
+    const prompt = "Line one\n\n  Line two with spacing  ";
+
+    assert.equal(normalizeZenWallpaperPromptOverride(prompt), prompt);
+    assert.equal(normalizeZenWallpaperPromptOverride("   \n  "), "");
+  });
+
+  it("hard-clamps custom Atmosphere prompts without adding style notes or ellipses", () => {
+    assert.equal(normalizeZenWallpaperPromptOverride("abcdef", 4), "abcd");
   });
 });

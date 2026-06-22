@@ -3044,6 +3044,302 @@
   white-space: nowrap;
 }
 
+.settingsTextField {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settingsTextField .settingsTextFieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--settings-section-quiet);
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.settingsTextArea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--settings-section-color) 22%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.settingsTextArea::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
+}
+
+.settingsTextArea:focus {
+  border-color: color-mix(in srgb, var(--settings-section-color) 58%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-section-color) 16%, transparent);
+  outline: none;
+}
+
+.zenWallpaperStyleOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(64px, 1fr));
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.zenWallpaperStyleOptionButton {
+  --zen-wallpaper-style-color: var(--settings-section-color);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 10px 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 7%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg) 90%, var(--bg-surface) 10%)
+    );
+  color: color-mix(in srgb, var(--fg) 88%, var(--zen-wallpaper-style-color));
+  text-align: center;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.zenWallpaperStyleOrb {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, var(--line));
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 38% 28%,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 22%, #ffffff) 0%,
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--zen-wallpaper-style-color) 10%, var(--bg-surface));
+  color: var(--zen-wallpaper-style-color);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent),
+    0 0 18px color-mix(in srgb, var(--zen-wallpaper-style-color) 20%, transparent);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.zenWallpaperStyleOptionButton:hover .zenWallpaperStyleOrb,
+.zenWallpaperStyleOptionButton:focus-visible .zenWallpaperStyleOrb {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 72%, #ffffff);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 30%, transparent),
+    0 0 24px color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, transparent);
+  transform: translateY(-1px);
+}
+
+.zenWallpaperStyleOptionButton:hover,
+.zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg-surface) 84%, var(--bg) 16%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 10px 24px -22px color-mix(in srgb, var(--zen-wallpaper-style-color) 52%, #000);
+  transform: translateY(-1px);
+}
+
+.zenWallpaperStyleOptionButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 76%, #ffffff);
+  outline-offset: 3px;
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 54%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--bg) 12%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 10%, transparent);
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 82%, #ffffff);
+  background:
+    radial-gradient(
+      circle at 38% 28%,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, #ffffff) 0%,
+      transparent 45%
+    ),
+    color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, var(--bg-surface));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, transparent),
+    0 0 30px color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, transparent);
+}
+
+.zenWallpaperStyleOptionButton[data-default="true"] .zenWallpaperStyleOrb {
+  color: #fffdf4;
+  background:
+    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.56), transparent 44%),
+    color-mix(in srgb, #ffffff 12%, var(--bg-surface));
+  border-color: color-mix(in srgb, #ffffff 62%, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.46),
+    0 0 22px rgba(255, 255, 255, 0.24);
+}
+
+.zenWallpaperStyleOptionButton[data-default="true"][data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.56),
+    0 0 0 3px rgba(255, 255, 255, 0.12),
+    0 0 34px rgba(255, 255, 255, 0.4);
+}
+
+.zenWallpaperStyleOptionLabel {
+  max-width: 100%;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] .zenWallpaperStyleOptionLabel {
+  color: var(--fg);
+}
+
+.themeLight .zenWallpaperStyleOptionButton {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 78%, var(--zen-wallpaper-style-color) 5%),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--zen-wallpaper-style-color) 4%)
+    );
+  color: color-mix(in srgb, var(--fg) 92%, var(--zen-wallpaper-style-color));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent),
+    0 10px 22px -24px rgba(22, 21, 20, 0.42);
+}
+
+.themeLight .zenWallpaperStyleOptionButton:hover,
+.themeLight .zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 82%, var(--zen-wallpaper-style-color) 6%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 88%, transparent),
+    0 12px 26px -24px rgba(22, 21, 20, 0.42);
+}
+
+.themeLight .zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 46%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 76%, var(--zen-wallpaper-style-color) 10%),
+      color-mix(in srgb, var(--bg-surface) 84%, var(--zen-wallpaper-style-color) 8%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 88%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, transparent);
+}
+
+.themeDark .zenWallpaperStyleOptionButton {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 92%, var(--zen-wallpaper-style-color) 8%),
+      color-mix(in srgb, var(--bg-deep) 94%, var(--zen-wallpaper-style-color) 6%)
+    );
+  color: color-mix(in srgb, var(--fg) 92%, var(--zen-wallpaper-style-color));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 12px 24px -28px color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, #000);
+}
+
+.themeDark .zenWallpaperStyleOptionButton:hover,
+.themeDark .zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 36%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--zen-wallpaper-style-color) 12%),
+      color-mix(in srgb, var(--bg) 92%, var(--zen-wallpaper-style-color) 8%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent),
+    0 14px 28px -26px color-mix(in srgb, var(--zen-wallpaper-style-color) 48%, #000);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 48%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 84%, var(--zen-wallpaper-style-color) 16%),
+      color-mix(in srgb, var(--bg) 90%, var(--zen-wallpaper-style-color) 10%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, transparent);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-default="true"] .zenWallpaperStyleOrb {
+  color: #fffdf4;
+  background:
+    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.24), transparent 44%),
+    color-mix(in srgb, #ffffff 7%, var(--bg-surface));
+  border-color: color-mix(in srgb, #ffffff 38%, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 20px rgba(255, 255, 255, 0.16);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-default="true"][data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 3px rgba(255, 255, 255, 0.08),
+    0 0 28px rgba(255, 255, 255, 0.24);
+}
+
 .form input[type="range"] {
   height: 24px;
   padding: 0;
@@ -3163,6 +3459,10 @@
   .settingsFieldGrid,
   .settingsScopeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .zenWallpaperStyleOptionGrid {
+    grid-template-columns: repeat(3, minmax(64px, 1fr));
   }
 
   .settingsStatusPills {
@@ -8174,105 +8474,230 @@
     );
 }
 
-.zenAtmosphereTextCutout {
-  --zen-atmosphere-text-cutout-width: min(calc(100vw - 8px), clamp(560px, 94vw, 1500px));
+.zenPersonaStartupAtmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      ellipse 86% 58% at 50% 30%,
+      color-mix(in srgb, var(--fg) 10%, transparent) 0%,
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse 72% 46% at 22% 74%,
+      color-mix(in srgb, var(--bg-elevated) 54%, transparent) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 70% 48% at 82% 70%,
+      color-mix(in srgb, var(--fg-muted) 20%, transparent) 0%,
+      transparent 64%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg) 86%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 58%, transparent) 44%,
+      color-mix(in srgb, var(--bg) 92%, transparent) 100%
+    );
+  filter: grayscale(1) saturate(0.34) contrast(0.96);
+  opacity: 0.94;
+}
+
+.zenPersonaStartupAtmosphere::before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: -2;
+  background:
+    radial-gradient(
+      ellipse 74% 54% at 46% 28%,
+      color-mix(in srgb, var(--fg) 13%, transparent) 0%,
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 64% 50% at 18% 82%,
+      color-mix(in srgb, var(--bg-elevated) 72%, transparent) 0%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 86% 78%,
+      color-mix(in srgb, var(--fg-muted) 24%, transparent) 0%,
+      transparent 68%
+    );
+  filter: blur(36px);
+  opacity: 0.78;
+  transform: translate3d(0, 0, 0);
+  animation: zenPersonaStartupAtmosphereDrift 16s ease-in-out infinite alternate;
+}
+
+.zenPersonaStartupAtmosphere::after {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  z-index: -1;
+  background:
+    radial-gradient(
+      ellipse 118% 84% at 50% 62%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 62%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 34%, transparent) 54%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 14%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 38%, transparent) 72%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 100%
+    );
+  filter: blur(44px) saturate(1.25);
+  mix-blend-mode: multiply;
+  opacity: 0.7;
+}
+
+.themeLight .zenPersonaStartupAtmosphere::after {
+  mix-blend-mode: screen;
+  opacity: 0.62;
+}
+
+@keyframes zenPersonaStartupAtmosphereDrift {
+  0% {
+    transform: translate3d(-1.5%, -0.8%, 0) scale(1.02);
+  }
+  100% {
+    transform: translate3d(1.5%, 0.8%, 0) scale(1.04);
+  }
+}
+
+.zenAtmosphereReadabilityOverlay {
+  --zen-atmosphere-readability-width: min(calc(100vw - 12px), clamp(540px, 92vw, 1320px));
   position: absolute;
   top: 0;
   bottom: 0;
   left: 50%;
   z-index: 0;
-  width: var(--zen-atmosphere-text-cutout-width);
+  width: var(--zen-atmosphere-readability-width);
   transform: translateX(-50%);
   pointer-events: none;
+  opacity: var(--zen-atmosphere-overlay-opacity, 0);
   background:
+    linear-gradient(
+      to right,
+      transparent 0%,
+      color-mix(in srgb, var(--bg-deep) 20%, transparent) 12%,
+      color-mix(in srgb, var(--bg-deep) 50%, transparent) 34%,
+      color-mix(in srgb, var(--bg) 62%, transparent) 50%,
+      color-mix(in srgb, var(--bg-deep) 50%, transparent) 66%,
+      color-mix(in srgb, var(--bg-deep) 20%, transparent) 88%,
+      transparent 100%
+    ),
     radial-gradient(
-      ellipse 80% 56% at 14% 12%,
-      color-mix(in srgb, var(--accent) 22%, transparent),
+      ellipse 70% 42% at 18% 16%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 74% 52% at 88% 24%,
-      color-mix(in srgb, var(--accent) 14%, transparent),
+      ellipse 68% 46% at 86% 30%,
+      color-mix(in srgb, var(--fg) 8%, transparent),
       transparent 72%
     ),
     linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--bg-deep) 84%, #000000 16%) 0%,
-      color-mix(in srgb, var(--bg) 94%, #000000 6%) 58%,
-      var(--bg-surface) 100%
+      color-mix(in srgb, var(--bg-deep) 46%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 34%, transparent) 46%,
+      color-mix(in srgb, var(--bg-surface) 54%, transparent) 100%
     );
   background-position: center top;
   background-repeat: no-repeat;
   background-size:
-    100vw 100%,
-    100vw 100%,
-    100vw 100%;
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  backdrop-filter: blur(96px) saturate(0.82) contrast(0.96);
+  -webkit-backdrop-filter: blur(96px) saturate(0.82) contrast(0.96);
   -webkit-mask-image: linear-gradient(
     to right,
-    transparent 0,
-    rgba(0, 0, 0, 0.06) 72px,
-    rgba(0, 0, 0, 0.22) min(168px, 28%),
-    rgba(0, 0, 0, 0.52) min(260px, 39%),
-    rgba(0, 0, 0, 0.84) min(322px, 46%),
-    #000 min(380px, 49%),
-    #000 calc(100% - min(380px, 49%)),
-    rgba(0, 0, 0, 0.84) calc(100% - min(322px, 46%)),
-    rgba(0, 0, 0, 0.52) calc(100% - min(260px, 39%)),
-    rgba(0, 0, 0, 0.22) calc(100% - min(168px, 28%)),
-    rgba(0, 0, 0, 0.06) calc(100% - 72px),
+    transparent 0%,
+    rgba(0, 0, 0, 0.24) 8%,
+    #000 18%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 92%,
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
-    transparent 0,
-    rgba(0, 0, 0, 0.06) 72px,
-    rgba(0, 0, 0, 0.22) min(168px, 28%),
-    rgba(0, 0, 0, 0.52) min(260px, 39%),
-    rgba(0, 0, 0, 0.84) min(322px, 46%),
-    #000 min(380px, 49%),
-    #000 calc(100% - min(380px, 49%)),
-    rgba(0, 0, 0, 0.84) calc(100% - min(322px, 46%)),
-    rgba(0, 0, 0, 0.52) calc(100% - min(260px, 39%)),
-    rgba(0, 0, 0, 0.22) calc(100% - min(168px, 28%)),
-    rgba(0, 0, 0, 0.06) calc(100% - 72px),
+    transparent 0%,
+    rgba(0, 0, 0, 0.24) 8%,
+    #000 18%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 92%,
     transparent 100%
   );
+  transition: opacity 180ms linear;
+  will-change: opacity, backdrop-filter;
 }
 
-.themeLight .zenAtmosphereTextCutout {
+.zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
+  --zen-atmosphere-readability-width: min(calc(100vw - 24px), clamp(360px, 92vw, 920px));
+  backdrop-filter: blur(26px) saturate(0.82) contrast(0.96);
+  -webkit-backdrop-filter: blur(26px) saturate(0.82) contrast(0.96);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.themeLight .zenAtmosphereReadabilityOverlay {
   background:
-    radial-gradient(
-      ellipse 80% 54% at 10% 4%,
-      color-mix(in srgb, #ffffff 78%, transparent),
-      transparent 72%
+    linear-gradient(
+      to right,
+      transparent 0%,
+      color-mix(in srgb, #ffffff 18%, transparent) 12%,
+      color-mix(in srgb, #ffffff 58%, transparent) 34%,
+      color-mix(in srgb, #ffffff 72%, transparent) 50%,
+      color-mix(in srgb, #ffffff 58%, transparent) 66%,
+      color-mix(in srgb, #ffffff 18%, transparent) 88%,
+      transparent 100%
     ),
     radial-gradient(
-      ellipse 68% 46% at 92% 12%,
-      color-mix(in srgb, #2fd3e3 3.5%, transparent),
+      ellipse 72% 42% at 16% 12%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 66% 44% at 2% 90%,
-      color-mix(in srgb, #ff4d6d 2.5%, transparent),
-      transparent 74%
+      ellipse 68% 44% at 88% 24%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 72%
     ),
     linear-gradient(
       to bottom,
-      #fffefb 0%,
-      var(--bg-surface) 52%,
-      var(--bg) 100%
+      color-mix(in srgb, #fffefb 58%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 46%, transparent) 52%,
+      color-mix(in srgb, var(--bg) 52%, transparent) 100%
     );
   background-position: center top;
   background-repeat: no-repeat;
   background-size:
-    100vw 100%,
-    100vw 100%,
-    100vw 100%,
-    100vw 100%;
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
+  -webkit-backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
+}
+
+.themeLight .zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
+  backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
+  -webkit-backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .zenAtmosphereBackdrop img {
+    transition: none;
+  }
+
+  .zenAtmosphereReadabilityOverlay {
     transition: none;
   }
 }
@@ -12695,6 +13120,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: var(--message-dynamic-font-size, var(--font-size-message));
 }
 
+.psychicThoughtBlock {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  color: color-mix(in srgb, currentColor 76%, transparent);
+  font-size: 12px;
+}
+
+.psychicThoughtLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.psychicThoughtBlock p {
+  margin: 0;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  word-spacing: 0.02em;
+}
+
 .assistantSentImageWrap {
   margin: 0 0 0.65rem 0;
   max-width: min(420px, 100%);
@@ -13916,6 +14369,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, #fffaf2 78%, transparent);
 }
 
+.zenInitialThinkingOverlay[data-persona="bot"] {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 20%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 10%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 7%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg-deep) 76%, transparent);
+}
+
+.themeLight .zenInitialThinkingOverlay[data-persona="bot"] {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 8%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 6%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, #fffaf2 78%, transparent);
+}
+
 .zenInitialThinkingOverlay[data-phase="compact"] {
   z-index: 851;
   display: block;
@@ -14015,6 +14508,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingGlyphDrift 2.6s ease-in-out infinite;
 }
 
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo {
+  color: var(--bot-ink, var(--bot-color, var(--fg)));
+  box-shadow:
+    0 24px 76px rgba(0, 0, 0, 0.34),
+    0 0 60px color-mix(in srgb, var(--bot-color, var(--accent)) 28%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 18%, transparent);
+}
+
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo {
   width: 42px;
   height: 42px;
@@ -14064,6 +14565,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingRingSpin 4.8s linear infinite;
 }
 
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo::before {
+  background:
+    conic-gradient(
+      from 18deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 90%, #ffffff 10%),
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 56%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 72%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 90%, #ffffff 10%)
+    );
+}
+
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::before {
   inset: -6px;
   padding: 1.5px;
@@ -14085,6 +14597,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: blur(28px);
   opacity: 0.42;
   animation: zenInitialThinkingAuraPulse 2.8s ease-in-out infinite;
+}
+
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo::after {
+  background:
+    conic-gradient(
+      from 120deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 42%, transparent),
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 18%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 30%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 42%, transparent)
+    );
 }
 
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::after {
@@ -14273,7 +14796,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenInitialThinkingGlyphHalo,
   .zenInitialThinkingGlyphHalo::before,
   .zenInitialThinkingGlyphHalo::after,
-  .zenInitialThinkingGlyph {
+  .zenInitialThinkingGlyph,
+  .zenPersonaStartupAtmosphere::before,
+  .zenPersonaStartupAtmosphere::after {
     animation: none;
   }
 }
@@ -17247,6 +17772,103 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+}
+
+.psychicModeToast {
+  position: fixed;
+  left: 50%;
+  bottom: max(92px, calc(env(safe-area-inset-bottom) + 22px));
+  z-index: 874;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 8%),
+      color-mix(in srgb, var(--bg-deep) 88%, transparent)
+    );
+  color: var(--fg);
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.25),
+    0 0 32px color-mix(in srgb, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  animation: psychicModeToastIn 3.6s ease both;
+}
+
+.psychicModeToast[data-psychic-active="false"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 90%, var(--fg-muted) 5%),
+      color-mix(in srgb, var(--bg-deep) 88%, transparent)
+    );
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.2),
+    0 0 20px color-mix(in srgb, var(--fg-muted) 9%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+}
+
+.psychicModeToastDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.psychicModeToast[data-psychic-active="false"] .psychicModeToastDot {
+  background: color-mix(in srgb, var(--fg-muted) 78%, var(--line));
+  box-shadow: none;
+}
+
+.psychicModeToastCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.psychicModeToastCopy strong {
+  font-size: 12px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.psychicModeToastCopy small {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes psychicModeToastIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.97);
+  }
+  12%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.985);
+  }
 }
 
 @keyframes zenMemoryLearnedIn {
