@@ -5343,6 +5343,13 @@ interface ChatPostEnvelope {
     provider: Provider;
     model?: string;
     simulated: boolean;
+    passCount?: number;
+    passes?: Array<{
+      name: "plan" | "draft" | "audit" | "revision";
+      chars: number;
+      warning?: string;
+    }>;
+    guidanceChars?: number;
   };
   /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
   zenAutonomyDecision?: ZenAutonomyDecision;
@@ -32691,6 +32698,22 @@ function HomeContent(): React.JSX.Element {
           `(${debug.provider}${debug.model ? `:${debug.model}` : ""}, effort=${debug.effort}): ` +
           debug.summary,
       });
+      if (typeof debug.passCount === "number" || typeof debug.guidanceChars === "number") {
+        lines.push({
+          kind: "summary",
+          text:
+            `${prefix} psychic diagnostics: passes=${debug.passCount ?? 0}; ` +
+            `guidance=${debug.guidanceChars ?? 0} chars`,
+        });
+      }
+      for (const pass of debug.passes ?? []) {
+        lines.push({
+          kind: "summary",
+          text:
+            `${prefix} psychic pass ${pass.name}: ${pass.chars} chars` +
+            (pass.warning ? `; warning=${pass.warning}` : ""),
+        });
+      }
       if (debug.scratchpad.trim().length > 0) {
         lines.push({
           kind: "summary",
@@ -53423,7 +53446,7 @@ function HomeContent(): React.JSX.Element {
                         Give all models effort customization
                       </label>
                       <small className={styles.settingsHostHint}>
-                        Shows the effort slider for local, Anthropic, non-reasoning OpenAI, and Auto choices.
+                        Shows simulated effort for local models; online models keep native effort or no-op clearly.
                       </small>
                     </div>
                   </div>
@@ -54021,7 +54044,7 @@ function HomeContent(): React.JSX.Element {
                           Give all models effort customization
                         </label>
                         <small className={styles.settingsHostHint}>
-                          Shows the effort slider for local, Anthropic, non-reasoning OpenAI, and Auto choices.
+                          Shows simulated effort for local models; online models keep native effort or no-op clearly.
                         </small>
                       </div>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
