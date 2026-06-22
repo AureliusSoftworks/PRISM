@@ -724,7 +724,7 @@ describe("resolveNextSettings — Zen Atmosphere text mask", () => {
 });
 
 describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
-  it("stores boolean grayscale values", () => {
+  it("enforces grayscale even when clients send boolean values", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperGrayscaleEnabled: true }, baseline())
         .zenWallpaperGrayscaleEnabled,
@@ -735,12 +735,12 @@ describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
         { zenWallpaperGrayscaleEnabled: false },
         baseline({ zenWallpaperGrayscaleEnabled: 1 })
       ).zenWallpaperGrayscaleEnabled,
-      false
+      true
     );
   });
 
-  it("keeps the stored grayscale setting when omitted or invalid", () => {
-    const current = baseline({ zenWallpaperGrayscaleEnabled: 1 });
+  it("normalizes stored false or invalid grayscale values to enabled", () => {
+    const current = baseline({ zenWallpaperGrayscaleEnabled: 0 });
     assert.equal(resolveNextSettings({}, current).zenWallpaperGrayscaleEnabled, true);
     assert.equal(
       resolveNextSettings(

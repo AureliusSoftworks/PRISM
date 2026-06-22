@@ -77,6 +77,7 @@ import {
   type ResponseMode,
 } from "./providerMode";
 import {
+  CircleHelp,
   Download,
   Image as ImageGlyph,
   Info,
@@ -172,6 +173,7 @@ import {
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
 } from "./prismDevChatCommands";
+import { prismWebDevToolsEnabled } from "./prismDevGating";
 import {
   ZEN_TOOL_LAB_TOOLS,
   buildZenToolLabMessageSample,
@@ -333,12 +335,6 @@ const DELETE_ALL_COFFEE_SESSIONS_KEY = "__delete_all_coffee_sessions__";
 /** Single Coffee Group delete — opens the same centered confirm modal as bulk deletes. */
 const DELETE_COFFEE_GROUP_KEY_PREFIX = "__delete_coffee_group__:";
 
-type PendingZenPersonaTransition = {
-  fromBotId: string | null;
-  toBotId: string;
-  origin: "picker" | "mention";
-};
-
 function coffeeGroupDeleteKey(groupId: string): string {
   return `${DELETE_COFFEE_GROUP_KEY_PREFIX}${groupId}`;
 }
@@ -347,6 +343,59 @@ function parseCoffeeGroupDeleteKey(key: string | null): string | null {
   if (key == null || !key.startsWith(DELETE_COFFEE_GROUP_KEY_PREFIX)) return null;
   const id = key.slice(DELETE_COFFEE_GROUP_KEY_PREFIX.length).trim();
   return id.length > 0 ? id : null;
+}
+
+function ZenPersonaTransitionChoiceControl({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: ZenPersonaTransitionChoice;
+  onChange: (next: ZenPersonaTransitionChoice) => void;
+  compact?: boolean;
+}): React.JSX.Element {
+  const labels: Record<ZenPersonaTransitionChoice, string> = {
+    auto: "Auto",
+    "new-speaks": compact ? "New" : "New speaks",
+    "previous-introduces": compact ? "Intro" : "Introduce",
+  };
+  return (
+    <div
+      className={styles.zenPersonaTransitionControl}
+      data-compact={compact ? "true" : undefined}
+      role="radiogroup"
+      aria-label="Persona transition style"
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <span className={styles.zenPersonaTransitionLabelWithInfo}>
+        <span className={styles.zenPersonaTransitionControlLabel}>Switch</span>
+        <PanelSectionInfo
+          id={`zen-persona-transition-switch-info-${compact ? "compact" : "full"}`}
+          label="About persona switching"
+          variant="control"
+          icon="help"
+        >
+          Controls the handoff when you change personas after Zen has started: Auto chooses,
+          New lets the selected persona speak, and Introduce has the current persona pass it over.
+        </PanelSectionInfo>
+      </span>
+      <div className={styles.zenPersonaTransitionSegments}>
+        {ZEN_PERSONA_TRANSITION_CHOICES.map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            className={styles.zenPersonaTransitionSegmentButton}
+            data-active={value === choice ? "true" : undefined}
+            role="radio"
+            aria-checked={value === choice}
+            onClick={() => onChange(choice)}
+          >
+            {labels[choice]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
@@ -461,11 +510,13 @@ function normalizeTutorialProgress(value: unknown): TutorialProgress {
   };
 }
 
-// Developer tools stay off for production/release builds unless explicitly enabled.
-// Local/dev remains on by default, and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
-const DEV_TOOLS_ENABLED =
-  process.env.NEXT_PUBLIC_DEV_TOOLS === "1" ||
-  (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS !== "0");
+// Developer tools stay off on main/release builds. Local/dev branches remain on by default,
+// and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
+const DEV_TOOLS_ENABLED = prismWebDevToolsEnabled({
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_DEV_TOOLS: process.env.NEXT_PUBLIC_DEV_TOOLS,
+  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+});
 // Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
 // Release builds keep shell controls anchored in-header unless explicitly re-enabled.
 const FLOATING_SHELL_APPLETS_ENABLED =
@@ -499,8 +550,8 @@ const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 300;
-const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 210;
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 380;
 const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 24;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
@@ -681,20 +732,14 @@ const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
 /** When set in localStorage, Import bot shows the paste-JSON path; otherwise the file picker opens immediately. */
 const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
-/** When set, inline developer metrics are rendered in the chat stream. */
-const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
-/** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
-const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
-/** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
-const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
-/** When set, shows the draggable Prism mood developer visual. */
-const PRISM_DEV_MOOD_VISUAL_STORAGE_KEY = "prism_dev_mood_visual";
+/** Local layout/state for developer-layer panels. */
+const PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY = "prism_dev_tools_ui_state_v1";
 /** Local position for the draggable Prism mood developer visual. */
 const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY = "prism_dev_mood_visual_position_v1";
 /** Dev-only Zen pause tester settings. */
 const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY = "prism_dev_zen_pause_tester_settings_v1";
-/** Dev-only Zen pause tester collapsed/open state. */
-const PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY = "prism_dev_zen_pause_tester_open_v1";
+/** Dev-only Zen Persona backdrop tuning. */
+const PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY = "prism_dev_zen_persona_backdrop_v2";
 const DEV_MOOD_VISUAL_DEFAULT_X = 22;
 const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
 const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
@@ -736,6 +781,14 @@ type DevToolsPanelDragState = {
   offsetX: number;
   offsetY: number;
 };
+type DevLayerOrbDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
+};
 type CompactedSummaryDebugPanelRect = {
   x: number;
   y: number;
@@ -755,6 +808,29 @@ type DevMoodVisualDragState = {
   startClientX: number;
   startClientY: number;
   moved: boolean;
+};
+type DevToolsUiStateStorage = {
+  activeSection?: DevToolsActiveSection;
+  panelPosition?: DevToolsPanelPosition;
+  mood?: {
+    open?: boolean;
+    position?: DevMoodVisualPosition;
+  };
+  pauseTester?: {
+    open?: boolean;
+    position?: DevToolsPanelPosition;
+  };
+  toolLab?: {
+    open?: boolean;
+    position?: DevToolsPanelPosition;
+  };
+  debugComposer?: {
+    minimized?: boolean;
+  };
+  compactedContext?: {
+    minimized?: boolean;
+    rect?: CompactedSummaryDebugPanelRect;
+  };
 };
 type CoffeePollPanelPosition = { x: number; y: number };
 type CoffeePollPanelDragState = {
@@ -895,6 +971,7 @@ const ZEN_USER_MESSAGE_PRISM_PALETTE = [
   { bright: "#ffa933", dark: "#944600" },
   { bright: "#bfeb4e", dark: "#5b7300" },
 ] as const;
+type ZenUserMessagePrismColor = (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number];
 
 type ImageReadyNoticeItem = { botId: string | null; imageId: string };
 type ImageReadyNoticeState = {
@@ -1172,6 +1249,37 @@ function clampDevToolsPanelPosition(
   return {
     x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
     y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeStoredDevToolsPosition(
+  value: unknown,
+  panelWidth: number,
+  panelHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): DevToolsPanelPosition | null {
+  if (!isRecord(value)) return null;
+  const { x, y } = value;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return clampDevToolsPanelPosition(x, y, panelWidth, panelHeight, viewportWidth, viewportHeight);
+}
+
+function initialDevLayerOrbPosition(side: "left" | "right"): DevToolsPanelPosition {
+  const viewportWidth =
+    typeof window === "undefined" ? 1280 : Math.max(320, window.innerWidth);
+  const viewportHeight =
+    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
+  const margin = 16;
+  const orbSize = 46;
+  return {
+    x: side === "left" ? margin : Math.max(margin, viewportWidth - margin - orbSize),
+    y: Math.max(margin, viewportHeight - 126 - orbSize),
   };
 }
 
@@ -2645,6 +2753,21 @@ function normalizeAccentForTheme(hex: string, theme?: "light" | "dark"): string 
     ? ACCENT_LUMINANCE_MAX_LIGHT_YELLOW
     : ACCENT_LUMINANCE_MAX_LIGHT;
   return clampLuminance(lightnessClamped, { max });
+}
+
+function resolveZenUserMessageColor(
+  personaInkSegment: { color: string; variant: "persona" | "default" } | null,
+  prismColor: ZenUserMessagePrismColor | undefined,
+  resolvedTheme: "light" | "dark"
+): string | undefined {
+  if (personaInkSegment?.variant === "persona") {
+    const rawPersonaColor = personaInkSegment.color.trim();
+    if (/^#[0-9a-f]{6}$/i.test(rawPersonaColor)) {
+      return normalizeAccentForTheme(rawPersonaColor, resolvedTheme);
+    }
+  }
+  if (!prismColor) return undefined;
+  return resolvedTheme === "light" ? prismColor.dark : prismColor.bright;
 }
 
 function coffeeBotTranscriptTextColor(
@@ -5118,6 +5241,16 @@ interface ConversationDetail {
   messages: Message[];
 }
 
+type ZenPrivateReturnCheckpoint = {
+  selectedId: string | null;
+  detail: ConversationDetail | null;
+  selectedBotId: string | null;
+  zenPersonaBotId: string | null;
+  chatBotOverride: string | null | undefined;
+  sessionOpinion: SessionOpinion | null;
+  botOpinion: BotOpinion | null;
+};
+
 /** POST /api/chat success envelope — `conversationStarters` only appears after “Talk to me!”. */
 interface ChatPostEnvelope {
   conversation: ConversationDetail;
@@ -5371,13 +5504,16 @@ function PanelSectionInfo({
   id,
   label,
   variant = "section",
+  icon = "info",
   children,
 }: {
   id: string;
   label: string;
   variant?: "section" | "control";
+  icon?: "info" | "help";
   children: string;
 }): React.JSX.Element {
+  const Icon = icon === "help" ? CircleHelp : Info;
   return (
     <span className={styles.panelSectionInfo} data-variant={variant}>
       <span
@@ -5386,7 +5522,7 @@ function PanelSectionInfo({
         aria-label={label}
         aria-describedby={id}
       >
-        <Info size={14} strokeWidth={2.1} aria-hidden="true" />
+        <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
       </span>
       <span id={id} className={styles.panelSectionInfoTooltip} role="tooltip">
         {children}
@@ -6713,7 +6849,8 @@ const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
-const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = false;
+const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
+const ZEN_ATMOSPHERE_COLOR_TRANSITION_MS = 720;
 const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
@@ -6721,6 +6858,40 @@ const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
 const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
 const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
 const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 180_000;
+const ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS = [
+  { value: "multiply", label: "Multiply" },
+  { value: "soft-light", label: "Soft Light" },
+  { value: "color", label: "Color" },
+  { value: "overlay", label: "Overlay" },
+  { value: "normal", label: "Normal" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" },
+  { value: "screen", label: "Screen" },
+  { value: "hard-light", label: "Hard Light" },
+  { value: "luminosity", label: "Luminosity" },
+] as const;
+type ZenPersonaBackdropBlendMode =
+  (typeof ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS)[number]["value"];
+type ZenPersonaBackdropTuning = {
+  blend: number;
+  darkBlendMode: ZenPersonaBackdropBlendMode;
+  lightBlendMode: ZenPersonaBackdropBlendMode;
+  opacity: number;
+  saturation: number;
+};
+const MIN_ZEN_PERSONA_BACKDROP_BLEND = 0;
+const MAX_ZEN_PERSONA_BACKDROP_BLEND = 100;
+const MIN_ZEN_PERSONA_BACKDROP_OPACITY = 0;
+const MAX_ZEN_PERSONA_BACKDROP_OPACITY = 0.6;
+const MIN_ZEN_PERSONA_BACKDROP_SATURATION = 0;
+const MAX_ZEN_PERSONA_BACKDROP_SATURATION = 1.6;
+const DEFAULT_ZEN_PERSONA_BACKDROP_TUNING: ZenPersonaBackdropTuning = {
+  blend: MAX_ZEN_PERSONA_BACKDROP_BLEND,
+  darkBlendMode: "multiply",
+  lightBlendMode: "screen",
+  opacity: MAX_ZEN_PERSONA_BACKDROP_OPACITY,
+  saturation: MAX_ZEN_PERSONA_BACKDROP_SATURATION,
+};
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -7053,18 +7224,7 @@ function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
   return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
 }
 
-function normalizeZenWallpaperGrayscaleSetting(value: unknown): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1" || normalized === "yes") {
-      return true;
-    }
-    if (normalized === "false" || normalized === "0" || normalized === "no") {
-      return false;
-    }
-  }
+function normalizeZenWallpaperGrayscaleSetting(_value: unknown): boolean {
   return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
 }
 
@@ -7086,6 +7246,102 @@ function normalizeIntegerSetting(
         : Number.NaN;
   const normalized = Number.isFinite(parsed) ? parsed : fallback;
   return Math.min(max, Math.max(min, Math.round(normalized)));
+}
+
+function normalizeDecimalSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  precision = 2
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallback;
+  const clamped = Math.min(max, Math.max(min, normalized));
+  return Number(clamped.toFixed(precision));
+}
+
+function normalizeZenPersonaBackdropBlendMode(
+  value: unknown,
+  fallback: ZenPersonaBackdropBlendMode
+): ZenPersonaBackdropBlendMode {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    const option = ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find(
+      (candidate) => candidate.value === normalized
+    );
+    if (option) return option.value;
+  }
+  return fallback;
+}
+
+function formatZenPersonaBackdropBlendMode(
+  value: ZenPersonaBackdropBlendMode
+): string {
+  return (
+    ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find((option) => option.value === value)
+      ?.label ?? value
+  );
+}
+
+function normalizeZenPersonaBackdropTuning(value: unknown): ZenPersonaBackdropTuning {
+  const source =
+    value !== null && typeof value === "object"
+      ? (value as Partial<Record<keyof ZenPersonaBackdropTuning, unknown>>)
+      : {};
+  return {
+    blend: normalizeIntegerSetting(
+      source.blend,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.blend,
+      MIN_ZEN_PERSONA_BACKDROP_BLEND,
+      MAX_ZEN_PERSONA_BACKDROP_BLEND
+    ),
+    darkBlendMode: normalizeZenPersonaBackdropBlendMode(
+      source.darkBlendMode,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode
+    ),
+    lightBlendMode: normalizeZenPersonaBackdropBlendMode(
+      source.lightBlendMode,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode
+    ),
+    opacity: normalizeDecimalSetting(
+      source.opacity,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.opacity,
+      MIN_ZEN_PERSONA_BACKDROP_OPACITY,
+      MAX_ZEN_PERSONA_BACKDROP_OPACITY
+    ),
+    saturation: normalizeDecimalSetting(
+      source.saturation,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.saturation,
+      MIN_ZEN_PERSONA_BACKDROP_SATURATION,
+      MAX_ZEN_PERSONA_BACKDROP_SATURATION
+    ),
+  };
+}
+
+function zenPersonaBackdropCssVars(
+  tuning: ZenPersonaBackdropTuning
+): React.CSSProperties {
+  const normalized = normalizeZenPersonaBackdropTuning(tuning);
+  const style = {} as React.CSSProperties & Record<string, string>;
+  style["--zen-persona-ink-opacity"] = String(normalized.opacity);
+  style["--zen-persona-ink-saturation"] = String(normalized.saturation);
+  style["--zen-persona-ink-blend-mode-dark"] = normalized.darkBlendMode;
+  style["--zen-persona-ink-blend-mode-light"] = normalized.lightBlendMode;
+  style["--zen-persona-ink-blend-strong"] = `${normalized.blend}%`;
+  style["--zen-persona-ink-blend-mid"] = `${Math.round(normalized.blend * 0.68)}%`;
+  style["--zen-persona-ink-blend-soft"] = `${Math.round(normalized.blend * 0.5)}%`;
+  style["--zen-persona-ink-blend-edge"] = `${Math.round(normalized.blend * 0.34)}%`;
+  return style;
+}
+
+function formatZenPersonaBackdropPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function normalizeZenSessionIdleGapSetting(value: unknown): number {
@@ -12229,6 +12485,10 @@ interface ComposerBotPickerProps {
   placement?: "up" | "down";
   /** Increment to close floating picker menus from the parent shell. */
   dismissPopoversSignal?: number;
+  /** Optional compact controls shown below the option list. */
+  menuFooter?: React.ReactNode;
+  /** Portaled menus need their own private-tone marker; app-shell selectors cannot reach document.body children. */
+  privateTone?: boolean;
 }
 
 function ComposerBotPicker({
@@ -12248,6 +12508,8 @@ function ComposerBotPicker({
   hueLensTrackSegments = EMPTY_HUE_LENS_TRACK_SEGMENTS,
   placement = "up",
   dismissPopoversSignal,
+  menuFooter,
+  privateTone = false,
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
@@ -12470,6 +12732,7 @@ function ComposerBotPicker({
           <div
             ref={menuRef}
             className={styles.composeBotMenu}
+            data-private-tone={privateTone ? "true" : undefined}
             style={menuPortalStyle}
           >
           {showFilterControls && (
@@ -12602,6 +12865,9 @@ function ComposerBotPicker({
               );
             })}
           </div>
+          {menuFooter ? (
+            <div className={styles.composeBotMenuFooter}>{menuFooter}</div>
+          ) : null}
         </div>,
           document.body
         )}
@@ -15872,6 +16138,7 @@ interface ComposerInputProps {
   mentionBots: readonly BotMentionPick[];
   mentionCommitMode?: ComposerMentionCommitMode;
   onMentionPersonaSelect?: (botId: string) => void;
+  mentionPopoverFooter?: React.ReactNode;
   onEmptyBackspace?: () => boolean;
   commandPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
@@ -17959,6 +18226,7 @@ interface DesktopMarkdownComposerProps {
   mentionBots: readonly BotMentionPick[];
   mentionCommitMode?: ComposerMentionCommitMode;
   onMentionPersonaSelect?: (botId: string) => void;
+  mentionPopoverFooter?: React.ReactNode;
   onEmptyBackspace?: () => boolean;
   /** Slash commands shown in the composer autocomplete menu at the first word. */
   commandPicks?: readonly CommandCenterCommand[];
@@ -17992,6 +18260,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       mentionBots,
       mentionCommitMode = "insert-mention",
       onMentionPersonaSelect,
+      mentionPopoverFooter,
       onEmptyBackspace,
       commandPicks = [],
       promptPicks = [],
@@ -19169,6 +19438,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           ensureContrast={ensureContrast}
           excludeInteractionRef={markdownComposerSurfaceRef}
           onDismiss={dismissMentionPopover}
+          footer={mentionPopoverFooter}
         />
         <ComposerCommandPopover
           open={commandUi.open}
@@ -19220,6 +19490,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     mentionBots,
     mentionCommitMode = "insert-mention",
     onMentionPersonaSelect,
+    mentionPopoverFooter,
     onEmptyBackspace,
     commandPicks = [],
     promptPicks = [],
@@ -19680,6 +19951,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           mentionBots={mentionBots}
           mentionCommitMode={mentionCommitMode}
           onMentionPersonaSelect={onMentionPersonaSelect}
+          mentionPopoverFooter={mentionPopoverFooter}
           onEmptyBackspace={onEmptyBackspace}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
@@ -20213,6 +20485,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             ensureContrast={ensureContrast}
             excludeInteractionRef={composeEditorShellRef}
             onDismiss={dismissTaMentionPopover}
+            footer={mentionPopoverFooter}
           />
           <ComposerCommandPopover
             open={taCommand.open}
@@ -21329,7 +21602,6 @@ function HomeContent(): React.JSX.Element {
     zenFreshStartGapMs,
     zenRecentContextMessages,
     zenWallpaperTextMaskEnabled,
-    zenWallpaperGrayscaleEnabled,
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
@@ -21799,8 +22071,9 @@ function HomeContent(): React.JSX.Element {
   // collapse so keyboard users land on the control they just opened.
   const chatOverflowGearButtonRef = useRef<HTMLButtonElement>(null);
   const chatOverflowMenuOpenPrevRef = useRef(chatOverflowMenuOpen);
+  const [devToolsUnlocked, setDevToolsUnlocked] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const [devTogglesOpen, setDevTogglesOpen] = useState(false);
+  const [devToolsMinimized, setDevToolsMinimized] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
   const [devToolsConsoleOnly, setDevToolsConsoleOnly] = useState(false);
@@ -21818,9 +22091,13 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
+  const [zenPersonaBackdropTuning, setZenPersonaBackdropTuning] =
+    useState<ZenPersonaBackdropTuning>(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
+  const devToolsBubbleRef = useRef<HTMLButtonElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const [devMoodVisualEnabled, setDevMoodVisualEnabled] = useState(false);
+  const devToolsBubbleDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const devToolsBubbleSuppressClickRef = useRef(false);
   const [devMoodVisualOpen, setDevMoodVisualOpen] = useState(false);
   const [devMoodNowMs, setDevMoodNowMs] = useState(() => Date.now());
   const [devMoodDebugBusy, setDevMoodDebugBusy] = useState(false);
@@ -21838,6 +22115,18 @@ function HomeContent(): React.JSX.Element {
   const devMoodVisualSuppressClickRef = useRef(false);
   const [devZenPauseTesterOpen, setDevZenPauseTesterOpen] = useState(false);
   const [zenToolLabOpen, setZenToolLabOpen] = useState(false);
+  const [devZenPauseTesterPosition, setDevZenPauseTesterPosition] =
+    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("right"));
+  const [zenToolLabPosition, setZenToolLabPosition] =
+    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("left"));
+  const devZenPauseTesterRef = useRef<HTMLDivElement | null>(null);
+  const zenToolLabRef = useRef<HTMLDivElement | null>(null);
+  const devZenPauseTesterDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const zenToolLabDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const devZenPauseTesterSuppressClickRef = useRef(false);
+  const zenToolLabSuppressClickRef = useRef(false);
+  const [devDebugComposerMinimized, setDevDebugComposerMinimized] = useState(false);
+  const [devToolsUiStorageLoaded, setDevToolsUiStorageLoaded] = useState(!DEV_TOOLS_ENABLED);
   const [devZenPauseTiming, setDevZenPauseTiming] = useState<ChatRevealTimingSettings>(
     DEFAULT_CHAT_REVEAL_TIMING
   );
@@ -21846,14 +22135,44 @@ function HomeContent(): React.JSX.Element {
   );
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
+  const devToolsRuntimeActive = DEV_TOOLS_ENABLED && devToolsUnlocked;
   const closeDevTools = useCallback(() => {
+    setDevToolsUnlocked(false);
     setDevToolsOpen(false);
-    setDevTogglesOpen(false);
+    setDevToolsMinimized(true);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+  }, []);
+  const openDevTools = useCallback((section?: DevToolsActiveSection) => {
+    setDevToolsUnlocked(true);
+    setDevToolsOpen(true);
+    setDevToolsMinimized(false);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+    if (section) setDevToolsActiveSection(section);
+  }, []);
+  const showDevToolsLayer = useCallback(() => {
+    setDevToolsUnlocked(true);
+    setDevToolsOpen(false);
+    setDevToolsMinimized(true);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+  }, []);
+  const toggleDevToolsLayer = useCallback(() => {
+    if (devToolsUnlocked) {
+      closeDevTools();
+    } else {
+      showDevToolsLayer();
+    }
+  }, [closeDevTools, devToolsUnlocked, showDevToolsLayer]);
+  const minimizeDevTools = useCallback(() => {
+    setDevToolsOpen(false);
+    setDevToolsMinimized(true);
     setDevToolsMessage(null);
     setDevToolsConsoleOnly(false);
   }, []);
   const effectiveChatRevealTiming =
-    DEV_TOOLS_ENABLED && view === "chat" ? devZenPauseTiming : DEFAULT_CHAT_REVEAL_TIMING;
+    devToolsRuntimeActive && view === "chat" ? devZenPauseTiming : DEFAULT_CHAT_REVEAL_TIMING;
 
   const closeBotContextMenu = useCallback(() => {
     setBotContextMenu(null);
@@ -22026,6 +22345,8 @@ function HomeContent(): React.JSX.Element {
   // contract so they still mean no memory/no history while preserving
   // the selected bot as prompt identity.
   const [pendingIncognito, setPendingIncognito] = useState(false);
+  const [zenPrivateReturnCheckpoint, setZenPrivateReturnCheckpoint] =
+    useState<ZenPrivateReturnCheckpoint | null>(null);
   // Pending mid-thread bot switch for the OPEN Chat-mode conversation.
   // Three-valued so the dropdown can distinguish "match the server's
   // current botId" (undefined) from "explicitly pick Default" (null)
@@ -22041,15 +22362,9 @@ function HomeContent(): React.JSX.Element {
   const zenPersonaBotIdRef = useRef<string | null>(null);
   zenPersonaBotIdRef.current = zenPersonaBotId;
   const [
-    pendingZenPersonaTransition,
-    setPendingZenPersonaTransition,
-  ] = useState<PendingZenPersonaTransition | null>(null);
-  const pendingZenPersonaTransitionRef = useRef<PendingZenPersonaTransition | null>(null);
-  pendingZenPersonaTransitionRef.current = pendingZenPersonaTransition;
-  const [
-    zenPersonaTransitionChoiceIndex,
-    setZenPersonaTransitionChoiceIndex,
-  ] = useState(0);
+    zenPersonaTransitionChoice,
+    setZenPersonaTransitionChoice,
+  ] = useState<ZenPersonaTransitionChoice>("auto");
   const [images, setImages] = useState<ImageRecord[]>([]);
   /** Full-gallery fetch for bot tallies while the grid shows a filtered list. */
   const [imageBotDirectorySnapshot, setImageBotDirectorySnapshot] = useState<
@@ -22504,12 +22819,8 @@ function HomeContent(): React.JSX.Element {
   const [botTransferOverlayNowMs, setBotTransferOverlayNowMs] = useState(() => Date.now());
   const botTransferBusy = botTransferOverlay !== null;
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
-  const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
-  const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
-  const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
-    useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
-  const devChatMetricsTerminalActive = devToolsOpen || devChatMetricsEnabled;
+  const devChatMetricsTerminalActive = devToolsRuntimeActive;
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
     if (typeof window === "undefined") return;
@@ -22523,41 +22834,33 @@ function HomeContent(): React.JSX.Element {
       // private mode / quota — preference just won't survive reload
     }
   }, []);
-  const persistDevChatMetricsEnabled = useCallback((next: boolean) => {
-    setDevChatMetricsEnabledState(next);
+  const persistZenPersonaBackdropTuning = useCallback(
+    (patch: Partial<ZenPersonaBackdropTuning>) => {
+      setZenPersonaBackdropTuning((previous) => {
+        const next = normalizeZenPersonaBackdropTuning({ ...previous, ...patch });
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(
+              PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
+              JSON.stringify(next)
+            );
+          } catch {
+            // private mode / quota — preference just won't survive reload
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+  const resetZenPersonaBackdropTuning = useCallback(() => {
+    setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
     if (typeof window === "undefined") return;
     try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistDevDebugComposerEnabled = useCallback((next: boolean) => {
-    setDevDebugComposerEnabledState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistDevShowCompactedSummaryInChat = useCallback((next: boolean) => {
-    setDevShowCompactedSummaryInChatState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY);
-      }
+      window.localStorage.setItem(
+        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
+        JSON.stringify(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING)
+      );
     } catch {
       // private mode / quota — preference just won't survive reload
     }
@@ -22568,20 +22871,17 @@ function HomeContent(): React.JSX.Element {
       setDevToolsBotImportPasteEnabledState(
         window.localStorage.getItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY) === "1"
       );
-      setDevChatMetricsEnabledState(
-        window.localStorage.getItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY) === "1"
+      const storedPersonaBackdrop = window.localStorage.getItem(
+        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY
       );
-      setDevDebugComposerEnabledState(
-        window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
-      );
-      setDevShowCompactedSummaryInChatState(
-        window.localStorage.getItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY) === "1"
-      );
+      if (storedPersonaBackdrop) {
+        setZenPersonaBackdropTuning(
+          normalizeZenPersonaBackdropTuning(JSON.parse(storedPersonaBackdrop))
+        );
+      }
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
-      setDevChatMetricsEnabledState(false);
-      setDevDebugComposerEnabledState(false);
-      setDevShowCompactedSummaryInChatState(false);
+      setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
     }
   }, []);
   useEffect(() => {
@@ -22797,8 +23097,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return;
     try {
-      const openRaw = window.localStorage.getItem(PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY);
-      setDevZenPauseTesterOpen(openRaw === "1");
       const settingsRaw = window.localStorage.getItem(PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY);
       if (settingsRaw) {
         setDevZenPauseTiming(
@@ -22815,18 +23113,6 @@ function HomeContent(): React.JSX.Element {
     if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
     try {
       window.localStorage.setItem(
-        PRISM_DEV_ZEN_PAUSE_TESTER_OPEN_STORAGE_KEY,
-        devZenPauseTesterOpen ? "1" : "0"
-      );
-    } catch {
-      // Local dev affordance only.
-    }
-  }, [devZenPauseTesterOpen, devZenPauseTesterStorageLoaded]);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
-    try {
-      window.localStorage.setItem(
         PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY,
         JSON.stringify(devZenPauseTiming)
       );
@@ -22838,50 +23124,121 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return;
     try {
-      setDevMoodVisualEnabled(
-        window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_STORAGE_KEY) === "1"
-      );
-      const raw = window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY);
+      const viewportW = Math.max(320, window.innerWidth);
+      const viewportH = Math.max(320, window.innerHeight);
+      const raw = window.localStorage.getItem(PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as unknown;
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          typeof (parsed as { x?: unknown }).x === "number" &&
-          typeof (parsed as { y?: unknown }).y === "number"
-        ) {
-          const position = parsed as DevMoodVisualPosition;
-          setDevMoodVisualPosition(
-            clampDevToolsPanelPosition(
-              position.x,
-              position.y,
+        if (isRecord(parsed)) {
+          const activeSection = parsed.activeSection;
+          if (
+            typeof activeSection === "string" &&
+            DEV_TOOLS_NAV_ITEMS.some((item) => item.id === activeSection)
+          ) {
+            setDevToolsActiveSection(activeSection as DevToolsActiveSection);
+          }
+
+          const panelPosition = normalizeStoredDevToolsPosition(
+            parsed.panelPosition,
+            46,
+            42,
+            viewportW,
+            viewportH
+          );
+          if (panelPosition) setDevToolsPanelPosition(panelPosition);
+
+          const mood = isRecord(parsed.mood) ? parsed.mood : null;
+          if (typeof mood?.open === "boolean") setDevMoodVisualOpen(mood.open);
+          const moodPosition = normalizeStoredDevToolsPosition(
+            mood?.position,
+            280,
+            220,
+            viewportW,
+            viewportH
+          );
+          if (moodPosition) setDevMoodVisualPosition(moodPosition);
+
+          const pauseTester = isRecord(parsed.pauseTester) ? parsed.pauseTester : null;
+          if (typeof pauseTester?.open === "boolean") {
+            setDevZenPauseTesterOpen(pauseTester.open);
+          }
+          const pauseTesterPosition = normalizeStoredDevToolsPosition(
+            pauseTester?.position,
+            46,
+            46,
+            viewportW,
+            viewportH
+          );
+          if (pauseTesterPosition) setDevZenPauseTesterPosition(pauseTesterPosition);
+
+          const toolLab = isRecord(parsed.toolLab) ? parsed.toolLab : null;
+          if (typeof toolLab?.open === "boolean") setZenToolLabOpen(toolLab.open);
+          const toolLabPosition = normalizeStoredDevToolsPosition(
+            toolLab?.position,
+            46,
+            46,
+            viewportW,
+            viewportH
+          );
+          if (toolLabPosition) setZenToolLabPosition(toolLabPosition);
+
+          const debugComposer = isRecord(parsed.debugComposer) ? parsed.debugComposer : null;
+          if (typeof debugComposer?.minimized === "boolean") {
+            setDevDebugComposerMinimized(debugComposer.minimized);
+          }
+
+          const compactedContext = isRecord(parsed.compactedContext)
+            ? parsed.compactedContext
+            : null;
+          if (typeof compactedContext?.minimized === "boolean") {
+            setCompactedSummaryDebugMinimized(compactedContext.minimized);
+          }
+          const storedRect = compactedContext?.rect;
+          if (isRecord(storedRect)) {
+            const { x, y, width, height } = storedRect;
+            if (
+              typeof x === "number" &&
+              typeof y === "number" &&
+              typeof width === "number" &&
+              typeof height === "number" &&
+              Number.isFinite(x) &&
+              Number.isFinite(y) &&
+              Number.isFinite(width) &&
+              Number.isFinite(height)
+            ) {
+              setCompactedSummaryDebugPanelRect(
+                clampCompactedSummaryDebugPanelRect(
+                  { x, y, width, height },
+                  viewportW,
+                  viewportH
+                )
+              );
+            }
+          }
+        }
+      } else {
+        const legacyMoodRaw = window.localStorage.getItem(
+          PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY
+        );
+        const legacyMoodPosition = legacyMoodRaw
+          ? normalizeStoredDevToolsPosition(
+              JSON.parse(legacyMoodRaw) as unknown,
               280,
               220,
-              window.innerWidth,
-              window.innerHeight
+              viewportW,
+              viewportH
             )
-          );
-        }
+          : null;
+        if (legacyMoodPosition) setDevMoodVisualPosition(legacyMoodPosition);
       }
     } catch {
       // Local dev affordance only.
     }
+    setDevToolsUiStorageLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
-    try {
-      window.localStorage.setItem(
-        PRISM_DEV_MOOD_VISUAL_STORAGE_KEY,
-        devMoodVisualEnabled ? "1" : "0"
-      );
-    } catch {
-      // Local dev affordance only.
-    }
-  }, [devMoodVisualEnabled]);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    if (!devToolsRuntimeActive) return;
     setDevMoodNowMs(Date.now());
     const timer = window.setInterval(() => {
       setDevMoodNowMs(Date.now());
@@ -22889,11 +23246,35 @@ function HomeContent(): React.JSX.Element {
     return () => {
       window.clearInterval(timer);
     };
-  }, [devMoodVisualEnabled]);
+  }, [devToolsRuntimeActive]);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
+    if (!DEV_TOOLS_ENABLED || !devToolsUiStorageLoaded) return;
     try {
+      const snapshot: DevToolsUiStateStorage = {
+        activeSection: devToolsActiveSection,
+        panelPosition: devToolsPanelPosition,
+        mood: {
+          open: devMoodVisualOpen,
+          position: devMoodVisualPosition,
+        },
+        pauseTester: {
+          open: devZenPauseTesterOpen,
+          position: devZenPauseTesterPosition,
+        },
+        toolLab: {
+          open: zenToolLabOpen,
+          position: zenToolLabPosition,
+        },
+        debugComposer: {
+          minimized: devDebugComposerMinimized,
+        },
+        compactedContext: {
+          minimized: compactedSummaryDebugMinimized,
+          rect: compactedSummaryDebugPanelRect,
+        },
+      };
+      window.localStorage.setItem(PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
       window.localStorage.setItem(
         PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY,
         JSON.stringify(devMoodVisualPosition)
@@ -22901,10 +23282,23 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Local dev affordance only.
     }
-  }, [devMoodVisualPosition]);
+  }, [
+    compactedSummaryDebugMinimized,
+    compactedSummaryDebugPanelRect,
+    devDebugComposerMinimized,
+    devMoodVisualOpen,
+    devMoodVisualPosition,
+    devToolsActiveSection,
+    devToolsPanelPosition,
+    devToolsUiStorageLoaded,
+    devZenPauseTesterOpen,
+    devZenPauseTesterPosition,
+    zenToolLabOpen,
+    zenToolLabPosition,
+  ]);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    if (!devToolsRuntimeActive) return;
     setDevMoodVisualPosition((current) =>
       clampDevToolsPanelPosition(
         current.x,
@@ -22915,7 +23309,31 @@ function HomeContent(): React.JSX.Element {
         viewportHeight
       )
     );
-  }, [devMoodVisualEnabled, viewportHeight, viewportWidth]);
+  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    if (!devToolsRuntimeActive) return;
+    setDevZenPauseTesterPosition((current) =>
+      clampDevToolsPanelPosition(
+        current.x,
+        current.y,
+        devZenPauseTesterRef.current?.offsetWidth ?? 46,
+        devZenPauseTesterRef.current?.offsetHeight ?? 46,
+        viewportWidth,
+        viewportHeight
+      )
+    );
+    setZenToolLabPosition((current) =>
+      clampDevToolsPanelPosition(
+        current.x,
+        current.y,
+        zenToolLabRef.current?.offsetWidth ?? 46,
+        zenToolLabRef.current?.offsetHeight ?? 46,
+        viewportWidth,
+        viewportHeight
+      )
+    );
+  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     if (!sidebarDrawerMode) return;
@@ -23019,6 +23437,82 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
+  const startDevLayerOrbDrag = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      panel: HTMLElement | null,
+      dragRef: { current: DevLayerOrbDragState | null },
+      suppressClickRef: { current: boolean }
+    ) => {
+      if (event.button !== 0 || !panel) return;
+      const rect = panel.getBoundingClientRect();
+      dragRef.current = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
+      suppressClickRef.current = false;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is missing in some test environments.
+      }
+    },
+    []
+  );
+  const dragDevLayerOrb = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      panel: HTMLElement | null,
+      dragRef: { current: DevLayerOrbDragState | null },
+      setPosition: (next: DevToolsPanelPosition) => void
+    ) => {
+      const dragState = dragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId || !panel) return;
+      const dx = Math.abs(event.clientX - dragState.startClientX);
+      const dy = Math.abs(event.clientY - dragState.startClientY);
+      if (dx > 3 || dy > 3) dragState.moved = true;
+      const rect = panel.getBoundingClientRect();
+      const next = clampDevToolsPanelPosition(
+        event.clientX - dragState.offsetX,
+        event.clientY - dragState.offsetY,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight
+      );
+      panel.style.left = `${next.x}px`;
+      panel.style.top = `${next.y}px`;
+      setPosition(next);
+    },
+    []
+  );
+  const endDevLayerOrbDrag = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      dragRef: { current: DevLayerOrbDragState | null },
+      suppressClickRef: { current: boolean }
+    ) => {
+      const dragState = dragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      dragRef.current = null;
+      suppressClickRef.current = dragState.moved;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+      if (dragState.moved) {
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
+    },
+    []
+  );
   const startDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const panel = devMoodVisualRef.current;
@@ -23945,6 +24439,12 @@ function HomeContent(): React.JSX.Element {
           explicitDefault: chatBotOverride === null,
         };
       }
+      if ((!detail || detail.id === "pending") && zenPersonaBotId !== null) {
+        return {
+          botId: zenPersonaBotId,
+          explicitDefault: false,
+        };
+      }
       if (detail?.id !== undefined && detail.id !== "pending") {
         return {
           botId: detail.botId,
@@ -23964,6 +24464,7 @@ function HomeContent(): React.JSX.Element {
     detail,
     chatBotOverride,
     privateChatActive,
+    zenPersonaBotId,
   ]);
 
   const activeBot = useMemo<Bot | null>(() => {
@@ -24177,6 +24678,56 @@ function HomeContent(): React.JSX.Element {
       : null;
     return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
   }, [bots, composeBotAccentId, resolvedTheme]);
+
+  const zenPersonaBackdropStyleVars = useMemo(
+    () => zenPersonaBackdropCssVars(zenPersonaBackdropTuning),
+    [zenPersonaBackdropTuning]
+  );
+
+  const zenPersonaContinuityWashStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (view !== "chat" || !selectedComposeBotAccent) return undefined;
+    return {
+      ...zenPersonaBackdropStyleVars,
+      ["--zen-persona-ink-color" as string]: selectedComposeBotAccent,
+    };
+  }, [selectedComposeBotAccent, view, zenPersonaBackdropStyleVars]);
+  const previousZenPersonaWashColorRef = useRef<string | null>(null);
+  const [exitingZenPersonaWash, setExitingZenPersonaWash] = useState<{
+    color: string;
+    id: number;
+  } | null>(null);
+  useEffect(() => {
+    const previousColor = previousZenPersonaWashColorRef.current;
+    if (view !== "chat") {
+      previousZenPersonaWashColorRef.current = null;
+      setExitingZenPersonaWash(null);
+      return;
+    }
+    if (selectedComposeBotAccent) {
+      previousZenPersonaWashColorRef.current = selectedComposeBotAccent;
+      setExitingZenPersonaWash(null);
+      return;
+    }
+    previousZenPersonaWashColorRef.current = null;
+    if (!previousColor) {
+      setExitingZenPersonaWash(null);
+      return;
+    }
+
+    const id = Date.now();
+    setExitingZenPersonaWash({ color: previousColor, id });
+    const timeout = window.setTimeout(() => {
+      setExitingZenPersonaWash((current) => (current?.id === id ? null : current));
+    }, ZEN_ATMOSPHERE_COLOR_TRANSITION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [selectedComposeBotAccent, view]);
+  const exitingZenPersonaWashStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!exitingZenPersonaWash) return undefined;
+    return {
+      ...zenPersonaBackdropStyleVars,
+      ["--zen-persona-ink-color" as string]: exitingZenPersonaWash.color,
+    };
+  }, [exitingZenPersonaWash, zenPersonaBackdropStyleVars]);
 
   const nextZenUserMessagePrismColor = useMemo<
     (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number] | null
@@ -25330,6 +25881,42 @@ function HomeContent(): React.JSX.Element {
       />
     );
   };
+  const renderZenPrivateModeToggle = (): React.ReactNode => {
+    if (view !== "chat") return null;
+    const label = appWidePrivateMode
+      ? "Private mode on. Click to return to the saved conversation."
+      : "Private mode off. Click to continue privately from here.";
+    return (
+      <button
+        type="button"
+        className={styles.zenPrivateModeToggle}
+        data-active={appWidePrivateMode ? "true" : undefined}
+        aria-pressed={appWidePrivateMode}
+        aria-label={label}
+        title={pendingReplyVisible ? "Wait for the current reply to finish." : label}
+        data-glyph-tooltip={
+          appWidePrivateMode
+            ? "Return from private mode"
+            : "Private mode"
+        }
+        disabled={pendingReplyVisible}
+        onClick={() => setAppWidePrivateMode(!appWidePrivateMode)}
+      >
+        <span
+          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleKey}`}
+          aria-hidden="true"
+        >
+          <IconKey />
+        </span>
+        <span
+          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleLock}`}
+          aria-hidden="true"
+        >
+          <BotGlyph name="lock" size={14} strokeWidth={2.05} />
+        </span>
+      </button>
+    );
+  };
   const renderHeaderModelPicker = (
     options: {
       modelMenuClassName?: string;
@@ -25365,11 +25952,12 @@ function HomeContent(): React.JSX.Element {
     const botDisabled = view === "chat" ? !detail : false;
     const zenPersonaPickerDisabled =
       view === "chat" &&
-      (pendingReplyVisible || (!detail && !forceNewConversationOnNextSend));
+      pendingReplyVisible;
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     return (
       <div className={styles.chatHeaderModelPicker}>
         {renderProviderModeToggle(styles.chatHeaderModeToggle)}
+        {renderZenPrivateModeToggle()}
         <ComposerModelPicker
           value={visibleModelChoice}
           onChange={(nextChoice) => {
@@ -25437,8 +26025,6 @@ function HomeContent(): React.JSX.Element {
             title={
               pendingReplyVisible
                 ? "Wait for the current reply before changing Persona."
-                : !detail && !forceNewConversationOnNextSend
-                ? "Zen is opening."
                 : "Persona for Zen replies"
             }
             ariaLabel="Zen Persona"
@@ -25450,6 +26036,8 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackGradient={hueLensTrackGradient}
             hueLensTrackSegments={hueLensTrackSegments}
             dismissPopoversSignal={composerPopoverDismissSignal}
+            menuFooter={renderZenPersonaTransitionChoiceControl()}
+            privateTone={appWidePrivateMode}
           />
         ) : null}
         {view === "sandbox" && bots.length > 0 ? (
@@ -25474,6 +26062,7 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackGradient={hueLensTrackGradient}
             hueLensTrackSegments={hueLensTrackSegments}
             dismissPopoversSignal={composerPopoverDismissSignal}
+            privateTone={appWidePrivateMode}
           />
         ) : null}
       </div>
@@ -27560,7 +28149,7 @@ function HomeContent(): React.JSX.Element {
     if (
       !compactedSummaryDebugFloatingEnabled ||
       compactedSummaryDebugMinimized ||
-      !devShowCompactedSummaryInChat
+      !devToolsRuntimeActive
     ) {
       return;
     }
@@ -27586,13 +28175,13 @@ function HomeContent(): React.JSX.Element {
   }, [
     compactedSummaryDebugFloatingEnabled,
     compactedSummaryDebugMinimized,
-    devShowCompactedSummaryInChat,
+    devToolsRuntimeActive,
     viewportHeight,
     viewportWidth,
   ]);
 
   const compactedSummaryDebugNode = useMemo(() => {
-    if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
+    if (!devToolsRuntimeActive) return null;
     if (view !== "chat" || !activeZenConversationId) return null;
     const summaryFromManual =
       manualCompactionStatus?.conversationId === activeZenConversationId &&
@@ -27801,7 +28390,7 @@ function HomeContent(): React.JSX.Element {
     detail?.zenWallpaper?.generationMessageCount,
     detail?.zenWallpaper?.promptSeed,
     detail?.id,
-    devShowCompactedSummaryInChat,
+    devToolsRuntimeActive,
     manualCompactionStatus,
     dragCompactedSummaryDebugPanel,
     endCompactedSummaryDebugPanelDrag,
@@ -29808,8 +30397,9 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (view !== "chat") return;
+    if (!detail || detail.id === "pending") return;
     const nextPersonaBotId =
-      detail && detail.id !== "pending" ? detail.lastBotId ?? null : null;
+      detail.lastBotId ?? null;
     setZenPersonaBotId((current) =>
       current === nextPersonaBotId ? current : nextPersonaBotId
     );
@@ -30023,9 +30613,9 @@ function HomeContent(): React.JSX.Element {
     void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
   }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
   useEffect(() => {
-    if (!devShowCompactedSummaryInChat) return;
+    if (!devToolsRuntimeActive) return;
     void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
-  }, [devShowCompactedSummaryInChat, view, detail?.id, selectedId]);
+  }, [devToolsRuntimeActive, view, detail?.id, selectedId]);
   useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
@@ -32657,7 +33247,12 @@ function HomeContent(): React.JSX.Element {
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
-    const privateForSend = false;
+    const privateForSend =
+      isZenMode && (detail?.incognito === true || pendingIncognito);
+    const privateConversationId =
+      privateForSend && detail?.incognito === true
+        ? selectedId ?? detail.id
+        : undefined;
     const mode: "zen" | "sandbox" = isZenMode ? "zen" : "sandbox";
     const commandCenterModelChoice = parseCommandCenterModelChoice(
       options.commandCenterModelChoice ?? AUTO_MODEL_CHOICE
@@ -32699,7 +33294,9 @@ function HomeContent(): React.JSX.Element {
           : zenPersonaBotId ?? undefined
         : undefined;
     return {
-      conversationId: options.forceNewConversation ? undefined : selectedId ?? undefined,
+      conversationId: privateForSend
+        ? privateConversationId
+        : options.forceNewConversation ? undefined : selectedId ?? undefined,
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
       ...(options.starterPromptWarrantsIntro
@@ -32724,6 +33321,12 @@ function HomeContent(): React.JSX.Element {
         mode === "sandbox"
           ? (selectedBotId ?? undefined)
           : zenPersonaBotIdForRequest,
+      ...(privateForSend
+        ? {
+            incognito: true,
+            ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [],
+          }
+        : {}),
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
@@ -33052,7 +33655,7 @@ function HomeContent(): React.JSX.Element {
 
     if (parsed.kind === "unknown") {
       setError(
-        `Unknown dev command "${parsed.token}". Type /dev to open Developer Tools.`,
+        `Unknown dev command "${parsed.token}". Type /dev to toggle developer tools.`,
       );
       return true;
     }
@@ -33062,9 +33665,11 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
-      setDevToolsMessage(null);
-      setDevTogglesOpen(false);
-      setDevToolsOpen(true);
+      if (trimmedLine.trimStart().slice(4).trim().length === 0) {
+        toggleDevToolsLayer();
+        return true;
+      }
+      openDevTools();
       return true;
     }
 
@@ -33078,9 +33683,8 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
-      setDevToolsMessage(null);
-      setDevToolsOpen(true);
-      setDevTogglesOpen(true);
+      openDevTools("system");
+      setDevToolsMessage("Dev toggles live in System.");
       return true;
     }
 
@@ -33089,10 +33693,8 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
+      openDevTools("system");
       setDevToolsMessage("Dev commands are listed in System.");
-      setDevToolsActiveSection("system");
-      setDevTogglesOpen(false);
-      setDevToolsOpen(true);
       return true;
     }
 
@@ -33101,6 +33703,10 @@ function HomeContent(): React.JSX.Element {
       return true;
     }
 
+    setDevToolsUnlocked(true);
+    setDevDebugComposerMinimized(false);
+    setCompactedSummaryDebugMinimized(false);
+    setZenToolLabOpen(true);
     appendZenToolLabSample("ask-question");
     return true;
   }
@@ -34545,7 +35151,12 @@ function HomeContent(): React.JSX.Element {
     let optimisticPromptCleanupMessageId: string | null = null;
     const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
-      detailForSend?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
+      detailForSend?.botId ??
+      (view === "chat"
+        ? zenPersonaBotIdForSend ?? selectedBotId ?? null
+        : optimisticIncognito
+          ? selectedBotId ?? null
+          : null);
     const optimisticLastBotId =
       detailForSend?.lastBotId ??
       (view === "sandbox" && !optimisticIncognito ? selectedBotId ?? null : optimisticBotId);
@@ -37155,6 +37766,7 @@ function HomeContent(): React.JSX.Element {
   const hideMobileEmptySend = false;
 
   function startFreshConversation(privateMode: boolean) {
+    setZenPrivateReturnCheckpoint(null);
     setImagePrivateMode(privateMode);
     if (view === "chat") {
       const switchingPrivacyMode = pendingIncognito !== privateMode;
@@ -37213,12 +37825,36 @@ function HomeContent(): React.JSX.Element {
   function setAppWidePrivateMode(privateMode: boolean): void {
     setImagePrivateMode(privateMode);
     if (privateMode) {
+      if (view === "chat" && !appWidePrivateMode && !zenPrivateReturnCheckpoint) {
+        setZenPrivateReturnCheckpoint({
+          selectedId,
+          detail,
+          selectedBotId,
+          zenPersonaBotId,
+          chatBotOverride,
+          sessionOpinion,
+          botOpinion,
+        });
+      }
       setPendingIncognito(true);
       return;
     }
+    setPendingIncognito(false);
+    if (view === "chat" && zenPrivateReturnCheckpoint) {
+      setSelectedId(zenPrivateReturnCheckpoint.selectedId);
+      setDetail(zenPrivateReturnCheckpoint.detail);
+      setSelectedBotId(zenPrivateReturnCheckpoint.selectedBotId);
+      setZenPersonaBotId(zenPrivateReturnCheckpoint.zenPersonaBotId);
+      setChatBotOverride(zenPrivateReturnCheckpoint.chatBotOverride);
+      setSessionOpinion(zenPrivateReturnCheckpoint.sessionOpinion);
+      setBotOpinion(zenPrivateReturnCheckpoint.botOpinion);
+      setZenPrivateReturnCheckpoint(null);
+      setError(null);
+      return;
+    }
+    setZenPrivateReturnCheckpoint(null);
     const restoreConversationId =
       selectedId ?? (detail?.id && detail.id !== "pending" ? detail.id : null);
-    setPendingIncognito(false);
     if (detail?.incognito && restoreConversationId) {
       void refreshConversation(restoreConversationId).catch(() => {});
     }
@@ -39470,7 +40106,7 @@ function HomeContent(): React.JSX.Element {
     setImportBotPasteError(null);
     setImportBotPasteText("");
     setImportBotPasteBusy(false);
-    if (!devToolsBotImportPasteEnabled) {
+    if (!devToolsRuntimeActive || !devToolsBotImportPasteEnabled) {
       setImportBotModalPhase("closed");
       queueMicrotask(() => {
         botImportInputRef.current?.click();
@@ -39748,6 +40384,7 @@ function HomeContent(): React.JSX.Element {
   function resetEmptyStateToPrismHome(): void {
     closeEmptyStateBotSearch();
     resetEmptyStateBotSelection();
+    setZenPersonaBotId(null);
     setPendingIncognito(false);
     if (hueFilterCenter !== null) {
       startBotPickerReturnToAll();
@@ -39851,24 +40488,27 @@ function HomeContent(): React.JSX.Element {
     [view]
   );
 
-  function clearPendingZenPersonaTransition(): void {
-    const pendingTransition = pendingZenPersonaTransitionRef.current;
-    if (pendingTransition) {
-      setZenPersonaBotId(pendingTransition.fromBotId);
-    }
-    setPendingZenPersonaTransition(null);
-    setZenPersonaTransitionChoiceIndex(0);
+  function zenSessionHasNotStarted(): boolean {
+    return view === "chat" && (!detail || detail.messages.length === 0);
+  }
+
+  function armFreshZenPersona(nextBotId: string | null): void {
+    setZenPersonaBotId(nextBotId);
+    setSelectedBotId(nextBotId);
+    setChatBotOverride(undefined);
+    closeEmptyStateBotSearch();
     focusDraftInput();
   }
 
   function commitZenPersonaOff(): void {
-    setPendingZenPersonaTransition(null);
-    setZenPersonaTransitionChoiceIndex(0);
     setZenPersonaBotId(null);
+    if (zenSessionHasNotStarted()) {
+      setSelectedBotId(null);
+    }
     focusDraftInput();
   }
 
-  function stageZenPersonaTransition(nextBotId: string | null, origin: "picker" | "mention"): void {
+  function commitZenPersonaTransition(nextBotId: string | null): void {
     if (pendingReplyVisible) return;
     const fromBotId = zenPersonaBotIdRef.current;
     if (fromBotId === nextBotId) return;
@@ -39876,26 +40516,13 @@ function HomeContent(): React.JSX.Element {
       commitZenPersonaOff();
       return;
     }
-    setZenPersonaBotId(nextBotId);
-    setPendingZenPersonaTransition({
+
+    const style = resolveZenPersonaTransitionStyle(zenPersonaTransitionChoice, {
       fromBotId,
       toBotId: nextBotId,
-      origin,
     });
-    setZenPersonaTransitionChoiceIndex(0);
-    focusDraftInput();
-  }
 
-  function commitPendingZenPersonaTransition(choice: ZenPersonaTransitionChoice): void {
-    const pendingTransition = pendingZenPersonaTransitionRef.current;
-    if (!pendingTransition || pendingReplyVisible) return;
-    const style = resolveZenPersonaTransitionStyle(choice, {
-      fromBotId: pendingTransition.fromBotId,
-      toBotId: pendingTransition.toBotId,
-    });
-    setPendingZenPersonaTransition(null);
-    setZenPersonaTransitionChoiceIndex(0);
-    setZenPersonaBotId(pendingTransition.toBotId);
+    setZenPersonaBotId(nextBotId);
     const syntheticSubmit = {
       preventDefault() {
         // no-op; used so Persona transitions share the normal submit path
@@ -39905,8 +40532,8 @@ function HomeContent(): React.JSX.Element {
       draftOverride: "",
       skipComposerHistory: true,
       personaTransition: {
-        fromBotId: pendingTransition.fromBotId,
-        toBotId: pendingTransition.toBotId,
+        fromBotId,
+        toBotId: nextBotId,
         source: "picker",
         style,
       },
@@ -39914,11 +40541,20 @@ function HomeContent(): React.JSX.Element {
   }
 
   function handleZenPersonaSelectionChange(next: string): void {
-    stageZenPersonaTransition(next || null, "picker");
+    const nextBotId = next || null;
+    if (zenSessionHasNotStarted()) {
+      armFreshZenPersona(nextBotId);
+      return;
+    }
+    commitZenPersonaTransition(nextBotId);
   }
 
   function handleZenMentionPersonaSelection(botId: string): void {
-    stageZenPersonaTransition(botId, "mention");
+    if (zenSessionHasNotStarted()) {
+      armFreshZenPersona(botId);
+      return;
+    }
+    commitZenPersonaTransition(botId);
   }
 
   function handleZenEmptyComposerBackspace(): boolean {
@@ -39929,120 +40565,13 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  useEffect(() => {
-    if (!pendingZenPersonaTransition) return;
-
-    function handleTransitionMenuKeyDown(event: KeyboardEvent): void {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        clearPendingZenPersonaTransition();
-        return;
-      }
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setZenPersonaTransitionChoiceIndex((current) =>
-          (current + 1) % ZEN_PERSONA_TRANSITION_CHOICES.length
-        );
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setZenPersonaTransitionChoiceIndex((current) =>
-          (current - 1 + ZEN_PERSONA_TRANSITION_CHOICES.length) %
-          ZEN_PERSONA_TRANSITION_CHOICES.length
-        );
-        return;
-      }
-      if (event.key === "Enter" || event.key === "Tab") {
-        event.preventDefault();
-        const choice =
-          ZEN_PERSONA_TRANSITION_CHOICES[
-            Math.min(
-              Math.max(zenPersonaTransitionChoiceIndex, 0),
-              ZEN_PERSONA_TRANSITION_CHOICES.length - 1
-            )
-          ] ?? "auto";
-        commitPendingZenPersonaTransition(choice);
-      }
-    }
-
-    function handleTransitionMenuPointerDown(event: PointerEvent): void {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("[data-zen-persona-transition-menu='true']")
-      ) {
-        return;
-      }
-      clearPendingZenPersonaTransition();
-    }
-
-    window.addEventListener("keydown", handleTransitionMenuKeyDown, true);
-    window.addEventListener("pointerdown", handleTransitionMenuPointerDown, true);
-    return () => {
-      window.removeEventListener("keydown", handleTransitionMenuKeyDown, true);
-      window.removeEventListener("pointerdown", handleTransitionMenuPointerDown, true);
-    };
-  }, [pendingZenPersonaTransition, zenPersonaTransitionChoiceIndex]);
-
-  function renderZenPersonaTransitionMenu(): React.ReactNode {
-    const pendingTransition = pendingZenPersonaTransition;
-    if (!pendingTransition) return null;
-    const fromBot = pendingTransition.fromBotId
-      ? bots.find((bot) => bot.id === pendingTransition.fromBotId) ?? null
-      : null;
-    const toBot = bots.find((bot) => bot.id === pendingTransition.toBotId) ?? null;
-    const fromLabel = fromBot?.name?.trim() || "PRISM";
-    const toLabel = toBot?.name?.trim() || "Persona";
-    const optionLabels: Record<ZenPersonaTransitionChoice, string> = {
-      auto: "Auto",
-      "new-speaks": "New persona speaks",
-      "previous-introduces":
-        pendingTransition.fromBotId === null ? "PRISM introduces" : "Previous introduces",
-    };
-
+  function renderZenPersonaTransitionChoiceControl(compact = false): React.ReactNode {
     return (
-      <div
-        className={`${styles.composeBotMenu} ${styles.composeCommandMenu} ${styles.zenPersonaTransitionMenu}`}
-        role="dialog"
-        aria-label={`Switch to ${toLabel}`}
-        data-zen-persona-transition-menu="true"
-      >
-        <div className={styles.zenPersonaTransitionHeader}>
-          <span className={styles.zenPersonaTransitionKicker}>
-            {fromLabel} to {toLabel}
-          </span>
-          <button
-            type="button"
-            className={styles.zenPersonaTransitionClose}
-            onClick={clearPendingZenPersonaTransition}
-            aria-label="Cancel persona switch"
-            data-glyph-tooltip="Cancel"
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </div>
-        <div className={styles.zenPersonaTransitionOptions} role="listbox">
-          {ZEN_PERSONA_TRANSITION_CHOICES.map((choice, index) => (
-            <button
-              key={choice}
-              type="button"
-              className={`${styles.composeCommandOption} ${styles.zenPersonaTransitionOption}`}
-              data-command-kind="mention"
-              aria-selected={zenPersonaTransitionChoiceIndex === index}
-              role="option"
-              onMouseEnter={() => setZenPersonaTransitionChoiceIndex(index)}
-              onClick={() => commitPendingZenPersonaTransition(choice)}
-            >
-              <span className={styles.zenPersonaTransitionOptionGlyph} aria-hidden="true">
-                {choice === "auto" ? "A" : choice === "new-speaks" ? "N" : "P"}
-              </span>
-              <span className={styles.composeBotOptionName}>{optionLabels[choice]}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <ZenPersonaTransitionChoiceControl
+        value={zenPersonaTransitionChoice}
+        onChange={setZenPersonaTransitionChoice}
+        compact={compact}
+      />
     );
   }
 
@@ -40704,20 +41233,16 @@ function HomeContent(): React.JSX.Element {
   }, [sweepUndoToast]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsOpen && !devToolsMinimized) return;
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        if (devTogglesOpen) {
-          setDevTogglesOpen(false);
-          return;
-        }
         closeDevTools();
       }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [devToolsOpen, devTogglesOpen, closeDevTools]);
+  }, [devToolsMinimized, devToolsOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -42424,6 +42949,9 @@ function HomeContent(): React.JSX.Element {
     closeEmptyStateBotSearch();
     startBotPickerReturnToAll();
     setSelectedBotId(spotlightBotId);
+    if (view === "chat") {
+      setZenPersonaBotId(spotlightBotId);
+    }
     setSandboxGridSelectedBotId(spotlightBotId);
     setComposerPrimed(false);
     setConversationStarterPrompts(null);
@@ -47716,116 +48244,61 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderDevTogglesModal = (): React.JSX.Element | null => {
-    if (!devTogglesOpen) return null;
-    return (
-      <div
-        className={`${styles.deleteAllModalBackdrop} ${styles.devTogglesModalBackdrop}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) setDevTogglesOpen(false);
-        }}
-      >
-        <div
-          id="dev-toggles-modal"
-          className={styles.deleteAllModalPanel}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="dev-toggles-title"
-          aria-describedby="dev-toggles-desc"
-          onClick={(event) => event.stopPropagation()}
+  const renderDebugComposer = (): React.JSX.Element | null => {
+    if (!devToolsRuntimeActive) return null;
+    if (devDebugComposerMinimized) {
+      return (
+        <button
+          type="button"
+          className={styles.debugComposerRestoreButton}
+          onClick={() => setDevDebugComposerMinimized(false)}
+          aria-label="Restore debug composer"
         >
-          <h2 id="dev-toggles-title" className={styles.deleteAllModalTitle}>
-            Dev toggles
-          </h2>
-          <p id="dev-toggles-desc" className={styles.deleteAllModalBody}>
-            Local-only switches for developer workflows.
-          </p>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devToolsBotImportPasteEnabled}
-              onChange={(event) => persistDevToolsBotImportPaste(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Allow paste JSON when importing</strong>
-              <small>
-                Off opens the .bot/.bots file picker directly. On adds a paste-from-clipboard
-                import choice.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devChatMetricsEnabled}
-              onChange={(event) => persistDevChatMetricsEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Keep developer metrics terminal active</strong>
-              <small>
-                The /dev panel turns it on while open; this keeps capture running after it closes.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devDebugComposerEnabled}
-              onChange={(event) => persistDevDebugComposerEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Show Zen debug composer</strong>
-              <small>
-                Adds a debug-only composer above Zen mode&apos;s normal composer. Send echoes text
-                locally as an assistant reply and skips model calls.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devShowCompactedSummaryInChat}
-              onChange={(event) =>
-                persistDevShowCompactedSummaryInChat(event.currentTarget.checked)
-              }
-            />
-            <span>
-              <strong>Show compacted summary in chat</strong>
-              <small>
-                Renders the latest thread-compaction payload at the bottom of the current chat
-                so context can be inspected after /compact or /summarize.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devMoodVisualEnabled}
-              onChange={(event) => setDevMoodVisualEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Show Prism mood visual</strong>
-              <small>
-                Displays a draggable mood face with mood diagnostics and debug controls.
-              </small>
-            </span>
-          </label>
-          <div className={styles.deleteAllModalActions}>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={() => setDevTogglesOpen(false)}
-            >
-              Close
-            </button>
+          <Maximize2 aria-hidden="true" size={14} />
+          <span>Debug composer</span>
+        </button>
+      );
+    }
+    return (
+      <div className={styles.debugComposerBox}>
+        <div className={styles.debugComposerHeader}>
+          <div className={styles.debugComposerLabel} aria-live="polite">
+            DEBUG COMPOSER (local echo only)
           </div>
+          <button
+            type="button"
+            className={styles.debugComposerMinimizeButton}
+            onClick={() => setDevDebugComposerMinimized(true)}
+            aria-label="Minimize debug composer"
+          >
+            <Minimize2 aria-hidden="true" size={13} />
+          </button>
+        </div>
+        <div className={styles.debugComposerRow} data-debug-composer="true">
+          <textarea
+            value={debugComposerDraft}
+            onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
+            placeholder="Type text to echo as a bot reply..."
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey) return;
+              event.preventDefault();
+              submitDebugComposerEcho();
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitDebugComposerEcho}
+            disabled={debugComposerDraft.trim().length === 0 || pendingReply}
+          >
+            Send debug echo
+          </button>
         </div>
       </div>
     );
   };
 
   const renderDevMoodVisual = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return null;
+    if (!devToolsRuntimeActive) return null;
     const coffeeMood =
       view === "coffee"
         ? coffeeSocialByIdToPrismMood(coffeeConversation?.coffeeBotSocialById)
@@ -48129,17 +48602,55 @@ function HomeContent(): React.JSX.Element {
   };
 
   const renderDevZenPauseTester = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || view !== "chat") return null;
+    if (!devToolsRuntimeActive || view !== "chat") return null;
     const status = resolveDevZenPauseTesterStatus();
     return (
       <div
+        ref={devZenPauseTesterRef}
         className={styles.devZenPauseTester}
         data-open={devZenPauseTesterOpen ? "true" : undefined}
+        style={{
+          left: `${devZenPauseTesterPosition.x}px`,
+          top: `${devZenPauseTesterPosition.y}px`,
+        }}
       >
         <button
           type="button"
           className={styles.devZenPauseTesterBubble}
-          onClick={() => setDevZenPauseTesterOpen((open) => !open)}
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              devZenPauseTesterRef.current,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              devZenPauseTesterRef.current,
+              devZenPauseTesterDragRef,
+              setDevZenPauseTesterPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(
+              event,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(
+              event,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onClick={() => {
+            if (devZenPauseTesterSuppressClickRef.current) return;
+            setDevZenPauseTesterOpen((open) => !open);
+          }}
           aria-label={devZenPauseTesterOpen ? "Collapse Zen pause tester" : "Open Zen pause tester"}
           aria-expanded={devZenPauseTesterOpen}
           data-glyph-tooltip={devZenPauseTesterOpen ? "Collapse pause tester" : "Zen pause tester"}
@@ -48211,16 +48722,46 @@ function HomeContent(): React.JSX.Element {
   };
 
   const renderZenToolLab = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || view !== "chat") return null;
+    if (!devToolsRuntimeActive || view !== "chat") return null;
     return (
       <div
+        ref={zenToolLabRef}
         className={styles.zenToolLabDock}
         data-open={zenToolLabOpen ? "true" : undefined}
+        style={{
+          left: `${zenToolLabPosition.x}px`,
+          top: `${zenToolLabPosition.y}px`,
+        }}
       >
         <button
           type="button"
           className={styles.zenToolLabBubble}
-          onClick={() => setZenToolLabOpen((open) => !open)}
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              zenToolLabRef.current,
+              zenToolLabDragRef,
+              zenToolLabSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              zenToolLabRef.current,
+              zenToolLabDragRef,
+              setZenToolLabPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(event, zenToolLabDragRef, zenToolLabSuppressClickRef)
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(event, zenToolLabDragRef, zenToolLabSuppressClickRef)
+          }
+          onClick={() => {
+            if (zenToolLabSuppressClickRef.current) return;
+            setZenToolLabOpen((open) => !open);
+          }}
           aria-label={zenToolLabOpen ? "Collapse Zen Tool Lab" : "Open Zen Tool Lab"}
           aria-expanded={zenToolLabOpen}
           aria-controls="zen-tool-lab-panel"
@@ -48284,7 +48825,54 @@ function HomeContent(): React.JSX.Element {
   };
 
   const renderDevToolsPanel = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devToolsOpen) return null;
+    if (!DEV_TOOLS_ENABLED || !devToolsUnlocked) return null;
+    if (!devToolsOpen || devToolsMinimized) {
+      return (
+        <button
+          ref={devToolsBubbleRef}
+          type="button"
+          className={styles.devToolsBubble}
+          style={
+            {
+              left: `${devToolsPanelPosition.x}px`,
+              top: `${devToolsPanelPosition.y}px`,
+            } as React.CSSProperties
+          }
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              devToolsBubbleRef.current,
+              devToolsBubbleDragRef,
+              devToolsBubbleSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              devToolsBubbleRef.current,
+              devToolsBubbleDragRef,
+              setDevToolsPanelPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(event, devToolsBubbleDragRef, devToolsBubbleSuppressClickRef)
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(event, devToolsBubbleDragRef, devToolsBubbleSuppressClickRef)
+          }
+          onClick={() => {
+            if (devToolsBubbleSuppressClickRef.current) return;
+            setDevToolsMinimized(false);
+            setDevToolsOpen(true);
+          }}
+          aria-label="Restore developer tools"
+          title="Developer tools"
+        >
+          <Maximize2 aria-hidden="true" size={15} />
+          <span className={styles.devToolsBubbleLabel}>Dev</span>
+        </button>
+      );
+    }
     const densityStageTargets = pickerDensityStageTargets(
       viewportWidth,
       viewportHeight
@@ -48816,37 +49404,40 @@ function HomeContent(): React.JSX.Element {
               <section className={styles.devToolsCard}>
                 <div className={styles.devToolsCardHeader}>
                   <span>Local controls</span>
-                  <strong>Commands on</strong>
+                  <strong>{devToolsRuntimeActive ? "Layer on" : "Layer off"}</strong>
                 </div>
                 <div className={styles.devToolsStatGrid}>
                   <span className={styles.devToolsStat}>
-                    <small>Dev commands</small>
-                    <strong>Panel-only</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Metrics</small>
-                    <strong>{devChatMetricsTerminalActive ? "On" : "Off"}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
                     <small>Debug composer</small>
-                    <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong>
+                    <strong>{devDebugComposerMinimized ? "Minimized" : "Visible"}</strong>
                   </span>
                   <span className={styles.devToolsStat}>
-                    <small>JSON import paste</small>
-                    <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+                    <small>Mood visual</small>
+                    <strong>{devMoodVisualOpen ? "Open" : "Bubble"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Context dock</small>
+                    <strong>{compactedSummaryDebugMinimized ? "Minimized" : "Visible"}</strong>
                   </span>
                 </div>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => setDevTogglesOpen(true)}
-                    aria-haspopup="dialog"
-                    aria-expanded={devTogglesOpen}
-                    aria-controls="dev-toggles-modal"
-                  >
-                    Open toggles
-                  </button>
+                <p className={styles.devToolsSectionHint}>
+                  Visual dev tools appear together while /dev is active. Minimize individual
+                  surfaces when they get in the way; /dev close hides the whole layer.
+                </p>
+                <div className={styles.devToolsToggleList}>
+                  <label className={styles.devToolsToggleOption}>
+                    <input
+                      type="checkbox"
+                      checked={devToolsBotImportPasteEnabled}
+                      onChange={(event) =>
+                        persistDevToolsBotImportPaste(event.currentTarget.checked)
+                      }
+                    />
+                    <span>
+                      <strong>Bot import paste</strong>
+                      <small>Add a clipboard JSON choice to bot imports.</small>
+                    </span>
+                  </label>
                 </div>
               </section>
 
@@ -48975,6 +49566,125 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </section>
 
+              {view === "chat" ? (
+                <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                  <div className={styles.devToolsCardHeader}>
+                    <span>Zen Persona backdrop</span>
+                    <strong>
+                      {selectedComposeBotAccent ? (zenPersonaBot?.name ?? "Equipped") : "No Persona"}
+                    </strong>
+                  </div>
+                  <div className={styles.devToolsBackdropPreview}>
+                    <span
+                      className={styles.devToolsBackdropSwatch}
+                      style={
+                        selectedComposeBotAccent
+                          ? ({
+                              "--dev-tools-backdrop-color": selectedComposeBotAccent,
+                            } as React.CSSProperties)
+                          : undefined
+                      }
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Blend {Math.round(zenPersonaBackdropTuning.blend)}% · opacity{" "}
+                      {formatZenPersonaBackdropPercent(zenPersonaBackdropTuning.opacity)} · saturation{" "}
+                      {formatZenPersonaBackdropPercent(zenPersonaBackdropTuning.saturation)} · dark{" "}
+                      {formatZenPersonaBackdropBlendMode(zenPersonaBackdropTuning.darkBlendMode)} · light{" "}
+                      {formatZenPersonaBackdropBlendMode(zenPersonaBackdropTuning.lightBlendMode)}
+                    </span>
+                  </div>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Blend strength</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_BLEND}
+                      max={MAX_ZEN_PERSONA_BACKDROP_BLEND}
+                      step={1}
+                      value={zenPersonaBackdropTuning.blend}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ blend: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Opacity</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_OPACITY}
+                      max={MAX_ZEN_PERSONA_BACKDROP_OPACITY}
+                      step={0.01}
+                      value={zenPersonaBackdropTuning.opacity}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ opacity: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Saturation</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_SATURATION}
+                      max={MAX_ZEN_PERSONA_BACKDROP_SATURATION}
+                      step={0.01}
+                      value={zenPersonaBackdropTuning.saturation}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ saturation: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Dark blend mode</span>
+                    <select
+                      value={zenPersonaBackdropTuning.darkBlendMode}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({
+                          darkBlendMode: normalizeZenPersonaBackdropBlendMode(
+                            event.target.value,
+                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode
+                          ),
+                        })
+                      }
+                    >
+                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={`dark:${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Light blend mode</span>
+                    <select
+                      value={zenPersonaBackdropTuning.lightBlendMode}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({
+                          lightBlendMode: normalizeZenPersonaBackdropBlendMode(
+                            event.target.value,
+                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode
+                          ),
+                        })
+                      }
+                    >
+                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={`light:${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className={styles.devToolsActions}>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={resetZenPersonaBackdropTuning}
+                    >
+                      Reset backdrop tuning
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
               {view === "coffee" ? (
                 <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
                   <div className={styles.devToolsCardHeader}>
@@ -49074,6 +49784,16 @@ function HomeContent(): React.JSX.Element {
                 <button
                   type="button"
                   className={styles.devToolsIconButton}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={minimizeDevTools}
+                  aria-label="Minimize developer tools"
+                >
+                  <Minimize2 aria-hidden="true" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.devToolsIconButton}
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={closeDevTools}
                   aria-label="Close developer tools"
                 >
@@ -49094,8 +49814,17 @@ function HomeContent(): React.JSX.Element {
                 onPointerCancel={endDevToolsPanelDrag}
                 aria-label="Drag developer metrics terminal"
               />
+              <button
+                type="button"
+                className={styles.devToolsConsoleMinimizeButton}
+                onClick={minimizeDevTools}
+                aria-label="Minimize developer metrics terminal"
+                title="Minimize"
+              >
+                <Minimize2 aria-hidden="true" size={13} />
+              </button>
               <main className={styles.devToolsConsoleOnlyContent}>
-                {renderDevMetricsTerminalLog()}
+                {renderDevMetricsTerminal(true)}
               </main>
             </>
           ) : (
@@ -49153,631 +49882,9 @@ function HomeContent(): React.JSX.Element {
                   {devToolsSectionContent}
                 </main>
               </div>
-
-              <footer className={styles.devToolsFooter}>
-                <button
-                  type="button"
-                  className={styles.deleteAllModalCancel}
-                  onClick={sendRandomConversationNudge}
-                  disabled={pendingReply && view !== "chat"}
-                  data-glyph-tooltip="Send random suggested prompt"
-                >
-                  Random prompt
-                </button>
-                <button
-                  type="button"
-                  className={styles.deleteAllModalCancel}
-                  onClick={closeDevTools}
-                >
-                  Close
-                </button>
-              </footer>
             </>
           )}
         </div>
-        {renderDevTogglesModal()}
-      </>
-    );
-    return (
-      <>
-        <div
-          ref={devToolsPanelRef}
-          className={styles.devToolsFloatingPanel}
-          role="dialog"
-          aria-labelledby="dev-tools-title"
-        >
-        <div
-          className={styles.devToolsHeader}
-          onPointerDown={startDevToolsPanelDrag}
-          onPointerMove={dragDevToolsPanel}
-          onPointerUp={endDevToolsPanelDrag}
-          onPointerCancel={endDevToolsPanelDrag}
-        >
-          <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-            Developer tools
-          </h2>
-          <span className={styles.devToolsDragHint} aria-hidden="true">
-            ::
-          </span>
-        </div>
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Dev toggles</span>
-            <span className={styles.devToolsToggleSummary}>
-              Debug composer: <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong> · Paste
-              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong> · Compact
-              view: <strong>{devShowCompactedSummaryInChat ? "On" : "Off"}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Off (default): Import opens the file picker for .bot/.bots files. On: Import shows upload plus paste-from-clipboard.
-          </p>
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => setDevTogglesOpen(true)}
-              aria-haspopup="dialog"
-              aria-expanded={devTogglesOpen}
-              aria-controls="dev-toggles-modal"
-            >
-              Open dev toggles
-            </button>
-          </div>
-        </details>
-
-        <section className={styles.devMetricsTerminalSection} aria-labelledby="dev-metrics-terminal-title">
-          <div className={styles.devMetricsTerminalHeader}>
-            <div>
-              <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
-              <p>
-                Backend route, model, memory, summary, and tool events for the current chat run.
-              </p>
-            </div>
-            <div className={styles.devMetricsTerminalActions}>
-              <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
-                {devChatMetricsEnabled ? "Live" : "Off"}
-              </span>
-              <button
-                type="button"
-                className={styles.devToolsAction}
-                onClick={() => setDevChatDebugEvents([])}
-                disabled={devChatDebugEvents.length === 0}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-          <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
-            {!devChatMetricsEnabled ? (
-              <div className={styles.devMetricsTerminalEmpty}>
-                Enable “Show developer metrics terminal” in Dev toggles to stream backend traces here.
-              </div>
-            ) : devChatDebugEvents.length === 0 ? (
-              <div className={styles.devMetricsTerminalEmpty}>
-                Waiting for the next chat request...
-              </div>
-            ) : (
-              devChatDebugEvents.slice(-80).map((event) => {
-                const kind = inferDevChatDebugKind(event);
-                return (
-                  <div
-                    key={event.id}
-                    className={styles.devMetricsTerminalLine}
-                    data-kind={kind}
-                  >
-                    <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
-                    <code>{event.text}</code>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Viewport</span>
-            <span className={styles.devToolsToggleSummary}>
-              <strong>{viewportWidth}px</strong> × <strong>{viewportHeight}px</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsViewportStatus} aria-live="polite">
-            <span>
-              Width <strong>{viewportWidth}px</strong>
-            </span>
-            <span>
-              Height <strong>{viewportHeight}px</strong>
-            </span>
-          </p>
-        </details>
-
-        {view === "coffee" && (
-          <details className={styles.devToolsSection}>
-            <summary className={styles.devToolsSectionSummary}>
-              <span className={styles.devToolsSectionTitle}>Coffee social diagnostics</span>
-              <span className={styles.devToolsToggleSummary}>
-                {coffeeSocialById
-                  ? <>Bots <strong>{Object.keys(coffeeSocialById ?? {}).length}</strong></>
-                  : "No social snapshot yet"}
-              </span>
-            </summary>
-            <p className={styles.devToolsSectionHint}>
-              Hidden per-bot metrics for this Coffee conversation. Player-facing UI never shows this.
-            </p>
-            {coffeeSocialById ? (
-              coffeeSocialOrderedBotIds.length > 0 ? (
-                <div className={styles.devToolsSectionHint}>
-                  {coffeeSocialOrderedBotIds.map((botId) => {
-                    const social = coffeeSocialById?.[botId];
-                    if (!social) return null;
-                    const bot = coffeeBotsById.get(botId);
-                    return (
-                      <p key={botId} className={styles.devToolsSectionHint}>
-                        <strong>{bot?.name ?? botId}</strong> · disposition{" "}
-                        <strong>{formatSocialPercent(social.disposition)}</strong> · values friction{" "}
-                        <strong>{formatSocialPercent(social.valuesFriction)}</strong> · restraint{" "}
-                        <strong>{formatSocialPercent(social.restraint)}</strong> · engagement{" "}
-                        <strong>{formatSocialPercent(social.engagement)}</strong> · leave pressure{" "}
-                        <strong>{formatSocialPercent(social.leavePressure)}</strong>
-                      </p>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className={styles.devToolsSectionHint}>No seated bots in this snapshot.</p>
-              )
-            ) : (
-              <p className={styles.devToolsSectionHint}>
-                Start or continue a Coffee turn to populate social diagnostics.
-              </p>
-            )}
-          </details>
-        )}
-
-        {view === "coffee" && (
-          <details className={styles.devToolsSection}>
-            <summary className={styles.devToolsSectionSummary}>
-              <span className={styles.devToolsSectionTitle}>Coffee seat emotions</span>
-              <span className={styles.devToolsToggleSummary}>
-                All seats:{" "}
-                <strong>
-                  {coffeeSeatMoodDevSlotLabel(
-                    COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex]
-                  )}
-                </strong>
-              </span>
-            </summary>
-            <p className={styles.devToolsSectionHint}>
-              Cycles every seat plate through the same Prism mood so you can preview animations and
-              CSS hooks (<code>data-prism-mood</code> on each seat). Does not change model output.
-              In-memory until reload.
-            </p>
-            <div className={styles.devToolsActions}>
-              <button
-                type="button"
-                className={styles.devToolsAction}
-                onClick={() =>
-                  setCoffeeSeatMoodDevCycleIndex(
-                    (i) => (i + 1) % COFFEE_SEAT_MOOD_DEV_CYCLE.length
-                  )
-                }
-              >
-                Cycle all seat moods
-              </button>
-            </div>
-          </details>
-        )}
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Seed data</span>
-            <span className={styles.devToolsToggleSummary}>
-              Bots <strong>{bots.length}</strong> · chats <strong>{visibleConversations.length}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Bots: <strong>{bots.length}</strong> | Sidebar chats:{" "}
-            <strong>{visibleConversations.length}</strong>
-          </p>
-          <label className={styles.devToolsCountControl}>
-            <span>Quantity</span>
-            <input
-              type="number"
-              min={DEV_TOOLS_BOT_QUANTITY_MIN}
-              max={DEV_TOOLS_BOT_QUANTITY_MAX}
-              step={1}
-              value={devToolsBotQuantity}
-              aria-label="Quantity for developer tools add actions"
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setDevToolsBotQuantity(
-                  next === "" ? "" : clampDevToolsBotQuantity(Number(next))
-                );
-              }}
-              disabled={devToolsBusy}
-            />
-          </label>
-          <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
-            {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
-              <button
-                key={quantity}
-                type="button"
-                className={`${styles.devToolsPresetButton} ${
-                  resolvedDevToolsBotQuantity === quantity ? styles.devToolsPresetButtonActive : ""
-                }`}
-                onClick={() => setDevToolsBotQuantity(quantity)}
-                disabled={devToolsBusy}
-              >
-                {quantity}
-              </button>
-            ))}
-          </div>
-          <p className={styles.devToolsSectionHint}>
-            Stage buttons set total bots for the current viewport.
-          </p>
-          <div
-            className={styles.devToolsStageRail}
-            aria-label="Bot picker density stages"
-          >
-            {densityStageTargets.map((stage) => {
-              const isCurrentTarget = bots.length === stage.targetCount;
-              return (
-                <button
-                  key={stage.id}
-                  type="button"
-                  className={`${styles.devToolsStageButton} ${
-                    isCurrentTarget ? styles.devToolsStageButtonActive : ""
-                  }`}
-                  onClick={() => void devToolsSetBotDensityStage(stage.id)}
-                  disabled={devToolsBusy}
-                >
-                  <span>{stage.label}</span>
-                  <strong>{stage.targetCount}</strong>
-                  <small>{stage.description}</small>
-                </button>
-              );
-            })}
-          </div>
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddRandomBots()}
-              disabled={devToolsBusy}
-            >
-              Add bots
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddSeedChats()}
-              disabled={devToolsBusy}
-            >
-              Add chats
-            </button>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-              onClick={() => void devToolsDeleteAllBots()}
-              disabled={devToolsBusy || bots.length === 0}
-            >
-              Clear all bots
-            </button>
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Connection</span>
-            <span className={styles.devToolsToggleSummary}>
-              {devToolsHasSavedConversation
-                ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}%`
-                  : "No read yet"
-                : "No saved chat"}
-              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion!.band)} · ${botOpinion!.score}%` : ""}
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Current chat:{" "}
-            <strong>
-              {devToolsHasSavedConversation
-                ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}% · ${opinionTrendLabel(sessionOpinion!.trend)}`
-                  : "No Connection read yet"
-                : "Open a saved chat first"}
-            </strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Sets the selected chat Connection state and opens the panel for quick visual checks.
-          </p>
-          <div
-            className={styles.devToolsConnectionRail}
-            aria-label="Connection panel presets"
-          >
-            {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.devToolsPresetButton}
-                onClick={() => void devToolsSetConnectionPreset(preset)}
-                disabled={devToolsBusy || !devToolsHasSavedConversation}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <p className={styles.devToolsSectionHint}>
-            Bot opinion extremes force the long-term relationship state for the active bot or Default Prism.
-          </p>
-          <div
-            className={styles.devToolsConnectionRail}
-            aria-label="Bot opinion presets"
-          >
-            {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.devToolsPresetButton}
-                onClick={() => void devToolsSetBotOpinionPreset(preset)}
-                disabled={devToolsBusy}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Dev memories</span>
-            <span className={styles.devToolsToggleSummary}>
-              Status <strong>{settings?.devMemoriesEnabled ? "On" : "Off"}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Global rule layer for testing hardcoded behavior before making it permanent.
-            Applies to every bot, including Prism/default.
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Toggle:{" "}
-            <strong>{settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}</strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Rules text{" "}
-            <strong>
-              {(settings?.devMemoriesText?.trim().length ?? 0).toLocaleString()} chars
-            </strong>
-          </p>
-          <textarea
-            className={styles.devToolsTextarea}
-            value={settings?.devMemoriesText ?? ""}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setSettings((previous) =>
-                previous
-                  ? { ...previous, devMemoriesText: nextValue }
-                  : previous
-              );
-            }}
-            disabled={devToolsBusy || !settings}
-            rows={5}
-            placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
-          />
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() =>
-                setSettings((previous) =>
-                  previous
-                    ? { ...previous, devMemoriesEnabled: !previous.devMemoriesEnabled }
-                    : previous
-                )
-              }
-              disabled={devToolsBusy || !settings}
-            >
-              {settings?.devMemoriesEnabled ? "Disable dev memories" : "Enable dev memories"}
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsSaveDevMemories()}
-              disabled={devToolsBusy || !settings}
-            >
-              Save dev memories
-            </button>
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Summarization</span>
-            <span className={styles.devToolsToggleSummary}>
-              Mode <strong>{devToolsSummaryMode}</strong>
-              {summaryDebug ? (
-                <> · in progress: <strong>{summaryDebug!.inProgress ? "yes" : "no"}</strong></>
-              ) : null}
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Latest summary time:{" "}
-            <strong>{summaryDebug?.latestSummaryAt ?? "none yet"}</strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Messages since compaction:{" "}
-            <strong>{summaryDebug?.messagesSinceLastCompaction ?? 0}</strong> · summary count:{" "}
-            <strong>{summaryDebug?.summaryCount ?? 0}</strong>
-          </p>
-          {devToolsSummaryPreview ? (
-            <p className={styles.devToolsSectionHint}>
-              Latest payload: <strong>{devToolsSummaryPreview}</strong>
-            </p>
-          ) : (
-            <p className={styles.devToolsSectionHint}>
-              Latest payload: <strong>none</strong>
-            </p>
-          )}
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsRunSummaryNow(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Run summary now
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void refreshSummaryDebug(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Refresh summary metrics
-            </button>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-              onClick={() => void devToolsResetSummary(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Reset summary state
-            </button>
-          </div>
-        </details>
-
-        {devToolsMemoryPanelOpen && (
-          <div className={styles.devToolsSection}>
-            <h3 className={styles.devToolsSectionTitle}>Memories</h3>
-            <p className={styles.devToolsSectionHint}>
-              All: <strong>{memories.length}</strong>
-              {memoryPanelScope === "bot" && memoryPanelBot ? (
-                <>
-                  {" "}· {memoryPanelBot!.name}: <strong>{botMemories.length}</strong>
-                </>
-              ) : memoryPanelScope === "session" ? (
-                <>
-                  {" "}· Session: <strong>{zenSessionMemories.length}</strong>
-                </>
-              ) : null}
-            </p>
-            <p className={styles.devToolsSectionHint}>
-              {memoryPanelScope === "session"
-                ? "Session checkpoints are created by Zen pause/resume turns."
-                : memoryPanelScope === "bot" && memoryPanelBot
-                ? `Adds the chosen quantity to ${devToolsMemoryScopeLabel}.`
-                : "Distributes the chosen quantity randomly across all bots."}
-            </p>
-            <label className={styles.devToolsCountControl}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>Seed type</span>
-                <PanelSectionInfo
-                  id="memory-panel-seed-type-info"
-                  label="About seed type"
-                  variant="control"
-                >
-                  Chooses whether generated seed memories are direct facts, inferred assumptions, or compiled summaries.
-                </PanelSectionInfo>
-              </span>
-              <select
-                value={devToolsMemorySeedSource}
-                onChange={(event) =>
-                  setDevToolsMemorySeedSource(event.currentTarget.value as DevToolsMemorySeedSource)
-                }
-                disabled={devToolsBusy}
-              >
-                <option value="direct">Direct memories</option>
-                <option value="inferred">Inferred assumptions</option>
-                <option value="compiled">Compiled assumptions</option>
-              </select>
-            </label>
-            <label className={styles.devToolsCountControl}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>
-                  Certainty{" "}
-                  <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
-                </span>
-                <PanelSectionInfo
-                  id="memory-panel-certainty-info"
-                  label="About memory certainty"
-                  variant="control"
-                >
-                  Sets the confidence score assigned to generated non-direct memory seeds.
-                </PanelSectionInfo>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={devToolsMemoryCertainty}
-                onChange={(event) =>
-                  setDevToolsMemoryCertainty(
-                    Math.max(0, Math.min(1, Number(event.currentTarget.value)))
-                  )
-                }
-                disabled={devToolsBusy || devToolsMemorySeedSource === "direct"}
-              />
-            </label>
-            <div className={styles.devToolsActions}>
-              {memoryPanelScope === "session" ? null : memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
-                <button
-                  type="button"
-                  className={styles.devToolsAction}
-                  onClick={() => void devToolsAddBotMemories()}
-                  disabled={devToolsBusy || !memoryPanelBot}
-                >
-                  Add {devToolsMemorySeedSource}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.devToolsAction}
-                  onClick={() => void devToolsAddAllMemories()}
-                  disabled={devToolsBusy || bots.length === 0}
-                >
-                  Add {devToolsMemorySeedSource}
-                </button>
-              )}
-              <button
-                type="button"
-                className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                onClick={() => void devToolsClearAllMemories()}
-                disabled={devToolsBusy || memories.length === 0}
-              >
-                Clear all memories
-              </button>
-            </div>
-          </div>
-        )}
-
-        {devToolsMessage && (
-          <p className={styles.devToolsStatus} role="status">
-            {devToolsMessage}
-          </p>
-        )}
-
-        <div className={styles.deleteAllModalActions}>
-          <button
-            type="button"
-            className={styles.deleteAllModalCancel}
-            onClick={sendRandomConversationNudge}
-            disabled={pendingReply && view !== "chat"}
-            data-glyph-tooltip="Send random suggested prompt"
-          >
-            Random prompt
-          </button>
-          <button
-            type="button"
-            className={styles.deleteAllModalCancel}
-            onClick={closeDevTools}
-          >
-            Close
-          </button>
-        </div>
-        </div>
-        {renderDevTogglesModal()}
       </>
     );
   };
@@ -52456,23 +52563,6 @@ function HomeContent(): React.JSX.Element {
                       />
                       Mask behind Zen text
                     </label>
-                    <label
-                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={zenWallpaperGrayscaleEnabled}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperGrayscaleEnabled: next }
-                              : previous
-                          );
-                        }}
-                      />
-                      Grayscale wallpaper
-                    </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -55139,7 +55229,7 @@ function HomeContent(): React.JSX.Element {
                           <strong>Upload from file</strong>
                           <small>.bot or .bots file from disk</small>
                         </button>
-                        {devToolsBotImportPasteEnabled ? (
+                        {devToolsRuntimeActive && devToolsBotImportPasteEnabled ? (
                           <button
                             type="button"
                             className={styles.importBotModalChoiceButton}
@@ -61465,11 +61555,13 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereWallpaperVisible = zenAtmosphereTimeline.some(
       (entry) => (zenAtmosphereLayerOpacities[entry.imageId] ?? 0) > 0.01
     );
+    const zenAtmospherePrismColorActive =
+      !appWidePrivateMode && composeBotAccentId === null;
     const zenAtmosphereBackdropStyle = {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
-      "--zen-atmosphere-grayscale": zenWallpaperGrayscaleEnabled ? "1" : "0",
+      "--zen-atmosphere-color-amount": zenAtmospherePrismColorActive ? "1" : "0",
     } as React.CSSProperties;
     const zenFirstReplyPending =
       pendingReplyVisible &&
@@ -61485,6 +61577,7 @@ function HomeContent(): React.JSX.Element {
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
+      data-zen-private-tone={appWidePrivateMode ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
@@ -61592,6 +61685,7 @@ function HomeContent(): React.JSX.Element {
                           hueLensTrackGradient={hueLensTrackGradient}
                           hueLensTrackSegments={hueLensTrackSegments}
                           dismissPopoversSignal={composerPopoverDismissSignal}
+                          privateTone={appWidePrivateMode}
                         />
                       )}
                     </>
@@ -61696,6 +61790,22 @@ function HomeContent(): React.JSX.Element {
           ) : null}
         </header>
         {renderZenMemoryToasts()}
+        {zenPersonaContinuityWashStyle ? (
+          <div
+            className={styles.zenPersonaComposerBrushWash}
+            style={zenPersonaContinuityWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
+        {exitingZenPersonaWashStyle ? (
+          <div
+            key={`composer-brush-${exitingZenPersonaWash?.id}`}
+            className={styles.zenPersonaComposerBrushWash}
+            data-exiting="true"
+            style={exitingZenPersonaWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <div
           className={styles.messagesFrame}
@@ -61733,6 +61843,22 @@ function HomeContent(): React.JSX.Element {
           ) : null}
           {zenAtmosphereWallpaperVisible && zenWallpaperTextMaskEnabled ? (
             <div className={styles.zenAtmosphereTextCutout} aria-hidden="true" />
+          ) : null}
+          {zenPersonaContinuityWashStyle ? (
+            <div
+              className={styles.zenPersonaContinuityWash}
+              style={zenPersonaContinuityWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {exitingZenPersonaWashStyle ? (
+            <div
+              key={exitingZenPersonaWash?.id}
+              className={styles.zenPersonaContinuityWash}
+              data-exiting="true"
+              style={exitingZenPersonaWashStyle}
+              aria-hidden="true"
+            />
           ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
@@ -61801,7 +61927,7 @@ function HomeContent(): React.JSX.Element {
                       bot={activeBot}
                       previewBot={null}
                       previewAsBotGlyph={false}
-                      privateHero={privateChatActive}
+                      privateHero={appWidePrivateMode}
                       forceTrianglePreview={lensInteracting}
                       resolvedTheme={resolvedTheme}
                     />
@@ -61818,23 +61944,27 @@ function HomeContent(): React.JSX.Element {
             //     strip (matches the "calm personal chat" shell).
             //   • ARMED — hero becomes the bot's full-color glyph; tapping
             //     the hero primes the starter hello + focuses compose.
-            // `activeBot` resolves the committed bot only, so hover never
-            // changes the hero, title, hint, or shell accent.
+            // Fresh Zen can arm a persona without starting the conversation.
+            // The first actual turn is still controlled by the user unless
+            // they tap the Talk to Me hero.
             const suppressHeroCopy = false;
             const isPreviewing = false;
-            const heroBot: Bot | null = null;
-            const privateBotName = "";
-            const title = "Zen with PRISM";
-            const descriptionPreview = "";
-            const selectedBotPromptPreview = "";
+            const heroBot: Bot | null = zenPersonaBot;
+            const heroBotName = heroBot?.name?.trim() ?? "";
+            const title = heroBotName ? `Zen with ${heroBotName}` : "Zen with PRISM";
+            const descriptionPreview = heroBot
+              ? botHeroPreview(heroBot.system_prompt)
+              : "";
+            const selectedBotPromptPreview = heroBot ? descriptionPreview : "";
             // While the hue lens has zoomed into a color group AND nothing is
             // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
             const heroLensPlaceholder = false;
-            const heroStartLabel =
-              "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
+            const heroStartLabel = heroBotName
+              ? `Send a message below, or tap the symbol to have ${heroBotName} open.`
+              : "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
             const hint = (() => {
               if (chatStartupSummaryVisible && chatStartupSummary) {
                 return chatStartupSummary;
@@ -61843,7 +61973,9 @@ function HomeContent(): React.JSX.Element {
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
             })();
-            const emptyStateStyle = undefined;
+            const emptyStateStyle = heroBot
+              ? botAccentStyle(heroBot.color, resolvedTheme)
+              : undefined;
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
@@ -61854,14 +61986,10 @@ function HomeContent(): React.JSX.Element {
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
-                privateHero={false}
-                /* Triangle hero replaces the rainbow brand mark whenever
-                   the surface isn't in home mode and there's no bot
-                   armed — its currentColor follows --accent, which
-                   means the triangle matches whatever the rest of the
-                   interface is currently tinted to (lens hue while
-                   engaged, theme fg in private). Drag-mode keeps its
-                   override regardless. */
+                privateHero={appWidePrivateMode}
+                /* Fresh Zen keeps the focused persona visible without
+                   starting the session; the user decides whether to type
+                   first or tap the Talk to Me hero. */
                 forceTrianglePreview={false}
                 resolvedTheme={resolvedTheme}
               />
@@ -61870,8 +61998,12 @@ function HomeContent(): React.JSX.Element {
               pendingReply ||
               !isStarterPromptAvailable(draft) ||
               heroLensPlaceholder;
-            const heroStartTitle = "Start with PRISM";
-            const heroStartAriaLabel = "Start Zen conversation with PRISM";
+            const heroStartTitle = heroBotName
+              ? `Start with ${heroBotName}`
+              : "Start with PRISM";
+            const heroStartAriaLabel = heroBotName
+              ? `Start Zen conversation with ${heroBotName}`
+              : "Start Zen conversation with PRISM";
             const shouldShowHeroNudge =
               !heroStartDisabled &&
               !emptyStateSearchActive &&
@@ -62118,8 +62250,20 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const zenPersonaInkStyle = zenPersonaInkSegment
               ? ({
+                  ...zenPersonaBackdropStyleVars,
                   "--zen-persona-ink-color": zenPersonaInkSegment.color,
                 } as React.CSSProperties)
+              : undefined;
+            const zenUserMessageColor =
+              msg.role === "user"
+                ? resolveZenUserMessageColor(
+                    zenPersonaInkSegment,
+                    zenUserPrismColor,
+                    resolvedTheme
+                  )
+                : undefined;
+            const zenUserMessageColorStyle = zenUserMessageColor
+              ? ({ "--zen-user-message-color": zenUserMessageColor } as React.CSSProperties)
               : undefined;
             return (
               <Fragment key={msg.id}>
@@ -62138,6 +62282,7 @@ function HomeContent(): React.JSX.Element {
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
                   ...(zenPersonaInkStyle ?? {}),
+                  ...(zenUserMessageColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -62433,32 +62578,7 @@ function HomeContent(): React.JSX.Element {
           {!composerHiddenByChoiceChips ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
-                {devDebugComposerEnabled && (
-                  <div className={styles.debugComposerBox}>
-                    <div className={styles.debugComposerLabel} aria-live="polite">
-                      DEBUG COMPOSER (local echo only)
-                    </div>
-                    <div className={styles.debugComposerRow} data-debug-composer="true">
-                      <textarea
-                        value={debugComposerDraft}
-                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
-                        placeholder="Type text to echo as a bot reply..."
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey) return;
-                          event.preventDefault();
-                          submitDebugComposerEcho();
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={submitDebugComposerEcho}
-                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
-                      >
-                        Send debug echo
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {renderDebugComposer()}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -62479,6 +62599,7 @@ function HomeContent(): React.JSX.Element {
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     mentionCommitMode="select-persona"
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
                     onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
@@ -62513,7 +62634,6 @@ function HomeContent(): React.JSX.Element {
             )
           ) : null}
         </form>
-        {renderZenPersonaTransitionMenu()}
         {renderMessageContextMenu()}
         {renderBotContextMenu()}
         {renderConversationGroupContextMenu()}
@@ -62781,6 +62901,22 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderChatOverflowGear()}
         </header>
+        {zenPersonaContinuityWashStyle ? (
+          <div
+            className={styles.zenPersonaComposerBrushWash}
+            style={zenPersonaContinuityWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
+        {exitingZenPersonaWashStyle ? (
+          <div
+            key={`composer-brush-${exitingZenPersonaWash?.id}`}
+            className={styles.zenPersonaComposerBrushWash}
+            data-exiting="true"
+            style={exitingZenPersonaWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <div
           className={styles.messagesFrame}
@@ -62791,6 +62927,22 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
+          {zenPersonaContinuityWashStyle ? (
+            <div
+              className={styles.zenPersonaContinuityWash}
+              style={zenPersonaContinuityWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {exitingZenPersonaWashStyle ? (
+            <div
+              key={exitingZenPersonaWash?.id}
+              className={styles.zenPersonaContinuityWash}
+              data-exiting="true"
+              style={exitingZenPersonaWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
@@ -63606,8 +63758,20 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const zenPersonaInkStyle = zenPersonaInkSegment
               ? ({
+                  ...zenPersonaBackdropStyleVars,
                   "--zen-persona-ink-color": zenPersonaInkSegment.color,
                 } as React.CSSProperties)
+              : undefined;
+            const zenUserMessageColor =
+              msg.role === "user"
+                ? resolveZenUserMessageColor(
+                    zenPersonaInkSegment,
+                    zenUserPrismColor,
+                    resolvedTheme
+                  )
+                : undefined;
+            const zenUserMessageColorStyle = zenUserMessageColor
+              ? ({ "--zen-user-message-color": zenUserMessageColor } as React.CSSProperties)
               : undefined;
             return (
               <Fragment key={msg.id}>
@@ -63626,6 +63790,7 @@ function HomeContent(): React.JSX.Element {
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
                   ...(zenPersonaInkStyle ?? {}),
+                  ...(zenUserMessageColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -63909,32 +64074,7 @@ function HomeContent(): React.JSX.Element {
           {!composerHiddenByChoiceChips ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
-                {devDebugComposerEnabled && (
-                  <div className={styles.debugComposerBox}>
-                    <div className={styles.debugComposerLabel} aria-live="polite">
-                      DEBUG COMPOSER (local echo only)
-                    </div>
-                    <div className={styles.debugComposerRow} data-debug-composer="true">
-                      <textarea
-                        value={debugComposerDraft}
-                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
-                        placeholder="Type text to echo as a bot reply..."
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey) return;
-                          event.preventDefault();
-                          submitDebugComposerEcho();
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={submitDebugComposerEcho}
-                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
-                      >
-                        Send debug echo
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {renderDebugComposer()}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -63955,6 +64095,7 @@ function HomeContent(): React.JSX.Element {
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     mentionCommitMode="select-persona"
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
                     onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}

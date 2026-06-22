@@ -1321,10 +1321,10 @@ describe("processChatMessage starter prompts", () => {
 
     assert.equal(conversation.id, "private-session-1");
     assert.equal(conversation.incognito, true);
-    assert.equal(conversation.botId, null);
-    assert.equal(conversation.lastBotId, null);
+    assert.equal(conversation.botId, "bot-1");
+    assert.equal(conversation.lastBotId, "bot-1");
     assert.equal(conversation.messages.length, 4);
-    assert.equal(conversation.messages[3]?.botName, undefined);
+    assert.equal(conversation.messages[3]?.botName, "Storm Bot");
     assert.equal(conversation.messages[3]?.provider, "openai");
 
     const conversationCount = db

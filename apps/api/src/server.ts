@@ -3285,9 +3285,10 @@ function buildRoutes(): RouteDefinition[] {
           : body.botId === null
             ? null
             : undefined;
-      // Zen is a continuous PRISM-only lane: no private/incognito turns.
-      // Sandbox ignores incognito as before.
-      const incognito = false;
+      // Zen private mode keeps the visible branch client-held: the request can
+      // carry an ephemeral transcript snapshot, but the server skips memory and
+      // persistence for the turn. Sandbox ignores incognito as before.
+      const incognito = mode === "zen" && body.incognito === true;
       // Per-request provider/model override so a fresh playground/Zen switch
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.

@@ -20,12 +20,6 @@ export function resolveZenPersonaTransitionStyle(
     return choice;
   }
 
-  const hasUsefulPreviousSpeaker =
-    typeof options.fromBotId === "string" &&
-    options.fromBotId.trim().length > 0 &&
-    options.fromBotId !== options.toBotId;
-  if (!hasUsefulPreviousSpeaker) return "new-speaks";
-
   const random = options.random ?? Math.random;
   return random() < 0.5 ? "new-speaks" : "previous-introduces";
 }

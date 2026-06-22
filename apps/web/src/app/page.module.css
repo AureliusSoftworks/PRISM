@@ -3637,11 +3637,13 @@
       color-mix(in srgb, var(--header-identity-color) 18%, transparent);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"],
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] {
   color: var(--fg);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph,
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
   color: color-mix(in srgb, var(--header-identity-color) 42%, var(--fg) 58%);
   background:
     radial-gradient(
@@ -3657,7 +3659,8 @@
     inset 0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent);
 }
 
-.themeLight.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+.themeLight.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph,
+.themeLight.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
   background:
     radial-gradient(
       circle at 50% 42%,
@@ -3671,7 +3674,8 @@
     inset 0 0 0 1px color-mix(in srgb, var(--header-identity-color) 10%, transparent);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg {
   transform: rotate(180deg);
 }
 
@@ -4624,7 +4628,8 @@
    keep conversation rows visibly distinct from normal mode with a
    calmer monochrome-tinted treatment, and mirror the private glyph
    language by flipping bot glyphs in grouped conversation chips. */
-.appLayout[data-private-active="true"] .conversationList {
+.appLayout[data-private-active="true"] .conversationList,
+.appLayout[data-zen-private-tone="true"] .conversationList {
   background:
     linear-gradient(
       90deg,
@@ -4645,18 +4650,22 @@
     0 0 0 1px color-mix(in srgb, #000000 32%, transparent);
 }
 
-.appLayout[data-private-active="true"] .conversationGroupGlyph > svg {
+.appLayout[data-private-active="true"] .conversationGroupGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .conversationGroupGlyph > svg {
   transform: rotate(180deg);
 }
 
-.appLayout[data-private-active="true"] .conversationGroupGlyph {
+.appLayout[data-private-active="true"] .conversationGroupGlyph,
+.appLayout[data-zen-private-tone="true"] .conversationGroupGlyph {
   color: var(--row-glyph-color, var(--row-color, var(--fg)));
 }
 
 /* Private mode: make conversation entries read like the bot icon tiles
    (border-forward, tinted body, subtle neon lift). */
 .appLayout[data-private-active="true"] .conversationTitleButton,
-.appLayout[data-private-active="true"] .conversationGroupTile {
+.appLayout[data-private-active="true"] .conversationGroupTile,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton,
+.appLayout[data-zen-private-tone="true"] .conversationGroupTile {
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 52%, var(--line));
   background:
     linear-gradient(
@@ -4692,7 +4701,9 @@
 }
 
 .appLayout[data-private-active="true"] .conversationTitleButton:hover,
-.appLayout[data-private-active="true"] .conversationGroupTile:hover {
+.appLayout[data-private-active="true"] .conversationGroupTile:hover,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton:hover,
+.appLayout[data-zen-private-tone="true"] .conversationGroupTile:hover {
   background:
     linear-gradient(
       132deg,
@@ -4724,7 +4735,8 @@
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 64%, var(--line-strong));
 }
 
-.appLayout[data-private-active="true"] .conversationTitleButton.selected {
+.appLayout[data-private-active="true"] .conversationTitleButton.selected,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton.selected {
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 72%, var(--fg));
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
@@ -5557,6 +5569,60 @@
   background: color-mix(in srgb, #061015 78%, var(--bg) 22%);
 }
 
+.devToolsBubble {
+  appearance: none;
+  position: fixed;
+  top: var(--dev-tools-panel-top, 76px);
+  left: var(--dev-tools-panel-left, 14px);
+  z-index: 2147483646;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, #48d6c8 58%, var(--line-strong) 42%);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #48d6c8 20%, var(--bg-elevated) 80%), var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.26);
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsBubble:active {
+  cursor: grabbing;
+}
+
+.devToolsBubble:hover,
+.devToolsBubble:focus-visible {
+  border-color: color-mix(in srgb, #48d6c8 82%, var(--line-strong) 18%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #48d6c8 30%, var(--bg-elevated) 70%), var(--bg-hover));
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
+    0 18px 34px rgba(0, 0, 0, 0.32);
+}
+
+.devToolsBubbleLabel {
+  line-height: 1;
+}
+
 .devToolsHeader {
   display: flex;
   align-items: center;
@@ -5728,6 +5794,33 @@
   min-height: 0;
 }
 
+.devToolsConsoleOnlyContent .devMetricsTerminalSection {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 30px 10px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader {
+  gap: 8px;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader h3 {
+  font-size: 12px;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader p {
+  display: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalActions {
+  padding-right: 32px;
+}
+
 .devToolsConsoleDragGrip {
   appearance: none;
   position: absolute;
@@ -5760,6 +5853,33 @@
     radial-gradient(circle, color-mix(in srgb, #d8f6ff 78%, transparent) 0 1px, transparent 1.4px)
       5px 4px / 6px 5px repeat,
     color-mix(in srgb, #0c2027 78%, transparent);
+  outline: none;
+}
+
+.devToolsConsoleMinimizeButton {
+  appearance: none;
+  position: absolute;
+  top: 6px;
+  right: 20px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, #d8f6ff 16%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, #061015 72%, transparent);
+  color: color-mix(in srgb, #d8f6ff 74%, var(--fg) 26%);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 4px 12px rgba(0, 0, 0, 0.24);
+}
+
+.devToolsConsoleMinimizeButton:hover,
+.devToolsConsoleMinimizeButton:focus-visible {
+  border-color: color-mix(in srgb, #d8f6ff 34%, transparent);
+  background: color-mix(in srgb, #0c2027 78%, transparent);
   outline: none;
 }
 
@@ -5950,38 +6070,79 @@
   gap: 8px;
 }
 
+.devToolsToggleList {
+  display: grid;
+  gap: 8px;
+}
+
+.devToolsToggleOption {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+}
+
+.devToolsToggleOption input {
+  margin-top: 2px;
+  accent-color: var(--dev-tools-accent);
+}
+
+.devToolsToggleOption span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.devToolsToggleOption strong {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.devToolsToggleOption small {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.devToolsBackdropPreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devToolsBackdropSwatch {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 68%, transparent);
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 35% 28%,
+      color-mix(in srgb, #ffffff 34%, var(--dev-tools-backdrop-color, var(--accent)) 66%),
+      var(--dev-tools-backdrop-color, var(--accent))
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent),
+    0 0 18px color-mix(in srgb, var(--dev-tools-backdrop-color, var(--accent)) 26%, transparent);
+}
+
 .devToolsDiagnosticList {
   display: grid;
   gap: 6px;
   max-height: 220px;
   overflow: auto;
   padding-right: 4px;
-}
-
-.devToolsFooter {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 2px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-}
-
-.devToolsFooter .deleteAllModalCancel {
-  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 46%, var(--bg) 54%), var(--bg));
-  color: var(--fg);
-  font-weight: 760;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 14%, transparent),
-    0 8px 18px rgba(0, 0, 0, 0.1);
-}
-
-.devToolsFooter .deleteAllModalCancel:hover:not(:disabled),
-.devToolsFooter .deleteAllModalCancel:focus-visible {
-  border-color: color-mix(in srgb, var(--dev-tools-accent) 60%, var(--line-strong) 40%);
-  background: color-mix(in srgb, var(--bg-hover) 84%, var(--dev-tools-accent) 16%);
-  transform: translateY(-1px);
 }
 
 .devMetricsTerminalSection {
@@ -6177,110 +6338,6 @@
   font-style: italic;
 }
 
-.devToolsSection {
-  display: block;
-  padding: 4px 7px;
-  margin-top: 5px;
-  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
-}
-
-.devToolsSection[open] {
-  display: grid;
-  gap: 8px;
-  padding: 14px 14px 12px;
-  margin-top: 10px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-surface) 88%, var(--danger) 12%);
-}
-
-.devToolsSectionSummary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 18px;
-  margin: 0;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-
-.devToolsSectionSummary::-webkit-details-marker {
-  display: none;
-}
-
-.devToolsSectionSummary::after {
-  content: "+";
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--fg-muted);
-  font-size: 10px;
-  line-height: 1;
-  transition:
-    background 120ms ease-out,
-    border-color 120ms ease-out,
-    color 120ms ease-out,
-    transform 120ms ease-out;
-}
-
-.devToolsSection[open] > .devToolsSectionSummary::after {
-  content: "−";
-  transform: rotate(180deg);
-}
-
-.devToolsSectionSummary:hover,
-.devToolsSectionSummary:focus-visible {
-  outline: none;
-}
-
-.devToolsSectionSummary:hover::after,
-.devToolsSectionSummary:focus-visible::after {
-  border-color: var(--line-strong);
-  color: var(--fg);
-}
-
-.devToolsSectionButton {
-  width: 100%;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 120ms ease-out,
-    background 120ms ease-out,
-    transform 90ms ease-out;
-}
-
-.devToolsSectionButton:hover,
-.devToolsSectionButton:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong) 42%);
-  background: color-mix(in srgb, var(--bg-hover) 88%, var(--danger) 12%);
-  outline: none;
-}
-
-.devToolsSectionButton:active {
-  transform: translateY(1px);
-}
-
-.devToolsSectionTitle {
-  margin: 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  line-height: 1.1;
-  text-transform: uppercase;
-  color: var(--fg-muted);
-}
-
 .devToolsSectionHint {
   margin: 0;
   font-size: 12px;
@@ -6290,54 +6347,6 @@
 .devToolsSectionHint strong {
   color: var(--fg);
   font-weight: 600;
-}
-
-.devToolsToggleSummary {
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.1;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.devToolsToggleSummary strong {
-  color: var(--fg);
-  font-weight: 600;
-}
-
-.devTogglesModalOption {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-surface);
-  color: var(--fg);
-}
-
-.devTogglesModalBackdrop {
-  z-index: 2147483647;
-}
-
-.devTogglesModalOption input {
-  margin-top: 3px;
-  accent-color: var(--accent);
-}
-
-.devTogglesModalOption span {
-  display: grid;
-  gap: 4px;
-}
-
-.devTogglesModalOption small {
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 .devToolsViewportStatus {
@@ -6710,6 +6719,7 @@
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
   cursor: grab;
   touch-action: none;
+  user-select: none;
   backdrop-filter: blur(16px);
 }
 
@@ -6763,8 +6773,8 @@
 
 .devZenPauseTester {
   position: fixed;
-  right: max(16px, calc(env(safe-area-inset-right, 0px) + 16px));
-  bottom: max(126px, calc(env(safe-area-inset-bottom, 0px) + 112px));
+  left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
+  top: max(16px, calc(env(safe-area-inset-top, 0px) + 16px));
   z-index: 92;
   display: grid;
   justify-items: end;
@@ -6791,7 +6801,9 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     0 18px 50px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   backdrop-filter: blur(16px);
   transition:
     border-color 140ms ease,
@@ -6810,6 +6822,7 @@
 }
 
 .devZenPauseTesterBubble:active {
+  cursor: grabbing;
   transform: translateY(0);
 }
 
@@ -6939,7 +6952,7 @@
   --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
   position: fixed;
   left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
-  bottom: max(126px, calc(env(safe-area-inset-bottom, 0px) + 112px));
+  top: max(16px, calc(env(safe-area-inset-top, 0px) + 16px));
   z-index: 92;
   display: grid;
   justify-items: start;
@@ -6966,7 +6979,9 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     0 18px 50px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   backdrop-filter: blur(16px);
   transition:
     border-color 140ms ease,
@@ -6985,6 +7000,7 @@
 }
 
 .zenToolLabBubble:active {
+  cursor: grabbing;
   transform: translateY(0);
 }
 
@@ -7123,10 +7139,7 @@
 
 @media (max-width: 620px) {
   .zenToolLabDock {
-    left: max(12px, calc(env(safe-area-inset-left, 0px) + 12px));
-    right: max(12px, calc(env(safe-area-inset-right, 0px) + 12px));
-    bottom: max(142px, calc(env(safe-area-inset-bottom, 0px) + 126px));
-    width: auto;
+    width: min(318px, calc(100vw - 28px));
   }
 
   .zenToolLabPanel {
@@ -7568,10 +7581,128 @@
   max-width: min(11ch, 20vw);
 }
 
+.zenPrivateModeToggle {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--fg) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--fg) 6%),
+      color-mix(in srgb, var(--bg) 90%, var(--fg) 7%)
+    );
+  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted) 28%);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.12);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.08s ease;
+}
+
+.zenPrivateModeToggle:hover:not(:disabled),
+.zenPrivateModeToggle:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fg) 58%, var(--line));
+  color: var(--fg);
+  outline: none;
+}
+
+.zenPrivateModeToggle:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.zenPrivateModeToggle[data-active="true"] {
+  border-color: color-mix(in srgb, var(--fg) 62%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 18%),
+      color-mix(in srgb, var(--bg-surface) 74%, var(--fg) 16%)
+    );
+  color: var(--fg);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 20%, transparent),
+    0 8px 22px color-mix(in srgb, #000 20%, transparent);
+}
+
+.zenPrivateModeToggle:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.zenPrivateModeToggleGlyph {
+  grid-area: 1 / 1;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  transform-origin: 50% 50%;
+  transition:
+    filter 0.18s ease,
+    opacity 0.16s ease,
+    transform 0.24s cubic-bezier(0.18, 0.9, 0.26, 1.18);
+}
+
+.zenPrivateModeToggleGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.zenPrivateModeToggleLock {
+  opacity: 0;
+  transform: rotate(-210deg) scale(0.48);
+}
+
+.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleKey {
+  opacity: 0;
+  transform: rotate(520deg) scale(0.42);
+}
+
+.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+  filter:
+    drop-shadow(0 0 7px rgba(255, 255, 255, 0.74))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.34));
+}
+
+.themeLight .zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
+  filter:
+    drop-shadow(0 0 7px rgba(0, 0, 0, 0.36))
+    drop-shadow(0 1px 1px rgba(255, 255, 255, 0.38));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chatHeaderTitle,
   .chatHeaderTitlePlaceholder,
-  .chatHeaderModelPicker {
+  .chatHeaderModelPicker,
+  .zenPrivateModeToggle {
+    transition: none;
+  }
+
+  .zenPrivateModeToggleGlyph {
+    transition: none;
+  }
+
+  .chatBotTileBotGlyph > svg,
+  .composeBotTriggerGlyph > svg,
+  .composeBotOptionGlyph > svg,
+  .emptyStateBotGlyph > svg,
+  .headerIdentityGlyph > svg,
+  .conversationGroupGlyph > svg {
     transition: none;
   }
 }
@@ -7917,6 +8048,9 @@
 }
 
 .zenAtmosphereBackdrop {
+  --zen-atmosphere-color-amount: 0;
+  --zen-atmosphere-grayscale-amount: calc(1 - var(--zen-atmosphere-color-amount, 0));
+  --zen-atmosphere-color-transition-duration: 720ms;
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -7943,10 +8077,12 @@
     saturate(0.72)
     contrast(0.92)
     brightness(0.78)
-    grayscale(var(--zen-atmosphere-grayscale, 0));
+    grayscale(var(--zen-atmosphere-grayscale-amount));
   transform: scale(1.01);
-  transition: opacity 180ms linear;
-  will-change: opacity;
+  transition:
+    opacity 180ms linear,
+    filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
+  will-change: opacity, filter;
 }
 
 .themeLight .zenAtmosphereBackdrop img {
@@ -7954,7 +8090,7 @@
     saturate(0.62)
     contrast(0.86)
     brightness(1.16)
-    grayscale(var(--zen-atmosphere-grayscale, 0));
+    grayscale(var(--zen-atmosphere-grayscale-amount));
   mix-blend-mode: multiply;
 }
 
@@ -7964,7 +8100,11 @@
   inset: -10%;
   z-index: 1;
   pointer-events: none;
-  opacity: calc(var(--zen-atmosphere-opacity, 0.15) * 0.55);
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.15) *
+      0.55 *
+      var(--zen-atmosphere-color-amount, 0)
+  );
   background:
     radial-gradient(
       ellipse 48% 36% at 18% 28%,
@@ -7991,10 +8131,17 @@
     );
   mix-blend-mode: screen;
   filter: blur(26px) saturate(0.78);
+  transition:
+    opacity var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1),
+    filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
 }
 
 .themeLight .zenAtmosphereBackdrop::before {
-  opacity: calc(var(--zen-atmosphere-opacity, 0.15) * 0.38);
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.15) *
+      0.38 *
+      var(--zen-atmosphere-color-amount, 0)
+  );
   mix-blend-mode: multiply;
   filter: blur(28px) saturate(0.66);
 }
@@ -8770,6 +8917,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .emptyStatePrivateHero::before,
 .themeLight .emptyStatePrivateHero::after {
   display: block;
+  background: #0f0f0f;
+}
+
+.themeLight .emptyStatePrivateHero::before {
+  opacity: 0.12;
+}
+
+.themeLight .emptyStatePrivateHero::after {
+  opacity: 0.08;
 }
 
 .themeLight .emptyStatePrivateHero .brandIcon {
@@ -10380,7 +10536,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   opacity: 1;
 }
 
-.appLayout[data-private-active="true"] .chatBotTileBotGlyph > svg {
+.chatBotTileBotGlyph > svg,
+.composeBotTriggerGlyph > svg,
+.composeBotOptionGlyph > svg,
+.emptyStateBotGlyph > svg,
+.headerIdentityGlyph > svg,
+.conversationGroupGlyph > svg {
+  transform-origin: 50% 50%;
+  transition: transform 0.18s ease;
+}
+
+.appLayout[data-private-active="true"] .chatBotTileBotGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .chatBotTileBotGlyph > svg,
+.appLayout[data-private-active="true"] .composeBotTriggerGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .composeBotTriggerGlyph > svg,
+.appLayout[data-private-active="true"] .emptyStateBotGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .emptyStateBotGlyph > svg {
+  transform: rotate(180deg);
+}
+
+.composeBotMenu[data-private-tone="true"] .composeBotOptionGlyph > svg {
   transform: rotate(180deg);
 }
 
@@ -10390,7 +10565,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTile,
-.appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTilePlaceholder {
+.appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTilePlaceholder,
+.appLayout[data-zen-private-tone="true"] .chatBotPickerFrame .chatBotTile,
+.appLayout[data-zen-private-tone="true"] .chatBotPickerFrame .chatBotTilePlaceholder {
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
@@ -11122,10 +11299,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageChatManifesting {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   animation: chatMessageManifest 0.48s ease-out both;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   opacity: 0;
   animation: chatUserQuestionFadeIn 0.92s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
@@ -11480,7 +11663,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenPersonaInkWash {
-  --zen-persona-ink-opacity: 0.38;
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  display: none;
   position: absolute;
   left: 50%;
   top: calc(0px - var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px)));
@@ -11497,39 +11687,216 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     radial-gradient(
       ellipse 84% 78% at 50% 50%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 78%, transparent) 0%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 44%, transparent) 56%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 56%,
       transparent 86%
     ),
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 38%, transparent) 16%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 54%, transparent) 50%,
-      color-mix(in srgb, var(--zen-persona-ink-color, transparent) 36%, transparent) 84%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 16%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 50%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 84%,
       transparent
-  );
-  filter: blur(56px) saturate(1.16);
-  mix-blend-mode: color;
+    );
+  filter: blur(56px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
   opacity: var(--zen-persona-ink-opacity);
   animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
 
 .themeLight .zenPersonaInkWash {
-  --zen-persona-ink-opacity: 0.28;
-  mix-blend-mode: soft-light;
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+}
+
+.zenPersonaContinuityWash {
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-edge: 34%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  position: fixed;
+  inset: clamp(64px, 10dvh, 124px) -28vw calc(-1 * clamp(132px, 20dvh, 280px));
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 34vw / 32dvh;
+  background:
+    radial-gradient(
+      ellipse 132% 112% at 50% 62%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 58%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 86%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 20%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 64%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 100%
+    );
+  filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  opacity: var(--zen-persona-ink-opacity);
+  transform: translateZ(0);
+  transition:
+    filter var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1),
+    opacity var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1);
+}
+
+.appLayout[data-zen-surface="true"] .zenPersonaContinuityWash {
+  z-index: 4;
+}
+
+.zenPersonaComposerBrushWash {
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-edge: 34%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  display: none;
+  position: fixed;
+  left: -22vw;
+  right: -22vw;
+  bottom: calc(-1 * clamp(64px, 10dvh, 144px));
+  height: clamp(260px, 44dvh, 560px);
+  z-index: 4;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 84% 72% at 50% 74%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 62%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 20%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 58%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 100%
+    );
+  filter: blur(50px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  opacity: var(--zen-persona-ink-opacity);
+  transform: translateZ(0);
+  transition:
+    filter var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1),
+    opacity var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 26%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 26%, #000 100%);
+}
+
+.zenPersonaContinuityWash[data-exiting="true"] {
+  animation: zenPersonaContinuityWashOut var(--zen-atmosphere-color-transition-duration, 720ms)
+    cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.zenPersonaComposerBrushWash[data-exiting="true"] {
+  animation: zenPersonaContinuityWashOut var(--zen-atmosphere-color-transition-duration, 720ms)
+    cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.themeLight .zenPersonaContinuityWash,
+.themeLight .zenPersonaComposerBrushWash {
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+}
+
+@keyframes zenPersonaContinuityWashOut {
+  from {
+    opacity: var(--zen-persona-ink-opacity);
+    filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  }
+  to {
+    opacity: 0;
+    filter: blur(64px) saturate(0.28);
+  }
 }
 
 @keyframes zenPersonaInkWashIn {
   from {
     opacity: 0;
     transform: translateX(-50%) scaleX(0.92);
-    filter: blur(54px) saturate(1.02);
+    filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
   }
   to {
     opacity: var(--zen-persona-ink-opacity);
     transform: translateX(-50%) scaleX(0.985);
-    filter: blur(56px) saturate(1.16);
+    filter: blur(56px) saturate(var(--zen-persona-ink-saturation));
   }
 }
 
@@ -11537,6 +11904,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenPersonaInkWash {
     animation: none;
     transform: translateX(-50%);
+  }
+
+  .zenPersonaContinuityWash {
+    transition: none;
+  }
+
+  .zenPersonaComposerBrushWash {
+    transition: none;
+  }
+
+  .zenPersonaContinuityWash[data-exiting="true"],
+  .zenPersonaComposerBrushWash[data-exiting="true"] {
+    animation: none;
+    opacity: 0;
   }
 }
 
@@ -14480,12 +14861,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 18%,
+    var(--compose-bot-color, var(--accent)) 62%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 14%,
+    var(--compose-bot-color, var(--accent)) 38%,
     transparent
   );
 }
@@ -14879,11 +15260,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-text-bottom-fade-start: clamp(36px, 6dvh, 84px);
   --zen-text-bottom-fade-mid: clamp(132px, 20dvh, 236px);
   --zen-text-bottom-fade-end: clamp(224px, 31dvh, 372px);
-  --zen-assistant-prose: color-mix(in srgb, #fffaf2 92%, var(--fg) 8%);
+  --zen-assistant-prose: #ffffff;
   --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 64%, var(--fg-muted));
   --zen-user-prism-color-bright: #44d7e6;
   --zen-user-prism-color-dark: #006f7a;
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
+  z-index: 5;
   padding-top: max(76px, var(--zen-prose-runway-top));
   padding-bottom: max(104px, var(--zen-prose-runway-bottom));
   scroll-padding-top: var(--zen-prose-runway-top);
@@ -14925,7 +15307,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] {
-  --zen-assistant-prose: color-mix(in srgb, #15120f 90%, var(--fg) 10%);
+  --zen-assistant-prose: #000000;
   --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 62%, var(--fg-muted));
   --zen-user-prism-color: var(--zen-user-prism-color-dark);
 }
@@ -14963,16 +15345,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser {
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
-  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-prose: var(--zen-user-message-color, var(--zen-user-prism-color));
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 74%, var(--fg-muted));
   --zen-user-prose-shadow:
     0 1px 1px rgba(0, 0, 0, 0.36),
     0 0 18px color-mix(in srgb, var(--zen-user-prose) 14%, transparent);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] .messageUser {
   --zen-user-prism-color: var(--zen-user-prism-color-dark);
-  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-prose: var(--zen-user-message-color, var(--zen-user-prism-color));
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 78%, var(--fg-muted));
   --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.46);
 }
@@ -14980,24 +15365,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"]
   .messages[data-chat-ephemeral="true"]
   .messageUser[data-zen-persona-ink="persona"] {
-  --zen-user-prose: color-mix(
-    in srgb,
-    var(--zen-persona-ink-color, var(--zen-user-prism-color)) 84%,
-    #fffaf2
+  --zen-user-prose: var(
+    --zen-user-message-color,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color))
   );
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 76%, var(--fg-muted));
   --zen-user-prose-shadow:
-    0 1px 1px rgba(0, 0, 0, 0.36),
-    0 0 18px color-mix(in srgb, var(--zen-persona-ink-color, var(--zen-user-prose)) 16%, transparent);
+    0 1px 2px rgba(0, 0, 0, 0.58),
+    0 0 22px rgba(0, 0, 0, 0.28);
 }
 
 .appLayout[data-zen-surface="true"].themeLight
   .messages[data-chat-ephemeral="true"]
   .messageUser[data-zen-persona-ink="persona"] {
-  --zen-user-prose: color-mix(
-    in srgb,
-    var(--zen-persona-ink-color, var(--zen-user-prism-color)) 78%,
-    #15120f
+  --zen-user-prose: var(
+    --zen-user-message-color,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color))
   );
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 80%, var(--fg-muted));
   --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
@@ -15010,6 +15393,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .chatEphemeralLine {
   color: var(--zen-user-prose);
   text-shadow: var(--zen-user-prose-shadow);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] p,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] .markdownBody {
+  color: var(--zen-user-prose);
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser h4 {
@@ -15120,6 +15512,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
   transform: translate3d(20px, 0, 0);
+}
+
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .zenPrivateModeToggle {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 999px;
 }
 
 .appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
@@ -15650,13 +16049,76 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 8px 10px;
 }
 
+.debugComposerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
 .debugComposerLabel {
+  min-width: 0;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--danger) 76%, var(--fg));
-  margin-bottom: 7px;
+  margin: 0;
+}
+
+.debugComposerMinimizeButton,
+.debugComposerRestoreButton {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 24%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 12%, var(--bg))
+    );
+  color: color-mix(in srgb, var(--danger) 78%, var(--fg));
+  font: inherit;
+  cursor: pointer;
+}
+
+.debugComposerMinimizeButton {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.debugComposerRestoreButton {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.debugComposerMinimizeButton:hover,
+.debugComposerMinimizeButton:focus-visible,
+.debugComposerRestoreButton:hover,
+.debugComposerRestoreButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--danger) 66%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 38%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 20%, var(--bg))
+    );
 }
 
 .debugComposerRow {
@@ -17355,12 +17817,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .markdownComposerSurface {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 72%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 58%,
     transparent
   );
 }
@@ -17394,16 +17856,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-private-active="true"]
   .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
   .markdownComposerSurface:focus-within {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 74%, var(--fg));
   box-shadow:
     0 0 0 3px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 14%,
+      var(--compose-bot-color, var(--accent)) 26%,
       transparent
     ),
     inset -18px 0 24px -24px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 24%,
+      var(--compose-bot-color, var(--accent)) 58%,
       transparent
     );
 }
@@ -17424,8 +17886,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   :global(.tiptap p.is-editor-empty.is-empty::before) {
   color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
-    var(--fg-muted) 76%
+    var(--compose-bot-color, var(--accent)) 76%,
+    var(--fg-muted) 24%
   );
 }
 
@@ -17606,17 +18068,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .compose[data-compose-bot-selected="true"]
   .markdownComposerInputRow
   > button:not(:disabled) {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
-      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
-    );
-  color: var(--fg);
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 72%, var(--line));
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 84%, var(--fg) 16%);
+  color: var(--accent-text);
   box-shadow:
     var(--shadow-sm),
-    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, transparent);
 }
 
 .compose[data-compose-bot-selected="true"] .markdownComposerInputRow > button:hover:not(:disabled) {
@@ -17631,12 +18088,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .compose[data-compose-bot-selected="true"]
   .markdownComposerInputRow
   > button:hover:not(:disabled) {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
-      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
-    );
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 76%, var(--fg) 24%);
 }
 
 .markdownComposerInputRow > button:active:not(:disabled) {
@@ -18920,82 +19372,94 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 12px 24px -18px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 80%, transparent);
 }
 
-.zenPersonaTransitionMenu {
-  position: fixed;
-  left: clamp(16px, 5vw, 96px);
-  bottom: 136px;
-  z-index: 90;
-  width: min(340px, calc(100vw - 32px));
-  min-width: min(340px, calc(100vw - 32px));
-  max-width: min(340px, calc(100vw - 32px));
-  max-height: none;
-  padding: 7px;
-  gap: 6px;
+.composeBotMenuFooter {
+  flex: 0 0 auto;
+  padding: 6px 7px 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
 }
 
-.zenPersonaTransitionHeader {
+.zenPersonaTransitionControl {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 3px 3px 5px 7px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
-}
-
-.zenPersonaTransitionKicker {
+  gap: 8px;
   min-width: 0;
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.zenPersonaTransitionClose {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  border: 1px solid color-mix(in srgb, var(--line-strong) 80%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.zenPersonaTransitionClose:hover,
-.zenPersonaTransitionClose:focus-visible {
-  color: var(--fg);
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--line-strong));
-  background: var(--bg-hover);
-  outline: none;
-}
-
-.zenPersonaTransitionOptions {
-  display: flex;
+.zenPersonaTransitionControl[data-compact="true"] {
+  align-items: stretch;
   flex-direction: column;
   gap: 5px;
 }
 
-.zenPersonaTransitionOption {
-  width: 100%;
+.zenPersonaTransitionLabelWithInfo {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  min-width: 0;
 }
 
-.zenPersonaTransitionOptionGlyph {
-  display: inline-grid;
-  place-items: center;
+.zenPersonaTransitionControl[data-compact="true"] .zenPersonaTransitionLabelWithInfo {
+  align-self: flex-start;
+}
+
+.zenPersonaTransitionControlLabel {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: color-mix(in srgb, var(--accent) 78%, var(--fg));
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.zenPersonaTransitionSegments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
+}
+
+.zenPersonaTransitionSegmentButton {
+  min-width: 0;
+  height: 25px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zenPersonaTransitionSegmentButton[data-active="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 13%, var(--bg-active)),
+      color-mix(in srgb, #2fd3e3 11%, var(--bg-active))
+    );
+  color: var(--fg);
+  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent) inset;
+}
+
+.zenPersonaTransitionSegmentButton:hover,
+.zenPersonaTransitionSegmentButton:focus-visible {
+  color: var(--fg);
+  background: var(--bg-hover);
+  outline: none;
 }
 
 .composeCommandOption[data-command-kind="wildcard-slot"] {
@@ -19667,12 +20131,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   textarea {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 72%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 58%,
     transparent
   );
 }
@@ -19714,16 +20178,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .appLayout[data-private-active="true"]
   .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
   textarea:focus {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 74%, var(--fg));
   box-shadow:
     0 0 0 3px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 14%,
+      var(--compose-bot-color, var(--accent)) 26%,
       transparent
     ),
     inset -18px 0 24px -24px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 24%,
+      var(--compose-bot-color, var(--accent)) 58%,
       transparent
     );
 }
@@ -19740,8 +20204,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea::placeholder {
   color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
-    var(--fg-muted) 76%
+    var(--compose-bot-color, var(--accent)) 76%,
+    var(--fg-muted) 24%
   );
 }
 
@@ -19876,17 +20340,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose[data-compose-bot-selected="true"]
   .composeInner
   button:not(:disabled) {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
-      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
-    );
-  color: var(--fg);
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 72%, var(--line));
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 84%, var(--fg) 16%);
+  color: var(--accent-text);
   box-shadow:
     var(--shadow-sm),
-    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, transparent);
 }
 
 .compose[data-compose-bot-selected="true"] .composeInner button:hover:not(:disabled) {
@@ -19901,12 +20360,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose[data-compose-bot-selected="true"]
   .composeInner
   button:hover:not(:disabled) {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
-      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
-    );
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 76%, var(--fg) 24%);
 }
 
 .composeInner button:active:not(:disabled) {

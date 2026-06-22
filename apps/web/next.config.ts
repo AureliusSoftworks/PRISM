@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { execSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,8 +37,28 @@ const extraDevOrigins =
     .map((origin) => origin.trim())
     .filter(Boolean) ?? [];
 
+function resolvePrismBranch(): string {
+  const fromEnv =
+    process.env.NEXT_PUBLIC_PRISM_BRANCH?.trim() || process.env.PRISM_BRANCH?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return (
+      execSync("git branch --show-current", {
+        cwd: MONOREPO_ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() || "unknown"
+    );
+  } catch {
+    return "unknown";
+  }
+}
+
 const nextConfig: NextConfig = {
   devIndicators: false,
+  env: {
+    NEXT_PUBLIC_PRISM_BRANCH: resolvePrismBranch(),
+  },
   output: "standalone",
   turbopack: {
     root: MONOREPO_ROOT,

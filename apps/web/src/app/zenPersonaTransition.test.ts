@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveZenPersonaTransitionStyle,
-  type ZenPersonaTransitionChoice,
 } from "./zenPersonaTransition.ts";
 
 describe("resolveZenPersonaTransitionStyle", () => {
@@ -58,16 +57,14 @@ describe("resolveZenPersonaTransitionStyle", () => {
     assert.deepEqual([...seen].sort(), ["new-speaks", "previous-introduces"]);
   });
 
-  it("falls back to the new persona when there is no useful previous speaker", () => {
-    for (const choice of ["auto"] satisfies ZenPersonaTransitionChoice[]) {
-      assert.equal(
-        resolveZenPersonaTransitionStyle(choice, {
-          fromBotId: null,
-          toBotId: "bot-b",
-          random: () => 0.99,
-        }),
-        "new-speaks"
-      );
-    }
+  it("lets Auto choose PRISM introduces when Default is the current persona", () => {
+    assert.equal(
+      resolveZenPersonaTransitionStyle("auto", {
+        fromBotId: null,
+        toBotId: "bot-b",
+        random: () => 0.99,
+      }),
+      "previous-introduces"
+    );
   });
 });

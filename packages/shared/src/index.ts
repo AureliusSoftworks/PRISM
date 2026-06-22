@@ -789,6 +789,8 @@ export interface ChatRequestPayload {
   modelOverride?: string;
   reasoningEffort?: ReasoningEffort;
   botId?: string | null;
+  /** When true in Zen, keep this turn client-held and skip memory/persistence. */
+  incognito?: boolean;
   /** Zen-only automatic Persona handoff turn. */
   personaTransition?: ZenPersonaTransitionInput;
   /** Zen-only idle autonomy check/turn. */
