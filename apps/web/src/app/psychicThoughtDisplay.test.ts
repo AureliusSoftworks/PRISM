@@ -107,6 +107,47 @@ describe("psychicThoughtDisplayLineForMessage", () => {
     );
   });
 
+  it("hides the explicit live Psychic scratchpad unless developer mode exposes it", () => {
+    const message: PsychicThoughtMessageLike = {
+      role: "user",
+      psychicThought: {
+        v: 1,
+        summary: "I checked the exact format and privacy boundary.",
+        effort: "high",
+        provider: "local",
+        model: "llama3.2",
+        createdAt: "2026-06-22T00:00:00.000Z",
+      },
+      psychicScratchpad: {
+        v: 1,
+        scratchpad: "Plan scratchpad:\n- preserve the requested labels",
+        effort: "high",
+        provider: "local",
+        model: "llama3.2",
+        simulated: true,
+        passCount: 3,
+        createdAt: "2026-06-22T00:00:00.000Z",
+      },
+    };
+
+    const hiddenLine = psychicThoughtDisplayLineForMessage(message);
+    assert.equal(hiddenLine?.scratchpad, undefined);
+    assert.equal(hiddenLine?.scratchpadMeta, undefined);
+    assert.deepEqual(
+      psychicThoughtDisplayLineForMessage(message, { showScratchpad: true }),
+      {
+        label: "Psychic",
+        summary: "I checked the exact format and privacy boundary.",
+        state: "summary",
+        animated: false,
+        ariaLabel:
+          "Psychic summary: I checked the exact format and privacy boundary.",
+        scratchpad: "Plan scratchpad:\n- preserve the requested labels",
+        scratchpadMeta: "local · llama3.2 · effort high · 3 passes",
+      }
+    );
+  });
+
   it("does not render private scratchpad, draft, audit, or revision artifacts", () => {
     const messageWithPrivateArtifacts: PsychicThoughtMessageLike & {
       scratchpad: string;

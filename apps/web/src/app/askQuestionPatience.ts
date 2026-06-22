@@ -19,9 +19,17 @@ export interface AskQuestionPatiencePauseInput {
   active: boolean;
   pendingReply: boolean;
   documentHidden: boolean;
+  composerRevealed?: boolean;
   nowMs: number;
   lastTypingAtMs: number | null;
   typingIdleMs?: number;
+}
+
+export interface AskQuestionInteractionKeyInput {
+  conversationId: string;
+  assistantMessageId: string;
+  prompt: string;
+  options: Array<{ id: string; label: string }>;
 }
 
 export function normalizeAskQuestionPatienceDurationMs(
@@ -59,13 +67,29 @@ export function advanceAskQuestionPatience(
 export function shouldPauseAskQuestionPatience(
   input: AskQuestionPatiencePauseInput
 ): boolean {
-  if (!input.active || input.pendingReply || input.documentHidden) return true;
+  if (!input.active || input.pendingReply || input.documentHidden || input.composerRevealed) {
+    return true;
+  }
   if (input.lastTypingAtMs === null) return false;
   const typingIdleMs = Math.max(
     0,
     Math.round(input.typingIdleMs ?? ASK_QUESTION_PATIENCE_TYPING_IDLE_MS)
   );
   return input.nowMs - input.lastTypingAtMs < typingIdleMs;
+}
+
+export function buildAskQuestionInteractionKey(
+  input: AskQuestionInteractionKeyInput
+): string {
+  return JSON.stringify({
+    conversationId: input.conversationId,
+    assistantMessageId: input.assistantMessageId,
+    prompt: input.prompt,
+    options: input.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+    })),
+  });
 }
 
 export function shouldReportAskQuestionPatienceExpiry(input: {
