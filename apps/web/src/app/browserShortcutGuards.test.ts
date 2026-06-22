@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   shouldBlockBrowserKeyboardShortcut,
+  shouldBlockBrowserMouseShortcut,
   shouldBlockBrowserWheelShortcut,
   type BrowserShortcutKeyEvent,
 } from "./browserShortcutGuards.ts";
@@ -83,6 +84,14 @@ test("blocks browser navigation and address chrome shortcuts", () => {
     shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "[", metaKey: true })),
     true
   );
+});
+
+test("blocks browser history mouse buttons", () => {
+  assert.equal(shouldBlockBrowserMouseShortcut({ button: 3 }), true);
+  assert.equal(shouldBlockBrowserMouseShortcut({ button: 4 }), true);
+  assert.equal(shouldBlockBrowserMouseShortcut({ button: 0 }), false);
+  assert.equal(shouldBlockBrowserMouseShortcut({ button: 1 }), false);
+  assert.equal(shouldBlockBrowserMouseShortcut({ button: 3, defaultPrevented: true }), false);
 });
 
 test("blocks tab, window, and common browser panel shortcuts", () => {

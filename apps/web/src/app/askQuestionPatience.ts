@@ -80,9 +80,10 @@ export function getPendingAskQuestionState<
 
 export function normalizeAskQuestionPatienceDurationMs(
   value: unknown,
-  fallback = 75_000,
-  min = 20_000,
-  max = 180_000
+  fallback = 60_000,
+  min = 10_000,
+  max = 60_000,
+  step = 10_000
 ): number {
   const parsed =
     typeof value === "number"
@@ -91,7 +92,12 @@ export function normalizeAskQuestionPatienceDurationMs(
         ? Number(value.trim())
         : Number.NaN;
   const normalized = Number.isFinite(parsed) ? parsed : fallback;
-  return Math.min(max, Math.max(min, Math.round(normalized)));
+  const clamped = Math.min(max, Math.max(min, Math.round(normalized)));
+  const normalizedStep =
+    typeof step === "number" && Number.isFinite(step) && step > 0
+      ? Math.round(step)
+      : 1;
+  return Math.min(max, Math.max(min, Math.round(clamped / normalizedStep) * normalizedStep));
 }
 
 export function advanceAskQuestionPatience(

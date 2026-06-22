@@ -14,7 +14,6 @@ export const ZEN_FALLBACK_WALLPAPER_ASSETS = [
 
 export interface ZenFallbackWallpaperEligibilityArgs {
   chatSurface: boolean;
-  rememberedWallpaperResolved: boolean;
   hasRememberedWallpaper: boolean;
   atmosphereTimelineLength: number;
 }
@@ -52,13 +51,11 @@ export function resolveZenFallbackWallpaperVariant(
 
 export function shouldShowZenFallbackWallpaper({
   chatSurface,
-  rememberedWallpaperResolved,
   hasRememberedWallpaper,
   atmosphereTimelineLength,
 }: ZenFallbackWallpaperEligibilityArgs): boolean {
   return (
     chatSurface &&
-    rememberedWallpaperResolved &&
     !hasRememberedWallpaper &&
     atmosphereTimelineLength === 0
   );

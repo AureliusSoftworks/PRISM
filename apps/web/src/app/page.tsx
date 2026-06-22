@@ -78,6 +78,7 @@ import {
   PSYCHIC_SLASH_COMMAND,
   parsePsychicSlashCommand,
 } from "./psychicCommand";
+import { shouldResetPreviousSessionContext } from "./naturalContextReset";
 import {
   psychicThoughtDisplayLineForMessage,
   type PsychicCanvasScratchpadPayload,
@@ -593,6 +594,9 @@ const DEV_TOOLS_GHOST_COUNT_MIN = 1;
 const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
+const DEV_TOOLS_PANEL_DEFAULT_WIDTH = 980;
+const DEV_TOOLS_PANEL_MIN_WIDTH = 260;
+const DEV_TOOLS_PANEL_MIN_HEIGHT = 190;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
 const DEV_PANEL_SAFE_AREA_ATTRIBUTE = "data-dev-panel-safe-area";
 const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
@@ -821,6 +825,7 @@ type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
 type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
 type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
 type DevToolsPanelPosition = { x: number; y: number };
+type DevToolsPanelSize = { width: number; height: number };
 type DevToolsPanelDragState = {
   pointerId: number;
   offsetX: number;
@@ -857,6 +862,7 @@ type DevMoodVisualDragState = {
 type DevToolsUiStateStorage = {
   activeSection?: DevToolsActiveSection;
   panelPosition?: DevToolsPanelPosition;
+  panelSize?: DevToolsPanelSize;
   mood?: {
     open?: boolean;
     position?: DevMoodVisualPosition;
@@ -1104,6 +1110,7 @@ const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
 const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
 const ZEN_LONG_SESSION_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+const ZEN_SESSION_BOUNDARY_DATE_GAP_MS = 24 * 60 * 60 * 1000;
 const ZEN_SESSION_BREAK_SCHEMA = "prism-zen-session-break-v1";
 const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = ZEN_IDLE_ERA_GAP_MS;
 const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
@@ -1321,6 +1328,25 @@ function clampDevToolsPanelPosition(
   });
 }
 
+function clampDevToolsPanelRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): { x: number; y: number; width: number; height: number } {
+  return clampDevPanelRectToSafeArea({
+    rect,
+    viewportWidth,
+    viewportHeight,
+    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    minWidth: DEV_TOOLS_PANEL_MIN_WIDTH,
+    minHeight: DEV_TOOLS_PANEL_MIN_HEIGHT,
+    maxWidth: Math.max(DEV_TOOLS_PANEL_DEFAULT_WIDTH, viewportWidth),
+    maxHeight: viewportHeight,
+    safeAreaInsets,
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1406,6 +1432,30 @@ function normalizeStoredDevToolsPosition(
     viewportHeight,
     safeAreaInsets
   );
+}
+
+function normalizeStoredDevToolsPanelSize(
+  value: unknown,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): DevToolsPanelSize | null {
+  if (!isRecord(value)) return null;
+  const { width, height } = value;
+  if (typeof width !== "number" || typeof height !== "number") return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  const rect = clampDevToolsPanelRect(
+    {
+      x: DEV_TOOLS_PANEL_DEFAULT_X,
+      y: DEV_TOOLS_PANEL_DEFAULT_Y,
+      width,
+      height,
+    },
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  return { width: rect.width, height: rect.height };
 }
 
 function initialDevLayerOrbPosition(side: "left" | "right"): DevToolsPanelPosition {
@@ -2909,7 +2959,7 @@ const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
   dark: "#151311",
 };
 const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
-const PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER = 0.16;
+const PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER = 0.62;
 
 function privateModeAccentHex(
   rawHex: string | null | undefined,
@@ -2924,7 +2974,7 @@ function privateModeAccentHex(
   const neutralized = mixHex(
     muted,
     neutralAnchor,
-    resolvedTheme === "dark" ? 0.36 : 0.28
+    resolvedTheme === "dark" ? 0.14 : 0.1
   );
   return ensureContrast(neutralized, THEME_BG[resolvedTheme], 4.5);
 }
@@ -3815,16 +3865,51 @@ function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null 
   return Number.isFinite(ms) ? ms : null;
 }
 
-function formatZenEraBoundaryLabel(message: Pick<Message, "createdAt">): string {
-  const ms = messageCreatedAtMs(message);
-  if (ms === null) return "A new stretch begins";
-  const label = new Date(ms).toLocaleString([], {
+function formatZenSessionGapDuration(gapMs: number): string {
+  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
+  const totalMinutes = Math.round(safeGapMs / (60 * 1000));
+  if (totalMinutes < 2) return "A moment later";
+  if (totalMinutes < 60) return `${totalMinutes} minutes later`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours} ${hours === 1 ? "hour" : "hours"} later`;
+  return `${hours}h ${minutes}m later`;
+}
+
+function formatZenSessionBoundaryDateLabel(ms: number): string {
+  const date = new Date(ms);
+  const includeYear = date.getFullYear() !== new Date().getFullYear();
+  return date.toLocaleDateString([], {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    ...(includeYear ? { year: "numeric" } : {}),
   });
-  return `A new stretch begins · ${label}`;
+}
+
+function formatZenSessionBoundaryLabel(
+  gapMs: number,
+  previousActiveAt?: string | null
+): string {
+  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
+  const previousMs = previousActiveAt ? Date.parse(previousActiveAt) : NaN;
+  const labelMs = Number.isFinite(previousMs) ? previousMs : Date.now() - safeGapMs;
+  if (safeGapMs >= ZEN_SESSION_BOUNDARY_DATE_GAP_MS) {
+    return `Last session ${formatZenSessionBoundaryDateLabel(labelMs)}`;
+  }
+  return formatZenSessionGapDuration(safeGapMs);
+}
+
+function formatZenEraBoundaryLabel(
+  previousMessage: Pick<Message, "createdAt">,
+  currentMessage: Pick<Message, "createdAt">
+): string {
+  const previousMs = messageCreatedAtMs(previousMessage);
+  const currentMs = messageCreatedAtMs(currentMessage);
+  if (previousMs === null || currentMs === null) return "A new stretch begins";
+  return formatZenSessionBoundaryLabel(
+    Math.max(0, currentMs - previousMs),
+    previousMessage.createdAt
+  );
 }
 
 function clampZenSessionSummary(text: string | null | undefined): string | null {
@@ -3838,15 +3923,7 @@ function formatZenSessionAwayLabel(
   gapMs: number,
   previousActiveAt?: string | null
 ): string {
-  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
-  const previousMs = previousActiveAt ? Date.parse(previousActiveAt) : NaN;
-  const fallbackMs = Date.now() - safeGapMs;
-  const labelMs = Number.isFinite(previousMs) ? previousMs : fallbackMs;
-  return `Last conversation ${new Date(labelMs).toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })}`;
+  return formatZenSessionBoundaryLabel(gapMs, previousActiveAt);
 }
 
 function effectiveZenSessionBreakGapMs(
@@ -3858,6 +3935,17 @@ function effectiveZenSessionBreakGapMs(
     : NaN;
   const realGapMs = Number.isFinite(previousMs) ? Math.max(0, nowMs - previousMs) : 0;
   return Math.max(sessionBreak.simulatedIdleMs, realGapMs);
+}
+
+function displayZenSessionBreakGapMs(
+  sessionBreak: Pick<ZenSessionBreakState, "previousActiveAt" | "simulatedIdleMs">,
+  nowMs = Date.now()
+): number {
+  const previousMs = sessionBreak.previousActiveAt
+    ? Date.parse(sessionBreak.previousActiveAt)
+    : NaN;
+  if (Number.isFinite(previousMs)) return Math.max(0, nowMs - previousMs);
+  return Math.max(0, sessionBreak.simulatedIdleMs);
 }
 
 function zenSessionBreakUsesFreshStart(
@@ -7190,9 +7278,9 @@ const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
 const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
-const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
-const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
-const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 180_000;
+const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
+const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
+const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 const ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS = [
   { value: "multiply", label: "Multiply" },
   { value: "soft-light", label: "Soft Light" },
@@ -12409,10 +12497,20 @@ function EmptyStateBotGlyph({
       className={`${styles.emptyStateBotGlyph} ${
         privateMode ? styles.emptyStatePrivateBotGlyph : ""
       }`}
+      data-private-mode={privateMode ? "true" : "false"}
       aria-hidden="true"
       style={style}
     >
-      <BotGlyph name={bot.glyph} />
+      <span
+        className={`${styles.emptyStateBotGlyphLayer} ${styles.emptyStateBotGlyphLayerPublic}`}
+      >
+        <BotGlyph name={bot.glyph} />
+      </span>
+      <span
+        className={`${styles.emptyStateBotGlyphLayer} ${styles.emptyStateBotGlyphLayerPrivate}`}
+      >
+        <BotGlyph name={bot.glyph} />
+      </span>
     </span>
   );
 }
@@ -12599,6 +12697,8 @@ const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
 const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
 /** Slightly above bot menu so both open pickers stack predictably over the rail. */
 const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+type ComposeMenuPlacement = "up" | "down" | "right";
+const COMPOSE_MENU_SIDE_HEIGHT_TARGET_PX = 380;
 /** Matches `.composeBotMenu { max-height: min(420px, …) }` for caret popovers. */
 const COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX = 420;
 /** Minimum space below the caret before the caret popover prefers opening downward. */
@@ -12623,7 +12723,7 @@ const COMPOSE_MENU_PORTAL_THEME_VARS = [
 ] as const;
 
 /**
- * Fixed coordinates for an upward-opening compose popover. Menus are
+ * Fixed coordinates for portaled compose popovers. Menus are
  * portaled to `document.body` so they are not clipped by
  * `.composeTools { overflow-y: hidden }` (horizontal scroll rail).
  */
@@ -12631,21 +12731,48 @@ function computeComposeMenuFixedStyle(
   trigger: HTMLButtonElement,
   floorMinWidth: number,
   portalZIndex: number,
-  placement: "up" | "down" = "up"
+  placement: ComposeMenuPlacement = "up"
 ): React.CSSProperties {
   const rect = trigger.getBoundingClientRect();
   const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
   const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
-  const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const gap = 6;
+  const viewportMaxWidth = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const preferredSideLeft = rect.right + gap;
+  const sideLeft = Math.max(
+    pad,
+    Math.min(preferredSideLeft, vw - floorMinWidth - pad)
+  );
+  const sideMaxWidth = Math.max(0, vw - sideLeft - pad);
+  const maxW =
+    placement === "right"
+      ? Math.min(COMPOSE_MENU_MAX_WIDTH_PX, sideMaxWidth)
+      : viewportMaxWidth;
   const minWidth = Math.min(Math.max(rect.width, floorMinWidth), maxW);
   // Anchor using `maxW`, not `minWidth`: the menu may expand up to max-width while
   // clamping only for min-width would leave the right edge past the viewport when the
   // trigger sits near the right side (Images panel model picker).
-  const left = Math.max(pad, Math.min(rect.left, vw - maxW - pad));
+  const left =
+    placement === "right"
+      ? sideLeft
+      : Math.max(pad, Math.min(rect.left, vw - maxW - pad));
+  const sideTop = Math.max(
+    pad,
+    Math.min(rect.top - 6, vh - pad - COMPOSE_MENU_SIDE_HEIGHT_TARGET_PX)
+  );
   const verticalPosition =
-    placement === "down"
-      ? { top: rect.bottom + 6, bottom: "auto" }
-      : { top: "auto", bottom: globalThis.window.innerHeight - rect.top + 6 };
+    placement === "right"
+      ? { top: sideTop, bottom: "auto" }
+      : placement === "down"
+        ? { top: rect.bottom + gap, bottom: "auto" }
+        : { top: "auto", bottom: vh - rect.top + gap };
+  const availableHeight =
+    placement === "right"
+      ? vh - pad - sideTop
+      : placement === "down"
+        ? vh - pad - (rect.bottom + gap)
+        : rect.top - pad - gap;
   const themeVars: Record<string, string> = {};
   const computedStyle = globalThis.window.getComputedStyle(trigger);
   for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
@@ -12661,6 +12788,7 @@ function computeComposeMenuFixedStyle(
     minWidth,
     maxWidth: maxW,
     zIndex: portalZIndex,
+    ["--compose-menu-available-height" as string]: `${Math.max(0, availableHeight)}px`,
     ...themeVars,
   } as React.CSSProperties;
 }
@@ -12670,7 +12798,7 @@ function useComposeMenuPortalStyle(
   triggerRef: React.RefObject<HTMLButtonElement | null>,
   floorMinWidth: number,
   portalZIndex: number = COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
-  placement: "up" | "down" = "up"
+  placement: ComposeMenuPlacement = "up"
 ): React.CSSProperties | undefined {
   const [fixedStyle, setFixedStyle] = useState<
     React.CSSProperties | undefined
@@ -12886,12 +13014,14 @@ interface ComposerBotPickerProps {
   hueLensAvailable?: boolean;
   hueLensTrackGradient?: string;
   hueLensTrackSegments?: readonly HueLensTrackSegment[];
-  /** Dropdown direction. Header pickers should use "down" to avoid top clipping. */
-  placement?: "up" | "down";
+  /** Dropdown direction. Fresh Zen can use "right" to avoid bottom clipping. */
+  placement?: ComposeMenuPlacement;
   /** Increment to close floating picker menus from the parent shell. */
   dismissPopoversSignal?: number;
   /** Optional compact controls shown below the option list. */
   menuFooter?: React.ReactNode;
+  /** Extra class for portaled menu contexts such as the fresh Zen hero picker. */
+  menuClassName?: string;
   /** Portaled menus need their own private-tone marker; app-shell selectors cannot reach document.body children. */
   privateTone?: boolean;
 }
@@ -12914,6 +13044,7 @@ function ComposerBotPicker({
   placement = "up",
   dismissPopoversSignal,
   menuFooter,
+  menuClassName,
   privateTone = false,
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -13064,6 +13195,7 @@ function ComposerBotPicker({
       data-bot-selected={selectedBot ? "true" : undefined}
       data-disabled={disabled ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
+      data-menu-placement={placement}
       style={controlStyle}
     >
       <button
@@ -13136,7 +13268,9 @@ function ComposerBotPicker({
         createPortal(
           <div
             ref={menuRef}
-            className={styles.composeBotMenu}
+            className={`${styles.composeBotMenu}${
+              menuClassName ? ` ${menuClassName}` : ""
+            }`}
             data-private-tone={privateTone ? "true" : undefined}
             style={menuPortalStyle}
           >
@@ -13532,7 +13666,7 @@ interface ComposerModelPickerProps {
   title?: string;
   ariaLabel: string;
   formName?: string;
-  placement?: "up" | "down";
+  placement?: ComposeMenuPlacement;
   minMenuWidthPx?: number;
   menuClassName?: string;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
@@ -20136,17 +20270,74 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     textareaOverlayRef.current.scrollTop = el.scrollTop;
     textareaOverlayRef.current.scrollLeft = el.scrollLeft;
   }, []);
+  const syncTextareaSingleLineState = useCallback((el: HTMLTextAreaElement): boolean => {
+    const wrap = el.parentElement;
+    const setSingleLine = (singleLine: boolean) => {
+      const value = singleLine ? "true" : "false";
+      if (el.dataset.composeSingleLine !== value) {
+        el.dataset.composeSingleLine = value;
+      }
+      if (wrap?.getAttribute("data-compose-single-line") !== value) {
+        wrap?.setAttribute("data-compose-single-line", value);
+      }
+    };
+
+    if (el.value.includes("\n")) {
+      setSingleLine(false);
+      return false;
+    }
+
+    setSingleLine(true);
+    const computed = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(computed.lineHeight);
+    const paddingLeft = Number.parseFloat(computed.paddingLeft);
+    const paddingRight = Number.parseFloat(computed.paddingRight);
+    const contentWidth =
+      el.clientWidth -
+      (Number.isFinite(paddingLeft) ? paddingLeft : 0) -
+      (Number.isFinite(paddingRight) ? paddingRight : 0);
+
+    const mirror = document.createElement("div");
+    mirror.textContent = el.value.length > 0 ? el.value : el.placeholder || " ";
+    mirror.style.position = "absolute";
+    mirror.style.visibility = "hidden";
+    mirror.style.pointerEvents = "none";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "anywhere";
+    mirror.style.boxSizing = "content-box";
+    mirror.style.width = `${Math.max(0, contentWidth)}px`;
+    mirror.style.font = computed.font;
+    mirror.style.fontSize = computed.fontSize;
+    mirror.style.fontFamily = computed.fontFamily;
+    mirror.style.fontWeight = computed.fontWeight;
+    mirror.style.fontStyle = computed.fontStyle;
+    mirror.style.letterSpacing = computed.letterSpacing;
+    mirror.style.lineHeight = computed.lineHeight;
+    document.body.appendChild(mirror);
+    const contentHeight = mirror.getBoundingClientRect().height;
+    mirror.remove();
+
+    if (Number.isFinite(lineHeight) && contentHeight > lineHeight * 1.45) {
+      setSingleLine(false);
+      return false;
+    }
+    return true;
+  }, []);
   const resizeTextareaToContent = useCallback(
     (el: HTMLTextAreaElement) => {
+      el.style.height = "auto";
+      const singleLine = syncTextareaSingleLineState(el);
       const computed = window.getComputedStyle(el);
       const maxHeight = Number.parseFloat(computed.maxHeight);
-      el.style.height = "auto";
+      const minHeight = Number.parseFloat(computed.minHeight);
+      const contentHeight =
+        singleLine && Number.isFinite(minHeight) ? minHeight : el.scrollHeight;
       el.style.height = `${
-        Number.isFinite(maxHeight) ? Math.min(el.scrollHeight, maxHeight) : el.scrollHeight
+        Number.isFinite(maxHeight) ? Math.min(contentHeight, maxHeight) : contentHeight
       }px`;
       syncTextareaOverlayScroll(el);
     },
-    [syncTextareaOverlayScroll]
+    [syncTextareaOverlayScroll, syncTextareaSingleLineState]
   );
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
@@ -22693,6 +22884,11 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
+  const [devToolsPanelSize, setDevToolsPanelSize] =
+    useState<DevToolsPanelSize | null>(null);
+  const devToolsPanelPositionRef = useRef(devToolsPanelPosition);
+  const devToolsPanelSizeRef = useRef(devToolsPanelSize);
+  const devToolsPanelResizePrimedRef = useRef(false);
   const [zenPersonaBackdropTuning, setZenPersonaBackdropTuning] =
     useState<ZenPersonaBackdropTuning>(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
@@ -23840,10 +24036,17 @@ function HomeContent(): React.JSX.Element {
             setDevToolsActiveSection(activeSection as DevToolsActiveSection);
           }
 
+          const panelSize = normalizeStoredDevToolsPanelSize(
+            parsed.panelSize,
+            viewportW,
+            viewportH
+          );
+          if (panelSize) setDevToolsPanelSize(panelSize);
+
           const panelPosition = normalizeStoredDevToolsPosition(
             parsed.panelPosition,
-            46,
-            42,
+            panelSize?.width ?? 46,
+            panelSize?.height ?? 42,
             viewportW,
             viewportH
           );
@@ -23956,6 +24159,7 @@ function HomeContent(): React.JSX.Element {
       const snapshot: DevToolsUiStateStorage = {
         activeSection: devToolsActiveSection,
         panelPosition: devToolsPanelPosition,
+        panelSize: devToolsPanelSize ?? undefined,
         mood: {
           open: devMoodVisualOpen,
           position: devMoodVisualPosition,
@@ -23992,12 +24196,21 @@ function HomeContent(): React.JSX.Element {
     devMoodVisualPosition,
     devToolsActiveSection,
     devToolsPanelPosition,
+    devToolsPanelSize,
     devToolsUiStorageLoaded,
     devZenPauseTesterOpen,
     devZenPauseTesterPosition,
     zenToolLabOpen,
     zenToolLabPosition,
   ]);
+
+  useEffect(() => {
+    devToolsPanelPositionRef.current = devToolsPanelPosition;
+  }, [devToolsPanelPosition]);
+
+  useEffect(() => {
+    devToolsPanelSizeRef.current = devToolsPanelSize;
+  }, [devToolsPanelSize]);
 
   useEffect(() => {
     if (!devToolsRuntimeActive) return;
@@ -24762,27 +24975,61 @@ function HomeContent(): React.JSX.Element {
     panelNode.style.top = `${devToolsPanelPosition.y}px`;
     panelNode.style.setProperty("--dev-tools-panel-left", `${devToolsPanelPosition.x}px`);
     panelNode.style.setProperty("--dev-tools-panel-top", `${devToolsPanelPosition.y}px`);
-  }, [devToolsPanelPosition]);
+    if (devToolsPanelSize) {
+      panelNode.style.width = `${devToolsPanelSize.width}px`;
+      panelNode.style.height = `${devToolsPanelSize.height}px`;
+    } else {
+      panelNode.style.removeProperty("width");
+      panelNode.style.removeProperty("height");
+    }
+  }, [devToolsPanelPosition, devToolsPanelSize]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsOpen) {
+      devToolsPanelResizePrimedRef.current = false;
+      return;
+    }
     const panelNode = devToolsPanelRef.current;
     if (!panelNode || typeof ResizeObserver === "undefined") return;
 
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
+    const resizeObserver = new ResizeObserver(() => {
+      const rect = panelNode.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
       setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(width, height));
-      setDevToolsPanelPosition((position) => {
-        const next = clampDevToolsPanelPosition(
-          position.x,
-          position.y,
+      const position = devToolsPanelPositionRef.current;
+      const next = clampDevToolsPanelRect(
+        {
+          x: position.x,
+          y: position.y,
           width,
           height,
-          viewportWidth,
-          viewportHeight,
-          devPanelSafeAreaInsets
-        );
-        return next.x === position.x && next.y === position.y ? position : next;
+        },
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      );
+      if (next.x !== position.x || next.y !== position.y) {
+        const nextPosition = { x: next.x, y: next.y };
+        devToolsPanelPositionRef.current = nextPosition;
+        setDevToolsPanelPosition(nextPosition);
+      }
+
+      const hasSeenInitialMeasurement = devToolsPanelResizePrimedRef.current;
+      devToolsPanelResizePrimedRef.current = true;
+      if (!hasSeenInitialMeasurement && !devToolsPanelSizeRef.current) return;
+
+      setDevToolsPanelSize((current) => {
+        if (
+          current &&
+          Math.abs(current.width - next.width) < 1 &&
+          Math.abs(current.height - next.height) < 1
+        ) {
+          return current;
+        }
+        const nextSize = { width: next.width, height: next.height };
+        devToolsPanelSizeRef.current = nextSize;
+        return nextSize;
       });
     });
 
@@ -26644,6 +26891,8 @@ function HomeContent(): React.JSX.Element {
     options: {
       modelMenuClassName?: string;
       modelMenuWidthPx?: number;
+      botMenuClassName?: string;
+      botMenuPlacement?: ComposeMenuPlacement;
     } = {}
   ): React.ReactNode => {
     // Use the effective provider so the picker shows local options whenever
@@ -26747,7 +26996,7 @@ function HomeContent(): React.JSX.Element {
             onChange={handleZenPersonaSelectionChange}
             bots={zenPersonaPickerBots}
             resolvedTheme={resolvedTheme}
-            placement="down"
+            placement={options.botMenuPlacement ?? "down"}
             disabled={zenPersonaPickerDisabled}
             title={
               pendingReplyVisible
@@ -26764,6 +27013,7 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackSegments={hueLensTrackSegments}
             dismissPopoversSignal={composerPopoverDismissSignal}
             menuFooter={renderZenPersonaTransitionChoiceControl()}
+            menuClassName={options.botMenuClassName}
             privateTone={appWidePrivateMode}
           />
         ) : null}
@@ -27925,7 +28175,7 @@ function HomeContent(): React.JSX.Element {
       const currentMs = messageCreatedAtMs(current);
       if (previousMs === null || currentMs === null) continue;
       if (currentMs - previousMs < zenSessionIdleGapMs) continue;
-      labels.set(current.id, formatZenEraBoundaryLabel(current));
+      labels.set(current.id, formatZenEraBoundaryLabel(source[i - 1]!, current));
     }
     return labels;
   }, [view, detail?.mode, detail?.messages, zenSessionIdleGapMs]);
@@ -27999,9 +28249,9 @@ function HomeContent(): React.JSX.Element {
     );
   }, [activeZenSessionBreak, visibleDetailMessages]);
   const renderZenSessionBreakNode = useCallback((sessionBreak: ZenSessionBreakState) => {
-    const effectiveGapMs = effectiveZenSessionBreakGapMs(sessionBreak);
+    const displayGapMs = displayZenSessionBreakGapMs(sessionBreak);
     const awayLabel = formatZenSessionAwayLabel(
-      effectiveGapMs,
+      displayGapMs,
       sessionBreak.previousActiveAt
     );
     return (
@@ -28980,7 +29230,7 @@ function HomeContent(): React.JSX.Element {
 
   const compactedSummaryDebugNode = useMemo(() => {
     if (!devToolsRuntimeActive) return null;
-    if (view !== "chat" || !activeZenConversationId) return null;
+    if (view !== "chat") return null;
     const summaryFromManual =
       manualCompactionStatus?.conversationId === activeZenConversationId &&
       (manualCompactionStatus.mode === "zen" || manualCompactionStatus.mode === "chat")
@@ -34924,10 +35174,16 @@ function HomeContent(): React.JSX.Element {
     void refreshConversations();
   }
 
-  async function clearConversationFromSlashCommand(): Promise<void> {
-    if (pendingReplyVisible) {
+  async function clearConversationFromSlashCommand(
+    options: {
+      conversationIdOverride?: string | null;
+      preserveComposer?: boolean;
+      allowPendingReply?: boolean;
+    } = {}
+  ): Promise<boolean> {
+    if (pendingReplyVisible && !options.allowPendingReply) {
       setError("Wait for the current reply to finish before clearing this chat.");
-      return;
+      return false;
     }
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
@@ -34935,20 +35191,25 @@ function HomeContent(): React.JSX.Element {
       view === "chat"
         ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
-    const conversationId = activeConversationId ?? fallbackChatConversationId;
+    const conversationId =
+      options.conversationIdOverride !== undefined
+        ? options.conversationIdOverride
+        : activeConversationId ?? fallbackChatConversationId;
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
-    if (editingMessageId !== null) {
-      setEditingMessageId(null);
-      setEditingOriginalText("");
+    if (!options.preserveComposer) {
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
     }
     if (!conversationId || conversationId === "pending" || detail?.incognito === true) {
       clearAllDisplayedConversationState();
       setForceNewConversationOnNextSend(false);
       setComposerPrimed(false);
-      return;
+      return true;
     }
     try {
       await api<{
@@ -34999,8 +35260,10 @@ function HomeContent(): React.JSX.Element {
       setForceNewConversationOnNextSend(false);
       setComposerPrimed(false);
       await refreshConversations();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Conversation clear failed.");
+      return false;
     }
   }
 
@@ -35215,6 +35478,60 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function firstComposerCommandToken(trimmedLine: string): string {
+    return trimmedLine.split(/\s+/)[0]?.trim().toLowerCase() ?? "";
+  }
+
+  function isBuiltInOperationalSlashCommand(trimmedLine: string): boolean {
+    const normalizedCommand = firstComposerCommandToken(trimmedLine);
+    return (
+      normalizedCommand === "/compact" ||
+      normalizedCommand === "/summarize" ||
+      normalizedCommand === "/clear" ||
+      normalizedCommand === "/cls" ||
+      normalizedCommand === "/atmosphere" ||
+      normalizedCommand === "/refresh" ||
+      normalizedCommand === "/restart" ||
+      normalizedCommand === "/new-session" ||
+      normalizedCommand === "/forgive-me" ||
+      normalizedCommand === PSYCHIC_SLASH_COMMAND ||
+      normalizedCommand === "/help"
+    );
+  }
+
+  function isDevOnlySlashCommand(trimmedLine: string): boolean {
+    if (DEV_TOOLS_ENABLED) {
+      const normalizedCommand = firstComposerCommandToken(trimmedLine);
+      if (normalizedCommand === "/forget" || normalizedCommand === "/forget-all") {
+        return true;
+      }
+    }
+    return (
+      PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED &&
+      parsePrismDevChatCommand(trimmedLine) !== null
+    );
+  }
+
+  function isLocalOnlyComposerCommand(trimmedLine: string): boolean {
+    if (parseGlobalClearCommand(trimmedLine).kind !== "none") return true;
+    return (
+      isBuiltInOperationalSlashCommand(trimmedLine) ||
+      isDevOnlySlashCommand(trimmedLine)
+    );
+  }
+
+  function ignoreLocalOnlyComposerCommandWhileReplying(trimmedLine: string): boolean {
+    const replyBusy =
+      (pendingReply && !canSendTextWhileReplyPending()) ||
+      chatAssistantRevealInProgress;
+    if (!replyBusy) return false;
+    if (!isLocalOnlyComposerCommand(trimmedLine)) return false;
+    setDraft("");
+    setComposerSendTintActive(false);
+    setError(null);
+    return true;
+  }
+
   /** Built-in operational slash commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
     const tokens = trimmedLine
@@ -35223,19 +35540,7 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (
-      normalizedCommand !== "/compact" &&
-      normalizedCommand !== "/summarize" &&
-      normalizedCommand !== "/clear" &&
-      normalizedCommand !== "/cls" &&
-      normalizedCommand !== "/atmosphere" &&
-      normalizedCommand !== "/refresh" &&
-      normalizedCommand !== "/restart" &&
-      normalizedCommand !== "/new-session" &&
-      normalizedCommand !== "/forgive-me" &&
-      normalizedCommand !== PSYCHIC_SLASH_COMMAND &&
-      normalizedCommand !== "/help"
-    ) {
+    if (!isBuiltInOperationalSlashCommand(trimmedLine)) {
       return false;
     }
     const psychicCommand = parsePsychicSlashCommand(trimmedLine);
@@ -35859,6 +36164,14 @@ function HomeContent(): React.JSX.Element {
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
+      ignoreLocalOnlyComposerCommandWhileReplying(rawTrimmed)
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
       await consumeBuiltInOperationalSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -35922,6 +36235,15 @@ function HomeContent(): React.JSX.Element {
         ? commandCenterResolution.promptShortcut
         : null;
     const commandCenterPromptActive = commandCenterResolution.kind === "resolved";
+    const naturalContextResetRequested =
+      rawTrimmed.length > 0 &&
+      view === "chat" &&
+      !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
+      !editingMessageId &&
+      !commandCenterPromptActive &&
+      shouldResetPreviousSessionContext(rawTrimmed);
+    let naturalContextResetApplied = false;
     const commandCenterSubmitActive =
       commandCenterPromptActive && commandCenterResolution.promptShortcut !== null;
     const composerWildcardResolution =
@@ -36050,6 +36372,41 @@ function HomeContent(): React.JSX.Element {
         setError(null);
       }
       return;
+    }
+    if (naturalContextResetRequested) {
+      const contextResetConversationId =
+        detailForSend?.id && detailForSend.id !== "pending"
+          ? detailForSend.id
+          : selectedId;
+      const cleared = await clearConversationFromSlashCommand({
+        conversationIdOverride: contextResetConversationId,
+        preserveComposer: true,
+        allowPendingReply: true,
+      });
+      if (!cleared) {
+        setDraft(rawDraft);
+        setComposerSendTintActive(rawDraft.trim().length > 0);
+        return;
+      }
+      naturalContextResetApplied = true;
+      setPendingZenSessionBreak(null);
+      setPendingZenSessionResumeContext(null);
+      setZenSessionBreak(null);
+      persistZenSessionBreak(null);
+      chatSummaryRefreshMarkerRef.current = null;
+      prismInterruptionForSend = undefined;
+      detailForSend = detailForSend
+        ? {
+            ...detailForSend,
+            title: "New chat",
+            hasAssistantReply: false,
+            lastBotId: null,
+            lastBotColor: null,
+            zenWallpaper: resetZenWallpaperForFreshConversation(detailForSend.zenWallpaper),
+            messages: [],
+          }
+        : null;
+      baselineMessageCount = 0;
     }
     if (chatAutoRestoreSuppressed) {
       setChatAutoRestoreSuppressed(false);
@@ -36313,6 +36670,7 @@ function HomeContent(): React.JSX.Element {
         zenFreshStartGapMs
       );
     const pendingZenSessionResumeContextForSend =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       forceNewConversation &&
@@ -36320,6 +36678,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingZenSessionResumeContext
         : null;
     const pendingZenSessionBreakForSend =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       forceNewConversation &&
@@ -36327,6 +36686,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingZenSessionBreak
         : null;
     const activeZenSessionBreakResumeContext =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       activeZenSessionBreak &&
@@ -51039,6 +51399,20 @@ function HomeContent(): React.JSX.Element {
           aria-busy={devToolsBusy ? "true" : undefined}
           data-section={devToolsActiveSection}
           data-console-only={devToolsConsoleOnly ? "true" : undefined}
+          style={
+            {
+              left: `${devToolsPanelPosition.x}px`,
+              top: `${devToolsPanelPosition.y}px`,
+              "--dev-tools-panel-left": `${devToolsPanelPosition.x}px`,
+              "--dev-tools-panel-top": `${devToolsPanelPosition.y}px`,
+              ...(devToolsPanelSize
+                ? {
+                    width: `${devToolsPanelSize.width}px`,
+                    height: `${devToolsPanelSize.height}px`,
+                  }
+                : {}),
+            } as React.CSSProperties
+          }
         >
           {!devToolsConsoleOnly ? (
             <div
@@ -53810,7 +54184,7 @@ function HomeContent(): React.JSX.Element {
                           type="range"
                           min={MIN_ZEN_ASK_QUESTION_PATIENCE_MS}
                           max={MAX_ZEN_ASK_QUESTION_PATIENCE_MS}
-                          step={5_000}
+                          step={10_000}
                           value={zenAskQuestionPatienceMs}
                           onChange={(event) => {
                             const next = normalizeZenAskQuestionPatienceMsSetting(
@@ -63086,22 +63460,6 @@ function HomeContent(): React.JSX.Element {
       zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
     const zenFallbackWallpaperBotId =
       zenPersonaBotId ?? detail?.lastBotId ?? detail?.botId ?? null;
-    const zenFallbackWallpaperHasBot = Boolean(zenFallbackWallpaperBotId?.trim());
-    const zenRememberedWallpaperLookupMatches =
-      zenFallbackWallpaperHasBot &&
-      zenRememberedWallpaperLookup?.botId === zenFallbackWallpaperBotId;
-    const zenRememberedWallpaperResolved =
-      !zenFallbackWallpaperHasBot ||
-      appWidePrivateMode ||
-      Boolean(
-        zenRememberedWallpaperLookupMatches &&
-          zenRememberedWallpaperLookup?.resolved
-      );
-    const zenRememberedWallpaperHasWallpaper = Boolean(
-      !appWidePrivateMode &&
-      zenRememberedWallpaperLookupMatches &&
-        zenRememberedWallpaperLookup?.hasWallpaper
-    );
     const zenFallbackWallpaperConversationId =
       detail?.id && detail.id !== "pending"
         ? detail.id
@@ -63116,8 +63474,7 @@ function HomeContent(): React.JSX.Element {
       : zenFallbackWallpaperNewConversationSeed;
     const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
       chatSurface: chatLikeSurface,
-      rememberedWallpaperResolved: zenRememberedWallpaperResolved,
-      hasRememberedWallpaper: zenRememberedWallpaperHasWallpaper,
+      hasRememberedWallpaper: zenRememberedWallpaperVisible,
       atmosphereTimelineLength: zenAtmosphereTimeline.length,
     });
     const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
@@ -63703,6 +64060,8 @@ function HomeContent(): React.JSX.Element {
                         {renderHeaderModelPicker({
                           modelMenuClassName: styles.zenSplashModelMenu,
                           modelMenuWidthPx: 220,
+                          botMenuClassName: styles.zenSplashBotMenu,
+                          botMenuPlacement: "right",
                         })}
                       </div>
                     ) : null}
@@ -63877,7 +64236,12 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
-            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const zenSessionBreakImmediatelyBeforeMessage =
+              zenSessionBreakAnchorIndex !== null &&
+              zenSessionBreakAnchorIndex === messageIndex - 1;
+            const zenEraBoundaryLabel = zenSessionBreakImmediatelyBeforeMessage
+              ? null
+              : zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             const starterPromptAlignment =
               msg.id === starterPromptCenteredMessageId
                 ? "centered"
@@ -65395,7 +65759,12 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
-            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const zenSessionBreakImmediatelyBeforeMessage =
+              zenSessionBreakAnchorIndex !== null &&
+              zenSessionBreakAnchorIndex === messageIndex - 1;
+            const zenEraBoundaryLabel = zenSessionBreakImmediatelyBeforeMessage
+              ? null
+              : zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             const starterPromptAlignment =
               msg.id === starterPromptCenteredMessageId
                 ? "centered"
