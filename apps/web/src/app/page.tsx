@@ -4787,6 +4787,7 @@ function pickStableStatusLabel(
 
 const FALLBACK_PROCESSING_HINT_DELAY_MS = 3800;
 const FALLBACK_PROCESSING_TICK_MS = 300;
+const PSYCHIC_THINKING_INDICATOR_DELAY_MS = 700;
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
   "copyright",
   "copyrighted",
@@ -27334,6 +27335,27 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode) return source;
     return source;
   }, [chatEphemeralMode, detail?.messages]);
+  const psychicThinkingDelayElapsed =
+    pendingReplyVisible &&
+    pendingReplyStartedAtMs !== null &&
+    pendingReplyNowMs - pendingReplyStartedAtMs >= PSYCHIC_THINKING_INDICATOR_DELAY_MS;
+  const psychicThinkingTargetMessageId = useMemo(() => {
+    if (settings?.psychicModeEnabled !== true) return null;
+    if (effectivePreferredProvider !== "local") return null;
+    if (!psychicThinkingDelayElapsed) return null;
+    for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
+      const message = visibleDetailMessages[i];
+      if (message?.role === "user" && !message.psychicThought) {
+        return message.id;
+      }
+    }
+    return null;
+  }, [
+    effectivePreferredProvider,
+    psychicThinkingDelayElapsed,
+    settings?.psychicModeEnabled,
+    visibleDetailMessages,
+  ]);
   const promptShortcutColorIndexByMessageId = useMemo(() => {
     const colorIndexes = new Map<string, number>();
     let promptShortcutIndex = 0;
@@ -36600,6 +36622,37 @@ function HomeContent(): React.JSX.Element {
             })}
           </button>
         ))}
+      </div>
+    );
+  }
+
+  function renderPsychicThoughtLine(msg: Message): React.ReactNode {
+    const pendingThinking = msg.id === psychicThinkingTargetMessageId;
+    const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
+      pendingThinking,
+      pendingDelayElapsed: pendingThinking,
+    });
+    if (!psychicLine) return null;
+    return (
+      <div
+        className={styles.psychicThoughtBlock}
+        data-psychic-state={psychicLine.state}
+        data-psychic-animated={psychicLine.animated ? "true" : "false"}
+        role={psychicLine.state === "thinking" ? "status" : undefined}
+        aria-live={psychicLine.state === "thinking" ? "polite" : undefined}
+        aria-label={psychicLine.ariaLabel}
+      >
+        <span className={styles.psychicThoughtLabel}>{psychicLine.label}</span>
+        <p>
+          <span className={styles.psychicThoughtText}>{psychicLine.summary}</span>
+          {psychicLine.state === "thinking" ? (
+            <span className={styles.psychicThoughtShimmer} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : null}
+        </p>
       </div>
     );
   }
@@ -63065,17 +63118,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
-                {(() => {
-                  const psychicLine = psychicThoughtDisplayLineForMessage(msg);
-                  return psychicLine ? (
-                    <div className={styles.psychicThoughtBlock}>
-                      <span className={styles.psychicThoughtLabel}>
-                        {psychicLine.label}
-                      </span>
-                      <p>{psychicLine.summary}</p>
-                    </div>
-                  ) : null;
-                })()}
+                {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -64582,17 +64625,7 @@ function HomeContent(): React.JSX.Element {
                   }
                   onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
                 />
-                {(() => {
-                  const psychicLine = psychicThoughtDisplayLineForMessage(msg);
-                  return psychicLine ? (
-                    <div className={styles.psychicThoughtBlock}>
-                      <span className={styles.psychicThoughtLabel}>
-                        {psychicLine.label}
-                      </span>
-                      <p>{psychicLine.summary}</p>
-                    </div>
-                  ) : null;
-                })()}
+                {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
