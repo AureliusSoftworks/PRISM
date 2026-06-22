@@ -4025,11 +4025,12 @@
 
 .appLayout[data-private-active="true"]
   :where(
-    .brandIconShell,
+    .brandIconShell .brandIcon,
+    .brandIconShell .brandIconLight,
     .brandWordmark,
     .chatBotTileBotGlyph,
     .composeBotTriggerGlyph,
-    .emptyStateBotGlyph,
+    .emptyStateBotGlyphLayer,
     .conversationGroupGlyph,
     .messageMoodBadge,
     .providerDot,
@@ -4037,18 +4038,19 @@
   ),
 .appLayout[data-zen-private-tone="true"]
   :where(
-    .brandIconShell,
+    .brandIconShell .brandIcon,
+    .brandIconShell .brandIconLight,
     .brandWordmark,
     .chatBotTileBotGlyph,
     .composeBotTriggerGlyph,
-    .emptyStateBotGlyph,
+    .emptyStateBotGlyphLayer,
     .conversationGroupGlyph,
     .messageMoodBadge,
     .providerDot,
     .imageReadyNoticeChip
   ),
 .composeBotMenu[data-private-tone="true"] :where(.composeBotOptionGlyph, .composeBotOptionName) {
-  filter: saturate(0.18) contrast(0.96);
+  filter: saturate(0.74) contrast(0.98);
 }
 
 /* ── App shell ── */
@@ -8035,6 +8037,7 @@
   .composeBotTriggerGlyph > svg,
   .composeBotOptionGlyph > svg,
   .emptyStateBotGlyph > svg,
+  .emptyStateBotGlyphLayer,
   .headerIdentityGlyph > svg,
   .conversationGroupGlyph > svg {
     transition: none;
@@ -9464,9 +9467,58 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     box-shadow 0.2s ease;
 }
 
-.emptyStateBotGlyph > svg {
+.emptyStateBotGlyph::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 82% 72% at 50% 52%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 22%, transparent) 0 40%,
+      transparent 72%
+    );
+  filter: blur(15px);
+  opacity: 0.54;
+  transform: scale(0.96);
+  transition:
+    opacity 0.22s ease,
+    filter 0.22s ease,
+    transform 0.24s ease;
+}
+
+.emptyStateBotGlyph > svg,
+.emptyStateBotGlyphLayer > svg {
   width: 34px;
   height: 34px;
+}
+
+.emptyStateBotGlyphLayer {
+  grid-area: 1 / 1;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  transition:
+    opacity 0.22s ease,
+    filter 0.22s ease,
+    transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.emptyStateBotGlyphLayerPublic {
+  opacity: 1;
+  filter: none;
+  transform: rotate(0deg) scale(1);
+}
+
+.emptyStateBotGlyphLayerPrivate {
+  opacity: 0;
+  filter: blur(0.5px);
+  transform: rotate(0deg) scale(0.92);
 }
 
 .emptyStatePrivateBotGlyph {
@@ -9485,6 +9537,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 18px color-mix(in srgb, #000000 24%, transparent);
 }
 
+.emptyStatePrivateBotGlyph::before {
+  inset: -32px;
+  background:
+    radial-gradient(
+      ellipse 88% 76% at 50% 54%,
+      color-mix(in srgb, var(--fg) 18%, transparent) 0 34%,
+      color-mix(in srgb, var(--bot-color, var(--fg)) 10%, transparent) 44%,
+      transparent 74%
+    );
+  filter: blur(20px);
+  opacity: 0.78;
+  transform: scale(1.04);
+}
+
 .themeLight .emptyStatePrivateBotGlyph {
   background:
     radial-gradient(
@@ -9498,8 +9564,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 16%, transparent);
 }
 
+.themeLight .emptyStatePrivateBotGlyph::before {
+  background:
+    radial-gradient(
+      ellipse 88% 76% at 50% 54%,
+      color-mix(in srgb, var(--fg) 11%, transparent) 0 34%,
+      color-mix(in srgb, var(--bot-color, var(--fg)) 8%, transparent) 44%,
+      transparent 74%
+    );
+  opacity: 0.64;
+}
+
 .emptyStatePrivateBotGlyph > svg {
   transform: rotate(180deg);
+}
+
+.emptyStateBotGlyph[data-private-mode="true"] .emptyStateBotGlyphLayerPublic {
+  opacity: 0;
+  filter: blur(0.5px);
+  transform: rotate(-180deg) scale(0.92);
+}
+
+.emptyStateBotGlyph[data-private-mode="true"] .emptyStateBotGlyphLayerPrivate {
+  opacity: 1;
+  filter: none;
+  transform: rotate(180deg) scale(1);
 }
 
 /* Clickable hero in the COMMITTED state — wraps EmptyStateIcon so the
@@ -11794,7 +11883,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenEraBoundary {
   width: clamp(260px, 56vw, 760px);
-  margin: 18px auto 8px;
+  margin: clamp(56px, 9dvh, 116px) auto clamp(34px, 5dvh, 72px);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -11840,9 +11929,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenSessionBreak {
   width: min(760px, calc(100% - 28px));
-  margin: clamp(44px, 8dvh, 96px) auto clamp(180px, 28dvh, 280px);
+  margin: clamp(56px, 9dvh, 118px) auto clamp(150px, 24dvh, 250px);
   display: grid;
-  gap: clamp(230px, 34dvh, 390px);
+  gap: clamp(170px, 28dvh, 320px);
   color: var(--fg);
   scroll-margin-block: clamp(56px, 10dvh, 92px);
 }
@@ -12886,14 +12975,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--bg-surface) 84%, var(--fg) 16%),
-      color-mix(in srgb, var(--bg-deep) 84%, var(--fg) 16%)
+      color-mix(in srgb, var(--bg-surface) 82%, var(--accent) 18%),
+      color-mix(in srgb, var(--bg-deep) 84%, var(--accent) 16%)
     );
-  border: 1px solid color-mix(in srgb, var(--fg) 18%, var(--line));
-  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  color: color-mix(in srgb, var(--accent) 48%, var(--fg) 52%);
   box-shadow:
     var(--shadow-sm),
-    inset -3px 0 0 color-mix(in srgb, var(--accent) 26%, var(--fg) 74%);
+    inset -3px 0 0 color-mix(in srgb, var(--accent) 46%, var(--fg) 54%);
 }
 
 .message h4 {
@@ -16170,6 +16259,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 18px 42px rgba(0, 0, 0, 0.34));
 }
 
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateIconButton:has(.emptyStatePrivateBotGlyph) {
+  filter: none;
+}
+
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleBlock {
   width: min(680px, calc(100vw - 36px));
   justify-items: center;
@@ -16323,6 +16416,27 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenSplashModelMenu .composeBotListbox {
   max-height: min(222px, calc(100vh - 346px));
+  padding: 4px;
+  gap: 1px;
+  border-radius: 7px;
+}
+
+.composeBotMenu.zenSplashBotMenu {
+  min-width: min(240px, calc(100vw - 24px)) !important;
+  max-width: min(300px, calc(100vw - 24px));
+  max-height: min(380px, var(--compose-menu-available-height, calc(100dvh - 96px)));
+  border-radius: 9px;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+.zenSplashBotMenu .composeBotListbox {
+  flex: 1 1 auto;
+  max-height: min(
+    260px,
+    max(96px, calc(var(--compose-menu-available-height, 380px) - 118px))
+  );
   padding: 4px;
   gap: 1px;
   border-radius: 7px;
@@ -18842,12 +18956,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 88px;
   padding: 14px 18px;
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-compose);
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   opacity: 0.52;
   filter: saturate(0.72);
   transition:
@@ -19580,6 +19699,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeBotControl[data-open="true"] .composeBotTriggerChevron {
   transform: rotate(180deg);
+}
+
+.composeBotControl[data-open="true"][data-menu-placement="right"] .composeBotTriggerChevron {
+  transform: rotate(-90deg);
 }
 
 /* Popover menu. Opens UPWARD from the trigger because the composer
@@ -20720,10 +20843,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-height: 60px;
   max-height: 220px;
   resize: none;
-  padding: 17px 18px;
+  padding: var(--compose-textarea-padding, 17px 18px);
   font: inherit;
-  font-size: var(--font-size-compose);
-  line-height: 1.42;
+  font-size: var(--compose-textarea-font-size, var(--font-size-compose));
+  line-height: var(--compose-textarea-line-height, 1.42);
   min-width: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
   /* Hide internal scrollbar — only the conversation pane should scroll. */
@@ -20736,12 +20859,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .composeTextareaVisualWrap {
-  --compose-textarea-overlay-padding: 17px 18px;
-  --compose-textarea-overlay-font-size: var(--font-size-compose);
-  --compose-textarea-overlay-line-height: 1.42;
   position: relative;
   width: 100%;
   min-width: 0;
+}
+
+.compose .composeTextareaVisualWrap {
+  --compose-textarea-padding: 17px 18px;
+  --compose-textarea-font-size: var(--font-size-compose);
+  --compose-textarea-line-height: 1.42;
+  --compose-textarea-overlay-padding: var(--compose-textarea-padding);
+  --compose-textarea-overlay-font-size: var(--compose-textarea-font-size);
+  --compose-textarea-overlay-line-height: var(--compose-textarea-line-height);
+}
+
+.compose .composeTextareaVisualWrap[data-compose-single-line="true"] {
+  --compose-textarea-padding: 17.5px 18px;
+  --compose-textarea-font-size: calc(var(--font-size-compose) + 1px);
+  --compose-textarea-line-height: 1.34;
 }
 
 .composeTextareaVisualOverlay {
@@ -21056,6 +21191,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--accent);
   color: var(--accent-text);
   align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 96px;
   min-height: 60px;
   padding: 0 20px;
@@ -21063,6 +21201,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font: inherit;
   font-size: var(--font-size-compose);
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   opacity: 0.52;
   filter: saturate(0.72);
   transform: translateX(0);
@@ -33647,11 +33787,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose textarea {
     border-radius: 14px;
     min-height: 52px;
-    padding: 12px 14px;
   }
 
-  .composeTextareaVisualWrap {
-    --compose-textarea-overlay-padding: 12px 14px;
+  .compose .composeTextareaVisualWrap {
+    --compose-textarea-padding: 12px 14px;
+  }
+
+  .compose .composeTextareaVisualWrap[data-compose-single-line="true"] {
+    --compose-textarea-padding: 13.75px 14px;
+    --compose-textarea-font-size: calc(var(--font-size-compose) + 1px);
+    --compose-textarea-line-height: 1.32;
   }
 
   .composeInner {

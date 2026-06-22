@@ -32,7 +32,6 @@ describe("resolveZenFallbackWallpaperVariant", () => {
 describe("shouldShowZenFallbackWallpaper", () => {
   const baseline = {
     chatSurface: true,
-    rememberedWallpaperResolved: true,
     hasRememberedWallpaper: false,
     atmosphereTimelineLength: 0,
   };
@@ -41,11 +40,10 @@ describe("shouldShowZenFallbackWallpaper", () => {
     assert.equal(shouldShowZenFallbackWallpaper(baseline), true);
   });
 
-  it("allows the caller to treat Prism/default Zen as lookup-resolved", () => {
+  it("does not wait for remembered Atmosphere lookup state", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({
         ...baseline,
-        rememberedWallpaperResolved: true,
       }),
       true
     );
@@ -62,11 +60,11 @@ describe("shouldShowZenFallbackWallpaper", () => {
     );
   });
 
-  it("waits for the remembered wallpaper lookup to resolve", () => {
+  it("does not show outside Zen chat surfaces", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({
         ...baseline,
-        rememberedWallpaperResolved: false,
+        chatSurface: false,
       }),
       false
     );

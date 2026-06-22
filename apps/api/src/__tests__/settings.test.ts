@@ -1049,22 +1049,23 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     const next = resolveNextSettings(
       {
         zenAskQuestionPatienceEnabled: true,
-        zenAskQuestionPatienceMs: 90_000,
+        zenAskQuestionPatienceMs: 40_000,
       },
       baseline()
     );
 
     assert.equal(next.zenAskQuestionPatienceEnabled, true);
-    assert.equal(next.zenAskQuestionPatienceMs, 90_000);
+    assert.equal(next.zenAskQuestionPatienceMs, 40_000);
   });
 
   it("clamps AskQuestion patience timing while preserving invalid values", () => {
     const current = baseline({
       zenAskQuestionPatienceEnabled: 1,
-      zenAskQuestionPatienceMs: 95_000,
+      zenAskQuestionPatienceMs: 50_000,
     });
     const low = resolveNextSettings({ zenAskQuestionPatienceMs: 1_000 }, current);
     const high = resolveNextSettings({ zenAskQuestionPatienceMs: 999_000 }, current);
+    const stepped = resolveNextSettings({ zenAskQuestionPatienceMs: 45_000 }, current);
     const invalid = resolveNextSettings(
       {
         zenAskQuestionPatienceEnabled: "sometimes",
@@ -1075,8 +1076,9 @@ describe("resolveNextSettings — Zen Mode settings", () => {
 
     assert.equal(low.zenAskQuestionPatienceMs, MIN_ZEN_ASK_QUESTION_PATIENCE_MS);
     assert.equal(high.zenAskQuestionPatienceMs, MAX_ZEN_ASK_QUESTION_PATIENCE_MS);
+    assert.equal(stepped.zenAskQuestionPatienceMs, 50_000);
     assert.equal(invalid.zenAskQuestionPatienceEnabled, true);
-    assert.equal(invalid.zenAskQuestionPatienceMs, 95_000);
+    assert.equal(invalid.zenAskQuestionPatienceMs, 50_000);
   });
 
   it("stores Zen Autonomy while preserving current value for invalid input", () => {

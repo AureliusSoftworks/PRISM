@@ -156,11 +156,12 @@ describe("AskQuestion patience timer", () => {
   });
 
   it("clamps duration and reports expiry once", () => {
-    assert.equal(normalizeAskQuestionPatienceDurationMs(1_000), 20_000);
-    assert.equal(normalizeAskQuestionPatienceDurationMs(999_000), 180_000);
+    assert.equal(normalizeAskQuestionPatienceDurationMs(1_000), 10_000);
+    assert.equal(normalizeAskQuestionPatienceDurationMs(45_000), 50_000);
+    assert.equal(normalizeAskQuestionPatienceDurationMs(999_000), 60_000);
     const expired = advanceAskQuestionPatience({
-      durationMs: 20_000,
-      elapsedMs: 19_500,
+      durationMs: 10_000,
+      elapsedMs: 9_500,
       fromMs: 0,
       toMs: 1_000,
       paused: false,

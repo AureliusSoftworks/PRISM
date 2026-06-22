@@ -62,9 +62,10 @@ export const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
 export const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
 export const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
 export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
-export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 75_000;
-export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 20_000;
-export const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 180_000;
+export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
+export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
+export const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
+export const STEP_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -601,11 +602,19 @@ export function normalizeZenAskQuestionPatienceMs(
   value: unknown,
   fallback = DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS
 ): number {
-  return normalizeNumberSetting(
+  const clamped = normalizeNumberSetting(
     value,
     fallback,
     MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
     MAX_ZEN_ASK_QUESTION_PATIENCE_MS
+  );
+  return Math.min(
+    MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
+    Math.max(
+      MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+      Math.round(clamped / STEP_ZEN_ASK_QUESTION_PATIENCE_MS) *
+        STEP_ZEN_ASK_QUESTION_PATIENCE_MS
+    )
   );
 }
 

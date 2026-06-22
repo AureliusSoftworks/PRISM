@@ -154,7 +154,7 @@ export function createDatabase(): DatabaseSync {
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
-      zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 75000,
+      zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
@@ -733,7 +733,7 @@ export function createDatabase(): DatabaseSync {
     (column) => column.name === "zen_ask_question_patience_ms"
   );
   if (!hasZenAskQuestionPatienceMs) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 75000;");
+    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000;");
   }
   const hasZenAutonomyEnabled = userColumns.some(
     (column) => column.name === "zen_autonomy_enabled"
