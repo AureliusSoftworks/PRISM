@@ -38,6 +38,8 @@ export interface DbUserRecord {
   comfyUiHost: string | null;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
+  experimentalAllModelEffortEnabled: number;
+  psychicModeEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -130,6 +132,8 @@ export function createDatabase(): DatabaseSync {
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
       experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
+      experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
+      psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
@@ -139,6 +143,8 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
       zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
       zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '',
       zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000,
       zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
       zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
@@ -342,6 +348,7 @@ export function createDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -509,6 +516,18 @@ export function createDatabase(): DatabaseSync {
   const userColumns = db
     .prepare("PRAGMA table_info(users)")
     .all() as Array<{ name: string }>;
+  const zenSessionMemoryColumns = db
+    .prepare("PRAGMA table_info(zen_session_memories)")
+    .all() as Array<{ name: string }>;
+  const hasZenSessionMemoryBotId = zenSessionMemoryColumns.some(
+    (column) => column.name === "bot_id"
+  );
+  if (!hasZenSessionMemoryBotId) {
+    db.exec("ALTER TABLE zen_session_memories ADD COLUMN bot_id TEXT;");
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);"
+  );
   const hasLastActiveAt = userColumns.some((column) => column.name === "last_active_at");
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
@@ -546,6 +565,20 @@ export function createDatabase(): DatabaseSync {
     db.exec(
       "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;"
     );
+  }
+  const hasExperimentalAllModelEffortEnabled = userColumns.some(
+    (column) => column.name === "experimental_all_model_effort_enabled"
+  );
+  if (!hasExperimentalAllModelEffortEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
+  const hasPsychicModeEnabled = userColumns.some(
+    (column) => column.name === "psychic_mode_enabled"
+  );
+  if (!hasPsychicModeEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;");
   }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled"
@@ -628,6 +661,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenWallpaperGrayscaleEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenWallpaperBlurredEdgesEnabled = userColumns.some(
+    (column) => column.name === "zen_wallpaper_blurred_edges_enabled"
+  );
+  if (!hasZenWallpaperBlurredEdgesEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenWallpaperStyleNotes = userColumns.some(
+    (column) => column.name === "zen_wallpaper_style_notes"
+  );
+  if (!hasZenWallpaperStyleNotes) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '';");
   }
   const hasZenSessionIdleGapMs = userColumns.some(
     (column) => column.name === "zen_session_idle_gap_ms"

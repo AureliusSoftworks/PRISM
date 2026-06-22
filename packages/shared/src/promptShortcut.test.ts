@@ -6,6 +6,7 @@ import {
   normalizeBuiltInPromptWildcardSlotKey,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
+  parseStoredPsychicThoughtPayload,
   serializePromptShortcutPayload,
   serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
@@ -121,6 +122,14 @@ describe("prompt shortcut payloads", () => {
           { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
         ],
       },
+      psychicThought: {
+        v: 1,
+        summary: "I checked the moving parts before answering.",
+        effort: "medium",
+        provider: "local",
+        model: "llama3.2",
+        createdAt: "2026-06-22T12:00:00.000Z",
+      },
     });
 
     assert.equal(typeof serialized, "string");
@@ -139,6 +148,14 @@ describe("prompt shortcut payloads", () => {
         { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19 },
         { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
       ],
+    });
+    assert.deepEqual(parseStoredPsychicThoughtPayload(serialized), {
+      v: 1,
+      summary: "I checked the moving parts before answering.",
+      effort: "medium",
+      provider: "local",
+      model: "llama3.2",
+      createdAt: "2026-06-22T12:00:00.000Z",
     });
   });
 

@@ -21,6 +21,12 @@ export interface ZenWallpaperHistoryEntry {
   createdAt?: string;
 }
 
+export interface RememberedZenWallpaper {
+  imageId: string;
+  promptSeed: string | null;
+  createdAt: string;
+}
+
 export interface ConversationSummary {
   id: string;
   title: string;
@@ -192,6 +198,49 @@ export function appendZenWallpaperHistoryEntry(
 
 export function serializeZenWallpaperHistory(entries: readonly ZenWallpaperHistoryEntry[]): string {
   return JSON.stringify(normalizeZenWallpaperHistory(entries));
+}
+
+export function getLatestRememberedZenWallpaperForBot(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null | undefined
+): RememberedZenWallpaper | null {
+  const normalizedBotId = botId?.trim();
+  if (!normalizedBotId) return null;
+  const row = db
+    .prepare(
+      `SELECT id, prompt, created_at
+         FROM images
+        WHERE user_id = ?
+          AND bot_id = ?
+          AND COALESCE(purpose, 'gallery') = 'wallpaper'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .get(userId, normalizedBotId) as
+    | { id: string; prompt: string | null; created_at: string }
+    | undefined;
+  if (!row?.id) return null;
+  return {
+    imageId: row.id,
+    promptSeed: row.prompt?.trim() || null,
+    createdAt: row.created_at,
+  };
+}
+
+export function buildRememberedZenWallpaperHistory(
+  wallpaper: RememberedZenWallpaper
+): ZenWallpaperHistoryEntry[] {
+  return normalizeZenWallpaperHistory([
+    {
+      imageId: wallpaper.imageId,
+      promptSeed: wallpaper.promptSeed,
+      generationMessageCount: 0,
+      revealStartMessageCount: 0,
+      revealFullMessageCount: 0,
+      createdAt: wallpaper.createdAt,
+    },
+  ]);
 }
 
 export function buildZenWallpaperHistoryForGeneratedImage(
@@ -508,6 +557,28 @@ export function recoverStaleZenWallpaperGenerationStatus(
         AND zen_wallpaper_status = 'generating'
         ${conversationClause}`
   ).run(...params);
+}
+
+export function dedupeActiveZenWallpaperGeneration(
+  db: DatabaseSync,
+  userId: string,
+  options: {
+    conversationId: string;
+    activeZenWallpaperConversationId?: string | null;
+    enabled?: boolean;
+  }
+): boolean {
+  if (options.enabled === false) return false;
+  const conversationId = options.conversationId.trim();
+  const activeConversationId = options.activeZenWallpaperConversationId?.trim();
+  if (!conversationId || activeConversationId !== conversationId) return false;
+  db.prepare(
+    `UPDATE conversations
+        SET zen_wallpaper_enabled = 1,
+            zen_wallpaper_status = 'generating'
+      WHERE id = ? AND user_id = ?`
+  ).run(conversationId, userId);
+  return true;
 }
 
 export function deleteCoffeePollsForConversations(

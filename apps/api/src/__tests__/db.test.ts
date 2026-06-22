@@ -85,10 +85,26 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
+      const allModelEffortColumn = userColumns.find(
+        (column) => column.name === "experimental_all_model_effort_enabled"
+      );
+      assert.equal(allModelEffortColumn?.dflt_value, "0");
+      const psychicModeColumn = userColumns.find(
+        (column) => column.name === "psychic_mode_enabled"
+      );
+      assert.equal(psychicModeColumn?.dflt_value, "0");
       const grayscaleColumn = userColumns.find(
         (column) => column.name === "zen_wallpaper_grayscale_enabled"
       );
       assert.equal(grayscaleColumn?.dflt_value, "1");
+      const blurredEdgesColumn = userColumns.find(
+        (column) => column.name === "zen_wallpaper_blurred_edges_enabled"
+      );
+      assert.equal(blurredEdgesColumn?.dflt_value, "1");
+      const styleNotesColumn = userColumns.find(
+        (column) => column.name === "zen_wallpaper_style_notes"
+      );
+      assert.equal(styleNotesColumn?.dflt_value, "''");
       const conversationColumns = reopened
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;
@@ -114,6 +130,18 @@ describe("createDatabase bot export hash migration", () => {
         .get("bot-1") as { export_hash: string | null } | undefined;
       assert.ok(row?.export_hash);
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
+      const settingsRow = reopened
+        .prepare(
+          "SELECT experimental_all_model_effort_enabled, psychic_mode_enabled FROM users WHERE id = ?"
+        )
+        .get("user-1") as
+        | {
+            experimental_all_model_effort_enabled: number;
+            psychic_mode_enabled: number;
+          }
+        | undefined;
+      assert.equal(settingsRow?.experimental_all_model_effort_enabled, 0);
+      assert.equal(settingsRow?.psychic_mode_enabled, 0);
       reopened.close();
     } finally {
       restoreEnv("DB_PATH", previousDbPath);

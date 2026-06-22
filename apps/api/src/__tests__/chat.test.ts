@@ -20,7 +20,10 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
-import { createZenSessionMemoryCheckpoint } from "../zen-session-memory.ts";
+import {
+  createZenSessionMemoryCheckpoint,
+  listZenSessionMemories,
+} from "../zen-session-memory.ts";
 const originalFetch = globalThis.fetch;
 
 /** 32 bytes for AES-256-GCM used by memory encryption in tests. */
@@ -72,6 +75,22 @@ function createChatTestDb(): DatabaseSync {
       delete_protected INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private'
     );
+    CREATE TABLE images (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      bot_id TEXT,
+      prompt TEXT NOT NULL,
+      revised_prompt TEXT,
+      url TEXT NOT NULL,
+      size TEXT,
+      quality TEXT,
+      provider TEXT,
+      model TEXT,
+      local_rel_path TEXT,
+      purpose TEXT NOT NULL DEFAULT 'gallery',
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -100,6 +119,7 @@ function createChatTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -232,6 +252,125 @@ describe("conversation title inference helpers", () => {
       sanitizeConversationTitle("A".repeat(80)),
       `${"A".repeat(57)}...`
     );
+  });
+});
+
+describe("processChatMessage Psychic planning", () => {
+  it("attaches a concise Psychic summary to the triggering user message", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      requests.push({ url, body: body as Record<string, unknown> });
+      const isPlanningPass = body.messages?.some((message) =>
+        message.content.includes("Prism's private planning pass")
+      );
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: isPlanningPass
+              ? JSON.stringify({
+                  summary: "I weighed the request and chose a practical sequence.",
+                  scratchpad: "developer-only hidden sketch",
+                  answerGuidance: "Answer in two short steps.",
+                })
+              : "Final answer.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help me plan this.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      }
+    );
+
+    const userMessage = result.conversation.messages.find(
+      (message) => message.role === "user"
+    );
+    assert.equal(
+      userMessage?.psychicThought?.summary,
+      "I weighed the request and chose a practical sequence."
+    );
+    assert.equal(userMessage?.psychicThought?.effort, "high");
+    assert.equal(result.psychicDebug?.scratchpad, "developer-only hidden sketch");
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.doesNotMatch(JSON.stringify(userMessage), /developer-only hidden sketch/);
+
+    const storedUserPayload = db
+      .prepare("SELECT tool_payload FROM messages WHERE role = 'user'")
+      .get() as { tool_payload: string | null } | undefined;
+    assert.match(storedUserPayload?.tool_payload ?? "", /practical sequence/);
+    assert.doesNotMatch(storedUserPayload?.tool_payload ?? "", /developer-only hidden sketch/);
+
+    const finalRequest = requests.find(({ body }) => {
+      const messages = body.messages as Array<{ content: string }> | undefined;
+      return messages?.some((message) => message.content.includes("Answer guidance:"));
+    });
+    assert.ok(finalRequest);
+    assert.doesNotMatch(JSON.stringify(finalRequest?.body), /developer-only hidden sketch/);
+    assert.ok(requests.every((request) => !request.url.includes("api.openai.com")));
+    await flushBackgroundTitleJobs();
+  });
+
+  it("falls back to a normal answer when the planning pass is invalid", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const isPlanningPass = body.messages?.some((message) =>
+        message.content.includes("Prism's private planning pass")
+      );
+      return new Response(
+        JSON.stringify({ message: { content: isPlanningPass ? "not json" : "Normal answer." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help me anyway.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "medium" },
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Normal answer."
+    );
+    assert.equal(result.psychicDebug, undefined);
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Psychic planning unavailable" &&
+          event.detail?.includes("invalid_json")
+      )
+    );
+    await flushBackgroundTitleJobs();
   });
 });
 
@@ -2839,12 +2978,63 @@ describe("processChatMessage AskQuestion tool", () => {
     });
   });
 
-  it("skips AskQuestion payload when options are not synthesized", async () => {
+  it("skips AskQuestion payload for open-ended assistant questions", async () => {
+    const cases = [
+      "Sure — here's one. What do you think?",
+      "How are you feeling about this?",
+      "Tell me more?",
+    ];
+
+    for (const content of cases) {
+      const db = createChatTestDb();
+      globalThis.fetch = (async (_input: string | URL | Request) =>
+        new Response(
+          JSON.stringify({
+            message: { content },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )) as typeof fetch;
+
+      const result = await processChatMessage(
+        db,
+        "user-1",
+        "Please ask me a multiple-choice question.",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          starterPrompt: false,
+          incognito: false,
+          mode: "chat",
+        }
+      );
+
+      const lastAssistant = result.conversation.messages
+        .filter((m) => m.role === "assistant")
+        .pop();
+      assert.equal(lastAssistant?.askQuestion, undefined);
+
+      const row = db.prepare(
+        "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
+      ).get("assistant") as { tool_payload: string | null };
+      assert.notEqual(row.tool_payload, null);
+      const payload = JSON.parse(String(row.tool_payload)) as {
+        askQuestion?: unknown;
+        mood?: unknown;
+      };
+      assert.equal(payload.askQuestion, undefined);
+      assert.ok(payload.mood);
+    }
+  });
+
+  it("backfills binary AskQuestion chips from clear yes/no assistant questions", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request) =>
       new Response(
         JSON.stringify({
-          message: { content: "Sure — here's one. Do you want to keep going?" },
+          message: {
+            content: "I can tune the tone.\nDo you want me to make that calmer?",
+          },
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       )) as typeof fetch;
@@ -2852,7 +3042,7 @@ describe("processChatMessage AskQuestion tool", () => {
     const result = await processChatMessage(
       db,
       "user-1",
-      "Please ask me a multiple-choice question.",
+      "This reads too sharp.",
       CHAT_TEST_USER_KEY,
       {
         preferredProvider: "local",
@@ -2864,18 +3054,86 @@ describe("processChatMessage AskQuestion tool", () => {
     );
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
-    assert.equal(lastAssistant?.askQuestion, undefined);
+    assert.equal(lastAssistant?.content, "I can tune the tone.");
+    assert.equal(lastAssistant?.askQuestion?.prompt, "Do you want me to make that calmer?");
+    assert.deepEqual(
+      lastAssistant?.askQuestion?.options.map((option) => option.label),
+      ["Yes", "No"]
+    );
+  });
 
-    const row = db.prepare(
-      "SELECT tool_payload FROM messages WHERE role = ? ORDER BY created_at DESC LIMIT 1"
-    ).get("assistant") as { tool_payload: string | null };
-    assert.notEqual(row.tool_payload, null);
-    const payload = JSON.parse(String(row.tool_payload)) as {
-      askQuestion?: unknown;
-      mood?: unknown;
-    };
-    assert.equal(payload.askQuestion, undefined);
-    assert.ok(payload.mood);
+  it("backfills AskQuestion chips from two-option assistant alternatives", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (_input: string | URL | Request) =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: "We can tune the vibe.\nShould we make it playful or restrained?",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help shape this interaction.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "We can tune the vibe.");
+    assert.equal(lastAssistant?.askQuestion?.prompt, "Should we make it playful or restrained?");
+    assert.deepEqual(
+      lastAssistant?.askQuestion?.options.map((option) => option.label),
+      ["Playful", "Restrained"]
+    );
+  });
+
+  it("backfills AskQuestion chips from three-option assistant alternatives", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (_input: string | URL | Request) =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content:
+              "I can set an atmosphere direction.\nWhich direction feels better: glass, ink, or shadow?",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Let's pick an atmosphere.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "I can set an atmosphere direction.");
+    assert.equal(
+      lastAssistant?.askQuestion?.prompt,
+      "Which direction feels better: glass, ink, or shadow?"
+    );
+    assert.deepEqual(
+      lastAssistant?.askQuestion?.options.map((option) => option.label),
+      ["Glass", "Ink", "Shadow"]
+    );
   });
 
   it("does not backfill AskQuestion when synthesized options are missing", async () => {
@@ -3745,6 +4003,309 @@ describe("processChatMessage conversational memory cues", () => {
       { role: "user", bot_id: "bot-1" },
       { role: "assistant", bot_id: "bot-1" },
     ]);
+  });
+
+  it("seeds fresh Zen Persona conversations with the latest remembered wallpaper", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-2", "user-1", "Sally", "#2f9a6b", "leaf");
+    db.prepare(
+      `INSERT INTO images (
+        id, user_id, conversation_id, bot_id, prompt, revised_prompt,
+        url, size, quality, provider, model, local_rel_path, purpose, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "wallpaper-old",
+      "user-1",
+      "old-conv",
+      "bot-1",
+      "old pier",
+      "old pier",
+      "/api/images/wallpaper-old/file",
+      "1536x1024",
+      "standard",
+      "local",
+      "dream",
+      null,
+      "wallpaper",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO images (
+        id, user_id, conversation_id, bot_id, prompt, revised_prompt,
+        url, size, quality, provider, model, local_rel_path, purpose, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "wallpaper-new",
+      "user-1",
+      "newer-conv",
+      "bot-1",
+      "moonlit reef",
+      "moonlit reef",
+      "/api/images/wallpaper-new/file",
+      "1536x1024",
+      "standard",
+      "local",
+      "dream",
+      null,
+      "wallpaper",
+      "2026-02-01T00:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO images (
+        id, user_id, conversation_id, bot_id, prompt, revised_prompt,
+        url, size, quality, provider, model, local_rel_path, purpose, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "wallpaper-other",
+      "user-1",
+      "other-conv",
+      "bot-2",
+      "forest cabin",
+      "forest cabin",
+      "/api/images/wallpaper-other/file",
+      "1536x1024",
+      "standard",
+      "local",
+      "dream",
+      null,
+      "wallpaper",
+      "2026-03-01T00:00:00.000Z"
+    );
+    installChatFetchStub("Good to know.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Let's go back.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.zenWallpaper?.enabled, true);
+    assert.equal(result.conversation.zenWallpaper?.status, "ready");
+    assert.equal(result.conversation.zenWallpaper?.imageId, "wallpaper-new");
+    assert.equal(result.conversation.zenWallpaper?.promptSeed, "moonlit reef");
+    assert.equal(result.conversation.zenWallpaper?.generationMessageCount, 0);
+    assert.deepEqual(result.conversation.zenWallpaper?.history, [
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "moonlit reef",
+        generationMessageCount: 0,
+        revealStartMessageCount: 0,
+        revealFullMessageCount: 0,
+        createdAt: "2026-02-01T00:00:00.000Z",
+      },
+    ]);
+
+    const conversationRow = db
+      .prepare(
+        `SELECT bot_id, zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations
+          WHERE id = ?`
+      )
+      .get(result.conversation.id) as {
+        bot_id: string | null;
+        zen_wallpaper_enabled: number;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_prompt_seed: string | null;
+        zen_wallpaper_message_count: number | null;
+        zen_wallpaper_status: string;
+        zen_wallpaper_history: string;
+      };
+    assert.equal(conversationRow.bot_id, null);
+    assert.equal(conversationRow.zen_wallpaper_enabled, 1);
+    assert.equal(conversationRow.zen_wallpaper_image_id, "wallpaper-new");
+    assert.equal(conversationRow.zen_wallpaper_prompt_seed, "moonlit reef");
+    assert.equal(conversationRow.zen_wallpaper_message_count, 0);
+    assert.equal(conversationRow.zen_wallpaper_status, "ready");
+    assert.deepEqual(JSON.parse(conversationRow.zen_wallpaper_history), [
+      {
+        imageId: "wallpaper-new",
+        promptSeed: "moonlit reef",
+        generationMessageCount: 0,
+        revealStartMessageCount: 0,
+        revealFullMessageCount: 0,
+        createdAt: "2026-02-01T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("starts default Prism Zen conversations without remembered wallpaper metadata", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      `INSERT INTO images (
+        id, user_id, conversation_id, bot_id, prompt, revised_prompt,
+        url, size, quality, provider, model, local_rel_path, purpose, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "wallpaper-default-skip",
+      "user-1",
+      "old-default-conv",
+      null,
+      "quiet prism light",
+      "quiet prism light",
+      "/api/images/wallpaper-default-skip/file",
+      "1536x1024",
+      "standard",
+      "local",
+      "dream",
+      null,
+      "wallpaper",
+      "2026-02-01T00:00:00.000Z"
+    );
+    installChatFetchStub("Clean slate.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Start fresh.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.zenWallpaper?.enabled, false);
+    assert.equal(result.conversation.zenWallpaper?.status, "idle");
+    assert.equal(result.conversation.zenWallpaper?.imageId, null);
+    assert.equal(result.conversation.zenWallpaper?.promptSeed, null);
+    assert.equal(result.conversation.zenWallpaper?.generationMessageCount, null);
+    assert.deepEqual(result.conversation.zenWallpaper?.history, []);
+
+    const conversationRow = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations
+          WHERE id = ?`
+      )
+      .get(result.conversation.id) as {
+        zen_wallpaper_enabled: number;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_prompt_seed: string | null;
+        zen_wallpaper_message_count: number | null;
+        zen_wallpaper_status: string;
+        zen_wallpaper_history: string;
+      };
+    assert.equal(conversationRow.zen_wallpaper_enabled, 0);
+    assert.equal(conversationRow.zen_wallpaper_image_id, null);
+    assert.equal(conversationRow.zen_wallpaper_prompt_seed, null);
+    assert.equal(conversationRow.zen_wallpaper_message_count, null);
+    assert.equal(conversationRow.zen_wallpaper_status, "idle");
+    assert.equal(conversationRow.zen_wallpaper_history, "[]");
+  });
+
+  it("does not seed remembered Zen Persona wallpapers in private mode", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    db.prepare(
+      `INSERT INTO images (
+        id, user_id, conversation_id, bot_id, prompt, revised_prompt,
+        url, size, quality, provider, model, local_rel_path, purpose, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "wallpaper-private-skip",
+      "user-1",
+      "old-conv",
+      "bot-1",
+      "secret grotto",
+      "secret grotto",
+      "/api/images/wallpaper-private-skip/file",
+      "1536x1024",
+      "standard",
+      "local",
+      "dream",
+      null,
+      "wallpaper",
+      "2026-02-01T00:00:00.000Z"
+    );
+    installChatFetchStub("Private reply.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Keep this off the books.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: true,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.incognito, true);
+    assert.equal(result.conversation.zenWallpaper, undefined);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations").get() as { n: number }).n,
+      0
+    );
+  });
+
+  it("arms fresh Zen Persona conversations for immediate Atmosphere generation when no remembered wallpaper exists", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Harry", "#b11f2b", "spark");
+    installChatFetchStub("A new horizon.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Start somewhere new.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    assert.equal(result.conversation.zenWallpaper?.enabled, true);
+    assert.equal(result.conversation.zenWallpaper?.status, "idle");
+    assert.equal(result.conversation.zenWallpaper?.imageId, null);
+    assert.deepEqual(result.conversation.zenWallpaper?.history, []);
+    const conversationRow = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations
+          WHERE id = ?`
+      )
+      .get(result.conversation.id) as {
+        zen_wallpaper_enabled: number;
+        zen_wallpaper_image_id: string | null;
+        zen_wallpaper_status: string;
+        zen_wallpaper_history: string;
+      };
+    assert.equal(conversationRow.zen_wallpaper_enabled, 1);
+    assert.equal(conversationRow.zen_wallpaper_image_id, null);
+    assert.equal(conversationRow.zen_wallpaper_status, "idle");
+    assert.equal(conversationRow.zen_wallpaper_history, "[]");
   });
 
   it("keeps Command Center prompt turns out of memories and mood state", async () => {
@@ -5239,6 +5800,233 @@ describe("processChatMessage Zen Persona transitions", () => {
         botId: message.botId,
       })),
       [{ role: "assistant", botId: null }]
+    );
+  });
+
+  it("checkpoints outgoing Persona spans and injects only that Persona when returning", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("mario", "user-1", "Mario", "#d22b2b", "star");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("crash", "user-1", "Crash Bandicoot", "#f47a20", "bolt");
+
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      const promptText = body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (promptText.includes("Zen Persona checkpoints")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                title: "Mario Tax Code",
+                text: "Mario should resume the Mushroom Kingdom tax-code story with Jared.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Persona reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const marioTurn = await processChatMessage(
+      db,
+      "user-1",
+      "Mario, tell me about the Mushroom Kingdom tax code.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "mario",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Mario.",
+        starterPromptLabel: "Mario",
+      }
+    );
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "crash",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Crash Bandicoot.",
+        starterPromptLabel: "Crash Bandicoot",
+        personaTransition: {
+          fromBotId: "mario",
+          toBotId: "crash",
+          source: "picker",
+          style: "new-speaks",
+        },
+      },
+      marioTurn.conversation.id
+    );
+
+    const marioMemories = listZenSessionMemories(
+      db,
+      "user-1",
+      CHAT_TEST_USER_KEY,
+      new Date(),
+      { botId: "mario" }
+    );
+    assert.equal(marioMemories.length, 1);
+    assert.match(marioMemories[0]?.text ?? "", /tax-code story/);
+
+    bodies.length = 0;
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "mario",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Mario.",
+        starterPromptLabel: "Mario",
+        personaTransition: {
+          fromBotId: "crash",
+          toBotId: "mario",
+          source: "picker",
+          style: "new-speaks",
+        },
+      },
+      marioTurn.conversation.id
+    );
+
+    const returnPrompt = bodies
+      .map((body) => body.messages?.map((message) => message.content).join("\n") ?? "")
+      .find((text) => text.includes("Zen Persona continuity context")) ?? "";
+    assert.match(returnPrompt, /Mario should resume the Mushroom Kingdom tax-code story/);
+    assert.doesNotMatch(returnPrompt, /Crash should/);
+    assert.equal(
+      listZenSessionMemories(db, "user-1", CHAT_TEST_USER_KEY, new Date(), {
+        botId: "crash",
+      }).length,
+      0
+    );
+  });
+
+  it("checkpoints the outgoing Persona when Zen Autonomy switches speakers", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("mario", "user-1", "Mario", "#d22b2b", "star");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("crash", "user-1", "Crash Bandicoot", "#f47a20", "bolt");
+
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        prompt?: string;
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      const promptText = body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (promptText.includes("Zen Persona checkpoints")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                title: "Mario Story",
+                text: "Mario was mid-story about old Mushroom Kingdom tax law with Jared.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Persona reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const marioTurn = await processChatMessage(
+      db,
+      "user-1",
+      "Mario, tell me a long story about Mushroom Kingdom tax law.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "mario",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Mario.",
+        starterPromptLabel: "Mario",
+      }
+    );
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "crash",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Crash Bandicoot.",
+        starterPromptLabel: "Crash Bandicoot",
+        zenAutonomy: {
+          source: "idle",
+          activeBotId: "mario",
+          idleMs: 10 * 60 * 1000,
+          clientTurnId: "turn-switch",
+        },
+      },
+      marioTurn.conversation.id
+    );
+
+    const marioMemories = listZenSessionMemories(
+      db,
+      "user-1",
+      CHAT_TEST_USER_KEY,
+      new Date(),
+      { botId: "mario" }
+    );
+    assert.equal(marioMemories.length, 1);
+    assert.match(marioMemories[0]?.text ?? "", /Mushroom Kingdom tax law/);
+    assert.equal(
+      listZenSessionMemories(db, "user-1", CHAT_TEST_USER_KEY, new Date(), {
+        botId: "crash",
+      }).length,
+      0
     );
   });
 

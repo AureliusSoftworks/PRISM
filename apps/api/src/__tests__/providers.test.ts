@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   ANTHROPIC_DEFAULT_MODEL,
   buildModelCatalog,
+  checkAnthropicApiKeyStatus,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
+  checkOpenAiApiKeyStatus,
   embedTextLocal,
   getAuxiliaryProvider,
   AnthropicProvider,
