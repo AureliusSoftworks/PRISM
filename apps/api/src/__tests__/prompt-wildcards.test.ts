@@ -3,23 +3,29 @@ import assert from "node:assert/strict";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
 import {
   applyPromptWildcardValues,
+  generateScriptedPromptWildcardValue,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
 } from "../prompt-wildcards.ts";
 
 describe("prompt wildcard resolution", () => {
-  it("tracks repeated wildcard slots as independent occurrences", async () => {
-    let requestedPrompt = "";
+  it("scripted built-in wildcard generation avoids used values when possible", () => {
+    const usedValues = new Set<string>();
+    const first = generateScriptedPromptWildcardValue("PERSON", usedValues);
+    const second = generateScriptedPromptWildcardValue("PERSON", usedValues);
+    assert.ok(first);
+    assert.ok(second);
+    assert.notEqual(first, second);
+    assert.match(generateScriptedPromptWildcardValue("NUM") ?? "", /^\d+$/u);
+  });
+
+  it("resolves built-in wildcard slots without calling the provider", async () => {
+    let providerCalls = 0;
     const provider: LlmProvider = {
       name: "local",
-      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
-        requestedPrompt = messages.at(-1)?.content ?? "";
-        return JSON.stringify({
-          NUM__1: "12",
-          ADJECTIVE__1: "feral",
-          NUM__2: "43",
-          ADJECTIVE__2: "sleepy",
-        });
+      async generateResponse(_messages: ProviderMessage[], _options?: GenerateOptions) {
+        providerCalls += 1;
+        throw new Error("provider should not be called for built-in wildcards");
       },
       async embedText() {
         return [];
@@ -32,34 +38,29 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.match(requestedPrompt, /NUM__1/u);
-    assert.match(requestedPrompt, /NUM__2/u);
-    assert.match(requestedPrompt, /ADJECTIVE__1/u);
-    assert.match(requestedPrompt, /ADJECTIVE__2/u);
-    assert.equal(
-      result.prompt,
-      "Would you rather fight 12 feral nuns, or 43 sleepy undertakers?"
-    );
+    assert.equal(providerCalls, 0);
+    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
     assert.deepEqual(
-      result.replacements.map(({ key, value, start, end }) => ({ key, value, start, end })),
+      result.replacements.map(({ key, source }) => ({ key, source })),
       [
-        { key: "NUM", value: "12", start: 23, end: 25 },
-        { key: "ADJECTIVE", value: "feral", start: 26, end: 31 },
-        { key: "NUM", value: "43", start: 41, end: 43 },
-        { key: "ADJECTIVE", value: "sleepy", start: 44, end: 50 },
+        { key: "NUM", source: "wildcard" },
+        { key: "ADJECTIVE", source: "wildcard" },
+        { key: "NUM", source: "wildcard" },
+        { key: "ADJECTIVE", source: "wildcard" },
       ]
     );
+    for (const replacement of result.replacements.filter(({ key }) => key === "NUM")) {
+      assert.match(replacement.value, /^\d+$/u);
+      const value = Number(replacement.value);
+      assert.equal(Number.isInteger(value) && value >= 1 && value <= 100, true);
+    }
   });
 
   it("reuses numbered wildcard references within one prompt run", async () => {
-    let requestedPrompt = "";
     const provider: LlmProvider = {
       name: "local",
-      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
-        requestedPrompt = messages.at(-1)?.content ?? "";
-        return JSON.stringify({
-          PERSON__REF_1: "Mike",
-        });
+      async generateResponse() {
+        throw new Error("provider should not be called for built-in wildcards");
       },
       async embedText() {
         return [];
@@ -72,30 +73,19 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.match(requestedPrompt, /PERSON__REF_1/u);
-    assert.doesNotMatch(requestedPrompt, /PERSON1__1/u);
-    assert.equal(result.prompt, "A Mike saw Mike.");
-    assert.deepEqual(
-      result.replacements.map(({ key, value, start, end, source }) => ({
-        key,
-        value,
-        start,
-        end,
-        source,
-      })),
-      [
-        { key: "PERSON", value: "Mike", start: 2, end: 6, source: "wildcard" },
-        { key: "PERSON", value: "Mike", start: 11, end: 15, source: "wildcard" },
-      ]
-    );
+    assert.equal(result.replacements.length, 2);
+    assert.equal(result.replacements[0]?.key, "PERSON");
+    assert.equal(result.replacements[1]?.key, "PERSON");
+    assert.equal(result.replacements[0]?.value, result.replacements[1]?.value);
+    assert.equal(result.prompt, `A ${result.replacements[0]?.value} saw ${result.replacements[0]?.value}.`);
   });
 
-  it("accepts legacy numbered response keys for referenced brace wildcards", async () => {
+  it("accepts legacy numbered response keys for referenced custom brace wildcards", async () => {
     const provider: LlmProvider = {
       name: "local",
       async generateResponse() {
         return JSON.stringify({
-          PERSON1: "Mina",
+          MOOD1: "wistful",
         });
       },
       async embedText() {
@@ -104,31 +94,26 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "A {PERSON1} met {PERSON1}.",
+      prompt: "{MOOD1} rain and {MOOD1} windows.",
       provider,
       generationOverrides: {},
     });
 
-    assert.equal(result.prompt, "A Mina met Mina.");
+    assert.equal(result.prompt, "wistful rain and wistful windows.");
     assert.deepEqual(
       result.replacements.map(({ key, value, source }) => ({ key, value, source })),
       [
-        { key: "PERSON", value: "Mina", source: "wildcard" },
-        { key: "PERSON", value: "Mina", source: "wildcard" },
+        { key: "MOOD", value: "wistful", source: "wildcard" },
+        { key: "MOOD", value: "wistful", source: "wildcard" },
       ]
     );
   });
 
-  it("sends PERSON-specific generation rules instead of relying on context grammar", async () => {
-    let requestedPrompt = "";
+  it("generates PERSON with scripted first names only", async () => {
     const provider: LlmProvider = {
       name: "local",
-      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
-        requestedPrompt = messages.at(-1)?.content ?? "";
-        return JSON.stringify({
-          PERSON__1: "Mira",
-          ADJECTIVE__1: "curious",
-        });
+      async generateResponse() {
+        throw new Error("provider should not be called for built-in wildcards");
       },
       async embedText() {
         return [];
@@ -141,29 +126,19 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.match(requestedPrompt, /PERSON__1/u);
-    assert.match(requestedPrompt, /wildcard key PERSON/u);
-    assert.match(requestedPrompt, /given first name only/u);
-    assert.match(requestedPrompt, /Do not return a role, title, occupation/u);
-    assert.equal(result.prompt, "Write about a curious person named Mira.");
-    assert.deepEqual(
-      result.replacements.map(({ key, value, source }) => ({ key, value, source })),
-      [
-        { key: "ADJECTIVE", value: "curious", source: "wildcard" },
-        { key: "PERSON", value: "Mira", source: "wildcard" },
-      ]
-    );
+    const person = result.replacements.find(({ key }) => key === "PERSON");
+    assert.ok(person);
+    assert.match(person.value, /^[A-Z][a-z]+$/u);
+    assert.doesNotMatch(person.value, /\s/u);
   });
 
-  it("sends noun rules without sticky concrete examples", async () => {
-    let requestedPrompt = "";
+  it("generates nouns with script values instead of sticky model examples", async () => {
+    let providerCalls = 0;
     const provider: LlmProvider = {
       name: "local",
-      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
-        requestedPrompt = messages.at(-1)?.content ?? "";
-        return JSON.stringify({
-          NOUN__1: "paperclip",
-        });
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for built-in wildcards");
       },
       async embedText() {
         return [];
@@ -176,20 +151,19 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.match(requestedPrompt, /wildcard key NOUN/u);
-    assert.match(requestedPrompt, /Do not copy or reuse words from these instructions/u);
-    assert.match(requestedPrompt, /Random nonce:/u);
+    assert.equal(providerCalls, 0);
+    assert.match(result.prompt, /^Hide the .+\.$/u);
+    assert.equal(result.replacements[0]?.key, "NOUN");
     for (const sticky of ["lantern", "subway", "rumor", "chessboard", "stinky"]) {
-      assert.doesNotMatch(requestedPrompt, new RegExp(sticky, "iu"));
+      assert.doesNotMatch(result.prompt, new RegExp(sticky, "iu"));
     }
-    assert.equal(result.prompt, "Hide the paperclip.");
   });
 
-  it("uses expanded noun fallbacks without the old sticky example words", async () => {
+  it("avoids repeated built-in values within one prompt run when the pool allows it", async () => {
     const provider: LlmProvider = {
       name: "local",
       async generateResponse() {
-        throw new Error("model unavailable");
+        throw new Error("provider should not be called for built-in wildcards");
       },
       async embedText() {
         return [];
@@ -197,23 +171,14 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Collect a {NOUN}, a {NOUN}, and several {PLURAL NOUN}.",
+      prompt: "{NOUN} {NOUN} {NOUN} {NOUN} {NOUN} {NOUN} {NOUN} {NOUN}",
       provider,
       generationOverrides: {},
     });
 
-    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
-    for (const sticky of ["lantern", "subway", "rumor", "chessboard"]) {
-      assert.doesNotMatch(result.prompt, new RegExp(`\\b${sticky}s?\\b`, "iu"));
-    }
-    assert.deepEqual(
-      result.replacements.map(({ key, source }) => ({ key, source })),
-      [
-        { key: "NOUN", source: "wildcard" },
-        { key: "NOUN", source: "wildcard" },
-        { key: "PLURAL_NOUN", source: "wildcard" },
-      ]
-    );
+    const values = result.replacements.map(({ value }) => value.toLowerCase());
+    assert.equal(values.length, 8);
+    assert.equal(new Set(values).size, values.length);
   });
 
   it("reuses numbered uppercase brace slots beyond the built-in list", async () => {
@@ -245,12 +210,14 @@ describe("prompt wildcard resolution", () => {
     );
   });
 
-  it("fills omitted model wildcard keys so unresolved brace tokens do not reach chat", async () => {
+  it("passes scripted built-in values into custom wildcard model context", async () => {
+    let requestedPrompt = "";
     const provider: LlmProvider = {
       name: "local",
-      async generateResponse() {
+      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
+        requestedPrompt = messages.at(-1)?.content ?? "";
         return JSON.stringify({
-          ADJECTIVE__1: "bright",
+          MOOD__1: "wistful",
         });
       },
       async embedText() {
@@ -259,7 +226,39 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Make a {ADJECTIVE} story in a {STYLE} voice.",
+      prompt: "A {NOUN} feels {MOOD}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.doesNotMatch(requestedPrompt, /\{NOUN\}/u);
+    assert.doesNotMatch(requestedPrompt, /NOUN__1/u);
+    assert.match(requestedPrompt, /wildcard key MOOD/u);
+    assert.match(result.prompt, /^A .+ feels wistful\.$/u);
+    assert.deepEqual(
+      result.replacements.map(({ key, source }) => ({ key, source })),
+      [
+        { key: "NOUN", source: "wildcard" },
+        { key: "MOOD", source: "wildcard" },
+      ]
+    );
+  });
+
+  it("fills omitted model wildcard keys so unresolved brace tokens do not reach chat", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          MOOD__1: "bright",
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Make a {MOOD} story in a {TEXTURE} voice.",
       provider,
       generationOverrides: {},
     });
@@ -270,8 +269,8 @@ describe("prompt wildcard resolution", () => {
     assert.deepEqual(
       result.replacements.map(({ key, source }) => ({ key, source })),
       [
-        { key: "ADJECTIVE", source: "wildcard" },
-        { key: "STYLE", source: "wildcard" },
+        { key: "MOOD", source: "wildcard" },
+        { key: "TEXTURE", source: "wildcard" },
       ]
     );
   });
@@ -288,7 +287,7 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Make a {ADJECTIVE} story in a {STYLE} voice.",
+      prompt: "Make a {MOOD} story in a {TEXTURE} voice.",
       provider,
       generationOverrides: {},
     });
@@ -298,8 +297,8 @@ describe("prompt wildcard resolution", () => {
     assert.deepEqual(
       result.replacements.map(({ key, source }) => ({ key, source })),
       [
-        { key: "ADJECTIVE", source: "wildcard" },
-        { key: "STYLE", source: "wildcard" },
+        { key: "MOOD", source: "wildcard" },
+        { key: "TEXTURE", source: "wildcard" },
       ]
     );
   });
@@ -316,14 +315,14 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Make a {ADJECTIVE} story.",
+      prompt: "Make a {MOOD} story.",
       provider,
       generationOverrides: {},
     });
 
     assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
     assert.equal(result.replacements.length, 1);
-    assert.equal(result.replacements[0]?.key, "ADJECTIVE");
+    assert.equal(result.replacements[0]?.key, "MOOD");
   });
 
   it("keeps different numbered wildcard references separate", async () => {
@@ -331,8 +330,8 @@ describe("prompt wildcard resolution", () => {
       name: "local",
       async generateResponse() {
         return JSON.stringify({
-          ADJECTIVE__REF_1: "stinky",
-          ADJECTIVE__REF_2: "nostalgic",
+          MOOD__REF_1: "stormy",
+          MOOD__REF_2: "hushed",
         });
       },
       async embedText() {
@@ -341,17 +340,17 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "I hate {ADJECTIVE1} food and love {ADJECTIVE2} stars.",
+      prompt: "I saw {MOOD1} doors and {MOOD2} windows.",
       provider,
       generationOverrides: {},
     });
 
-    assert.equal(result.prompt, "I hate stinky food and love nostalgic stars.");
+    assert.equal(result.prompt, "I saw stormy doors and hushed windows.");
     assert.deepEqual(
       result.replacements.map(({ key, value, source }) => ({ key, value, source })),
       [
-        { key: "ADJECTIVE", value: "stinky", source: "wildcard" },
-        { key: "ADJECTIVE", value: "nostalgic", source: "wildcard" },
+        { key: "MOOD", value: "stormy", source: "wildcard" },
+        { key: "MOOD", value: "hushed", source: "wildcard" },
       ]
     );
   });
