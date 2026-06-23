@@ -10,6 +10,7 @@ import {
   promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
   formatPromptShortcutInsertion,
+  resendDraftTextForMessage,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   splitPromptRandomizationOptions,
@@ -60,6 +61,37 @@ describe("pendingWildcardOptimisticMessageContent", () => {
       }),
       "Tell cat about green."
     );
+  });
+});
+
+describe("resendDraftTextForMessage", () => {
+  it("uses the wildcard template so resend regenerates placeholders", () => {
+    assert.equal(
+      resendDraftTextForMessage({
+        content: "Tell cat about green.",
+        promptWildcardTemplate: "Tell !animals about {red|green}.",
+      }),
+      "Tell !animals about {red|green}."
+    );
+  });
+
+  it("falls back through prompt shortcut, alias, and visible content", () => {
+    assert.equal(
+      resendDraftTextForMessage({
+        content: "Expanded text",
+        commandAliasOriginalText: "/alias",
+        promptShortcutTemplate: "/story {PLACE}",
+      }),
+      "/story {PLACE}"
+    );
+    assert.equal(
+      resendDraftTextForMessage({
+        content: "Expanded text",
+        commandAliasOriginalText: "/alias",
+      }),
+      "/alias"
+    );
+    assert.equal(resendDraftTextForMessage({ content: " Plain text " }), "Plain text");
   });
 });
 

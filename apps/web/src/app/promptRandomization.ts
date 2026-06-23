@@ -28,6 +28,20 @@ export function pendingWildcardOptimisticMessageContent(options: {
   return resolvedDisplayContent || rawDraft;
 }
 
+export function resendDraftTextForMessage(options: {
+  content: string;
+  commandAliasOriginalText?: string | null;
+  promptShortcutTemplate?: string | null;
+  promptWildcardTemplate?: string | null;
+}): string {
+  return (
+    options.promptWildcardTemplate?.trim() ||
+    options.promptShortcutTemplate?.trim() ||
+    options.commandAliasOriginalText?.trim() ||
+    options.content.trim()
+  );
+}
+
 export function promptInsertionStartsSentence(before: string): boolean {
   if (/[\r\n]\s*$/u.test(before)) return true;
   const trimmed = before.trimEnd();
