@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import {
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
@@ -11,9 +12,101 @@ const PROMPT_WILDCARD_SYSTEM_PROMPT =
 const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
 const PROMPT_WILDCARD_MAX_KEYS = 16;
 const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
-const PROMPT_WILDCARD_FALLBACK_VALUES: Record<string, readonly string[]> = {
-  ADJECTIVE: ["vivid", "restless", "golden", "curious", "weathered", "luminous"],
-  VERB: ["wander", "discover", "transform", "gather", "whisper", "tumble"],
+const SCRIPTED_PROMPT_WILDCARD_VALUES: Record<string, readonly string[]> = {
+  ADJECTIVE: [
+    "brisk",
+    "hushed",
+    "jagged",
+    "tender",
+    "peculiar",
+    "crisp",
+    "velvety",
+    "restless",
+    "radiant",
+    "stubborn",
+    "nimble",
+    "dusky",
+    "fragile",
+    "lopsided",
+    "mellow",
+    "wary",
+    "frosted",
+    "buoyant",
+    "earnest",
+    "crooked",
+    "silvery",
+    "drowsy",
+    "clever",
+    "threadbare",
+    "glossy",
+    "solemn",
+    "mischievous",
+    "orderly",
+    "weathered",
+    "electric",
+    "gentle",
+    "rattling",
+    "prickly",
+    "soft-spoken",
+    "muddy",
+    "polished",
+    "glimmering",
+    "uneasy",
+    "breezy",
+    "plainspoken",
+    "fierce",
+    "sleepy",
+    "luminous",
+    "wistful",
+    "sturdy",
+    "wild",
+    "careful",
+    "flinty",
+    "golden",
+    "curious",
+  ],
+  VERB: [
+    "wander",
+    "assemble",
+    "borrow",
+    "scatter",
+    "measure",
+    "unfold",
+    "whisper",
+    "gather",
+    "tilt",
+    "mend",
+    "drift",
+    "balance",
+    "sketch",
+    "polish",
+    "trade",
+    "unlock",
+    "shuffle",
+    "plant",
+    "trace",
+    "weave",
+    "carry",
+    "sort",
+    "climb",
+    "listen",
+    "invent",
+    "fold",
+    "deliver",
+    "notice",
+    "repair",
+    "hide",
+    "count",
+    "rescue",
+    "collect",
+    "follow",
+    "paint",
+    "tumble",
+    "question",
+    "sweep",
+    "discover",
+    "transform",
+  ],
   NOUN: [
     "window",
     "key",
@@ -138,11 +231,136 @@ const PROMPT_WILDCARD_FALLBACK_VALUES: Record<string, readonly string[]> = {
     "receipts",
     "staircases",
   ],
-  ADVERB: ["quietly", "boldly", "sideways", "gently", "suddenly", "carefully"],
-  PLACE: ["market", "harbor", "forest", "canyon", "station", "village"],
-  PERSON: ["Mira", "Theo", "June", "Elias", "Amara", "Niko"],
-  STYLE: ["whimsical", "noir", "pastoral", "dreamlike", "playful", "mythic"],
-  NUM: ["7", "12", "23", "42", "64", "99"],
+  ADVERB: [
+    "quietly",
+    "boldly",
+    "sideways",
+    "gently",
+    "carefully",
+    "briskly",
+    "warmly",
+    "awkwardly",
+    "patiently",
+    "curiously",
+    "solemnly",
+    "brightly",
+    "sharply",
+    "loosely",
+    "eagerly",
+    "warily",
+    "smoothly",
+    "softly",
+    "plainly",
+    "wildly",
+    "neatly",
+    "slowly",
+    "lightly",
+    "roughly",
+    "cheerfully",
+    "secretly",
+    "calmly",
+    "oddly",
+    "firmly",
+  ],
+  PLACE: [
+    "bakery",
+    "museum",
+    "rooftop",
+    "library",
+    "kitchen",
+    "courtyard",
+    "bookstore",
+    "greenhouse",
+    "alley",
+    "pier",
+    "train platform",
+    "laundromat",
+    "attic",
+    "basement",
+    "orchard",
+    "cafeteria",
+    "workshop",
+    "theater",
+    "parking lot",
+    "bus stop",
+    "post office",
+    "classroom",
+    "warehouse",
+    "dock",
+    "farmhouse",
+    "observatory",
+    "playground",
+    "hotel lobby",
+    "barbershop",
+    "clinic",
+    "studio",
+    "market",
+    "harbor",
+    "forest",
+    "canyon",
+    "station",
+    "village",
+  ],
+  PERSON: [
+    "Mira",
+    "Theo",
+    "June",
+    "Elias",
+    "Amara",
+    "Niko",
+    "Iris",
+    "Rowan",
+    "Lena",
+    "Owen",
+    "Maya",
+    "Felix",
+    "Nora",
+    "Jonah",
+    "Sofia",
+    "Caleb",
+    "Ari",
+    "Milo",
+    "Talia",
+    "Ezra",
+    "Naomi",
+    "Rafi",
+    "Clara",
+    "Hugo",
+    "Anya",
+    "Leo",
+    "Selene",
+    "Marin",
+    "Zara",
+    "Noel",
+  ],
+  STYLE: [
+    "noir",
+    "deadpan",
+    "pastoral",
+    "glitchy",
+    "documentary",
+    "whimsical",
+    "satirical",
+    "minimalist",
+    "gothic",
+    "fable-like",
+    "absurdist",
+    "melancholic",
+    "cinematic",
+    "epistolary",
+    "dreamlike",
+    "playful",
+    "mythic",
+    "journalistic",
+    "lyrical",
+    "cozy",
+    "surreal",
+    "picaresque",
+    "hardboiled",
+    "folk-tale",
+    "screwball",
+  ],
+  NUM: [],
 };
 const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
   "vivid",
@@ -152,6 +370,35 @@ const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
   "restless",
   "luminous",
 ] as const;
+
+function randomScriptedValue(values: readonly string[]): string | null {
+  if (values.length === 0) return null;
+  return values[randomInt(values.length)] ?? null;
+}
+
+export function generateScriptedPromptWildcardValue(
+  keyOrSlot: string | { key: string },
+  usedValues?: Set<string>
+): string | null {
+  const key = normalizePromptWildcardKey(
+    typeof keyOrSlot === "string" ? keyOrSlot : keyOrSlot.key
+  );
+  if (!key) return null;
+  if (key === "NUM") {
+    return String(randomInt(1, 101));
+  }
+  const values = SCRIPTED_PROMPT_WILDCARD_VALUES[key];
+  if (!values || values.length === 0) return null;
+  const availableValues =
+    usedValues && usedValues.size < values.length
+      ? values.filter((value) => !usedValues.has(value.toLowerCase()))
+      : values;
+  const value = randomScriptedValue(
+    availableValues.length > 0 ? availableValues : values
+  );
+  if (value && usedValues) usedValues.add(value.toLowerCase());
+  return value;
+}
 
 interface PromptWildcardOccurrence {
   key: string;
@@ -339,15 +586,28 @@ function promptWildcardRecordValueForOccurrence(
 }
 
 function fallbackPromptWildcardValue(occurrence: PromptWildcardOccurrence): string {
-  const values =
-    PROMPT_WILDCARD_FALLBACK_VALUES[occurrence.key] ??
-    PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES;
-  const randomSalt = Math.floor(Math.random() * values.length);
-  const seed = Array.from(occurrence.requestKey).reduce(
-    (sum, char) => sum + char.charCodeAt(0),
-    occurrence.start + randomSalt
+  return (
+    generateScriptedPromptWildcardValue(occurrence.key) ??
+    randomScriptedValue(PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES) ??
+    "vivid"
   );
-  return values[Math.abs(seed) % values.length] ?? "vivid";
+}
+
+function scriptedPromptWildcardValuesForOccurrences(
+  occurrences: readonly PromptWildcardOccurrence[]
+): Map<string, string> {
+  const values = new Map<string, string>();
+  const usedValuesByKey = new Map<string, Set<string>>();
+  for (const occurrence of occurrences) {
+    if (values.has(occurrence.requestKey)) continue;
+    if (!getBuiltInPromptWildcardSlot(occurrence.key)) continue;
+    const usedValues = usedValuesByKey.get(occurrence.key) ?? new Set<string>();
+    const value = generateScriptedPromptWildcardValue(occurrence.key, usedValues);
+    if (!value) continue;
+    usedValuesByKey.set(occurrence.key, usedValues);
+    values.set(occurrence.requestKey, value);
+  }
+  return values;
 }
 
 function fillMissingPromptWildcardValues(
@@ -563,18 +823,33 @@ export async function resolvePromptWildcardsWithModel(args: {
       ),
     };
   }
+  const scriptedValues = scriptedPromptWildcardValuesForOccurrences(occurrences);
+  const modelOccurrences = occurrences.filter(
+    (occurrence) => !scriptedValues.has(occurrence.requestKey)
+  );
+  if (modelOccurrences.length === 0) {
+    return applyPromptWildcardValues(
+      args.prompt,
+      scriptedValues,
+      args.existingReplacements
+    );
+  }
   try {
-    const exampleKey = occurrences[0]?.requestKey ?? "ADJECTIVE__1";
+    const exampleKey = modelOccurrences[0]?.requestKey ?? "CUSTOM__1";
+    const promptForModel =
+      scriptedValues.size > 0
+        ? applyPromptWildcardValues(args.prompt, scriptedValues).prompt
+        : args.prompt;
     const promptMessages: ProviderMessage[] = [
       { role: "system", content: PROMPT_WILDCARD_SYSTEM_PROMPT },
       {
         role: "user",
         content: [
           "Prompt template:",
-          args.prompt,
+          promptForModel,
           "",
           "Wildcard occurrences:",
-          ...promptWildcardRequestLines(occurrences),
+          ...promptWildcardRequestLines(modelOccurrences),
           "",
           `Return a single JSON object whose keys are exactly those occurrence keys. Include a string property named "${exampleKey}" and the other requested keys.`,
           "Each unique occurrence key is one random draw. If the same occurrence key appears at multiple positions, use that same value everywhere.",
@@ -586,12 +861,16 @@ export async function resolvePromptWildcardsWithModel(args: {
     const raw = await args.provider.generateResponse(promptMessages, {
       ...args.generationOverrides,
       temperature: Math.max(0.6, args.generationOverrides.temperature ?? 0.72),
-      maxTokens: Math.min(900, Math.max(160, occurrences.length * 70)),
+      maxTokens: Math.min(900, Math.max(160, modelOccurrences.length * 70)),
       jsonMode: true,
       signal: args.signal,
     });
-    const values = extractPromptWildcardValues(raw, occurrences);
-    return applyPromptWildcardValues(args.prompt, values, args.existingReplacements);
+    const values = extractPromptWildcardValues(raw, modelOccurrences);
+    return applyPromptWildcardValues(
+      args.prompt,
+      new Map([...scriptedValues, ...values]),
+      args.existingReplacements
+    );
   } catch (error) {
     console.warn(
       "[prompt-wildcards] filling prompt wildcards with local fallbacks:",
@@ -599,7 +878,7 @@ export async function resolvePromptWildcardsWithModel(args: {
     );
     return applyPromptWildcardValues(
       args.prompt,
-      fillMissingPromptWildcardValues(new Map(), occurrences),
+      fillMissingPromptWildcardValues(scriptedValues, modelOccurrences),
       args.existingReplacements
     );
   }

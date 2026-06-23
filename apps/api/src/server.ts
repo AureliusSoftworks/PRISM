@@ -177,7 +177,7 @@ import {
   readComposerCleanupText,
 } from "./composer-cleanup.ts";
 import {
-  normalizeComposerWildcardValueResponse,
+  generateScriptedPromptWildcardValue,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
 } from "./prompt-wildcards.ts";
@@ -318,8 +318,6 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
 } as const;
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
-const COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT =
-  "You generate one random wildcard value for a composer helper. The wildcard key and generation rule are authoritative: never change a PERSON into an adjective, an ADJECTIVE into a person, or any other key into a different kind of value. Use only the requested wildcard type, not conversation context. Return JSON only in this exact shape: {\"value\":\"...\"}. The value must be short, natural, vivid, and must not include braces, quotes, labels, explanations, or multiple options.";
 const PROMPT_RUN_WILDCARD_TOKEN_RE = /\{[A-Z][A-Z0-9_ ]{1,63}\}/gu;
 
 function escapePromptRunRegexLiteral(value: string): string {
@@ -3358,7 +3356,7 @@ function buildRoutes(): RouteDefinition[] {
       }
     }),
     route("POST", "/api/composer/wildcard-value", async (ctx) => {
-      const userId = requireAuth(ctx);
+      requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const slot = getBuiltInPromptWildcardSlot(
         body.key ?? body.slotKey ?? body.label ?? body.name
@@ -3366,78 +3364,14 @@ function buildRoutes(): RouteDefinition[] {
       if (!slot) {
         throw new HttpError(400, "Unknown wildcard slot.");
       }
-      if (slot.key === "NUM") {
-        json(ctx.res, 200, {
-          ok: true,
-          key: slot.key,
-          value: String(1 + Math.floor(Math.random() * 100)),
-        });
-        return;
+      const value = generateScriptedPromptWildcardValue(slot);
+      if (!value) {
+        throw new HttpError(500, "Wildcard slot could not be generated.");
       }
-      const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
-      const explicitModelOverride = readModelOverride(body.modelOverride);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride,
-        botPreferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.prism_default_llm_model) ??
-              readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
-      });
-      effectiveProvider = resolvedAuto.provider;
-      const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const raw = await provider.generateResponse(
-        [
-          {
-            role: "system",
-            content: COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: [
-              `Wildcard key: ${slot.key}`,
-              `Display label: ${slot.label}`,
-              `Generation rule: ${slot.generationHint}`,
-              "Choose one genuinely random value that fits the wildcard type.",
-              "Do not use conversation context, user context, current prompt text, or adjacent words.",
-              `Random nonce: ${randomId(10)}`,
-              "Return JSON only: {\"value\":\"...\"}",
-            ].join("\n"),
-          },
-        ],
-        {
-          model: resolvedAuto.model,
-          temperature: 1.08,
-          maxTokens: 80,
-          jsonMode: true,
-        }
-      );
-      const value = normalizeComposerWildcardValueResponse(raw, slot);
       json(ctx.res, 200, {
         ok: true,
         key: slot.key,
         value,
-        provider: effectiveProvider,
-        model: resolvedAuto.model,
       });
     }),
     route("POST", "/api/composer/random-prompt", async (ctx) => {
