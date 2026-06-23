@@ -155,6 +155,67 @@ describe("prompt wildcard resolution", () => {
     );
   });
 
+  it("sends noun rules without sticky concrete examples", async () => {
+    let requestedPrompt = "";
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages: ProviderMessage[], _options?: GenerateOptions) {
+        requestedPrompt = messages.at(-1)?.content ?? "";
+        return JSON.stringify({
+          NOUN__1: "paperclip",
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Hide the {NOUN}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.match(requestedPrompt, /wildcard key NOUN/u);
+    assert.match(requestedPrompt, /Do not copy or reuse words from these instructions/u);
+    assert.match(requestedPrompt, /Random nonce:/u);
+    for (const sticky of ["lantern", "subway", "rumor", "chessboard", "stinky"]) {
+      assert.doesNotMatch(requestedPrompt, new RegExp(sticky, "iu"));
+    }
+    assert.equal(result.prompt, "Hide the paperclip.");
+  });
+
+  it("uses expanded noun fallbacks without the old sticky example words", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        throw new Error("model unavailable");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Collect a {NOUN}, a {NOUN}, and several {PLURAL NOUN}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    for (const sticky of ["lantern", "subway", "rumor", "chessboard"]) {
+      assert.doesNotMatch(result.prompt, new RegExp(`\\b${sticky}s?\\b`, "iu"));
+    }
+    assert.deepEqual(
+      result.replacements.map(({ key, source }) => ({ key, source })),
+      [
+        { key: "NOUN", source: "wildcard" },
+        { key: "NOUN", source: "wildcard" },
+        { key: "PLURAL_NOUN", source: "wildcard" },
+      ]
+    );
+  });
+
   it("reuses numbered uppercase brace slots beyond the built-in list", async () => {
     const provider: LlmProvider = {
       name: "local",
