@@ -9,6 +9,7 @@ export const REQUIRED_LOCAL_MODELS = {
 } as const;
 
 export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
+export const DISABLED_MODEL_CHOICE = "disabled";
 const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LOCAL_MODEL_ID]);
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
@@ -38,6 +39,10 @@ export interface ResolvedAutoModel {
 export interface ModelForDefaultVisibility {
   id: string;
   provider?: AutoModelProvider;
+}
+
+export function isDisabledModelChoice(value: unknown): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === DISABLED_MODEL_CHOICE;
 }
 
 const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [

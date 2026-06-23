@@ -9,6 +9,7 @@ import {
   resolveChatRevealWordDelayMsByMood,
   scaleChatRevealTimingSettings,
   tokenizeChatRevealText,
+  visibleChatRevealHasCompletedFirstSentence,
   type ChatRevealTimingSettings,
 } from "./chatRevealTiming.ts";
 
@@ -69,5 +70,26 @@ describe("chat reveal timing helpers", () => {
       resolveChatRevealWordDelayMsByMood("warm", scaled),
       resolveChatRevealWordDelayMsByMood("warm", DEFAULT_CHAT_REVEAL_TIMING) * 0.5
     );
+  });
+});
+
+describe("visibleChatRevealHasCompletedFirstSentence", () => {
+  it("keeps grace before sentence-ending punctuation is visible", () => {
+    const text = "What an interesting find, I'm sure you will make good use of it.";
+    assert.equal(visibleChatRevealHasCompletedFirstSentence(text, 6), false);
+  });
+
+  it("ends grace once the first sentence is visible", () => {
+    const text = "What an interesting find, I'm sure you will make good use of it. Tell me, what next?";
+    const tokens = tokenizeChatRevealText(text);
+    const firstSentenceEnd = tokens.findIndex((token) => token.includes("."));
+    assert.ok(firstSentenceEnd >= 0);
+    assert.equal(visibleChatRevealHasCompletedFirstSentence(text, firstSentenceEnd), false);
+    assert.equal(visibleChatRevealHasCompletedFirstSentence(text, firstSentenceEnd + 1), true);
+  });
+
+  it("treats question and exclamation endings as completed sentences", () => {
+    assert.equal(visibleChatRevealHasCompletedFirstSentence("Really? I see.", 2), true);
+    assert.equal(visibleChatRevealHasCompletedFirstSentence("Careful! More follows.", 2), true);
   });
 });

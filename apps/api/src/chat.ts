@@ -81,6 +81,7 @@ import {
   createDefaultPrismMoodState,
   decayPrismMood,
   hydrateAssistantMessageParts,
+  isDisabledModelChoice,
   isPrismMoodIgnoring,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
@@ -1101,6 +1102,7 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   if (
     !args.isStarterPrompt &&
     imageModel.length > 0 &&
+    !isDisabledModelChoice(imageModel) &&
     userMessageSuggestsInChatImageRequest(args.rawUserMessage, args.recentMessages ?? [])
   ) {
     return {

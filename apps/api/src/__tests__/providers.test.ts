@@ -425,7 +425,7 @@ describe("buildModelCatalog", () => {
     );
   });
 
-  it("lists paired secondary Ollama models only when the same model exists locally", async () => {
+  it("lists every paired secondary Ollama model even when it is not installed locally", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
@@ -462,10 +462,12 @@ describe("buildModelCatalog", () => {
     assert.equal(secondaryLlama?.label, "Llama 3.2 (Paired host)");
     assert.equal(secondaryLlama?.hostLabel, "Paired host");
     assert.equal(secondaryLlama?.localHost, "secondary");
-    assert.equal(
-      catalog.local.find((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`),
-      undefined
+    const secondaryMistral = catalog.local.find(
+      (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`
     );
+    assert.equal(secondaryMistral?.label, "Mistral (Paired host)");
+    assert.equal(secondaryMistral?.hostLabel, "Paired host");
+    assert.equal(secondaryMistral?.localHost, "secondary");
   });
 });
 

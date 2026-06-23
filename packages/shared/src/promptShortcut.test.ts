@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
   getBuiltInPromptWildcardSlot,
+  isDisabledPromptWildcardToken,
   normalizeBuiltInPromptWildcardSlotKey,
+  parseBuiltInPromptWildcardReference,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredPsychicThoughtPayload,
@@ -26,11 +28,58 @@ describe("built-in prompt wildcard slots", () => {
   it("rejects unsupported built-in wildcard keys", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("MOOD RING"), null);
     assert.equal(getBuiltInPromptWildcardSlot("MOOD RING"), null);
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("CHARACTER"), null);
+    assert.equal(getBuiltInPromptWildcardSlot("{CHARACTER}"), null);
+    assert.equal(isDisabledPromptWildcardToken("CHARACTER"), true);
+    assert.equal(isDisabledPromptWildcardToken("{CHARACTER1}"), true);
+  });
+
+  it("parses numbered references for known built-in wildcard slots", () => {
+    assert.deepEqual(parseBuiltInPromptWildcardReference("PERSON1"), {
+      slot: getBuiltInPromptWildcardSlot("PERSON"),
+      key: "PERSON",
+      reference: "1",
+    });
+    assert.deepEqual(parseBuiltInPromptWildcardReference("{ADJECTIVE2}"), {
+      slot: getBuiltInPromptWildcardSlot("ADJECTIVE"),
+      key: "ADJECTIVE",
+      reference: "2",
+    });
+    assert.deepEqual(parseBuiltInPromptWildcardReference("plural-noun02"), {
+      slot: getBuiltInPromptWildcardSlot("PLURAL_NOUN"),
+      key: "PLURAL_NOUN",
+      reference: "2",
+    });
+    assert.equal(parseBuiltInPromptWildcardReference("MOOD1"), null);
   });
 
   it("keeps built-in wildcard keys unique", () => {
     const keys = new Set(BUILT_IN_PROMPT_WILDCARD_SLOTS.map((slot) => slot.key));
     assert.equal(keys.size, BUILT_IN_PROMPT_WILDCARD_SLOTS.length);
+  });
+
+  it("keeps the PERSON generation rule limited to first names", () => {
+    const slot = getBuiltInPromptWildcardSlot("PERSON");
+    assert.ok(slot);
+    assert.match(slot.title, /first name/iu);
+    assert.match(slot.generationHint, /first name only/iu);
+    assert.match(slot.generationHint, /Do not return a role, title, occupation/iu);
+  });
+
+  it("keeps the STYLE generation rule focused on tone or genre labels", () => {
+    const slot = getBuiltInPromptWildcardSlot("STYLE");
+    assert.ok(slot);
+    assert.match(slot.title, /writing tone or genre/iu);
+    assert.match(slot.generationHint, /tone or genre label only/iu);
+    assert.match(slot.generationHint, /Do not return a full instruction/iu);
+  });
+
+  it("keeps the NUM generation rule limited to a small integer", () => {
+    const slot = getBuiltInPromptWildcardSlot("NUM");
+    assert.ok(slot);
+    assert.match(slot.title, /integer from 1 to 100/iu);
+    assert.match(slot.generationHint, /integer from 1 to 100/iu);
+    assert.match(slot.generationHint, /digits only/iu);
   });
 });
 
@@ -41,12 +90,27 @@ describe("prompt shortcut payloads", () => {
       commandId: "builtin:/help",
       name: "help",
       invocation: "/help -v explain this",
+      template: "/help -v explain this",
       flags: [{ key: "v", value: "Please be verbose" }],
       passthrough: "explain this",
       resolvedPrompt: "Choose luminous garden.",
       wildcardReplacements: [
         { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
         { key: "PLACE", value: "garden", start: 16, end: 22 },
+      ],
+      promptRuns: [
+        {
+          commandId: "builtin:/help",
+          name: "help",
+          invocation: "/help",
+          sourceStart: 0,
+          sourceEnd: 5,
+          resolvedPrompt: "Choose luminous garden.",
+          wildcardReplacements: [
+            { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
+            { key: "PLACE", value: "garden", start: 16, end: 22 },
+          ],
+        },
       ],
     });
 
@@ -56,12 +120,27 @@ describe("prompt shortcut payloads", () => {
       commandId: "builtin:/help",
       name: "help",
       invocation: "/help -v explain this",
+      template: "/help -v explain this",
       flags: [{ key: "v", value: "Please be verbose" }],
       passthrough: "explain this",
       resolvedPrompt: "Choose luminous garden.",
       wildcardReplacements: [
         { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
         { key: "PLACE", value: "garden", start: 16, end: 22 },
+      ],
+      promptRuns: [
+        {
+          commandId: "builtin:/help",
+          name: "help",
+          invocation: "/help",
+          sourceStart: 0,
+          sourceEnd: 5,
+          resolvedPrompt: "Choose luminous garden.",
+          wildcardReplacements: [
+            { key: "ADJECTIVE", value: "luminous", start: 7, end: 15 },
+            { key: "PLACE", value: "garden", start: 16, end: 22 },
+          ],
+        },
       ],
     });
   });
@@ -118,8 +197,8 @@ describe("prompt shortcut payloads", () => {
         template: "Tell me about !randomShit with {ADJECTIVE}.",
         resolvedPrompt: "Tell me about lemon with luminous.",
         wildcardReplacements: [
-          { key: "randomShit", value: "lemon", start: 14, end: 19 },
-          { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
+          { key: "randomShit", value: "lemon", start: 14, end: 19, source: "deck" },
+          { key: "ADJECTIVE", value: "luminous", start: 25, end: 33, source: "wildcard" },
         ],
       },
       psychicThought: {
@@ -145,8 +224,8 @@ describe("prompt shortcut payloads", () => {
       template: "Tell me about !randomShit with {ADJECTIVE}.",
       resolvedPrompt: "Tell me about lemon with luminous.",
       wildcardReplacements: [
-        { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19 },
-        { key: "ADJECTIVE", value: "luminous", start: 25, end: 33 },
+        { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19, source: "deck" },
+        { key: "ADJECTIVE", value: "luminous", start: 25, end: 33, source: "wildcard" },
       ],
     });
     assert.deepEqual(parseStoredPsychicThoughtPayload(serialized), {

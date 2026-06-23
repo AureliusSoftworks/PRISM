@@ -977,10 +977,7 @@ export async function buildModelCatalog(
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
   const localIds = uniqueModelIdsByLabel([config.ollamaModel, ...discoveredLocal]);
-  const localLabelKeys = new Set(localIds.map(modelLabelKey));
-  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal).filter((id) =>
-    localLabelKeys.has(modelLabelKey(id))
-  );
+  const secondaryLocalIds = uniqueModelIdsByLabel(discoveredSecondaryLocal);
   const onlineIds = openAiApiKey
     ? preferOpenAiChatVariants(
         uniqueModelIds([

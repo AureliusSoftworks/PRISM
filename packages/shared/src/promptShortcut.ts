@@ -8,6 +8,17 @@ export interface PromptShortcutWildcardReplacement {
   value: string;
   start?: number;
   end?: number;
+  source?: "deck" | "option" | "wildcard";
+}
+
+export interface PromptShortcutRunMetadata {
+  commandId: string;
+  name: string;
+  invocation: string;
+  sourceStart?: number;
+  sourceEnd?: number;
+  resolvedPrompt: string;
+  wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
 export interface BuiltInPromptWildcardSlot {
@@ -70,30 +81,36 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
   {
     key: "PERSON",
     label: "PERSON",
-    aliases: ["person", "character"],
-    title: "Generate a random person.",
+    aliases: ["person"],
+    title: "Generate a random first name.",
     generationHint:
-      "Return one person, role, or character phrase, such as archivist, tired magician, neighbor, or retired astronaut.",
+      "Return one given first name only, such as Mira, Theo, June, Elias, or Amara. Do not return a role, title, occupation, character type, descriptor, noun, or phrase.",
   },
   {
     key: "STYLE",
     label: "STYLE",
     aliases: ["style", "tone"],
-    title: "Generate a random style or tone.",
+    title: "Generate a random writing tone or genre.",
     generationHint:
-      "Return one style, tone, genre, or treatment, such as noir, deadpan, pastoral, glitchy, or documentary.",
+      "Return one concise writing tone or genre label only, such as noir, deadpan, pastoral, glitchy, documentary, or whimsical. Do not return a full instruction, role, character type, title, or phrase.",
   },
   {
     key: "NUM",
     label: "NUM",
     aliases: ["num", "number"],
-    title: "Generate a random number.",
+    title: "Generate a random integer from 1 to 100.",
     generationHint: "Return one integer from 1 to 100, with digits only.",
   },
 ] as const satisfies readonly BuiltInPromptWildcardSlot[];
 
 export type BuiltInPromptWildcardSlotKey =
   (typeof BUILT_IN_PROMPT_WILDCARD_SLOTS)[number]["key"];
+
+export interface BuiltInPromptWildcardReference {
+  slot: BuiltInPromptWildcardSlot;
+  key: BuiltInPromptWildcardSlotKey;
+  reference: string | null;
+}
 
 function normalizeBuiltInPromptWildcardSlotLookup(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -122,6 +139,8 @@ for (const slot of BUILT_IN_PROMPT_WILDCARD_SLOTS) {
   }
 }
 
+const DISABLED_PROMPT_WILDCARD_TOKEN_LOOKUP = new Set(["CHARACTER"]);
+
 export function getBuiltInPromptWildcardSlot(
   value: unknown
 ): BuiltInPromptWildcardSlot | null {
@@ -139,15 +158,54 @@ export function normalizeBuiltInPromptWildcardSlotKey(
   return slot ? (slot.key as BuiltInPromptWildcardSlotKey) : null;
 }
 
+export function isDisabledPromptWildcardToken(value: unknown): boolean {
+  const normalized = normalizeBuiltInPromptWildcardSlotLookup(value);
+  if (!normalized) return false;
+  if (DISABLED_PROMPT_WILDCARD_TOKEN_LOOKUP.has(normalized)) return true;
+  const numbered = normalized.match(/^(.+?)(\d+)$/u);
+  const base = numbered?.[1] ?? "";
+  return Boolean(base && DISABLED_PROMPT_WILDCARD_TOKEN_LOOKUP.has(base));
+}
+
+export function parseBuiltInPromptWildcardReference(
+  value: unknown
+): BuiltInPromptWildcardReference | null {
+  if (isDisabledPromptWildcardToken(value)) return null;
+  const exactSlot = getBuiltInPromptWildcardSlot(value);
+  if (exactSlot) {
+    return {
+      slot: exactSlot,
+      key: exactSlot.key as BuiltInPromptWildcardSlotKey,
+      reference: null,
+    };
+  }
+  const normalized = normalizeBuiltInPromptWildcardSlotLookup(value);
+  const numbered = normalized.match(/^(.+?)(\d+)$/u);
+  if (!numbered) return null;
+  const base = numbered[1] ?? "";
+  const reference = numbered[2]?.replace(/^0+(?=\d)/u, "") ?? "";
+  if (!base || !reference) return null;
+  const slot = getBuiltInPromptWildcardSlot(base);
+  if (!slot) return null;
+  return {
+    slot,
+    key: slot.key as BuiltInPromptWildcardSlotKey,
+    reference,
+  };
+}
+
 export interface PromptShortcutMetadata {
   v: 1;
   commandId: string;
   name: string;
   invocation: string;
+  /** User-authored draft before prompt shortcut expansion. */
+  template?: string;
   flags: PromptShortcutFlag[];
   passthrough?: string;
   resolvedPrompt?: string;
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
+  promptRuns?: PromptShortcutRunMetadata[];
 }
 
 export interface PromptWildcardRunMetadata {
@@ -202,6 +260,7 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
   const name = readPromptShortcutString(row.name, 96).replace(/^\/+/, "");
   const invocation = readPromptShortcutString(row.invocation, 2000);
   if (!commandId || !name || !invocation) return undefined;
+  const template = readPromptShortcutString(row.template, 20000);
   const flags = Array.isArray(row.flags)
     ? row.flags
         .map((flag): PromptShortcutFlag | null => {
@@ -219,15 +278,18 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
   ).slice(0, 80);
   const passthrough = readPromptShortcutString(row.passthrough, 2000);
   const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
+  const promptRuns = normalizePromptShortcutRuns(row.promptRuns);
   return {
     v: 1,
     commandId,
     name,
     invocation,
+    ...(template ? { template } : {}),
     flags,
     ...(passthrough ? { passthrough } : {}),
     ...(resolvedPrompt ? { resolvedPrompt } : {}),
     ...(wildcardReplacements.length > 0 ? { wildcardReplacements } : {}),
+    ...(promptRuns.length > 0 ? { promptRuns } : {}),
   };
 }
 
@@ -248,10 +310,17 @@ function normalizePromptWildcardReplacements(
           const start = readPromptShortcutRange(replacementRow.start);
           const end = readPromptShortcutRange(replacementRow.end);
           const hasValidRange = start !== undefined && end !== undefined && end > start;
+          const source =
+            replacementRow.source === "deck" ||
+            replacementRow.source === "option" ||
+            replacementRow.source === "wildcard"
+              ? replacementRow.source
+              : undefined;
           return {
             key,
             value: replacementValue,
             ...(hasValidRange ? { start, end } : {}),
+            ...(source ? { source } : {}),
           };
         })
         .filter(
@@ -259,6 +328,41 @@ function normalizePromptWildcardReplacements(
             Boolean(replacement)
         )
         .slice(0, 120)
+    : [];
+}
+
+function normalizePromptShortcutRuns(value: unknown): PromptShortcutRunMetadata[] {
+  return Array.isArray(value)
+    ? value
+        .map((run): PromptShortcutRunMetadata | null => {
+          if (!run || typeof run !== "object") return null;
+          const row = run as Record<string, unknown>;
+          const commandId = readPromptShortcutString(row.commandId, 160);
+          const name = readPromptShortcutString(row.name, 96).replace(/^\/+/, "");
+          const invocation = readPromptShortcutString(row.invocation, 2000);
+          const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
+          if (!commandId || !name || !invocation || !resolvedPrompt) return null;
+          const sourceStart = readPromptShortcutRange(row.sourceStart);
+          const sourceEnd = readPromptShortcutRange(row.sourceEnd);
+          const hasValidSourceRange =
+            sourceStart !== undefined &&
+            sourceEnd !== undefined &&
+            sourceEnd > sourceStart;
+          const wildcardReplacements = normalizePromptWildcardReplacements(
+            row.wildcardReplacements
+          ).slice(0, 80);
+          return {
+            commandId,
+            name,
+            invocation,
+            ...(sourceStart !== undefined ? { sourceStart } : {}),
+            ...(hasValidSourceRange ? { sourceEnd } : {}),
+            resolvedPrompt,
+            ...(wildcardReplacements.length > 0 ? { wildcardReplacements } : {}),
+          };
+        })
+        .filter((run): run is PromptShortcutRunMetadata => Boolean(run))
+        .slice(0, 20)
     : [];
 }
 

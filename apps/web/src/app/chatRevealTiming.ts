@@ -176,6 +176,17 @@ export function resolveChatRevealWordDelayMsByMood(
   return CHAT_REVEAL_MOOD_WORD_REVEAL_MS[normalizedMood] * baseScale;
 }
 
+export function visibleChatRevealHasCompletedFirstSentence(
+  text: string,
+  visibleTokenCount: number
+): boolean {
+  const tokens = tokenizeChatRevealText(text);
+  const clampedCount = Math.max(0, Math.min(tokens.length, Math.floor(visibleTokenCount)));
+  if (clampedCount <= 0) return false;
+  const visible = tokens.slice(0, clampedCount).join("");
+  return /[.!?](?:["')\]]|\s|$)/u.test(visible);
+}
+
 export function resolveChatRevealTokenLetterDurationMs(
   token: string,
   timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
