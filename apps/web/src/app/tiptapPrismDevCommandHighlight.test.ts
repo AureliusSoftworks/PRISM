@@ -367,18 +367,81 @@ describe("resolveWildcardSlotTextRanges", () => {
     );
   });
 
-  it("recognizes built-in bang wildcard invocations as composer chips", () => {
+  it("recognizes numbered wildcard brace slots as composer chips", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it {ADJECTIVE1} now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+      }),
+      [
+        {
+          start: 8,
+          end: 20,
+          name: "ADJECTIVE",
+          reference: "1",
+          labelEnd: 18,
+          badge: "A",
+          syntax: "brace",
+        },
+      ]
+    );
+  });
+
+  it("recognizes the highest letter badge on numbered brace slots", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it {ADJECTIVE26} now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+      }),
+      [
+        {
+          start: 8,
+          end: 21,
+          name: "ADJECTIVE",
+          reference: "26",
+          labelEnd: 18,
+          badge: "Z",
+          syntax: "brace",
+        },
+      ]
+    );
+  });
+
+  it("does not recognize deprecated built-in bang wildcard invocations as composer chips", () => {
     assert.deepEqual(
       resolveWildcardSlotTextRanges("make it !adjective now", {
         wildcardSlotNames: ["ADJECTIVE"],
       }),
-      [{ start: 8, end: 18, name: "ADJECTIVE", syntax: "bang" }]
+      []
+    );
+  });
+
+  it("does not recognize deprecated numbered built-in bang wildcard invocations as chips", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it !adjective1 now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+      }),
+      []
     );
   });
 
   it("lets custom wildcard decks claim bang invocations first", () => {
     assert.deepEqual(
       resolveWildcardSlotTextRanges("make it !adjective now", {
+        wildcardSlotNames: ["ADJECTIVE"],
+        excludedBangNames: ["adjective"],
+      }),
+      []
+    );
+  });
+
+  it("keeps bang syntax reserved for custom wildcard decks", () => {
+    assert.deepEqual(
+      resolveWildcardDeckTextRanges("make it !adjective1 now", {
+        wildcardNames: ["adjective"],
+      }),
+      [{ start: 8, end: 18, name: "adjective" }]
+    );
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("make it !adjective1 now", {
         wildcardSlotNames: ["ADJECTIVE"],
         excludedBangNames: ["adjective"],
       }),

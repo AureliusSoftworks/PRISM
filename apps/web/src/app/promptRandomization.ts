@@ -1,5 +1,6 @@
 import {
-  getBuiltInPromptWildcardSlot,
+  isDisabledPromptWildcardToken,
+  parseBuiltInPromptWildcardReference,
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 
@@ -12,6 +13,19 @@ export interface PromptRandomizationDeck {
   name: string;
   values: readonly string[];
   aliases?: readonly string[];
+}
+
+export function pendingWildcardOptimisticMessageContent(options: {
+  rawDraft: string;
+  resolvedDisplayContent: string;
+  pendingWildcardResolution: boolean;
+}): string {
+  const rawDraft = options.rawDraft.trim();
+  const resolvedDisplayContent = options.resolvedDisplayContent.trim();
+  if (options.pendingWildcardResolution) {
+    return rawDraft || resolvedDisplayContent;
+  }
+  return resolvedDisplayContent || rawDraft;
 }
 
 export function promptInsertionStartsSentence(before: string): boolean {
@@ -112,14 +126,12 @@ function deckReplacementKey(name: string): string {
     .toUpperCase() || "DECK";
 }
 
-const BUILT_IN_WILDCARD_INVOCATION_RE =
-  /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
 const MODEL_FILLED_WILDCARD_BRACE_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/gu;
 
 export function promptContainsBuiltInWildcardSlots(source: string): boolean {
   for (const match of source.matchAll(BUILT_IN_WILDCARD_BRACE_RE)) {
-    if (getBuiltInPromptWildcardSlot(match[1] ?? "")) return true;
+    if (parseBuiltInPromptWildcardReference(match[1] ?? "")) return true;
   }
   return false;
 }
@@ -130,13 +142,16 @@ export function maskBuiltInWildcardSlotsForPending(
 ): string {
   if (!source || !pendingText) return source;
   return source.replace(BUILT_IN_WILDCARD_BRACE_RE, (token, name: string) =>
-    getBuiltInPromptWildcardSlot(name) ? pendingText : token
+    parseBuiltInPromptWildcardReference(name) ? pendingText : token
   );
 }
 
 export function promptContainsModelFilledWildcardSlots(source: string): boolean {
   MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
-  return MODEL_FILLED_WILDCARD_BRACE_RE.test(source);
+  for (const match of source.matchAll(MODEL_FILLED_WILDCARD_BRACE_RE)) {
+    if (!isDisabledPromptWildcardToken(match[1] ?? "")) return true;
+  }
+  return false;
 }
 
 export function maskModelFilledWildcardSlotsForPending(
@@ -145,7 +160,9 @@ export function maskModelFilledWildcardSlotsForPending(
 ): string {
   if (!source || !pendingText) return source;
   MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
-  return source.replace(MODEL_FILLED_WILDCARD_BRACE_RE, pendingText);
+  return source.replace(MODEL_FILLED_WILDCARD_BRACE_RE, (token, name: string) =>
+    isDisabledPromptWildcardToken(name) ? token : pendingText
+  );
 }
 
 export function isStandaloneWildcardComposerDraft(source: string): boolean {
@@ -153,7 +170,10 @@ export function isStandaloneWildcardComposerDraft(source: string): boolean {
   if (!trimmed) return false;
   if (/^![a-z0-9][a-z0-9_-]*[.!?]?$/iu.test(trimmed)) return true;
   if (/^\{[^{}\r\n]*\|[^{}\r\n]*\}[.!?]?$/u.test(trimmed)) return true;
-  return /^\{[A-Z][A-Z0-9_ ]{1,63}\}[.!?]?$/u.test(trimmed);
+  const braceWildcard = trimmed.match(/^\{([A-Z][A-Z0-9_ ]{1,63})\}[.!?]?$/u);
+  return Boolean(
+    braceWildcard && !isDisabledPromptWildcardToken(braceWildcard[1] ?? "")
+  );
 }
 
 function normalizedPromptRandomizationReplacementsForPrompt(
@@ -186,6 +206,7 @@ function normalizedPromptRandomizationReplacementsForPrompt(
       const value = prompt.slice(normalizedStart, normalizedEnd);
       if (!value) return null;
       return {
+        ...replacement,
         key: replacement.key,
         value,
         start: normalizedStart,
@@ -209,56 +230,13 @@ export function resolveBuiltInPromptWildcardInvocations(
   source: string,
   existingReplacements?: readonly PromptShortcutWildcardReplacement[]
 ): PromptRandomizationResolution {
-  const preservedReplacements = normalizedPromptRandomizationReplacementsForPrompt(
-    source,
-    existingReplacements
-  );
-  let prompt = "";
-  let cursor = 0;
-  let changed = false;
-  const replacements: PromptShortcutWildcardReplacement[] = [];
-  const preserveSegmentReplacements = (
-    segmentStart: number,
-    segmentEnd: number,
-    resolvedSegmentStart: number
-  ) => {
-    for (const replacement of preservedReplacements) {
-      const start = replacement.start ?? -1;
-      const end = replacement.end ?? -1;
-      if (start < segmentStart || end > segmentEnd) continue;
-      replacements.push({
-        ...replacement,
-        start: resolvedSegmentStart + (start - segmentStart),
-        end: resolvedSegmentStart + (end - segmentStart),
-      });
-    }
+  return {
+    prompt: source,
+    replacements: normalizedPromptRandomizationReplacementsForPrompt(
+      source,
+      existingReplacements
+    ),
   };
-
-  for (const match of source.matchAll(BUILT_IN_WILDCARD_INVOCATION_RE)) {
-    const raw = match[0] ?? "";
-    const name = match[2] ?? "";
-    const matchIndex = match.index ?? -1;
-    const slot = getBuiltInPromptWildcardSlot(name);
-    if (matchIndex < 0 || !raw || !name || !slot) continue;
-    const delimiterLength = raw.startsWith("!") ? 0 : 1;
-    const start = matchIndex + delimiterLength;
-    const end = start + 1 + name.length;
-    const resolvedSegmentStart = prompt.length;
-    prompt += source.slice(cursor, start);
-    preserveSegmentReplacements(cursor, start, resolvedSegmentStart);
-    prompt += `{${slot.label}}`;
-    cursor = end;
-    changed = true;
-  }
-
-  if (!changed) {
-    return { prompt: source, replacements: preservedReplacements };
-  }
-
-  const finalResolvedSegmentStart = prompt.length;
-  prompt += source.slice(cursor);
-  preserveSegmentReplacements(cursor, source.length, finalResolvedSegmentStart);
-  return { prompt, replacements };
 }
 
 function buildPromptRandomizationDeckLookup(
@@ -380,6 +358,7 @@ export function resolvePromptRandomizationGroups(
         value: casedValue,
         start: replacementStart,
         end: replacementStart + casedValue.length,
+        source: "deck",
       });
       cursor = deckToken.end;
       continue;
@@ -406,6 +385,7 @@ export function resolvePromptRandomizationGroups(
         value: casedValue,
         start: replacementStart,
         end: replacementStart + casedValue.length,
+        source: "option",
       });
     } else {
       prompt += source.slice(start, end + 1);

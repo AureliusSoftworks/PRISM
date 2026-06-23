@@ -5,6 +5,7 @@ import {
   isStandaloneWildcardComposerDraft,
   maskBuiltInWildcardSlotsForPending,
   maskModelFilledWildcardSlotsForPending,
+  pendingWildcardOptimisticMessageContent,
   promptContainsBuiltInWildcardSlots,
   promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
@@ -14,6 +15,53 @@ import {
   splitPromptRandomizationOptions,
   withSentenceCasedPromptInsertion,
 } from "./promptRandomization.ts";
+
+describe("pendingWildcardOptimisticMessageContent", () => {
+  it("uses the raw draft while wildcard resolution is pending", () => {
+    assert.equal(
+      pendingWildcardOptimisticMessageContent({
+        rawDraft: "Tell !animals about {ADJECTIVE}.",
+        resolvedDisplayContent: "Tell cat about {ADJECTIVE}.",
+        pendingWildcardResolution: true,
+      }),
+      "Tell !animals about {ADJECTIVE}."
+    );
+  });
+
+  it("does not leak locally resolved deck or option values while pending", () => {
+    const content = pendingWildcardOptimisticMessageContent({
+      rawDraft: "Tell !animals about {red|green} {STYLE}.",
+      resolvedDisplayContent: "Tell cat about green {STYLE}.",
+      pendingWildcardResolution: true,
+    });
+
+    assert.equal(content.includes("cat"), false);
+    assert.equal(content.includes("{LOADING}"), false);
+    assert.equal(content, "Tell !animals about {red|green} {STYLE}.");
+  });
+
+  it("keeps prompt shortcut sends collapsed to the user-authored invocation while pending", () => {
+    assert.equal(
+      pendingWildcardOptimisticMessageContent({
+        rawDraft: "Tell me a wild /story",
+        resolvedDisplayContent: "Tell me a wild write a story about a cat in a {STYLE} voice.",
+        pendingWildcardResolution: true,
+      }),
+      "Tell me a wild /story"
+    );
+  });
+
+  it("uses the resolved display content once there is no pending wildcard work", () => {
+    assert.equal(
+      pendingWildcardOptimisticMessageContent({
+        rawDraft: "Tell !animals about {red|green}.",
+        resolvedDisplayContent: "Tell cat about green.",
+        pendingWildcardResolution: false,
+      }),
+      "Tell cat about green."
+    );
+  });
+});
 
 describe("withSentenceCasedPromptInsertion", () => {
   it("capitalizes sentence-start insertions without lowercasing mid-sentence insertions", () => {
@@ -75,8 +123,8 @@ describe("resolvePromptRandomizationGroups", () => {
       {
         prompt: "Pick banana with green.",
         replacements: [
-          { key: "OPTION", value: "banana", start: 5, end: 11 },
-          { key: "OPTION", value: "green", start: 17, end: 22 },
+          { key: "OPTION", value: "banana", start: 5, end: 11, source: "option" },
+          { key: "OPTION", value: "green", start: 17, end: 22, source: "option" },
         ],
       }
     );
@@ -103,8 +151,8 @@ describe("resolvePromptRandomizationGroups", () => {
       {
         prompt: "Tell me about lemon with spicy {ADJECTIVE}.",
         replacements: [
-          { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19 },
-          { key: "OPTION", value: "spicy", start: 25, end: 30 },
+          { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19, source: "deck" },
+          { key: "OPTION", value: "spicy", start: 25, end: 30, source: "option" },
         ],
       }
     );
@@ -123,7 +171,9 @@ describe("resolvePromptRandomizationGroups", () => {
       }),
       {
         prompt: "Pick potato.",
-        replacements: [{ key: "RANDOMSHIT", value: "potato", start: 5, end: 11 }],
+        replacements: [
+          { key: "RANDOMSHIT", value: "potato", start: 5, end: 11, source: "deck" },
+        ],
       }
     );
   });
@@ -140,7 +190,40 @@ describe("resolvePromptRandomizationGroups", () => {
       }),
       {
         prompt: "Pick Alexson.",
-        replacements: [{ key: "NAME", value: "Alex", start: 5, end: 9 }],
+        replacements: [{ key: "NAME", value: "Alex", start: 5, end: 9, source: "deck" }],
+      }
+    );
+  });
+
+  it("keeps bang syntax deck-only, including text that resembles old numbered built-ins", () => {
+    const deckResolution = resolvePromptRandomizationGroups("Pick !person and !person1.", {
+      decks: [
+        {
+          name: "person",
+          values: ["Alex"],
+        },
+      ],
+      random: () => 0,
+    });
+
+    assert.deepEqual(deckResolution, {
+      prompt: "Pick Alex and Alex1.",
+      replacements: [
+        { key: "PERSON", value: "Alex", start: 5, end: 9, source: "deck" },
+        { key: "PERSON", value: "Alex", start: 14, end: 18, source: "deck" },
+      ],
+    });
+    assert.deepEqual(
+      resolveBuiltInPromptWildcardInvocations(
+        deckResolution.prompt,
+        deckResolution.replacements
+      ),
+      {
+        prompt: "Pick Alex and Alex1.",
+        replacements: [
+          { key: "PERSON", value: "Alex", start: 5, end: 9, source: "deck" },
+          { key: "PERSON", value: "Alex", start: 14, end: 18, source: "deck" },
+        ],
       }
     );
   });
@@ -157,7 +240,7 @@ describe("resolvePromptRandomizationGroups", () => {
       }),
       {
         prompt: 'lastname "Heathson"',
-        replacements: [{ key: "NAME", value: "Heath", start: 10, end: 15 }],
+        replacements: [{ key: "NAME", value: "Heath", start: 10, end: 15, source: "deck" }],
       }
     );
   });
@@ -178,7 +261,9 @@ describe("resolvePromptRandomizationGroups", () => {
       }),
       {
         prompt: "Pick Morgan.",
-        replacements: [{ key: "NAMESON", value: "Morgan", start: 5, end: 11 }],
+        replacements: [
+          { key: "NAMESON", value: "Morgan", start: 5, end: 11, source: "deck" },
+        ],
       }
     );
   });
@@ -213,11 +298,23 @@ describe("resolvePromptRandomizationGroups", () => {
 });
 
 describe("resolveBuiltInPromptWildcardInvocations", () => {
-  it("converts built-in bang wildcard invocations to deferred brace slots", () => {
+  it("leaves deprecated built-in bang wildcard invocations untouched", () => {
     assert.deepEqual(
       resolveBuiltInPromptWildcardInvocations("Make a !adjective apple and !plural-noun."),
       {
-        prompt: "Make a {ADJECTIVE} apple and {PLURAL NOUN}.",
+        prompt: "Make a !adjective apple and !plural-noun.",
+        replacements: [],
+      }
+    );
+  });
+
+  it("leaves deprecated numbered built-in bang wildcard references untouched", () => {
+    assert.deepEqual(
+      resolveBuiltInPromptWildcardInvocations(
+        "Make !person1 meet !person1 near !plural-noun2."
+      ),
+      {
+        prompt: "Make !person1 meet !person1 near !plural-noun2.",
         replacements: [],
       }
     );
@@ -235,8 +332,8 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
         deckResolution.replacements
       ),
       {
-        prompt: "Ask glowing about {ADJECTIVE}.",
-        replacements: [{ key: "MOOD", value: "glowing", start: 4, end: 11 }],
+        prompt: "Ask glowing about !adjective.",
+        replacements: [{ key: "MOOD", value: "glowing", start: 4, end: 11, source: "deck" }],
       }
     );
   });
@@ -252,6 +349,8 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
 describe("pending built-in wildcard slot masking", () => {
   it("detects known brace slots without treating option groups as true wildcards", () => {
     assert.equal(promptContainsBuiltInWildcardSlots("Make it {ADJECTIVE}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {ADJECTIVE1}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {CHARACTER}."), false);
     assert.equal(promptContainsBuiltInWildcardSlots("Pick {red|green}."), false);
     assert.equal(promptContainsBuiltInWildcardSlots("Keep {MOOD RING} unknown."), false);
   });
@@ -264,11 +363,20 @@ describe("pending built-in wildcard slot masking", () => {
       ),
       "A {LOADING} with {red|green} {LOADING}."
     );
+    assert.equal(
+      maskBuiltInWildcardSlotsForPending(
+        "A {PLURAL NOUN1} with {red|green} {ADJECTIVE2}.",
+        "{LOADING}"
+      ),
+      "A {LOADING} with {red|green} {LOADING}."
+    );
   });
 
   it("detects model-filled uppercase brace slots beyond the built-in list", () => {
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {WORD}."), true);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {MOOD RING}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER1}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Pick {red|green}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Keep {word} literal."), false);
   });
@@ -276,10 +384,10 @@ describe("pending built-in wildcard slot masking", () => {
   it("masks model-filled brace slots for optimistic canvas placeholders", () => {
     assert.equal(
       maskModelFilledWildcardSlotsForPending(
-        "A {WORD} with {red|green} and {MOOD RING}.",
+        "A {WORD} with {red|green}, {CHARACTER}, and {MOOD RING}.",
         "{LOADING}"
       ),
-      "A {LOADING} with {red|green} and {LOADING}."
+      "A {LOADING} with {red|green}, {CHARACTER}, and {LOADING}."
     );
   });
 });
@@ -293,6 +401,7 @@ describe("isStandaloneWildcardComposerDraft", () => {
   it("recognizes one-off uppercase brace wildcard calls", () => {
     assert.equal(isStandaloneWildcardComposerDraft("{WORD}"), true);
     assert.equal(isStandaloneWildcardComposerDraft("{MOOD RING}!"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{CHARACTER}"), false);
   });
 
   it("recognizes one-off hardcoded option groups", () => {

@@ -1,11 +1,35 @@
-import type { PromptShortcutWildcardReplacement } from "@localai/shared";
+import {
+  getBuiltInPromptWildcardSlot,
+  isDisabledPromptWildcardToken,
+  parseBuiltInPromptWildcardReference,
+  type PromptShortcutWildcardReplacement,
+} from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "./providers.ts";
 
 const PROMPT_WILDCARD_SYSTEM_PROMPT =
-  "You fill prompt-template wildcards. Return JSON only. For each requested wildcard occurrence key, choose one concrete replacement value that fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces. Treat repeated wildcard keys as independent random draws unless the occurrence key explicitly repeats.";
+  "You fill prompt-template wildcards. Return JSON only. The wildcard key and generation rule are authoritative: never change a PERSON into an adjective, an ADJECTIVE into a person, or any other key into a different kind of value just because nearby grammar suggests it. For each requested wildcard occurrence key, choose one concrete replacement value that satisfies that wildcard type and still fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces. Treat repeated wildcard keys as independent random draws unless the occurrence key explicitly repeats.";
 const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
 const PROMPT_WILDCARD_MAX_KEYS = 16;
 const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
+const PROMPT_WILDCARD_FALLBACK_VALUES: Record<string, readonly string[]> = {
+  ADJECTIVE: ["vivid", "restless", "golden", "curious", "weathered", "luminous"],
+  VERB: ["wander", "discover", "transform", "gather", "whisper", "tumble"],
+  NOUN: ["lantern", "river", "secret", "garden", "signal", "threshold"],
+  PLURAL_NOUN: ["sparks", "lanterns", "footprints", "echoes", "seeds", "stars"],
+  ADVERB: ["quietly", "boldly", "sideways", "gently", "suddenly", "carefully"],
+  PLACE: ["market", "harbor", "forest", "canyon", "station", "village"],
+  PERSON: ["Mira", "Theo", "June", "Elias", "Amara", "Niko"],
+  STYLE: ["whimsical", "noir", "pastoral", "dreamlike", "playful", "mythic"],
+  NUM: ["7", "12", "23", "42", "64", "99"],
+};
+const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
+  "vivid",
+  "curious",
+  "golden",
+  "hidden",
+  "restless",
+  "luminous",
+] as const;
 
 interface PromptWildcardOccurrence {
   key: string;
@@ -13,6 +37,7 @@ interface PromptWildcardOccurrence {
   token: string;
   start: number;
   end: number;
+  reference: string | null;
 }
 
 export interface PromptWildcardResolution {
@@ -26,26 +51,84 @@ export function normalizePromptWildcardKey(value: unknown): string {
     : "";
 }
 
+function parsePromptWildcardOccurrenceName(value: unknown): {
+  key: string;
+  reference: string | null;
+} {
+  if (isDisabledPromptWildcardToken(value)) return { key: "", reference: null };
+  const builtInReference = parseBuiltInPromptWildcardReference(value);
+  if (builtInReference) {
+    return { key: builtInReference.key, reference: builtInReference.reference };
+  }
+  const key = normalizePromptWildcardKey(value);
+  if (isDisabledPromptWildcardToken(key)) return { key: "", reference: null };
+  const numbered = key.match(/^(.+?)(\d+)$/u);
+  if (!numbered) return { key, reference: null };
+  const base = numbered[1] ?? "";
+  const reference = numbered[2]?.replace(/^0+(?=\d)/u, "") ?? "";
+  if (!base || !reference) return { key, reference: null };
+  if (isDisabledPromptWildcardToken(base)) return { key: "", reference: null };
+  return { key: base, reference };
+}
+
 function promptWildcardOccurrences(prompt: string): PromptWildcardOccurrence[] {
   const occurrences: PromptWildcardOccurrence[] = [];
   const countsByKey = new Map<string, number>();
   for (const match of prompt.matchAll(PROMPT_WILDCARD_PATTERN)) {
     const token = match[0] ?? "";
-    const key = normalizePromptWildcardKey(match[1]);
+    const parsedName = parsePromptWildcardOccurrenceName(match[1]);
+    const key = parsedName.key;
     const start = match.index ?? -1;
     if (!key || !token || start < 0) continue;
-    const count = (countsByKey.get(key) ?? 0) + 1;
-    countsByKey.set(key, count);
+    const count = parsedName.reference ? 0 : (countsByKey.get(key) ?? 0) + 1;
+    if (!parsedName.reference) countsByKey.set(key, count);
     occurrences.push({
       key,
-      requestKey: `${key}__${count}`,
+      requestKey: parsedName.reference
+        ? `${key}__REF_${parsedName.reference}`
+        : `${key}__${count}`,
       token,
       start,
       end: start + token.length,
+      reference: parsedName.reference,
     });
     if (occurrences.length >= PROMPT_WILDCARD_MAX_KEYS) break;
   }
   return occurrences;
+}
+
+function promptWildcardRequestLines(
+  occurrences: readonly PromptWildcardOccurrence[]
+): string[] {
+  const grouped = new Map<
+    string,
+    { occurrence: PromptWildcardOccurrence; starts: number[]; tokens: Set<string> }
+  >();
+  for (const occurrence of occurrences) {
+    const existing = grouped.get(occurrence.requestKey);
+    if (existing) {
+      existing.starts.push(occurrence.start);
+      existing.tokens.add(occurrence.token);
+      continue;
+    }
+    grouped.set(occurrence.requestKey, {
+      occurrence,
+      starts: [occurrence.start],
+      tokens: new Set([occurrence.token]),
+    });
+  }
+  return [...grouped.values()].map(({ occurrence, starts, tokens }) => {
+    const tokenLabel = [...tokens].join(", ");
+    const startsLabel = starts.join(", ");
+    const referenceLabel = occurrence.reference
+      ? `, reference ${occurrence.reference}`
+      : "";
+    const slot = getBuiltInPromptWildcardSlot(occurrence.key);
+    const generationRule = slot
+      ? ` Rule: ${slot.generationHint}`
+      : " Rule: Return a short value matching this custom wildcard key.";
+    return `- ${occurrence.requestKey}: ${tokenLabel} at character ${startsLabel} (wildcard key ${occurrence.key}${referenceLabel}).${generationRule}`;
+  });
 }
 
 export function promptWildcardNames(prompt: string): string[] {
@@ -97,13 +180,72 @@ function recordValue(record: Record<string, unknown>, key: string): unknown {
   );
 }
 
+function uniquePromptWildcardRequestCountByKey(
+  occurrences: readonly PromptWildcardOccurrence[]
+): Map<string, number> {
+  const requestKeysByKey = new Map<string, Set<string>>();
+  for (const occurrence of occurrences) {
+    const requestKeys = requestKeysByKey.get(occurrence.key) ?? new Set<string>();
+    requestKeys.add(occurrence.requestKey);
+    requestKeysByKey.set(occurrence.key, requestKeys);
+  }
+  const counts = new Map<string, number>();
+  for (const [key, requestKeys] of requestKeysByKey) {
+    counts.set(key, requestKeys.size);
+  }
+  return counts;
+}
+
+function promptWildcardRecordValueForOccurrence(
+  record: Record<string, unknown>,
+  occurrence: PromptWildcardOccurrence,
+  requestCountByKey: ReadonlyMap<string, number>
+): unknown {
+  const rawTokenName = occurrence.token.replace(/[{}]/g, "");
+  const directValue =
+    recordValue(record, occurrence.requestKey) ??
+    recordValue(record, rawTokenName) ??
+    (occurrence.reference
+      ? recordValue(record, `${occurrence.key}${occurrence.reference}`) ??
+        recordValue(record, `${occurrence.key}_${occurrence.reference}`) ??
+        recordValue(record, `${occurrence.key} ${occurrence.reference}`)
+      : undefined);
+  if (directValue !== undefined) return directValue;
+  return (requestCountByKey.get(occurrence.key) ?? 0) === 1
+    ? recordValue(record, occurrence.key)
+    : undefined;
+}
+
+function fallbackPromptWildcardValue(occurrence: PromptWildcardOccurrence): string {
+  const values =
+    PROMPT_WILDCARD_FALLBACK_VALUES[occurrence.key] ??
+    PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES;
+  const seed = Array.from(occurrence.requestKey).reduce(
+    (sum, char) => sum + char.charCodeAt(0),
+    occurrence.start
+  );
+  return values[Math.abs(seed) % values.length] ?? "vivid";
+}
+
+function fillMissingPromptWildcardValues(
+  values: Map<string, string>,
+  occurrences: readonly PromptWildcardOccurrence[]
+): Map<string, string> {
+  const filled = new Map(values);
+  for (const occurrence of occurrences) {
+    if (filled.has(occurrence.requestKey)) continue;
+    filled.set(occurrence.requestKey, fallbackPromptWildcardValue(occurrence));
+  }
+  return filled;
+}
+
 function extractPromptWildcardValues(
   raw: string,
   occurrences: readonly PromptWildcardOccurrence[]
 ): Map<string, string> {
   const parsed = parsePromptWildcardJson(raw);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return new Map();
+    return fillMissingPromptWildcardValues(new Map(), occurrences);
   }
   const root = parsed as Record<string, unknown>;
   const nested = ["wildcards", "values", "replacements"].find(
@@ -111,23 +253,20 @@ function extractPromptWildcardValues(
   );
   const record = nested ? (root[nested] as Record<string, unknown>) : root;
   const values = new Map<string, string>();
-  const occurrenceCountByKey = occurrences.reduce((counts, occurrence) => {
-    counts.set(occurrence.key, (counts.get(occurrence.key) ?? 0) + 1);
-    return counts;
-  }, new Map<string, number>());
+  const requestCountByKey = uniquePromptWildcardRequestCountByKey(occurrences);
   for (const occurrence of occurrences) {
-    const requestValue = recordValue(record, occurrence.requestKey);
-    const keyValue =
-      (occurrenceCountByKey.get(occurrence.key) ?? 0) === 1
-        ? recordValue(record, occurrence.key)
-        : undefined;
+    const requestValue = promptWildcardRecordValueForOccurrence(
+      record,
+      occurrence,
+      requestCountByKey
+    );
     const normalized = normalizePromptWildcardValue(
-      requestValue ?? keyValue,
+      requestValue,
       occurrence.key
     );
     if (normalized) values.set(occurrence.requestKey, normalized);
   }
-  return values;
+  return fillMissingPromptWildcardValues(values, occurrences);
 }
 
 export function normalizeComposerWildcardValueResponse(
@@ -200,6 +339,7 @@ function normalizePromptShortcutReplacementRangesForPrompt(
           ? replacement.key.trim().slice(0, 64)
           : "OPTION";
       return {
+        ...replacement,
         key,
         value,
         start: normalizedStart,
@@ -264,6 +404,7 @@ export function applyPromptWildcardValues(
         value,
         start,
         end: start + value.length,
+        source: "wildcard",
       });
     } else {
       resolved += occurrence.token;
@@ -310,13 +451,10 @@ export async function resolvePromptWildcardsWithModel(args: {
           args.prompt,
           "",
           "Wildcard occurrences:",
-          ...occurrences.map(
-            (occurrence) =>
-              `- ${occurrence.requestKey}: ${occurrence.token} at character ${occurrence.start} (wildcard key ${occurrence.key})`
-          ),
+          ...promptWildcardRequestLines(occurrences),
           "",
           `Return a single JSON object whose keys are exactly those occurrence keys, for example: {"${exampleKey}":"stinky"}.`,
-          "Each occurrence is an independent random draw, even when two occurrences share the same wildcard key.",
+          "Each unique occurrence key is one random draw. If the same occurrence key appears at multiple positions, use that same value everywhere.",
           "Choose values that make the prompt vivid and coherent. Do not rewrite the prompt.",
         ].join("\n"),
       },
@@ -332,15 +470,13 @@ export async function resolvePromptWildcardsWithModel(args: {
     return applyPromptWildcardValues(args.prompt, values, args.existingReplacements);
   } catch (error) {
     console.warn(
-      "[prompt-wildcards] leaving prompt wildcards unresolved:",
+      "[prompt-wildcards] filling prompt wildcards with local fallbacks:",
       error instanceof Error ? error.message : error
     );
-    return {
-      prompt: args.prompt,
-      replacements: normalizePromptShortcutReplacementRangesForPrompt(
-        args.prompt,
-        args.existingReplacements
-      ),
-    };
+    return applyPromptWildcardValues(
+      args.prompt,
+      fillMissingPromptWildcardValues(new Map(), occurrences),
+      args.existingReplacements
+    );
   }
 }

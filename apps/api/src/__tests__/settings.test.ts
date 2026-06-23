@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 import {
   DEFAULT_ZEN_CANVAS_TYPING_SPEED,
   DEFAULT_ZEN_FRESH_START_GAP_MS,
@@ -411,6 +412,14 @@ describe("resolveNextSettings — prismDefaultLlmModel", () => {
     );
     assert.equal(cleared.prismDefaultLlmModel, null);
   });
+
+  it("stores disabled as an explicit internal model choice", () => {
+    const next = resolveNextSettings(
+      { prismDefaultLlmModel: ` ${DISABLED_MODEL_CHOICE} ` },
+      baseline()
+    );
+    assert.equal(next.prismDefaultLlmModel, DISABLED_MODEL_CHOICE);
+  });
 });
 
 describe("resolveNextSettings — prismImageToolLlmModel", () => {
@@ -426,6 +435,14 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
     );
     assert.equal(cleared.prismImageToolLlmModel, null);
   });
+
+  it("stores disabled as an explicit image-request LLM choice", () => {
+    const next = resolveNextSettings(
+      { prismImageToolLlmModel: DISABLED_MODEL_CHOICE },
+      baseline()
+    );
+    assert.equal(next.prismImageToolLlmModel, DISABLED_MODEL_CHOICE);
+  });
 });
 
 describe("resolveNextSettings — preferred auto models", () => {
@@ -436,6 +453,18 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(next.preferredLocalModel, "llama3.2");
     assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("stores disabled as an explicit local + online model hint", () => {
+    const next = resolveNextSettings(
+      {
+        preferredLocalModel: DISABLED_MODEL_CHOICE,
+        preferredOnlineModel: ` ${DISABLED_MODEL_CHOICE} `,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredLocalModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredOnlineModel, DISABLED_MODEL_CHOICE);
   });
 
   it("clears each preference independently with empty string", () => {
@@ -605,6 +634,18 @@ describe("resolveNextSettings — image panel model picks", () => {
     assert.equal(next.preferredOpenAiImageModel, "gpt-image-1-mini");
   });
 
+  it("stores disabled as an explicit image panel lane choice", () => {
+    const next = resolveNextSettings(
+      {
+        preferredLocalImageModel: DISABLED_MODEL_CHOICE,
+        preferredOpenAiImageModel: DISABLED_MODEL_CHOICE,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredLocalImageModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredOpenAiImageModel, DISABLED_MODEL_CHOICE);
+  });
+
   it("clears local image model when given empty string", () => {
     const current = baseline({ preferredLocalImageModel: "old" });
     assert.equal(
@@ -700,6 +741,18 @@ describe("resolveNextSettings — Zen Atmosphere model picks", () => {
       baseline()
     );
     assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
+  });
+
+  it("stores disabled as an explicit Atmosphere lane choice", () => {
+    const next = resolveNextSettings(
+      {
+        preferredZenWallpaperLocalImageModel: DISABLED_MODEL_CHOICE,
+        preferredZenWallpaperOpenAiImageModel: DISABLED_MODEL_CHOICE,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredZenWallpaperLocalImageModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, DISABLED_MODEL_CHOICE);
   });
 
   it("clears wallpaper image model ids with empty strings", () => {
