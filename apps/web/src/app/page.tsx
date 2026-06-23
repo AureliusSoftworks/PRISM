@@ -252,6 +252,7 @@ import {
   maskModelFilledWildcardSlotsForPending,
   pendingWildcardOptimisticMessageContent,
   promptContainsModelFilledWildcardSlots,
+  resendDraftTextForMessage,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
 } from "./promptRandomization";
@@ -37881,15 +37882,22 @@ function HomeContent(): React.JSX.Element {
     }
     let detailForSend = detail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
-    const isInitialZenStarterPrompt =
+    const isInitialZenOpeningTurn =
       view === "chat" &&
-      isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      !editingMessageId &&
+      (isStarterPrompt || trimmed.length > 0) &&
       baselineMessageCount === 0 &&
       detailForSend?.hasAssistantReply !== true;
+    const isInitialZenStarterPrompt = isInitialZenOpeningTurn && isStarterPrompt;
     if (isInitialZenStarterPrompt) {
       if (replayCachedZenInitialStarterReply()) return;
       if (armCanceledZenInitialStarterReplay()) return;
       setZenInitialStarterOverlayActive(true);
+    } else if (isInitialZenOpeningTurn) {
+      setZenInitialStarterOverlayActive(true);
+      clearZenInitialStarterReplyCache();
+      zenInitialStarterLiveEnvelopeRef.current = null;
     } else if (!isStarterPrompt && view === "chat") {
       setZenInitialStarterOverlayActive(false);
       clearZenInitialStarterReplyCache();
@@ -38928,7 +38936,12 @@ function HomeContent(): React.JSX.Element {
   function resendUserMessage(msg: Message): void {
     if (msg.role !== "user") return;
     const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
-    const resendText = (commandAlias?.originalText ?? msg.content).trim();
+    const resendText = resendDraftTextForMessage({
+      content: msg.content,
+      commandAliasOriginalText: commandAlias?.originalText,
+      promptShortcutTemplate: msg.promptShortcut?.template,
+      promptWildcardTemplate: msg.promptWildcards?.template,
+    });
     if (resendText.length === 0) return;
     closeMessageContextOverlay();
     // Force normal send mode if an edit draft was active.
