@@ -50,17 +50,17 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     key: "NOUN",
     label: "NOUN",
     aliases: ["noun", "thing"],
-    title: "Generate a random noun.",
+    title: "Generate a varied singular noun.",
     generationHint:
-      "Return one singular noun or short noun phrase, such as lantern, subway, rumor, or chessboard.",
+      "Return one singular noun only. Vary the choice widely across everyday concrete and abstract nouns. Do not copy or reuse words from these instructions.",
   },
   {
     key: "PLURAL_NOUN",
     label: "PLURAL NOUN",
     aliases: ["plural-noun", "plural_noun", "nouns"],
-    title: "Generate a random plural noun.",
+    title: "Generate varied plural nouns.",
     generationHint:
-      "Return one plural noun or short plural noun phrase, such as marbles, haunted houses, paper boats, or satellites.",
+      "Return one plural noun or concise plural noun phrase only. Vary the choice widely across everyday concrete and abstract nouns. Do not copy or reuse words from these instructions.",
   },
   {
     key: "ADVERB",

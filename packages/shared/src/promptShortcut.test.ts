@@ -58,6 +58,19 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(keys.size, BUILT_IN_PROMPT_WILDCARD_SLOTS.length);
   });
 
+  it("keeps noun generation rules free of sticky concrete examples", () => {
+    const noun = getBuiltInPromptWildcardSlot("NOUN");
+    const pluralNoun = getBuiltInPromptWildcardSlot("PLURAL_NOUN");
+    assert.ok(noun);
+    assert.ok(pluralNoun);
+    assert.match(noun.generationHint, /Do not copy or reuse words from these instructions/iu);
+    assert.match(pluralNoun.generationHint, /Do not copy or reuse words from these instructions/iu);
+    for (const sticky of ["lantern", "subway", "rumor", "chessboard"]) {
+      assert.doesNotMatch(noun.generationHint, new RegExp(sticky, "iu"));
+      assert.doesNotMatch(pluralNoun.generationHint, new RegExp(sticky, "iu"));
+    }
+  });
+
   it("keeps the PERSON generation rule limited to first names", () => {
     const slot = getBuiltInPromptWildcardSlot("PERSON");
     assert.ok(slot);
