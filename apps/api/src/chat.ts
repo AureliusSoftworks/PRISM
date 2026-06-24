@@ -3384,13 +3384,24 @@ function userMessageSuggestsInterruptedReplyResume(userMessage: string): boolean
 
 function buildInterruptedReplyContinuationHint(
   chatHistory: ChatMessage[],
-  userMessage: string
+  userMessage: string,
+  explicitInterruptedContent?: string
 ): string | null {
-  const previousMessage = [...chatHistory]
-    .reverse()
-    .find((item) => item.role === "assistant" || item.role === "user");
-  if (!previousMessage || previousMessage.role !== "assistant") return null;
-  const interruptedContent = previousMessage.content.trim();
+  const explicitContent =
+    typeof explicitInterruptedContent === "string"
+      ? explicitInterruptedContent.trim()
+      : "";
+  const previousMessage =
+    explicitContent.length > 0
+      ? null
+      : [...chatHistory]
+          .reverse()
+          .find((item) => item.role === "assistant" || item.role === "user");
+  if (explicitContent.length === 0 && (!previousMessage || previousMessage.role !== "assistant")) {
+    return null;
+  }
+  const interruptedContent =
+    explicitContent.length > 0 ? explicitContent : previousMessage?.content.trim() ?? "";
   if (!INTERRUPTED_ASSISTANT_CUTOFF_PATTERN.test(interruptedContent)) return null;
   const interruptedSnippet = interruptedContent
     .replace(INTERRUPTED_ASSISTANT_CUTOFF_PATTERN, "")
@@ -5153,6 +5164,7 @@ function buildPromptMessages(args: {
   userMessage: string;
   mode: ChatMode;
   askQuestionMode: "off" | "explicit" | "continuation";
+  interruptedContent?: string;
   /** Prism single-slot image job hint (busy / in-flight status). */
   imageSlotSystemHint?: string | null;
 }): ProviderMessage[] {
@@ -5280,7 +5292,11 @@ function buildPromptMessages(args: {
     promptMessages.push({ role: "system", content: hint });
   }
   const interruptedContinuationHint = isZenMode(args.mode)
-    ? buildInterruptedReplyContinuationHint(args.chatHistory, args.userMessage)
+    ? buildInterruptedReplyContinuationHint(
+        args.chatHistory,
+        args.userMessage,
+        args.interruptedContent
+      )
     : null;
   if (interruptedContinuationHint) {
     promptMessages.push({
@@ -5825,6 +5841,7 @@ export async function processChatMessage(
       userMessage: promptUserMessage,
       mode,
       askQuestionMode,
+      interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
     pushBackendEvent(
@@ -6686,6 +6703,7 @@ export async function processChatMessage(
     userMessage: promptUserMessage,
     mode,
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
+    interruptedContent: settings.prismInterruption?.interruptedContent,
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
   });
   pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));

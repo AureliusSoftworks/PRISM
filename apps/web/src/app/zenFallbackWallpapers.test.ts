@@ -32,6 +32,7 @@ describe("resolveZenFallbackWallpaperVariant", () => {
 describe("shouldShowZenFallbackWallpaper", () => {
   const baseline = {
     chatSurface: true,
+    atmosphereEnabled: true,
     hasRememberedWallpaper: false,
     atmosphereTimelineLength: 0,
     hasConversationMessages: true,
@@ -76,6 +77,16 @@ describe("shouldShowZenFallbackWallpaper", () => {
       shouldShowZenFallbackWallpaper({
         ...baseline,
         chatSurface: false,
+      }),
+      false
+    );
+  });
+
+  it("does not show when Atmosphere is turned off", () => {
+    assert.equal(
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        atmosphereEnabled: false,
       }),
       false
     );

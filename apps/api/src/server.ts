@@ -857,6 +857,9 @@ function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | und
     ...(typeof record.totalTokenCount === "number" && Number.isFinite(record.totalTokenCount)
       ? { totalTokenCount: Math.max(1, Math.floor(record.totalTokenCount)) }
       : {}),
+    ...(typeof record.interruptedContent === "string" && record.interruptedContent.trim().length > 0
+      ? { interruptedContent: record.interruptedContent.trim() }
+      : {}),
   };
 }
 
@@ -4964,6 +4967,9 @@ function buildRoutes(): RouteDefinition[] {
           : {}),
         ...(parsedPrismInterruption?.totalTokenCount !== undefined
           ? { totalTokenCount: parsedPrismInterruption.totalTokenCount }
+          : {}),
+        ...(parsedPrismInterruption?.interruptedContent
+          ? { interruptedContent: parsedPrismInterruption.interruptedContent }
           : {}),
       };
       const currentMood = loadPrismMoodState(db, userId, message.conversation_id, mode) ??
