@@ -24275,7 +24275,7 @@ function HomeContent(): React.JSX.Element {
     clearZenHeaderAutoHideTimer();
     zenHeaderAutoHideTimerRef.current = setTimeout(() => {
       if (zenHeaderPinnedRef.current) {
-        setZenHeaderVisible(true);
+        setZenHeaderVisible((current) => (current ? current : true));
         zenHeaderAutoHideTimerRef.current = null;
         return;
       }
@@ -24304,7 +24304,7 @@ function HomeContent(): React.JSX.Element {
     zenHeaderAutoHideArmedRef.current = true;
     clearZenHeaderAutoHideTimer();
     if (zenHeaderPinnedRef.current) {
-      setZenHeaderVisible(true);
+      setZenHeaderVisible((current) => (current ? current : true));
       return;
     }
     setZenHeaderVisible(false);
@@ -29940,7 +29940,7 @@ function HomeContent(): React.JSX.Element {
     zenHeaderPinnedRef.current = zenHeaderPinned;
     if (!zenHeaderPinned) return;
     clearZenHeaderAutoHideTimer();
-    setZenHeaderVisible(true);
+    setZenHeaderVisible((current) => (current ? current : true));
   }, [clearZenHeaderAutoHideTimer, zenHeaderPinned]);
 
   const setChatHeaderChromeVisibleState = useCallback((visible: boolean) => {
