@@ -5672,6 +5672,172 @@ describe("processChatMessage session resume context", () => {
   });
 });
 
+describe("processChatMessage topic reset context", () => {
+  it("adds a one-turn topic pivot hint without storing or clearing it", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Pivot-aware reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Tell me about pottery glazes.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Let's talk about telescopes.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+        topicReset: true,
+      },
+      first.conversation.id
+    );
+
+    assert.equal(second.conversation.messages.length, 4);
+    const persistedUserMessages = second.conversation.messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content);
+    assert.deepEqual(persistedUserMessages, [
+      "Tell me about pottery glazes.",
+      "Let's talk about telescopes.",
+    ]);
+    const chatBodies = bodies.filter((body) => Array.isArray(body.messages));
+    const latestPromptText = (chatBodies.at(-1)?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(latestPromptText, /clean topic pivot/i);
+    assert.match(latestPromptText, /Do not continue, answer, or revive the previous topic/i);
+    assert.match(latestPromptText, /Tell me about pottery glazes/);
+    const storedHintRows = db
+      .prepare("SELECT COUNT(*) AS n FROM messages WHERE content LIKE '%clean topic pivot%' OR content LIKE '%/nvm%'")
+      .get() as { n: number };
+    assert.equal(storedHintRows.n, 0);
+  });
+});
+
+describe("processChatMessage Zen action prompt guidance", () => {
+  it("adds action interpretation guidance to Zen prompts", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Presence received." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "*looks at you inquisitively*",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "chat",
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /single-asterisk action beat/);
+    assert.match(promptText, /performed non-verbal action/);
+  });
+
+  it("does not add Zen action guidance to Sandbox prompts", async () => {
+    const db = createChatTestDb();
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "Sandbox received." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "*looks at you inquisitively*",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const chatBody = bodies.find((body) => Array.isArray(body.messages));
+    assert.ok(chatBody);
+    const promptText = (chatBody.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.doesNotMatch(promptText, /single-asterisk action beat/);
+    assert.doesNotMatch(promptText, /performed non-verbal action/);
+  });
+});
+
 describe("processChatMessage bot mentions", () => {
   it("adds mentioned library bot profile context to the model prompt", async () => {
     const db = createChatTestDb();

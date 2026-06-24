@@ -21,6 +21,8 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("adj"), "ADJECTIVE");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{PLURAL NOUN}"), "PLURAL_NOUN");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("plural-noun"), "PLURAL_NOUN");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{CONTAINER}"), "CONTAINER");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("receptacle"), "CONTAINER");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("hidden-truth"), "SECRET");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{#}"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("#"), "NUM");
@@ -92,6 +94,7 @@ describe("built-in prompt wildcard slots", () => {
       "TIME",
       "PROBLEM",
     ]);
+    assert.equal(getBuiltInPromptWildcardSlot("CONTAINER")?.pickerVisibility, "searchable");
     assert.equal(getBuiltInPromptWildcardSlot("TREASURE")?.pickerVisibility, "searchable");
     assert.equal(getBuiltInPromptWildcardSlot("SUFFIX")?.pickerVisibility, "searchable");
   });
