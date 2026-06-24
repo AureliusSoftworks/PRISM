@@ -8,6 +8,19 @@ import {
 describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
   const messageCountToY = (messageCount: number): number => messageCount * 100;
 
+  it("starts factory-default Zen with no wallpaper layers", () => {
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline: [],
+        readerY: 300,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      {}
+    );
+  });
+
   it("keeps the first Atmosphere layer invisible before its reveal point", () => {
     const timeline = [
       {
@@ -27,6 +40,48 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
         messageCountToY,
       }),
       { first: 0 }
+    );
+  });
+
+  it("fades the first generated Atmosphere layer from its generation point", () => {
+    const timeline = [
+      {
+        imageId: "first",
+        generationMessageCount: 2,
+        revealStartMessageCount: 2,
+        revealFullMessageCount: 6,
+      },
+    ];
+
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 200,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 0 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 400,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 0.5 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 700,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 1 }
     );
   });
 
@@ -59,6 +114,54 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
         messageCountToY,
       }),
       { first: 1 }
+    );
+  });
+
+  it("keeps the previous wallpaper visible until the next generated layer crossfades", () => {
+    const timeline = [
+      {
+        imageId: "first",
+        generationMessageCount: 2,
+        revealStartMessageCount: 2,
+        revealFullMessageCount: 6,
+      },
+      {
+        imageId: "second",
+        generationMessageCount: 10,
+        revealStartMessageCount: 12,
+        revealFullMessageCount: 16,
+      },
+    ];
+
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 1100,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 1, second: 0 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 1400,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 0.5, second: 0.5 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 1700,
+        revealDelayMessageCount: 2,
+        revealSpanMessageCount: 4,
+        messageCountToY,
+      }),
+      { first: 0, second: 1 }
     );
   });
 });

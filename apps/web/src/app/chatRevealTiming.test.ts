@@ -6,6 +6,8 @@ import {
   isChatRevealEllipsisToken,
   resolveChatRevealPauseKind,
   resolveChatRevealStepDelayMs,
+  resolveChatRevealTokenLetterDurationMs,
+  resolveVisibleChatRevealTokenCountAtElapsedMs,
   resolveChatRevealWordDelayMsByMood,
   scaleChatRevealTimingSettings,
   tokenizeChatRevealText,
@@ -62,6 +64,9 @@ describe("chat reveal timing helpers", () => {
     const scaled = scaleChatRevealTimingSettings(DEFAULT_CHAT_REVEAL_TIMING, 0.5);
 
     assert.equal(scaled.baseWordDelayMs, DEFAULT_CHAT_REVEAL_TIMING.baseWordDelayMs * 0.5);
+    assert.equal(scaled.letterRevealMs, DEFAULT_CHAT_REVEAL_TIMING.letterRevealMs * 0.5);
+    assert.equal(scaled.letterRevealStepMs, DEFAULT_CHAT_REVEAL_TIMING.letterRevealStepMs * 0.5);
+    assert.equal(scaled.wordRevealSettleMs, DEFAULT_CHAT_REVEAL_TIMING.wordRevealSettleMs * 0.5);
     assert.equal(scaled.clausePauseMs, DEFAULT_CHAT_REVEAL_TIMING.clausePauseMs * 0.5);
     assert.equal(scaled.sentencePauseMs, DEFAULT_CHAT_REVEAL_TIMING.sentencePauseMs * 0.5);
     assert.equal(scaled.ellipsisHoldMs, DEFAULT_CHAT_REVEAL_TIMING.ellipsisHoldMs * 0.5);
@@ -70,6 +75,42 @@ describe("chat reveal timing helpers", () => {
       resolveChatRevealWordDelayMsByMood("warm", scaled),
       resolveChatRevealWordDelayMsByMood("warm", DEFAULT_CHAT_REVEAL_TIMING) * 0.5
     );
+  });
+
+  it("scales the scheduler wait that follows each fading word", () => {
+    const scaled = scaleChatRevealTimingSettings(DEFAULT_CHAT_REVEAL_TIMING, 0.5);
+    const token = "quietly";
+
+    assert.equal(
+      resolveChatRevealTokenLetterDurationMs(token, scaled),
+      resolveChatRevealTokenLetterDurationMs(token, DEFAULT_CHAT_REVEAL_TIMING) * 0.5
+    );
+    assert.equal(
+      resolveChatRevealStepDelayMs(token, "neutral", scaled),
+      resolveChatRevealStepDelayMs(token, "neutral", DEFAULT_CHAT_REVEAL_TIMING) * 0.5
+    );
+  });
+
+  it("reveals more prose sooner when timing is scaled faster", () => {
+    const tokens = tokenizeChatRevealText("one gently unfolding thought");
+    const scaled = scaleChatRevealTimingSettings(DEFAULT_CHAT_REVEAL_TIMING, 0.5);
+    const defaultFirstStep = resolveChatRevealStepDelayMs(tokens[0] ?? "", "neutral");
+    const scaledFirstStep = resolveChatRevealStepDelayMs(tokens[0] ?? "", "neutral", scaled);
+
+    assert.equal(
+      resolveVisibleChatRevealTokenCountAtElapsedMs(
+        tokens,
+        scaledFirstStep,
+        "neutral",
+        DEFAULT_CHAT_REVEAL_TIMING
+      ),
+      1
+    );
+    assert.equal(
+      resolveVisibleChatRevealTokenCountAtElapsedMs(tokens, scaledFirstStep, "neutral", scaled),
+      2
+    );
+    assert.equal(scaledFirstStep < defaultFirstStep, true);
   });
 });
 

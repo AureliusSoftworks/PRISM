@@ -4,22 +4,6 @@ export type ChatRevealPauseKind = "base" | "clause" | "sentence" | "ellipsis";
 
 export type ChatRevealEllipsisPhase = "typing" | "complete";
 
-export interface ChatRevealTimingSettings {
-  baseWordDelayMs: number;
-  clausePauseMs: number;
-  sentencePauseMs: number;
-  ellipsisHoldMs: number;
-  ellipsisDotStepMs: number;
-}
-
-export const DEFAULT_CHAT_REVEAL_TIMING: ChatRevealTimingSettings = {
-  baseWordDelayMs: 78,
-  clausePauseMs: 140,
-  sentencePauseMs: 260,
-  ellipsisHoldMs: 720,
-  ellipsisDotStepMs: 240,
-};
-
 const CHAT_REVEAL_LETTER_REVEAL_MS = 170;
 const CHAT_REVEAL_LETTER_REVEAL_STEP_MS = 18;
 const CHAT_REVEAL_WORD_REVEAL_SETTLE_MS = 12;
@@ -34,6 +18,29 @@ const CHAT_REVEAL_MARKDOWN_THEMATIC_BREAK_PATTERN = /^\s{0,3}([*_-])(?:\s*\1){2,
 const CHAT_REVEAL_TIMING_MAX_MS = 5000;
 const CHAT_REVEAL_TIMING_MIN_MULTIPLIER = 0.05;
 const CHAT_REVEAL_TIMING_MAX_MULTIPLIER = 20;
+
+export interface ChatRevealTimingSettings {
+  baseWordDelayMs: number;
+  letterRevealMs: number;
+  letterRevealStepMs: number;
+  wordRevealSettleMs: number;
+  clausePauseMs: number;
+  sentencePauseMs: number;
+  ellipsisHoldMs: number;
+  ellipsisDotStepMs: number;
+}
+
+export const DEFAULT_CHAT_REVEAL_TIMING: ChatRevealTimingSettings = {
+  baseWordDelayMs: 78,
+  letterRevealMs: CHAT_REVEAL_LETTER_REVEAL_MS,
+  letterRevealStepMs: CHAT_REVEAL_LETTER_REVEAL_STEP_MS,
+  wordRevealSettleMs: CHAT_REVEAL_WORD_REVEAL_SETTLE_MS,
+  clausePauseMs: 140,
+  sentencePauseMs: 260,
+  ellipsisHoldMs: 720,
+  ellipsisDotStepMs: 240,
+};
+
 const CHAT_REVEAL_MOOD_WORD_REVEAL_MS: Record<ChatRevealMoodKey, number> = {
   joyful: 58,
   warm: 68,
@@ -69,6 +76,9 @@ export function normalizeChatRevealTimingSettings(
   const record = value && typeof value === "object" ? value as Partial<ChatRevealTimingSettings> : {};
   return {
     baseWordDelayMs: finiteMs(record.baseWordDelayMs, fallback.baseWordDelayMs),
+    letterRevealMs: finiteMs(record.letterRevealMs, fallback.letterRevealMs),
+    letterRevealStepMs: finiteMs(record.letterRevealStepMs, fallback.letterRevealStepMs),
+    wordRevealSettleMs: finiteMs(record.wordRevealSettleMs, fallback.wordRevealSettleMs),
     clausePauseMs: finiteMs(record.clausePauseMs, fallback.clausePauseMs),
     sentencePauseMs: finiteMs(record.sentencePauseMs, fallback.sentencePauseMs),
     ellipsisHoldMs: finiteMs(record.ellipsisHoldMs, fallback.ellipsisHoldMs),
@@ -90,6 +100,9 @@ export function scaleChatRevealTimingSettings(
   return normalizeChatRevealTimingSettings(
     {
       baseWordDelayMs: normalizedTiming.baseWordDelayMs * multiplier,
+      letterRevealMs: normalizedTiming.letterRevealMs * multiplier,
+      letterRevealStepMs: normalizedTiming.letterRevealStepMs * multiplier,
+      wordRevealSettleMs: normalizedTiming.wordRevealSettleMs * multiplier,
       clausePauseMs: normalizedTiming.clausePauseMs * multiplier,
       sentencePauseMs: normalizedTiming.sentencePauseMs * multiplier,
       ellipsisHoldMs: normalizedTiming.ellipsisHoldMs * multiplier,
@@ -198,11 +211,11 @@ export function resolveChatRevealTokenLetterDurationMs(
   if (displayToken.length === 0) return 0;
   if (isEllipsis) {
     const dotCount = displayToken.match(/\./g)?.length ?? 1;
-    return CHAT_REVEAL_LETTER_REVEAL_MS + Math.max(0, dotCount - 1) * timing.ellipsisDotStepMs;
+    return timing.letterRevealMs + Math.max(0, dotCount - 1) * timing.ellipsisDotStepMs;
   }
   return (
-    CHAT_REVEAL_LETTER_REVEAL_MS +
-    Math.max(0, Array.from(displayToken).length - 1) * CHAT_REVEAL_LETTER_REVEAL_STEP_MS
+    timing.letterRevealMs +
+    Math.max(0, Array.from(displayToken).length - 1) * timing.letterRevealStepMs
   );
 }
 
@@ -228,7 +241,7 @@ export function resolveChatRevealStepDelayMs(
   const minimumDelayMs = resolveChatRevealWordDelayMsByMood(moodKey, timing);
   return Math.max(
     minimumDelayMs,
-    resolveChatRevealTokenLetterDurationMs(previousToken, timing) + CHAT_REVEAL_WORD_REVEAL_SETTLE_MS
+    resolveChatRevealTokenLetterDurationMs(previousToken, timing) + timing.wordRevealSettleMs
   ) + resolveChatRevealTokenPunctuationPauseMs(previousToken, timing);
 }
 

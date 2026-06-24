@@ -7,8 +7,25 @@ export interface ComposerShortcutCompletionToken {
   query: string;
 }
 
+export interface ComposerShortcutInsertionCandidate {
+  id: string;
+  name: string;
+  command?: string;
+}
+
 export function normalizeComposerShortcutQuery(value: string): string {
   return value.trim().replace(/^[!/]+/, "").toLowerCase();
+}
+
+export function composerShortcutInsertionText(
+  command: ComposerShortcutInsertionCandidate
+): string {
+  if (command.id.startsWith("wildcard-slot:")) {
+    const fallback = command.command?.trim() || `{${command.name}}`;
+    return `${fallback} `;
+  }
+  const prefix = command.id.startsWith("wildcard:") ? "!" : "/";
+  return `${prefix}${command.name} `;
 }
 
 export function composerShortcutQueryExactlyMatchesCommand(

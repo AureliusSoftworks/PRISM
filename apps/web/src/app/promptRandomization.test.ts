@@ -5,7 +5,7 @@ import {
   isStandaloneWildcardComposerDraft,
   maskBuiltInWildcardSlotsForPending,
   maskModelFilledWildcardSlotsForPending,
-  pendingWildcardOptimisticMessageContent,
+  pendingCleanupOptimisticMessageContent,
   promptContainsBuiltInWildcardSlots,
   promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
@@ -17,23 +17,34 @@ import {
   withSentenceCasedPromptInsertion,
 } from "./promptRandomization.ts";
 
-describe("pendingWildcardOptimisticMessageContent", () => {
+describe("pendingCleanupOptimisticMessageContent", () => {
   it("uses the raw draft while wildcard resolution is pending", () => {
     assert.equal(
-      pendingWildcardOptimisticMessageContent({
+      pendingCleanupOptimisticMessageContent({
         rawDraft: "Tell !animals about {ADJECTIVE}.",
         resolvedDisplayContent: "Tell cat about {ADJECTIVE}.",
-        pendingWildcardResolution: true,
+        pendingCleanup: true,
       }),
       "Tell !animals about {ADJECTIVE}."
     );
   });
 
+  it("uses the raw draft while ordinary send cleanup is pending", () => {
+    assert.equal(
+      pendingCleanupOptimisticMessageContent({
+        rawDraft: "this are rough",
+        resolvedDisplayContent: "this are rough",
+        pendingCleanup: true,
+      }),
+      "this are rough"
+    );
+  });
+
   it("does not leak locally resolved deck or option values while pending", () => {
-    const content = pendingWildcardOptimisticMessageContent({
+    const content = pendingCleanupOptimisticMessageContent({
       rawDraft: "Tell !animals about {red|green} {STYLE}.",
       resolvedDisplayContent: "Tell cat about green {STYLE}.",
-      pendingWildcardResolution: true,
+      pendingCleanup: true,
     });
 
     assert.equal(content.includes("cat"), false);
@@ -43,21 +54,21 @@ describe("pendingWildcardOptimisticMessageContent", () => {
 
   it("keeps prompt shortcut sends collapsed to the user-authored invocation while pending", () => {
     assert.equal(
-      pendingWildcardOptimisticMessageContent({
+      pendingCleanupOptimisticMessageContent({
         rawDraft: "Tell me a wild /story",
         resolvedDisplayContent: "Tell me a wild write a story about a cat in a {STYLE} voice.",
-        pendingWildcardResolution: true,
+        pendingCleanup: true,
       }),
       "Tell me a wild /story"
     );
   });
 
-  it("uses the resolved display content once there is no pending wildcard work", () => {
+  it("uses the resolved display content once there is no pending cleanup work", () => {
     assert.equal(
-      pendingWildcardOptimisticMessageContent({
+      pendingCleanupOptimisticMessageContent({
         rawDraft: "Tell !animals about {red|green}.",
         resolvedDisplayContent: "Tell cat about green.",
-        pendingWildcardResolution: false,
+        pendingCleanup: false,
       }),
       "Tell cat about green."
     );

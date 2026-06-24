@@ -67,8 +67,8 @@ import {
 import {
   resolveZenLineDisplayPlacements,
   resolveZenMessageDisplayPlacement,
+  resolveZenTextEffectSpans,
   resolveZenToneSpaceFromAnnoyance,
-  resolveZenWordEffect,
   type ZenResolvedLinePlacement,
   type ZenTextEffect,
 } from "./zenToneText";
@@ -91,6 +91,11 @@ import {
   PSYCHIC_SLASH_COMMAND,
   parsePsychicSlashCommand,
 } from "./psychicCommand";
+import {
+  NVM_COMMAND_NAME,
+  NVM_SLASH_COMMAND,
+  parseNvmSlashCommand,
+} from "./nvmCommand";
 import { shouldResetPreviousSessionContext } from "./naturalContextReset";
 import { parseUndoSlashCommand } from "./undoSlashCommand";
 import {
@@ -117,6 +122,7 @@ import {
   reasoningEffortForSend,
   resolveChatZenReasoningEffortAvailability,
 } from "./chatZenReasoningEffort";
+import { shouldChoiceChipRailControlViewport } from "./choiceChipRailAnchor";
 import { rewriteWildcardSlotTokenReference } from "./wildcardReferenceBadge";
 import {
   CircleHelp,
@@ -255,6 +261,7 @@ import {
 } from "./promptShortcutPreviewHighlight";
 import {
   promptShortcutChipLabel,
+  promptShortcutExpandedPromptFontCapPx,
   promptShortcutResolvedPromptText,
   promptShortcutVisualSizingText,
   type PromptShortcutPresentation,
@@ -264,7 +271,7 @@ import {
   formatPromptShortcutInsertion,
   isStandaloneWildcardComposerDraft,
   maskModelFilledWildcardSlotsForPending,
-  pendingWildcardOptimisticMessageContent,
+  pendingCleanupOptimisticMessageContent,
   promptContainsModelFilledWildcardSlots,
   resendDraftTextForMessage,
   resolveBuiltInPromptWildcardInvocations,
@@ -314,6 +321,12 @@ import {
   type BotMentionPick,
 } from "./botMention";
 import {
+  resolveCurrentZenActionCue,
+  resolveZenActionPresentation,
+  resolveZenActionPreview,
+  type ZenActionCue,
+} from "./zenActions";
+import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
 } from "./botMentionTipTapBackspace";
@@ -349,6 +362,7 @@ import {
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 import {
+  composerShortcutInsertionText,
   composerShortcutTokenExactlyMatchesAnyCommand,
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
@@ -357,6 +371,33 @@ import {
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
+import {
+  cleanupMessageRevealKey,
+  CLEANUP_MESSAGE_REVEAL_DURATION_MS,
+  CLEANUP_MESSAGE_REVEAL_SETTLE_MS,
+  mapPendingCleanupMessagesToFinalRevealKeys,
+} from "./messageCleanupReveal";
+import {
+  botMemoryCategoryLabel,
+  botMemoryDossierSessionOpinion,
+  botMemoryDossierStatItems,
+  botMemorySourceLabel,
+  botMemoryTierLabel,
+  resolveBotMemoryDossierSectionCounts,
+  type BotMemoryDossierPayload,
+} from "./botMemoryDossier";
+import {
+  messageContainsYouTubeVideoLink,
+  splitMarkdownByYouTubeVideoLinks,
+  type YouTubeVideoEmbed,
+} from "./youtubeEmbed";
+import {
+  beginZenCanvasSpeedNudgeHold,
+  createZenCanvasSpeedNudgeState,
+  endZenCanvasSpeedNudgeHold,
+  resolveZenCanvasSpeedNudgeDelayMultiplier,
+  type ZenCanvasSpeedNudgeState,
+} from "./zenCanvasSpeedNudge";
 import {
   buildZenPersonaInkSegmentMap,
   countZenPrismUserMessages,
@@ -989,6 +1030,7 @@ const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
 const PSYCHIC_MODE_TOAST_DISMISS_MS = 3600;
+const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
 const ZEN_HEADER_REVEAL_EDGE_PX = 72;
 const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
@@ -4301,12 +4343,7 @@ function coffeeSeatPlateGlyph(emojiMood: CoffeeSeatEmojiMood, mouthOpen: boolean
 }
 
 function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
-  if (!bot) return "neutral";
-  try {
-    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
-  } catch {
-    return "neutral";
-  }
+  return resolveBotVoicePreset(bot);
 }
 
 /** Dev-only: `"live"` uses thread + social moods; otherwise every seat shows this Prism mood. */
@@ -4377,6 +4414,24 @@ const CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS = 1000;
 const CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS = 1200;
 const CHAT_MODE_TYPED_LETTER_STEP_MS = 42;
 const CHAT_MODE_TYPED_LETTER_FADE_MS = 340;
+const ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  "summary",
+  "[role='button']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[aria-expanded]",
+  "[data-prompt-shortcut-preview]",
+  "[data-bot-id]",
+  "[data-dev-panel-safe-area]",
+  "[data-zen-pending-reply-placeholder]",
+].join(", ");
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
@@ -4417,6 +4472,7 @@ type ChatModeTypedTokenStyle = "default" | "rainbow";
 interface ChatModeTypedTokenMeta {
   style: ChatModeTypedTokenStyle;
   effect?: ZenTextEffect;
+  effectReadyTokenIndex?: number;
   isItalic: boolean;
   isBold: boolean;
   isQuote: boolean;
@@ -4549,11 +4605,14 @@ function resolveComplementHeadingColorVars(
   } as React.CSSProperties;
 }
 
-function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta[] {
+function resolveChatModeTypedTokenMeta(
+  tokens: string[],
+  options: { zenTextEffectsEnabled?: boolean } = {}
+): ChatModeTypedTokenMeta[] {
   let insideStrong = false;
   let insideEmphasis = false;
   let insideQuote = false;
-  return tokens.map((token) => {
+  const tokenMeta: ChatModeTypedTokenMeta[] = tokens.map((token) => {
     const strongMarkerCount = countChatModeStrongMarkers(token);
     const isStrongToken = insideStrong || strongMarkerCount > 0;
     if (strongMarkerCount % 2 === 1) {
@@ -4575,7 +4634,6 @@ function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta
     const rainbowToken = allCapsToken;
     return {
       style: rainbowToken ? "rainbow" : "default",
-      effect: resolveZenWordEffect(token) ?? undefined,
       isItalic: isEmphasisToken,
       isBold: isStrongToken,
       isQuote: isQuotedToken,
@@ -4584,6 +4642,23 @@ function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta
       isEllipsis: ellipsis,
     };
   });
+  if (options.zenTextEffectsEnabled === true) {
+    for (const span of resolveZenTextEffectSpans(tokens)) {
+      const readyTokenIndex = Math.max(span.startTokenIndex, span.endTokenIndex - 1);
+      for (
+        let index = span.startTokenIndex;
+        index < span.endTokenIndex && index < tokenMeta.length;
+        index += 1
+      ) {
+        tokenMeta[index] = {
+          ...tokenMeta[index]!,
+          effect: span.effect,
+          effectReadyTokenIndex: readyTokenIndex,
+        };
+      }
+    }
+  }
+  return tokenMeta;
 }
 
 function messageRequestedAskQuestion(content: string): boolean {
@@ -5588,6 +5663,19 @@ function botOpinionBandTitle(band: BotOpinion["band"]): string {
   if (band === "careful") return "Careful";
   return "Open";
 }
+
+function botOpinionBoundaryDescription(level: BotOpinion["boundaryLevel"]): string {
+  if (level === "firm") return "Firm boundary";
+  if (level === "gentle") return "Gentle boundary";
+  return "No boundary";
+}
+
+function botOpinionBandDescription(band: BotOpinion["band"]): string {
+  if (band === "bonded") return "The long-term relationship reads as especially settled.";
+  if (band === "wounded") return "This bot is carrying some long-term caution.";
+  if (band === "careful") return "The relationship is open, but asking for care.";
+  return "The long-term relationship is open and workable.";
+}
 interface ConversationDetail {
   id: string;
   title: string;
@@ -5797,6 +5885,12 @@ interface BotOpinion {
   repairCount: number;
   updatedAt: string;
 }
+
+type BotMemoryPanelDossier = BotMemoryDossierPayload<
+  UserMemory,
+  SessionOpinion,
+  BotOpinion
+>;
 
 type ApiKeySource = "saved" | "server" | "none";
 type ProviderApiKeyAuthSource = "account" | "server" | "none";
@@ -6039,6 +6133,16 @@ function formatDevMetricsTimestamp(createdAt: string): string {
   });
 }
 
+function formatMemoryDossierDate(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function renderDevMetricsToken(token: string, key: string): React.JSX.Element {
   const keyValue = token.match(/^([A-Za-z][\w-]*)=("[^"]*"|[^\s;\u2014,)]+)$/);
   if (keyValue) {
@@ -6220,6 +6324,12 @@ interface PsychicModeToast {
   id: string;
   enabled: boolean;
   source: "chat" | "coffee";
+  expiresAt: number;
+}
+interface LocalCommandToast {
+  id: string;
+  title: string;
+  detail: string;
   expiresAt: number;
 }
 interface ModelCatalogEntry {
@@ -6482,6 +6592,7 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "forgive-me",
   "undo",
   PSYCHIC_COMMAND_NAME,
+  NVM_COMMAND_NAME,
 ]);
 const BUILT_IN_HELP_COMMAND_ALIASES = ["?"];
 const BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = ["wallpaper", "wall", "background"];
@@ -6510,6 +6621,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "undo",
   ...BUILT_IN_UNDO_COMMAND_ALIASES,
   PSYCHIC_COMMAND_NAME,
+  NVM_COMMAND_NAME,
   "dev",
   "forget",
   "forget-all",
@@ -6806,6 +6918,22 @@ function createBuiltInPsychicCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInNvmCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/nvm",
+    name: NVM_COMMAND_NAME,
+    title: NVM_COMMAND_NAME,
+    command: "Resets the current topic locally without sending anything to Prism.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string
@@ -6910,13 +7038,6 @@ function composerCommandPickKind(
   if (isComposerTrueWildcardSlotPick(command)) return "wildcard-slot";
   if (isComposerWildcardDeckPick(command)) return "wildcard";
   return isCommandCenterOperationalCommand(command) ? "command" : "prompt";
-}
-
-function composerShortcutInsertionText(command: CommandCenterCommand): string {
-  if (isComposerTrueWildcardSlotPick(command)) {
-    return `${composerTrueWildcardSlotFallback(command)} `;
-  }
-  return `${composerShortcutInvocationPrefix(command)}${command.name} `;
 }
 
 const BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
@@ -7085,6 +7206,7 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInForgiveMeCommand(),
     createBuiltInUndoCommand(),
     createBuiltInPsychicCommand(),
+    createBuiltInNvmCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -10358,6 +10480,42 @@ function PrismMessageRoleLabel(): React.JSX.Element {
 function resolveMessageMoodKey(message: Message): NonNullable<Message["moodKey"]> {
   if (message.role !== "assistant") return DEFAULT_MESSAGE_MOOD;
   return normalizeAssistantMoodKey(message.moodKey);
+}
+
+function resolveBotVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
+  if (!bot) return "neutral";
+  try {
+    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
+  } catch {
+    return "neutral";
+  }
+}
+
+function resolveMessageVoicePreset(message: Message, bots: readonly Bot[]): BotVoicePreset {
+  if (message.role !== "assistant") return "neutral";
+  const botId = message.botId?.trim() ?? "";
+  const botName = message.botName?.trim() ?? "";
+  const bot =
+    (botId ? bots.find((candidate) => candidate.id === botId) : null) ??
+    (botName ? bots.find((candidate) => candidate.name === botName) : null);
+  return resolveBotVoicePreset(bot);
+}
+
+function TypingDots({
+  className,
+  voicePreset = "neutral",
+}: {
+  className: string;
+  voicePreset?: BotVoicePreset | null;
+}): React.JSX.Element {
+  const preset = voicePreset ?? "neutral";
+  return (
+    <span className={className} data-voice-preset={preset} aria-hidden="true">
+      <span>.</span>
+      <span>.</span>
+      <span>.</span>
+    </span>
+  );
 }
 
 function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
@@ -15809,9 +15967,6 @@ interface PromptShortcutToggleTarget {
 }
 
 const PROMPT_SHORTCUT_DEFAULT_TARGET_KEY = "__prompt__";
-type PendingPromptWildcardCensorMode = "strip" | "bubble";
-const PENDING_PROMPT_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
-const PENDING_PROMPT_WILDCARD_OPTION_RE = /\{[^{}\r\n]*\|[^{}\r\n]*\}/gu;
 
 function isPromptWildcardBraceTokenName(value: string): boolean {
   if (isDisabledPromptWildcardToken(value)) return false;
@@ -15835,8 +15990,16 @@ interface MessageBodyProps {
   revealWordByWord?: boolean;
   /** Chat-mode effect: render each line as a distinct canvas row. */
   renderAsEphemeralLines?: boolean;
+  /** Zen-only: render YouTube links as click-to-load ambient video cards. */
+  youtubeEmbedsEnabled?: boolean;
   /** Optional display-only Zen placement metadata. */
   zenDisplay?: ZenDisplayMetadata;
+  /** Enables subtle Zen assistant text effects in the typed reveal path. */
+  zenTextEffectsEnabled?: boolean;
+  /** Zen-only: lift roleplay actions out of Markdown prose into ambient beats. */
+  zenActionsEnabled?: boolean;
+  /** Label used for the ambient action beat. */
+  zenActionActorLabel?: string;
   /** Zen keeps decorative color on user prose only. */
   suppressDecorativePrismText?: boolean;
   /** Current temporal phase for line-by-line dissolve choreography. */
@@ -15847,6 +16010,8 @@ interface MessageBodyProps {
   forcedVisibleTokenCount?: number;
   /** Assistant typing cadence key for mood-based reveal speed. */
   revealMoodKey?: NonNullable<Message["moodKey"]>;
+  /** Assistant dot glyph styling, matched to the bot's communication preset. */
+  typingVoicePreset?: BotVoicePreset;
   /** Live timing controls for word reveal and dynamic pauses. */
   chatRevealTiming?: ChatRevealTimingSettings;
   /** Scales typed-word fade and letter stagger to match live reveal pacing. */
@@ -15858,8 +16023,8 @@ interface MessageBodyProps {
   onOpenCommandMention?: (commandId: string) => void;
   promptShortcut?: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
-  pendingPromptWildcardCleanup?: boolean;
-  pendingPromptWildcardCensorMode?: PendingPromptWildcardCensorMode;
+  pendingMessageCleanup?: boolean;
+  cleanupRevealActive?: boolean;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
   expandedPromptShortcutTargetKeys?: ReadonlySet<string>;
@@ -15867,7 +16032,6 @@ interface MessageBodyProps {
   promptShortcutUnfolded?: boolean;
   renderPromptMetadataAsProse?: boolean;
   onTogglePromptShortcut?: (target?: PromptShortcutToggleTarget) => void;
-  onUnfoldPromptShortcut?: () => void;
   onCollapsePromptShortcut?: () => void;
 }
 
@@ -15973,189 +16137,6 @@ function renderPendingWildcardPlaceholders(
       `${keyPrefix}-child`
     ),
   });
-}
-
-function pendingPromptCleanupWildcardNames(
-  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
-): string[] {
-  if (!commandMentionsById || commandMentionsById.size === 0) return [];
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const command of commandMentionsById.values()) {
-    if (!isComposerWildcardDeckPick(command) && !isComposerTrueWildcardSlotPick(command)) {
-      continue;
-    }
-    for (const name of commandInvocationNames(command)) {
-      const normalized = name.trim().toLowerCase();
-      if (!normalized || seen.has(normalized)) continue;
-      seen.add(normalized);
-      names.push(name);
-    }
-  }
-  return names;
-}
-
-function pendingPromptCleanupPromptNames(
-  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>,
-  promptShortcut?: PromptShortcutMetadata
-): string[] {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  const addName = (name: string | null | undefined) => {
-    const normalized = name?.trim().replace(/^[!/]+/u, "") ?? "";
-    const key = normalized.toLowerCase();
-    if (!normalized || seen.has(key)) return;
-    seen.add(key);
-    names.push(normalized);
-  };
-
-  addName(promptShortcut?.invocation);
-  addName(promptShortcut?.name);
-  for (const command of commandMentionsById?.values() ?? []) {
-    if (
-      !isCommandCenterPromptShortcut(command) ||
-      !commandCenterPromptHasRequiredDetails(command)
-    ) {
-      continue;
-    }
-    for (const name of commandInvocationNames(command)) {
-      addName(name);
-    }
-  }
-  return names;
-}
-
-function promptShortcutInvocationSizeCh(promptShortcut?: PromptShortcutMetadata): number | undefined {
-  const invocation = promptShortcut?.invocation.trim().replace(/^[!/]+/u, "");
-  return invocation ? Math.max(3.8, invocation.length) : undefined;
-}
-
-interface PendingPromptWildcardCensorRange {
-  start: number;
-  end: number;
-  sizeCh: number;
-}
-
-function pendingPromptWildcardCensorRanges(
-  source: string,
-  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>,
-  promptShortcut?: PromptShortcutMetadata
-): PendingPromptWildcardCensorRange[] {
-  const ranges: PendingPromptWildcardCensorRange[] = [];
-  const addRange = (start: number, end: number, fallbackSizeCh?: number) => {
-    if (start < 0 || end <= start || end > source.length) return;
-    const sizeCh = fallbackSizeCh ?? Math.max(3.8, source.slice(start, end).trim().length);
-    ranges.push({ start, end, sizeCh: Math.max(3.8, Math.min(28, sizeCh)) });
-  };
-
-  const wildcardNames = pendingPromptCleanupWildcardNames(commandMentionsById);
-  if (wildcardNames.length > 0) {
-    for (const range of resolveWildcardDeckTextRanges(source, { wildcardNames })) {
-      addRange(range.start, range.end, range.name.length);
-    }
-  }
-
-  const promptNames = pendingPromptCleanupPromptNames(commandMentionsById, promptShortcut);
-  const promptInvocationSizeCh = promptShortcutInvocationSizeCh(promptShortcut);
-  if (promptNames.length > 0) {
-    for (const range of resolvePromptShortcutTextRanges(source, { promptNames })) {
-      addRange(range.start, range.end, promptInvocationSizeCh ?? range.name.length);
-    }
-  }
-
-  PENDING_PROMPT_WILDCARD_BRACE_RE.lastIndex = 0;
-  for (const match of source.matchAll(PENDING_PROMPT_WILDCARD_BRACE_RE)) {
-    const raw = match[0] ?? "";
-    const name = match[1] ?? "";
-    const start = match.index ?? -1;
-    if (!raw || start < 0 || !isPromptWildcardBraceTokenName(name)) continue;
-    addRange(start, start + raw.length, Math.max(5, raw.length - 2));
-  }
-
-  PENDING_PROMPT_WILDCARD_OPTION_RE.lastIndex = 0;
-  for (const match of source.matchAll(PENDING_PROMPT_WILDCARD_OPTION_RE)) {
-    const raw = match[0] ?? "";
-    const start = match.index ?? -1;
-    addRange(start, start + raw.length, Math.max(5, raw.length - 2));
-  }
-
-  if (source.includes(PENDING_COMPOSER_WILDCARD_SLOT_TEXT)) {
-    let index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT);
-    while (index >= 0) {
-      addRange(index, index + PENDING_COMPOSER_WILDCARD_SLOT_TEXT.length, 8);
-      index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT, index + 1);
-    }
-  }
-
-  return ranges
-    .sort((a, b) => a.start - b.start || b.end - a.end)
-    .filter((range, index, sorted) => {
-      const previous = sorted[index - 1];
-      return !previous || range.start >= previous.end;
-    });
-}
-
-function PendingPromptWildcardCleanupMessage({
-  content,
-  commandMentionsById,
-  promptShortcut,
-}: {
-  content: string;
-  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
-  promptShortcut?: PromptShortcutMetadata;
-}): React.JSX.Element {
-  const source = content.trim();
-  const ranges = pendingPromptWildcardCensorRanges(
-    source,
-    commandMentionsById,
-    promptShortcut
-  );
-  const nodes: React.ReactNode[] = [];
-  let cursor = 0;
-  for (const [index, range] of ranges.entries()) {
-    if (range.start > cursor) nodes.push(source.slice(cursor, range.start));
-    nodes.push(
-      <PendingWildcardShimmer
-        key={`pending-wildcard-${range.start}-${index}`}
-        className={styles.pendingPromptWildcardShimmer}
-        sizeCh={range.sizeCh}
-      />
-    );
-    cursor = range.end;
-  }
-  if (ranges.length > 0 && cursor < source.length) {
-    nodes.push(source.slice(cursor));
-  }
-
-  return (
-    <p className={styles.pendingPromptWildcardMessage} aria-label="Preparing prompt">
-      {ranges.length > 0 ? (
-        nodes
-      ) : (
-        <PendingWildcardShimmer className={styles.pendingPromptWildcardShimmer} />
-      )}
-    </p>
-  );
-}
-
-function PendingPromptWildcardBubbleMessage(
-  props: MessageBodyProps & { content: string }
-): React.JSX.Element {
-  return (
-    <div className={styles.pendingPromptWildcardBubble} aria-label="Preparing prompt">
-      <div className={styles.pendingPromptWildcardBubbleContent} aria-hidden="true">
-        <MarkdownMessageBody
-          {...props}
-          pendingPromptWildcardCleanup={true}
-          renderPromptMetadataAsProse={false}
-        />
-      </div>
-      <span className={styles.pendingPromptWildcardBubbleStatus} role="status">
-        <span className={styles.pendingPromptWildcardSpinner} aria-hidden="true" />
-        Preparing prompt
-      </span>
-    </div>
-  );
 }
 
 function promptShortcutShouldRenderAsComposerText(
@@ -16304,6 +16285,49 @@ interface PromptWildcardTemplateRange {
   key: string;
 }
 
+function replacePromptWildcardRangesWithPendingStrips(
+  source: string,
+  ranges: readonly { start?: number; end?: number }[]
+): string {
+  if (!source || ranges.length === 0) return source;
+  const normalizedRanges = [...ranges]
+    .map((range): Pick<PromptWildcardTemplateRange, "start" | "end"> | null => {
+      if (typeof range.start !== "number" || typeof range.end !== "number") {
+        return null;
+      }
+      const start = Math.floor(range.start);
+      const end = Math.floor(range.end);
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        start < 0 ||
+        end <= start ||
+        end > source.length
+      ) {
+        return null;
+      }
+      return { start, end };
+    })
+    .filter((range): range is Pick<PromptWildcardTemplateRange, "start" | "end"> =>
+      range !== null
+    )
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .filter((range, index, sorted) => {
+      const previous = sorted[index - 1];
+      return !previous || range.start >= previous.end;
+    });
+  if (normalizedRanges.length === 0) return source;
+  let output = "";
+  let cursor = 0;
+  for (const range of normalizedRanges) {
+    output += source.slice(cursor, range.start);
+    output += PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
+    cursor = range.end;
+  }
+  output += source.slice(cursor);
+  return output;
+}
+
 function promptWildcardTemplateAutoRevealRanges(
   source: string,
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
@@ -16359,6 +16383,97 @@ function promptWildcardTemplateAutoRevealRanges(
     });
 }
 
+function promptWildcardPendingTemplateRanges(
+  source: string,
+  promptWildcards: PromptWildcardRunMetadata | undefined,
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): PromptWildcardTemplateRange[] {
+  const ranges = promptWildcardTemplateAutoRevealRanges(source, commandMentionsById);
+  const knownReplacementKeys = new Set(
+    (promptWildcards?.wildcardReplacements ?? []).map((replacement) =>
+      promptWildcardReplacementKey(replacement.key)
+    )
+  );
+  if (knownReplacementKeys.size > 0) {
+    const bangDeckRe = /(^|[^\w])(![a-z0-9][a-z0-9_-]*)\b/giu;
+    for (const match of source.matchAll(bangDeckRe)) {
+      const raw = match[2] ?? "";
+      const prefix = match[1] ?? "";
+      const matchStart = match.index ?? -1;
+      const start = matchStart + prefix.length;
+      if (!raw || start < 0) continue;
+      const key = promptWildcardReplacementKey(raw);
+      if (!knownReplacementKeys.has(key)) continue;
+      ranges.push({ start, end: start + raw.length, key });
+    }
+  }
+  return ranges
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .filter((range, index, sorted) => {
+      const previous = sorted[index - 1];
+      return !previous || range.start >= previous.end;
+    });
+}
+
+function promptWildcardPendingCanvasSource({
+  fullSource,
+  promptWildcards,
+  commandMentionsById,
+}: {
+  fullSource: string;
+  promptWildcards?: PromptWildcardRunMetadata;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+}): string {
+  const template = promptWildcards?.template?.trim() || fullSource;
+  if (!template) return fullSource;
+  const pendingSource = replacePromptWildcardRangesWithPendingStrips(
+    template,
+    promptWildcardPendingTemplateRanges(template, promptWildcards, commandMentionsById)
+  );
+  if (pendingSource !== template) return pendingSource;
+  return maskModelFilledWildcardSlotsForPending(
+    template,
+    PENDING_COMPOSER_WILDCARD_SLOT_TEXT
+  );
+}
+
+function promptShortcutPendingCanvasSource({
+  fullSource,
+  promptShortcut,
+  promptWildcards,
+  commandMentionsById,
+}: {
+  fullSource: string;
+  promptShortcut: PromptShortcutMetadata;
+  promptWildcards?: PromptWildcardRunMetadata;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+}): string {
+  if (promptWildcards) {
+    return promptWildcardPendingCanvasSource({
+      fullSource,
+      promptWildcards,
+      commandMentionsById,
+    });
+  }
+  const resolvedPrompt = promptShortcut.resolvedPrompt?.trim() || "";
+  if (resolvedPrompt && (promptShortcut.wildcardReplacements?.length ?? 0) > 0) {
+    return replacePromptWildcardRangesWithPendingStrips(
+      resolvedPrompt,
+      promptShortcut.wildcardReplacements ?? []
+    );
+  }
+  if (resolvedPrompt && promptContainsModelFilledWildcardSlots(resolvedPrompt)) {
+    return promptWildcardPendingCanvasSource({
+      fullSource: resolvedPrompt,
+      commandMentionsById,
+    });
+  }
+  return promptWildcardPendingCanvasSource({
+    fullSource,
+    commandMentionsById,
+  });
+}
+
 function applyPromptWildcardTemplateAutoReveal(
   source: string,
   promptWildcards: PromptWildcardRunMetadata | undefined,
@@ -16400,17 +16515,17 @@ function promptShortcutCanvasSourceWithResolvedWildcards({
   promptShortcut,
   promptWildcards,
   commandMentionsById,
-  pendingPromptWildcardCleanup,
+  pendingMessageCleanup,
 }: {
   fullSource: string;
   promptShortcut: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
   commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
-  pendingPromptWildcardCleanup?: boolean;
+  pendingMessageCleanup?: boolean;
 }): string {
   const template = promptShortcut.template?.trim() || fullSource;
   const pendingResolvedPrompt =
-    pendingPromptWildcardCleanup === true &&
+    pendingMessageCleanup === true &&
     fullSource.includes(PENDING_COMPOSER_WILDCARD_SLOT_TEXT)
       ? fullSource.trim()
       : "";
@@ -16498,6 +16613,9 @@ function promptShortcutRunForCommand(
   return promptShortcut?.promptRuns?.find((run) => run.commandId === commandId);
 }
 
+// Flip off to let Zen prompt-shortcut messages use the normal preview capsule again.
+const ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD = true;
+
 function PromptShortcutExpandedInline({
   promptSent,
   replacements,
@@ -16511,16 +16629,20 @@ function PromptShortcutExpandedInline({
     promptSent,
     promptShortcutWildcardReplacementsForPromptText(promptSent, replacements)
   );
-  const wildcardHighlightStyle =
-    promptSentHighlightRanges.length > 0
-      ? ({
+  const expandedStyle = {
+    ["--prompt-shortcut-expanded-font-cap" as string]: `${promptShortcutExpandedPromptFontCapPx(
+      promptSent
+    )}px`,
+    ...(promptSentHighlightRanges.length > 0
+      ? {
           ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
-        } as React.CSSProperties)
-      : undefined;
+        }
+      : {}),
+  } as React.CSSProperties;
   return (
     <span
       className={styles.promptShortcutExpandedProse}
-      style={wildcardHighlightStyle}
+      style={expandedStyle}
       data-prompt-shortcut-preview="true"
     >
       {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
@@ -16536,7 +16658,6 @@ function PromptShortcutMessage({
   expanded,
   disabled,
   onToggle,
-  onUnfold,
 }: {
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
@@ -16545,7 +16666,6 @@ function PromptShortcutMessage({
   expanded: boolean;
   disabled?: boolean;
   onToggle?: () => void;
-  onUnfold?: () => void;
 }) {
   const label = promptShortcutChipLabel(promptShortcut);
   const expandable = presentation === "expandable";
@@ -16570,12 +16690,6 @@ function PromptShortcutMessage({
             if (disabled) return;
             if (event.detail >= 2) return;
             onToggle?.();
-          }}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (disabled) return;
-            onUnfold?.();
           }}
           onContextMenu={(event) => {
             event.preventDefault();
@@ -19589,26 +19703,71 @@ function resolveTypedLineStartIndexes(lines: string[]): number[] {
   });
 }
 
+function ZenActionAmbientCue({
+  actorLabel,
+  cue,
+  actionOnly,
+}: {
+  actorLabel: string;
+  cue: ZenActionCue;
+  actionOnly?: boolean;
+}): React.JSX.Element {
+  const label = actorLabel.trim() || "Prism";
+  return (
+    <div
+      className={styles.zenActionCue}
+      data-motion={cue.motion}
+      data-action-only={actionOnly ? "true" : undefined}
+      role="note"
+      aria-label={`${label}: ${cue.action}`}
+      title={`${label}: ${cue.action}`}
+    >
+      <span className={styles.zenActionCueActor}>{label}</span>
+      <span className={styles.zenActionCueText}>{cue.action}</span>
+    </div>
+  );
+}
+
+function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Element {
+  return (
+    <div
+      className={styles.zenActionComposerPreview}
+      role="status"
+      aria-live="polite"
+      aria-label={`Action preview: ${cue.action}`}
+    >
+      <span className={styles.zenActionComposerPreviewActor}>You</span>
+      <span className={styles.zenActionComposerPreviewText}>{cue.action}</span>
+    </div>
+  );
+}
+
+function wrapCleanupRevealMessageBody(
+  node: React.JSX.Element,
+  active: boolean
+): React.JSX.Element {
+  if (!active) return node;
+  return (
+    <div
+      className={styles.cleanupRevealMessage}
+      data-cleanup-reveal="whole-message"
+      style={
+        {
+          "--cleanup-message-reveal-duration": `${CLEANUP_MESSAGE_REVEAL_DURATION_MS}ms`,
+        } as React.CSSProperties
+      }
+    >
+      {node}
+    </div>
+  );
+}
+
 function MessageBody(props: MessageBodyProps): React.JSX.Element {
   const fullSource =
     props.assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(props.content).displayContent
       : props.content;
-  if (
-    props.messageRole === "user" &&
-    props.pendingPromptWildcardCleanup === true
-  ) {
-    if (props.pendingPromptWildcardCensorMode === "bubble") {
-      return <PendingPromptWildcardBubbleMessage {...props} content={fullSource} />;
-    }
-    return (
-      <PendingPromptWildcardCleanupMessage
-        content={fullSource}
-        commandMentionsById={props.commandMentionsById}
-        promptShortcut={props.promptShortcut}
-      />
-    );
-  }
+  const cleanupRevealActive = props.cleanupRevealActive === true;
   if (
     props.messageRole === "user" &&
     !props.promptShortcut &&
@@ -19617,30 +19776,47 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
   ) {
     const markdownProps: MessageBodyProps = {
       ...props,
-      content: props.promptWildcards.resolvedPrompt?.trim() || fullSource,
+      content:
+        props.pendingMessageCleanup === true
+          ? promptWildcardPendingCanvasSource({
+              fullSource,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptShortcut: undefined,
       promptWildcards: undefined,
       renderPromptMetadataAsProse: false,
     };
-    return <MarkdownMessageBody {...markdownProps} />;
+    return wrapCleanupRevealMessageBody(
+      renderMarkdownMessageBodyWithZenYouTubeEmbeds(markdownProps),
+      cleanupRevealActive
+    );
   }
   if (props.messageRole === "user" && props.promptShortcut) {
     if (props.promptShortcutUnfolded === true) {
       const unfoldedContent =
-        props.promptWildcards?.resolvedPrompt?.trim() ||
-        promptShortcutResolvedPromptText(props.promptShortcut, fullSource);
-      return (
-        <MarkdownMessageBody
-          {...props}
-          content={unfoldedContent}
-          promptShortcut={undefined}
-          promptWildcards={undefined}
-          promptShortcutExpanded={false}
-          expandedPromptShortcutTargetKeys={undefined}
-          onTogglePromptShortcut={undefined}
-          onUnfoldPromptShortcut={undefined}
-          onCollapsePromptShortcut={undefined}
-        />
+        props.pendingMessageCleanup === true
+          ? promptShortcutPendingCanvasSource({
+              fullSource,
+              promptShortcut: props.promptShortcut,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards?.resolvedPrompt?.trim() ||
+            promptShortcutResolvedPromptText(props.promptShortcut, fullSource);
+      return wrapCleanupRevealMessageBody(
+        renderMarkdownMessageBodyWithZenYouTubeEmbeds({
+          ...props,
+          content: unfoldedContent,
+          promptShortcut: undefined,
+          promptWildcards: undefined,
+          promptShortcutExpanded: false,
+          expandedPromptShortcutTargetKeys: undefined,
+          onTogglePromptShortcut: undefined,
+          onCollapsePromptShortcut: undefined,
+        }),
+        cleanupRevealActive
       );
     }
     if (
@@ -19651,25 +19827,33 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
       )
     ) {
       const markdownContent =
-        props.renderPromptMetadataAsProse === true
+        props.pendingMessageCleanup === true
+          ? promptShortcutPendingCanvasSource({
+              fullSource,
+              promptShortcut: props.promptShortcut,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.renderPromptMetadataAsProse === true
           ? fullSource
             : promptShortcutCanvasSourceWithResolvedWildcards({
                 fullSource,
                 promptShortcut: props.promptShortcut,
                 promptWildcards: props.promptWildcards,
                 commandMentionsById: props.commandMentionsById,
-                pendingPromptWildcardCleanup: props.pendingPromptWildcardCleanup,
+                pendingMessageCleanup: props.pendingMessageCleanup,
               });
-      return (
-        <MarkdownMessageBody
-          {...props}
-          content={markdownContent}
-        />
+      return wrapCleanupRevealMessageBody(
+        renderMarkdownMessageBodyWithZenYouTubeEmbeds({
+          ...props,
+          content: markdownContent,
+        }),
+        cleanupRevealActive
       );
     }
     const presentation = props.promptShortcutPresentation ?? "expandable";
-    const promptShortcutInteractionDisabled = props.pendingPromptWildcardCleanup === true;
-    return (
+    const promptShortcutInteractionDisabled = props.pendingMessageCleanup === true;
+    return wrapCleanupRevealMessageBody(
       <PromptShortcutMessage
         promptShortcut={props.promptShortcut}
         fullPrompt={fullSource}
@@ -19686,20 +19870,143 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
             commandId: props.promptShortcut?.commandId,
           })
         }
-        onUnfold={props.onUnfoldPromptShortcut}
-      />
+      />,
+      cleanupRevealActive
     );
   }
   if (props.messageRole === "user" && props.promptWildcards) {
     const markdownProps: MessageBodyProps = {
       ...props,
-      content: props.promptWildcards.resolvedPrompt?.trim() || fullSource,
+      content:
+        props.pendingMessageCleanup === true
+          ? promptWildcardPendingCanvasSource({
+              fullSource,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptWildcards: undefined,
       renderPromptMetadataAsProse: false,
     };
-    return <MarkdownMessageBody {...markdownProps} />;
+    return wrapCleanupRevealMessageBody(
+      renderMarkdownMessageBodyWithZenYouTubeEmbeds(markdownProps),
+      cleanupRevealActive
+    );
   }
-  return <MarkdownMessageBody {...props} />;
+  return wrapCleanupRevealMessageBody(
+    renderMarkdownMessageBodyWithZenYouTubeEmbeds(props),
+    cleanupRevealActive
+  );
+}
+
+function renderMarkdownMessageBodyWithZenYouTubeEmbeds(
+  props: MessageBodyProps
+): React.JSX.Element {
+  if (props.youtubeEmbedsEnabled !== true) {
+    return <MarkdownMessageBody {...props} />;
+  }
+  const displayContent =
+    props.assistantStripPrismToolTail === true
+      ? parseAssistantPrismTools(props.content).displayContent
+      : props.content;
+  const source =
+    typeof props.maxParagraphs === "number"
+      ? takeLeadingParagraphs(displayContent, props.maxParagraphs)
+      : displayContent;
+  if (!messageContainsYouTubeVideoLink(source)) {
+    return <MarkdownMessageBody {...props} />;
+  }
+  return <ZenYouTubeSeparatedMessageBody {...props} content={source} />;
+}
+
+function ZenYouTubeSeparatedMessageBody(props: MessageBodyProps): React.JSX.Element {
+  const parts = splitMarkdownByYouTubeVideoLinks(props.content);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.kind === "youtube") {
+          return (
+            <div
+              key={`youtube:${part.video.videoId}:${index}`}
+              className={styles.zenYouTubeMessagePanel}
+              data-zen-youtube-panel="true"
+            >
+              <YouTubeEmbedCard
+                video={part.video}
+                label={part.label ?? part.source}
+              />
+            </div>
+          );
+        }
+        return (
+          <MarkdownMessageBody
+            key={`markdown:${index}`}
+            {...props}
+            content={part.markdown}
+            assistantStripPrismToolTail={false}
+            maxParagraphs={undefined}
+            youtubeEmbedsEnabled={false}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function YouTubeEmbedCard({
+  video,
+  label,
+}: {
+  video: YouTubeVideoEmbed;
+  label?: string;
+}): React.JSX.Element {
+  const [loaded, setLoaded] = useState(false);
+  const cleanLabel = label?.trim();
+  const playLabel = cleanLabel && cleanLabel !== video.canonicalUrl
+    ? `Play YouTube video: ${cleanLabel}`
+    : "Play YouTube video";
+  const style = {
+    "--zen-youtube-thumbnail": `url("${video.thumbnailUrl}")`,
+  } as CSSProperties;
+  return (
+    <div className={styles.zenYouTubeEmbed} style={style}>
+      <div className={styles.zenYouTubeGlow} aria-hidden="true" />
+      <div className={styles.zenYouTubeFrame}>
+        {loaded ? (
+          <iframe
+            className={styles.zenYouTubeIframe}
+            src={video.embedUrl}
+            title={cleanLabel || "YouTube video player"}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        ) : (
+          <button
+            type="button"
+            className={styles.zenYouTubePosterButton}
+            onClick={(event) => {
+              event.stopPropagation();
+              setLoaded(true);
+            }}
+            aria-label={playLabel}
+          >
+            <img
+              className={styles.zenYouTubePoster}
+              src={video.thumbnailUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+            <span className={styles.zenYouTubePosterScrim} aria-hidden="true" />
+            <span className={styles.zenYouTubePlayButton} aria-hidden="true">
+              <Play size={24} fill="currentColor" strokeWidth={2.6} />
+            </span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function MarkdownMessageBody({
@@ -19709,12 +20016,17 @@ function MarkdownMessageBody({
   maxParagraphs,
   revealWordByWord,
   renderAsEphemeralLines,
+  youtubeEmbedsEnabled = false,
   zenDisplay,
+  zenTextEffectsEnabled,
+  zenActionsEnabled,
+  zenActionActorLabel,
   suppressDecorativePrismText,
   chatPhase,
   chatCommittedLineCount,
   forcedVisibleTokenCount,
   revealMoodKey,
+  typingVoicePreset = "neutral",
   chatRevealTiming = DEFAULT_CHAT_REVEAL_TIMING,
   chatRevealAnimationMultiplier,
   mentionRenderBots,
@@ -19722,13 +20034,12 @@ function MarkdownMessageBody({
   commandMentionsById,
   onOpenCommandMention,
   promptShortcut,
-  pendingPromptWildcardCleanup,
+  pendingMessageCleanup,
   promptShortcutExpanded,
   expandedPromptShortcutTargetKeys,
   promptShortcutPresentation,
   promptShortcutColorIndex,
   onTogglePromptShortcut,
-  onUnfoldPromptShortcut,
 }: MessageBodyProps): React.JSX.Element {
   const fullSource =
     assistantStripPrismToolTail === true
@@ -19738,17 +20049,28 @@ function MarkdownMessageBody({
     PENDING_COMPOSER_WILDCARD_SLOT_TEXT
   );
   const pendingWildcardVisualActive =
-    pendingPromptWildcardCleanup === true || hasPendingWildcardPlaceholder;
+    pendingMessageCleanup === true || hasPendingWildcardPlaceholder;
   const source =
     typeof maxParagraphs === "number"
       ? takeLeadingParagraphs(fullSource, maxParagraphs)
       : fullSource;
+  const zenActionPresentation = useMemo(
+    () =>
+      zenActionsEnabled === true &&
+      renderAsEphemeralLines === true &&
+      (messageRole === "assistant" || messageRole === "user")
+        ? resolveZenActionPresentation(source)
+        : null,
+    [messageRole, renderAsEphemeralLines, source, zenActionsEnabled]
+  );
+  const actionDisplaySource =
+    zenActionPresentation?.hasActions === true ? zenActionPresentation.mainText : source;
   const normalizedSource = useMemo(
     () =>
       renderAsEphemeralLines
-        ? normalizeChatRevealFencedCodeBlockLeadingNewline(source)
-        : source,
-    [renderAsEphemeralLines, source]
+        ? normalizeChatRevealFencedCodeBlockLeadingNewline(actionDisplaySource)
+        : actionDisplaySource,
+    [actionDisplaySource, renderAsEphemeralLines]
   );
   const chatModeSource = useMemo(
     () =>
@@ -19756,6 +20078,9 @@ function MarkdownMessageBody({
         ? stripChatRevealThematicBreakLines(normalizedSource)
         : normalizedSource,
     [normalizedSource, renderAsEphemeralLines]
+  );
+  const youtubeEmbedActive = Boolean(
+    youtubeEmbedsEnabled && messageContainsYouTubeVideoLink(chatModeSource)
   );
   const tokens = useMemo(() => tokenizeMessageReveal(chatModeSource), [chatModeSource]);
   const [visibleTokenCount, setVisibleTokenCount] = useState(() =>
@@ -19820,12 +20145,43 @@ function MarkdownMessageBody({
     tokens,
     visibleTokenCount,
   ]);
-  const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
+  const typedTokenMeta = useMemo(
+    () =>
+      resolveChatModeTypedTokenMeta(tokens, {
+        zenTextEffectsEnabled: zenTextEffectsEnabled === true,
+      }),
+    [tokens, zenTextEffectsEnabled]
+  );
   const allowDecorativePrismText = suppressDecorativePrismText !== true;
   const typedRevealAnimationMultiplier = normalizeRevealDelayMultiplier(
     chatRevealAnimationMultiplier
   );
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
+  const zenActionCue = useMemo(() => {
+    if (zenActionPresentation?.hasActions !== true) return null;
+    const visibleDisplayLength = revealWordByWord
+      ? getBotMentionDisplayLength(
+          tokens.slice(0, Math.max(0, renderVisibleTokenCount)).join("")
+        )
+      : Number.POSITIVE_INFINITY;
+    return resolveCurrentZenActionCue(
+      zenActionPresentation.cues,
+      visibleDisplayLength
+    );
+  }, [renderVisibleTokenCount, revealWordByWord, tokens, zenActionPresentation]);
+  const zenActionCueNode =
+    zenActionCue && zenActionPresentation
+      ? (
+          <ZenActionAmbientCue
+            actorLabel={
+              zenActionActorLabel?.trim() ||
+              (messageRole === "user" ? "You" : DEFAULT_ASSISTANT_NAME)
+            }
+            cue={zenActionCue}
+            actionOnly={zenActionPresentation.actionOnly}
+          />
+        )
+      : null;
   const shouldProgressiveFenceReveal = Boolean(
     renderAsEphemeralLines &&
     messageRole === "assistant" &&
@@ -19852,6 +20208,8 @@ function MarkdownMessageBody({
   const useTypedLineRenderer = Boolean(
     renderAsEphemeralLines &&
     messageRole === "assistant" &&
+    !youtubeEmbedActive &&
+    chatModeSource.trim().length > 0 &&
     !hasFencedCodeBlock
   );
   const typedLineRendererNode = useTypedLineRenderer ? (() => {
@@ -19973,6 +20331,7 @@ function MarkdownMessageBody({
                   ? "typing"
                   : "complete";
               const ellipsisComplete = tokenMeta?.isEllipsis === true && ellipsisPhase === "complete";
+              const ellipsisTyping = tokenMeta?.isEllipsis === true && ellipsisPhase === "typing";
               const renderedToken = formatChatRevealTokenDisplay(token, {
                 ellipsisPhase: tokenMeta?.isEllipsis === true ? ellipsisPhase : undefined,
               });
@@ -19988,7 +20347,10 @@ function MarkdownMessageBody({
               const wordNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noFade;
               const letterNoFade =
                 !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade || ellipsisComplete;
-              const wordEffect = revealWordByWord ? tokenMeta?.effect : undefined;
+              const wordEffectReady =
+                tokenMeta?.effectReadyTokenIndex === undefined ||
+                tokenMeta.effectReadyTokenIndex < visibleLimit;
+              const wordEffect = revealWordByWord && wordEffectReady ? tokenMeta?.effect : undefined;
               const wordClassName = [
                 styles.chatEphemeralTypedWord,
                 allowDecorativePrismText && tokenMeta?.style === "rainbow"
@@ -19997,14 +20359,23 @@ function MarkdownMessageBody({
                 tokenMeta?.isQuote ? styles.chatEphemeralTypedWordQuote : "",
                 tokenMeta?.isItalic ? styles.chatEphemeralTypedWordItalic : "",
                 tokenMeta?.isBold ? styles.chatEphemeralTypedWordBold : "",
-                wordEffect === "emphasis" ? styles.chatEphemeralTypedWordEmphasis : "",
+                wordEffect === "impact" ? styles.chatEphemeralTypedWordImpact : "",
+                wordEffect === "question" ? styles.chatEphemeralTypedWordQuestion : "",
                 wordEffect === "affirm" ? styles.chatEphemeralTypedWordAffirm : "",
+                wordEffect === "negative" ? styles.chatEphemeralTypedWordNegative : "",
+                wordEffect === "whisper" ? styles.chatEphemeralTypedWordWhisper : "",
+                wordEffect === "action" ? styles.chatEphemeralTypedWordAction : "",
+                ellipsisTyping ? styles.chatEphemeralTypedWordEllipsis : "",
                 wordNoFade ? styles.chatEphemeralTypedWordNoFade : "",
               ]
                 .filter(Boolean)
                 .join(" ");
               return (
-                <span key={`${index}:${globalTokenIndex}`} className={wordClassName}>
+                <span
+                  key={`${index}:${globalTokenIndex}`}
+                  className={wordClassName}
+                  data-voice-preset={ellipsisTyping ? typingVoicePreset : undefined}
+                >
                   {(() => {
                     let ellipsisDotIndex = -1;
                     return chars.map((char, charIndex) => {
@@ -20016,6 +20387,9 @@ function MarkdownMessageBody({
                       return (
                         <span
                           key={`${index}:${globalTokenIndex}:${charIndex}`}
+                          data-ellipsis-dot={
+                            tokenMeta?.isEllipsis === true && char === "." ? "true" : undefined
+                          }
                           className={
                             letterNoFade
                               ? `${styles.chatEphemeralTypedLetter} ${styles.chatEphemeralTypedLetterNoFade}`
@@ -20070,8 +20444,17 @@ function MarkdownMessageBody({
           ...(messageRole ? { "data-message-role": messageRole } : {}),
         } as const)
       : undefined;
-  const markdownComponents = useMemo((): Components => {
-    return {
+  const revealMessageChildren = (
+    children: React.ReactNode,
+    keyPrefix: string
+  ): React.ReactNode => {
+    return renderPendingWildcardPlaceholders(
+      children,
+      pendingWildcardVisualActive,
+      keyPrefix
+    );
+  };
+  const markdownComponents: Components = {
       a: ({ href, children, ...rest }) => {
         const commandId = parsePrismCommandMentionHref(href ?? undefined);
         if (commandId) {
@@ -20148,12 +20531,6 @@ function MarkdownMessageBody({
                 }
                 onOpenCommandMention?.(commandId);
               }}
-              onDoubleClick={(event) => {
-                if (!promptPreviewActive || promptInteractionDisabled) return;
-                event.preventDefault();
-                event.stopPropagation();
-                onUnfoldPromptShortcut?.();
-              }}
               onContextMenu={(event) => {
                 if (!promptPreviewActive || promptInteractionDisabled) return;
                 event.preventDefault();
@@ -20227,32 +20604,53 @@ function MarkdownMessageBody({
       },
       p: ({ children }: { children?: React.ReactNode }) => {
         const isPullQuoteInline = nodeStartsWithPullQuoteInlinePrefix(children);
-        const resolvedChildren = renderPendingWildcardPlaceholders(
-          children,
-          pendingWildcardVisualActive,
-          "message-pending-wildcard"
-        );
+        const resolvedChildren = revealMessageChildren(children, "message-body-p");
         if (!isPullQuoteInline) {
           return <p>{resolvedChildren}</p>;
         }
         return (
-          <p className={styles.markdownPullQuoteInline} data-pull-quote-inline="true">
+          <p
+            className={styles.markdownPullQuoteInline}
+            data-pull-quote-inline="true"
+          >
             {resolvedChildren}
           </p>
         );
       },
+      li: ({ children }: { children?: React.ReactNode }) => (
+        <li>{revealMessageChildren(children, "message-body-li")}</li>
+      ),
+      h1: ({ children }: { children?: React.ReactNode }) => (
+        <h1>{revealMessageChildren(children, "message-body-h1")}</h1>
+      ),
+      h2: ({ children }: { children?: React.ReactNode }) => (
+        <h2>{revealMessageChildren(children, "message-body-h2")}</h2>
+      ),
+      h3: ({ children }: { children?: React.ReactNode }) => (
+        <h3>{revealMessageChildren(children, "message-body-h3")}</h3>
+      ),
+      h4: ({ children }: { children?: React.ReactNode }) => (
+        <h4>{revealMessageChildren(children, "message-body-h4")}</h4>
+      ),
+      h5: ({ children }: { children?: React.ReactNode }) => (
+        <h5>{revealMessageChildren(children, "message-body-h5")}</h5>
+      ),
+      th: ({ children }: { children?: React.ReactNode }) => (
+        <th>{revealMessageChildren(children, "message-body-th")}</th>
+      ),
+      td: ({ children }: { children?: React.ReactNode }) => (
+        <td>{revealMessageChildren(children, "message-body-td")}</td>
+      ),
       blockquote: ({ children }: { children?: React.ReactNode }) => {
         const isPullQuote = nodeStartsWithPullQuoteMarker(children);
         const resolvedChildren = isPullQuote
           ? stripLeadingPullQuoteMarker(children)
           : children;
         return (
-          <blockquote data-pull-quote={isPullQuote ? "true" : undefined}>
-            {renderPendingWildcardPlaceholders(
-              resolvedChildren,
-              pendingWildcardVisualActive,
-              "message-pending-wildcard-blockquote"
-            )}
+          <blockquote
+            data-pull-quote={isPullQuote ? "true" : undefined}
+          >
+            {revealMessageChildren(resolvedChildren, "message-body-blockquote")}
           </blockquote>
         );
       },
@@ -20320,45 +20718,33 @@ function MarkdownMessageBody({
         );
       },
     };
-  }, [
-      codeBlockRevealPlan,
-      commandMentionsById,
-      expandedPromptShortcutTargetKeys,
-      fullSource,
-      messageRole,
-      onOpenCommandMention,
-      onTogglePromptShortcut,
-      onUnfoldPromptShortcut,
-      pendingWildcardVisualActive,
-      preferLocalProgressiveReveal,
-      promptShortcut,
-      promptShortcutColorIndex,
-      promptShortcutExpanded,
-      promptShortcutPresentation,
-      renderAsEphemeralLines,
-      renderVisibleTokenCount,
-      shouldProgressiveFenceReveal,
-      source,
-      revealWordByWord,
-      chatCommittedLineCount,
-      mentionBotsById,
-      resolvedTheme,
-    ]
-  );
-  if (typedLineRendererNode) return typedLineRendererNode;
+  if (typedLineRendererNode) {
+    return (
+      <>
+        {zenActionCueNode}
+        {typedLineRendererNode}
+      </>
+    );
+  }
+  if (markdownSource.trim().length === 0) {
+    return <>{zenActionCueNode}</>;
+  }
   return (
-    <div
-      className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
-      data-chat-render-kind="markdown"
-      {...chatPhaseAttrs}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
+    <>
+      {zenActionCueNode}
+      <div
+        className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
+        data-chat-render-kind="markdown"
+        {...chatPhaseAttrs}
       >
-        {markdownSource}
-      </ReactMarkdown>
-    </div>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+        >
+          {markdownSource}
+        </ReactMarkdown>
+      </div>
+    </>
   );
 }
 
@@ -20406,6 +20792,8 @@ interface DesktopMarkdownComposerProps {
   dismissPopoversSignal?: number;
 }
 
+const EMPTY_COMPOSER_COMMAND_PICKS: readonly CommandCenterCommand[] = [];
+
 const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, DesktopMarkdownComposerProps>(
   function DesktopMarkdownComposer(
     {
@@ -20426,9 +20814,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       onMentionPersonaSelect,
       mentionPopoverFooter,
       onEmptyBackspace,
-      commandPicks = [],
-      promptPicks = [],
-      wildcardPicks = [],
+      commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+      promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+      wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       onGenerateWildcardSlotValue,
       chipPointerBehavior = "resolve",
       generatingRandomPrompt = false,
@@ -20804,17 +21192,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     const applyComposerCommandPickInEditor = useCallback(
       (ed: Editor, command: CommandCenterCommand, scope: ComposerShortcutScope): boolean => {
-        if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
-          const id = `wildcard-slot-${++pendingWildcardSlotIdRef.current}`;
-          const pending = insertPendingWildcardSlotInEditor(ed, command, scope, id);
-          if (!pending) return false;
-          setPendingWildcardSlots((current) => [...current, pending]);
-          generatePendingWildcardSlot(pending);
-          return true;
-        }
         return insertComposerShortcutInEditor(ed, command, scope);
       },
-      [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
+      []
     );
 
     const resolveEditorComposerChipActivation = useCallback(
@@ -20832,33 +21212,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         }
 
         if (target.kind === "wildcard") {
-          const command = commandCenterCommandForChipText(
-            wildcardPicksRef.current.filter(isComposerWildcardDeckPick),
-            target.text,
-            "!"
-          );
-          if (!command) return false;
-          const beforeText = ed.state.doc.textBetween(0, target.start, "\n", "\n");
-          const replacement = randomComposerWildcardDeckReplacement(command, beforeText);
-          if (replacement === null) return false;
-          return replaceComposerChipRangeInEditor(ed, target, replacement);
+          return false;
         }
 
-        const key = builtInWildcardSlotKeyFromChipText(target.text);
-        if (!key || !onGenerateWildcardSlotValue) return false;
-        const pending = insertPendingWildcardSlotChipInEditor(
-          ed,
-          target,
-          key,
-          target.text.trim(),
-          `wildcard-slot-${++pendingWildcardSlotIdRef.current}`
-        );
-        if (!pending) return false;
-        setPendingWildcardSlots((current) => [...current, pending]);
-        generatePendingWildcardSlot(pending);
-        return true;
+        return false;
       },
-      [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
+      []
     );
 
     useLayoutEffect(() => {
@@ -21003,6 +21362,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               chipActivationRef.current = null;
               event.preventDefault();
               const applied = deleteComposerChipRangeInEditor(activeEditor, target);
+              if (applied) {
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+              }
+              return applied;
+            }
+            if (target.kind === "wildcard-slot") {
+              chipActivationRef.current = null;
+              event.preventDefault();
+              const applied = resolveEditorComposerChipActivation(activeEditor, target);
               if (applied) {
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
               }
@@ -21784,9 +22152,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     onMentionPersonaSelect,
     mentionPopoverFooter,
     onEmptyBackspace,
-    commandPicks = [],
-    promptPicks = [],
-    wildcardPicks = [],
+    commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+    promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+    wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     dismissPopoversSignal,
   },
   ref
@@ -22018,36 +22386,6 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       command: CommandCenterCommand,
       scope: ComposerShortcutScope
     ): boolean => {
-      if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
-        const key = composerTrueWildcardSlotKey(command);
-        if (!key) return false;
-        const fallback = composerTrueWildcardSlotFallback(command);
-        const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
-        const next = replaceTextareaComposerShortcutWithText(
-          el.value,
-          el.selectionStart ?? 0,
-          `${pendingText} `,
-          scope
-        );
-        if (!next) return false;
-        const pending: PendingComposerWildcardSlot = {
-          id: `textarea-wildcard-slot-${++pendingTextareaWildcardIdRef.current}`,
-          key,
-          fallback,
-          pendingText,
-          from: next.start,
-          to: next.start + pendingText.length,
-        };
-        pendingTextareaWildcardSlotsRef.current = [
-          ...pendingTextareaWildcardSlotsRef.current,
-          pending,
-        ];
-        textareaValueRef.current = next.value;
-        pendingTextareaCaretRef.current = next.caret;
-        onValueChange(next.value);
-        generatePendingTextareaWildcardSlot(pending);
-        return true;
-      }
       const next = replaceTextareaComposerShortcut(
         el.value,
         el.selectionStart ?? 0,
@@ -22060,7 +22398,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       onValueChange(next.value);
       return true;
     },
-    [generatePendingTextareaWildcardSlot, onGenerateWildcardSlotValue, onValueChange]
+    [onValueChange]
   );
 
   const replaceTextareaChipActivationTarget = useCallback(
@@ -22104,48 +22442,12 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       }
 
       if (target.kind === "wildcard") {
-        const command = commandCenterCommandForChipText(
-          wildcardPicksRef.current.filter(isComposerWildcardDeckPick),
-          target.text,
-          "!"
-        );
-        if (!command) return false;
-        const beforeText = textareaValueRef.current.slice(0, target.start);
-        const replacement = randomComposerWildcardDeckReplacement(command, beforeText);
-        if (replacement === null) return false;
-        return replaceTextareaChipActivationTarget(target, replacement);
+        return false;
       }
 
-      const key = builtInWildcardSlotKeyFromChipText(target.text);
-      if (!key || !onGenerateWildcardSlotValue) return false;
-      const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
-      const current = textareaValueRef.current;
-      const next = replaceComposerChipText(current, target, pendingText);
-      if (!next) return false;
-      const pending: PendingComposerWildcardSlot = {
-        id: `textarea-wildcard-slot-${++pendingTextareaWildcardIdRef.current}`,
-        key,
-        fallback: target.text.trim(),
-        pendingText,
-        from: target.start,
-        to: target.start + pendingText.length,
-      };
-      pendingTextareaWildcardSlotsRef.current = [
-        ...pendingTextareaWildcardSlotsRef.current,
-        pending,
-      ];
-      textareaValueRef.current = next.value;
-      pendingTextareaCaretRef.current = next.caret;
-      onValueChange(next.value);
-      generatePendingTextareaWildcardSlot(pending);
-      return true;
+      return false;
     },
-    [
-      generatePendingTextareaWildcardSlot,
-      onGenerateWildcardSlotValue,
-      onValueChange,
-      replaceTextareaChipActivationTarget,
-    ]
+    [replaceTextareaChipActivationTarget]
   );
 
   const findTextareaComposerChipActivationTarget = useCallback(
@@ -22191,6 +22493,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       if (chipPointerBehavior === "delete") {
         textareaChipActivationRef.current = null;
         return deleteTextareaChipActivationTarget(target);
+      }
+      if (target.kind === "wildcard-slot") {
+        textareaChipActivationRef.current = null;
+        return resolveTextareaComposerChipActivation(target);
       }
       if (
         !shouldResolveComposerChipActivation(
@@ -24192,7 +24498,6 @@ function HomeContent(): React.JSX.Element {
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
-  const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
@@ -24209,6 +24514,12 @@ function HomeContent(): React.JSX.Element {
   const chatHeaderChromeVisibleRef = useRef(true);
   const chatComposerChromeVisibleRef = useRef(true);
   const chatChromeAutoHiddenRef = useRef(false);
+  const [zenCanvasSpeedNudgeState, setZenCanvasSpeedNudgeState] =
+    useState<ZenCanvasSpeedNudgeState>(() => createZenCanvasSpeedNudgeState());
+  const zenCanvasSpeedNudgePointerRef = useRef<{
+    pointerId: number;
+    revealKey: string;
+  } | null>(null);
   const [askQuestionPatienceElapsedMs, setAskQuestionPatienceElapsedMs] =
     useState(0);
   const askQuestionPatienceElapsedMsRef = useRef(0);
@@ -24378,12 +24689,16 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [botMemoryDossier, setBotMemoryDossier] =
+    useState<BotMemoryPanelDossier | null>(null);
   const [zenPreviousContext, setZenPreviousContext] =
     useState<ZenPreviousContextSummary | null>(null);
   const [zenSessionMemories, setZenSessionMemories] = useState<ZenSessionMemoryItem[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
   const [psychicModeToast, setPsychicModeToast] =
     useState<PsychicModeToast | null>(null);
+  const [localCommandToast, setLocalCommandToast] =
+    useState<LocalCommandToast | null>(null);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -24423,7 +24738,7 @@ function HomeContent(): React.JSX.Element {
   const [zenFollowupBuffer, setZenFollowupBuffer] = useState<{
     conversationId: string | null;
     messages: string[];
-    pendingPromptCleanupMessageIds: string[];
+    pendingMessageCleanupMessageIds: string[];
     startedAtMs: number;
     lastActivityAtMs: number;
     generation: number;
@@ -24543,6 +24858,7 @@ function HomeContent(): React.JSX.Element {
   const zenOpenInFlightRef = useRef(false);
   const [chatAutoRestoreSuppressed, setChatAutoRestoreSuppressed] = useState(false);
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
+  const pendingNvmTopicResetRef = useRef(false);
   const detailIdRef = useRef<string | null>(null);
   const CANVAS_BOT_SWITCH_MIN_LOADING_MS = 520;
   const CONVERSATION_SURFACE_LOADING_MIN_MS = 360;
@@ -24914,8 +25230,6 @@ function HomeContent(): React.JSX.Element {
     useState<PromptCenterDragState | null>(null);
   const [expandedPromptShortcutTargetsByMessageId, setExpandedPromptShortcutTargetsByMessageId] =
     useState<Record<string, string[]>>(() => ({}));
-  const [unfoldedPromptShortcutMessageIds, setUnfoldedPromptShortcutMessageIds] =
-    useState<Record<string, true>>(() => ({}));
   const toggleExpandedPromptShortcutTarget = useCallback(
     (messageId: string, target?: PromptShortcutToggleTarget) => {
       const targetKey = promptShortcutToggleTargetKey(target);
@@ -24937,17 +25251,6 @@ function HomeContent(): React.JSX.Element {
     },
     []
   );
-  const unfoldPromptShortcutMessage = useCallback((messageId: string) => {
-    setUnfoldedPromptShortcutMessageIds((current) => (
-      current[messageId] ? current : { ...current, [messageId]: true }
-    ));
-    setExpandedPromptShortcutTargetsByMessageId((current) => {
-      if (!current[messageId]) return current;
-      const next = { ...current };
-      delete next[messageId];
-      return next;
-    });
-  }, []);
   const collapseExpandedPromptShortcutsForMessage = useCallback((messageId: string) => {
     setExpandedPromptShortcutTargetsByMessageId((current) => {
       if (!current[messageId]) return current;
@@ -24956,12 +25259,14 @@ function HomeContent(): React.JSX.Element {
       return next;
     });
   }, []);
-  const [pendingPromptWildcardCleanupMessageIds, setPendingPromptWildcardCleanupMessageIds] =
+  const [pendingMessageCleanupMessageIds, setPendingMessageCleanupMessageIds] =
     useState<Set<string>>(() => new Set());
-  const clearPendingPromptWildcardCleanupIds = useCallback((ids: readonly string[]): void => {
+  const [cleanupRevealMessageKeys, setCleanupRevealMessageKeys] =
+    useState<Set<string>>(() => new Set());
+  const clearPendingMessageCleanupIds = useCallback((ids: readonly string[]): void => {
     if (ids.length === 0) return;
     const idsToClear = new Set(ids);
-    setPendingPromptWildcardCleanupMessageIds((current) => {
+    setPendingMessageCleanupMessageIds((current) => {
       let changed = false;
       const next = new Set(current);
       for (const id of idsToClear) {
@@ -24970,17 +25275,29 @@ function HomeContent(): React.JSX.Element {
       return changed ? next : current;
     });
   }, []);
+  const startCleanupMessageReveal = useCallback((messageKeys: readonly string[]): void => {
+    if (messageKeys.length === 0) return;
+    const uniqueMessageKeys = messageKeys.filter(
+      (key, index) => key && messageKeys.indexOf(key) === index
+    );
+    if (uniqueMessageKeys.length === 0) return;
+    setCleanupRevealMessageKeys((current) => {
+      const next = new Set(current);
+      for (const key of uniqueMessageKeys) next.add(key);
+      return next.size === current.size ? current : next;
+    });
+  }, []);
   useEffect(() => {
-    if (pendingPromptWildcardCleanupMessageIds.size === 0) return;
+    if (pendingMessageCleanupMessageIds.size === 0) return;
     const visibleMessageIds = new Set((detail?.messages ?? []).map((message) => message.id));
-    const staleIds = [...pendingPromptWildcardCleanupMessageIds].filter(
+    const staleIds = [...pendingMessageCleanupMessageIds].filter(
       (id) => !visibleMessageIds.has(id)
     );
-    clearPendingPromptWildcardCleanupIds(staleIds);
+    clearPendingMessageCleanupIds(staleIds);
   }, [
-    clearPendingPromptWildcardCleanupIds,
+    clearPendingMessageCleanupIds,
     detail?.messages,
-    pendingPromptWildcardCleanupMessageIds,
+    pendingMessageCleanupMessageIds,
   ]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
@@ -25123,6 +25440,8 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
   const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
+  const [zenAtmosphereScrollBlendReadyKey, setZenAtmosphereScrollBlendReadyKey] =
+    useState<string | null>(null);
   const [
     zenRememberedWallpaperPreview,
     setZenRememberedWallpaperPreview,
@@ -25167,6 +25486,23 @@ function HomeContent(): React.JSX.Element {
         .join("|"),
     [zenAtmosphereTimeline]
   );
+  const zenAtmosphereInitialLayerOpacities = useMemo(() => {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) return {};
+    const visibleMessageCount = detail?.messages.length ?? 0;
+    return calculateZenAtmosphereLayerOpacitiesForReader({
+      timeline: zenAtmosphereTimeline,
+      readerY: visibleMessageCount,
+      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
+      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      messageCountToY: (messageCount) => messageCount,
+    });
+  }, [
+    view,
+    detail?.messages.length,
+    zenAtmosphereTimelineKey,
+    zenWallpaperRevealDelayMessageCount,
+    zenWallpaperRevealSpanMessageCount,
+  ]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
     []
@@ -29520,6 +29856,15 @@ function HomeContent(): React.JSX.Element {
     idleHoldMs: CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS,
     recoveryMs: CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS,
   });
+  const resolveZenAssistantRevealDelayMultiplier = useCallback(
+    (revealKey: string): number =>
+      chatRevealDelayMultiplier *
+      resolveZenCanvasSpeedNudgeDelayMultiplier(zenCanvasSpeedNudgeState, {
+        revealKey,
+        nowMs: chatEphemeralNowMs,
+      }),
+    [chatEphemeralNowMs, chatRevealDelayMultiplier, zenCanvasSpeedNudgeState]
+  );
   const zenFollowupActive = view === "chat" && zenFollowupBuffer !== null;
   const zenFollowupModelPrompt = (messages: readonly string[]): string =>
     messages
@@ -29554,8 +29899,8 @@ function HomeContent(): React.JSX.Element {
         const next = {
           conversationId: current?.conversationId ?? conversationId,
           messages: current?.messages ?? [],
-          pendingPromptCleanupMessageIds:
-            current?.pendingPromptCleanupMessageIds ?? [],
+          pendingMessageCleanupMessageIds:
+            current?.pendingMessageCleanupMessageIds ?? [],
           startedAtMs: current?.startedAtMs ?? now,
           lastActivityAtMs: now,
           generation: (current?.generation ?? 0) + 1,
@@ -29570,7 +29915,6 @@ function HomeContent(): React.JSX.Element {
     composerFocused ||
     draft.trim().length > 0 ||
     editingMessageId !== null ||
-    composerCleanupBusy ||
     mobileKeyboardInset > 0;
   const chatHeaderChromePinned = chatOverflowMenuOpen;
 
@@ -29712,10 +30056,10 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
-  const pendingPromptWildcardResolutionVisible =
-    pendingPromptWildcardCleanupMessageIds.size > 0;
+  const pendingMessageCleanupVisible =
+    pendingMessageCleanupMessageIds.size > 0;
   const pendingReplyVisualVisible =
-    pendingReplyVisible && !pendingPromptWildcardResolutionVisible;
+    pendingReplyVisible && !pendingMessageCleanupVisible;
   const requestZenAutonomyScheduleTick = useCallback((): void => {
     if (typeof window === "undefined") {
       setZenAutonomyScheduleTick((tick) => tick + 1);
@@ -30168,7 +30512,7 @@ function HomeContent(): React.JSX.Element {
             tokenizeMessageReveal(resolveMessageDisplayContent(message)),
             resolveMessageMoodKey(message),
             effectiveChatRevealTiming,
-            chatRevealDelayMultiplier
+            resolveZenAssistantRevealDelayMultiplier(temporalKey)
           )
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
@@ -30198,7 +30542,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
-    chatRevealDelayMultiplier,
+    resolveZenAssistantRevealDelayMultiplier,
     chatArchiveRevealEpoch,
   ]);
   const chatArchiveLoadingActive =
@@ -30507,7 +30851,7 @@ function HomeContent(): React.JSX.Element {
                   elapsedMs,
                   resolveMessageMoodKey(message),
                   effectiveChatRevealTiming,
-                  chatRevealDelayMultiplier
+                  resolveZenAssistantRevealDelayMultiplier(revealKey)
                 )
               );
               return revealTokens.slice(0, visibleTokenCount).join("");
@@ -30527,7 +30871,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
-    chatRevealDelayMultiplier,
+    resolveZenAssistantRevealDelayMultiplier,
     latestAssistantMessageId,
     latestUserMessageIndex,
   ]);
@@ -30646,7 +30990,7 @@ function HomeContent(): React.JSX.Element {
       revealTokens,
       DEFAULT_MESSAGE_MOOD,
       effectiveChatRevealTiming,
-      chatRevealDelayMultiplier
+      resolveZenAssistantRevealDelayMultiplier(revealKey)
     );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
@@ -30654,10 +30998,29 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
-    chatRevealDelayMultiplier,
+    resolveZenAssistantRevealDelayMultiplier,
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
+  const activeAssistantRevealKey =
+    chatAssistantRevealInProgress && detail?.id && latestAssistantMessageId
+      ? `${detail.id}:${latestAssistantMessageId}`
+      : null;
+  const zenCanvasSpeedNudgePulseActive =
+    activeAssistantRevealKey !== null &&
+    zenCanvasSpeedNudgeState.revealKey === activeAssistantRevealKey &&
+    chatEphemeralNowMs < zenCanvasSpeedNudgeState.pulseUntilMs;
+  const zenCanvasSpeedNudgeHolding =
+    activeAssistantRevealKey !== null &&
+    zenCanvasSpeedNudgeState.revealKey === activeAssistantRevealKey &&
+    zenCanvasSpeedNudgeState.holdActive === true;
+  useEffect(() => {
+    if (activeAssistantRevealKey !== null) return;
+    zenCanvasSpeedNudgePointerRef.current = null;
+    setZenCanvasSpeedNudgeState((current) =>
+      current.revealKey === null ? current : createZenCanvasSpeedNudgeState()
+    );
+  }, [activeAssistantRevealKey]);
 
   type ActiveAssistantRevealInterruption = {
     conversationId: string;
@@ -30699,7 +31062,7 @@ function HomeContent(): React.JSX.Element {
             Math.max(0, Date.now() - firstSeenAt),
             latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
             effectiveChatRevealTiming,
-            chatRevealDelayMultiplier
+            resolveZenAssistantRevealDelayMultiplier(revealKey)
           )
     );
     const interruptionContent = interruptedMidWordSnippet(
@@ -30923,6 +31286,53 @@ function HomeContent(): React.JSX.Element {
     setChatEphemeralNowMs(Date.now());
   }
 
+  function freezeActiveAssistantRevealForLocalTopicReset(): void {
+    if (
+      !chatAssistantTypingMechanicsActive ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) {
+      return;
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) return;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
+    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    const revealTokens = tokenizeMessageReveal(displayContent);
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const pacedVisibleTokenCount =
+      chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
+    const visibleTokenCount = Math.min(
+      tokenTotal,
+      typeof pacedVisibleTokenCount === "number"
+        ? Math.max(1, pacedVisibleTokenCount)
+        : resolveVisibleTokenCountAtElapsedMs(
+            revealTokens,
+            Math.max(0, Date.now() - firstSeenAt),
+            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+            effectiveChatRevealTiming,
+            resolveZenAssistantRevealDelayMultiplier(revealKey)
+          )
+    );
+    const visibleText = revealTokens
+      .slice(0, Math.min(tokenTotal, Math.max(1, visibleTokenCount)))
+      .join("");
+    chatCommittedFontLineCountByKeyRef.current.set(
+      revealKey,
+      Math.max(
+        estimateVisualLineCount(visibleText),
+        chatCommittedFontLineCountByKeyRef.current.get(revealKey) ?? 0
+      )
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.set(revealKey, visibleTokenCount);
+    chatRevealPaceByKeyRef.current.delete(revealKey);
+    setChatEphemeralNowMs(Date.now());
+  }
+
   function clearReplyWorkForManualCompaction(): void {
     const starterRequest = zenInitialStarterRequestRef.current;
     if (starterRequest) {
@@ -30977,13 +31387,52 @@ function HomeContent(): React.JSX.Element {
   const replyInFlightSignals =
     pendingReplyVisualVisible || chatAssistantRevealInProgress || zenFollowupActive;
   const replyRunwayActive = chatLikeSurface && replyInFlightSignals;
-  /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
+  const zenPendingReplyPlaceholderVisible =
+    chatLikeSurface && pendingReplyVisualVisible && !chatAssistantRevealInProgress;
+  const zenPendingReplyPlaceholderNode = useMemo(() => {
+    if (!zenPendingReplyPlaceholderVisible) return null;
+    const pendingRespondent =
+      composeBotAccentId !== null
+        ? bots.find((b) => b.id === composeBotAccentId) ?? null
+        : zenPersonaBot;
+    const edge = detail?.incognito
+      ? "private"
+      : composeBotAccentId !== null
+        ? "bot"
+        : "prism";
+    const voicePreset = resolveBotVoicePreset(pendingRespondent);
+    const style = selectedComposeBotAccent
+      ? ({ "--typing-accent": selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    return (
+      <article
+        className={`${styles.message} ${styles.messageAssistant} ${styles.zenPendingReplyPlaceholder}`}
+        data-message-edge={edge}
+        data-zen-pending-reply-placeholder="true"
+        role="status"
+        aria-live="polite"
+        aria-label="Assistant is preparing a reply"
+        style={style}
+      >
+        <TypingDots className={styles.zenPendingReplyDots} voicePreset={voicePreset} />
+      </article>
+    );
+  }, [
+    bots,
+    chatLikeSurface,
+    composeBotAccentId,
+    detail?.incognito,
+    pendingReplyVisualVisible,
+    selectedComposeBotAccent,
+    zenPersonaBot,
+    zenPendingReplyPlaceholderVisible,
+  ]);
+  /** Zen uses the in-canvas three-dot placeholder while waiting; keep the stop pill for active canvas reveal only. */
   const typingIndicatorVisible =
-    zenFollowupActive ||
-    (pendingReplyVisualVisible && !zenInitialThinkingActive) ||
-    (chatEphemeralMode &&
-      chatAssistantRevealInProgress &&
-      !zenInitialReplyRevealActive);
+    chatLikeSurface
+      ? chatAssistantRevealInProgress && !zenInitialReplyRevealActive
+      : zenFollowupActive ||
+        (pendingReplyVisualVisible && !zenInitialThinkingActive);
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
     const pendingRespondent =
@@ -31007,6 +31456,7 @@ function HomeContent(): React.JSX.Element {
       : chatAssistantRevealInProgress
       ? `${displayName} is replying…`
       : pickGeneratingLabel(displayName, salt);
+    const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
       ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
       : undefined;
@@ -31021,6 +31471,8 @@ function HomeContent(): React.JSX.Element {
           zenFollowupActive ? styles.typingIndicatorPaused : ""
         } ${
           showFallbackCheckerboardRing ? styles.typingIndicatorFallbackProcessing : ""
+        } ${
+          zenCanvasSpeedNudgePulseActive ? styles.typingIndicatorSpeedNudged : ""
         }`}
         style={style}
         aria-label={`${label}. Tap or click to stop.`}
@@ -31028,11 +31480,7 @@ function HomeContent(): React.JSX.Element {
         onClick={handleTypingIndicatorPress}
       >
         <span>{label}</span>
-        <span className={styles.typingDots} aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
+        <TypingDots className={styles.typingDots} voicePreset={voicePreset} />
       </button>
     );
   }, [
@@ -31052,6 +31500,7 @@ function HomeContent(): React.JSX.Element {
     selectedComposeBotAccent,
     chatLikeSurface,
     handleTypingIndicatorPress,
+    zenCanvasSpeedNudgePulseActive,
   ]);
   const zenInitialThinkingNode = useMemo(() => {
     const active = zenInitialThinkingActive || zenInitialReplyRevealActive;
@@ -31943,7 +32392,6 @@ function HomeContent(): React.JSX.Element {
     setTouchPreview(null);
     touchPreviewPointerIdRef.current = null;
     setExpandedPromptShortcutTargetsByMessageId({});
-    setUnfoldedPromptShortcutMessageIds({});
     setCoffeeOpeningPollModalOpen(false);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
@@ -34398,6 +34846,41 @@ function HomeContent(): React.JSX.Element {
       window.clearInterval(timer);
     };
   }, [chatAssistantTypingMechanicsActive, detail?.id]);
+  const cleanupMessageRevealActive = cleanupRevealMessageKeys.size > 0;
+  useEffect(() => {
+    if (!cleanupMessageRevealActive) return;
+    const timer = window.setTimeout(() => {
+      setCleanupRevealMessageKeys(new Set<string>());
+    }, CLEANUP_MESSAGE_REVEAL_SETTLE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [cleanupMessageRevealActive, cleanupRevealMessageKeys]);
+  useEffect(() => {
+    if (!cleanupMessageRevealActive) return;
+    const activeMessageKeys = new Set<string>();
+    if (detail?.id) {
+      for (const message of detail.messages) {
+        activeMessageKeys.add(cleanupMessageRevealKey(detail.id, message.id));
+      }
+    }
+    setCleanupRevealMessageKeys((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const key of current) {
+        if (!activeMessageKeys.has(key)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [
+    cleanupMessageRevealActive,
+    cleanupRevealMessageKeys,
+    detail?.id,
+    detail?.messages,
+  ]);
   // Chat mode seeds `chatMessageFirstSeenAtRef` inside `chatMessageTemporalById`.
   // Token-scheduled assists also rely on anchored first-seen times per message key.
   useEffect(() => {
@@ -34439,7 +34922,7 @@ function HomeContent(): React.JSX.Element {
       revealTokens,
       DEFAULT_MESSAGE_MOOD,
       effectiveChatRevealTiming,
-      chatRevealDelayMultiplier
+      resolveZenAssistantRevealDelayMultiplier(temporalKey)
     );
     const visuallyComplete =
       typeof pacedVisibleTokenCount === "number"
@@ -34456,7 +34939,7 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
-    chatRevealDelayMultiplier,
+    resolveZenAssistantRevealDelayMultiplier,
     pendingReplyVisible,
   ]);
   useEffect(() => {
@@ -34568,6 +35051,17 @@ function HomeContent(): React.JSX.Element {
     }, remainingMs);
     return () => window.clearTimeout(timer);
   }, [psychicModeToast]);
+
+  useEffect(() => {
+    if (!localCommandToast) return;
+    const remainingMs = Math.max(0, localCommandToast.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setLocalCommandToast((current) =>
+        current?.id === localCommandToast.id ? null : current
+      );
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [localCommandToast]);
 
   // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
   // clears stale mode state too, then the restore effect below opens the
@@ -35202,6 +35696,7 @@ function HomeContent(): React.JSX.Element {
         await refreshBotMemories(nextPickedBotId);
       } else {
         setBotMemories([]);
+        setBotMemoryDossier(null);
       }
     } catch (err) {
       if (!sameSurface && selectedIdRef.current === id) {
@@ -35611,14 +36106,23 @@ function HomeContent(): React.JSX.Element {
     );
   }
   async function refreshBotMemories(botId: string) {
-    const d = await api<{ memories: UserMemory[] }>(
-      `/api/memories?botId=${encodeURIComponent(botId)}`
+    const conversationId =
+      detailIdRef.current && detailIdRef.current !== "pending"
+        ? detailIdRef.current
+        : selectedIdRef.current;
+    const query = conversationId
+      ? `?conversationId=${encodeURIComponent(conversationId)}`
+      : "";
+    const d = await api<BotMemoryPanelDossier & { ok?: boolean }>(
+      `/api/bots/${encodeURIComponent(botId)}/memory-panel${query}`
     );
     setBotMemories(d.memories);
+    setBotMemoryDossier(d);
   }
   async function refreshDefaultMemories() {
     const d = await api<{ memories: UserMemory[] }>("/api/memories?scope=default");
     setBotMemories(d.memories);
+    setBotMemoryDossier(null);
   }
   async function refreshZenSessionMemory() {
     const conversationId =
@@ -36199,6 +36703,7 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setMemories([]);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
@@ -36311,7 +36816,6 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterSpecsCommandId(null);
     setCommandCenterHelpModalOpen(false);
     setExpandedPromptShortcutTargetsByMessageId({});
-    setUnfoldedPromptShortcutMessageIds({});
     setConversationGroupOrder([]);
     setBotLibraryGroups([createFavoritesBotGroup()]);
     setConversations([]);
@@ -36323,6 +36827,7 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setMemories([]);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
@@ -36646,6 +37151,7 @@ function HomeContent(): React.JSX.Element {
       sessionEnding?: boolean;
       sessionResumeContext?: SessionResumeContext;
       forceNewConversation?: boolean;
+      topicReset?: boolean;
       commandCenterModelChoice?: string;
       commandCenterPrompt?: boolean;
       resolvedCommandCenterPrompt?: string;
@@ -36727,6 +37233,7 @@ function HomeContent(): React.JSX.Element {
         ? { sessionResumeContext: options.sessionResumeContext }
         : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
+      ...(mode === "zen" && options.topicReset ? { topicReset: true } : {}),
       mode,
       ...(mode === "zen"
         ? {
@@ -37429,6 +37936,7 @@ function HomeContent(): React.JSX.Element {
         : activeConversationId ?? fallbackChatConversationId;
     setError(null);
     setConversationStarterPrompts(null);
+    pendingNvmTopicResetRef.current = false;
     if (!options.preserveComposer) {
       setDraft("");
       setComposerSendTintActive(false);
@@ -37556,6 +38064,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function clearRevealStateForUndo(conversationId: string, messageIds: readonly string[]): void {
+    const cleanupRevealKeys = messageIds.map((messageId) =>
+      cleanupMessageRevealKey(conversationId, messageId)
+    );
     for (const messageId of messageIds) {
       const revealKey = `${conversationId}:${messageId}`;
       chatCommittedFontLineCountByKeyRef.current.delete(revealKey);
@@ -37564,6 +38075,17 @@ function HomeContent(): React.JSX.Element {
       chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
       chatRevealPaceByKeyRef.current.delete(revealKey);
       chatMessageFirstSeenAtRef.current.delete(revealKey);
+    }
+    if (cleanupRevealKeys.length > 0) {
+      const cleanupRevealKeySet = new Set(cleanupRevealKeys);
+      setCleanupRevealMessageKeys((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const revealKey of cleanupRevealKeySet) {
+          if (next.delete(revealKey)) changed = true;
+        }
+        return changed ? next : current;
+      });
     }
     setChatEphemeralNowMs(Date.now());
   }
@@ -37576,7 +38098,7 @@ function HomeContent(): React.JSX.Element {
     if (removeCount <= 0) return conversation;
     const nextMessages = conversation.messages.slice(0, -removeCount);
     const removedIds = conversation.messages.slice(-removeCount).map((message) => message.id);
-    clearPendingPromptWildcardCleanupIds(removedIds);
+    clearPendingMessageCleanupIds(removedIds);
     if (conversation.id) {
       clearRevealStateForUndo(conversation.id, removedIds);
     }
@@ -37839,6 +38361,66 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function showLocalCommandToast(title: string, detail: string): void {
+    const now = Date.now();
+    setLocalCommandToast({
+      id: `local-command:${now}`,
+      title,
+      detail,
+      expiresAt: now + LOCAL_COMMAND_TOAST_DISMISS_MS,
+    });
+  }
+
+  function clearReplyWorkForLocalTopicReset(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    clearZenFollowupCooldownTimer();
+    zenFollowupBufferRef.current = null;
+    setZenFollowupBuffer(null);
+    zenInitialThinkingCancelControllerRef.current = null;
+    priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+    stopPendingReply();
+    freezeActiveAssistantRevealForLocalTopicReset();
+    setPendingMessageCleanupMessageIds(new Set<string>());
+    setCleanupRevealMessageKeys(new Set<string>());
+  }
+
+  async function resetTopicFromNvmSlashCommand(source: "chat" | "coffee"): Promise<void> {
+    if (pendingReply || chatAssistantRevealInProgress || zenFollowupBufferRef.current) {
+      clearReplyWorkForLocalTopicReset();
+    } else {
+      clearZenFollowupCooldownTimer();
+      zenFollowupBufferRef.current = null;
+      setZenFollowupBuffer(null);
+    }
+    setError(null);
+    if (source === "chat") {
+      pendingNvmTopicResetRef.current = true;
+      setConversationStarterPrompts(null);
+      setStarterComposerRevealed(false);
+      setAskQuestionComposerRevealed(false);
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
+      showLocalCommandToast("Topic reset", "Next message starts fresh.");
+      return;
+    }
+    if (source === "coffee") {
+      setCoffeeError(null);
+      setCoffeeDraft("");
+      showLocalCommandToast("Topic reset", "Next message starts fresh.");
+    }
+  }
+
   async function togglePsychicModeFromSlashCommand(
     options: { clearChatComposer?: boolean; source?: "chat" | "coffee" } = {}
   ): Promise<void> {
@@ -37900,6 +38482,7 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand === "/undo" ||
       normalizedCommand === "/undo-turn" ||
       normalizedCommand === PSYCHIC_SLASH_COMMAND ||
+      normalizedCommand === NVM_SLASH_COMMAND ||
       BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)
     );
   }
@@ -37927,6 +38510,7 @@ function HomeContent(): React.JSX.Element {
 
   function ignoreLocalOnlyComposerCommandWhileReplying(trimmedLine: string): boolean {
     if (parseUndoSlashCommand(trimmedLine).kind !== "none") return false;
+    if (parseNvmSlashCommand(trimmedLine).kind !== "none") return false;
     const replyBusy =
       (pendingReply && !canSendTextWhileReplyPending()) ||
       chatAssistantRevealInProgress;
@@ -37950,6 +38534,7 @@ function HomeContent(): React.JSX.Element {
       return false;
     }
     const psychicCommand = parsePsychicSlashCommand(trimmedLine);
+    const nvmCommand = parseNvmSlashCommand(trimmedLine);
     if (BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)) {
       setDraft("");
       setComposerSendTintActive(false);
@@ -37964,6 +38549,14 @@ function HomeContent(): React.JSX.Element {
     }
     if (undoCommand.kind === "ok") {
       await undoLatestMessageFromSlashCommand(undoCommand.count);
+      return true;
+    }
+    if (nvmCommand.kind === "error") {
+      setError(nvmCommand.error);
+      return true;
+    }
+    if (nvmCommand.kind === "ok") {
+      await resetTopicFromNvmSlashCommand("chat");
       return true;
     }
     if (tokens.length > 1) {
@@ -38225,19 +38818,6 @@ function HomeContent(): React.JSX.Element {
           }
         : null,
     };
-  }
-
-  async function generateComposerWildcardSlotValue(
-    key: BuiltInPromptWildcardSlotKey
-  ): Promise<string> {
-    const result = await api<{ ok: true; key: BuiltInPromptWildcardSlotKey; value: string }>(
-      "/api/composer/wildcard-value",
-      {
-        method: "POST",
-        body: JSON.stringify({ key }),
-      }
-    );
-    return result.value;
   }
 
   function clearPendingImageJobPoll(jobId: string) {
@@ -38515,6 +39095,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function clearAllDisplayedConversationState(): void {
+    pendingNvmTopicResetRef.current = false;
     setDetail((current) =>
       current
         ? {
@@ -38587,7 +39168,7 @@ function HomeContent(): React.JSX.Element {
 
   function appendOptimisticZenFollowupMessage(input: {
     content: string;
-    pendingPromptWildcardCleanup?: boolean;
+    pendingMessageCleanup?: boolean;
     promptWildcards?: PromptWildcardRunMetadata | null;
   }): string {
     const optimisticZenPersonaBot =
@@ -38606,8 +39187,8 @@ function HomeContent(): React.JSX.Element {
       ...(optimisticZenPersonaBot?.color ? { botColor: optimisticZenPersonaBot.color } : {}),
       ...(input.promptWildcards ? { promptWildcards: input.promptWildcards } : {}),
     };
-    if (input.pendingPromptWildcardCleanup === true) {
-      setPendingPromptWildcardCleanupMessageIds((current) => {
+    if (input.pendingMessageCleanup === true) {
+      setPendingMessageCleanupMessageIds((current) => {
         const next = new Set(current);
         next.add(optimisticMessageId);
         return next;
@@ -38626,11 +39207,11 @@ function HomeContent(): React.JSX.Element {
       if (zenFollowupDispatchingRef.current) return;
       const snapshot = zenFollowupBufferRef.current;
       const messages = snapshot?.messages.slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT) ?? [];
-      const pendingPromptCleanupMessageIds =
-        snapshot?.pendingPromptCleanupMessageIds ?? [];
+      const pendingMessageCleanupIds =
+        snapshot?.pendingMessageCleanupMessageIds ?? [];
       const latest = messages[messages.length - 1]?.replace(/\s+/g, " ").trim() ?? "";
       if (!snapshot || !latest) {
-        clearPendingPromptWildcardCleanupIds(pendingPromptCleanupMessageIds);
+        clearPendingMessageCleanupIds(pendingMessageCleanupIds);
         setZenFollowupBuffer(null);
         return;
       }
@@ -38658,7 +39239,7 @@ function HomeContent(): React.JSX.Element {
             queuedConversationId: conversationId,
             skipComposerHistory: true,
             zenFollowupDispatch: true,
-            zenFollowupCleanupMessageIds: pendingPromptCleanupMessageIds,
+            zenFollowupCleanupMessageIds: pendingMessageCleanupIds,
           }
         );
       };
@@ -38854,13 +39435,26 @@ function HomeContent(): React.JSX.Element {
       standaloneComposerWildcardRun && !composerPromptHasTrueWildcardSlots
         ? null
         : composerPromptWildcards;
-    const promptWildcardCleanupAwaitsServer =
+    const commandCenterPromptHasWildcardReplacements =
+      (commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0;
+    const composerPromptHasWildcardRun = composerPromptWildcardsForSend !== null;
+    const promptHasWildcardFinalization =
+      commandCenterPromptHasTrueWildcardSlots ||
+      composerPromptHasTrueWildcardSlots ||
+      commandCenterPromptHasWildcardReplacements ||
+      composerPromptHasWildcardRun;
+    const messageCleanupAwaitsServer =
       settings?.composerWritingAssist !== false &&
       !standaloneComposerWildcardRun &&
-      ((commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0 ||
-        (composerPromptWildcardsForSend?.wildcardReplacements?.length ?? 0) > 0);
-    const promptWildcardFillAwaitsServerCleanup =
-      promptWildcardCleanupAwaitsServer ||
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      !isPersonaTransition &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      promptHasWildcardFinalization &&
+      trimmed.length > 0;
+    const messageFinalizationAwaitsServer =
+      messageCleanupAwaitsServer ||
       commandCenterPromptHasTrueWildcardSlots ||
       composerPromptHasTrueWildcardSlots;
     const zenFollowupBufferingSend =
@@ -38900,17 +39494,17 @@ function HomeContent(): React.JSX.Element {
         }
       }
       beginOrRefreshZenFollowupBuffer(activeConversationId);
-      const followupPendingWildcardCleanup =
-        promptWildcardFillAwaitsServerCleanup || composerPromptWildcards !== null;
-      const optimisticFollowupContent = pendingWildcardOptimisticMessageContent({
+      const followupMessageFinalizationAwaitsServer =
+        messageFinalizationAwaitsServer || composerPromptWildcards !== null;
+      const optimisticFollowupContent = pendingCleanupOptimisticMessageContent({
         rawDraft: rawTrimmed,
         resolvedDisplayContent: displayTrimmed,
-        pendingWildcardResolution: followupPendingWildcardCleanup,
+        pendingCleanup: followupMessageFinalizationAwaitsServer,
       });
       const optimisticFollowupMessageId = appendOptimisticZenFollowupMessage({
         content: optimisticFollowupContent,
-        pendingPromptWildcardCleanup: followupPendingWildcardCleanup,
-        promptWildcards: followupPendingWildcardCleanup
+        pendingMessageCleanup: followupMessageFinalizationAwaitsServer,
+        promptWildcards: followupMessageFinalizationAwaitsServer
           ? composerPromptWildcardsForSend
           : null,
       });
@@ -38920,14 +39514,14 @@ function HomeContent(): React.JSX.Element {
           ...(current?.messages ?? []),
           displayTrimmed,
         ].slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT);
-        const pendingPromptCleanupMessageIds = [
-          ...(current?.pendingPromptCleanupMessageIds ?? []),
-          ...(followupPendingWildcardCleanup ? [optimisticFollowupMessageId] : []),
+        const pendingMessageCleanupIds = [
+          ...(current?.pendingMessageCleanupMessageIds ?? []),
+          ...(followupMessageFinalizationAwaitsServer ? [optimisticFollowupMessageId] : []),
         ];
         const next = {
           conversationId: current?.conversationId ?? activeConversationId,
           messages,
-          pendingPromptCleanupMessageIds,
+          pendingMessageCleanupMessageIds: pendingMessageCleanupIds,
           startedAtMs: current?.startedAtMs ?? now,
           lastActivityAtMs: now,
           generation: (current?.generation ?? 0) + 1,
@@ -39245,14 +39839,14 @@ function HomeContent(): React.JSX.Element {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
-      const optimisticUserContent = pendingWildcardOptimisticMessageContent({
+      const optimisticUserContent = pendingCleanupOptimisticMessageContent({
         rawDraft: rawTrimmed,
         resolvedDisplayContent: displayTrimmed,
-        pendingWildcardResolution: promptWildcardFillAwaitsServerCleanup,
+        pendingCleanup: messageFinalizationAwaitsServer,
       });
-      if (promptWildcardFillAwaitsServerCleanup) {
+      if (messageFinalizationAwaitsServer) {
         optimisticPromptCleanupMessageId = optimisticMessageId;
-        setPendingPromptWildcardCleanupMessageIds((current) => {
+        setPendingMessageCleanupMessageIds((current) => {
           const next = new Set(current);
           next.add(optimisticMessageId);
           return next;
@@ -39382,6 +39976,11 @@ function HomeContent(): React.JSX.Element {
     const sessionResumeContextForSend: SessionResumeContext | undefined =
       pendingZenSessionResumeContextForSend ??
       activeZenSessionBreakResumeContext;
+    const topicResetForSend =
+      view === "chat" &&
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      pendingNvmTopicResetRef.current;
 
     try {
       const chatBody = buildChatRequestBody(
@@ -39410,6 +40009,7 @@ function HomeContent(): React.JSX.Element {
           ...(sessionResumeContextForSend
             ? { sessionResumeContext: sessionResumeContextForSend }
             : {}),
+          ...(topicResetForSend ? { topicReset: true } : {}),
           ...(prismInterruptionForSend
             ? { prismInterruption: prismInterruptionForSend }
             : {}),
@@ -39444,6 +40044,9 @@ function HomeContent(): React.JSX.Element {
       }
       if (priorityCommandCancelControllerRef.current === chatRequestController) {
         return;
+      }
+      if (topicResetForSend) {
+        pendingNvmTopicResetRef.current = false;
       }
       const activeInitialStarterRequest = zenInitialStarterRequestId
         ? zenInitialStarterRequestRef.current
@@ -39527,6 +40130,20 @@ function HomeContent(): React.JSX.Element {
         if (!isZenAutonomy || zenAutonomySpoke) {
           markLatestAssistantRevealEligible(patchedConversation);
         }
+        const pendingCleanupIdsForReveal = [
+          ...(optimisticPromptCleanupMessageId ? [optimisticPromptCleanupMessageId] : []),
+          ...(options.zenFollowupCleanupMessageIds ?? []),
+        ];
+        const cleanupRevealKeys =
+          pendingCleanupIdsForReveal.length > 0
+            ? mapPendingCleanupMessagesToFinalRevealKeys({
+                conversationId: patchedConversation.id,
+                pendingMessageIds: pendingCleanupIdsForReveal,
+                previousMessages: previousDetail?.messages ?? [],
+                finalMessages: patchedConversation.messages,
+              })
+            : [];
+        startCleanupMessageReveal(cleanupRevealKeys);
         if (view === "chat") {
           if (!isZenAutonomy || zenAutonomySpoke) {
             hardResetChatArchiveStateForConversation(d.conversation.id);
@@ -39659,6 +40276,7 @@ function HomeContent(): React.JSX.Element {
           await refreshBotMemories(nextBotId);
         } else {
           setBotMemories([]);
+          setBotMemoryDossier(null);
         }
       }
     } catch (err) {
@@ -39745,7 +40363,7 @@ function HomeContent(): React.JSX.Element {
       clearPendingReplyVisuals();
       if (optimisticPromptCleanupMessageId) {
         const cleanupMessageId = optimisticPromptCleanupMessageId;
-        setPendingPromptWildcardCleanupMessageIds((current) => {
+        setPendingMessageCleanupMessageIds((current) => {
           if (!current.has(cleanupMessageId)) return current;
           const next = new Set(current);
           next.delete(cleanupMessageId);
@@ -39753,7 +40371,7 @@ function HomeContent(): React.JSX.Element {
         });
       }
       if (successfulConversationId) {
-        clearPendingPromptWildcardCleanupIds(options.zenFollowupCleanupMessageIds ?? []);
+        clearPendingMessageCleanupIds(options.zenFollowupCleanupMessageIds ?? []);
         scheduleNextQueuedPrompt(successfulConversationId);
       }
     }
@@ -40656,7 +41274,7 @@ function HomeContent(): React.JSX.Element {
       nowMs: chatEphemeralNowMs,
       completed: false,
       moodKey: DEFAULT_MESSAGE_MOOD,
-      delayMultiplier: chatRevealDelayMultiplier,
+      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
     });
     return visibleTokenCount < tokenTotal;
   }
@@ -40695,7 +41313,7 @@ function HomeContent(): React.JSX.Element {
           nowMs: chatEphemeralNowMs,
           completed: false,
           moodKey: DEFAULT_MESSAGE_MOOD,
-          delayMultiplier: chatRevealDelayMultiplier,
+          delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
         });
         return visibleTokenCount < tokenTotal;
       })()
@@ -40757,6 +41375,11 @@ function HomeContent(): React.JSX.Element {
       : starterPromptsInteractive
         ? starterPromptsAnchorMessage?.id ?? null
         : null;
+  const choiceChipRailControlsViewport = shouldChoiceChipRailControlViewport({
+    chatSurface: view === "chat",
+    anchorMessageId: choiceChipRailAnchorMessageId,
+    latestAssistantMessageId,
+  });
   const choiceChipRailComposerRevealed =
     pendingAskQuestionInteractiveKey !== null
       ? askQuestionComposerRevealed
@@ -40773,6 +41396,13 @@ function HomeContent(): React.JSX.Element {
       : activeChoiceComposerSource === "starter"
         ? !starterComposerRevealed
         : false;
+  const zenComposerActionPreview = useMemo(
+    () =>
+      chatLikeSurface && !composerHiddenByChoiceChips
+        ? resolveZenActionPreview(draft)
+        : null,
+    [chatLikeSurface, composerHiddenByChoiceChips, draft]
+  );
   const askQuestionPatienceAssistantMessageId =
     pendingAskQuestionInteractiveKey !== null
       ? pendingAskQuestionState?.assistantMessageId ?? null
@@ -41220,6 +41850,7 @@ function HomeContent(): React.JSX.Element {
 
   function centerActiveChoicePanelInMessages(): void {
     if (!choiceChipRailInteractiveKey || !choiceChipRailAnchorMessageId) return;
+    if (!choiceChipRailControlsViewport) return;
     if (choiceChipRailComposerRevealed) return;
     if (
       askQuestionComposerHiddenForReadingKeyRef.current ===
@@ -41272,7 +41903,13 @@ function HomeContent(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!choiceChipRailInteractiveKey || choiceChipRailComposerRevealed) return;
+    if (
+      !choiceChipRailInteractiveKey ||
+      !choiceChipRailControlsViewport ||
+      choiceChipRailComposerRevealed
+    ) {
+      return;
+    }
     let settleTimerA: number | null = null;
     let settleTimerB: number | null = null;
     requestAnimationFrame(() => {
@@ -41287,21 +41924,31 @@ function HomeContent(): React.JSX.Element {
   }, [
     choiceChipRailAnchorMessageId,
     choiceChipRailComposerRevealed,
+    choiceChipRailControlsViewport,
     choiceChipRailInteractiveKey,
     detail?.id,
   ]);
   const askQuestionPromptDockSpaceActive =
     choiceChipRailInteractiveKey !== null &&
+    choiceChipRailControlsViewport &&
     choiceChipRailComposerRevealed &&
     viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const askQuestionTailSpaceActive =
-    choiceChipRailInteractiveKey !== null && !askQuestionPromptDockSpaceActive;
+    choiceChipRailInteractiveKey !== null &&
+    choiceChipRailControlsViewport &&
+    !askQuestionPromptDockSpaceActive;
   const askQuestionCollapsedBubbleActive = false;
 
   function snapAskQuestionComposerToChatBottom(force = false): void {
     const rail = getComposerChipRail();
     if (!rail?.collapsed) return;
-    if (!choiceChipRailInteractiveKey || (!force && !choiceChipRailComposerRevealed)) return;
+    if (
+      !choiceChipRailInteractiveKey ||
+      !choiceChipRailControlsViewport ||
+      (!force && !choiceChipRailComposerRevealed)
+    ) {
+      return;
+    }
     const el = messagesScrollRef.current;
     if (!el) return;
     chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
@@ -41383,11 +42030,27 @@ function HomeContent(): React.JSX.Element {
 
   function updateZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
     if (!scrollRoot) {
-      applyZenAtmosphereLayerOpacities({});
+      if (zenAtmosphereTimeline.length === 0) {
+        applyZenAtmosphereLayerOpacities({});
+        setZenAtmosphereScrollBlendReadyKey(null);
+      }
       return;
     }
-    applyZenAtmosphereLayerOpacities(
-      calculateZenAtmosphereLayerOpacities(scrollRoot)
+    const measuredLayerOpacities = calculateZenAtmosphereLayerOpacities(scrollRoot);
+    const initialLayerOpacity = maxZenAtmosphereLayerOpacity(
+      zenAtmosphereInitialLayerOpacities
+    );
+    if (
+      zenAtmosphereScrollBlendReadyKey !== zenAtmosphereTimelineKey &&
+      initialLayerOpacity > 0.01 &&
+      maxZenAtmosphereLayerOpacity(measuredLayerOpacities) <= 0.01
+    ) {
+      applyZenAtmosphereLayerOpacities(zenAtmosphereInitialLayerOpacities);
+      return;
+    }
+    applyZenAtmosphereLayerOpacities(measuredLayerOpacities);
+    setZenAtmosphereScrollBlendReadyKey((current) =>
+      current === zenAtmosphereTimelineKey ? current : zenAtmosphereTimelineKey
     );
   }
 
@@ -41402,6 +42065,7 @@ function HomeContent(): React.JSX.Element {
   useLayoutEffect(() => {
     if (view !== "chat" || zenAtmosphereTimeline.length === 0) {
       applyZenAtmosphereLayerOpacities({});
+      setZenAtmosphereScrollBlendReadyKey(null);
       return;
     }
     const scrollRoot = messagesScrollRef.current;
@@ -41659,6 +42323,67 @@ function HomeContent(): React.JSX.Element {
     resetChatModeScrollElastic();
   }
 
+  const handleZenCanvasSpeedNudgePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (!activeAssistantRevealKey) return;
+      if (event.defaultPrevented) return;
+      if (event.pointerType === "touch") return;
+      if (event.button !== 0) return;
+      if (canvasBotMarqueeRect !== null) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!event.currentTarget.contains(target)) return;
+      if (target.closest(ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      zenCanvasSpeedNudgePointerRef.current = {
+        pointerId: event.pointerId,
+        revealKey: activeAssistantRevealKey,
+      };
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is optional in tests and older embedded webviews.
+      }
+      const now = Date.now();
+      setZenCanvasSpeedNudgeState((current) =>
+        beginZenCanvasSpeedNudgeHold(current, {
+          revealKey: activeAssistantRevealKey,
+          nowMs: now,
+        }).state
+      );
+      setChatEphemeralNowMs(now);
+    },
+    [activeAssistantRevealKey, canvasBotMarqueeRect]
+  );
+
+  const handleZenCanvasSpeedNudgePointerEnd = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const activePointer = zenCanvasSpeedNudgePointerRef.current;
+      if (!activePointer || activePointer.pointerId !== event.pointerId) return;
+      zenCanvasSpeedNudgePointerRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Capture may already be released by the browser.
+      }
+      const now = Date.now();
+      setZenCanvasSpeedNudgeState((current) =>
+        endZenCanvasSpeedNudgeHold(current, {
+          revealKey: activePointer.revealKey,
+          nowMs: now,
+        })
+      );
+      setChatEphemeralNowMs(now);
+    },
+    []
+  );
+
   function resetComposerHistoryCursor(): void {
     composerHistoryIndexRef.current = null;
     composerHistoryDraftBeforeRecallRef.current = null;
@@ -41873,68 +42598,6 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     updateComposerDraft(e.currentTarget.value);
-  }
-
-  async function cleanupComposerDraft(): Promise<void> {
-    const currentDraft = draft;
-    if (
-      currentDraft.trim().length === 0 ||
-      composerCleanupBusy ||
-      pendingReply ||
-      settings?.composerWritingAssist === false
-    ) {
-      return;
-    }
-    setComposerCleanupBusy(true);
-    setError(null);
-    try {
-      const response = await api<{
-        text: string;
-        changed?: boolean;
-        provider?: Provider;
-        model?: string;
-      }>("/api/composer/cleanup", {
-        method: "POST",
-        body: JSON.stringify({
-          text: currentDraft,
-          forceLocal: effectivePreferredProvider === "local",
-        }),
-      });
-      if (typeof response.text !== "string" || response.text.trim().length === 0) {
-        throw new Error("Writing cleanup returned an empty draft.");
-      }
-      updateComposerDraft(response.text);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Writing cleanup failed.");
-    } finally {
-      setComposerCleanupBusy(false);
-    }
-  }
-
-  function renderComposerWritingAssistAction(): React.ReactNode {
-    if (
-      composerHiddenByChoiceChips ||
-      settings?.composerWritingAssist === false ||
-      draft.trim().length === 0
-    ) {
-      return null;
-    }
-    const disabled = composerCleanupBusy || pendingReply;
-    return (
-      <div className={styles.composeWritingAssistRow}>
-        <button
-          type="button"
-          className={styles.composeWritingAssistButton}
-          onClick={() => void cleanupComposerDraft()}
-          disabled={disabled}
-          aria-busy={composerCleanupBusy ? "true" : undefined}
-          title="Clean up spelling and grammar without sending the message."
-        >
-          {composerCleanupBusy ? "Cleaning..." : "Fix spelling & grammar"}
-        </button>
-      </div>
-    );
   }
 
   function handleComposerFocus() {
@@ -47293,6 +47956,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelSelectedFamily(botPrismGroup(bot.color));
     setFocusedMemoryId(null);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad(`Loading ${bot.name} memories...`, async () => {
       await refreshBotMemories(bot.id);
     });
@@ -47310,6 +47974,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad(view === "chat" ? "Loading Prism memories..." : "Loading Prism shared memories...", async () => {
       await refreshPrismMemoryPanel();
     });
@@ -47321,6 +47986,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelBotId(null);
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad("Loading memory directories...", async () => {
       await refreshMemories();
     });
@@ -47500,6 +48166,30 @@ function HomeContent(): React.JSX.Element {
     const { fields } = parseStoredBotPrompt(memoryPanelBot.system_prompt ?? "");
     return listBotProfileFacts(fields.facts);
   }, [memoryPanelBot]);
+
+  const activeBotMemoryDossier = useMemo(
+    () =>
+      memoryPanelBot?.id && botMemoryDossier?.botId === memoryPanelBot.id
+        ? botMemoryDossier
+        : null,
+    [botMemoryDossier, memoryPanelBot?.id]
+  );
+
+  const botAboutYouMemories = activeBotMemoryDossier?.aboutYouMemories ?? [];
+  const botMemoryDossierCurrentSessionOpinion = botMemoryDossierSessionOpinion(
+    activeBotMemoryDossier,
+    memoryPanelBot?.id
+  );
+  const botMemoryDossierSectionCounts = useMemo(
+    () => resolveBotMemoryDossierSectionCounts(botMemories, botAboutYouMemories),
+    [botAboutYouMemories, botMemories]
+  );
+  const botMemoryDossierStats = activeBotMemoryDossier
+    ? botMemoryDossierStatItems(
+        activeBotMemoryDossier.counts,
+        botMemoryDossierSectionCounts
+      )
+    : [];
 
   const memoryPanelAccent = normalizeAccentForTheme(
     memoryPanelScope === "bot"
@@ -51511,6 +52201,23 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderLocalCommandToast = () => {
+    if (!localCommandToast) return null;
+    return (
+      <div
+        className={`${styles.psychicModeToast} ${styles.localCommandToast}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className={styles.psychicModeToastDot} aria-hidden="true" />
+        <span className={styles.psychicModeToastCopy}>
+          <strong>{localCommandToast.title}</strong>
+          <small>{localCommandToast.detail}</small>
+        </span>
+      </div>
+    );
+  };
+
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
@@ -53011,7 +53718,7 @@ function HomeContent(): React.JSX.Element {
         nowMs: chatEphemeralNowMs,
         completed: false,
         moodKey: DEFAULT_MESSAGE_MOOD,
-        delayMultiplier: chatRevealDelayMultiplier,
+        delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
       });
       return revealTokens.slice(0, visibleTokenCount).join("").length;
     })();
@@ -54610,8 +55317,179 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderMemoryConnectionMeter = (): React.JSX.Element => {
-    if (!sessionOpinion) {
+  const renderMemoryDetailMeta = (memory: UserMemory): React.JSX.Element => {
+    const signal = Math.round(memoryBubbleSignalValue(memory) * 100);
+    const detailLabel = isAssumptionMemory(memory) ? "certainty" : "confidence";
+    return (
+      <div className={styles.memoryFullProseMeta} aria-label="Memory details">
+        <span>{botMemorySourceLabel(memory.source)}</span>
+        <span>{botMemoryCategoryLabel(memoryCategory(memory))}</span>
+        <span>{botMemoryTierLabel(memoryTier(memory))}</span>
+        <span>{detailLabel} {signal}%</span>
+        <span>{formatMemoryDossierDate(memory.createdAt)}</span>
+      </div>
+    );
+  };
+
+  const renderBotMemoryDossierStats = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !activeBotMemoryDossier) return null;
+    return (
+      <div className={styles.memoryDossierStats} aria-label="Bot memory counts">
+        {botMemoryDossierStats.map((item) => (
+          <span key={item.id}>
+            <strong>{item.value}</strong>
+            <small>{item.label}</small>
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBotMemoryFactsSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !memoryPanelBot) return null;
+    return (
+      <section className={styles.memoryFactsSection} aria-label={`${memoryPanelBot.name} permanent facts`}>
+        <div className={styles.memoryFactsHeader}>
+          <div>
+            <strong>Permanent facts</strong>
+            <span>Profile facts belong to the bot, separate from learned memories.</span>
+          </div>
+        </div>
+        {memoryPanelBotFacts.length > 0 ? (
+          <ul className={styles.memoryFactsList}>
+            {memoryPanelBotFacts.map((fact) => (
+              <li key={fact.key}>
+                <span className={styles.memoryFactLabel}>{fact.label}</span>
+                <span className={styles.memoryFactValue}>{fact.value}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={styles.memoryFactsEmpty}>
+            No permanent facts yet. Add them from the bot profile when this bot needs stable identity details.
+          </p>
+        )}
+      </section>
+    );
+  };
+
+  const renderBotMemoryRelationshipSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !memoryPanelBot) return null;
+    const durableOpinion = activeBotMemoryDossier?.botOpinion ?? null;
+    const statusSummary = activeBotMemoryDossier?.botStatusSummary ?? null;
+    return (
+      <section className={styles.memoryRelationshipSection} aria-label={`${memoryPanelBot.name} relationship state`}>
+        <div className={styles.memoryRelationshipHeader}>
+          <div>
+            <strong>Relationship memory</strong>
+            <span>Longer-lived tone, separate from the current chat.</span>
+          </div>
+        </div>
+        <div className={styles.memoryRelationshipGrid}>
+          <article className={styles.memoryRelationshipCard}>
+            <span className={styles.opinionEyebrow}>Durable read</span>
+            {durableOpinion ? (
+              <>
+                <strong>{botOpinionBandTitle(durableOpinion.band)} · {durableOpinion.score}%</strong>
+                <p>{botOpinionBandDescription(durableOpinion.band)}</p>
+                <small>
+                  {opinionTrendDescription(durableOpinion.trend)} · {botOpinionBoundaryDescription(durableOpinion.boundaryLevel)}
+                </small>
+              </>
+            ) : (
+              <>
+                <strong>Still forming</strong>
+                <p>This bot has not built a long-term relationship read yet.</p>
+                <small>No durable shifts recorded</small>
+              </>
+            )}
+          </article>
+          <article className={styles.memoryRelationshipCard}>
+            <span className={styles.opinionEyebrow}>Status note</span>
+            {statusSummary ? (
+              <>
+                <strong>Latest note</strong>
+                <p>{statusSummary}</p>
+                <small>Existing bot-status summary</small>
+              </>
+            ) : (
+              <>
+                <strong>No status note yet</strong>
+                <p>When this bot has a saved status recap, it will appear here.</p>
+                <small>No new summary is generated by opening this panel</small>
+              </>
+            )}
+          </article>
+        </div>
+      </section>
+    );
+  };
+
+  const renderProtectedAboutYouSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || botAboutYouMemories.length === 0) return null;
+    return (
+      <section className={styles.protectedAboutYouSection} aria-label="Protected about-you memories">
+        <div className={styles.longTermMemoryHeader}>
+          <div>
+            <strong>About you</strong>
+            <span>Protected user facts this bot can use.</span>
+          </div>
+        </div>
+        <ul className={styles.longTermMemoryList}>
+          {botAboutYouMemories.map((memory) => {
+            const actionKey = longTermMemoryActionKey(memory.id);
+            const isArmed = pendingDeleteKey === actionKey;
+            const text = renderMemoryPanelText(memory);
+            return (
+              <li key={`about-you:${memory.id}`}>
+                <div>
+                  <p>{text}</p>
+                  {renderMemoryDetailMeta(memory)}
+                </div>
+                <button
+                  type="button"
+                  className={[
+                    styles.conversationDelete,
+                    styles.longTermMemoryRowAction,
+                    isArmed ? styles.conversationDeleteArmed : "",
+                  ].filter(Boolean).join(" ")}
+                  data-delete-affordance="true"
+                  aria-label={isArmed ? `Confirm remove memory: ${text}` : `Remove memory: ${text}`}
+                  data-glyph-tooltip={isArmed ? `Confirm remove: ${text}` : "Remove memory"}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (isArmed) {
+                      disarmDelete();
+                      void deleteMemory(memory.id, {
+                        allowLongTerm: true,
+                        allowAboutYou: true,
+                      });
+                      return;
+                    }
+                    armDelete(actionKey);
+                  }}
+                >
+                  {isArmed && (
+                    <span className={styles.conversationDeletePrompt}>
+                      Are you sure?
+                    </span>
+                  )}
+                  <span className={styles.conversationDeleteGlyph}>
+                    {isArmed ? "✓" : "×"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  };
+
+  const renderMemoryConnectionMeter = (
+    opinion: SessionOpinion | null = sessionOpinion
+  ): React.JSX.Element => {
+    if (!opinion) {
       return (
         <section
           className={styles.memoryConnectionMeter}
@@ -54633,14 +55511,14 @@ function HomeContent(): React.JSX.Element {
     return (
       <section
         className={styles.memoryConnectionMeter}
-        data-band={sessionOpinion.band}
-        data-trend={sessionOpinion.trend}
+        data-band={opinion.band}
+        data-trend={opinion.trend}
         style={
           {
-            "--opinion-score": `${sessionOpinion.score}%`,
+            "--opinion-score": `${opinion.score}%`,
           } as React.CSSProperties
         }
-        aria-label={`${opinionBandTitle(sessionOpinion.band)} connection, ${sessionOpinion.score} percent, ${opinionScoreCaption(sessionOpinion.score)}`}
+        aria-label={`${opinionBandTitle(opinion.band)} connection, ${opinion.score} percent, ${opinionScoreCaption(opinion.score)}`}
       >
         <div className={styles.memoryConnectionGauge} aria-hidden="true">
           <span />
@@ -54649,11 +55527,11 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.memoryConnectionHeader}>
             <span className={styles.opinionEyebrow}>Connection</span>
             <strong>
-              {opinionBandTitle(sessionOpinion.band)} · {sessionOpinion.score}%
+              {opinionBandTitle(opinion.band)} · {opinion.score}%
             </strong>
           </div>
-          <p>{opinionBandDescription(sessionOpinion.band)}</p>
-          <small>{opinionTrendDescription(sessionOpinion.trend)}</small>
+          <p>{opinionBandDescription(opinion.band)}</p>
+          <small>{opinionTrendDescription(opinion.trend)}</small>
         </div>
       </section>
     );
@@ -54800,18 +55678,16 @@ function HomeContent(): React.JSX.Element {
                   <span>Only this bot can use these memories.</span>
                 </div>
               </div>
-              {memoryPanelBotFacts.length > 0 && (
-                <button
-                  type="button"
-                  className={styles.memoryFactsEditButton}
-                  onClick={() => {
-                    if (memoryPanelBot) openBotCustomizerFacts(memoryPanelBot);
-                  }}
-                  aria-label={`Edit ${memoryPanelBot.name} permanent facts`}
-                >
-                  Edit facts
-                </button>
-              )}
+              <button
+                type="button"
+                className={styles.memoryFactsEditButton}
+                onClick={() => {
+                  if (memoryPanelBot) openBotCustomizerFacts(memoryPanelBot);
+                }}
+                aria-label={`Edit ${memoryPanelBot.name} permanent facts`}
+              >
+                Edit facts
+              </button>
             </div>
           )}
           {memoryPanelScope === "default" && (
@@ -54853,7 +55729,10 @@ function HomeContent(): React.JSX.Element {
                   ? "Previous context stays; session checkpoints fade after about four days."
                   : "Short-term memories float here; protected long-term memories stack below by category."}
           </p>
-          {memoryPanelScope === "bot" ? renderMemoryConnectionMeter() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryDossierStats() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryFactsSection() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryRelationshipSection() : null}
+          {memoryPanelScope === "bot" ? renderMemoryConnectionMeter(botMemoryDossierCurrentSessionOpinion) : null}
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
             <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
               <button
@@ -54934,6 +55813,7 @@ function HomeContent(): React.JSX.Element {
                       // drill-down view instead of jumping all the way
                       // to the directory.
                       setBotMemories([]);
+                      setBotMemoryDossier(null);
                       await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
                         if (!cluster.botId) return;
                         await refreshBotMemories(cluster.botId);
@@ -54951,6 +55831,7 @@ function HomeContent(): React.JSX.Element {
                         setMemoryPanelBotId(cluster.botId);
                         setFocusedMemoryId(null);
                         setBotMemories([]);
+                        setBotMemoryDossier(null);
                         await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
                           if (!cluster.botId) return;
                           await refreshBotMemories(cluster.botId);
@@ -54994,7 +55875,10 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.memoryPanelMemoryStacks}>
               {renderZenSessionMemorySection()}
             </div>
-          ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 || showZenSessionMemoryInPrismPanel ? (
+          ) : visibleMemoryBubbles.length > 0 ||
+              visibleLongTermMemories.length > 0 ||
+              botAboutYouMemories.length > 0 ||
+              showZenSessionMemoryInPrismPanel ? (
             <div className={styles.memoryPanelMemoryStacks}>
               {showZenSessionMemoryInPrismPanel ? renderZenSessionMemorySection() : null}
               {visibleMemoryBubbles.length > 0 ? (
@@ -55100,6 +55984,7 @@ function HomeContent(): React.JSX.Element {
                       <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
                         <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
                         <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
+                        {renderMemoryDetailMeta(selectedVisibleMemory)}
                         <button
                           type="button"
                           className={`${styles.memoryFullProseDeleteButton} ${
@@ -55152,6 +56037,7 @@ function HomeContent(): React.JSX.Element {
                     >
                       <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
                       <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
+                      {renderMemoryDetailMeta(selectedVisibleMemory)}
                       <button
                         type="button"
                         className={`${styles.memoryFullProseDeleteButton} ${
@@ -55242,7 +56128,10 @@ function HomeContent(): React.JSX.Element {
                             .join(" ");
                           return (
                           <li key={`long-term:${memory.id}`}>
-                            <p>{text}</p>
+                            <div>
+                              <p>{text}</p>
+                              {renderMemoryDetailMeta(memory)}
+                            </div>
                             <button
                               type="button"
                               className={buttonClass}
@@ -55301,6 +56190,7 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </section>
               )}
+              {renderProtectedAboutYouSection()}
             </div>
           ) : (
             <div className={styles.memoryEmptyState}>
@@ -56657,7 +57547,6 @@ function HomeContent(): React.JSX.Element {
                                 commandPicks={[]}
                                 promptPicks={[]}
                                 wildcardPicks={composerWildcardDeckPicks}
-                                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                                 chipPointerBehavior="delete"
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                                 onChange={(event) => {
@@ -62613,11 +63502,26 @@ function HomeContent(): React.JSX.Element {
     });
     return true;
   };
+  const consumeCoffeeNvmCommand = async (trimmedLine: string): Promise<boolean> => {
+    const nvmCommand = parseNvmSlashCommand(trimmedLine);
+    if (nvmCommand.kind === "none") return false;
+    setCoffeeDraft("");
+    setCoffeeError(null);
+    if (nvmCommand.kind === "error") {
+      setCoffeeError(nvmCommand.error);
+      return true;
+    }
+    await resetTopicFromNvmSlashCommand("coffee");
+    return true;
+  };
   const triggerDirectedCoffeeTurn = async (botId: string) => {
     if (!coffeeConversation || !coffeeAutoplayPaused || coffeeSessionPhase !== "live") return;
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmedLiveDraft = liveDraft.trim();
     if (trimmedLiveDraft.length > 0 && consumeGlobalClearCommand(trimmedLiveDraft, "coffee")) {
+      return;
+    }
+    if (await consumeCoffeeNvmCommand(trimmedLiveDraft)) {
       return;
     }
     if (await consumeCoffeePsychicCommand(trimmedLiveDraft)) {
@@ -62675,6 +63579,7 @@ function HomeContent(): React.JSX.Element {
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
+    if (await consumeCoffeeNvmCommand(trimmed)) return;
     if (await consumeCoffeePsychicCommand(trimmed)) return;
     if (liveDraft !== coffeeDraft) {
       setCoffeeDraft(liveDraft);
@@ -64704,11 +65609,7 @@ function HomeContent(): React.JSX.Element {
                         : `${bot.name} is preparing a reply`
                     }
                   >
-                    <span className={styles.typingDots} aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
+                    <TypingDots className={styles.typingDots} voicePreset={seatVoicePreset} />
                   </div>
                 ) : notifiedBotIds.has(bot.id) ? (
                   <div
@@ -65943,6 +66844,7 @@ function HomeContent(): React.JSX.Element {
 
         {renderSharedPanels()}
         {renderPsychicModeToast()}
+        {renderLocalCommandToast()}
         {renderViewSwitchOverlay()}
         {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
@@ -67010,6 +67912,8 @@ function HomeContent(): React.JSX.Element {
       chatSurface: chatLikeSurface,
       hasRememberedWallpaper: zenRememberedWallpaperVisible,
       atmosphereTimelineLength: zenAtmosphereTimeline.length,
+      hasConversationMessages:
+        (detail?.messages.length ?? 0) > 0 || pendingReplyVisible,
     });
     const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
       ? resolveZenFallbackWallpaperVariant(zenFallbackWallpaperSeed)
@@ -67029,9 +67933,13 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisplayTimeline = zenRememberedAtmosphereEntry
       ? [zenRememberedAtmosphereEntry]
       : zenAtmosphereTimeline;
+    const zenAtmosphereMeasuredLayerOpacities =
+      zenAtmosphereScrollBlendReadyKey === zenAtmosphereTimelineKey
+        ? zenAtmosphereLayerOpacities
+        : zenAtmosphereInitialLayerOpacities;
     const zenAtmosphereDisplayLayerOpacities = zenRememberedAtmosphereEntry
       ? { [zenRememberedAtmosphereEntry.imageId]: 1 }
-      : zenAtmosphereLayerOpacities;
+      : zenAtmosphereMeasuredLayerOpacities;
     const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
       (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
     ) || zenFallbackWallpaperVisible;
@@ -67430,10 +68338,16 @@ function HomeContent(): React.JSX.Element {
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-reply-runway-active={replyRunwayActive ? "true" : undefined}
+            data-zen-speed-nudge-pulse={zenCanvasSpeedNudgePulseActive ? "true" : undefined}
+            data-zen-speed-nudge-holding={zenCanvasSpeedNudgeHolding ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
+            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
@@ -67746,8 +68660,9 @@ function HomeContent(): React.JSX.Element {
               detail?.id
                 ? (() => {
                     const displayContent = resolveMessageDisplayContent(msg);
+                    const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
-                      revealKey: `${detail.id}:${msg.id}`,
+                      revealKey,
                       displayContent,
                       nowMs: chatEphemeralNowMs,
                       completed: messageRevealAlreadyCompleted,
@@ -67755,10 +68670,16 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
-                      delayMultiplier: chatRevealDelayMultiplier,
+                      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
                     });
                   })()
                 : undefined;
+            const cleanupRevealKey =
+              msg.role === "user" && detail?.id
+                ? cleanupMessageRevealKey(detail.id, msg.id)
+                : null;
+            const cleanupRevealActive =
+              cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
             const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
@@ -67785,6 +68706,8 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const assistantMoodKey =
               msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const assistantVoicePreset =
+              msg.role === "assistant" ? resolveMessageVoicePreset(msg, bots) : "neutral";
             const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
               message: msg,
               view,
@@ -67835,7 +68758,11 @@ function HomeContent(): React.JSX.Element {
             const expandedPromptShortcutTargetKeys = new Set(
               expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
             );
-            const promptShortcutUnfolded = unfoldedPromptShortcutMessageIds[msg.id] === true;
+            const promptShortcutUnfolded =
+              chatLikeSurface &&
+              ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
+              msg.role === "user" &&
+              Boolean(msg.promptShortcut);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -67982,18 +68909,33 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  youtubeEmbedsEnabled={chatEphemeralMode}
                   zenDisplay={
                     chatLikeSurface && msg.role === "assistant" ? msg.zenDisplay : undefined
+                  }
+                  zenTextEffectsEnabled={chatLikeSurface && msg.role === "assistant"}
+                  zenActionsEnabled={
+                    chatLikeSurface &&
+                    (msg.role === "assistant" || msg.role === "user") &&
+                    !msg.promptShortcut &&
+                    !msg.promptWildcards
+                  }
+                  zenActionActorLabel={
+                    msg.role === "user"
+                      ? "You"
+                      : msg.botName?.trim() || DEFAULT_ASSISTANT_NAME
                   }
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  typingVoicePreset={assistantVoicePreset}
                   chatRevealTiming={effectiveChatRevealTiming}
                   chatRevealAnimationMultiplier={
                     chatLikeSurface
-                      ? chatRevealDelayMultiplier * effectiveChatRevealAnimationMultiplier
+                      ? resolveZenAssistantRevealDelayMultiplier(temporalKey ?? "") *
+                        effectiveChatRevealAnimationMultiplier
                       : 1
                   }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -68002,10 +68944,10 @@ function HomeContent(): React.JSX.Element {
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
-                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                  pendingMessageCleanup={pendingMessageCleanupMessageIds.has(
                     msg.id
                   )}
-                  pendingPromptWildcardCensorMode={chatLikeSurface ? "strip" : "bubble"}
+                  cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
                     msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
@@ -68017,7 +68959,6 @@ function HomeContent(): React.JSX.Element {
                   onTogglePromptShortcut={(target) =>
                     toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
-                  onUnfoldPromptShortcut={() => unfoldPromptShortcutMessage(msg.id)}
                   onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
                 {renderPsychicThoughtLine(msg)}
@@ -68090,6 +69031,7 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {zenPendingReplyPlaceholderNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -68155,12 +69097,14 @@ function HomeContent(): React.JSX.Element {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
           {!composerHiddenByChoiceChips ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
+                {zenComposerActionPreview ? (
+                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -68186,7 +69130,6 @@ function HomeContent(): React.JSX.Element {
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
-                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -68212,7 +69155,6 @@ function HomeContent(): React.JSX.Element {
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
-                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
@@ -68232,6 +69174,7 @@ function HomeContent(): React.JSX.Element {
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderPsychicModeToast()}
+      {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {renderZenToolLab()}
@@ -68547,10 +69490,16 @@ function HomeContent(): React.JSX.Element {
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-reply-runway-active={replyRunwayActive ? "true" : undefined}
+            data-zen-speed-nudge-pulse={zenCanvasSpeedNudgePulseActive ? "true" : undefined}
+            data-zen-speed-nudge-holding={zenCanvasSpeedNudgeHolding ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
+            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
@@ -69280,8 +70229,9 @@ function HomeContent(): React.JSX.Element {
               detail?.id
                 ? (() => {
                     const displayContent = resolveMessageDisplayContent(msg);
+                    const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
-                      revealKey: `${detail.id}:${msg.id}`,
+                      revealKey,
                       displayContent,
                       nowMs: chatEphemeralNowMs,
                       completed: messageRevealAlreadyCompleted,
@@ -69289,10 +70239,16 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
-                      delayMultiplier: chatRevealDelayMultiplier,
+                      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
                     });
                   })()
                 : undefined;
+            const cleanupRevealKey =
+              msg.role === "user" && detail?.id
+                ? cleanupMessageRevealKey(detail.id, msg.id)
+                : null;
+            const cleanupRevealActive =
+              cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
             const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
@@ -69319,6 +70275,8 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const assistantMoodKey =
               msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const assistantVoicePreset =
+              msg.role === "assistant" ? resolveMessageVoicePreset(msg, bots) : "neutral";
             const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
               message: msg,
               view,
@@ -69348,7 +70306,11 @@ function HomeContent(): React.JSX.Element {
             const expandedPromptShortcutTargetKeys = new Set(
               expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
             );
-            const promptShortcutUnfolded = unfoldedPromptShortcutMessageIds[msg.id] === true;
+            const promptShortcutUnfolded =
+              chatLikeSurface &&
+              ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
+              msg.role === "user" &&
+              Boolean(msg.promptShortcut);
             const zenPersonaInkSegment =
               chatLikeSurface
                 ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
@@ -69513,18 +70475,33 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  youtubeEmbedsEnabled={chatEphemeralMode}
                   zenDisplay={
                     chatLikeSurface && msg.role === "assistant" ? msg.zenDisplay : undefined
+                  }
+                  zenTextEffectsEnabled={chatLikeSurface && msg.role === "assistant"}
+                  zenActionsEnabled={
+                    chatLikeSurface &&
+                    (msg.role === "assistant" || msg.role === "user") &&
+                    !msg.promptShortcut &&
+                    !msg.promptWildcards
+                  }
+                  zenActionActorLabel={
+                    msg.role === "user"
+                      ? "You"
+                      : msg.botName?.trim() || DEFAULT_ASSISTANT_NAME
                   }
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  typingVoicePreset={assistantVoicePreset}
                   chatRevealTiming={effectiveChatRevealTiming}
                   chatRevealAnimationMultiplier={
                     chatLikeSurface
-                      ? chatRevealDelayMultiplier * effectiveChatRevealAnimationMultiplier
+                      ? resolveZenAssistantRevealDelayMultiplier(temporalKey ?? "") *
+                        effectiveChatRevealAnimationMultiplier
                       : 1
                   }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -69533,10 +70510,10 @@ function HomeContent(): React.JSX.Element {
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
-                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                  pendingMessageCleanup={pendingMessageCleanupMessageIds.has(
                     msg.id
                   )}
-                  pendingPromptWildcardCensorMode={chatLikeSurface ? "strip" : "bubble"}
+                  cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
                   promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
                     msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
@@ -69548,7 +70525,6 @@ function HomeContent(): React.JSX.Element {
                   onTogglePromptShortcut={(target) =>
                     toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
-                  onUnfoldPromptShortcut={() => unfoldPromptShortcutMessage(msg.id)}
                   onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
                 {renderPsychicThoughtLine(msg)}
@@ -69621,6 +70597,7 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {zenPendingReplyPlaceholderNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -69677,12 +70654,14 @@ function HomeContent(): React.JSX.Element {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
           {!composerHiddenByChoiceChips ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
+                {zenComposerActionPreview ? (
+                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -69708,7 +70687,6 @@ function HomeContent(): React.JSX.Element {
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
-                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -69734,7 +70712,6 @@ function HomeContent(): React.JSX.Element {
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
-                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
@@ -69754,6 +70731,7 @@ function HomeContent(): React.JSX.Element {
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderPsychicModeToast()}
+      {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {touchPreview && (

@@ -51,6 +51,13 @@ export function shouldResolveComposerChipActivation(
   windowMs = COMPOSER_CHIP_ACTIVATION_WINDOW_MS
 ): boolean {
   if (pending === null) return false;
+  if (
+    target.kind === "command" ||
+    target.kind === "wildcard" ||
+    target.kind === "wildcard-slot"
+  ) {
+    return false;
+  }
   if (!sameComposerChipActivationTarget(pending, target)) return false;
   const elapsed = nowMs - pending.armedAtMs;
   return elapsed >= 0 && elapsed <= windowMs;

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  composerShortcutInsertionText,
   composerShortcutQueryExactlyMatchesCommand,
   composerShortcutTokenExactlyMatchesAnyCommand,
 } from "./composerShortcutCompletion.ts";
@@ -42,6 +43,39 @@ describe("composer shortcut exact completion matching", () => {
         ]
       ),
       true
+    );
+  });
+});
+
+describe("composer shortcut insertion text", () => {
+  it("keeps built-in wildcard completion literal in the composer", () => {
+    assert.equal(
+      composerShortcutInsertionText({
+        id: "wildcard-slot:NOUN",
+        name: "NOUN",
+        command: "{NOUN}",
+      }),
+      "{NOUN} "
+    );
+  });
+
+  it("keeps custom wildcard deck completion literal in the composer", () => {
+    assert.equal(
+      composerShortcutInsertionText({
+        id: "wildcard:weather",
+        name: "weather",
+      }),
+      "!weather "
+    );
+  });
+
+  it("keeps ordinary command completion slash-prefixed", () => {
+    assert.equal(
+      composerShortcutInsertionText({
+        id: "builtin:/clear",
+        name: "clear",
+      }),
+      "/clear "
     );
   });
 });
