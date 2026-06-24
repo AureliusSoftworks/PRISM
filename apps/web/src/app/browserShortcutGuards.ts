@@ -15,6 +15,11 @@ export interface BrowserShortcutWheelEvent {
   defaultPrevented?: boolean;
 }
 
+export interface BrowserShortcutMouseEvent {
+  button: number;
+  defaultPrevented?: boolean;
+}
+
 const DEVTOOLS_CTRL_SHIFT_KEYS = new Set(["C", "I", "J", "K"]);
 const DEVTOOLS_META_ALT_KEYS = new Set(["C", "I", "J", "U"]);
 const FUNCTION_BROWSER_KEYS = new Set([
@@ -59,6 +64,7 @@ const CTRL_OR_META_BROWSER_KEYS = new Set([
 const ZOOM_KEYS = new Set(["+", "-", "0", "=", "_"]);
 const ZOOM_CODES = new Set(["Equal", "Minus", "NumpadAdd", "NumpadSubtract"]);
 const CTRL_OR_META_TAB_KEYS = new Set(["Tab", "PageDown", "PageUp"]);
+const BROWSER_HISTORY_MOUSE_BUTTONS = new Set([3, 4]);
 
 function normalizeShortcutKey(key: string): string {
   if (key.length === 1) return key.toUpperCase();
@@ -155,4 +161,11 @@ export function shouldBlockBrowserWheelShortcut(
 ): boolean {
   if (event.defaultPrevented) return false;
   return event.ctrlKey || event.metaKey;
+}
+
+export function shouldBlockBrowserMouseShortcut(
+  event: BrowserShortcutMouseEvent
+): boolean {
+  if (event.defaultPrevented) return false;
+  return BROWSER_HISTORY_MOUSE_BUTTONS.has(event.button);
 }

@@ -2,12 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   cleanBotMentionTextArtifacts,
+  composeMentionPersonaPlainTextAction,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
   extractStageDirectionCues,
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
+  findFirstBotMentionId,
   formatBotMentionMarkdown,
   normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
@@ -170,6 +172,48 @@ describe("composeMentionTabPlainTextAction", () => {
   });
 });
 
+describe("composeMentionPersonaPlainTextAction", () => {
+  const bots = [
+    { id: "1", name: "Alex One", color: null, glyph: null },
+    { id: "2", name: "Alex Two", color: null, glyph: null },
+    { id: "3", name: "Sam", color: null, glyph: null },
+  ] as const;
+
+  it("selects the highlighted multi-match bot without inserting mention text", () => {
+    const text = "ask @alex";
+    const act = composeMentionPersonaPlainTextAction(text, text.length, bots, 1);
+    assert.equal(act.kind, "select-persona");
+    if (act.kind === "select-persona") {
+      assert.equal(act.bot.id, "2");
+      assert.equal(act.replacement, "ask ");
+      assert.equal(act.caret, 4);
+    }
+  });
+
+  it("selects a single match and removes only the active token", () => {
+    const text = "before @sam after";
+    const caret = "before @sam".length;
+    const act = composeMentionPersonaPlainTextAction(text, caret, bots, 0);
+    assert.equal(act.kind, "select-persona");
+    if (act.kind === "select-persona") {
+      assert.equal(act.bot.id, "3");
+      assert.equal(act.replacement, "before  after");
+      assert.equal(act.caret, "before ".length);
+    }
+  });
+
+  it("returns none when there is no active @ token or no match", () => {
+    assert.equal(
+      composeMentionPersonaPlainTextAction("ask Alex", "ask Alex".length, bots, 0).kind,
+      "none"
+    );
+    assert.equal(
+      composeMentionPersonaPlainTextAction("ask @zzz", "ask @zzz".length, bots, 0).kind,
+      "none"
+    );
+  });
+});
+
 describe("tokenizeBotMentionSource", () => {
   it("returns a single text segment when there are no mentions", () => {
     const segs = tokenizeBotMentionSource("hello world");
@@ -224,6 +268,25 @@ describe("tokenizeBotMentionSource", () => {
     assert.equal(segs[1]!.kind, "mention");
     assert.equal(segs[1]!.displayName, "B");
     assert.equal(segs[1]!.srcStart, segs[0]!.srcEnd);
+  });
+});
+
+describe("findFirstBotMentionId", () => {
+  const bots = [
+    { id: "bot-harry", name: "Harry", color: "#a11", glyph: null },
+    { id: "bot-strange", name: "Dr. Strange", color: "#15c", glyph: null },
+  ] as const;
+
+  it("returns the first valid markdown bot mention id", () => {
+    const text =
+      "Hi [Harry](prism-bot://bot-harry), meet [Dr. Strange](prism-bot://bot-strange).";
+    assert.equal(findFirstBotMentionId(text, bots), "bot-harry");
+  });
+
+  it("ignores unknown bot ids", () => {
+    const text =
+      "Hi [Unknown](prism-bot://missing), then [Dr. Strange](prism-bot://bot-strange).";
+    assert.equal(findFirstBotMentionId(text, bots), "bot-strange");
   });
 });
 

@@ -15,8 +15,8 @@ import {
   useImperativeHandle,
   forwardRef,
   useSyncExternalStore,
-  useTransition,
   type HTMLAttributes,
+  type CSSProperties,
   type RefObject,
   type UIEvent,
 } from "react";
@@ -30,6 +30,19 @@ import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
+import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
+import {
+  BACKEND_AVAILABLE_EVENT,
+  BACKEND_UNAVAILABLE_CODE,
+  BACKEND_UNAVAILABLE_EVENT,
+  createBackendUnavailableError,
+  createBackendUnavailableErrorFromPayload,
+  dispatchBackendAvailableEvent,
+  dispatchBackendUnavailableEvent,
+  isBackendUnavailablePayload,
+  isPrismBackendUnavailableError,
+  type BackendUnavailableEventDetail,
+} from "./backendUnavailable";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
   coffeeHeadGazeHorizontalSign,
@@ -41,19 +54,54 @@ import {
   coffeeShouldQueueAssistantRevealAfterUserTyping,
 } from "./coffee-user-reveal-flow";
 import {
+  DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  DEV_PANEL_SAFE_AREA_SIDES,
+  clampDevPanelPositionToSafeArea,
+  clampDevPanelRectToSafeArea,
+  devPanelSafeAreaInsetsEqual,
+  resolveDevPanelSafeAreaInsets,
+  type DevPanelSafeAreaBlocker,
+  type DevPanelSafeAreaInsets,
+  type DevPanelSafeAreaSide,
+} from "./devPanelSafeArea";
+import {
   resolveZenLineDisplayPlacements,
   resolveZenMessageDisplayPlacement,
+  resolveZenTextEffectSpans,
   resolveZenToneSpaceFromAnnoyance,
-  resolveZenWordEffect,
   type ZenResolvedLinePlacement,
   type ZenTextEffect,
 } from "./zenToneText";
+import {
+  advanceAskQuestionPatience,
+  buildAskQuestionInteractionKey,
+  getPendingAskQuestionState,
+  normalizeAskQuestionPatienceDurationMs,
+  shouldPauseAskQuestionPatience,
+  shouldReportAskQuestionPatienceExpiry,
+} from "./askQuestionPatience";
 import {
   clampCoffeeReplayMessageIndex,
   coffeeReplayVisibleMessages,
   collectCoffeeReplayActionsForBot,
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
+import {
+  PSYCHIC_COMMAND_NAME,
+  PSYCHIC_SLASH_COMMAND,
+  parsePsychicSlashCommand,
+} from "./psychicCommand";
+import {
+  NVM_COMMAND_NAME,
+  NVM_SLASH_COMMAND,
+  parseNvmSlashCommand,
+} from "./nvmCommand";
+import { shouldResetPreviousSessionContext } from "./naturalContextReset";
+import { parseUndoSlashCommand } from "./undoSlashCommand";
+import {
+  psychicThoughtDisplayLineForMessage,
+  type PsychicCanvasScratchpadPayload,
+} from "./psychicThoughtDisplay";
 import {
   createStoryDialogState,
   createStoryInventoryViewState,
@@ -71,17 +119,32 @@ import {
   type ResponseMode,
 } from "./providerMode";
 import {
+  reasoningEffortForSend,
+  resolveChatZenReasoningEffortAvailability,
+} from "./chatZenReasoningEffort";
+import { shouldChoiceChipRailControlViewport } from "./choiceChipRailAnchor";
+import { rewriteWildcardSlotTokenReference } from "./wildcardReferenceBadge";
+import {
+  CircleHelp,
+  Brush,
+  Building2,
   Download,
+  Droplets,
   Image as ImageGlyph,
   Info,
   LogOut,
+  Menu as MenuIcon,
   Maximize2,
   Minimize2,
   Pause,
   Play,
   RotateCcw,
+  ScanLine,
   SkipBack,
   SkipForward,
+  Sparkles,
+  Timer,
+  Waves,
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
@@ -105,8 +168,11 @@ import {
   westernZodiacFromIsoBirthday,
   catalogEntriesMatchingLocalImageHeuristic,
   DEFAULT_PRISM_MOOD_SENSITIVITY,
+  DISABLED_MODEL_CHOICE,
   ELEVENLABS_IMAGE_MODEL_OPTIONS_FOR_UI,
   isComfyUiModelId,
+  isDisabledModelChoice,
+  isDisabledPromptWildcardToken,
   isElevenLabsImageModelId,
   MAX_PRISM_MOOD_SENSITIVITY,
   MIN_PRISM_MOOD_SENSITIVITY,
@@ -114,6 +180,7 @@ import {
   normalizePrismMoodSensitivity,
   openAiModelSupportsReasoningEffort,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
+  parseBuiltInPromptWildcardReference,
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
@@ -140,8 +207,10 @@ import {
   type PrismMoodInterruptionInput,
   type PrismMoodSnapshot,
   type PromptShortcutMetadata,
+  type PromptShortcutRunMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  type PsychicThoughtPayload,
   type BuiltInPromptWildcardSlotKey,
   type SentGeneratedImagePayload,
   type ZenDisplayMetadata,
@@ -156,12 +225,23 @@ import {
   type ZenPreviousContextSummary,
   type ZenSessionMemoryItem,
   type ZenSessionMemoryOverview,
+  type ZenAskQuestionPatienceInput,
+  type ZenAutonomyDecision,
+  type ZenAutonomyInput,
+  type ZenPersonaTransitionInput,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
 } from "./prismDevChatCommands";
+import { prismWebDevToolsEnabled } from "./prismDevGating";
+import {
+  ZEN_TOOL_LAB_TOOLS,
+  buildZenToolLabMessageSample,
+  isZenToolLabDevImageId,
+  type ZenToolLabToolId,
+} from "./zenToolLab";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   findLeadingDevCommandTokenRange,
@@ -173,23 +253,48 @@ import {
   resolvePendingWildcardSlotTextRanges,
   resolvePromptShortcutTextRanges,
   resolveWildcardDeckTextRanges,
+  resolveWildcardSlotTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
 import {
   resolvePromptShortcutPreviewHighlightRanges,
   type PromptShortcutPreviewHighlightRange,
 } from "./promptShortcutPreviewHighlight";
 import {
+  promptShortcutChipLabel,
+  promptShortcutExpandedPromptFontCapPx,
+  promptShortcutResolvedPromptText,
+  promptShortcutVisualSizingText,
+  type PromptShortcutPresentation,
+} from "./promptShortcutChipDisplay";
+import {
   collapseDeletedPromptWildcardDeckReferences,
-  maskBuiltInWildcardSlotsForPending,
-  promptContainsBuiltInWildcardSlots,
+  formatPromptShortcutInsertion,
+  isStandaloneWildcardComposerDraft,
+  maskModelFilledWildcardSlotsForPending,
+  pendingCleanupOptimisticMessageContent,
+  promptContainsModelFilledWildcardSlots,
+  resendDraftTextForMessage,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
   withSentenceCasedPromptInsertion,
 } from "./promptRandomization";
 import {
+  armComposerChipActivation,
+  replaceComposerChipText,
+  shouldResolveComposerChipActivation,
+  type ComposerChipActivationTarget,
+  type PendingComposerChipActivation,
+} from "./composerChipActivation";
+import {
+  moveCommandCenterItemToTarget,
+  type CommandCenterDropPlacement,
+} from "./commandCenterOrdering";
+import {
   createWildcardDeckDraft,
   findDuplicateWildcardDeckValueIssues,
   formatWildcardDeckValuesText,
+  inferWildcardDeckValueInflectionMode,
+  inflectWildcardDeckValues,
   normalizeWildcardDeckAliases,
   normalizeWildcardDeckNameInput,
   normalizeWildcardDeckValueKey,
@@ -204,15 +309,23 @@ import {
 } from "./wildcardDecks";
 import {
   PRISM_BOT_MARKDOWN_LINK_RE,
+  composeMentionPersonaPlainTextAction,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
   extractStageDirectionCues,
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
+  findFirstBotMentionId,
   getBotMentionDisplayLength,
   type BotMentionPick,
 } from "./botMention";
+import {
+  resolveCurrentZenActionCue,
+  resolveZenActionPresentation,
+  resolveZenActionPreview,
+  type ZenActionCue,
+} from "./zenActions";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -233,6 +346,7 @@ import {
 } from "./prismBotMarkdownNav";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
+  applyComposeMentionPersonaToEditor,
   applyComposeMentionTabToEditor,
   applyMentionTabToEditor,
   editorInFenceLikeContext,
@@ -248,13 +362,80 @@ import {
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 import {
+  composerShortcutInsertionText,
   composerShortcutTokenExactlyMatchesAnyCommand,
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
 import {
+  resolveChatRevealDelayMultiplierForTyping,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
+import {
+  cleanupMessageRevealKey,
+  CLEANUP_MESSAGE_REVEAL_DURATION_MS,
+  CLEANUP_MESSAGE_REVEAL_SETTLE_MS,
+  mapPendingCleanupMessagesToFinalRevealKeys,
+} from "./messageCleanupReveal";
+import {
+  botMemoryCategoryLabel,
+  botMemoryDossierSessionOpinion,
+  botMemoryDossierStatItems,
+  botMemorySourceLabel,
+  botMemoryTierLabel,
+  resolveBotMemoryDossierSectionCounts,
+  type BotMemoryDossierPayload,
+} from "./botMemoryDossier";
+import {
+  messageContainsYouTubeVideoLink,
+  splitMarkdownByYouTubeVideoLinks,
+  type YouTubeVideoEmbed,
+} from "./youtubeEmbed";
+import {
+  beginZenCanvasSpeedNudgeHold,
+  createZenCanvasSpeedNudgeState,
+  endZenCanvasSpeedNudgeHold,
+  resolveZenCanvasSpeedNudgeDelayMultiplier,
+  type ZenCanvasSpeedNudgeState,
+} from "./zenCanvasSpeedNudge";
+import {
+  buildZenPersonaInkSegmentMap,
+  countZenPrismUserMessages,
+} from "./zenPersonaInk";
+import {
+  ZEN_PERSONA_TRANSITION_CHOICES,
+  resolveZenPersonaTransitionStyle,
+  type ZenPersonaTransitionChoice,
+} from "./zenPersonaTransition";
+import {
+  calculateZenAtmosphereLayerOpacitiesForReader,
+  maxZenAtmosphereLayerOpacity,
+} from "./zenAtmosphere";
+import {
+  createZenFallbackWallpaperSeed,
+  resolveZenFallbackWallpaperVariant,
+  shouldShowZenFallbackWallpaper,
+} from "./zenFallbackWallpapers";
+import {
+  nextZenAutonomyCooldownUntilMs,
+  resolveZenAutonomyEligibility,
+} from "./zenAutonomy";
+import {
+  DEFAULT_CHAT_REVEAL_TIMING,
+  formatChatRevealTokenDisplay,
+  isChatRevealEllipsisToken,
+  normalizeChatRevealFencedCodeBlockLeadingNewline,
+  normalizeChatRevealTimingSettings,
+  resolveChatRevealDurationMsForTokens,
+  resolveChatRevealPauseKind,
+  resolveChatRevealStepDelayMs,
+  resolveVisibleChatRevealTokenCountAtElapsedMs,
+  scaleChatRevealTimingSettings,
+  stripChatRevealThematicBreakLines,
+  tokenizeChatRevealText,
+  visibleChatRevealHasCompletedFirstSentence,
+  type ChatRevealTimingSettings,
+} from "./chatRevealTiming";
 
 // How long the two-stage delete (× → ✓) stays armed before auto-disarming.
 // Long enough for a deliberate confirmation click, short enough that the armed
@@ -290,6 +471,59 @@ function parseCoffeeGroupDeleteKey(key: string | null): string | null {
   if (key == null || !key.startsWith(DELETE_COFFEE_GROUP_KEY_PREFIX)) return null;
   const id = key.slice(DELETE_COFFEE_GROUP_KEY_PREFIX.length).trim();
   return id.length > 0 ? id : null;
+}
+
+function ZenPersonaTransitionChoiceControl({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: ZenPersonaTransitionChoice;
+  onChange: (next: ZenPersonaTransitionChoice) => void;
+  compact?: boolean;
+}): React.JSX.Element {
+  const labels: Record<ZenPersonaTransitionChoice, string> = {
+    auto: "Auto",
+    "new-speaks": compact ? "New" : "New speaks",
+    "previous-introduces": compact ? "Intro" : "Introduce",
+  };
+  return (
+    <div
+      className={styles.zenPersonaTransitionControl}
+      data-compact={compact ? "true" : undefined}
+      role="radiogroup"
+      aria-label="Persona transition style"
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <span className={styles.zenPersonaTransitionLabelWithInfo}>
+        <span className={styles.zenPersonaTransitionControlLabel}>Switch</span>
+        <PanelSectionInfo
+          id={`zen-persona-transition-switch-info-${compact ? "compact" : "full"}`}
+          label="About persona switching"
+          variant="control"
+          icon="help"
+        >
+          Controls the handoff when you change personas after Zen has started: Auto chooses,
+          New lets the selected persona speak, and Introduce has the current persona pass it over.
+        </PanelSectionInfo>
+      </span>
+      <div className={styles.zenPersonaTransitionSegments}>
+        {ZEN_PERSONA_TRANSITION_CHOICES.map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            className={styles.zenPersonaTransitionSegmentButton}
+            data-active={value === choice ? "true" : undefined}
+            role="radio"
+            aria-checked={value === choice}
+            onClick={() => onChange(choice)}
+          >
+            {labels[choice]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
@@ -404,11 +638,13 @@ function normalizeTutorialProgress(value: unknown): TutorialProgress {
   };
 }
 
-// Developer tools stay off for production/release builds unless explicitly enabled.
-// Local/dev remains on by default, and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
-const DEV_TOOLS_ENABLED =
-  process.env.NEXT_PUBLIC_DEV_TOOLS === "1" ||
-  (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS !== "0");
+// Developer tools stay off on main/release builds. Local/dev branches remain on by default,
+// and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
+const DEV_TOOLS_ENABLED = prismWebDevToolsEnabled({
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_DEV_TOOLS: process.env.NEXT_PUBLIC_DEV_TOOLS,
+  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+});
 // Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
 // Release builds keep shell controls anchored in-header unless explicitly re-enabled.
 const FLOATING_SHELL_APPLETS_ENABLED =
@@ -441,7 +677,13 @@ const DEV_TOOLS_GHOST_COUNT_MIN = 1;
 const DEV_TOOLS_GHOST_COUNT_MAX = 99;
 const DEV_TOOLS_PANEL_DEFAULT_X = 14;
 const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
+const DEV_TOOLS_PANEL_DEFAULT_WIDTH = 980;
+const DEV_TOOLS_PANEL_MIN_WIDTH = 260;
+const DEV_TOOLS_PANEL_MIN_HEIGHT = 190;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
+const DEV_PANEL_SAFE_AREA_ATTRIBUTE = "data-dev-panel-safe-area";
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
+const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 380;
 const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 24;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
@@ -622,18 +864,27 @@ const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
 const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
 /** When set in localStorage, Import bot shows the paste-JSON path; otherwise the file picker opens immediately. */
 const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
-/** When set, inline developer metrics are rendered in the chat stream. */
-const PRISM_DEV_CHAT_METRICS_STORAGE_KEY = "prism_dev_chat_metrics";
-/** When set, Zen mode (`view === "chat"`) shows a local debug echo composer above the default composer. */
-const PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY = "prism_dev_debug_composer";
-/** When set, renders the latest thread-compaction payload inside the chat canvas for QA. */
-const PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY = "prism_dev_show_compacted_summary";
-/** When set, shows the draggable Prism mood developer visual. */
-const PRISM_DEV_MOOD_VISUAL_STORAGE_KEY = "prism_dev_mood_visual";
+/** Local layout/state for developer-layer panels. */
+const PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY = "prism_dev_tools_ui_state_v1";
 /** Local position for the draggable Prism mood developer visual. */
 const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY = "prism_dev_mood_visual_position_v1";
+/** Dev-only Zen pause tester settings. */
+const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY = "prism_dev_zen_pause_tester_settings_v1";
+/** Dev-only Zen Persona backdrop tuning. */
+const PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY = "prism_dev_zen_persona_backdrop_v2";
 const DEV_MOOD_VISUAL_DEFAULT_X = 22;
 const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
+const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
+  { key: "baseWordDelayMs", label: "Word", shortLabel: "word" },
+  { key: "clausePauseMs", label: "Clause", shortLabel: "clause" },
+  { key: "sentencePauseMs", label: "Sentence", shortLabel: "sentence" },
+  { key: "ellipsisHoldMs", label: "Ellipsis hold", shortLabel: "ellipsis" },
+  { key: "ellipsisDotStepMs", label: "Dot step", shortLabel: "dot" },
+] as const satisfies ReadonlyArray<{
+  key: keyof ChatRevealTimingSettings;
+  label: string;
+  shortLabel: string;
+}>;
 /** Local marker for the next/active Zen session boundary. */
 const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -657,10 +908,19 @@ type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
 type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
 type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
 type DevToolsPanelPosition = { x: number; y: number };
+type DevToolsPanelSize = { width: number; height: number };
 type DevToolsPanelDragState = {
   pointerId: number;
   offsetX: number;
   offsetY: number;
+};
+type DevLayerOrbDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
 };
 type CompactedSummaryDebugPanelRect = {
   x: number;
@@ -681,6 +941,30 @@ type DevMoodVisualDragState = {
   startClientX: number;
   startClientY: number;
   moved: boolean;
+};
+type DevToolsUiStateStorage = {
+  activeSection?: DevToolsActiveSection;
+  panelPosition?: DevToolsPanelPosition;
+  panelSize?: DevToolsPanelSize;
+  mood?: {
+    open?: boolean;
+    position?: DevMoodVisualPosition;
+  };
+  pauseTester?: {
+    open?: boolean;
+    position?: DevToolsPanelPosition;
+  };
+  toolLab?: {
+    open?: boolean;
+    position?: DevToolsPanelPosition;
+  };
+  debugComposer?: {
+    minimized?: boolean;
+  };
+  compactedContext?: {
+    minimized?: boolean;
+    rect?: CompactedSummaryDebugPanelRect;
+  };
 };
 type CoffeePollPanelPosition = { x: number; y: number };
 type CoffeePollPanelDragState = {
@@ -745,6 +1029,8 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
+const PSYCHIC_MODE_TOAST_DISMISS_MS = 3600;
+const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
 const ZEN_HEADER_REVEAL_EDGE_PX = 72;
 const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
@@ -821,6 +1107,7 @@ const ZEN_USER_MESSAGE_PRISM_PALETTE = [
   { bright: "#ffa933", dark: "#944600" },
   { bright: "#bfeb4e", dark: "#5b7300" },
 ] as const;
+type ZenUserMessagePrismColor = (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number];
 
 type ImageReadyNoticeItem = { botId: string | null; imageId: string };
 type ImageReadyNoticeState = {
@@ -862,6 +1149,28 @@ type ZenWallpaperApiResponse = {
   image?: { id: string };
 };
 
+type ZenRememberedWallpaperPreview = {
+  botId: string;
+  imageId: string;
+  promptSeed: string | null;
+  createdAt: string;
+};
+
+type ZenRememberedWallpaperLookup = {
+  botId: string;
+  resolved: boolean;
+  hasWallpaper: boolean;
+};
+
+type ZenRememberedWallpaperApiResponse = {
+  ok: true;
+  wallpaper: null | {
+    imageId: string;
+    promptSeed: string | null;
+    createdAt: string;
+  };
+};
+
 type ImageGenerationVariant = "portrait" | "letterbox" | "landscape";
 
 const IMAGE_GENERATION_VARIANT_OPTIONS: ReadonlyArray<{
@@ -880,11 +1189,12 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
   landscape: "1536x1024",
 };
 const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
-const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 8;
+const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 0;
 const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
 const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
 const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
 const ZEN_LONG_SESSION_GAP_MS = 7 * 24 * 60 * 60 * 1000;
+const ZEN_SESSION_BOUNDARY_DATE_GAP_MS = 24 * 60 * 60 * 1000;
 const ZEN_SESSION_BREAK_SCHEMA = "prism-zen-session-break-v1";
 const DEFAULT_ZEN_SESSION_IDLE_GAP_MS = ZEN_IDLE_ERA_GAP_MS;
 const MIN_ZEN_SESSION_IDLE_GAP_MS = 15 * 60 * 1000;
@@ -896,7 +1206,7 @@ const MIN_ZEN_RECENT_CONTEXT_MESSAGES = 10;
 const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
 const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL =
   ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
-const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 5;
+const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
 const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT =
   ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
@@ -906,6 +1216,9 @@ const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT =
   ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
 const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
 const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
+const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
+const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
+const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
 
 const IMAGE_VARIANT_TAGS: Readonly<Record<ImageGenerationVariant, readonly string[]>> = {
   portrait: [
@@ -1084,59 +1397,204 @@ function clampDevToolsPanelPosition(
   panelWidth: number,
   panelHeight: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): DevToolsPanelPosition {
-  const maxX = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportWidth - panelWidth - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
-  const maxY = Math.max(
-    DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    viewportHeight - panelHeight - DEV_TOOLS_PANEL_VIEWPORT_MARGIN
-  );
+  return clampDevPanelPositionToSafeArea({
+    x,
+    y,
+    panelWidth,
+    panelHeight,
+    viewportWidth,
+    viewportHeight,
+    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    safeAreaInsets,
+  });
+}
 
+function clampDevToolsPanelRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): { x: number; y: number; width: number; height: number } {
+  return clampDevPanelRectToSafeArea({
+    rect,
+    viewportWidth,
+    viewportHeight,
+    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
+    minWidth: DEV_TOOLS_PANEL_MIN_WIDTH,
+    minHeight: DEV_TOOLS_PANEL_MIN_HEIGHT,
+    maxWidth: Math.max(DEV_TOOLS_PANEL_DEFAULT_WIDTH, viewportWidth),
+    maxHeight: viewportHeight,
+    safeAreaInsets,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseDevPanelSafeAreaSides(value: string | null | undefined): DevPanelSafeAreaSide[] {
+  if (!value) return [];
+  const rawSides = value.split(/\s+/).filter(Boolean);
+  if (rawSides.includes("all")) return [...DEV_PANEL_SAFE_AREA_SIDES];
+  const sides = new Set<DevPanelSafeAreaSide>();
+  for (const side of rawSides) {
+    if (DEV_PANEL_SAFE_AREA_SIDES.includes(side as DevPanelSafeAreaSide)) {
+      sides.add(side as DevPanelSafeAreaSide);
+    }
+  }
+  return [...sides];
+}
+
+function devPanelSafeAreaRectFromDomRect(rect: DOMRect): DevPanelSafeAreaBlocker["rect"] {
   return {
-    x: Math.min(Math.max(x, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxX),
-    y: Math.min(Math.max(y, DEV_TOOLS_PANEL_VIEWPORT_MARGIN), maxY),
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
   };
+}
+
+function collectDevPanelSafeAreaInsets(
+  viewportWidth: number,
+  viewportHeight: number
+): DevPanelSafeAreaInsets {
+  if (typeof document === "undefined") return DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
+  const blockers: DevPanelSafeAreaBlocker[] = [];
+  document
+    .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
+    .forEach((node) => {
+      const sides = parseDevPanelSafeAreaSides(
+        node.getAttribute(DEV_PANEL_SAFE_AREA_ATTRIBUTE)
+      );
+      if (sides.length === 0) return;
+      if (node.getAttribute("aria-hidden") === "true" || node.inert) return;
+      const style = window.getComputedStyle(node);
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.opacity === "0" ||
+        style.pointerEvents === "none"
+      ) {
+        return;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 && rect.height <= 0) return;
+      blockers.push({
+        sides,
+        rect: devPanelSafeAreaRectFromDomRect(rect),
+      });
+    });
+
+  return resolveDevPanelSafeAreaInsets({
+    blockers,
+    viewportWidth,
+    viewportHeight,
+  });
+}
+
+function stableMeasuredDevPanelSafeAreaInset(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.ceil(value);
+}
+
+function stableMeasuredDevPanelSafeAreaInsets(
+  insets: DevPanelSafeAreaInsets
+): DevPanelSafeAreaInsets {
+  return {
+    top: stableMeasuredDevPanelSafeAreaInset(insets.top),
+    right: stableMeasuredDevPanelSafeAreaInset(insets.right),
+    bottom: stableMeasuredDevPanelSafeAreaInset(insets.bottom),
+    left: stableMeasuredDevPanelSafeAreaInset(insets.left),
+  };
+}
+
+function normalizeStoredDevToolsPosition(
+  value: unknown,
+  panelWidth: number,
+  panelHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): DevToolsPanelPosition | null {
+  if (!isRecord(value)) return null;
+  const { x, y } = value;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return clampDevToolsPanelPosition(
+    x,
+    y,
+    panelWidth,
+    panelHeight,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+}
+
+function normalizeStoredDevToolsPanelSize(
+  value: unknown,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): DevToolsPanelSize | null {
+  if (!isRecord(value)) return null;
+  const { width, height } = value;
+  if (typeof width !== "number" || typeof height !== "number") return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  const rect = clampDevToolsPanelRect(
+    {
+      x: DEV_TOOLS_PANEL_DEFAULT_X,
+      y: DEV_TOOLS_PANEL_DEFAULT_Y,
+      width,
+      height,
+    },
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  return { width: rect.width, height: rect.height };
+}
+
+function initialDevLayerOrbPosition(side: "left" | "right"): DevToolsPanelPosition {
+  const viewportWidth =
+    typeof window === "undefined" ? 1280 : Math.max(320, window.innerWidth);
+  const viewportHeight =
+    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
+  const margin = 16;
+  const orbSize = 46;
+  return {
+    x: side === "left" ? margin : Math.max(margin, viewportWidth - margin - orbSize),
+    y: Math.max(margin, viewportHeight - 126 - orbSize),
+  };
+}
+
+function shouldShowDevToolsConsoleOnly(width: number, height: number): boolean {
+  return (
+    width < DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH ||
+    height < DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT
+  );
 }
 
 function clampCompactedSummaryDebugPanelRect(
   rect: CompactedSummaryDebugPanelRect,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): CompactedSummaryDebugPanelRect {
-  const availableWidth = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
-    viewportWidth - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
-  );
-  const availableHeight = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
-    viewportHeight - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN * 2
-  );
-  const width = Math.min(
-    Math.max(rect.width, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH),
-    Math.min(COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH, availableWidth)
-  );
-  const height = Math.min(
-    Math.max(rect.height, COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT),
-    availableHeight
-  );
-  const maxX = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
-    viewportWidth - width - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
-  );
-  const maxY = Math.max(
-    COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
-    viewportHeight - height - COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN
-  );
-
-  return {
-    x: Math.min(Math.max(rect.x, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxX),
-    y: Math.min(Math.max(rect.y, COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN), maxY),
-    width,
-    height,
-  };
+  return clampDevPanelRectToSafeArea({
+    rect,
+    viewportWidth,
+    viewportHeight,
+    margin: COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
+    minWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
+    minHeight: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
+    maxWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH,
+    maxHeight: viewportHeight,
+    safeAreaInsets,
+  });
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -1546,6 +2004,7 @@ const DESKTOP_SIDEBAR_WIDTH = 280;
 const DESKTOP_MESSAGES_PADDING_X = 40;
 /** Sidebar drawer (single-column shell) through this width. */
 const SIDEBAR_DRAWER_BREAKPOINT = 1080;
+const APP_SIDEBAR_NAVIGATION_ID = "prism-sidebar-navigation";
 /**
  * Phone-only shell: fixed ☰ + floating wrench + compact header. Wider than
  * this (up to `PICKER_MOBILE_BREAKPOINT`) uses the › sidebar handle + looser
@@ -2566,6 +3025,21 @@ function normalizeAccentForTheme(hex: string, theme?: "light" | "dark"): string 
   return clampLuminance(lightnessClamped, { max });
 }
 
+function resolveZenUserMessageColor(
+  personaInkSegment: { color: string; variant: "persona" | "default" } | null,
+  prismColor: ZenUserMessagePrismColor | undefined,
+  resolvedTheme: "light" | "dark"
+): string | undefined {
+  if (personaInkSegment?.variant === "persona") {
+    const rawPersonaColor = personaInkSegment.color.trim();
+    if (/^#[0-9a-f]{6}$/i.test(rawPersonaColor)) {
+      return normalizeAccentForTheme(rawPersonaColor, resolvedTheme);
+    }
+  }
+  if (!prismColor) return undefined;
+  return resolvedTheme === "light" ? prismColor.dark : prismColor.bright;
+}
+
 function coffeeBotTranscriptTextColor(
   rawHex: string | null | undefined,
   resolvedTheme: "light" | "dark"
@@ -2585,6 +3059,37 @@ const THEME_SURFACE_BG: Record<"light" | "dark", string> = {
   dark: "#151311",
 };
 const COMPOSE_BOT_LIGHT_INK_CONTRAST_RATIO = 5.8;
+const PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER = 0.62;
+
+function privateModeAccentHex(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark"
+): string | null {
+  const raw = rawHex?.trim();
+  if (!raw) return null;
+  const normalized = normalizeAccentForTheme(raw, resolvedTheme);
+  const { h, s, l } = hexToHsl(normalized);
+  const muted = hslToHex(h, s * PRIVATE_MODE_ACCENT_SATURATION_MULTIPLIER, l);
+  const neutralAnchor = resolvedTheme === "dark" ? "#d7cfc3" : "#332d27";
+  const neutralized = mixHex(
+    muted,
+    neutralAnchor,
+    resolvedTheme === "dark" ? 0.14 : 0.1
+  );
+  return ensureContrast(neutralized, THEME_BG[resolvedTheme], 4.5);
+}
+
+function displayAccentForMode(
+  rawHex: string | null | undefined,
+  resolvedTheme: "light" | "dark",
+  privateMode: boolean
+): string | null {
+  const raw = rawHex?.trim();
+  if (!raw) return null;
+  return privateMode
+    ? privateModeAccentHex(raw, resolvedTheme)
+    : normalizeAccentForTheme(raw, resolvedTheme);
+}
 
 function botAccentStyle(
   rawHex: string | null | undefined,
@@ -2779,6 +3284,7 @@ function formatCoffeePollBotVoteLabel(
 }
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
+const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
 const COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND: Record<BotMoodKey, number> = {
@@ -2995,13 +3501,20 @@ function clampCoffeePollPanelPosition(
   width: number,
   height: number,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): CoffeePollPanelPosition {
   const margin = 12;
-  return {
-    x: Math.max(margin, Math.min(viewportWidth - width - margin, x)),
-    y: Math.max(margin, Math.min(viewportHeight - height - margin, y)),
-  };
+  return clampDevPanelPositionToSafeArea({
+    x,
+    y,
+    panelWidth: width,
+    panelHeight: height,
+    viewportWidth,
+    viewportHeight,
+    margin,
+    safeAreaInsets,
+  });
 }
 
 function emptyCoffeeSeatBotIds(): Array<string | null> {
@@ -3227,10 +3740,18 @@ function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
   return { kind: "ok" };
 }
 
+const PRISM_COMMAND_MENTION_LEGACY_PROTOCOL = "prism-command://";
+const PRISM_COMMAND_MENTION_HASH_PREFIX = "#prism-command:";
+
 function parsePrismCommandMentionHref(href?: string | null): string | null {
   if (!href) return null;
-  if (!href.toLowerCase().startsWith("prism-command://")) return null;
-  const encoded = href.slice("prism-command://".length).trim();
+  const lowered = href.toLowerCase();
+  const encodedWithMeta = lowered.startsWith(PRISM_COMMAND_MENTION_LEGACY_PROTOCOL)
+    ? href.slice(PRISM_COMMAND_MENTION_LEGACY_PROTOCOL.length).trim()
+    : lowered.startsWith(PRISM_COMMAND_MENTION_HASH_PREFIX)
+      ? href.slice(PRISM_COMMAND_MENTION_HASH_PREFIX.length).trim()
+      : "";
+  const encoded = encodedWithMeta.split("?")[0]?.trim() ?? "";
   if (!encoded) return null;
   try {
     const decoded = decodeURIComponent(encoded);
@@ -3240,8 +3761,23 @@ function parsePrismCommandMentionHref(href?: string | null): string | null {
   }
 }
 
-function prismCommandMentionHref(commandId: string): string {
-  return `prism-command://${encodeURIComponent(commandId)}`;
+function parsePrismCommandMentionSourceStart(href?: string | null): number | null {
+  if (!href) return null;
+  const metadataStart = href.indexOf("?");
+  if (metadataStart < 0) return null;
+  const params = new URLSearchParams(href.slice(metadataStart + 1));
+  const rawStart = params.get("start");
+  if (!rawStart) return null;
+  const start = Number(rawStart);
+  return Number.isInteger(start) && start >= 0 ? start : null;
+}
+
+function prismCommandMentionHref(commandId: string, sourceStart?: number): string {
+  const metadata =
+    typeof sourceStart === "number" && Number.isInteger(sourceStart) && sourceStart >= 0
+      ? `?start=${sourceStart}`
+      : "";
+  return `${PRISM_COMMAND_MENTION_HASH_PREFIX}${encodeURIComponent(commandId)}${metadata}`;
 }
 
 /**
@@ -3404,6 +3940,7 @@ interface Message {
   provider?: Provider;
   model?: string;
   fallbackUsed?: boolean;
+  botId?: string | null;
   botName?: string;
   botColor?: string;
   botGlyph?: string;
@@ -3418,6 +3955,8 @@ interface Message {
     prompt: string;
     options: Array<{ id: string; label: string }>;
   };
+  /** True once an AskQuestion was closed by the patience timer. */
+  askQuestionTimedOut?: boolean;
   /** Story continuation controls for long fictional prose. */
   tellFictionalStory?: {
     v: 1;
@@ -3432,6 +3971,16 @@ interface Message {
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Concise simulated reasoning summary shown when Psychic mode is enabled. */
+  psychicThought?: PsychicThoughtPayload;
+  /** Live-only verbose Psychic scratchpad shown in the active canvas when Psychic is enabled. */
+  psychicScratchpad?: PsychicCanvasScratchpadPayload;
+}
+
+interface ConversationStarterPromptState {
+  conversationId: string;
+  prompts: string[];
+  assistantMessageId: string | null;
 }
 
 function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null {
@@ -3439,16 +3988,81 @@ function messageCreatedAtMs(message: Pick<Message, "createdAt">): number | null 
   return Number.isFinite(ms) ? ms : null;
 }
 
-function formatZenEraBoundaryLabel(message: Pick<Message, "createdAt">): string {
-  const ms = messageCreatedAtMs(message);
-  if (ms === null) return "A new stretch begins";
-  const label = new Date(ms).toLocaleString([], {
+function getLatestAssistantMessageId(messages: readonly Message[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === "assistant") return message.id;
+  }
+  return null;
+}
+
+function findConversationStarterAnchorMessage(
+  messages: readonly Message[],
+  assistantMessageId: string | null | undefined
+): Message | undefined {
+  if (assistantMessageId) {
+    return messages.find(
+      (message) => message.id === assistantMessageId && message.role === "assistant"
+    );
+  }
+  return [...messages].reverse().find((message) => message.role === "assistant");
+}
+
+function hasUserReplyAfterMessage(
+  messages: readonly Message[],
+  messageId: string | null | undefined
+): boolean {
+  if (!messageId) return false;
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return false;
+  return messages.slice(messageIndex + 1).some((message) => message.role === "user");
+}
+
+function formatZenSessionGapDuration(gapMs: number): string {
+  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
+  const totalMinutes = Math.round(safeGapMs / (60 * 1000));
+  if (totalMinutes < 2) return "A moment later";
+  if (totalMinutes < 60) return `${totalMinutes} minutes later`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours} ${hours === 1 ? "hour" : "hours"} later`;
+  return `${hours}h ${minutes}m later`;
+}
+
+function formatZenSessionBoundaryDateLabel(ms: number): string {
+  const date = new Date(ms);
+  const includeYear = date.getFullYear() !== new Date().getFullYear();
+  return date.toLocaleDateString([], {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+    ...(includeYear ? { year: "numeric" } : {}),
   });
-  return `A new stretch begins · ${label}`;
+}
+
+function formatZenSessionBoundaryLabel(
+  gapMs: number,
+  previousActiveAt?: string | null
+): string {
+  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
+  const previousMs = previousActiveAt ? Date.parse(previousActiveAt) : NaN;
+  const labelMs = Number.isFinite(previousMs) ? previousMs : Date.now() - safeGapMs;
+  if (safeGapMs >= ZEN_SESSION_BOUNDARY_DATE_GAP_MS) {
+    return `Last session ${formatZenSessionBoundaryDateLabel(labelMs)}`;
+  }
+  return formatZenSessionGapDuration(safeGapMs);
+}
+
+function formatZenEraBoundaryLabel(
+  previousMessage: Pick<Message, "createdAt">,
+  currentMessage: Pick<Message, "createdAt">
+): string {
+  const previousMs = messageCreatedAtMs(previousMessage);
+  const currentMs = messageCreatedAtMs(currentMessage);
+  if (previousMs === null || currentMs === null) return "A new stretch begins";
+  return formatZenSessionBoundaryLabel(
+    Math.max(0, currentMs - previousMs),
+    previousMessage.createdAt
+  );
 }
 
 function clampZenSessionSummary(text: string | null | undefined): string | null {
@@ -3462,15 +4076,7 @@ function formatZenSessionAwayLabel(
   gapMs: number,
   previousActiveAt?: string | null
 ): string {
-  const safeGapMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 0;
-  const previousMs = previousActiveAt ? Date.parse(previousActiveAt) : NaN;
-  const fallbackMs = Date.now() - safeGapMs;
-  const labelMs = Number.isFinite(previousMs) ? previousMs : fallbackMs;
-  return `Last conversation ${new Date(labelMs).toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })}`;
+  return formatZenSessionBoundaryLabel(gapMs, previousActiveAt);
 }
 
 function effectiveZenSessionBreakGapMs(
@@ -3482,6 +4088,17 @@ function effectiveZenSessionBreakGapMs(
     : NaN;
   const realGapMs = Number.isFinite(previousMs) ? Math.max(0, nowMs - previousMs) : 0;
   return Math.max(sessionBreak.simulatedIdleMs, realGapMs);
+}
+
+function displayZenSessionBreakGapMs(
+  sessionBreak: Pick<ZenSessionBreakState, "previousActiveAt" | "simulatedIdleMs">,
+  nowMs = Date.now()
+): number {
+  const previousMs = sessionBreak.previousActiveAt
+    ? Date.parse(sessionBreak.previousActiveAt)
+    : NaN;
+  if (Number.isFinite(previousMs)) return Math.max(0, nowMs - previousMs);
+  return Math.max(0, sessionBreak.simulatedIdleMs);
 }
 
 function zenSessionBreakUsesFreshStart(
@@ -3639,6 +4256,14 @@ type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 /** How many typewriter characters advance before swapping open/closed mouth. */
 const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 3;
 
+function coffeeSeatMouthOpenFromVisibleLength(visibleLength: number): boolean {
+  return (
+    Math.floor(
+      Math.max(0, visibleLength) / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE
+    ) % 2 === 0
+  );
+}
+
 function lastCoffeeAssistantMoodKeyForBotName(
   threadMessages: readonly CoffeeConversationMessage[],
   botName: string
@@ -3718,12 +4343,7 @@ function coffeeSeatPlateGlyph(emojiMood: CoffeeSeatEmojiMood, mouthOpen: boolean
 }
 
 function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
-  if (!bot) return "neutral";
-  try {
-    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
-  } catch {
-    return "neutral";
-  }
+  return resolveBotVoicePreset(bot);
 }
 
 /** Dev-only: `"live"` uses thread + social moods; otherwise every seat shows this Prism mood. */
@@ -3777,8 +4397,8 @@ const CHAT_MODE_NEW_TURN_START_RATIO = 0.48;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.52;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 22;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.75;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.35;
 const CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS = 520;
 const CHAT_MODE_ASSISTANT_ANCHOR_SMOOTH_SCROLL_MS = 420;
 const CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX = 36;
@@ -3789,31 +4409,39 @@ const CHAT_MODE_ASSISTANT_AUTOSCROLL_MAX_CORRECTION_PX = 220;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_HEADER_REVEAL_RATIO = 0.3;
 const CHAT_MODE_COMPOSER_REVEAL_RATIO = 0.34;
+const CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER = 2;
+const CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS = 1000;
+const CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS = 1200;
+const CHAT_MODE_TYPED_LETTER_STEP_MS = 42;
+const CHAT_MODE_TYPED_LETTER_FADE_MS = 340;
+const ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  "summary",
+  "[role='button']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[aria-expanded]",
+  "[data-prompt-shortcut-preview]",
+  "[data-bot-id]",
+  "[data-dev-panel-safe-area]",
+  "[data-zen-pending-reply-placeholder]",
+].join(", ");
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
-const CHAT_MODE_WORD_REVEAL_MS = 200;
-const CHAT_MODE_LETTER_REVEAL_MS = 170;
-const CHAT_MODE_LETTER_REVEAL_STEP_MS = 18;
-const CHAT_MODE_WORD_REVEAL_SETTLE_MS = 12;
-const CHAT_MODE_COMMA_PAUSE_MS = 500;
-const CHAT_MODE_PERIOD_PAUSE_MS = 1500;
-const CHAT_MODE_ELLIPSIS_PAUSE_MS = 5000;
-const CHAT_MODE_ELLIPSIS_DOT_STEP_MS = 5000;
-const CHAT_MODE_ELLIPSIS_WORD_HOLD_MS = CHAT_MODE_ELLIPSIS_PAUSE_MS;
-const CHAT_MODE_ELLIPSIS_TOKEN_PATTERN = /^(?:\.\.\.|…)\s*$/;
-const CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN = /[)"'\]}»”’]+$/u;
-const CHAT_MODE_SENTENCE_PAUSE_PATTERN = /[.!?]$/u;
-const CHAT_MODE_CLAUSE_PAUSE_PATTERN = /[,;:]$/u;
-const CHAT_MODE_DASH_PAUSE_PATTERN = /(?:--|[–—])$/u;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
 const CHAT_MODE_STRONG_MARKER_PATTERN = /\*\*/g;
 const CHAT_MODE_EMPHASIS_MARKER_PATTERN = /(?<!\*)\*(?!\*)/g;
 const CHAT_MODE_QUOTE_MARKER_PATTERN = /["“”]/g;
 const CHAT_MODE_ALL_CAPS_WORD_PATTERN = /^(?=.*[A-Z])[A-Z0-9][A-Z0-9'’\-]*$/;
-const CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN = /^\s{0,3}([*_-])(?:\s*\1){2,}\s*$/;
 const CHAT_MODE_MARKDOWN_HEADING_PATTERN = /^\s{0,3}#{1,6}\s+\S/;
 const CHAT_MODE_HASH_HEADING_CAPTURE_PATTERN = /^\s{0,3}(#{1,5})\s+(.+?)\s*#*\s*$/;
 const CHAT_MODE_MARKDOWN_STRONG_LINE_PATTERN = /^\s*(\*\*|__)\S[\s\S]*\S\1\s*$/;
@@ -3836,13 +4464,6 @@ const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_P
 // the auto-scroll target.
 const CHAT_MODE_MESSAGE_FONT_CURVE_EXPONENT = 0.6;
 const CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE = 34;
-const CHAT_MODE_MOOD_WORD_REVEAL_MS: Record<MessageMoodKey, number> = {
-  joyful: 58,
-  warm: 68,
-  neutral: CHAT_MODE_WORD_REVEAL_MS,
-  guarded: 104,
-  strained: 132,
-};
 const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversation.";
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
 
@@ -3851,6 +4472,7 @@ type ChatModeTypedTokenStyle = "default" | "rainbow";
 interface ChatModeTypedTokenMeta {
   style: ChatModeTypedTokenStyle;
   effect?: ZenTextEffect;
+  effectReadyTokenIndex?: number;
   isItalic: boolean;
   isBold: boolean;
   isQuote: boolean;
@@ -3879,27 +4501,6 @@ function isQuestionLikeChatTurn(content: string): boolean {
   const trimmed = content.trim();
   if (!trimmed) return false;
   return CHAT_MODE_USER_QUESTION_PATTERN.test(trimmed);
-}
-
-function isChatModeEllipsisToken(token: string): boolean {
-  return CHAT_MODE_ELLIPSIS_TOKEN_PATTERN.test(token);
-}
-
-function formatChatModeTypedTokenDisplay(token: string, isEllipsis: boolean): string {
-  const withoutMarkdownMarkers = token
-    .replace(CHAT_MODE_STRONG_MARKER_PATTERN, "")
-    .replace(CHAT_MODE_EMPHASIS_MARKER_PATTERN, "");
-  if (!isEllipsis) return withoutMarkdownMarkers;
-  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
-  return `. . .${trailingWhitespace}`;
-}
-
-function stripChatModeThematicBreakLines(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => (CHAT_MODE_MARKDOWN_THEMATIC_BREAK_PATTERN.test(line) ? "" : line))
-    .join("\n");
 }
 
 function nodeStartsWithPullQuoteMarker(node: React.ReactNode): boolean {
@@ -4004,11 +4605,14 @@ function resolveComplementHeadingColorVars(
   } as React.CSSProperties;
 }
 
-function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta[] {
+function resolveChatModeTypedTokenMeta(
+  tokens: string[],
+  options: { zenTextEffectsEnabled?: boolean } = {}
+): ChatModeTypedTokenMeta[] {
   let insideStrong = false;
   let insideEmphasis = false;
   let insideQuote = false;
-  return tokens.map((token) => {
+  const tokenMeta: ChatModeTypedTokenMeta[] = tokens.map((token) => {
     const strongMarkerCount = countChatModeStrongMarkers(token);
     const isStrongToken = insideStrong || strongMarkerCount > 0;
     if (strongMarkerCount % 2 === 1) {
@@ -4024,13 +4628,12 @@ function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta
     if (quoteMarkerCount % 2 === 1) {
       insideQuote = !insideQuote;
     }
-    const ellipsis = isChatModeEllipsisToken(token);
+    const ellipsis = isChatRevealEllipsisToken(token);
     const allCapsToken = isChatModeAllCapsToken(token);
     const instantRender = allCapsToken;
     const rainbowToken = allCapsToken;
     return {
       style: rainbowToken ? "rainbow" : "default",
-      effect: resolveZenWordEffect(token) ?? undefined,
       isItalic: isEmphasisToken,
       isBold: isStrongToken,
       isQuote: isQuotedToken,
@@ -4039,6 +4642,23 @@ function resolveChatModeTypedTokenMeta(tokens: string[]): ChatModeTypedTokenMeta
       isEllipsis: ellipsis,
     };
   });
+  if (options.zenTextEffectsEnabled === true) {
+    for (const span of resolveZenTextEffectSpans(tokens)) {
+      const readyTokenIndex = Math.max(span.startTokenIndex, span.endTokenIndex - 1);
+      for (
+        let index = span.startTokenIndex;
+        index < span.endTokenIndex && index < tokenMeta.length;
+        index += 1
+      ) {
+        tokenMeta[index] = {
+          ...tokenMeta[index]!,
+          effect: span.effect,
+          effectReadyTokenIndex: readyTokenIndex,
+        };
+      }
+    }
+  }
+  return tokenMeta;
 }
 
 function messageRequestedAskQuestion(content: string): boolean {
@@ -4433,27 +5053,14 @@ function applyExplicitAskQuestionFallback(
 }
 
 function getConversationPendingAskQuestionState(
-  messages: Message[] | undefined
+  messages: Message[] | undefined,
+  locallyClosedAssistantMessageIds?: ReadonlySet<string>
 ): { askQuestion: NonNullable<Message["askQuestion"]>; assistantMessageId: string } | undefined {
-  if (!messages || messages.length === 0) return undefined;
-  let lastUserIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === "user") {
-      lastUserIndex = i;
-      break;
-    }
-  }
-  const tail = lastUserIndex < 0 ? messages : messages.slice(lastUserIndex + 1);
-  if (tail.some((m) => m.role === "user")) return undefined;
-
-  for (const m of tail) {
-    if (m.role !== "assistant") continue;
-    const qa = resolveAssistantAskQuestion(m);
-    if (qa && qa.name === "AskQuestion" && (qa.options.length === 2 || qa.options.length === 3)) {
-      return { askQuestion: qa, assistantMessageId: m.id };
-    }
-  }
-  return undefined;
+  return getPendingAskQuestionState(
+    messages,
+    resolveAssistantAskQuestion,
+    locallyClosedAssistantMessageIds
+  );
 }
 
 function stripEmojiFromAskQuestionLabel(label: string): string {
@@ -4579,6 +5186,7 @@ function pickStableStatusLabel(
 
 const FALLBACK_PROCESSING_HINT_DELAY_MS = 3800;
 const FALLBACK_PROCESSING_TICK_MS = 300;
+const PSYCHIC_THINKING_INDICATOR_DELAY_MS = 700;
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
   "copyright",
   "copyrighted",
@@ -5055,6 +5663,19 @@ function botOpinionBandTitle(band: BotOpinion["band"]): string {
   if (band === "careful") return "Careful";
   return "Open";
 }
+
+function botOpinionBoundaryDescription(level: BotOpinion["boundaryLevel"]): string {
+  if (level === "firm") return "Firm boundary";
+  if (level === "gentle") return "Gentle boundary";
+  return "No boundary";
+}
+
+function botOpinionBandDescription(band: BotOpinion["band"]): string {
+  if (band === "bonded") return "The long-term relationship reads as especially settled.";
+  if (band === "wounded") return "This bot is carrying some long-term caution.";
+  if (band === "careful") return "The relationship is open, but asking for care.";
+  return "The long-term relationship is open and workable.";
+}
 interface ConversationDetail {
   id: string;
   title: string;
@@ -5077,6 +5698,16 @@ interface ConversationDetail {
   prismMood?: PrismMoodSnapshot;
   messages: Message[];
 }
+
+type ZenPrivateReturnCheckpoint = {
+  selectedId: string | null;
+  detail: ConversationDetail | null;
+  selectedBotId: string | null;
+  zenPersonaBotId: string | null;
+  chatBotOverride: string | null | undefined;
+  sessionOpinion: SessionOpinion | null;
+  botOpinion: BotOpinion | null;
+};
 
 /** POST /api/chat success envelope — `conversationStarters` only appears after “Talk to me!”. */
 interface ChatPostEnvelope {
@@ -5117,6 +5748,24 @@ interface ChatPostEnvelope {
   };
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Live-only Psychic/planning detail for the developer metrics stream. */
+  psychicDebug?: {
+    summary: string;
+    scratchpad: string;
+    effort: ReasoningEffort;
+    provider: Provider;
+    model?: string;
+    simulated: boolean;
+    passCount?: number;
+    passes?: Array<{
+      name: "plan" | "draft" | "audit" | "revision";
+      chars: number;
+      warning?: string;
+    }>;
+    guidanceChars?: number;
+  };
+  /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
+  zenAutonomyDecision?: ZenAutonomyDecision;
   /**
    * Per-turn tool-call diagnostics for the developer metrics stream. Empty/omitted on
    * turns where nothing tool-shaped was attempted. Used to surface what the assistant
@@ -5124,6 +5773,64 @@ interface ChatPostEnvelope {
    * and whether the parser silently dropped a tool-shaped reply.
    */
   toolCalls?: ChatToolCallEvent[];
+}
+
+type ChatPsychicDebugPayload = NonNullable<ChatPostEnvelope["psychicDebug"]>;
+
+function livePsychicScratchpadFromDebug(
+  debug: ChatPsychicDebugPayload | undefined,
+  enabled: boolean,
+  createdAt: string
+): PsychicCanvasScratchpadPayload | null {
+  if (!enabled || !debug) return null;
+  const scratchpad = debug.scratchpad.trim();
+  if (!scratchpad) return null;
+  return {
+    v: 1,
+    scratchpad,
+    effort: debug.effort,
+    provider: debug.provider,
+    ...(debug.model ? { model: debug.model } : {}),
+    simulated: debug.simulated,
+    ...(typeof debug.passCount === "number" ? { passCount: debug.passCount } : {}),
+    ...(typeof debug.guidanceChars === "number"
+      ? { guidanceChars: debug.guidanceChars }
+      : {}),
+    createdAt,
+  };
+}
+
+function attachLivePsychicScratchpadToConversation(
+  conversation: ConversationDetail,
+  debug: ChatPsychicDebugPayload | undefined,
+  enabled: boolean
+): ConversationDetail {
+  if (!enabled || !debug?.scratchpad.trim()) return conversation;
+  const targetIndex = (() => {
+    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+      const message = conversation.messages[i];
+      if (message?.role === "user" && message.psychicThought) return i;
+    }
+    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
+      if (conversation.messages[i]?.role === "user") return i;
+    }
+    return -1;
+  })();
+  if (targetIndex < 0) return conversation;
+  const target = conversation.messages[targetIndex];
+  if (!target) return conversation;
+  const scratchpad = livePsychicScratchpadFromDebug(
+    debug,
+    enabled,
+    target.psychicThought?.createdAt ?? new Date().toISOString()
+  );
+  if (!scratchpad) return conversation;
+  return {
+    ...conversation,
+    messages: conversation.messages.map((message, index) =>
+      index === targetIndex ? { ...message, psychicScratchpad: scratchpad } : message
+    ),
+  };
 }
 
 interface ZenInitialStarterCachedReply {
@@ -5178,6 +5885,12 @@ interface BotOpinion {
   repairCount: number;
   updatedAt: string;
 }
+
+type BotMemoryPanelDossier = BotMemoryDossierPayload<
+  UserMemory,
+  SessionOpinion,
+  BotOpinion
+>;
 
 type ApiKeySource = "saved" | "server" | "none";
 type ProviderApiKeyAuthSource = "account" | "server" | "none";
@@ -5237,6 +5950,8 @@ interface UserSettings {
   autoMemory: boolean;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
+  experimentalAllModelEffortEnabled: boolean;
+  psychicModeEnabled: boolean;
   /**
    * When true (default), assistant bubbles that used the configured copyright
    * lenient local fallback get the striped left-edge treatment.
@@ -5268,6 +5983,9 @@ interface UserSettings {
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
+  zenWallpaperGrayscaleEnabled: boolean;
+  zenWallpaperBlurredEdgesEnabled: boolean;
+  zenWallpaperStyleNotes: string;
   zenSessionIdleGapMs: number;
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
@@ -5275,6 +5993,10 @@ interface UserSettings {
   zenWallpaperRevealDelayMessageCount: number;
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
+  zenCanvasTypingSpeed: number;
+  zenAskQuestionPatienceEnabled: boolean;
+  zenAskQuestionPatienceMs: number;
+  zenAutonomyEnabled: boolean;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -5291,6 +6013,9 @@ type ZenModeSettingsFields = Pick<
   UserSettings,
   | "zenWallpaperOpacity"
   | "zenWallpaperTextMaskEnabled"
+  | "zenWallpaperGrayscaleEnabled"
+  | "zenWallpaperBlurredEdgesEnabled"
+  | "zenWallpaperStyleNotes"
   | "zenSessionIdleGapMs"
   | "zenFreshStartGapMs"
   | "zenRecentContextMessages"
@@ -5298,6 +6023,10 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperRevealDelayMessageCount"
   | "zenWallpaperRevealSpanMessageCount"
   | "zenMoodSensitivity"
+  | "zenCanvasTypingSpeed"
+  | "zenAskQuestionPatienceEnabled"
+  | "zenAskQuestionPatienceMs"
+  | "zenAutonomyEnabled"
 >;
 
 type SavedApiKeySettingsState = Pick<
@@ -5321,13 +6050,16 @@ function PanelSectionInfo({
   id,
   label,
   variant = "section",
+  icon = "info",
   children,
 }: {
   id: string;
   label: string;
   variant?: "section" | "control";
+  icon?: "info" | "help";
   children: string;
 }): React.JSX.Element {
+  const Icon = icon === "help" ? CircleHelp : Info;
   return (
     <span className={styles.panelSectionInfo} data-variant={variant}>
       <span
@@ -5336,7 +6068,7 @@ function PanelSectionInfo({
         aria-label={label}
         aria-describedby={id}
       >
-        <Info size={14} strokeWidth={2.1} aria-hidden="true" />
+        <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
       </span>
       <span id={id} className={styles.panelSectionInfoTooltip} role="tooltip">
         {children}
@@ -5386,6 +6118,105 @@ function formatBackendDebugLine(prefix: string, event: ChatBackendDebugEvent): s
   if (event.detail && event.detail.length > 0) parts.push(event.detail);
   parts.push(`${event.elapsedMs}ms`);
   return parts.join(" — ");
+}
+
+const DEV_METRICS_INLINE_TOKEN_PATTERN =
+  /(\[[^\]\n]+\]|\/api\/[^\s;,)]+|\/[A-Za-z][\w/-]*|(?:mode|chars|bot|provider|model|incognito|jobId|prompt)=("[^"]*"|[^\s;\u2014,)]+)|\b\d+(?:\.\d+)?(?:ms|%)\b|\b(?:backend|route|context|model|tool|summary|memories?|memory|opinion|provider|incognito|started|created|retracted|rejected|triggered|requested|failed|succeeded|detected|acquired|busy|dropped)\b|"[^"]*")/gi;
+
+function formatDevMetricsTimestamp(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatMemoryDossierDate(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function renderDevMetricsToken(token: string, key: string): React.JSX.Element {
+  const keyValue = token.match(/^([A-Za-z][\w-]*)=("[^"]*"|[^\s;\u2014,)]+)$/);
+  if (keyValue) {
+    return (
+      <span key={key} className={styles.devMetricsTokenKeyValue}>
+        <span className={styles.devMetricsTokenKey}>{keyValue[1]}=</span>
+        <strong>{keyValue[2]}</strong>
+      </span>
+    );
+  }
+
+  if (token.startsWith("[")) {
+    return (
+      <span key={key} className={styles.devMetricsTokenPrefix}>
+        {token}
+      </span>
+    );
+  }
+
+  if (token.startsWith("/")) {
+    return (
+      <span key={key} className={styles.devMetricsTokenRoute}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^".*"$/.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenQuote}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^\d+(?:\.\d+)?(?:ms|%)$/.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenMetric}>
+        {token}
+      </span>
+    );
+  }
+
+  if (/^(failed|dropped|busy|succeeded|created|retracted|rejected)$/i.test(token)) {
+    return (
+      <span key={key} className={styles.devMetricsTokenStatus}>
+        {token}
+      </span>
+    );
+  }
+
+  return (
+    <span key={key} className={styles.devMetricsTokenKeyword}>
+      {token}
+    </span>
+  );
+}
+
+function renderDevMetricsInlineText(text: string): Array<string | React.JSX.Element> {
+  const nodes: Array<string | React.JSX.Element> = [];
+  DEV_METRICS_INLINE_TOKEN_PATTERN.lastIndex = 0;
+
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = DEV_METRICS_INLINE_TOKEN_PATTERN.exec(text)) !== null) {
+    const token = match[0];
+    const start = match.index;
+    if (start > cursor) nodes.push(text.slice(cursor, start));
+    nodes.push(renderDevMetricsToken(token, `token-${start}-${nodes.length}`));
+    cursor = start + token.length;
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length > 0 ? nodes : [text];
 }
 interface SummaryCompactionDebug {
   mode: "zen" | "chat" | "sandbox";
@@ -5489,6 +6320,18 @@ type MemoryToast =
       rejected: MemoryRejectedEventPayload;
       expiresAt: number;
     };
+interface PsychicModeToast {
+  id: string;
+  enabled: boolean;
+  source: "chat" | "coffee";
+  expiresAt: number;
+}
+interface LocalCommandToast {
+  id: string;
+  title: string;
+  detail: string;
+  expiresAt: number;
+}
 interface ModelCatalogEntry {
   id: string;
   label: string;
@@ -5687,6 +6530,7 @@ interface CommandCenterCommand {
   colorTag?: CommandCenterColorTag;
   aliases: string[];
   arguments: CommandCenterArgument[];
+  wildcardValues?: readonly string[];
   builtIn: boolean;
   readOnly: boolean;
   createdAt: string;
@@ -5708,6 +6552,35 @@ interface CommandCenterStateV1 {
   wildcardDecks?: unknown;
 }
 
+const PROMPT_CENTER_DRAG_MIME = "application/x-prism-prompt-center-drag";
+
+type PromptCenterDragKind = "prompt" | "wildcard";
+
+interface PromptCenterDragState {
+  kind: PromptCenterDragKind;
+  id: string;
+  overId: string | null;
+  placement: CommandCenterDropPlacement | null;
+}
+
+interface CommandCenterExportBundleV1 {
+  schema: "prism-command-center-v1";
+  exportedAt: string;
+  preferredModel: string;
+  commands: CommandCenterCommand[];
+  wildcardDecks: CommandCenterWildcardDeck[];
+}
+
+interface CommandCenterImportMergeResult {
+  commands: CommandCenterCommand[];
+  wildcardDecks: CommandCenterWildcardDeck[];
+  importedCommandIds: string[];
+  importedWildcardDeckIds: string[];
+}
+
+const COMMAND_CENTER_ARCHIVE_ENTRY_NAME = "command-center.json";
+const COMMAND_CENTER_ARCHIVE_MIME = "application/vnd.prism.command-center+zip";
+
 const BUILT_IN_COMMAND_NAMES = new Set([
   "help",
   "compact",
@@ -5717,18 +6590,38 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "restart",
   "new-session",
   "forgive-me",
+  "undo",
+  PSYCHIC_COMMAND_NAME,
+  NVM_COMMAND_NAME,
+]);
+const BUILT_IN_HELP_COMMAND_ALIASES = ["?"];
+const BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = ["wallpaper", "wall", "background"];
+const BUILT_IN_UNDO_COMMAND_ALIASES = ["undo-turn"];
+const BUILT_IN_HELP_SLASH_COMMANDS = new Set([
+  "/help",
+  ...BUILT_IN_HELP_COMMAND_ALIASES.map((alias) => `/${alias}`),
+]);
+const BUILT_IN_ATMOSPHERE_SLASH_COMMANDS = new Set([
+  "/atmosphere",
+  ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES.map((alias) => `/${alias}`),
 ]);
 const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "help",
+  ...BUILT_IN_HELP_COMMAND_ALIASES,
   "compact",
   "summarize",
   "clear",
   "cls",
   "atmosphere",
+  ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES,
   "refresh",
   "restart",
   "new-session",
   "forgive-me",
+  "undo",
+  ...BUILT_IN_UNDO_COMMAND_ALIASES,
+  PSYCHIC_COMMAND_NAME,
+  NVM_COMMAND_NAME,
   "dev",
   "forget",
   "forget-all",
@@ -5870,7 +6763,7 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
     name: "help",
     title: "help",
     command: "Opens a list of available commands and prompts.",
-    aliases: [],
+    aliases: [...BUILT_IN_HELP_COMMAND_ALIASES],
     arguments: [],
     builtIn: true,
     readOnly: true,
@@ -5920,7 +6813,7 @@ function createBuiltInAtmosphereCommand(): CommandCenterCommand {
     name: "atmosphere",
     title: "atmosphere",
     command: "Generates a fresh Zen Atmosphere wallpaper immediately.",
-    aliases: [],
+    aliases: [...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES],
     arguments: [],
     builtIn: true,
     readOnly: true,
@@ -5984,6 +6877,54 @@ function createBuiltInForgiveMeCommand(): CommandCenterCommand {
     name: "forgive-me",
     title: "forgive-me",
     command: "Resets Prism's Zen mood, cooldown timer, and ignore penalties.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInUndoCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/undo",
+    name: "undo",
+    title: "undo",
+    command: "Rewinds the latest message. Use /undo 2 or /undo-turn to rewind two messages.",
+    aliases: [...BUILT_IN_UNDO_COMMAND_ALIASES],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInPsychicCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/psychic",
+    name: PSYCHIC_COMMAND_NAME,
+    title: PSYCHIC_COMMAND_NAME,
+    command: "Switches Psychic mode on or off for future turns.",
+    aliases: [],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createBuiltInNvmCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/nvm",
+    name: NVM_COMMAND_NAME,
+    title: NVM_COMMAND_NAME,
+    command: "Resets the current topic locally without sending anything to Prism.",
     aliases: [],
     arguments: [],
     builtIn: true,
@@ -6063,16 +7004,32 @@ function composerTrueWildcardSlotFallback(command: CommandCenterCommand): string
   return command.command.trim() || `{${command.name}}`;
 }
 
+function composerTrueWildcardSlotDisplayTokens(command: CommandCenterCommand): string {
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  const addToken = (value: string): void => {
+    const token = value.trim();
+    const key = token.toLowerCase();
+    if (!token || seen.has(key)) return;
+    seen.add(key);
+    tokens.push(token);
+  };
+  addToken(composerTrueWildcardSlotFallback(command));
+  for (const alias of command.aliases) {
+    addToken(`{${alias}}`);
+  }
+  return tokens.join(", ");
+}
+
 function composerCommandDisplayName(command: CommandCenterCommand): string {
   return command.name;
 }
 
-const PENDING_COMPOSER_WILDCARD_SLOT_TEXT = "{LOADING}";
+const PENDING_COMPOSER_WILDCARD_SLOT_TEXT = "\uE000PRISM_PENDING_WILDCARD\uE000";
 
-function composerShortcutInvocationPrefix(command: CommandCenterCommand): "/" | "!" {
-  return isComposerWildcardDeckPick(command) || isComposerTrueWildcardSlotPick(command)
-    ? "!"
-    : "/";
+function composerShortcutInvocationPrefix(command: CommandCenterCommand): "/" | "!" | "{" {
+  if (isComposerTrueWildcardSlotPick(command)) return "{";
+  return isComposerWildcardDeckPick(command) ? "!" : "/";
 }
 
 function composerCommandPickKind(
@@ -6081,13 +7038,6 @@ function composerCommandPickKind(
   if (isComposerTrueWildcardSlotPick(command)) return "wildcard-slot";
   if (isComposerWildcardDeckPick(command)) return "wildcard";
   return isCommandCenterOperationalCommand(command) ? "command" : "prompt";
-}
-
-function composerShortcutInsertionText(command: CommandCenterCommand): string {
-  if (isComposerTrueWildcardSlotPick(command)) {
-    return `${composerTrueWildcardSlotFallback(command)} `;
-  }
-  return `${composerShortcutInvocationPrefix(command)}${command.name} `;
 }
 
 const BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
@@ -6104,6 +7054,15 @@ const BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
     updatedAt: "built-in",
   }));
 
+const PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
+  BUILT_IN_WILDCARD_SLOT_PICKS.filter((command) => {
+    const key = composerTrueWildcardSlotKey(command);
+    const slot = key
+      ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
+      : null;
+    return slot?.pickerVisibility === "primary";
+  });
+
 function commandCenterWildcardDeckPick(deck: CommandCenterWildcardDeck): CommandCenterCommand {
   const now = deck.updatedAt || deck.createdAt || new Date().toISOString();
   const sampleValues = deck.values.slice(0, 4).join(", ");
@@ -6118,6 +7077,7 @@ function commandCenterWildcardDeckPick(deck: CommandCenterWildcardDeck): Command
         ? `${itemCountLabel}: ${sampleValues}`
         : itemCountLabel,
     command: sampleValues,
+    wildcardValues: deck.values,
     ...(deck.colorTag ? { colorTag: deck.colorTag } : {}),
     aliases: deck.aliases,
     arguments: [],
@@ -6160,6 +7120,38 @@ function commandMatchesInvocationName(
   );
 }
 
+function commandCenterCommandForChipText(
+  commands: readonly CommandCenterCommand[],
+  chipText: string,
+  prefix: "/" | "!"
+): CommandCenterCommand | null {
+  const trimmed = chipText.trim();
+  if (!trimmed.startsWith(prefix)) return null;
+  const invocation = trimmed.slice(prefix.length).trim();
+  if (!invocation) return null;
+  return (
+    commands.find((command) => commandMatchesInvocationName(command, invocation)) ?? null
+  );
+}
+
+function builtInWildcardSlotKeyFromChipText(
+  chipText: string
+): BuiltInPromptWildcardSlotKey | null {
+  return parseBuiltInPromptWildcardReference(chipText)?.key ?? null;
+}
+
+function randomComposerWildcardDeckReplacement(
+  command: CommandCenterCommand,
+  beforeText: string
+): string | null {
+  const values = (command.wildcardValues ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (values.length === 0) return null;
+  const value = values[Math.floor(Math.random() * values.length)] ?? "";
+  return withSentenceCasedPromptInsertion(value, beforeText);
+}
+
 interface LeadingCommandChipMatch {
   command: CommandCenterCommand;
   commandStart: number;
@@ -6171,7 +7163,7 @@ function resolveLeadingCommandChipMatch(
   commands: readonly CommandCenterCommand[]
 ): LeadingCommandChipMatch | null {
   const firstLine = value.split(/\r?\n/u, 1)[0] ?? "";
-  const match = /^(\s*)\/([a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(firstLine);
+  const match = /^(\s*)\/(\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(firstLine);
   if (!match) return null;
   const normalizedName = normalizeCommandNameInput(match[2] ?? "");
   if (!normalizedName) return null;
@@ -6212,6 +7204,9 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
     createBuiltInForgiveMeCommand(),
+    createBuiltInUndoCommand(),
+    createBuiltInPsychicCommand(),
+    createBuiltInNvmCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -6447,6 +7442,212 @@ function commandCenterAliasIssueMap<T>(
   return issues;
 }
 
+function createCommandCenterCommandId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `cmd:${crypto.randomUUID()}`
+    : `cmd:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createCommandCenterWildcardDeckId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `wildcard:${crypto.randomUUID()}`
+    : `wildcard:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parseCommandCenterBundleJson(raw: string): CommandCenterStateV1 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripOptionalLeadingUtf8Bom(raw));
+  } catch {
+    throw new Error("Could not read Command Center bundle JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Command Center bundle is not a valid JSON object.");
+  }
+  const record = parsed as Partial<CommandCenterStateV1>;
+  if (record.schema !== "prism-command-center-v1") {
+    throw new Error("That .prism file is not a Command Center bundle.");
+  }
+  return record as CommandCenterStateV1;
+}
+
+function parseCommandCenterBundleBytes(bytes: Uint8Array): CommandCenterStateV1 {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes);
+  } catch {
+    return parseCommandCenterBundleJson(strFromU8(bytes));
+  }
+  const preferredEntry = Object.entries(entries).find(
+    ([name]) => name.trim().toLowerCase() === COMMAND_CENTER_ARCHIVE_ENTRY_NAME
+  );
+  const fallbackEntry = Object.entries(entries).find(
+    ([name]) => name.trim().toLowerCase().endsWith("/command-center.json")
+  );
+  const jsonEntry = preferredEntry ?? fallbackEntry;
+  if (!jsonEntry) {
+    throw new Error(".prism file does not contain command-center.json.");
+  }
+  return parseCommandCenterBundleJson(strFromU8(jsonEntry[1]));
+}
+
+function filterImportedWildcardDeckAliases(
+  aliases: readonly string[],
+  primaryName: string,
+  existingDecks: readonly CommandCenterWildcardDeck[]
+): string[] {
+  const used = new Set(
+    existingDecks
+      .flatMap((deck) => wildcardDeckInvocationNames(deck))
+      .map((name) => name.toLowerCase())
+  );
+  const primaryKey = primaryName.toLowerCase();
+  return normalizeWildcardDeckAliases(aliases, primaryName).filter((alias) => {
+    const key = alias.toLowerCase();
+    return key !== primaryKey && !used.has(key);
+  });
+}
+
+function filterImportedCommandAliases(
+  aliases: readonly string[],
+  primaryName: string,
+  existingCommands: readonly CommandCenterCommand[]
+): string[] {
+  const used = new Set(
+    existingCommands
+      .flatMap((command) => commandInvocationNames(command))
+      .map((name) => name.toLowerCase())
+  );
+  const primaryKey = primaryName.toLowerCase();
+  return normalizeCommandAliasList(aliases, primaryName).filter((alias) => {
+    const key = alias.toLowerCase();
+    return (
+      key !== primaryKey &&
+      !used.has(key) &&
+      !BUILT_IN_COMMAND_RESERVED_NAMES.has(key)
+    );
+  });
+}
+
+function remapImportedWildcardReferences(
+  source: string,
+  renameByInvocationName: ReadonlyMap<string, string>
+): string {
+  if (!source.includes("!") || renameByInvocationName.size === 0) return source;
+  const names = [...renameByInvocationName.keys()].sort(
+    (a, b) => b.length - a.length || a.localeCompare(b)
+  );
+  const lowerSource = source.toLowerCase();
+  let output = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    const start = source.indexOf("!", cursor);
+    if (start < 0) break;
+    const afterBang = lowerSource.slice(start + 1);
+    const name = names.find((candidate) => {
+      if (!afterBang.startsWith(candidate)) return false;
+      const nextChar = source[start + 1 + candidate.length] ?? "";
+      return !nextChar || /[\s.,;:!?)}\]]/u.test(nextChar);
+    });
+    if (!name) {
+      output += source.slice(cursor, start + 1);
+      cursor = start + 1;
+      continue;
+    }
+    output += source.slice(cursor, start);
+    output += `!${renameByInvocationName.get(name)}`;
+    cursor = start + 1 + name.length;
+  }
+  output += source.slice(cursor);
+  return output;
+}
+
+function mergeCommandCenterImportBundle({
+  currentCommands,
+  currentWildcardDecks,
+  importedRaw,
+}: {
+  currentCommands: readonly CommandCenterCommand[];
+  currentWildcardDecks: readonly CommandCenterWildcardDeck[];
+  importedRaw: CommandCenterStateV1;
+}): CommandCenterImportMergeResult {
+  const imported = normalizeCommandCenterState(importedRaw);
+  const importedCommands = imported.commands.filter(isCommandCenterPromptShortcut);
+  const importedDecks = imported.wildcardDecks;
+  const now = new Date().toISOString();
+  let nextWildcardDecks = [...currentWildcardDecks];
+  const importedWildcardDeckIds: string[] = [];
+  const wildcardRenameByInvocationName = new Map<string, string>();
+
+  for (const deck of importedDecks) {
+    if (!commandCenterWildcardDeckHasRequiredDetails(deck)) continue;
+    const id = createCommandCenterWildcardDeckId();
+    const name = uniqueWildcardDeckNameForList(deck.name, nextWildcardDecks, id);
+    const aliases = filterImportedWildcardDeckAliases(
+      deck.aliases,
+      name,
+      nextWildcardDecks
+    );
+    const aliasKeys = new Set(aliases.map((alias) => alias.toLowerCase()));
+    for (const invocationName of wildcardDeckInvocationNames(deck)) {
+      const key = normalizeWildcardDeckNameInput(invocationName).toLowerCase();
+      if (!key) continue;
+      if (key !== name.toLowerCase() && !aliasKeys.has(key)) {
+        wildcardRenameByInvocationName.set(key, name);
+      }
+    }
+    const importedDeck: CommandCenterWildcardDeck = {
+      ...deck,
+      id,
+      name,
+      aliases,
+      createdAt: now,
+      updatedAt: now,
+    };
+    nextWildcardDecks = [...nextWildcardDecks, importedDeck];
+    importedWildcardDeckIds.push(id);
+  }
+  nextWildcardDecks = sanitizeWildcardDeckAliases(nextWildcardDecks);
+
+  let nextCommands = [...currentCommands];
+  const importedCommandIds: string[] = [];
+  for (const command of importedCommands) {
+    if (!commandCenterPromptHasRequiredDetails(command)) continue;
+    const id = createCommandCenterCommandId();
+    const name = uniqueCommandNameForList(command.name, nextCommands, id);
+    const aliases = filterImportedCommandAliases(command.aliases, name, nextCommands);
+    const title =
+      command.title.trim().length === 0 || command.title === command.name
+        ? name
+        : command.title;
+    const importedCommand: CommandCenterCommand = {
+      ...command,
+      id,
+      name,
+      title,
+      command: remapImportedWildcardReferences(
+        command.command,
+        wildcardRenameByInvocationName
+      ),
+      aliases,
+      arguments: [],
+      builtIn: false,
+      readOnly: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    nextCommands = [...nextCommands, importedCommand];
+    importedCommandIds.push(id);
+  }
+
+  return {
+    commands: sanitizeCommandAliasesForList(nextCommands),
+    wildcardDecks: nextWildcardDecks,
+    importedCommandIds,
+    importedWildcardDeckIds,
+  };
+}
+
 function botImportUtf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
@@ -6552,6 +7753,7 @@ const REASONING_EFFORT_ANCHOR_LABELS: Array<{
 const REASONING_EFFORT_SLIDER_MAX = 100;
 const DEFAULT_MANUAL_REASONING_EFFORT = "medium" as const;
 const AUTO_MODEL_SETTINGS_SUBTEXT = "define preferred model in settings";
+const DISABLED_MODEL_SETTINGS_SUBTEXT = "do not use this model lane";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
 const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
@@ -6574,9 +7776,106 @@ const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
+const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
+const DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED = true;
+const MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH = 320;
+const ZEN_WALLPAPER_STYLE_OPTIONS = [
+  {
+    id: "default",
+    label: "Default",
+    color: "#fffdf4",
+    glyph: Sparkles,
+    notes: "",
+    ariaLabel: "Default PRISM atmosphere style",
+  },
+  {
+    id: "glass",
+    label: "Glass",
+    color: PRISM_COLORS.s,
+    glyph: Droplets,
+    notes:
+      "style preset: misted glass abstraction; translucent panes, condensation haze, soft refraction, layered depth, quiet gallery light",
+    ariaLabel: "Glass atmosphere style",
+  },
+  {
+    id: "ink",
+    label: "Ink",
+    color: PRISM_COLORS.m,
+    glyph: Brush,
+    notes:
+      "style preset: ink wash abstraction; diluted brush washes, feathered edges, handmade paper grain, pooled pigment, open negative space",
+    ariaLabel: "Ink atmosphere style",
+  },
+  {
+    id: "shadow",
+    label: "Shadow",
+    color: PRISM_COLORS.r,
+    glyph: Building2,
+    notes:
+      "style preset: architectural shadow abstraction; minimal interior planes, slatted light, threshold geometry, long soft shadows, measured spatial rhythm",
+    ariaLabel: "Shadow atmosphere style",
+  },
+  {
+    id: "grain",
+    label: "Grain",
+    color: PRISM_COLORS.p,
+    glyph: ScanLine,
+    notes:
+      "style preset: analog film grain abstraction; subtle 35mm texture, low contrast halation, soft vignette, gentle bloom, lightly worn emulsion",
+    ariaLabel: "Grain atmosphere style",
+  },
+  {
+    id: "tide",
+    label: "Tide",
+    color: PRISM_COLORS.i,
+    glyph: Waves,
+    notes:
+      "style preset: slow ocean light abstraction; horizon shimmer, tidal blur, glassy reflections, calm wave bands, liquid atmospheric depth",
+    ariaLabel: "Tide atmosphere style",
+  },
+] as const;
+const ZEN_ATMOSPHERE_COLOR_TRANSITION_MS = 720;
 const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
+const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
+const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
+const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
+const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
+const ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS = [
+  { value: "multiply", label: "Multiply" },
+  { value: "soft-light", label: "Soft Light" },
+  { value: "color", label: "Color" },
+  { value: "overlay", label: "Overlay" },
+  { value: "normal", label: "Normal" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" },
+  { value: "screen", label: "Screen" },
+  { value: "hard-light", label: "Hard Light" },
+  { value: "luminosity", label: "Luminosity" },
+] as const;
+type ZenPersonaBackdropBlendMode =
+  (typeof ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS)[number]["value"];
+type ZenPersonaBackdropTuning = {
+  blend: number;
+  darkBlendMode: ZenPersonaBackdropBlendMode;
+  lightBlendMode: ZenPersonaBackdropBlendMode;
+  opacity: number;
+  saturation: number;
+};
+const MIN_ZEN_PERSONA_BACKDROP_BLEND = 0;
+const MAX_ZEN_PERSONA_BACKDROP_BLEND = 100;
+const MIN_ZEN_PERSONA_BACKDROP_OPACITY = 0;
+const MAX_ZEN_PERSONA_BACKDROP_OPACITY = 0.6;
+const MIN_ZEN_PERSONA_BACKDROP_SATURATION = 0;
+const MAX_ZEN_PERSONA_BACKDROP_SATURATION = 1.6;
+const DEFAULT_ZEN_PERSONA_BACKDROP_TUNING: ZenPersonaBackdropTuning = {
+  blend: MAX_ZEN_PERSONA_BACKDROP_BLEND,
+  darkBlendMode: "multiply",
+  lightBlendMode: "screen",
+  opacity: MAX_ZEN_PERSONA_BACKDROP_OPACITY,
+  saturation: MAX_ZEN_PERSONA_BACKDROP_SATURATION,
+};
 
 /**
  * Stable key for remembering LOCAL/ONLINE model picks per open thread
@@ -6876,7 +8175,12 @@ function botReplyLengthPresetForTokens(tokens: number) {
 
 function normalizeModelChoice(value: string | null | undefined): string {
   const trimmed = value?.trim() ?? "";
+  if (isDisabledModelChoice(trimmed)) return DISABLED_MODEL_CHOICE;
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
+}
+
+function modelChoiceIsDisabled(value: string | null | undefined): boolean {
+  return normalizeModelChoice(value) === DISABLED_MODEL_CHOICE;
 }
 
 function normalizeZenWallpaperOpacitySetting(value: unknown): number {
@@ -6894,7 +8198,15 @@ function normalizeZenWallpaperOpacitySetting(value: unknown): number {
   return Number(clamped.toFixed(2));
 }
 
-function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
+function normalizeZenWallpaperTextMaskSetting(_value: unknown): boolean {
+  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+}
+
+function normalizeZenWallpaperGrayscaleSetting(_value: unknown): boolean {
+  return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
+}
+
+function normalizeZenWallpaperBlurredEdgesSetting(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
   if (typeof value === "string") {
@@ -6906,7 +8218,34 @@ function normalizeZenWallpaperTextMaskSetting(value: unknown): boolean {
       return false;
     }
   }
-  return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
+  return DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED;
+}
+
+function normalizeZenWallpaperStyleNotesSetting(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH) {
+    return normalized;
+  }
+  return normalized
+    .slice(0, MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
+    .trimEnd();
+}
+
+function resolveZenWallpaperStyleOptionNotes(value: unknown): string {
+  const normalized = normalizeZenWallpaperStyleNotesSetting(value).toLowerCase();
+  const matchedOption = ZEN_WALLPAPER_STYLE_OPTIONS.find(
+    (option) =>
+      normalizeZenWallpaperStyleNotesSetting(option.notes).toLowerCase() === normalized
+  );
+  return matchedOption?.notes ?? "";
+}
+
+function zenWallpaperStyleOptionSelected(currentValue: string, optionNotes: string): boolean {
+  return (
+    resolveZenWallpaperStyleOptionNotes(currentValue).toLowerCase() ===
+    normalizeZenWallpaperStyleNotesSetting(optionNotes).toLowerCase()
+  );
 }
 
 function formatZenWallpaperOpacity(value: unknown): string {
@@ -6927,6 +8266,102 @@ function normalizeIntegerSetting(
         : Number.NaN;
   const normalized = Number.isFinite(parsed) ? parsed : fallback;
   return Math.min(max, Math.max(min, Math.round(normalized)));
+}
+
+function normalizeDecimalSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  precision = 2
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallback;
+  const clamped = Math.min(max, Math.max(min, normalized));
+  return Number(clamped.toFixed(precision));
+}
+
+function normalizeZenPersonaBackdropBlendMode(
+  value: unknown,
+  fallback: ZenPersonaBackdropBlendMode
+): ZenPersonaBackdropBlendMode {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    const option = ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find(
+      (candidate) => candidate.value === normalized
+    );
+    if (option) return option.value;
+  }
+  return fallback;
+}
+
+function formatZenPersonaBackdropBlendMode(
+  value: ZenPersonaBackdropBlendMode
+): string {
+  return (
+    ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find((option) => option.value === value)
+      ?.label ?? value
+  );
+}
+
+function normalizeZenPersonaBackdropTuning(value: unknown): ZenPersonaBackdropTuning {
+  const source =
+    value !== null && typeof value === "object"
+      ? (value as Partial<Record<keyof ZenPersonaBackdropTuning, unknown>>)
+      : {};
+  return {
+    blend: normalizeIntegerSetting(
+      source.blend,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.blend,
+      MIN_ZEN_PERSONA_BACKDROP_BLEND,
+      MAX_ZEN_PERSONA_BACKDROP_BLEND
+    ),
+    darkBlendMode: normalizeZenPersonaBackdropBlendMode(
+      source.darkBlendMode,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode
+    ),
+    lightBlendMode: normalizeZenPersonaBackdropBlendMode(
+      source.lightBlendMode,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode
+    ),
+    opacity: normalizeDecimalSetting(
+      source.opacity,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.opacity,
+      MIN_ZEN_PERSONA_BACKDROP_OPACITY,
+      MAX_ZEN_PERSONA_BACKDROP_OPACITY
+    ),
+    saturation: normalizeDecimalSetting(
+      source.saturation,
+      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.saturation,
+      MIN_ZEN_PERSONA_BACKDROP_SATURATION,
+      MAX_ZEN_PERSONA_BACKDROP_SATURATION
+    ),
+  };
+}
+
+function zenPersonaBackdropCssVars(
+  tuning: ZenPersonaBackdropTuning
+): React.CSSProperties {
+  const normalized = normalizeZenPersonaBackdropTuning(tuning);
+  const style = {} as React.CSSProperties & Record<string, string>;
+  style["--zen-persona-ink-opacity"] = String(normalized.opacity);
+  style["--zen-persona-ink-saturation"] = String(normalized.saturation);
+  style["--zen-persona-ink-blend-mode-dark"] = normalized.darkBlendMode;
+  style["--zen-persona-ink-blend-mode-light"] = normalized.lightBlendMode;
+  style["--zen-persona-ink-blend-strong"] = `${normalized.blend}%`;
+  style["--zen-persona-ink-blend-mid"] = `${Math.round(normalized.blend * 0.68)}%`;
+  style["--zen-persona-ink-blend-soft"] = `${Math.round(normalized.blend * 0.5)}%`;
+  style["--zen-persona-ink-blend-edge"] = `${Math.round(normalized.blend * 0.34)}%`;
+  return style;
+}
+
+function formatZenPersonaBackdropPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function normalizeZenSessionIdleGapSetting(value: unknown): number {
@@ -6999,10 +8434,73 @@ function formatZenMoodSensitivity(value: unknown): string {
   return `${Math.round(normalizeZenMoodSensitivitySetting(value) * 100)}%`;
 }
 
+function normalizeZenCanvasTypingSpeedSetting(value: unknown): number {
+  return normalizeDecimalSetting(
+    value,
+    DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    MIN_ZEN_CANVAS_TYPING_SPEED,
+    MAX_ZEN_CANVAS_TYPING_SPEED,
+    2
+  );
+}
+
+function formatZenCanvasTypingSpeed(value: unknown): string {
+  return `${normalizeZenCanvasTypingSpeedSetting(value)
+    .toFixed(2)
+    .replace(/\.?0+$/u, "")}x`;
+}
+
+function normalizeZenAskQuestionPatienceEnabledSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED;
+}
+
+function normalizeZenAutonomyEnabledSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
+  return false;
+}
+
+function normalizeZenAskQuestionPatienceMsSetting(value: unknown): number {
+  return normalizeAskQuestionPatienceDurationMs(
+    value,
+    DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+    MAX_ZEN_ASK_QUESTION_PATIENCE_MS
+  );
+}
+
+function formatZenAskQuestionPatience(value: unknown): string {
+  return `${Math.round(normalizeZenAskQuestionPatienceMsSetting(value) / 1000)}s`;
+}
+
 function defaultZenModeSettings(): ZenModeSettingsFields {
   return {
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+    zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
+    zenWallpaperBlurredEdgesEnabled:
+      DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
+    zenWallpaperStyleNotes: "",
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -7012,6 +8510,10 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenWallpaperRevealSpanMessageCount:
       DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
+    zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    zenAutonomyEnabled: false,
   };
 }
 
@@ -7022,18 +8524,9 @@ function modelChoiceSupportsReasoningEffort(
   return (
     provider === "openai" &&
     modelChoice !== AUTO_MODEL_CHOICE &&
+    modelChoice !== DISABLED_MODEL_CHOICE &&
     openAiModelSupportsReasoningEffort(modelChoice)
   );
-}
-
-function reasoningEffortForSend(
-  provider: Provider,
-  modelOverride: string | undefined,
-  effort: ReasoningEffort
-): ReasoningEffort | undefined {
-  if (effort === DEFAULT_REASONING_EFFORT) return undefined;
-  if (provider !== "openai" || !modelOverride) return undefined;
-  return openAiModelSupportsReasoningEffort(modelOverride) ? effort : undefined;
 }
 
 function reasoningEffortSliderPosition(value: ReasoningEffort): number {
@@ -7074,6 +8567,15 @@ function normalizeZenModeSettingsFields(
     zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskSetting(
       settings?.zenWallpaperTextMaskEnabled
     ),
+    zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleSetting(
+      settings?.zenWallpaperGrayscaleEnabled
+    ),
+    zenWallpaperBlurredEdgesEnabled: normalizeZenWallpaperBlurredEdgesSetting(
+      settings?.zenWallpaperBlurredEdgesEnabled
+    ),
+    zenWallpaperStyleNotes: resolveZenWallpaperStyleOptionNotes(
+      settings?.zenWallpaperStyleNotes
+    ),
     zenSessionIdleGapMs,
     zenFreshStartGapMs: normalizeZenFreshStartGapSetting(
       settings?.zenFreshStartGapMs,
@@ -7096,6 +8598,19 @@ function normalizeZenModeSettingsFields(
       ),
     zenMoodSensitivity: normalizeZenMoodSensitivitySetting(
       settings?.zenMoodSensitivity
+    ),
+    zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeedSetting(
+      settings?.zenCanvasTypingSpeed
+    ),
+    zenAskQuestionPatienceEnabled:
+      normalizeZenAskQuestionPatienceEnabledSetting(
+        settings?.zenAskQuestionPatienceEnabled
+      ),
+    zenAskQuestionPatienceMs: normalizeZenAskQuestionPatienceMsSetting(
+      settings?.zenAskQuestionPatienceMs
+    ),
+    zenAutonomyEnabled: normalizeZenAutonomyEnabledSetting(
+      settings?.zenAutonomyEnabled
     ),
   };
 }
@@ -7133,6 +8648,7 @@ function parseCommandCenterModelChoice(
 ): { provider: Provider; modelId: string } | null {
   const normalized = normalizeModelChoice(value);
   if (normalized === AUTO_MODEL_CHOICE) return null;
+  if (normalized === DISABLED_MODEL_CHOICE) return null;
   const separatorIndex = normalized.indexOf(":");
   if (separatorIndex <= 0) return null;
   const providerRaw = normalized.slice(0, separatorIndex).trim().toLowerCase();
@@ -7148,13 +8664,16 @@ function parseCommandCenterModelChoice(
 function normalizeCommandCenterPreferredModelChoice(value: string | null | undefined): string {
   const normalized = normalizeModelChoice(value);
   if (normalized === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
+  if (normalized === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   const parsed = parseCommandCenterModelChoice(normalized);
   return parsed ? `local:${parsed.modelId}` : AUTO_MODEL_CHOICE;
 }
 
 function commandCenterAuxiliaryModelId(settings: UserSettings | null): string {
   const accountOverride = settings?.prismDefaultLlmModel?.trim() ?? "";
-  if (accountOverride.length > 0) return accountOverride;
+  if (accountOverride.length > 0 && !modelChoiceIsDisabled(accountOverride)) {
+    return accountOverride;
+  }
   const serverAuxiliary = settings?.ollamaAuxiliaryModel?.trim() ?? "";
   return serverAuxiliary.length > 0 ? serverAuxiliary : "llama3.2";
 }
@@ -7165,6 +8684,7 @@ function resolveCommandCenterModelChoiceForSend(
   catalog: ModelCatalog | null
 ): string {
   const normalized = normalizeCommandCenterPreferredModelChoice(value);
+  if (normalized === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   const parsed = parseCommandCenterModelChoice(normalized);
   if (parsed) {
     const visibleChoice = visibleModelChoiceForProvider(
@@ -7189,7 +8709,9 @@ function chatSettingsSavedDefaultModelId(
   const raw =
     provider === "local" ? settings.preferredLocalModel : settings.preferredOnlineModel;
   const normalized = normalizeModelChoice(raw);
-  return normalized === AUTO_MODEL_CHOICE ? null : normalized;
+  return normalized === AUTO_MODEL_CHOICE || normalized === DISABLED_MODEL_CHOICE
+    ? null
+    : normalized;
 }
 
 /** Row to badge in image model menus from Settings image preferences. */
@@ -7200,10 +8722,11 @@ function imageSettingsSavedDefaultModelId(
   if (!settings) return null;
   if (provider === "local") {
     const n = normalizeModelChoice(settings.preferredLocalImageModel);
-    return n === AUTO_MODEL_CHOICE ? null : n;
+    return n === AUTO_MODEL_CHOICE || n === DISABLED_MODEL_CHOICE ? null : n;
   }
   const trimmed = settings.preferredOpenAiImageModel?.trim() ?? "";
   if (trimmed.length === 0) return null;
+  if (modelChoiceIsDisabled(trimmed)) return null;
   return isAllowedOpenAiImageModelId(trimmed) || isElevenLabsImageModelId(trimmed)
     ? trimmed
     : null;
@@ -7293,13 +8816,13 @@ function anthropicTextModelLabelFromId(id: string): string | null {
   const normalized = id.trim().toLowerCase();
   if (!normalized.startsWith("claude-")) return null;
   const latest = normalized.match(/^claude-(\d)-(\d)-(sonnet|haiku)-latest$/);
-  if (latest) return `Claude ${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
+  if (latest) return `${latest[1]}.${latest[2]} ${titleCaseModelToken(latest[3]!)}`;
   const named = normalized.match(
     /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/
   );
   if (named) {
     const version = named[3] ? `${named[2]}.${named[3]}` : named[2]!;
-    return `Claude ${titleCaseModelToken(named[1]!)} ${version}${modelSnapshotSuffix(named[4])}`;
+    return `${titleCaseModelToken(named[1]!)} ${version}${modelSnapshotSuffix(named[4])}`;
   }
   return null;
 }
@@ -7523,6 +9046,9 @@ function visibleConcreteModelChoiceForProvider(
   choice: string | null | undefined
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === DISABLED_MODEL_CHOICE) {
+    return DISABLED_MODEL_CHOICE;
+  }
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return defaultModelChoiceForProvider(catalog, settings, provider);
   }
@@ -7549,6 +9075,9 @@ function visibleConcreteOnlineModelChoice(
   choice: string | null | undefined
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === DISABLED_MODEL_CHOICE) {
+    return DISABLED_MODEL_CHOICE;
+  }
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return defaultOnlineModelChoice(catalog, settings);
   }
@@ -7570,6 +9099,7 @@ function visibleModelChoiceForProvider(
   choice: string | null | undefined
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   if (visibleChoice === AUTO_MODEL_CHOICE) {
     return visibleChoice;
   }
@@ -7601,6 +9131,7 @@ function visiblePreferredOnlineModelChoice(
   choice: string | null | undefined
 ): string {
   const visibleChoice = normalizeModelChoice(choice);
+  if (visibleChoice === DISABLED_MODEL_CHOICE) return DISABLED_MODEL_CHOICE;
   if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
   if (isHiddenBotModelId(settings, visibleChoice)) return AUTO_MODEL_CHOICE;
   const provider = inferOnlineProviderForModelId(visibleChoice);
@@ -7662,6 +9193,7 @@ function includeSelectedModelOption(
   if (
     !normalizedChoice ||
     normalizedChoice === AUTO_MODEL_CHOICE ||
+    normalizedChoice === DISABLED_MODEL_CHOICE ||
     options.some((model) => model.id === normalizedChoice)
   ) {
     return options;
@@ -7681,6 +9213,7 @@ function includeSelectedOnlineModelOption(
   const normalizedChoice = normalizeModelChoice(choice);
   if (
     normalizedChoice === AUTO_MODEL_CHOICE ||
+    normalizedChoice === DISABLED_MODEL_CHOICE ||
     options.some((model) => model.id === normalizedChoice)
   ) {
     return options;
@@ -7709,6 +9242,7 @@ function includeSelectedResponseModeModelOption(
 
 function visibleLocalImageModelSelectValue(value: string | null | undefined): string {
   const trimmed = value?.trim() ?? "";
+  if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
   return isComfyUiModelId(trimmed) ? "" : trimmed;
 }
 
@@ -8948,6 +10482,42 @@ function resolveMessageMoodKey(message: Message): NonNullable<Message["moodKey"]
   return normalizeAssistantMoodKey(message.moodKey);
 }
 
+function resolveBotVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
+  if (!bot) return "neutral";
+  try {
+    return parseStoredBotPrompt(bot.system_prompt).fields.core.communicationStyle;
+  } catch {
+    return "neutral";
+  }
+}
+
+function resolveMessageVoicePreset(message: Message, bots: readonly Bot[]): BotVoicePreset {
+  if (message.role !== "assistant") return "neutral";
+  const botId = message.botId?.trim() ?? "";
+  const botName = message.botName?.trim() ?? "";
+  const bot =
+    (botId ? bots.find((candidate) => candidate.id === botId) : null) ??
+    (botName ? bots.find((candidate) => candidate.name === botName) : null);
+  return resolveBotVoicePreset(bot);
+}
+
+function TypingDots({
+  className,
+  voicePreset = "neutral",
+}: {
+  className: string;
+  voicePreset?: BotVoicePreset | null;
+}): React.JSX.Element {
+  const preset = voicePreset ?? "neutral";
+  return (
+    <span className={className} data-voice-preset={preset} aria-hidden="true">
+      <span>.</span>
+      <span>.</span>
+      <span>.</span>
+    </span>
+  );
+}
+
 function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
   switch (moodKey) {
     case "joyful":
@@ -8969,12 +10539,14 @@ function MessageMoodFace(props: {
   placement?: "leading" | "trailing";
   color?: string | null;
   voicePreset?: BotVoicePreset;
+  isTalking?: boolean;
+  mouthOpen?: boolean;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
   const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(moodKey);
-  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, false);
+  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, props.mouthOpen === true);
   const color = props.color?.trim();
   const style = color
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
@@ -8991,7 +10563,7 @@ function MessageMoodFace(props: {
     >
       <CoffeeSeatPlateEmoji
         enabled={variant === "prism"}
-        isTalking={false}
+        isTalking={props.isTalking === true}
         scheduleKey={`message-mood-${variant}-${moodKey}`}
         baseText={seatPlateGlyph.text}
         rotateDeg={seatPlateGlyph.rotateDeg}
@@ -9542,11 +11114,10 @@ function looksLikeDisconnectedFetchFailure(err: unknown, path: string): boolean 
 }
 
 function prismApiTransportHint(path: string, rawMsg: string): Error {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "the Prism web app";
-  return new Error(
-    `Lost connection loading ${path} from ${origin}. Start the Prism API (default http://127.0.0.1:18787) or fix LOCALAI_API_ORIGIN where you run Next. (${rawMsg})`
-  );
+  return createBackendUnavailableError("Prism is waiting for its local API.", {
+    path,
+    detail: rawMsg,
+  });
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -9574,7 +11145,11 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     const rawMsg =
       err instanceof Error ? `${err.message || err.name}`.trim() : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
-      throw prismApiTransportHint(path, rawMsg || "network");
+      const backendError = prismApiTransportHint(path, rawMsg || "network");
+      if (isPrismBackendUnavailableError(backendError)) {
+        dispatchBackendUnavailableEvent(backendError);
+      }
+      throw backendError;
     }
     throw err instanceof Error ? err : new Error(rawMsg);
   }
@@ -9588,7 +11163,11 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     const rawMsg =
       err instanceof Error ? `${err.message || err.name}`.trim() : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
-      throw prismApiTransportHint(path, rawMsg || "response body interrupted");
+      const backendError = prismApiTransportHint(path, rawMsg || "response body interrupted");
+      if (isPrismBackendUnavailableError(backendError)) {
+        dispatchBackendUnavailableEvent(backendError);
+      }
+      throw backendError;
     }
     throw err instanceof Error ? err : new Error(rawMsg);
   }
@@ -9601,8 +11180,19 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
   if (!res.ok || payload?.ok === false) {
+    if (isBackendUnavailablePayload(payload)) {
+      const backendError = createBackendUnavailableErrorFromPayload(payload, {
+        path,
+        status: res.status,
+      });
+      dispatchBackendUnavailableEvent(backendError);
+      throw backendError;
+    }
     const fallbackMessage = raw.trim() || `Request failed (${res.status})`;
     throw new Error(payload?.error ?? fallbackMessage);
+  }
+  if (typeof path === "string" && path.startsWith("/api") && path !== "/api/dev/restart") {
+    dispatchBackendAvailableEvent();
   }
   return (payload ?? {}) as T;
 }
@@ -9691,6 +11281,15 @@ function IconSave(): React.JSX.Element {
       <path d="M5 4h11l3 3v13H5z" />
       <path d="M8 4v6h8V4" />
       <path d="M9 20v-6h6v6" />
+    </svg>
+  );
+}
+
+function IconClone(): React.JSX.Element {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }
@@ -11529,10 +13128,20 @@ function EmptyStateBotGlyph({
       className={`${styles.emptyStateBotGlyph} ${
         privateMode ? styles.emptyStatePrivateBotGlyph : ""
       }`}
+      data-private-mode={privateMode ? "true" : "false"}
       aria-hidden="true"
       style={style}
     >
-      <BotGlyph name={bot.glyph} />
+      <span
+        className={`${styles.emptyStateBotGlyphLayer} ${styles.emptyStateBotGlyphLayerPublic}`}
+      >
+        <BotGlyph name={bot.glyph} />
+      </span>
+      <span
+        className={`${styles.emptyStateBotGlyphLayer} ${styles.emptyStateBotGlyphLayerPrivate}`}
+      >
+        <BotGlyph name={bot.glyph} />
+      </span>
     </span>
   );
 }
@@ -11547,7 +13156,7 @@ function EmptyStateBotGlyph({
 //      drop-shadow.
 //
 //   2. `privateHero` set → private styling. Default/Prism keeps the
-//      hub-style black tile with grayscale glow; selected bots keep their
+//      hub-style silver tile with grayscale glow; selected bots keep their
 //      glyph/color but render through a more restrained inverted private tile.
 //
 //   3. `previewBot` set → Prism triangle, but tinted to the hovered bot's
@@ -11719,6 +13328,9 @@ const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
 const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
 /** Slightly above bot menu so both open pickers stack predictably over the rail. */
 const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+type ComposeMenuPlacement = "up" | "down" | "right";
+const COMPOSE_MENU_SIDE_MAX_WIDTH_PX = 330;
+const COMPOSE_MENU_SIDE_HEIGHT_TARGET_PX = 380;
 /** Matches `.composeBotMenu { max-height: min(420px, …) }` for caret popovers. */
 const COMPOSE_CARET_MENU_MAX_HEIGHT_CAP_PX = 420;
 /** Minimum space below the caret before the caret popover prefers opening downward. */
@@ -11743,7 +13355,7 @@ const COMPOSE_MENU_PORTAL_THEME_VARS = [
 ] as const;
 
 /**
- * Fixed coordinates for an upward-opening compose popover. Menus are
+ * Fixed coordinates for portaled compose popovers. Menus are
  * portaled to `document.body` so they are not clipped by
  * `.composeTools { overflow-y: hidden }` (horizontal scroll rail).
  */
@@ -11751,21 +13363,48 @@ function computeComposeMenuFixedStyle(
   trigger: HTMLButtonElement,
   floorMinWidth: number,
   portalZIndex: number,
-  placement: "up" | "down" = "up"
+  placement: ComposeMenuPlacement = "up"
 ): React.CSSProperties {
   const rect = trigger.getBoundingClientRect();
   const vw = globalThis.window.innerWidth;
+  const vh = globalThis.window.innerHeight;
   const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
-  const maxW = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const gap = 6;
+  const viewportMaxWidth = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
+  const preferredSideLeft = rect.right + gap;
+  const sideLeft = Math.max(
+    pad,
+    Math.min(preferredSideLeft, vw - floorMinWidth - pad)
+  );
+  const sideMaxWidth = Math.max(0, vw - sideLeft - pad);
+  const maxW =
+    placement === "right"
+      ? Math.min(COMPOSE_MENU_SIDE_MAX_WIDTH_PX, sideMaxWidth)
+      : viewportMaxWidth;
   const minWidth = Math.min(Math.max(rect.width, floorMinWidth), maxW);
   // Anchor using `maxW`, not `minWidth`: the menu may expand up to max-width while
   // clamping only for min-width would leave the right edge past the viewport when the
   // trigger sits near the right side (Images panel model picker).
-  const left = Math.max(pad, Math.min(rect.left, vw - maxW - pad));
+  const left =
+    placement === "right"
+      ? sideLeft
+      : Math.max(pad, Math.min(rect.left, vw - maxW - pad));
+  const sideTop = Math.max(
+    pad,
+    Math.min(rect.top - 6, vh - pad - COMPOSE_MENU_SIDE_HEIGHT_TARGET_PX)
+  );
   const verticalPosition =
-    placement === "down"
-      ? { top: rect.bottom + 6, bottom: "auto" }
-      : { top: "auto", bottom: globalThis.window.innerHeight - rect.top + 6 };
+    placement === "right"
+      ? { top: sideTop, bottom: "auto" }
+      : placement === "down"
+        ? { top: rect.bottom + gap, bottom: "auto" }
+        : { top: "auto", bottom: vh - rect.top + gap };
+  const availableHeight =
+    placement === "right"
+      ? vh - pad - sideTop
+      : placement === "down"
+        ? vh - pad - (rect.bottom + gap)
+        : rect.top - pad - gap;
   const themeVars: Record<string, string> = {};
   const computedStyle = globalThis.window.getComputedStyle(trigger);
   for (const varName of COMPOSE_MENU_PORTAL_THEME_VARS) {
@@ -11781,6 +13420,7 @@ function computeComposeMenuFixedStyle(
     minWidth,
     maxWidth: maxW,
     zIndex: portalZIndex,
+    ["--compose-menu-available-height" as string]: `${Math.max(0, availableHeight)}px`,
     ...themeVars,
   } as React.CSSProperties;
 }
@@ -11790,7 +13430,7 @@ function useComposeMenuPortalStyle(
   triggerRef: React.RefObject<HTMLButtonElement | null>,
   floorMinWidth: number,
   portalZIndex: number = COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
-  placement: "up" | "down" = "up"
+  placement: ComposeMenuPlacement = "up"
 ): React.CSSProperties | undefined {
   const [fixedStyle, setFixedStyle] = useState<
     React.CSSProperties | undefined
@@ -12006,10 +13646,16 @@ interface ComposerBotPickerProps {
   hueLensAvailable?: boolean;
   hueLensTrackGradient?: string;
   hueLensTrackSegments?: readonly HueLensTrackSegment[];
-  /** Dropdown direction. Header pickers should use "down" to avoid top clipping. */
-  placement?: "up" | "down";
+  /** Dropdown direction. Fresh Zen can use "right" to avoid bottom clipping. */
+  placement?: ComposeMenuPlacement;
   /** Increment to close floating picker menus from the parent shell. */
   dismissPopoversSignal?: number;
+  /** Optional compact controls shown below the option list. */
+  menuFooter?: React.ReactNode;
+  /** Extra class for portaled menu contexts such as the fresh Zen hero picker. */
+  menuClassName?: string;
+  /** Portaled menus need their own private-tone marker; app-shell selectors cannot reach document.body children. */
+  privateTone?: boolean;
 }
 
 function ComposerBotPicker({
@@ -12029,6 +13675,9 @@ function ComposerBotPicker({
   hueLensTrackSegments = EMPTY_HUE_LENS_TRACK_SEGMENTS,
   placement = "up",
   dismissPopoversSignal,
+  menuFooter,
+  menuClassName,
+  privateTone = false,
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
@@ -12038,7 +13687,7 @@ function ComposerBotPicker({
 
   const selectedBot = value ? bots.find(b => b.id === value) ?? null : null;
   const selectedAccent = selectedBot?.color
-    ? normalizeAccentForTheme(selectedBot.color, resolvedTheme)
+    ? displayAccentForMode(selectedBot.color, resolvedTheme, privateTone)
     : null;
   const controlStyle: React.CSSProperties | undefined = selectedAccent
     ? ({ "--bot-color": selectedAccent } as React.CSSProperties)
@@ -12178,6 +13827,7 @@ function ComposerBotPicker({
       data-bot-selected={selectedBot ? "true" : undefined}
       data-disabled={disabled ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
+      data-menu-placement={placement}
       style={controlStyle}
     >
       <button
@@ -12250,7 +13900,10 @@ function ComposerBotPicker({
         createPortal(
           <div
             ref={menuRef}
-            className={styles.composeBotMenu}
+            className={`${styles.composeBotMenu}${
+              menuClassName ? ` ${menuClassName}` : ""
+            }`}
+            data-private-tone={privateTone ? "true" : undefined}
             style={menuPortalStyle}
           >
           {showFilterControls && (
@@ -12334,7 +13987,7 @@ function ComposerBotPicker({
             {visibleBots.map(b => {
               const isSelected = value === b.id;
               const accent = b.color
-                ? normalizeAccentForTheme(b.color, resolvedTheme)
+                ? displayAccentForMode(b.color, resolvedTheme, privateTone)
                 : null;
               const optionStyle: React.CSSProperties | undefined = accent
                 ? ({
@@ -12383,6 +14036,9 @@ function ComposerBotPicker({
               );
             })}
           </div>
+          {menuFooter ? (
+            <div className={styles.composeBotMenuFooter}>{menuFooter}</div>
+          ) : null}
         </div>,
           document.body
         )}
@@ -12403,6 +14059,7 @@ interface ImageBotDirectoryDropdownProps {
   onPick: (botId: string) => void;
   /** Increment to close the floating menu from the parent shell. */
   dismissPopoversSignal?: number;
+  privateTone?: boolean;
 }
 
 function ImageBotDirectoryDropdown({
@@ -12412,6 +14069,7 @@ function ImageBotDirectoryDropdown({
   selectedBotId,
   onPick,
   dismissPopoversSignal,
+  privateTone = false,
 }: ImageBotDirectoryDropdownProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -12486,7 +14144,7 @@ function ImageBotDirectoryDropdown({
   const selectedTriggerName =
     selectedBot?.name ?? selectedEntry?.name ?? "Bot";
   const triggerAccent = selectedBot?.color
-    ? normalizeAccentForTheme(selectedBot.color, resolvedTheme)
+    ? displayAccentForMode(selectedBot.color, resolvedTheme, privateTone)
     : null;
   const controlStyle: React.CSSProperties | undefined = triggerAccent
     ? ({ "--bot-color": triggerAccent } as React.CSSProperties)
@@ -12576,7 +14234,7 @@ function ImageBotDirectoryDropdown({
               {entries.map((row) => {
                 const bot = bots.find((b) => b.id === row.botId) ?? null;
                 const accent = bot?.color
-                  ? normalizeAccentForTheme(bot.color, resolvedTheme)
+                  ? displayAccentForMode(bot.color, resolvedTheme, privateTone)
                   : null;
                 const optionStyle: React.CSSProperties | undefined = accent
                   ? ({
@@ -12629,6 +14287,7 @@ interface ComposerModelPickerEffortControl {
   value: ReasoningEffort;
   onChange: (nextValue: ReasoningEffort) => void;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 interface ComposerModelPickerProps {
@@ -12640,17 +14299,25 @@ interface ComposerModelPickerProps {
   title?: string;
   ariaLabel: string;
   formName?: string;
-  placement?: "up" | "down";
+  placement?: ComposeMenuPlacement;
   minMenuWidthPx?: number;
   menuClassName?: string;
   /** When false, hides the Auto row (used by image model picker). Defaults to true. */
   showAutoOption?: boolean;
-  /** Value emitted by the synthetic Auto/Disabled row. Defaults to `auto`. */
+  /** Value emitted by the synthetic Auto row. Defaults to `auto`. */
   autoOptionValue?: string;
-  /** Visible label for the synthetic Auto/Disabled row. Defaults to Auto. */
+  /** Visible label for the synthetic Auto row. Defaults to Auto. */
   autoOptionLabel?: string;
   /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
+  /** Shows a synthetic Disabled row when this picker supports shutting off a lane. */
+  showDisabledOption?: boolean;
+  /** Value emitted by the synthetic Disabled row. Defaults to `disabled`. */
+  disabledOptionValue?: string;
+  /** Visible label for the synthetic Disabled row. Defaults to Disabled. */
+  disabledOptionLabel?: string;
+  /** Replaces the default Disabled subtitle when a surface needs context-specific copy. */
+  disabledOptionMetaOverride?: string;
   /**
    * When set, the "Default" badge follows this id (user’s saved Settings choice).
    * `null` = never badge a concrete row. Omit to fall back to catalog `isDefault`.
@@ -12677,6 +14344,10 @@ function ComposerModelPicker({
   autoOptionValue = AUTO_MODEL_CHOICE,
   autoOptionLabel = "Auto",
   autoOptionMetaOverride,
+  showDisabledOption = false,
+  disabledOptionValue = DISABLED_MODEL_CHOICE,
+  disabledOptionLabel = "Disabled",
+  disabledOptionMetaOverride,
   settingsDefaultModelId,
   effortControl,
   dismissPopoversSignal,
@@ -12686,8 +14357,11 @@ function ComposerModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
+  const disabledMetaShown =
+    disabledOptionMetaOverride ?? DISABLED_MODEL_SETTINGS_SUBTEXT;
+  const disabledSelected = value === disabledOptionValue;
   const selectedModel =
-    (value === autoOptionValue
+    (value === autoOptionValue || disabledSelected
       ? null
       : options.find((model) => model.id === value)) ??
     options.find((model) => model.isDefault) ??
@@ -12696,6 +14370,8 @@ function ComposerModelPicker({
   const selectedLabel =
     value === autoOptionValue
       ? autoOptionLabel
+      : disabledSelected
+        ? disabledOptionLabel
       : selectedModel?.label ?? value;
   const menuOpen = open && !disabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
@@ -12863,6 +14539,25 @@ function ComposerModelPicker({
                 </span>
               </button>
             )}
+            {showDisabledOption && (
+              <button
+                key={disabledOptionValue}
+                type="button"
+                className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                role="option"
+                aria-selected={value === disabledOptionValue}
+                onClick={() => pick(disabledOptionValue)}
+              >
+                <span className={styles.composeModelOptionMain}>
+                  <span className={styles.composeModelOptionName}>
+                    {disabledOptionLabel}
+                  </span>
+                  <span className={styles.composeModelOptionMeta}>
+                    {disabledMetaShown}
+                  </span>
+                </span>
+              </button>
+            )}
             {options.map((model) => {
               const isSelected = value === model.id;
               const isUnavailable = Boolean(model.disabledReason);
@@ -12906,91 +14601,99 @@ function ComposerModelPicker({
                 </button>
               );
             })}
+          </div>
             {effortControl ? (
-              <div
-                className={styles.composeModelEffortControl}
-                data-auto={effortAutoEnabled ? "true" : undefined}
-                role="group"
-                aria-label="Reasoning effort"
-              >
-                <div className={styles.composeModelEffortHeader}>
-                  <span className={styles.controlLabelWithInfo}>
-                    <span>Effort</span>
-                    <PanelSectionInfo
-                      id="compose-model-effort-info"
-                      label="About reasoning effort"
-                      variant="control"
-                    >
-                      Adjusts how much reasoning the selected model spends before answering.
-                    </PanelSectionInfo>
-                  </span>
-                  <span className={styles.composeModelEffortStatus}>
-                    <output>{REASONING_EFFORT_LABELS[effortControl.value]}</output>
-                    <button
-                      type="button"
-                      className={styles.composeModelEffortAutoToggle}
-                      data-active={effortAutoEnabled ? "true" : undefined}
-                      aria-pressed={effortAutoEnabled}
-                      disabled={effortControl.disabled}
-                      onClick={() => {
-                        if (effortAutoEnabled) {
-                          const nextValue =
-                            lastManualReasoningEffortRef.current === DEFAULT_REASONING_EFFORT
-                              ? DEFAULT_MANUAL_REASONING_EFFORT
-                              : lastManualReasoningEffortRef.current;
+              <div className={styles.composeModelMenuFooter}>
+                <div
+                  className={styles.composeModelEffortControl}
+                  data-auto={effortAutoEnabled ? "true" : undefined}
+                  data-disabled={effortControl.disabled ? "true" : undefined}
+                  role="group"
+                  aria-label="Reasoning effort"
+                >
+                  <div className={styles.composeModelEffortHeader}>
+                    <span className={styles.controlLabelWithInfo}>
+                      <span>Effort</span>
+                      <PanelSectionInfo
+                        id="compose-model-effort-info"
+                        label="About reasoning effort"
+                        variant="control"
+                      >
+                        Adjusts how much reasoning the selected model spends before answering.
+                      </PanelSectionInfo>
+                    </span>
+                    <span className={styles.composeModelEffortStatus}>
+                      <output>{REASONING_EFFORT_LABELS[effortControl.value]}</output>
+                      <button
+                        type="button"
+                        className={styles.composeModelEffortAutoToggle}
+                        data-active={effortAutoEnabled ? "true" : undefined}
+                        aria-pressed={effortAutoEnabled}
+                        disabled={effortControl.disabled}
+                        onClick={() => {
+                          if (effortAutoEnabled) {
+                            const nextValue =
+                              lastManualReasoningEffortRef.current === DEFAULT_REASONING_EFFORT
+                                ? DEFAULT_MANUAL_REASONING_EFFORT
+                                : lastManualReasoningEffortRef.current;
+                            lastEmittedReasoningEffortRef.current = nextValue;
+                            setEffortSliderPosition(
+                              reasoningEffortSliderPosition(nextValue)
+                            );
+                            effortControl.onChange(nextValue);
+                            return;
+                          }
+                          if (effortControl.value !== DEFAULT_REASONING_EFFORT) {
+                            lastManualReasoningEffortRef.current = effortControl.value;
+                          }
+                          const nextValue = DEFAULT_REASONING_EFFORT;
                           lastEmittedReasoningEffortRef.current = nextValue;
-                          setEffortSliderPosition(
-                            reasoningEffortSliderPosition(nextValue)
-                          );
                           effortControl.onChange(nextValue);
-                          return;
-                        }
-                        if (effortControl.value !== DEFAULT_REASONING_EFFORT) {
-                          lastManualReasoningEffortRef.current = effortControl.value;
-                        }
-                        const nextValue = DEFAULT_REASONING_EFFORT;
-                        lastEmittedReasoningEffortRef.current = nextValue;
-                        effortControl.onChange(nextValue);
-                      }}
-                    >
-                      <span>Auto</span>
-                      <span
-                        className={styles.composeModelEffortAutoToggleThumb}
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </span>
-                </div>
-                <div className={styles.composeModelEffortSliderShell}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={REASONING_EFFORT_SLIDER_MAX}
-                    step="any"
-                    value={effortSliderPosition}
-                    disabled={effortSliderDisabled}
-                    aria-label="Reasoning effort"
-                    aria-valuetext={REASONING_EFFORT_LABELS[effortControl.value]}
-                    onChange={(event) => {
-                      const nextPosition = Number(event.currentTarget.value);
-                      const nextValue = reasoningEffortFromSliderPosition(nextPosition);
-                      setEffortSliderPosition(nextPosition);
-                      if (nextValue !== effortControl.value) {
-                        lastManualReasoningEffortRef.current = nextValue;
-                        lastEmittedReasoningEffortRef.current = nextValue;
-                        effortControl.onChange(nextValue);
-                      }
-                    }}
-                  />
-                  <div className={styles.composeModelEffortTicks} aria-hidden="true">
-                    {REASONING_EFFORT_ANCHOR_LABELS.map((tick) => (
-                      <span key={tick.value}>{tick.label}</span>
-                    ))}
+                        }}
+                      >
+                        <span>Auto</span>
+                        <span
+                          className={styles.composeModelEffortAutoToggleThumb}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </span>
                   </div>
+                  <div className={styles.composeModelEffortSliderShell}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={REASONING_EFFORT_SLIDER_MAX}
+                      step="any"
+                      value={effortSliderPosition}
+                      disabled={effortSliderDisabled}
+                      aria-label="Reasoning effort"
+                      aria-valuetext={REASONING_EFFORT_LABELS[effortControl.value]}
+                      onChange={(event) => {
+                        const nextPosition = Number(event.currentTarget.value);
+                        const nextValue = reasoningEffortFromSliderPosition(nextPosition);
+                        setEffortSliderPosition(nextPosition);
+                        if (nextValue !== effortControl.value) {
+                          lastManualReasoningEffortRef.current = nextValue;
+                          lastEmittedReasoningEffortRef.current = nextValue;
+                          effortControl.onChange(nextValue);
+                        }
+                      }}
+                    />
+                    <div className={styles.composeModelEffortTicks} aria-hidden="true">
+                      {REASONING_EFFORT_ANCHOR_LABELS.map((tick) => (
+                        <span key={tick.value}>{tick.label}</span>
+                      ))}
+                    </div>
+                  </div>
+                  {effortControl.disabled && effortControl.disabledReason ? (
+                    <p className={styles.composeModelEffortHint}>
+                      {effortControl.disabledReason}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ) : null}
-          </div>
         </div>,
           document.body
         )}
@@ -14258,6 +15961,23 @@ function GlyphFeed({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
+interface PromptShortcutToggleTarget {
+  commandId?: string;
+  targetKey?: string;
+}
+
+const PROMPT_SHORTCUT_DEFAULT_TARGET_KEY = "__prompt__";
+
+function isPromptWildcardBraceTokenName(value: string): boolean {
+  if (isDisabledPromptWildcardToken(value)) return false;
+  if (parseBuiltInPromptWildcardReference(value)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(value.trim());
+}
+
+function promptShortcutToggleTargetKey(target?: PromptShortcutToggleTarget): string {
+  return target?.targetKey ?? target?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY;
+}
+
 interface MessageBodyProps {
   content: string;
   /** Assistant bubbles only: strips leaked <<<PRISM_TOOL>>>… blocks from display. */
@@ -14270,8 +15990,16 @@ interface MessageBodyProps {
   revealWordByWord?: boolean;
   /** Chat-mode effect: render each line as a distinct canvas row. */
   renderAsEphemeralLines?: boolean;
+  /** Zen-only: render YouTube links as click-to-load ambient video cards. */
+  youtubeEmbedsEnabled?: boolean;
   /** Optional display-only Zen placement metadata. */
   zenDisplay?: ZenDisplayMetadata;
+  /** Enables subtle Zen assistant text effects in the typed reveal path. */
+  zenTextEffectsEnabled?: boolean;
+  /** Zen-only: lift roleplay actions out of Markdown prose into ambient beats. */
+  zenActionsEnabled?: boolean;
+  /** Label used for the ambient action beat. */
+  zenActionActorLabel?: string;
   /** Zen keeps decorative color on user prose only. */
   suppressDecorativePrismText?: boolean;
   /** Current temporal phase for line-by-line dissolve choreography. */
@@ -14282,6 +16010,12 @@ interface MessageBodyProps {
   forcedVisibleTokenCount?: number;
   /** Assistant typing cadence key for mood-based reveal speed. */
   revealMoodKey?: NonNullable<Message["moodKey"]>;
+  /** Assistant dot glyph styling, matched to the bot's communication preset. */
+  typingVoicePreset?: BotVoicePreset;
+  /** Live timing controls for word reveal and dynamic pauses. */
+  chatRevealTiming?: ChatRevealTimingSettings;
+  /** Scales typed-word fade and letter stagger to match live reveal pacing. */
+  chatRevealAnimationMultiplier?: number;
   /** When set, `prism-bot://…` markdown links render as glyph + colored name. */
   mentionRenderBots?: readonly BotMentionPick[];
   resolvedTheme?: "light" | "dark";
@@ -14289,11 +16023,15 @@ interface MessageBodyProps {
   onOpenCommandMention?: (commandId: string) => void;
   promptShortcut?: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
-  pendingPromptWildcardCleanup?: boolean;
+  pendingMessageCleanup?: boolean;
+  cleanupRevealActive?: boolean;
   promptShortcutColorIndex?: number;
   promptShortcutExpanded?: boolean;
+  expandedPromptShortcutTargetKeys?: ReadonlySet<string>;
+  promptShortcutPresentation?: PromptShortcutPresentation;
+  promptShortcutUnfolded?: boolean;
   renderPromptMetadataAsProse?: boolean;
-  onTogglePromptShortcut?: () => void;
+  onTogglePromptShortcut?: (target?: PromptShortcutToggleTarget) => void;
   onCollapsePromptShortcut?: () => void;
 }
 
@@ -14315,16 +16053,22 @@ function flattenMarkdownText(node: React.ReactNode): string {
   return flattenMarkdownText(element.props.children);
 }
 
-function promptShortcutLabel(promptShortcut: PromptShortcutMetadata): string {
-  const invocation = promptShortcut.invocation.trim();
-  return invocation || `/${promptShortcut.name}`;
-}
-
 function PendingWildcardShimmer({
   className,
+  sizeCh,
 }: {
   className?: string;
+  sizeCh?: number;
 }): React.JSX.Element {
+  const style =
+    typeof sizeCh === "number" && Number.isFinite(sizeCh) && sizeCh > 0
+      ? ({
+          ["--pending-wildcard-shimmer-size" as string]: `${Math.max(
+            3.8,
+            Math.min(22, sizeCh)
+          )}ch`,
+        } as React.CSSProperties)
+      : undefined;
   return (
     <span
       className={
@@ -14332,59 +16076,83 @@ function PendingWildcardShimmer({
           ? `${styles.pendingWildcardShimmer} ${className}`
           : styles.pendingWildcardShimmer
       }
+      style={style}
       aria-hidden="true"
     />
   );
 }
 
-function PendingPromptWildcardCleanupMessage({
-  content,
-}: {
-  content: string;
-}): React.JSX.Element {
-  const source = content.trim();
+function renderPendingWildcardTextPlaceholders(
+  value: string,
+  keyPrefix: string
+): React.ReactNode {
+  if (!value.includes(PENDING_COMPOSER_WILDCARD_SLOT_TEXT)) return value;
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
+  let index = value.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT);
   let matchCount = 0;
-  let index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT);
   while (index >= 0) {
     if (index > cursor) {
-      nodes.push(source.slice(cursor, index));
+      nodes.push(value.slice(cursor, index));
     }
     nodes.push(
       <PendingWildcardShimmer
-        key={`pending-wildcard-${index}-${matchCount}`}
+        key={`${keyPrefix}-pending-wildcard-${matchCount}`}
         className={styles.pendingPromptWildcardShimmer}
       />
     );
     matchCount += 1;
     cursor = index + PENDING_COMPOSER_WILDCARD_SLOT_TEXT.length;
-    index = source.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT, cursor);
+    index = value.indexOf(PENDING_COMPOSER_WILDCARD_SLOT_TEXT, cursor);
   }
-  if (matchCount > 0 && cursor < source.length) {
-    nodes.push(source.slice(cursor));
+  if (cursor < value.length) {
+    nodes.push(value.slice(cursor));
   }
-
-  return (
-    <p className={styles.pendingPromptWildcardMessage} aria-label="Preparing prompt">
-      {matchCount > 0 ? (
-        nodes
-      ) : (
-        <PendingWildcardShimmer className={styles.pendingPromptWildcardShimmer} />
-      )}
-    </p>
-  );
+  return nodes;
 }
 
-function promptShortcutRendersAsStandalone(
+function renderPendingWildcardPlaceholders(
+  node: React.ReactNode,
+  enabled: boolean,
+  keyPrefix = "pending-wildcard"
+): React.ReactNode {
+  if (!enabled) return node;
+  if (node == null || typeof node === "boolean") return node;
+  if (typeof node === "string") {
+    return renderPendingWildcardTextPlaceholders(node, keyPrefix);
+  }
+  if (typeof node === "number") return node;
+  if (Array.isArray(node)) {
+    return node.map((child, index) =>
+      renderPendingWildcardPlaceholders(child, enabled, `${keyPrefix}-${index}`)
+    );
+  }
+  if (!isValidElement(node)) return node;
+  const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+  if (element.props.children === undefined) return node;
+  return cloneElement(element, {
+    children: renderPendingWildcardPlaceholders(
+      element.props.children,
+      enabled,
+      `${keyPrefix}-child`
+    ),
+  });
+}
+
+function promptShortcutShouldRenderAsComposerText(
   content: string,
-  promptShortcut: PromptShortcutMetadata
+  promptShortcut: PromptShortcutMetadata,
+  forceComposerText: boolean
 ): boolean {
-  const visible = content.trim();
-  if (!visible) return false;
-  if (visible === promptShortcut.invocation.trim()) return true;
+  if (forceComposerText) return true;
+  const template = promptShortcut.template?.trim() ?? "";
+  const invocation = promptShortcut.invocation.trim();
+  if (template) return template !== invocation;
+  const visibleContent = content.trim();
+  if (!visibleContent) return false;
   const resolvedPrompt = promptShortcut.resolvedPrompt?.trim() ?? "";
-  return resolvedPrompt.length > 0 && visible === resolvedPrompt;
+  if (resolvedPrompt && visibleContent === resolvedPrompt) return false;
+  return visibleContent !== invocation;
 }
 
 function linkPromptShortcutTokensForMarkdown(
@@ -14421,42 +16189,8 @@ function linkPromptShortcutTokensForMarkdown(
     const token = source.slice(range.start, range.end);
     const label = escapeMarkdownLinkLabel(token);
     linked = `${linked.slice(0, range.start)}[${label}](${prismCommandMentionHref(
-      command.id
-    )})${linked.slice(range.end)}`;
-  }
-  return linked;
-}
-
-function linkWildcardDeckTokensForMarkdown(
-  source: string,
-  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
-): string {
-  if (!source || !commandMentionsById || commandMentionsById.size === 0) {
-    return source;
-  }
-  const commandByInvocationName = new Map<string, CommandCenterCommand>();
-  const wildcardNames: string[] = [];
-  for (const command of commandMentionsById.values()) {
-    if (!isComposerWildcardDeckPick(command)) continue;
-    for (const name of commandInvocationNames(command)) {
-      const normalized = name.trim().toLowerCase();
-      if (!normalized || commandByInvocationName.has(normalized)) continue;
-      commandByInvocationName.set(normalized, command);
-      wildcardNames.push(name);
-    }
-  }
-  const ranges = resolveWildcardDeckTextRanges(source, { wildcardNames });
-  if (ranges.length === 0) return source;
-
-  let linked = source;
-  for (let index = ranges.length - 1; index >= 0; index -= 1) {
-    const range = ranges[index]!;
-    const command = commandByInvocationName.get(range.name.toLowerCase());
-    if (!command) continue;
-    const token = source.slice(range.start, range.end);
-    const label = escapeMarkdownLinkLabel(token);
-    linked = `${linked.slice(0, range.start)}[${label}](${prismCommandMentionHref(
-      command.id
+      command.id,
+      range.start
     )})${linked.slice(range.end)}`;
   }
   return linked;
@@ -14492,6 +16226,8 @@ function renderPromptShortcutPromptSent(
   }
   return nodes;
 }
+
+const PROMPT_CANVAS_UNRESOLVED_WILDCARD_RE = /\{([^{}\r\n]{1,80})\}/gu;
 
 function promptShortcutWildcardReplacementsForPromptText(
   promptSent: string,
@@ -14531,27 +16267,386 @@ function promptShortcutWildcardReplacementsForPromptText(
     );
 }
 
-function PromptShortcutUnfoldedMessage({
-  promptShortcut,
-  fullPrompt,
-}: {
-  promptShortcut: PromptShortcutMetadata;
-  fullPrompt: string;
-}) {
-  const displayPromptBody = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
-  const promptBodyHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
-    displayPromptBody,
-    promptShortcutWildcardReplacementsForPromptText(
-      displayPromptBody,
-      promptShortcut.wildcardReplacements
+function promptWildcardReplacementKey(value: string): string {
+  const builtInReference = parseBuiltInPromptWildcardReference(value);
+  if (builtInReference) return builtInReference.key;
+  return value
+    .trim()
+    .replace(/[{}]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]+/giu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .toUpperCase();
+}
+
+interface PromptWildcardTemplateRange {
+  start: number;
+  end: number;
+  key: string;
+}
+
+function replacePromptWildcardRangesWithPendingStrips(
+  source: string,
+  ranges: readonly { start?: number; end?: number }[]
+): string {
+  if (!source || ranges.length === 0) return source;
+  const normalizedRanges = [...ranges]
+    .map((range): Pick<PromptWildcardTemplateRange, "start" | "end"> | null => {
+      if (typeof range.start !== "number" || typeof range.end !== "number") {
+        return null;
+      }
+      const start = Math.floor(range.start);
+      const end = Math.floor(range.end);
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        start < 0 ||
+        end <= start ||
+        end > source.length
+      ) {
+        return null;
+      }
+      return { start, end };
+    })
+    .filter((range): range is Pick<PromptWildcardTemplateRange, "start" | "end"> =>
+      range !== null
+    )
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .filter((range, index, sorted) => {
+      const previous = sorted[index - 1];
+      return !previous || range.start >= previous.end;
+    });
+  if (normalizedRanges.length === 0) return source;
+  let output = "";
+  let cursor = 0;
+  for (const range of normalizedRanges) {
+    output += source.slice(cursor, range.start);
+    output += PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
+    cursor = range.end;
+  }
+  output += source.slice(cursor);
+  return output;
+}
+
+function promptWildcardTemplateAutoRevealRanges(
+  source: string,
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): PromptWildcardTemplateRange[] {
+  const ranges: PromptWildcardTemplateRange[] = [];
+  const commandByInvocationName = new Map<string, CommandCenterCommand>();
+  const wildcardNames: string[] = [];
+  for (const command of commandMentionsById?.values() ?? []) {
+    if (!isComposerTrueWildcardSlotPick(command) && !isComposerWildcardDeckPick(command)) {
+      continue;
+    }
+    for (const name of commandInvocationNames(command)) {
+      const normalized = name.trim().toLowerCase();
+      if (!normalized || commandByInvocationName.has(normalized)) continue;
+      commandByInvocationName.set(normalized, command);
+      wildcardNames.push(name);
+    }
+  }
+  for (const range of resolveWildcardDeckTextRanges(source, { wildcardNames })) {
+    const command = commandByInvocationName.get(range.name.toLowerCase());
+    const key = command
+      ? isComposerTrueWildcardSlotPick(command)
+        ? composerTrueWildcardSlotKey(command)
+        : promptWildcardReplacementKey(command.name)
+      : null;
+    if (!key) continue;
+    ranges.push({ start: range.start, end: range.end, key });
+  }
+  for (const match of source.matchAll(PROMPT_CANVAS_UNRESOLVED_WILDCARD_RE)) {
+    const raw = match[0] ?? "";
+    const name = match[1] ?? "";
+    const start = match.index ?? -1;
+    if (!raw || start < 0) continue;
+    if (!isPromptWildcardBraceTokenName(name)) continue;
+    ranges.push({
+      start,
+      end: start + raw.length,
+      key: promptWildcardReplacementKey(raw),
+    });
+  }
+  const optionGroupRe = /\{[^{}\r\n]*\|[^{}\r\n]*\}/gu;
+  for (const match of source.matchAll(optionGroupRe)) {
+    const raw = match[0] ?? "";
+    const start = match.index ?? -1;
+    if (!raw || start < 0) continue;
+    ranges.push({ start, end: start + raw.length, key: "OPTION" });
+  }
+  return ranges
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .filter((range, index, sorted) => {
+      const previous = sorted[index - 1];
+      return !previous || range.start >= previous.end;
+    });
+}
+
+function promptWildcardPendingTemplateRanges(
+  source: string,
+  promptWildcards: PromptWildcardRunMetadata | undefined,
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): PromptWildcardTemplateRange[] {
+  const ranges = promptWildcardTemplateAutoRevealRanges(source, commandMentionsById);
+  const knownReplacementKeys = new Set(
+    (promptWildcards?.wildcardReplacements ?? []).map((replacement) =>
+      promptWildcardReplacementKey(replacement.key)
     )
   );
+  if (knownReplacementKeys.size > 0) {
+    const bangDeckRe = /(^|[^\w])(![a-z0-9][a-z0-9_-]*)\b/giu;
+    for (const match of source.matchAll(bangDeckRe)) {
+      const raw = match[2] ?? "";
+      const prefix = match[1] ?? "";
+      const matchStart = match.index ?? -1;
+      const start = matchStart + prefix.length;
+      if (!raw || start < 0) continue;
+      const key = promptWildcardReplacementKey(raw);
+      if (!knownReplacementKeys.has(key)) continue;
+      ranges.push({ start, end: start + raw.length, key });
+    }
+  }
+  return ranges
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .filter((range, index, sorted) => {
+      const previous = sorted[index - 1];
+      return !previous || range.start >= previous.end;
+    });
+}
+
+function promptWildcardPendingCanvasSource({
+  fullSource,
+  promptWildcards,
+  commandMentionsById,
+}: {
+  fullSource: string;
+  promptWildcards?: PromptWildcardRunMetadata;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+}): string {
+  const template = promptWildcards?.template?.trim() || fullSource;
+  if (!template) return fullSource;
+  const pendingSource = replacePromptWildcardRangesWithPendingStrips(
+    template,
+    promptWildcardPendingTemplateRanges(template, promptWildcards, commandMentionsById)
+  );
+  if (pendingSource !== template) return pendingSource;
+  return maskModelFilledWildcardSlotsForPending(
+    template,
+    PENDING_COMPOSER_WILDCARD_SLOT_TEXT
+  );
+}
+
+function promptShortcutPendingCanvasSource({
+  fullSource,
+  promptShortcut,
+  promptWildcards,
+  commandMentionsById,
+}: {
+  fullSource: string;
+  promptShortcut: PromptShortcutMetadata;
+  promptWildcards?: PromptWildcardRunMetadata;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+}): string {
+  if (promptWildcards) {
+    return promptWildcardPendingCanvasSource({
+      fullSource,
+      promptWildcards,
+      commandMentionsById,
+    });
+  }
+  const resolvedPrompt = promptShortcut.resolvedPrompt?.trim() || "";
+  if (resolvedPrompt && (promptShortcut.wildcardReplacements?.length ?? 0) > 0) {
+    return replacePromptWildcardRangesWithPendingStrips(
+      resolvedPrompt,
+      promptShortcut.wildcardReplacements ?? []
+    );
+  }
+  if (resolvedPrompt && promptContainsModelFilledWildcardSlots(resolvedPrompt)) {
+    return promptWildcardPendingCanvasSource({
+      fullSource: resolvedPrompt,
+      commandMentionsById,
+    });
+  }
+  return promptWildcardPendingCanvasSource({
+    fullSource,
+    commandMentionsById,
+  });
+}
+
+function applyPromptWildcardTemplateAutoReveal(
+  source: string,
+  promptWildcards: PromptWildcardRunMetadata | undefined,
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>
+): string {
+  if (!source || !promptWildcards?.wildcardReplacements?.length) return source;
+  const replacements = promptWildcards.wildcardReplacements;
+  if (replacements.length === 0) return source;
+  const usedReplacementIndexes = new Set<number>();
+  const takeReplacement = (key: string): PromptShortcutWildcardReplacement | null => {
+    const normalizedKey = promptWildcardReplacementKey(key);
+    const matchingIndex = replacements.findIndex(
+      (replacement, index) =>
+        !usedReplacementIndexes.has(index) &&
+        promptWildcardReplacementKey(replacement.key) === normalizedKey
+    );
+    if (matchingIndex < 0) return null;
+    usedReplacementIndexes.add(matchingIndex);
+    return replacements[matchingIndex] ?? null;
+  };
+  const ranges = promptWildcardTemplateAutoRevealRanges(source, commandMentionsById);
+  if (ranges.length === 0) return source;
+  let output = "";
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start < cursor) continue;
+    const replacement = takeReplacement(range.key);
+    if (!replacement) continue;
+    output += source.slice(cursor, range.start);
+    output += replacement.value;
+    cursor = range.end;
+  }
+  output += source.slice(cursor);
+  return output;
+}
+
+function promptShortcutCanvasSourceWithResolvedWildcards({
+  fullSource,
+  promptShortcut,
+  promptWildcards,
+  commandMentionsById,
+  pendingMessageCleanup,
+}: {
+  fullSource: string;
+  promptShortcut: PromptShortcutMetadata;
+  promptWildcards?: PromptWildcardRunMetadata;
+  commandMentionsById?: ReadonlyMap<string, CommandCenterCommand>;
+  pendingMessageCleanup?: boolean;
+}): string {
+  const template = promptShortcut.template?.trim() || fullSource;
+  const pendingResolvedPrompt =
+    pendingMessageCleanup === true &&
+    fullSource.includes(PENDING_COMPOSER_WILDCARD_SLOT_TEXT)
+      ? fullSource.trim()
+      : "";
+  const resolvedPrompt =
+    pendingResolvedPrompt ||
+    promptWildcards?.resolvedPrompt?.trim() ||
+    promptShortcut.resolvedPrompt?.trim() ||
+    "";
+  const promptRuns = [...(promptShortcut.promptRuns ?? [])]
+    .filter(
+      (run) =>
+        typeof run.sourceStart === "number" &&
+        typeof run.sourceEnd === "number" &&
+        run.sourceEnd > run.sourceStart &&
+        run.sourceEnd <= template.length &&
+        run.resolvedPrompt.trim().length > 0
+    )
+    .sort((a, b) => (a.sourceStart ?? 0) - (b.sourceStart ?? 0));
+  if (!resolvedPrompt || promptRuns.length === 0) {
+    return applyPromptWildcardTemplateAutoReveal(
+      template,
+      promptWildcards,
+      commandMentionsById
+    );
+  }
+
+  let rendered = "";
+  let sourceCursor = 0;
+  let resolvedCursor = 0;
+  for (const run of promptRuns) {
+    const sourceStart = run.sourceStart ?? -1;
+    const sourceEnd = run.sourceEnd ?? -1;
+    if (sourceStart < sourceCursor || sourceEnd <= sourceStart) {
+      return applyPromptWildcardTemplateAutoReveal(
+        template,
+        promptWildcards,
+        commandMentionsById
+      );
+    }
+    const runPrompt = run.resolvedPrompt.trim();
+    const runPromptForLookup =
+      pendingResolvedPrompt &&
+      runPrompt.includes("{") &&
+      promptContainsModelFilledWildcardSlots(runPrompt)
+        ? maskModelFilledWildcardSlotsForPending(
+            runPrompt,
+            PENDING_COMPOSER_WILDCARD_SLOT_TEXT
+          )
+        : runPrompt;
+    const resolvedIndex = resolvedPrompt.indexOf(runPromptForLookup, resolvedCursor);
+    if (resolvedIndex < 0) {
+      if (pendingResolvedPrompt) {
+        return pendingResolvedPrompt;
+      }
+      return applyPromptWildcardTemplateAutoReveal(
+        template,
+        promptWildcards,
+        commandMentionsById
+      );
+    }
+    rendered += resolvedPrompt.slice(resolvedCursor, resolvedIndex);
+    rendered += template.slice(sourceStart, sourceEnd);
+    sourceCursor = sourceEnd;
+    resolvedCursor = resolvedIndex + runPromptForLookup.length;
+  }
+  rendered += resolvedPrompt.slice(resolvedCursor);
+  return rendered.trim() || template;
+}
+
+function promptShortcutRunForCommand(
+  promptShortcut: PromptShortcutMetadata | undefined,
+  commandId: string,
+  sourceStart?: number | null
+): PromptShortcutRunMetadata | undefined {
+  if (
+    typeof sourceStart === "number" &&
+    Number.isInteger(sourceStart) &&
+    sourceStart >= 0
+  ) {
+    const matchingRun = promptShortcut?.promptRuns?.find(
+      (run) => run.commandId === commandId && run.sourceStart === sourceStart
+    );
+    if (matchingRun) return matchingRun;
+  }
+  return promptShortcut?.promptRuns?.find((run) => run.commandId === commandId);
+}
+
+// Flip off to let Zen prompt-shortcut messages use the normal preview capsule again.
+const ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD = true;
+
+function PromptShortcutExpandedInline({
+  promptSent,
+  replacements,
+  colorIndex,
+}: {
+  promptSent: string;
+  replacements?: readonly PromptShortcutWildcardReplacement[];
+  colorIndex?: number;
+}): React.JSX.Element {
+  const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
+    promptSent,
+    promptShortcutWildcardReplacementsForPromptText(promptSent, replacements)
+  );
+  const expandedStyle = {
+    ["--prompt-shortcut-expanded-font-cap" as string]: `${promptShortcutExpandedPromptFontCapPx(
+      promptSent
+    )}px`,
+    ...(promptSentHighlightRanges.length > 0
+      ? {
+          ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
+        }
+      : {}),
+  } as React.CSSProperties;
   return (
-    <p className={styles.promptShortcutUnfoldedText}>
-      <span className={styles.promptShortcutUnfoldedInsertion}>
-        {renderPromptShortcutPromptSent(displayPromptBody, promptBodyHighlightRanges)}
-      </span>
-    </p>
+    <span
+      className={styles.promptShortcutExpandedProse}
+      style={expandedStyle}
+      data-prompt-shortcut-preview="true"
+    >
+      {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
+    </span>
   );
 }
 
@@ -14559,184 +16654,75 @@ function PromptShortcutMessage({
   promptShortcut,
   fullPrompt,
   colorIndex,
+  presentation,
   expanded,
+  disabled,
   onToggle,
-  onCollapse,
-  onOpenPrompt,
 }: {
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
   colorIndex?: number;
+  presentation: PromptShortcutPresentation;
   expanded: boolean;
+  disabled?: boolean;
   onToggle?: () => void;
-  onCollapse?: () => void;
-  onOpenPrompt?: (commandId: string) => void;
 }) {
-  const label = promptShortcutLabel(promptShortcut);
-  const promptSent = promptShortcut.resolvedPrompt?.trim() || fullPrompt.trim();
-  const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
-    promptSent,
-    promptShortcutWildcardReplacementsForPromptText(
-      promptSent,
-      promptShortcut.wildcardReplacements
-    )
-  );
-  const wildcardHighlightStyle =
-    promptSentHighlightRanges.length > 0
-      ? ({
-          ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
-        } as React.CSSProperties)
-      : undefined;
+  const label = promptShortcutChipLabel(promptShortcut);
+  const expandable = presentation === "expandable";
+  const popout = presentation === "popout";
+  const previewExpanded = (expandable || popout) && expanded;
+  const promptSent = promptShortcutResolvedPromptText(promptShortcut, fullPrompt);
   return (
     <span
       className={styles.promptShortcutInline}
-      data-prompt-shortcut-preview="true"
-      data-expanded={expanded ? "true" : undefined}
+      data-prompt-shortcut-preview={expandable || popout ? "true" : undefined}
+      data-prompt-shortcut-presentation={presentation}
+      data-expanded={previewExpanded ? "true" : undefined}
     >
-      <button
-        type="button"
-        className={styles.promptShortcutCapsule}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Expand"} prompt shortcut ${label}`}
-      >
-        <span>{label.replace(/^\/+/, "")}</span>
-      </button>
-      {expanded && (
-        <span className={styles.promptShortcutPreview} role="group" aria-label="Prompt shortcut preview">
-          <span className={styles.promptShortcutPreviewHeader}>
-            <span className={styles.promptShortcutPreviewTitle}>{label}</span>
-            <span className={styles.promptShortcutPreviewActions}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenPrompt?.(promptShortcut.commandId);
-                }}
-              >
-                Edit prompt
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCollapse?.();
-                }}
-              >
-                Collapse
-              </button>
-            </span>
-          </span>
-          {promptShortcut.passthrough && (
-            <span className={styles.promptShortcutPreviewSection}>
-              <span>User request</span>
-              <span>{promptShortcut.passthrough}</span>
-            </span>
-          )}
-          <span className={styles.promptShortcutPreviewSection}>
-            <span>Prompt sent</span>
-            <code style={wildcardHighlightStyle}>
-              {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
-            </code>
-          </span>
+      {expandable || popout ? (
+        <button
+          type="button"
+          className={styles.promptShortcutCapsule}
+          disabled={disabled}
+          data-prompt-shortcut-pending={disabled ? "true" : undefined}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (disabled) return;
+            if (event.detail >= 2) return;
+            onToggle?.();
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (disabled) return;
+            onToggle?.();
+          }}
+          aria-expanded={disabled ? undefined : previewExpanded}
+          aria-label={
+            disabled
+              ? `Prompt shortcut ${label} is waiting for wildcards`
+              : `${previewExpanded ? (popout ? "Hide" : "Collapse") : popout ? "Show" : "Expand"} prompt shortcut ${label}`
+          }
+        >
+          <span>{label}</span>
+        </button>
+      ) : (
+        <span
+          className={styles.promptShortcutCapsule}
+          data-prompt-shortcut-locked="true"
+          aria-label={`Prompt shortcut ${label}`}
+        >
+          <span>{label}</span>
         </span>
       )}
-    </span>
-  );
-}
-
-function PromptWildcardRunMessage({
-  promptWildcards,
-  fullPrompt,
-  colorIndex,
-  expanded,
-  onToggle,
-  onCollapse,
-  children,
-}: {
-  promptWildcards: PromptWildcardRunMetadata;
-  fullPrompt: string;
-  colorIndex?: number;
-  expanded: boolean;
-  onToggle?: () => void;
-  onCollapse?: () => void;
-  children: React.ReactNode;
-}) {
-  const promptSent = promptWildcards.resolvedPrompt?.trim() || fullPrompt.trim();
-  const promptSentHighlightRanges = resolvePromptShortcutPreviewHighlightRanges(
-    promptSent,
-    promptShortcutWildcardReplacementsForPromptText(
-      promptSent,
-      promptWildcards.wildcardReplacements
-    )
-  );
-  const wildcardHighlightStyle =
-    promptSentHighlightRanges.length > 0
-      ? ({
-          ["--prompt-shortcut-wildcard-color" as string]: promptShortcutWildcardColor(colorIndex),
-        } as React.CSSProperties)
-      : undefined;
-  return (
-    <div
-      className={`${styles.promptShortcutInline} ${styles.promptWildcardRunInline}`}
-      data-prompt-wildcards-preview="true"
-      data-expanded={expanded ? "true" : undefined}
-    >
-      <div>{children}</div>
-      <button
-        type="button"
-        className={`${styles.promptShortcutCapsule} ${styles.promptWildcardCapsule}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggle?.();
-        }}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Expand"} wildcard preview`}
-      >
-        <span>!wildcards</span>
-      </button>
-      {expanded && (
-        <div className={styles.promptShortcutPreview} role="group" aria-label="Wildcard preview">
-          <span className={styles.promptShortcutPreviewHeader}>
-            <span className={styles.promptShortcutPreviewTitle}>Wildcard run</span>
-            <span className={styles.promptShortcutPreviewActions}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCollapse?.();
-                }}
-              >
-                Collapse
-              </button>
-            </span>
-          </span>
-          <span className={styles.promptShortcutPreviewSection}>
-            <span>Template</span>
-            <code>{promptWildcards.template}</code>
-          </span>
-          <span className={styles.promptShortcutPreviewSection}>
-            <span>Prompt sent</span>
-            <code style={wildcardHighlightStyle}>
-              {renderPromptShortcutPromptSent(promptSent, promptSentHighlightRanges)}
-            </code>
-          </span>
-        </div>
+      {previewExpanded && (
+        <PromptShortcutExpandedInline
+          promptSent={promptSent}
+          replacements={promptShortcut.wildcardReplacements}
+          colorIndex={colorIndex}
+        />
       )}
-    </div>
+    </span>
   );
 }
 
@@ -14750,13 +16736,41 @@ function WildcardDeckValuesInput({
   onChange: (nextValue: string) => void;
 }): React.JSX.Element {
   const values = useMemo(() => normalizeWildcardDeckValueList(value), [value]);
-  const valueKeys = useMemo(
-    () => new Set(values.map((item) => normalizeWildcardDeckValueKey(item))),
+  const valueEntries = useMemo(
+    () =>
+      values.map((item) => ({
+        item,
+        key: normalizeWildcardDeckValueKey(item),
+      })),
     [values]
+  );
+  const valueKeys = useMemo(
+    () => new Set(valueEntries.map((item) => item.key)),
+    [valueEntries]
   );
   const [draftValue, setDraftValue] = useState("");
   const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null);
+  const [selectedValueKeys, setSelectedValueKeys] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [selectionMarquee, setSelectionMarquee] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const valueBoxRef = useRef<HTMLDivElement | null>(null);
+  const valueChipRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const selectionDragRef = useRef<{
+    pointerId: number;
+    originX: number;
+    originY: number;
+    baseKeys: Set<string>;
+    mode: "replace" | "add" | "remove";
+    moved: boolean;
+  } | null>(null);
+  const suppressNextChipClickRef = useRef(false);
   const draftDuplicateValue = useMemo(() => {
     const [normalizedDraft] = normalizeWildcardDeckValueList(draftValue);
     return normalizedDraft && valueKeys.has(normalizeWildcardDeckValueKey(normalizedDraft))
@@ -14766,6 +16780,20 @@ function WildcardDeckValuesInput({
   const duplicateMessage = draftDuplicateValue
     ? `Already added "${draftDuplicateValue}".`
     : duplicateNotice;
+  const selectedValueCount = useMemo(
+    () =>
+      valueEntries.reduce(
+        (count, item) => count + (selectedValueKeys.has(item.key) ? 1 : 0),
+        0
+      ),
+    [selectedValueKeys, valueEntries]
+  );
+  const valueInflectionMode = useMemo(
+    () => inferWildcardDeckValueInflectionMode(values),
+    [values]
+  );
+  const valueInflectionLabel =
+    valueInflectionMode === "plural" ? "Make plural" : "Make singular";
 
   const updateValues = useCallback(
     (nextValues: readonly string[]) => {
@@ -14773,6 +16801,36 @@ function WildcardDeckValuesInput({
     },
     [onChange]
   );
+
+  const focusValueInputSoon = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    inputRef.current?.focus();
+  }, []);
+
+  const clearValueSelection = useCallback(() => {
+    setSelectedValueKeys((current) => (current.size === 0 ? current : new Set()));
+  }, []);
+
+  const selectAllValues = useCallback(() => {
+    if (valueEntries.length === 0) return;
+    setDuplicateNotice(null);
+    setSelectedValueKeys(new Set(valueEntries.map((item) => item.key)));
+    focusValueInputSoon();
+  }, [focusValueInputSoon, valueEntries]);
+
+  const removeSelectedValues = useCallback((): boolean => {
+    if (selectedValueKeys.size === 0) return false;
+    setDuplicateNotice(null);
+    updateValues(
+      values.filter((item) => !selectedValueKeys.has(normalizeWildcardDeckValueKey(item)))
+    );
+    setSelectedValueKeys(new Set());
+    focusValueInputSoon();
+    return true;
+  }, [focusValueInputSoon, selectedValueKeys, updateValues, values]);
 
   const commitInputValue = useCallback(
     (raw: unknown): boolean => {
@@ -14793,26 +16851,34 @@ function WildcardDeckValuesInput({
       }
       setDuplicateNotice(duplicateValue ? `Already added "${duplicateValue}".` : null);
       setDraftValue("");
+      clearValueSelection();
       if (nextUniqueItems.length === 0) return false;
       updateValues([...values, ...nextUniqueItems]);
       return true;
     },
-    [updateValues, valueKeys, values]
+    [clearValueSelection, updateValues, valueKeys, values]
   );
 
   const removeValueAt = useCallback(
     (index: number) => {
       setDuplicateNotice(null);
+      setSelectedValueKeys(new Set());
       updateValues(values.filter((_, itemIndex) => itemIndex !== index));
-      if (typeof window !== "undefined") {
-        window.requestAnimationFrame(() => inputRef.current?.focus());
-      }
+      focusValueInputSoon();
     },
-    [updateValues, values]
+    [focusValueInputSoon, updateValues, values]
   );
+
+  const toggleValueInflection = useCallback(() => {
+    if (values.length === 0) return;
+    setDuplicateNotice(null);
+    setSelectedValueKeys(new Set());
+    updateValues(inflectWildcardDeckValues(values, valueInflectionMode));
+  }, [updateValues, valueInflectionMode, values]);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const next = event.currentTarget.value;
+    clearValueSelection();
     if (!WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE.test(next)) {
       setDuplicateNotice(null);
       setDraftValue(next);
@@ -14830,6 +16896,7 @@ function WildcardDeckValuesInput({
   };
 
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (event.defaultPrevented) return;
     const isDelimiter =
       event.key === "," ||
       event.key === ";" ||
@@ -14855,6 +16922,42 @@ function WildcardDeckValuesInput({
     }
   };
 
+  const handleValueBoxKeyDownCapture = (
+    event: React.KeyboardEvent<HTMLDivElement>
+  ): void => {
+    const key = event.key.toLowerCase();
+    const isPlainSelectAll =
+      key === "a" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey;
+    if (isPlainSelectAll && valueEntries.length > 0) {
+      const target = event.target;
+      if (target === inputRef.current && draftValue.length > 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectAllValues();
+      return;
+    }
+    const isPlainRemove =
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey;
+    if (isPlainRemove && removeSelectedValues()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === "Escape" && selectedValueCount > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearValueSelection();
+      focusValueInputSoon();
+    }
+  };
+
   const handleInputPaste = (event: React.ClipboardEvent<HTMLInputElement>): void => {
     const text = event.clipboardData.getData("text");
     if (!WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE.test(text)) return;
@@ -14862,35 +16965,187 @@ function WildcardDeckValuesInput({
     commitInputValue(text);
   };
 
+  const updateDragSelection = useCallback(
+    (
+      drag: NonNullable<typeof selectionDragRef.current>,
+      clientX: number,
+      clientY: number
+    ) => {
+      const left = Math.min(drag.originX, clientX);
+      const top = Math.min(drag.originY, clientY);
+      const right = Math.max(drag.originX, clientX);
+      const bottom = Math.max(drag.originY, clientY);
+      const hitKeys = new Set<string>();
+      for (const { key } of valueEntries) {
+        const chip = valueChipRefs.current.get(key);
+        if (!chip) continue;
+        const rect = chip.getBoundingClientRect();
+        if (rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom) {
+          continue;
+        }
+        hitKeys.add(key);
+      }
+      if (drag.mode === "remove") {
+        const next = new Set(drag.baseKeys);
+        for (const key of hitKeys) {
+          next.delete(key);
+        }
+        setSelectedValueKeys(next);
+      } else if (drag.mode === "add") {
+        const next = new Set(drag.baseKeys);
+        for (const key of hitKeys) {
+          next.add(key);
+        }
+        setSelectedValueKeys(next);
+      } else {
+        setSelectedValueKeys(hitKeys);
+      }
+      setSelectionMarquee({
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+      });
+    },
+    [valueEntries]
+  );
+
+  const finishDragSelection = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = selectionDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (!drag.moved) {
+        const target = event.target instanceof Element ? event.target : null;
+        const clickedChip = target?.closest('[data-wildcard-value-chip="true"]');
+        if (!clickedChip && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+          clearValueSelection();
+        }
+      }
+      selectionDragRef.current = null;
+      setSelectionMarquee(null);
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          suppressNextChipClickRef.current = false;
+        });
+      } else {
+        suppressNextChipClickRef.current = false;
+      }
+    },
+    [clearValueSelection]
+  );
+
+  const handleValueBoxPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>
+  ): void => {
+    if (event.button !== 0 || !event.isPrimary || values.length === 0) return;
+    if (event.target === inputRef.current) return;
+    selectionDragRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originY: event.clientY,
+      baseKeys: new Set(selectedValueKeys),
+      mode: event.altKey
+        ? "remove"
+        : event.ctrlKey || event.metaKey || event.shiftKey
+          ? "add"
+          : "replace",
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleValueBoxPointerMove = (
+    event: React.PointerEvent<HTMLDivElement>
+  ): void => {
+    const drag = selectionDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - drag.originX, event.clientY - drag.originY);
+    if (!drag.moved && distance < 4) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      suppressNextChipClickRef.current = true;
+    }
+    event.preventDefault();
+    updateDragSelection(drag, event.clientX, event.clientY);
+  };
+
   return (
     <>
+      <div className={styles.promptCenterWildcardValuesHeader}>
+        <span>Values</span>
+        <button
+          type="button"
+          onClick={toggleValueInflection}
+          disabled={values.length === 0}
+          title={
+            values.length === 0
+              ? "Add values before changing singular or plural form"
+              : `${valueInflectionLabel} values`
+          }
+        >
+          {valueInflectionLabel}
+        </button>
+      </div>
       <div
+        ref={valueBoxRef}
         className={styles.promptCenterWildcardValueBox}
         data-invalid={duplicateMessage ? "true" : undefined}
-        onClick={() => inputRef.current?.focus()}
+        data-selecting={selectionMarquee ? "true" : undefined}
+        onClick={(event) => {
+          if (suppressNextChipClickRef.current) {
+            event.preventDefault();
+            return;
+          }
+          inputRef.current?.focus();
+        }}
+        onKeyDownCapture={handleValueBoxKeyDownCapture}
+        onPointerDown={handleValueBoxPointerDown}
+        onPointerMove={handleValueBoxPointerMove}
+        onPointerUp={finishDragSelection}
+        onPointerCancel={finishDragSelection}
       >
-        {values.map((item, index) => (
-          <button
-            key={`${item}-${index}`}
-            type="button"
-            className={styles.promptCenterWildcardValueChip}
-            onClick={(event) => {
-              event.stopPropagation();
-              removeValueAt(index);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Backspace" && event.key !== "Delete") return;
-              event.preventDefault();
-              event.stopPropagation();
-              removeValueAt(index);
-            }}
-            aria-label={`Remove wildcard value ${item}`}
-            title="Remove value"
-          >
-            <span>{item}</span>
-            <span aria-hidden="true">×</span>
-          </button>
-        ))}
+        {valueEntries.map(({ item, key }, index) => {
+          const selected = selectedValueKeys.has(key);
+          return (
+            <button
+              key={`${item}-${index}`}
+              ref={(node) => {
+                if (node) {
+                  valueChipRefs.current.set(key, node);
+                } else {
+                  valueChipRefs.current.delete(key);
+                }
+              }}
+              type="button"
+              className={styles.promptCenterWildcardValueChip}
+              data-selected={selected ? "true" : undefined}
+              data-wildcard-value-chip="true"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (suppressNextChipClickRef.current) {
+                  event.preventDefault();
+                  return;
+                }
+                removeValueAt(index);
+              }}
+              onKeyDown={(event) => {
+                if (event.defaultPrevented) return;
+                if (event.key !== "Backspace" && event.key !== "Delete") return;
+                event.preventDefault();
+                event.stopPropagation();
+                removeValueAt(index);
+              }}
+              aria-label={`Remove wildcard value ${item}`}
+              title="Remove value"
+            >
+              <span>{item}</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          );
+        })}
         <input
           ref={inputRef}
           type="text"
@@ -14903,16 +17158,31 @@ function WildcardDeckValuesInput({
           }}
           placeholder={values.length > 0 ? "Add another value" : "lemon, potato; chicken"}
           spellCheck={true}
+          aria-label="Wildcard values"
           aria-invalid={duplicateMessage ? "true" : undefined}
         />
       </div>
+      {selectionMarquee && (
+        <span
+          className={styles.promptCenterWildcardSelectionMarquee}
+          style={{
+            left: selectionMarquee.left,
+            top: selectionMarquee.top,
+            width: selectionMarquee.width,
+            height: selectionMarquee.height,
+          }}
+          aria-hidden="true"
+        />
+      )}
       <span
         className={styles.promptCenterWildcardValueHint}
         data-invalid={duplicateMessage ? "true" : undefined}
         aria-live="polite"
       >
         {duplicateMessage ??
-          `${values.length} value${values.length === 1 ? "" : "s"}`}
+          (selectedValueCount > 0
+            ? `${selectedValueCount} selected`
+            : `${values.length} value${values.length === 1 ? "" : "s"}`)}
       </span>
     </>
   );
@@ -15108,10 +17378,6 @@ function buildProgressiveMarkdownSource(
   }
   output += takeLeadingTokens(tail, remainingTailTokens);
   return output;
-}
-
-function normalizeFencedCodeBlockLeadingNewline(text: string): string {
-  return text.replace(/([^\n])(```[^\n\r]*\r?\n)/g, "$1\n$2");
 }
 
 function resolveMarkdownCodeLanguageAccent(language?: string): string | null {
@@ -15447,102 +17713,58 @@ function resolveMessageDisplayContent(message: Message): string {
     : message.content;
 }
 
-function splitChatModeRevealTokenForEllipsis(token: string): string[] {
-  const trailingWhitespace = token.match(/\s+$/u)?.[0] ?? "";
-  const core = trailingWhitespace ? token.slice(0, -trailingWhitespace.length) : token;
-  if (core.length === 0) return [token];
-  if (isChatModeEllipsisToken(token)) return [token];
-  if (core.endsWith("...") && core.length > 3) {
-    return [core.slice(0, -3), `...${trailingWhitespace}`];
+function resolveMessageVisualSizingContent(message: Message): string {
+  if (
+    message.role === "user" &&
+    message.promptShortcut &&
+    !promptShortcutShouldRenderAsComposerText(message.content, message.promptShortcut, false)
+  ) {
+    return promptShortcutVisualSizingText(message.promptShortcut);
   }
-  if (core.endsWith("…") && core.length > 1) {
-    return [core.slice(0, -1), `…${trailingWhitespace}`];
-  }
-  return [token];
+  return resolveMessageDisplayContent(message);
 }
 
 function tokenizeMessageReveal(text: string): string[] {
-  const rawTokens = text.match(/\S+\s*/g) ?? [];
-  return rawTokens.flatMap(splitChatModeRevealTokenForEllipsis);
-}
-
-function resolveRevealWordDelayMsByMood(
-  moodKey: NonNullable<Message["moodKey"]> | undefined
-): number {
-  const normalizedMood = normalizeAssistantMoodKey(moodKey);
-  return CHAT_MODE_MOOD_WORD_REVEAL_MS[normalizedMood] ?? CHAT_MODE_WORD_REVEAL_MS;
-}
-
-function resolveTokenLetterRevealDurationMs(token: string): number {
-  const isEllipsis = isChatModeEllipsisToken(token);
-  const displayToken = formatChatModeTypedTokenDisplay(token, isEllipsis).trimEnd();
-  if (displayToken.length === 0) return 0;
-  if (isEllipsis) {
-    const dotCount = displayToken.match(/\./g)?.length ?? 1;
-    return CHAT_MODE_LETTER_REVEAL_MS + Math.max(0, dotCount - 1) * CHAT_MODE_ELLIPSIS_DOT_STEP_MS;
-  }
-  return (
-    CHAT_MODE_LETTER_REVEAL_MS +
-    Math.max(0, Array.from(displayToken).length - 1) * CHAT_MODE_LETTER_REVEAL_STEP_MS
-  );
-}
-
-function resolveTokenPunctuationPauseMs(token: string): number {
-  if (isChatModeEllipsisToken(token)) return CHAT_MODE_ELLIPSIS_PAUSE_MS;
-  const displayToken = formatChatModeTypedTokenDisplay(token, false)
-    .trimEnd()
-    .replace(CHAT_MODE_TRAILING_PAUSE_CLOSER_PATTERN, "");
-  if (CHAT_MODE_SENTENCE_PAUSE_PATTERN.test(displayToken)) return CHAT_MODE_PERIOD_PAUSE_MS;
-  if (
-    CHAT_MODE_CLAUSE_PAUSE_PATTERN.test(displayToken) ||
-    CHAT_MODE_DASH_PAUSE_PATTERN.test(displayToken)
-  ) {
-    return CHAT_MODE_COMMA_PAUSE_MS;
-  }
-  return 0;
+  return tokenizeChatRevealText(text);
 }
 
 function resolveRevealStepDelayMs(
   previousToken: string,
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING
 ): number {
-  if (isChatModeEllipsisToken(previousToken)) {
-    return CHAT_MODE_ELLIPSIS_WORD_HOLD_MS;
-  }
-  const minimumDelayMs = resolveRevealWordDelayMsByMood(moodKey);
-  return Math.max(
-    minimumDelayMs,
-    resolveTokenLetterRevealDurationMs(previousToken) + CHAT_MODE_WORD_REVEAL_SETTLE_MS
-  ) + resolveTokenPunctuationPauseMs(previousToken);
+  return resolveChatRevealStepDelayMs(previousToken, moodKey, timing);
+}
+
+function normalizeRevealDelayMultiplier(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function resolveVisibleTokenCountAtElapsedMs(
   tokens: string[],
   elapsedMs: number,
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING,
+  delayMultiplier?: number
 ): number {
-  if (tokens.length <= 1) return 1;
-  let visible = 1;
-  let remaining = Math.max(0, elapsedMs);
-  while (visible < tokens.length) {
-    const delayMs = resolveRevealStepDelayMs(tokens[visible - 1] ?? "", moodKey);
-    if (remaining < delayMs) break;
-    remaining -= delayMs;
-    visible += 1;
-  }
-  return visible;
+  return resolveVisibleChatRevealTokenCountAtElapsedMs(
+    tokens,
+    elapsedMs / normalizeRevealDelayMultiplier(delayMultiplier),
+    moodKey,
+    timing
+  );
 }
 
 function resolveRevealDurationMsForTokens(
   tokens: string[],
-  moodKey?: NonNullable<Message["moodKey"]>
+  moodKey?: NonNullable<Message["moodKey"]>,
+  timing: ChatRevealTimingSettings = DEFAULT_CHAT_REVEAL_TIMING,
+  delayMultiplier?: number
 ): number {
-  if (tokens.length <= 1) return 0;
-  let total = 0;
-  for (let i = 1; i < tokens.length; i += 1) {
-    total += resolveRevealStepDelayMs(tokens[i - 1] ?? "", moodKey);
-  }
-  return total;
+  return (
+    resolveChatRevealDurationMsForTokens(tokens, moodKey, timing) *
+    normalizeRevealDelayMultiplier(delayMultiplier)
+  );
 }
 
 function resolveChatModeMessageFontSizePx(
@@ -15720,6 +17942,9 @@ interface ComposerInputHandle {
   insertTextAtCursor: (text: string) => void;
 }
 
+type ComposerMentionCommitMode = "insert-mention" | "select-persona";
+type ComposerChipPointerBehavior = "resolve" | "delete";
+
 interface ComposerInputProps {
   enabled: boolean;
   value: string;
@@ -15733,17 +17958,22 @@ interface ComposerInputProps {
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
+  chipPointerBehavior?: ComposerChipPointerBehavior;
   onFocus: () => void;
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
   mentionBots: readonly BotMentionPick[];
+  mentionCommitMode?: ComposerMentionCommitMode;
+  onMentionPersonaSelect?: (botId: string) => void;
+  mentionPopoverFooter?: React.ReactNode;
+  onEmptyBackspace?: () => boolean;
   commandPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
   wildcardPicks?: readonly CommandCenterCommand[];
   dismissPopoversSignal?: number;
 }
 
-type ComposerShortcutScope = "leading" | "inline" | "wildcard";
+type ComposerShortcutScope = "leading" | "inline" | "wildcard" | "wildcard-slot";
 
 interface ComposerShortcutToken {
   from: number;
@@ -15754,7 +17984,8 @@ interface ComposerShortcutToken {
 
 function filterCommandPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
-  query: string
+  query: string,
+  limit = 10
 ): CommandCenterCommand[] {
   const normalizedQuery = normalizeComposerShortcutQuery(query);
   const seen = new Set<string>();
@@ -15799,22 +18030,38 @@ function filterCommandPicksForShortcutQuery(
       if (aBest !== bBest) return aBest - bBest;
       return aName.localeCompare(bName);
     })
-    .slice(0, 10);
+    .slice(0, limit);
 }
 
-function filterWildcardPicksForShortcutQuery(
+function filterWildcardDeckPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
   query: string
 ): CommandCenterCommand[] {
-  const slots = filterCommandPicksForShortcutQuery(
-    commands.filter(isComposerTrueWildcardSlotPick),
-    query
-  );
-  const decks = filterCommandPicksForShortcutQuery(
+  return filterCommandPicksForShortcutQuery(
     commands.filter((command) => !isComposerTrueWildcardSlotPick(command)),
     query
   );
-  return [...slots, ...decks];
+}
+
+function filterWildcardSlotPicksForShortcutQuery(
+  commands: readonly CommandCenterCommand[],
+  query: string
+): CommandCenterCommand[] {
+  const normalizedQuery = normalizeComposerShortcutQuery(query);
+  const visibleCommands = normalizedQuery
+    ? commands
+    : commands.filter((command) => {
+        const key = composerTrueWildcardSlotKey(command);
+        const slot = key
+          ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
+          : null;
+        return slot?.pickerVisibility === "primary";
+      });
+  return filterCommandPicksForShortcutQuery(
+    visibleCommands.filter(isComposerTrueWildcardSlotPick),
+    query,
+    normalizedQuery ? 10 : Number.MAX_SAFE_INTEGER
+  );
 }
 
 function filterLeadingPicksForShortcutQuery(
@@ -15873,7 +18120,7 @@ function shortcutPopoverVerticalHighlight(
   if (len === 0) return 0;
   const safeHighlight = ((highlight % len) + len) % len;
   const railPredicate =
-    scope === "wildcard"
+    scope === "wildcard-slot"
       ? isComposerTrueWildcardSlotPick
       : scope === "leading"
         ? isCommandCenterOperationalCommand
@@ -15899,7 +18146,7 @@ function leadingSlashShortcutTokenFromLinePrefix(
 ): ComposerShortcutToken | null {
   const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
   const lineToCaret = textToCaret.slice(lineStartInText);
-  const match = /^(\s*)\/([a-z0-9-]*)$/iu.exec(lineToCaret);
+  const match = /^(\s*)\/([a-z0-9-]*|\?)$/iu.exec(lineToCaret);
   if (!match) return null;
   const from = lineStartOffset + lineStartInText + (match[1]?.length ?? 0);
   return {
@@ -15948,6 +18195,25 @@ function wildcardDeckTokenFromTextToCaret(
   };
 }
 
+function wildcardSlotTokenFromTextToCaret(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /(^|[\s([{])\{([#a-z0-9_ -]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const delimiterLength = match[1]?.length ?? 0;
+  const matchIndex = match.index ?? 0;
+  const from = lineStartOffset + lineStartInText + matchIndex + delimiterLength;
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "wildcard-slot",
+  };
+}
+
 function shortcutTokenFromTextToCaret(
   textToCaret: string,
   lineStartOffset: number,
@@ -15958,6 +18224,9 @@ function shortcutTokenFromTextToCaret(
   }
   if (scope === "wildcard") {
     return wildcardDeckTokenFromTextToCaret(textToCaret, lineStartOffset);
+  }
+  if (scope === "wildcard-slot") {
+    return wildcardSlotTokenFromTextToCaret(textToCaret, lineStartOffset);
   }
   return promptShortcutTokenFromTextToCaret(textToCaret, lineStartOffset);
 }
@@ -15996,6 +18265,8 @@ interface ComposerTextareaChipRange {
   end: number;
   kind: ComposerTextareaChipKind;
   pending?: boolean;
+  badge?: string | null;
+  labelEnd?: number;
 }
 
 function addNonOverlappingComposerTextareaChipRanges(
@@ -16021,43 +18292,24 @@ function resolveBuiltInWildcardSlotTextRanges(
   wildcardPicks: readonly CommandCenterCommand[]
 ): ComposerTextareaChipRange[] {
   const ranges: ComposerTextareaChipRange[] = [];
-  const seenTokens = new Set<string>();
-  const slotTokens = wildcardPicks
-    .flatMap((command) => {
-      if (!isComposerTrueWildcardSlotPick(command)) return [];
-      return [
-        composerTrueWildcardSlotFallback(command),
-        ...commandInvocationNames(command).map((name) => `!${name}`),
-      ];
-    })
-    .filter((token) => {
-      const normalized = token.toLowerCase();
-      if (!token || seenTokens.has(normalized)) return false;
-      seenTokens.add(normalized);
-      return true;
-    });
+  const wildcardSlotNames = wildcardPicks
+    .filter(isComposerTrueWildcardSlotPick)
+    .flatMap((command) => commandInvocationNames(command));
+  const wildcardDeckNames = wildcardPicks
+    .filter(isComposerWildcardDeckPick)
+    .flatMap((command) => commandInvocationNames(command));
 
-  for (const token of slotTokens) {
-    const normalizedToken = token.toLowerCase();
-    const normalizedValue = value.toLowerCase();
-    let index = normalizedValue.indexOf(normalizedToken);
-    while (index >= 0) {
-      const before = index > 0 ? value[index - 1] ?? "" : "";
-      const after = value[index + token.length] ?? "";
-      const bangToken = token.startsWith("!");
-      const hasValidBangBoundary =
-        !bangToken ||
-        ((!before || /[\s([{]/u.test(before)) &&
-          (!after || /[\s.,;:!?)}\]]/u.test(after)));
-      if (hasValidBangBoundary) {
-        ranges.push({
-          start: index,
-          end: index + token.length,
-          kind: "wildcard-slot",
-        });
-      }
-      index = normalizedValue.indexOf(normalizedToken, index + token.length);
-    }
+  for (const range of resolveWildcardSlotTextRanges(value, {
+    wildcardSlotNames,
+    excludedBangNames: wildcardDeckNames,
+  })) {
+    ranges.push({
+      start: range.start,
+      end: range.end,
+      kind: "wildcard-slot",
+      ...(range.badge ? { badge: range.badge } : {}),
+      ...(range.labelEnd ? { labelEnd: range.labelEnd } : {}),
+    });
   }
 
   for (const range of resolvePendingWildcardSlotTextRanges(value, {
@@ -16124,10 +18376,12 @@ function composerTextareaChipLabel(value: string, range: ComposerTextareaChipRan
   const token = value.slice(range.start, range.end);
   if (range.kind === "wildcard-slot") {
     const trimmed = token.trim();
-    const label =
+    let label =
       trimmed.startsWith("{") && trimmed.endsWith("}")
         ? trimmed.slice(1, -1)
         : trimmed.replace(/^!+/u, "");
+    const reference = parseBuiltInPromptWildcardReference(label);
+    if (reference?.reference) label = reference.slot.label;
     return label.replace(/[-_]+/gu, " ").toLowerCase();
   }
   return token.replace(/^[!/]/u, "");
@@ -16150,18 +18404,24 @@ function renderComposerTextareaOverlayContent(
     const tokenText = value.slice(range.start, range.end);
     const tokenLabel = composerTextareaChipLabel(value, range);
     const pending = range.kind === "wildcard-slot" && range.pending === true;
+    const badge = range.kind === "wildcard-slot" && !pending ? range.badge : null;
     nodes.push(
       <span
         key={`chip-slot-${range.kind}-${range.start}-${range.end}-${index}`}
         className={styles.composeTextareaTokenSlot}
+        data-composer-chip-slot="true"
+        data-chip-start={range.start}
+        data-chip-end={range.end}
         data-kind={range.kind}
         data-pending={pending ? "true" : undefined}
+        data-wildcard-badge={badge ?? undefined}
       >
         <span className={styles.composeTextareaTokenMeasure}>{tokenText}</span>
         <span
           className={styles.composeTextareaToken}
           data-kind={range.kind}
           data-pending={pending ? "true" : undefined}
+          data-wildcard-badge={badge ?? undefined}
           aria-hidden="true"
         >
           {pending ? (
@@ -16491,6 +18751,32 @@ function applyTextareaBuiltInWildcardSlotChipDelete(
   return null;
 }
 
+function applyTextareaWildcardSlotReferenceCycle(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: "up" | "down",
+  wildcardPicks: readonly CommandCenterCommand[]
+): { value: string; caret: number } | null {
+  if (selectionStart !== selectionEnd) return null;
+  const ranges = resolveBuiltInWildcardSlotTextRanges(text, wildcardPicks).filter(
+    (range) => range.pending !== true
+  );
+  const caret = selectionStart;
+  for (const range of ranges) {
+    if (caret < range.start || caret > range.end) continue;
+    const token = text.slice(range.start, range.end);
+    const replacement = rewriteWildcardSlotTokenReference(token, direction);
+    if (!replacement || replacement === token) return null;
+    const value = `${text.slice(0, range.start)}${replacement}${text.slice(range.end)}`;
+    return {
+      value,
+      caret: range.start + replacement.length,
+    };
+  }
+  return null;
+}
+
 function textareaComposerShortcutChipArrowCaret({
   text,
   selectionStart,
@@ -16656,6 +18942,38 @@ function applyWildcardSlotChipBoundaryDelete(
   return false;
 }
 
+function applyWildcardSlotReferenceCycle(
+  editor: Editor,
+  direction: "up" | "down",
+  wildcardSlotNames: readonly string[],
+  excludedBangNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  if (!sel.empty) return false;
+  const ranges = findWildcardSlotTokenRanges(
+    editor.state.doc,
+    wildcardSlotNames,
+    excludedBangNames
+  );
+  if (ranges.length === 0) return false;
+
+  for (const range of ranges) {
+    if (sel.from < range.from || sel.from > range.to) continue;
+    const token = editor.state.doc.textBetween(range.from, range.to, "\n", "\n");
+    const replacement = rewriteWildcardSlotTokenReference(token, direction);
+    if (!replacement || replacement === token) return false;
+    editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, replacement)
+      .setTextSelection(range.from + replacement.length)
+      .run();
+    return true;
+  }
+
+  return false;
+}
+
 type ComposerShortcutChipKind = "command" | "prompt" | "wildcard" | "wildcard-slot";
 
 interface EditorComposerShortcutChipRange {
@@ -16734,7 +19052,7 @@ function composerShortcutChipKindFromClick(
   return "prompt";
 }
 
-function applyComposerShortcutChipClickDelete(
+function findEditorComposerShortcutChipRangeAt(
   editor: Editor,
   pos: number,
   kind: ComposerShortcutChipKind,
@@ -16742,23 +19060,160 @@ function applyComposerShortcutChipClickDelete(
   promptNames: readonly string[],
   wildcardNames: readonly string[],
   wildcardSlotNames: readonly string[]
+): EditorComposerShortcutChipRange | null {
+  return (
+    findEditorComposerShortcutChipRanges(
+      editor,
+      commandNames,
+      promptNames,
+      wildcardNames,
+      wildcardSlotNames
+    ).find((candidate) => {
+      return candidate.kind === kind && pos >= candidate.from && pos <= candidate.to;
+    }) ?? null
+  );
+}
+
+function editorComposerChipActivationTarget(
+  editor: Editor,
+  range: EditorComposerShortcutChipRange
+): ComposerChipActivationTarget | null {
+  const text = editor.state.doc.textBetween(range.from, range.to, "\n", "\n");
+  if (!text) return null;
+  return {
+    surface: "editor",
+    kind: range.kind,
+    start: range.from,
+    end: range.to,
+    text,
+  };
+}
+
+function replaceComposerChipRangeInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget,
+  replacement: string
 ): boolean {
-  const range = findEditorComposerShortcutChipRanges(
-    editor,
-    commandNames,
-    promptNames,
-    wildcardNames,
-    wildcardSlotNames
-  ).find((candidate) => {
-    return (
-      candidate.kind === kind &&
-      pos >= candidate.from &&
-      pos <= candidate.to
-    );
-  });
-  if (!range) return false;
-  editor.chain().focus().deleteRange({ from: range.from, to: range.to }).run();
+  if (target.surface !== "editor") return false;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return false;
+  }
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: target.start, to: target.end })
+    .insertContentAt(target.start, replacement)
+    .run();
   return true;
+}
+
+function deleteComposerChipRangeInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget
+): boolean {
+  if (target.surface !== "editor") return false;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return false;
+  }
+  editor.chain().focus().deleteRange({ from: target.start, to: target.end }).run();
+  return true;
+}
+
+function insertPendingWildcardSlotChipInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget,
+  key: BuiltInPromptWildcardSlotKey,
+  fallback: string,
+  id: string
+): PendingComposerWildcardSlot | null {
+  if (target.surface !== "editor" || target.kind !== "wildcard-slot") return null;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return null;
+  }
+  const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: target.start, to: target.end })
+    .insertContentAt(target.start, pendingText)
+    .run();
+  return {
+    id,
+    key,
+    fallback,
+    pendingText,
+    from: target.start,
+    to: target.start + pendingText.length,
+  };
+}
+
+function findComposerTextareaChipRangeAt(
+  ranges: readonly ComposerTextareaChipRange[],
+  caret: number
+): ComposerTextareaChipRange | null {
+  return (
+    ranges.find((range) => !range.pending && caret >= range.start && caret <= range.end) ??
+    null
+  );
+}
+
+function findComposerTextareaChipRangeAtPoint(
+  ranges: readonly ComposerTextareaChipRange[],
+  overlay: HTMLElement | null,
+  clientX: number,
+  clientY: number
+): ComposerTextareaChipRange | null {
+  if (!overlay) return null;
+  const slots = overlay.querySelectorAll<HTMLElement>("[data-composer-chip-slot='true']");
+  for (const slot of slots) {
+    const rect = slot.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      continue;
+    }
+    const start = Number(slot.dataset.chipStart);
+    const end = Number(slot.dataset.chipEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    const kind = slot.dataset.kind as ComposerTextareaChipRange["kind"] | undefined;
+    return (
+      ranges.find(
+        (range) =>
+          !range.pending &&
+          range.start === start &&
+          range.end === end &&
+          (!kind || range.kind === kind)
+      ) ?? null
+    );
+  }
+  return null;
+}
+
+function textareaComposerChipActivationTarget(
+  value: string,
+  range: ComposerTextareaChipRange
+): ComposerChipActivationTarget | null {
+  const text = value.slice(range.start, range.end);
+  if (!text) return null;
+  return {
+    surface: "textarea",
+    kind: range.kind,
+    start: range.start,
+    end: range.end,
+    text,
+  };
 }
 
 function applyComposerShortcutChipArrowKey(
@@ -17041,7 +19496,7 @@ function ComposerCommandPopover({
   }
   const indexedCommands = commands.map((command, index) => ({ command, index }));
   const wildcardRailEntries =
-    scope === "wildcard"
+    scope === "wildcard-slot"
       ? indexedCommands.filter(({ command }) => isComposerTrueWildcardSlotPick(command))
       : [];
   const commandRailEntries =
@@ -17049,7 +19504,7 @@ function ComposerCommandPopover({
       ? indexedCommands.filter(({ command }) => isCommandCenterOperationalCommand(command))
       : [];
   const listEntries =
-    scope === "wildcard"
+    scope === "wildcard-slot"
       ? indexedCommands.filter(({ command }) => !isComposerTrueWildcardSlotPick(command))
       : scope === "leading"
         ? indexedCommands.filter(({ command }) => !isCommandCenterOperationalCommand(command))
@@ -17057,7 +19512,7 @@ function ComposerCommandPopover({
   const visibleKinds = new Set(listEntries.map(({ command }) => composerCommandPickKind(command)));
   const railEntriesLength = wildcardRailEntries.length + commandRailEntries.length;
   const showSectionHeaders =
-    scope === "wildcard" || scope === "leading"
+    scope === "wildcard-slot" || scope === "leading"
       ? railEntriesLength > 0 && listEntries.length > 0
       : visibleKinds.size > 1;
 
@@ -17068,8 +19523,10 @@ function ComposerCommandPopover({
       style={adjustedStyle}
       role="listbox"
       aria-label={
-        scope === "wildcard"
+        scope === "wildcard-slot"
           ? "Choose a wildcard"
+          : scope === "wildcard"
+            ? "Choose a wildcard deck"
           : scope === "leading"
             ? "Choose a command or prompt"
             : "Choose a prompt"
@@ -17079,7 +19536,9 @@ function ComposerCommandPopover({
         {commands.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
             {scope === "wildcard"
-              ? "No wildcards match."
+              ? "No decks match."
+              : scope === "wildcard-slot"
+                ? "No wildcards match."
               : scope === "leading"
                 ? "No commands or prompts match."
                 : "No prompts match."}
@@ -17111,10 +19570,13 @@ function ComposerCommandPopover({
                   }}
                 >
                   <span className={styles.composeCommandSlash} aria-hidden="true">
-                    !
+                    {"{"}
                   </span>
                   <span className={styles.composeBotOptionName}>
                     {composerCommandDisplayName(command)}
+                  </span>
+                  <span className={styles.composeCommandSlash} aria-hidden="true">
+                    {"}"}
                   </span>
                 </button>
               );
@@ -17197,9 +19659,15 @@ function ComposerCommandPopover({
                   onPickCommand(command);
                 }}
               >
-                <span className={styles.composeCommandSlash} aria-hidden="true">
-                  {composerShortcutInvocationPrefix(command)}
-                </span>
+                {commandKind === "wildcard-slot" ? (
+                  <span className={styles.composeCommandSlash} aria-hidden="true">
+                    {"{"}
+                  </span>
+                ) : (
+                  <span className={styles.composeCommandSlash} aria-hidden="true">
+                    {composerShortcutInvocationPrefix(command)}
+                  </span>
+                )}
                 <span className={styles.composeCommandText}>
                   <span className={styles.composeBotOptionName}>
                     {composerCommandDisplayName(command)}
@@ -17208,6 +19676,11 @@ function ComposerCommandPopover({
                     <span className={styles.composeCommandMeta}>{description}</span>
                   ) : null}
                 </span>
+                {commandKind === "wildcard-slot" ? (
+                  <span className={styles.composeCommandSlash} aria-hidden="true">
+                    {"}"}
+                  </span>
+                ) : null}
               </button>
             </Fragment>
           );
@@ -17230,73 +19703,310 @@ function resolveTypedLineStartIndexes(lines: string[]): number[] {
   });
 }
 
+function ZenActionAmbientCue({
+  actorLabel,
+  cue,
+  actionOnly,
+}: {
+  actorLabel: string;
+  cue: ZenActionCue;
+  actionOnly?: boolean;
+}): React.JSX.Element {
+  const label = actorLabel.trim() || "Prism";
+  return (
+    <div
+      className={styles.zenActionCue}
+      data-motion={cue.motion}
+      data-action-only={actionOnly ? "true" : undefined}
+      role="note"
+      aria-label={`${label}: ${cue.action}`}
+      title={`${label}: ${cue.action}`}
+    >
+      <span className={styles.zenActionCueActor}>{label}</span>
+      <span className={styles.zenActionCueText}>{cue.action}</span>
+    </div>
+  );
+}
+
+function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Element {
+  return (
+    <div
+      className={styles.zenActionComposerPreview}
+      role="status"
+      aria-live="polite"
+      aria-label={`Action preview: ${cue.action}`}
+    >
+      <span className={styles.zenActionComposerPreviewActor}>You</span>
+      <span className={styles.zenActionComposerPreviewText}>{cue.action}</span>
+    </div>
+  );
+}
+
+function wrapCleanupRevealMessageBody(
+  node: React.JSX.Element,
+  active: boolean
+): React.JSX.Element {
+  if (!active) return node;
+  return (
+    <div
+      className={styles.cleanupRevealMessage}
+      data-cleanup-reveal="whole-message"
+      style={
+        {
+          "--cleanup-message-reveal-duration": `${CLEANUP_MESSAGE_REVEAL_DURATION_MS}ms`,
+        } as React.CSSProperties
+      }
+    >
+      {node}
+    </div>
+  );
+}
+
 function MessageBody(props: MessageBodyProps): React.JSX.Element {
   const fullSource =
     props.assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(props.content).displayContent
       : props.content;
-  if (props.messageRole === "user" && props.pendingPromptWildcardCleanup === true) {
-    return <PendingPromptWildcardCleanupMessage content={fullSource} />;
-  }
+  const cleanupRevealActive = props.cleanupRevealActive === true;
   if (
     props.messageRole === "user" &&
-    props.renderPromptMetadataAsProse === true &&
-    (props.promptShortcut || props.promptWildcards)
+    !props.promptShortcut &&
+    props.promptWildcards &&
+    props.renderPromptMetadataAsProse === true
   ) {
     const markdownProps: MessageBodyProps = {
       ...props,
       content:
-        props.promptShortcut?.resolvedPrompt?.trim() ||
-        props.promptWildcards?.resolvedPrompt?.trim() ||
-        fullSource,
+        props.pendingMessageCleanup === true
+          ? promptWildcardPendingCanvasSource({
+              fullSource,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptShortcut: undefined,
       promptWildcards: undefined,
       renderPromptMetadataAsProse: false,
     };
-    return <MarkdownMessageBody {...markdownProps} />;
+    return wrapCleanupRevealMessageBody(
+      renderMarkdownMessageBodyWithZenYouTubeEmbeds(markdownProps),
+      cleanupRevealActive
+    );
   }
   if (props.messageRole === "user" && props.promptShortcut) {
-    if (promptShortcutRendersAsStandalone(fullSource, props.promptShortcut)) {
-      return (
-        <PromptShortcutMessage
-          promptShortcut={props.promptShortcut}
-          fullPrompt={fullSource}
-          colorIndex={props.promptShortcutColorIndex}
-          expanded={props.promptShortcutExpanded === true}
-          onToggle={props.onTogglePromptShortcut}
-          onCollapse={props.onCollapsePromptShortcut}
-          onOpenPrompt={props.onOpenCommandMention}
-        />
+    if (props.promptShortcutUnfolded === true) {
+      const unfoldedContent =
+        props.pendingMessageCleanup === true
+          ? promptShortcutPendingCanvasSource({
+              fullSource,
+              promptShortcut: props.promptShortcut,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards?.resolvedPrompt?.trim() ||
+            promptShortcutResolvedPromptText(props.promptShortcut, fullSource);
+      return wrapCleanupRevealMessageBody(
+        renderMarkdownMessageBodyWithZenYouTubeEmbeds({
+          ...props,
+          content: unfoldedContent,
+          promptShortcut: undefined,
+          promptWildcards: undefined,
+          promptShortcutExpanded: false,
+          expandedPromptShortcutTargetKeys: undefined,
+          onTogglePromptShortcut: undefined,
+          onCollapsePromptShortcut: undefined,
+        }),
+        cleanupRevealActive
       );
     }
-    return (
-      <PromptShortcutUnfoldedMessage
+    if (
+      promptShortcutShouldRenderAsComposerText(
+        fullSource,
+        props.promptShortcut,
+        props.renderPromptMetadataAsProse === true
+      )
+    ) {
+      const markdownContent =
+        props.pendingMessageCleanup === true
+          ? promptShortcutPendingCanvasSource({
+              fullSource,
+              promptShortcut: props.promptShortcut,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.renderPromptMetadataAsProse === true
+          ? fullSource
+            : promptShortcutCanvasSourceWithResolvedWildcards({
+                fullSource,
+                promptShortcut: props.promptShortcut,
+                promptWildcards: props.promptWildcards,
+                commandMentionsById: props.commandMentionsById,
+                pendingMessageCleanup: props.pendingMessageCleanup,
+              });
+      return wrapCleanupRevealMessageBody(
+        renderMarkdownMessageBodyWithZenYouTubeEmbeds({
+          ...props,
+          content: markdownContent,
+        }),
+        cleanupRevealActive
+      );
+    }
+    const presentation = props.promptShortcutPresentation ?? "expandable";
+    const promptShortcutInteractionDisabled = props.pendingMessageCleanup === true;
+    return wrapCleanupRevealMessageBody(
+      <PromptShortcutMessage
         promptShortcut={props.promptShortcut}
         fullPrompt={fullSource}
-      />
+        colorIndex={props.promptShortcutColorIndex}
+        presentation={presentation}
+        expanded={
+          !promptShortcutInteractionDisabled &&
+          (presentation === "expandable" || presentation === "popout") &&
+          props.promptShortcutExpanded === true
+        }
+        disabled={promptShortcutInteractionDisabled}
+        onToggle={() =>
+          props.onTogglePromptShortcut?.({
+            commandId: props.promptShortcut?.commandId,
+          })
+        }
+      />,
+      cleanupRevealActive
     );
   }
   if (props.messageRole === "user" && props.promptWildcards) {
     const markdownProps: MessageBodyProps = {
       ...props,
-      content: props.promptWildcards.resolvedPrompt?.trim() || fullSource,
-      promptShortcut: undefined,
+      content:
+        props.pendingMessageCleanup === true
+          ? promptWildcardPendingCanvasSource({
+              fullSource,
+              promptWildcards: props.promptWildcards,
+              commandMentionsById: props.commandMentionsById,
+            })
+          : props.promptWildcards.resolvedPrompt?.trim() || fullSource,
       promptWildcards: undefined,
+      renderPromptMetadataAsProse: false,
     };
-    return (
-      <PromptWildcardRunMessage
-        promptWildcards={props.promptWildcards}
-        fullPrompt={fullSource}
-        colorIndex={props.promptShortcutColorIndex}
-        expanded={props.promptShortcutExpanded === true}
-        onToggle={props.onTogglePromptShortcut}
-        onCollapse={props.onCollapsePromptShortcut}
-      >
-        <MarkdownMessageBody {...markdownProps} />
-      </PromptWildcardRunMessage>
+    return wrapCleanupRevealMessageBody(
+      renderMarkdownMessageBodyWithZenYouTubeEmbeds(markdownProps),
+      cleanupRevealActive
     );
   }
-  return <MarkdownMessageBody {...props} />;
+  return wrapCleanupRevealMessageBody(
+    renderMarkdownMessageBodyWithZenYouTubeEmbeds(props),
+    cleanupRevealActive
+  );
+}
+
+function renderMarkdownMessageBodyWithZenYouTubeEmbeds(
+  props: MessageBodyProps
+): React.JSX.Element {
+  if (props.youtubeEmbedsEnabled !== true) {
+    return <MarkdownMessageBody {...props} />;
+  }
+  const displayContent =
+    props.assistantStripPrismToolTail === true
+      ? parseAssistantPrismTools(props.content).displayContent
+      : props.content;
+  const source =
+    typeof props.maxParagraphs === "number"
+      ? takeLeadingParagraphs(displayContent, props.maxParagraphs)
+      : displayContent;
+  if (!messageContainsYouTubeVideoLink(source)) {
+    return <MarkdownMessageBody {...props} />;
+  }
+  return <ZenYouTubeSeparatedMessageBody {...props} content={source} />;
+}
+
+function ZenYouTubeSeparatedMessageBody(props: MessageBodyProps): React.JSX.Element {
+  const parts = splitMarkdownByYouTubeVideoLinks(props.content);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.kind === "youtube") {
+          return (
+            <div
+              key={`youtube:${part.video.videoId}:${index}`}
+              className={styles.zenYouTubeMessagePanel}
+              data-zen-youtube-panel="true"
+            >
+              <YouTubeEmbedCard
+                video={part.video}
+                label={part.label ?? part.source}
+              />
+            </div>
+          );
+        }
+        return (
+          <MarkdownMessageBody
+            key={`markdown:${index}`}
+            {...props}
+            content={part.markdown}
+            assistantStripPrismToolTail={false}
+            maxParagraphs={undefined}
+            youtubeEmbedsEnabled={false}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function YouTubeEmbedCard({
+  video,
+  label,
+}: {
+  video: YouTubeVideoEmbed;
+  label?: string;
+}): React.JSX.Element {
+  const [loaded, setLoaded] = useState(false);
+  const cleanLabel = label?.trim();
+  const playLabel = cleanLabel && cleanLabel !== video.canonicalUrl
+    ? `Play YouTube video: ${cleanLabel}`
+    : "Play YouTube video";
+  const style = {
+    "--zen-youtube-thumbnail": `url("${video.thumbnailUrl}")`,
+  } as CSSProperties;
+  return (
+    <div className={styles.zenYouTubeEmbed} style={style}>
+      <div className={styles.zenYouTubeGlow} aria-hidden="true" />
+      <div className={styles.zenYouTubeFrame}>
+        {loaded ? (
+          <iframe
+            className={styles.zenYouTubeIframe}
+            src={video.embedUrl}
+            title={cleanLabel || "YouTube video player"}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        ) : (
+          <button
+            type="button"
+            className={styles.zenYouTubePosterButton}
+            onClick={(event) => {
+              event.stopPropagation();
+              setLoaded(true);
+            }}
+            aria-label={playLabel}
+          >
+            <img
+              className={styles.zenYouTubePoster}
+              src={video.thumbnailUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+            <span className={styles.zenYouTubePosterScrim} aria-hidden="true" />
+            <span className={styles.zenYouTubePlayButton} aria-hidden="true">
+              <Play size={24} fill="currentColor" strokeWidth={2.6} />
+            </span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function MarkdownMessageBody({
@@ -17306,39 +20016,71 @@ function MarkdownMessageBody({
   maxParagraphs,
   revealWordByWord,
   renderAsEphemeralLines,
+  youtubeEmbedsEnabled = false,
   zenDisplay,
+  zenTextEffectsEnabled,
+  zenActionsEnabled,
+  zenActionActorLabel,
   suppressDecorativePrismText,
   chatPhase,
   chatCommittedLineCount,
   forcedVisibleTokenCount,
   revealMoodKey,
+  typingVoicePreset = "neutral",
+  chatRevealTiming = DEFAULT_CHAT_REVEAL_TIMING,
+  chatRevealAnimationMultiplier,
   mentionRenderBots,
   resolvedTheme,
   commandMentionsById,
   onOpenCommandMention,
   promptShortcut,
+  pendingMessageCleanup,
+  promptShortcutExpanded,
+  expandedPromptShortcutTargetKeys,
+  promptShortcutPresentation,
+  promptShortcutColorIndex,
+  onTogglePromptShortcut,
 }: MessageBodyProps): React.JSX.Element {
   const fullSource =
     assistantStripPrismToolTail === true
       ? parseAssistantPrismTools(content).displayContent
       : content;
+  const hasPendingWildcardPlaceholder = fullSource.includes(
+    PENDING_COMPOSER_WILDCARD_SLOT_TEXT
+  );
+  const pendingWildcardVisualActive =
+    pendingMessageCleanup === true || hasPendingWildcardPlaceholder;
   const source =
     typeof maxParagraphs === "number"
       ? takeLeadingParagraphs(fullSource, maxParagraphs)
       : fullSource;
+  const zenActionPresentation = useMemo(
+    () =>
+      zenActionsEnabled === true &&
+      renderAsEphemeralLines === true &&
+      (messageRole === "assistant" || messageRole === "user")
+        ? resolveZenActionPresentation(source)
+        : null,
+    [messageRole, renderAsEphemeralLines, source, zenActionsEnabled]
+  );
+  const actionDisplaySource =
+    zenActionPresentation?.hasActions === true ? zenActionPresentation.mainText : source;
   const normalizedSource = useMemo(
     () =>
       renderAsEphemeralLines
-        ? normalizeFencedCodeBlockLeadingNewline(source)
-        : source,
-    [renderAsEphemeralLines, source]
+        ? normalizeChatRevealFencedCodeBlockLeadingNewline(actionDisplaySource)
+        : actionDisplaySource,
+    [actionDisplaySource, renderAsEphemeralLines]
   );
   const chatModeSource = useMemo(
     () =>
       renderAsEphemeralLines
-        ? stripChatModeThematicBreakLines(normalizedSource)
+        ? stripChatRevealThematicBreakLines(normalizedSource)
         : normalizedSource,
     [normalizedSource, renderAsEphemeralLines]
+  );
+  const youtubeEmbedActive = Boolean(
+    youtubeEmbedsEnabled && messageContainsYouTubeVideoLink(chatModeSource)
   );
   const tokens = useMemo(() => tokenizeMessageReveal(chatModeSource), [chatModeSource]);
   const [visibleTokenCount, setVisibleTokenCount] = useState(() =>
@@ -17385,7 +20127,7 @@ function MarkdownMessageBody({
     if (clampedVisibleTokenCount >= tokens.length) return;
     let timer: number | null = null;
     const priorToken = tokens[clampedVisibleTokenCount - 1] ?? "";
-    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey);
+    const delayMs = resolveRevealStepDelayMs(priorToken, revealMoodKey, chatRevealTiming);
     timer = window.setTimeout(() => {
       setVisibleTokenCount((current) => Math.min(Math.max(1, current) + 1, tokens.length));
     }, delayMs);
@@ -17395,6 +20137,7 @@ function MarkdownMessageBody({
   }, [
     forcedVisibleTokenCount,
     clampedForcedVisibleTokenCount,
+    chatRevealTiming,
     preferLocalProgressiveReveal,
     revealMoodKey,
     revealWordByWord,
@@ -17402,9 +20145,43 @@ function MarkdownMessageBody({
     tokens,
     visibleTokenCount,
   ]);
-  const typedTokenMeta = useMemo(() => resolveChatModeTypedTokenMeta(tokens), [tokens]);
+  const typedTokenMeta = useMemo(
+    () =>
+      resolveChatModeTypedTokenMeta(tokens, {
+        zenTextEffectsEnabled: zenTextEffectsEnabled === true,
+      }),
+    [tokens, zenTextEffectsEnabled]
+  );
   const allowDecorativePrismText = suppressDecorativePrismText !== true;
+  const typedRevealAnimationMultiplier = normalizeRevealDelayMultiplier(
+    chatRevealAnimationMultiplier
+  );
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
+  const zenActionCue = useMemo(() => {
+    if (zenActionPresentation?.hasActions !== true) return null;
+    const visibleDisplayLength = revealWordByWord
+      ? getBotMentionDisplayLength(
+          tokens.slice(0, Math.max(0, renderVisibleTokenCount)).join("")
+        )
+      : Number.POSITIVE_INFINITY;
+    return resolveCurrentZenActionCue(
+      zenActionPresentation.cues,
+      visibleDisplayLength
+    );
+  }, [renderVisibleTokenCount, revealWordByWord, tokens, zenActionPresentation]);
+  const zenActionCueNode =
+    zenActionCue && zenActionPresentation
+      ? (
+          <ZenActionAmbientCue
+            actorLabel={
+              zenActionActorLabel?.trim() ||
+              (messageRole === "user" ? "You" : DEFAULT_ASSISTANT_NAME)
+            }
+            cue={zenActionCue}
+            actionOnly={zenActionPresentation.actionOnly}
+          />
+        )
+      : null;
   const shouldProgressiveFenceReveal = Boolean(
     renderAsEphemeralLines &&
     messageRole === "assistant" &&
@@ -17424,9 +20201,6 @@ function MarkdownMessageBody({
       if (messageRole === "user" && promptShortcut) {
         source = linkPromptShortcutTokensForMarkdown(source, commandMentionsById);
       }
-      if (messageRole === "user") {
-        source = linkWildcardDeckTokensForMarkdown(source, commandMentionsById);
-      }
       return source;
     },
     [commandMentionsById, messageRole, promptShortcut, renderedSource]
@@ -17434,6 +20208,8 @@ function MarkdownMessageBody({
   const useTypedLineRenderer = Boolean(
     renderAsEphemeralLines &&
     messageRole === "assistant" &&
+    !youtubeEmbedActive &&
+    chatModeSource.trim().length > 0 &&
     !hasFencedCodeBlock
   );
   const typedLineRendererNode = useTypedLineRenderer ? (() => {
@@ -17550,11 +20326,31 @@ function MarkdownMessageBody({
               const globalTokenIndex = lineStartIndex + tokenIndex;
               if (globalTokenIndex >= visibleLimit) return null;
               const tokenMeta = typedTokenMeta[globalTokenIndex];
-              const renderedToken = formatChatModeTypedTokenDisplay(token, tokenMeta?.isEllipsis === true);
+              const ellipsisPhase =
+                tokenMeta?.isEllipsis === true && revealWordByWord && globalTokenIndex === latestVisibleTokenIndex
+                  ? "typing"
+                  : "complete";
+              const ellipsisComplete = tokenMeta?.isEllipsis === true && ellipsisPhase === "complete";
+              const ellipsisTyping = tokenMeta?.isEllipsis === true && ellipsisPhase === "typing";
+              const renderedToken = formatChatRevealTokenDisplay(token, {
+                ellipsisPhase: tokenMeta?.isEllipsis === true ? ellipsisPhase : undefined,
+              });
               const chars = Array.from(renderedToken);
+              const typedLetterStepMs = Math.round(
+                (tokenMeta?.isEllipsis
+                  ? chatRevealTiming.ellipsisDotStepMs
+                  : CHAT_MODE_TYPED_LETTER_STEP_MS) * typedRevealAnimationMultiplier
+              );
+              const typedLetterFadeDurationMs = Math.round(
+                CHAT_MODE_TYPED_LETTER_FADE_MS * typedRevealAnimationMultiplier
+              );
               const wordNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noFade;
-              const letterNoFade = !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade;
-              const wordEffect = revealWordByWord ? tokenMeta?.effect : undefined;
+              const letterNoFade =
+                !revealWordByWord || lineNoLetterFade || tokenMeta?.noLetterFade || ellipsisComplete;
+              const wordEffectReady =
+                tokenMeta?.effectReadyTokenIndex === undefined ||
+                tokenMeta.effectReadyTokenIndex < visibleLimit;
+              const wordEffect = revealWordByWord && wordEffectReady ? tokenMeta?.effect : undefined;
               const wordClassName = [
                 styles.chatEphemeralTypedWord,
                 allowDecorativePrismText && tokenMeta?.style === "rainbow"
@@ -17563,14 +20359,23 @@ function MarkdownMessageBody({
                 tokenMeta?.isQuote ? styles.chatEphemeralTypedWordQuote : "",
                 tokenMeta?.isItalic ? styles.chatEphemeralTypedWordItalic : "",
                 tokenMeta?.isBold ? styles.chatEphemeralTypedWordBold : "",
-                wordEffect === "emphasis" ? styles.chatEphemeralTypedWordEmphasis : "",
+                wordEffect === "impact" ? styles.chatEphemeralTypedWordImpact : "",
+                wordEffect === "question" ? styles.chatEphemeralTypedWordQuestion : "",
                 wordEffect === "affirm" ? styles.chatEphemeralTypedWordAffirm : "",
+                wordEffect === "negative" ? styles.chatEphemeralTypedWordNegative : "",
+                wordEffect === "whisper" ? styles.chatEphemeralTypedWordWhisper : "",
+                wordEffect === "action" ? styles.chatEphemeralTypedWordAction : "",
+                ellipsisTyping ? styles.chatEphemeralTypedWordEllipsis : "",
                 wordNoFade ? styles.chatEphemeralTypedWordNoFade : "",
               ]
                 .filter(Boolean)
                 .join(" ");
               return (
-                <span key={`${index}:${globalTokenIndex}`} className={wordClassName}>
+                <span
+                  key={`${index}:${globalTokenIndex}`}
+                  className={wordClassName}
+                  data-voice-preset={ellipsisTyping ? typingVoicePreset : undefined}
+                >
                   {(() => {
                     let ellipsisDotIndex = -1;
                     return chars.map((char, charIndex) => {
@@ -17582,6 +20387,9 @@ function MarkdownMessageBody({
                       return (
                         <span
                           key={`${index}:${globalTokenIndex}:${charIndex}`}
+                          data-ellipsis-dot={
+                            tokenMeta?.isEllipsis === true && char === "." ? "true" : undefined
+                          }
                           className={
                             letterNoFade
                               ? `${styles.chatEphemeralTypedLetter} ${styles.chatEphemeralTypedLetterNoFade}`
@@ -17590,9 +20398,8 @@ function MarkdownMessageBody({
                           style={
                             {
                               ["--char-index" as string]: revealIndex,
-                              ...(tokenMeta?.isEllipsis
-                                ? { ["--char-step-ms" as string]: `${CHAT_MODE_ELLIPSIS_DOT_STEP_MS}ms` }
-                                : {}),
+                              ["--char-step-ms" as string]: `${typedLetterStepMs}ms`,
+                              ["--chat-letter-fade-duration" as string]: `${typedLetterFadeDurationMs}ms`,
                               ...(allowDecorativePrismText &&
                               tokenMeta?.style === "rainbow" &&
                               char.trim().length > 0
@@ -17637,27 +20444,146 @@ function MarkdownMessageBody({
           ...(messageRole ? { "data-message-role": messageRole } : {}),
         } as const)
       : undefined;
-  const markdownComponents = useMemo((): Components => {
-    return {
+  const revealMessageChildren = (
+    children: React.ReactNode,
+    keyPrefix: string
+  ): React.ReactNode => {
+    return renderPendingWildcardPlaceholders(
+      children,
+      pendingWildcardVisualActive,
+      keyPrefix
+    );
+  };
+  const markdownComponents: Components = {
       a: ({ href, children, ...rest }) => {
         const commandId = parsePrismCommandMentionHref(href ?? undefined);
         if (commandId) {
+          const commandSourceStart = parsePrismCommandMentionSourceStart(
+            href ?? undefined
+          );
+          const promptTargetKey =
+            commandSourceStart !== null
+              ? `${commandId}:${commandSourceStart}`
+              : commandId;
           const command = commandMentionsById?.get(commandId);
           const label = flattenMarkdownText(children).trim() || `/${command?.name ?? "command"}`;
           const isWildcardDeck = command ? isComposerWildcardDeckPick(command) : false;
-          return (
+          const isWildcardToken = command
+            ? isWildcardDeck || isComposerTrueWildcardSlotPick(command)
+            : false;
+          const isPromptCommand =
+            !isWildcardToken &&
+            (command ? isCommandCenterPromptShortcut(command) : commandId === promptShortcut?.commandId);
+          const promptShortcutPresentationMode =
+            promptShortcutPresentation ?? "expandable";
+          const promptPopoutActive =
+            messageRole === "user" &&
+            Boolean(promptShortcut) &&
+            isPromptCommand &&
+            promptShortcutPresentationMode === "popout";
+          const promptPreviewActive =
+            messageRole === "user" &&
+            Boolean(promptShortcut) &&
+            !pendingWildcardVisualActive &&
+            isPromptCommand &&
+            (promptShortcutPresentationMode === "expandable" || promptPopoutActive);
+          const promptInteractionDisabled =
+            messageRole === "user" &&
+            pendingWildcardVisualActive &&
+            isPromptCommand;
+          const promptRun = promptShortcutRunForCommand(
+            promptShortcut,
+            commandId,
+            commandSourceStart
+          );
+          const promptLabel = promptRun
+            ? `/${promptRun.name}`
+            : promptShortcut
+              ? promptShortcutChipLabel(promptShortcut)
+              : label;
+          const promptSent = promptShortcut
+            ? promptRun?.resolvedPrompt ??
+              promptShortcutResolvedPromptText(promptShortcut, fullSource)
+            : "";
+          const promptExpandedActive =
+            promptPreviewActive &&
+            (expandedPromptShortcutTargetKeys?.has(promptTargetKey) ?? false);
+          const chip = (
             <button
               type="button"
               className={`${styles.promptShortcutCapsule} ${
-                isWildcardDeck ? styles.promptWildcardCapsule : ""
+                isWildcardToken ? styles.promptWildcardCapsule : ""
               }`}
-              onClick={() => onOpenCommandMention?.(commandId)}
+              disabled={promptInteractionDisabled}
+              data-prompt-shortcut-pending={
+                promptInteractionDisabled ? "true" : undefined
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                if (promptInteractionDisabled) return;
+                if (event.detail >= 2) return;
+                if (promptPreviewActive) {
+                  onTogglePromptShortcut?.({
+                    commandId,
+                    targetKey: promptTargetKey,
+                  });
+                  return;
+                }
+                onOpenCommandMention?.(commandId);
+              }}
+              onContextMenu={(event) => {
+                if (!promptPreviewActive || promptInteractionDisabled) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onTogglePromptShortcut?.({
+                  commandId,
+                  targetKey: promptTargetKey,
+                });
+              }}
               data-command-id={commandId}
-              data-command-kind={isWildcardDeck ? "wildcard" : "prompt"}
-              aria-label={`${isWildcardDeck ? "Open wildcard deck" : "Open prompt"} ${label}`}
+              data-command-kind={isWildcardToken ? "wildcard" : "prompt"}
+              aria-expanded={promptPreviewActive ? promptExpandedActive : undefined}
+              aria-label={
+                promptInteractionDisabled
+                  ? `Prompt shortcut ${promptLabel} is waiting for wildcards`
+                  : promptPreviewActive
+                    ? `${promptExpandedActive ? "Hide" : "Show"} prompt shortcut ${promptLabel}`
+                    : `${isWildcardToken ? "Open wildcard" : "Open prompt"} ${label}`
+              }
             >
               <span>{label.replace(/^[!/]+/, "")}</span>
             </button>
+          );
+          if (!promptPreviewActive || !promptShortcut) return chip;
+          if (promptExpandedActive) {
+            return (
+              <span
+                className={styles.promptShortcutInline}
+                data-prompt-shortcut-preview="true"
+                data-prompt-shortcut-presentation={promptShortcutPresentationMode}
+                data-expanded="true"
+              >
+                {chip}
+                <PromptShortcutExpandedInline
+                  promptSent={promptSent}
+                  replacements={
+                    promptRun?.wildcardReplacements ??
+                    promptShortcut.wildcardReplacements
+                  }
+                  colorIndex={promptShortcutColorIndex}
+                />
+              </span>
+            );
+          }
+          return (
+            <span
+              className={styles.promptShortcutInline}
+              data-prompt-shortcut-preview="true"
+              data-prompt-shortcut-presentation={promptShortcutPresentationMode}
+              data-expanded={promptExpandedActive ? "true" : undefined}
+            >
+              {chip}
+            </span>
           );
         }
         if (resolvedTheme) {
@@ -17678,23 +20604,53 @@ function MarkdownMessageBody({
       },
       p: ({ children }: { children?: React.ReactNode }) => {
         const isPullQuoteInline = nodeStartsWithPullQuoteInlinePrefix(children);
+        const resolvedChildren = revealMessageChildren(children, "message-body-p");
         if (!isPullQuoteInline) {
-          return <p>{children}</p>;
+          return <p>{resolvedChildren}</p>;
         }
         return (
-          <p className={styles.markdownPullQuoteInline} data-pull-quote-inline="true">
-            {children}
+          <p
+            className={styles.markdownPullQuoteInline}
+            data-pull-quote-inline="true"
+          >
+            {resolvedChildren}
           </p>
         );
       },
+      li: ({ children }: { children?: React.ReactNode }) => (
+        <li>{revealMessageChildren(children, "message-body-li")}</li>
+      ),
+      h1: ({ children }: { children?: React.ReactNode }) => (
+        <h1>{revealMessageChildren(children, "message-body-h1")}</h1>
+      ),
+      h2: ({ children }: { children?: React.ReactNode }) => (
+        <h2>{revealMessageChildren(children, "message-body-h2")}</h2>
+      ),
+      h3: ({ children }: { children?: React.ReactNode }) => (
+        <h3>{revealMessageChildren(children, "message-body-h3")}</h3>
+      ),
+      h4: ({ children }: { children?: React.ReactNode }) => (
+        <h4>{revealMessageChildren(children, "message-body-h4")}</h4>
+      ),
+      h5: ({ children }: { children?: React.ReactNode }) => (
+        <h5>{revealMessageChildren(children, "message-body-h5")}</h5>
+      ),
+      th: ({ children }: { children?: React.ReactNode }) => (
+        <th>{revealMessageChildren(children, "message-body-th")}</th>
+      ),
+      td: ({ children }: { children?: React.ReactNode }) => (
+        <td>{revealMessageChildren(children, "message-body-td")}</td>
+      ),
       blockquote: ({ children }: { children?: React.ReactNode }) => {
         const isPullQuote = nodeStartsWithPullQuoteMarker(children);
         const resolvedChildren = isPullQuote
           ? stripLeadingPullQuoteMarker(children)
           : children;
         return (
-          <blockquote data-pull-quote={isPullQuote ? "true" : undefined}>
-            {resolvedChildren}
+          <blockquote
+            data-pull-quote={isPullQuote ? "true" : undefined}
+          >
+            {revealMessageChildren(resolvedChildren, "message-body-blockquote")}
           </blockquote>
         );
       },
@@ -17762,35 +20718,33 @@ function MarkdownMessageBody({
         );
       },
     };
-  }, [
-      codeBlockRevealPlan,
-      commandMentionsById,
-      messageRole,
-      onOpenCommandMention,
-      preferLocalProgressiveReveal,
-      renderAsEphemeralLines,
-      renderVisibleTokenCount,
-      shouldProgressiveFenceReveal,
-      revealWordByWord,
-      chatCommittedLineCount,
-      mentionBotsById,
-      resolvedTheme,
-    ]
-  );
-  if (typedLineRendererNode) return typedLineRendererNode;
+  if (typedLineRendererNode) {
+    return (
+      <>
+        {zenActionCueNode}
+        {typedLineRendererNode}
+      </>
+    );
+  }
+  if (markdownSource.trim().length === 0) {
+    return <>{zenActionCueNode}</>;
+  }
   return (
-    <div
-      className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
-      data-chat-render-kind="markdown"
-      {...chatPhaseAttrs}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
+    <>
+      {zenActionCueNode}
+      <div
+        className={`${styles.markdownBody} ${styles.chatEphemeralMarkdownBody}`}
+        data-chat-render-kind="markdown"
+        {...chatPhaseAttrs}
       >
-        {markdownSource}
-      </ReactMarkdown>
-    </div>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+        >
+          {markdownSource}
+        </ReactMarkdown>
+      </div>
+    </>
   );
 }
 
@@ -17808,6 +20762,7 @@ interface DesktopMarkdownComposerProps {
   onValueChange: (value: string) => void;
   onFocus: () => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
+  chipPointerBehavior?: ComposerChipPointerBehavior;
   submitDisabled: boolean;
   submitLabel: React.ReactNode;
   submitAriaLabel: string;
@@ -17819,6 +20774,10 @@ interface DesktopMarkdownComposerProps {
   resolvedTheme: "light" | "dark";
   /** Chat-enabled bots available for `@` mentions (empty disables). */
   mentionBots: readonly BotMentionPick[];
+  mentionCommitMode?: ComposerMentionCommitMode;
+  onMentionPersonaSelect?: (botId: string) => void;
+  mentionPopoverFooter?: React.ReactNode;
+  onEmptyBackspace?: () => boolean;
   /** Slash commands shown in the composer autocomplete menu at the first word. */
   commandPicks?: readonly CommandCenterCommand[];
   /** User prompt shortcuts shown in the composer autocomplete menu. */
@@ -17832,6 +20791,8 @@ interface DesktopMarkdownComposerProps {
   /** Increment to close composer mention/command popovers from the parent shell. */
   dismissPopoversSignal?: number;
 }
+
+const EMPTY_COMPOSER_COMMAND_PICKS: readonly CommandCenterCommand[] = [];
 
 const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, DesktopMarkdownComposerProps>(
   function DesktopMarkdownComposer(
@@ -17849,10 +20810,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       submitOnEnter = true,
       resolvedTheme,
       mentionBots,
-      commandPicks = [],
-      promptPicks = [],
-      wildcardPicks = [],
+      mentionCommitMode = "insert-mention",
+      onMentionPersonaSelect,
+      mentionPopoverFooter,
+      onEmptyBackspace,
+      commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+      promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+      wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       onGenerateWildcardSlotValue,
+      chipPointerBehavior = "resolve",
       generatingRandomPrompt = false,
       disabled = false,
       dismissPopoversSignal,
@@ -17868,6 +20834,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const pendingValueTimerRef = useRef<number | null>(null);
     const locallyEmittedValuesRef = useRef<string[]>([]);
     const mentionBotsRef = useRef(mentionBots);
+    const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
+    const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
+    const onEmptyBackspaceRef = useRef(onEmptyBackspace);
     const commandPicksRef = useRef(commandPicks);
     const promptPicksRef = useRef(promptPicks);
     const wildcardPicksRef = useRef(wildcardPicks);
@@ -17889,9 +20858,19 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const pendingWildcardSlotIdRef = useRef(0);
     const pendingWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
     const pendingWildcardDecorationsRef = useRef<PendingWildcardSlotDecoration[]>([]);
+    const chipActivationRef = useRef<PendingComposerChipActivation | null>(null);
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
+    useLayoutEffect(() => {
+      mentionCommitModeRef.current = mentionCommitMode;
+    }, [mentionCommitMode]);
+    useLayoutEffect(() => {
+      onMentionPersonaSelectRef.current = onMentionPersonaSelect;
+    }, [onMentionPersonaSelect]);
+    useLayoutEffect(() => {
+      onEmptyBackspaceRef.current = onEmptyBackspace;
+    }, [onEmptyBackspace]);
     useLayoutEffect(() => {
       commandPicksRef.current = commandPicks;
     }, [commandPicks]);
@@ -17980,7 +20959,12 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const dismissMentionPopover = useCallback(() => {
       const ed = editorRef.current;
       const ui = mentionUiRef.current;
-      if (ed && ui.open && ui.filtered.length === 1) {
+      if (
+        ed &&
+        ui.open &&
+        ui.filtered.length === 1 &&
+        mentionCommitModeRef.current === "insert-mention"
+      ) {
         applyMentionTabToEditor(ed, mentionBotsRef.current);
       }
       setMentionUi((s) =>
@@ -18042,9 +21026,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         const sameIds =
           sameLength &&
           prev.filtered.every((b, i) => b.id === filtered[i]?.id);
+        const lastIndex = Math.max(0, filtered.length - 1);
         const highlight = sameIds
-          ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
-          : 0;
+          ? Math.min(prev.highlight, lastIndex)
+          : lastIndex;
         return {
           open: true,
           caretRect,
@@ -18067,17 +21052,25 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
           ? getComposerShortcutFromEditor(ed, "wildcard")
           : null;
-      const token = leadingToken ?? promptToken ?? wildcardToken;
+      const wildcardSlotToken =
+        !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
+          : null;
+      const token = leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
       const scope: ComposerShortcutScope = leadingToken
         ? "leading"
         : promptToken
           ? "inline"
-          : "wildcard";
+          : wildcardToken
+            ? "wildcard"
+            : "wildcard-slot";
       const commands = leadingToken
         ? [...commandPicksRef.current, ...promptPicksRef.current]
         : promptToken
           ? promptPicksRef.current
-          : wildcardPicksRef.current;
+          : wildcardToken
+            ? wildcardPicksRef.current.filter(isComposerWildcardDeckPick)
+            : wildcardPicksRef.current.filter(isComposerTrueWildcardSlotPick);
       if (!token || !commands.length) {
         setCommandUi((s) =>
           s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -18089,7 +21082,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       );
       const filtered =
         scope === "wildcard"
-          ? filterWildcardPicksForShortcutQuery(commands, token.query)
+          ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
+          : scope === "wildcard-slot"
+            ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
           : scope === "leading"
             ? filterLeadingPicksForShortcutQuery(commands, token.query)
           : filterCommandPicksForShortcutQuery(commands, token.query);
@@ -18142,7 +21137,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         wildcardPicksRef.current.length > 0
           ? getComposerShortcutFromEditor(ed, "wildcard")
           : null;
-      if (leadingToken || promptToken || wildcardToken) {
+      const wildcardSlotToken =
+        !wildcardToken && wildcardPicksRef.current.length > 0
+          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
+          : null;
+      if (leadingToken || promptToken || wildcardToken || wildcardSlotToken) {
         syncCommandPopover(ed);
         return;
       }
@@ -18193,17 +21192,32 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     const applyComposerCommandPickInEditor = useCallback(
       (ed: Editor, command: CommandCenterCommand, scope: ComposerShortcutScope): boolean => {
-        if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
-          const id = `wildcard-slot-${++pendingWildcardSlotIdRef.current}`;
-          const pending = insertPendingWildcardSlotInEditor(ed, command, scope, id);
-          if (!pending) return false;
-          setPendingWildcardSlots((current) => [...current, pending]);
-          generatePendingWildcardSlot(pending);
-          return true;
-        }
         return insertComposerShortcutInEditor(ed, command, scope);
       },
-      [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
+      []
+    );
+
+    const resolveEditorComposerChipActivation = useCallback(
+      (ed: Editor, target: ComposerChipActivationTarget): boolean => {
+        if (target.kind === "command") return false;
+
+        if (target.kind === "prompt") {
+          const command = commandCenterCommandForChipText(
+            promptPicksRef.current,
+            target.text,
+            "/"
+          );
+          if (!command) return false;
+          return replaceComposerChipRangeInEditor(ed, target, command.command);
+        }
+
+        if (target.kind === "wildcard") {
+          return false;
+        }
+
+        return false;
+      },
+      []
     );
 
     useLayoutEffect(() => {
@@ -18284,6 +21298,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             },
           },
           handlePaste: (view, event) => {
+            chipActivationRef.current = null;
             const sel = view.state.selection;
             const activeEditor = editorRef.current;
             if (isCollapsedCaretInsidePrismBotLink(view.state, sel.from)) {
@@ -18305,6 +21320,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             return false;
           },
           handleTextInput: (view, from, to, text) => {
+            chipActivationRef.current = null;
             const activeEditor = editorRef.current;
             if (
               activeEditor &&
@@ -18322,26 +21338,75 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           handleClick: (_view, pos, event) => {
             const activeEditor = editorRef.current;
             const chipKind = composerShortcutChipKindFromClick(event);
-            if (!activeEditor || !chipKind) return false;
-            if (
-              !applyComposerShortcutChipClickDelete(
-                activeEditor,
-                pos,
-                chipKind,
-                commandNamesForHighlight,
-                promptNamesForHighlight,
-                wildcardNamesForHighlight,
-                wildcardSlotNamesForHighlight
-              )
-            ) {
+            if (!activeEditor || !chipKind) {
+              chipActivationRef.current = null;
               return false;
             }
+            const range = findEditorComposerShortcutChipRangeAt(
+              activeEditor,
+              pos,
+              chipKind,
+              commandNamesForHighlight,
+              promptNamesForHighlight,
+              wildcardNamesForHighlight,
+              wildcardSlotNamesForHighlight
+            );
+            const target = range
+              ? editorComposerChipActivationTarget(activeEditor, range)
+              : null;
+            if (!target) {
+              chipActivationRef.current = null;
+              return false;
+            }
+            if (chipPointerBehavior === "delete") {
+              chipActivationRef.current = null;
+              event.preventDefault();
+              const applied = deleteComposerChipRangeInEditor(activeEditor, target);
+              if (applied) {
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+              }
+              return applied;
+            }
+            if (target.kind === "wildcard-slot") {
+              chipActivationRef.current = null;
+              event.preventDefault();
+              const applied = resolveEditorComposerChipActivation(activeEditor, target);
+              if (applied) {
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+              }
+              return applied;
+            }
+            const nowMs = performance.now();
+            if (!shouldResolveComposerChipActivation(chipActivationRef.current, target, nowMs)) {
+              chipActivationRef.current = armComposerChipActivation(target, nowMs);
+              return false;
+            }
+            chipActivationRef.current = null;
+            if (target.kind === "command") return false;
             event.preventDefault();
-            queueMicrotask(() => syncComposerPopovers(activeEditor));
-            return true;
+            const applied = resolveEditorComposerChipActivation(activeEditor, target);
+            if (applied) {
+              queueMicrotask(() => syncComposerPopovers(activeEditor));
+            }
+            return applied;
           },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
+            if (
+              event.key === "Escape" ||
+              event.key === "Backspace" ||
+              event.key === "Delete" ||
+              event.key.startsWith("Arrow") ||
+              isPlainTextInsertionKey({
+                key: event.key,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                nativeEvent: event as globalThis.KeyboardEvent,
+              })
+            ) {
+              chipActivationRef.current = null;
+            }
             if (
               activeEditor &&
               event.key === "Backspace" &&
@@ -18399,6 +21464,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               ) {
                 event.preventDefault();
                 queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (activeEditor.isEmpty && onEmptyBackspaceRef.current?.() === true) {
+                event.preventDefault();
                 return true;
               }
             }
@@ -18481,7 +21550,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               if (
                 commandUiRef.current.open &&
                 activeShortcutToken &&
-                (commandUiRef.current.scope === "wildcard" ||
+                (commandUiRef.current.scope === "wildcard-slot" ||
                   commandUiRef.current.scope === "leading") &&
                 commandUiRef.current.filtered.length > 0
               ) {
@@ -18489,7 +21558,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   commandUiRef.current.filtered,
                   commandUiRef.current.highlight,
                   event.key === "ArrowLeft" ? -1 : 1,
-                  commandUiRef.current.scope === "wildcard"
+                  commandUiRef.current.scope === "wildcard-slot"
                     ? isComposerTrueWildcardSlotPick
                     : isCommandCenterOperationalCommand
                 );
@@ -18586,14 +21655,31 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 }
                 return true;
               }
-              if (event.key === "Tab") {
+              if (
+                (event.key === "Tab" || event.key === "Enter") &&
+                !event.shiftKey
+              ) {
                 if (mentionUiRef.current.open) {
                   event.preventDefault();
-                  applyComposeMentionTabToEditor(
-                    activeEditor,
-                    mentionBotsRef.current,
-                    mentionUiRef.current.highlight
-                  );
+                  if (mentionCommitModeRef.current === "select-persona") {
+                    const action = applyComposeMentionPersonaToEditor(
+                      activeEditor,
+                      mentionBotsRef.current,
+                      mentionUiRef.current.highlight
+                    );
+                    if (action.kind === "select-persona") {
+                      setMentionUi((s) =>
+                        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                      );
+                      onMentionPersonaSelectRef.current?.(action.bot.id);
+                    }
+                  } else {
+                    applyComposeMentionTabToEditor(
+                      activeEditor,
+                      mentionBotsRef.current,
+                      mentionUiRef.current.highlight
+                    );
+                  }
                   queueMicrotask(() => syncComposerPopovers(activeEditor));
                   return true;
                 }
@@ -18629,6 +21715,25 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                     s.scope
                   ),
                 }));
+                return true;
+              }
+              if (
+                (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                !commandUiRef.current.open &&
+                !mentionUiRef.current.open &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !(event as globalThis.KeyboardEvent).isComposing &&
+                applyWildcardSlotReferenceCycle(
+                  activeEditor,
+                  event.key === "ArrowUp" ? "up" : "down",
+                  wildcardSlotNamesForHighlight,
+                  wildcardNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
                 return true;
               }
               if (
@@ -18682,6 +21787,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           },
         },
         onUpdate: ({ editor: ed }) => {
+          chipActivationRef.current = null;
           prunePendingWildcardSlots(ed);
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
@@ -18705,6 +21811,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         placeholder,
         syncComposerPopovers,
         applyComposerCommandPickInEditor,
+        resolveEditorComposerChipActivation,
         pendingWildcardSlotsForDecoration,
         prunePendingWildcardSlots,
         rememberLocallyEmittedValue,
@@ -18712,6 +21819,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         promptNamesForHighlight,
         wildcardNamesForHighlight,
         wildcardSlotNamesForHighlight,
+        chipPointerBehavior,
         submitOnEnter,
       ]
     );
@@ -18730,6 +21838,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }, [mentionBots]);
 
     useEffect(() => {
+      chipActivationRef.current = null;
       if (!editor || editor.isDestroyed) return;
       const dom = getMountedEditorDom(editor);
       if (!dom) return;
@@ -18782,6 +21891,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }, [editor]);
 
     useEffect(() => {
+      chipActivationRef.current = null;
       if (!editor || editor.isDestroyed) return;
       // Most value updates come directly from this editor's own onUpdate path.
       // In that common case, skip re-serializing markdown back out of ProseMirror.
@@ -18842,6 +21952,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         insertTextAtCursor: (text: string) => {
           const activeEditor = editorRef.current;
           if (!activeEditor || activeEditor.isDestroyed || text.length === 0) return;
+          chipActivationRef.current = null;
           activeEditor.chain().focus().insertContent(text).run();
         },
       }),
@@ -18952,10 +22063,27 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           onHighlightIndexChange={(next) =>
             setMentionUi((s) => ({ ...s, highlight: next }))
           }
-          onSingleMatchClick={() => {
+          onPickIndex={(index) => {
             const ed = editorRef.current;
             if (!ed) return;
-            if (applyMentionTabToEditor(ed, mentionBotsRef.current)) {
+            if (mentionCommitModeRef.current === "select-persona") {
+              const action = applyComposeMentionPersonaToEditor(
+                ed,
+                mentionBotsRef.current,
+                index
+              );
+              if (action.kind === "select-persona") {
+                setMentionUi((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                onMentionPersonaSelectRef.current?.(action.bot.id);
+              }
+              queueMicrotask(() => {
+                syncComposerPopovers(ed);
+              });
+              return;
+            }
+            if (applyComposeMentionTabToEditor(ed, mentionBotsRef.current, index)) {
               queueMicrotask(() => {
                 syncComposerPopovers(ed);
               });
@@ -18969,6 +22097,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           ensureContrast={ensureContrast}
           excludeInteractionRef={markdownComposerSurfaceRef}
           onDismiss={dismissMentionPopover}
+          footer={mentionPopoverFooter}
         />
         <ComposerCommandPopover
           open={commandUi.open}
@@ -19014,13 +22143,18 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     onChange,
     onValueChange,
     onGenerateWildcardSlotValue,
+    chipPointerBehavior = "resolve",
     onFocus,
     hideSubmitButton,
     resolvedTheme,
     mentionBots,
-    commandPicks = [],
-    promptPicks = [],
-    wildcardPicks = [],
+    mentionCommitMode = "insert-mention",
+    onMentionPersonaSelect,
+    mentionPopoverFooter,
+    onEmptyBackspace,
+    commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+    promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+    wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     dismissPopoversSignal,
   },
   ref
@@ -19030,6 +22164,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const composeEditorShellRef = useRef<HTMLDivElement | null>(null);
   const wysiwygRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const mentionBotsRef = useRef(mentionBots);
+  const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
+  const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
+  const onEmptyBackspaceRef = useRef(onEmptyBackspace);
   const commandPicksRef = useRef(commandPicks);
   const promptPicksRef = useRef(promptPicks);
   const wildcardPicksRef = useRef(wildcardPicks);
@@ -19037,6 +22174,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const pendingTextareaCaretRef = useRef<number | null>(null);
   const pendingTextareaWildcardIdRef = useRef(0);
   const pendingTextareaWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
+  const textareaChipActivationRef = useRef<PendingComposerChipActivation | null>(null);
+  const textareaLastChipPointerEventMsRef = useRef(0);
   const [taMention, setTaMention] = useState<{
     open: boolean;
     caretRect: DOMRect | null;
@@ -19074,21 +22213,87 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     textareaOverlayRef.current.scrollTop = el.scrollTop;
     textareaOverlayRef.current.scrollLeft = el.scrollLeft;
   }, []);
+  const syncTextareaSingleLineState = useCallback((el: HTMLTextAreaElement): boolean => {
+    const wrap = el.parentElement;
+    const setSingleLine = (singleLine: boolean) => {
+      const value = singleLine ? "true" : "false";
+      if (el.dataset.composeSingleLine !== value) {
+        el.dataset.composeSingleLine = value;
+      }
+      if (wrap?.getAttribute("data-compose-single-line") !== value) {
+        wrap?.setAttribute("data-compose-single-line", value);
+      }
+    };
+
+    if (el.value.includes("\n")) {
+      setSingleLine(false);
+      return false;
+    }
+
+    setSingleLine(true);
+    const computed = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(computed.lineHeight);
+    const paddingLeft = Number.parseFloat(computed.paddingLeft);
+    const paddingRight = Number.parseFloat(computed.paddingRight);
+    const contentWidth =
+      el.clientWidth -
+      (Number.isFinite(paddingLeft) ? paddingLeft : 0) -
+      (Number.isFinite(paddingRight) ? paddingRight : 0);
+
+    const mirror = document.createElement("div");
+    mirror.textContent = el.value.length > 0 ? el.value : el.placeholder || " ";
+    mirror.style.position = "absolute";
+    mirror.style.visibility = "hidden";
+    mirror.style.pointerEvents = "none";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "anywhere";
+    mirror.style.boxSizing = "content-box";
+    mirror.style.width = `${Math.max(0, contentWidth)}px`;
+    mirror.style.font = computed.font;
+    mirror.style.fontSize = computed.fontSize;
+    mirror.style.fontFamily = computed.fontFamily;
+    mirror.style.fontWeight = computed.fontWeight;
+    mirror.style.fontStyle = computed.fontStyle;
+    mirror.style.letterSpacing = computed.letterSpacing;
+    mirror.style.lineHeight = computed.lineHeight;
+    document.body.appendChild(mirror);
+    const contentHeight = mirror.getBoundingClientRect().height;
+    mirror.remove();
+
+    if (Number.isFinite(lineHeight) && contentHeight > lineHeight * 1.45) {
+      setSingleLine(false);
+      return false;
+    }
+    return true;
+  }, []);
   const resizeTextareaToContent = useCallback(
     (el: HTMLTextAreaElement) => {
+      el.style.height = "auto";
+      const singleLine = syncTextareaSingleLineState(el);
       const computed = window.getComputedStyle(el);
       const maxHeight = Number.parseFloat(computed.maxHeight);
-      el.style.height = "auto";
+      const minHeight = Number.parseFloat(computed.minHeight);
+      const contentHeight =
+        singleLine && Number.isFinite(minHeight) ? minHeight : el.scrollHeight;
       el.style.height = `${
-        Number.isFinite(maxHeight) ? Math.min(el.scrollHeight, maxHeight) : el.scrollHeight
+        Number.isFinite(maxHeight) ? Math.min(contentHeight, maxHeight) : contentHeight
       }px`;
       syncTextareaOverlayScroll(el);
     },
-    [syncTextareaOverlayScroll]
+    [syncTextareaOverlayScroll, syncTextareaSingleLineState]
   );
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
+  useLayoutEffect(() => {
+    mentionCommitModeRef.current = mentionCommitMode;
+  }, [mentionCommitMode]);
+  useLayoutEffect(() => {
+    onMentionPersonaSelectRef.current = onMentionPersonaSelect;
+  }, [onMentionPersonaSelect]);
+  useLayoutEffect(() => {
+    onEmptyBackspaceRef.current = onEmptyBackspace;
+  }, [onEmptyBackspace]);
   useLayoutEffect(() => {
     commandPicksRef.current = commandPicks;
   }, [commandPicks]);
@@ -19099,6 +22304,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     wildcardPicksRef.current = wildcardPicks;
   }, [wildcardPicks]);
   useLayoutEffect(() => {
+    textareaChipActivationRef.current = null;
     textareaValueRef.current = value;
   }, [value]);
   useLayoutEffect(() => {
@@ -19180,36 +22386,6 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       command: CommandCenterCommand,
       scope: ComposerShortcutScope
     ): boolean => {
-      if (isComposerTrueWildcardSlotPick(command) && onGenerateWildcardSlotValue) {
-        const key = composerTrueWildcardSlotKey(command);
-        if (!key) return false;
-        const fallback = composerTrueWildcardSlotFallback(command);
-        const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
-        const next = replaceTextareaComposerShortcutWithText(
-          el.value,
-          el.selectionStart ?? 0,
-          `${pendingText} `,
-          scope
-        );
-        if (!next) return false;
-        const pending: PendingComposerWildcardSlot = {
-          id: `textarea-wildcard-slot-${++pendingTextareaWildcardIdRef.current}`,
-          key,
-          fallback,
-          pendingText,
-          from: next.start,
-          to: next.start + pendingText.length,
-        };
-        pendingTextareaWildcardSlotsRef.current = [
-          ...pendingTextareaWildcardSlotsRef.current,
-          pending,
-        ];
-        textareaValueRef.current = next.value;
-        pendingTextareaCaretRef.current = next.caret;
-        onValueChange(next.value);
-        generatePendingTextareaWildcardSlot(pending);
-        return true;
-      }
       const next = replaceTextareaComposerShortcut(
         el.value,
         el.selectionStart ?? 0,
@@ -19222,7 +22398,147 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       onValueChange(next.value);
       return true;
     },
-    [generatePendingTextareaWildcardSlot, onGenerateWildcardSlotValue, onValueChange]
+    [onValueChange]
+  );
+
+  const replaceTextareaChipActivationTarget = useCallback(
+    (target: ComposerChipActivationTarget, replacement: string): boolean => {
+      const current = textareaValueRef.current;
+      const next = replaceComposerChipText(current, target, replacement);
+      if (!next) return false;
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      return true;
+    },
+    [onValueChange]
+  );
+
+  const deleteTextareaChipActivationTarget = useCallback(
+    (target: ComposerChipActivationTarget): boolean => {
+      const current = textareaValueRef.current;
+      const next = replaceComposerChipText(current, target, "");
+      if (!next) return false;
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      return true;
+    },
+    [onValueChange]
+  );
+
+  const resolveTextareaComposerChipActivation = useCallback(
+    (target: ComposerChipActivationTarget): boolean => {
+      if (target.kind === "command") return false;
+
+      if (target.kind === "prompt") {
+        const command = commandCenterCommandForChipText(
+          promptPicksRef.current,
+          target.text,
+          "/"
+        );
+        if (!command) return false;
+        return replaceTextareaChipActivationTarget(target, command.command);
+      }
+
+      if (target.kind === "wildcard") {
+        return false;
+      }
+
+      return false;
+    },
+    [replaceTextareaChipActivationTarget]
+  );
+
+  const findTextareaComposerChipActivationTarget = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event?: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): ComposerChipActivationTarget | null => {
+      const ranges = resolveComposerTextareaChipRanges({
+        value: el.value,
+        commandPicks: commandPicksRef.current,
+        promptPicks: promptPicksRef.current,
+        wildcardPicks: wildcardPicksRef.current,
+      });
+      const range =
+        event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+          ? findComposerTextareaChipRangeAtPoint(
+              ranges,
+              textareaOverlayRef.current,
+              event.clientX,
+              event.clientY
+            ) ?? findComposerTextareaChipRangeAt(ranges, el.selectionStart ?? 0)
+          : findComposerTextareaChipRangeAt(ranges, el.selectionStart ?? 0);
+      return range ? textareaComposerChipActivationTarget(el.value, range) : null;
+    },
+    []
+  );
+
+  const handleTextareaChipPointerActivation = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event?: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): boolean => {
+      const eventMs = performance.now();
+      if (eventMs - textareaLastChipPointerEventMsRef.current < 80) {
+        return false;
+      }
+      textareaLastChipPointerEventMsRef.current = eventMs;
+      const target = findTextareaComposerChipActivationTarget(el, event);
+      if (!target) {
+        textareaChipActivationRef.current = null;
+        return false;
+      }
+      if (chipPointerBehavior === "delete") {
+        textareaChipActivationRef.current = null;
+        return deleteTextareaChipActivationTarget(target);
+      }
+      if (target.kind === "wildcard-slot") {
+        textareaChipActivationRef.current = null;
+        return resolveTextareaComposerChipActivation(target);
+      }
+      if (
+        !shouldResolveComposerChipActivation(
+          textareaChipActivationRef.current,
+          target,
+          eventMs
+        )
+      ) {
+        textareaChipActivationRef.current = armComposerChipActivation(target, eventMs);
+        return false;
+      }
+      textareaChipActivationRef.current = null;
+      if (target.kind === "command") return false;
+      return resolveTextareaComposerChipActivation(target);
+    },
+    [
+      chipPointerBehavior,
+      deleteTextareaChipActivationTarget,
+      findTextareaComposerChipActivationTarget,
+      resolveTextareaComposerChipActivation,
+    ]
+  );
+
+  const resolveTextareaComposerChipDoubleClick = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): boolean => {
+      const target = findTextareaComposerChipActivationTarget(el, event);
+      textareaChipActivationRef.current = null;
+      if (!target || target.kind === "command") return false;
+      if (chipPointerBehavior === "delete") {
+        return deleteTextareaChipActivationTarget(target);
+      }
+      return resolveTextareaComposerChipActivation(target);
+    },
+    [
+      chipPointerBehavior,
+      deleteTextareaChipActivationTarget,
+      findTextareaComposerChipActivationTarget,
+      resolveTextareaComposerChipActivation,
+    ]
   );
 
   useEffect(() => {
@@ -19245,17 +22561,25 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
         ? getComposerShortcutFromTextarea(el.value, caret, "wildcard")
         : null;
-    const token = leadingToken ?? promptToken ?? wildcardToken;
+    const wildcardSlotToken =
+      !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
+        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard-slot")
+        : null;
+    const token = leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
     const scope: ComposerShortcutScope = leadingToken
       ? "leading"
       : promptToken
         ? "inline"
-        : "wildcard";
+        : wildcardToken
+          ? "wildcard"
+          : "wildcard-slot";
     const commands = leadingToken
       ? [...commandPicksRef.current, ...promptPicksRef.current]
       : promptToken
         ? promptPicksRef.current
-        : wildcardPicksRef.current;
+        : wildcardToken
+          ? wildcardPicksRef.current.filter(isComposerWildcardDeckPick)
+          : wildcardPicksRef.current.filter(isComposerTrueWildcardSlotPick);
     if (!token || !commands.length) {
       setTaCommand((s) =>
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -19267,7 +22591,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     );
     const filtered =
       scope === "wildcard"
-        ? filterWildcardPicksForShortcutQuery(commands, token.query)
+        ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
+        : scope === "wildcard-slot"
+          ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
         : scope === "leading"
           ? filterLeadingPicksForShortcutQuery(commands, token.query)
         : filterCommandPicksForShortcutQuery(commands, token.query);
@@ -19322,17 +22648,61 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       const sameIds =
         sameLength &&
         prev.filtered.every((b, i) => b.id === filtered[i]?.id);
+      const lastIndex = Math.max(0, filtered.length - 1);
       const highlight = sameIds
-        ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
-        : 0;
+        ? Math.min(prev.highlight, lastIndex)
+        : lastIndex;
       return {
         open: true,
-        caretRect,
+        caretRect: caretRect ?? el.getBoundingClientRect(),
         filtered,
         highlight,
       };
     });
   }, []);
+
+  const textareaMentionSyncFrameRef = useRef<number | null>(null);
+  const textareaMentionSyncSnapshotRef = useRef("");
+  const scheduleTextareaMentionSync = useCallback(() => {
+    if (textareaMentionSyncFrameRef.current !== null) {
+      window.cancelAnimationFrame(textareaMentionSyncFrameRef.current);
+    }
+    textareaMentionSyncFrameRef.current = window.requestAnimationFrame(() => {
+      textareaMentionSyncFrameRef.current = null;
+      const el = textareaRef.current;
+      if (el) syncTextareaMention(el);
+    });
+  }, [syncTextareaMention]);
+
+  useEffect(() => {
+    return () => {
+      if (textareaMentionSyncFrameRef.current !== null) {
+        window.cancelAnimationFrame(textareaMentionSyncFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const el = textareaRef.current;
+      if (!el || document.activeElement !== el) return;
+      const snapshot = [
+        el.value,
+        el.selectionStart ?? 0,
+        el.selectionEnd ?? 0,
+        mentionBotsRef.current.length,
+        commandPicksRef.current.length,
+        promptPicksRef.current.length,
+        wildcardPicksRef.current.length,
+      ].join("\u0000");
+      if (snapshot === textareaMentionSyncSnapshotRef.current) return;
+      textareaMentionSyncSnapshotRef.current = snapshot;
+      syncTextareaMention(el);
+    }, 120);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [syncTextareaMention]);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -19369,6 +22739,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       },
       insertTextAtCursor: (text: string) => {
         if (text.length === 0) return;
+        textareaChipActivationRef.current = null;
         if (enabled) {
           wysiwygRef.current?.insertTextAtCursor(text);
           return;
@@ -19411,6 +22782,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
           onGenerateWildcardSlotValue={onGenerateWildcardSlotValue}
+          chipPointerBehavior={chipPointerBehavior}
           onFocus={onFocus}
           submitDisabled={submitDisabled}
           submitLabel={submitLabel}
@@ -19419,6 +22791,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           hideSubmitButton={hideSubmitButton}
           resolvedTheme={resolvedTheme}
           mentionBots={mentionBots}
+          mentionCommitMode={mentionCommitMode}
+          onMentionPersonaSelect={onMentionPersonaSelect}
+          mentionPopoverFooter={mentionPopoverFooter}
+          onEmptyBackspace={onEmptyBackspace}
           commandPicks={commandPicks}
           promptPicks={promptPicks}
           wildcardPicks={wildcardPicks}
@@ -19455,34 +22831,80 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 data-rich-overlay="true"
                 onScroll={(event) => syncTextareaOverlayScroll(event.currentTarget)}
                 onChange={(event) => {
+                  textareaChipActivationRef.current = null;
                   onChange(event);
                   resizeTextareaToContent(event.currentTarget);
                   syncTextareaOverlayScroll(event.currentTarget);
-                  queueMicrotask(() => {
-                    const el = textareaRef.current;
-                    if (el) syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
                 }}
                 onSelect={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  queueMicrotask(() => {
-                    syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
+                }}
+                onPointerUp={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
+                }}
+                onMouseUp={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
                 }}
                 onClick={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  queueMicrotask(() => {
-                    syncTextareaMention(el);
-                  });
+                  scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
+                }}
+                onDoubleClick={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (resolveTextareaComposerChipDoubleClick(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
                 }}
                 onKeyUp={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
-                  syncTextareaMention(el);
+                  scheduleTextareaMentionSync();
                 }}
                 onPaste={(event) => {
+                  textareaChipActivationRef.current = null;
                   const el = textareaRef.current;
                   if (!el) return;
                   const start = el.selectionStart ?? 0;
@@ -19502,6 +22924,32 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 onKeyDown={(event) => {
                   const el = textareaRef.current;
                   if (!el) return;
+                  if (
+                    event.key === "Escape" ||
+                    event.key === "Backspace" ||
+                    event.key === "Delete" ||
+                    event.key.startsWith("Arrow") ||
+                    isPlainTextInsertionKey({
+                      key: event.key,
+                      altKey: event.altKey,
+                      ctrlKey: event.ctrlKey,
+                      metaKey: event.metaKey,
+                      nativeEvent: event.nativeEvent,
+                    })
+                  ) {
+                    textareaChipActivationRef.current = null;
+                  }
+                  if (
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.nativeEvent.isComposing &&
+                    (event.key.length === 1 ||
+                      event.key === "Backspace" ||
+                      event.key === "Delete")
+                  ) {
+                    window.setTimeout(scheduleTextareaMentionSync, 0);
+                  }
                   if (
                     event.key === "Backspace" &&
                     !event.altKey &&
@@ -19574,6 +23022,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       event.preventDefault();
                       pendingTextareaCaretRef.current = promptApplied.caret;
                       onValueChange(promptApplied.value);
+                      return;
+                    }
+                    if (
+                      el.value.length === 0 &&
+                      start === 0 &&
+                      end === 0 &&
+                      onEmptyBackspaceRef.current?.() === true
+                    ) {
+                      event.preventDefault();
                       return;
                     }
                   }
@@ -19677,7 +23134,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     if (
                       taCommandRef.current.open &&
                       activeShortcutToken &&
-                      (taCommandRef.current.scope === "wildcard" ||
+                      (taCommandRef.current.scope === "wildcard-slot" ||
                         taCommandRef.current.scope === "leading") &&
                       taCommandRef.current.filtered.length > 0
                     ) {
@@ -19685,7 +23142,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                         taCommandRef.current.filtered,
                         taCommandRef.current.highlight,
                         event.key === "ArrowLeft" ? -1 : 1,
-                        taCommandRef.current.scope === "wildcard"
+                        taCommandRef.current.scope === "wildcard-slot"
                           ? isComposerTrueWildcardSlotPick
                           : isCommandCenterOperationalCommand
                       );
@@ -19783,9 +23240,31 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     }
                     return;
                   }
-                  if (event.key === "Tab" && !event.shiftKey && taMentionRef.current.open) {
+                  if (
+                    (event.key === "Tab" || event.key === "Enter") &&
+                    !event.shiftKey &&
+                    taMentionRef.current.open
+                  ) {
                     event.preventDefault();
                     const mention = taMentionRef.current;
+                    if (mentionCommitModeRef.current === "select-persona") {
+                      const act = composeMentionPersonaPlainTextAction(
+                        el.value,
+                        el.selectionStart ?? 0,
+                        mentionBotsRef.current,
+                        mention.highlight
+                      );
+                      if (act.kind !== "none") {
+                        pendingTextareaCaretRef.current = act.caret;
+                        textareaValueRef.current = act.replacement;
+                        onValueChange(act.replacement);
+                        setTaMention((s) =>
+                          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                        );
+                        onMentionPersonaSelectRef.current?.(act.bot.id);
+                      }
+                      return;
+                    }
                     const act = composeMentionTabPlainTextAction(
                       el.value,
                       el.selectionStart ?? 0,
@@ -19795,6 +23274,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     if (act.kind !== "none") {
                       pendingTextareaCaretRef.current = act.caret;
                       onValueChange(act.replacement);
+                      setTaMention((s) =>
+                        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                      );
                     }
                   }
                   if (event.key === "Escape" && taCommandRef.current.open) {
@@ -19840,6 +23322,34 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       highlight: (s.highlight + delta + len) % len,
                     }));
                   }
+                  if (
+                    (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+                    !taCommandRef.current.open &&
+                    !taMentionRef.current.open &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    const applied = applyTextareaWildcardSlotReferenceCycle(
+                      el.value,
+                      el.selectionStart ?? 0,
+                      el.selectionEnd ?? 0,
+                      event.key === "ArrowUp" ? "up" : "down",
+                      wildcardPicksRef.current
+                    );
+                    if (applied) {
+                      event.preventDefault();
+                      textareaValueRef.current = applied.value;
+                      pendingTextareaCaretRef.current = applied.caret;
+                      onValueChange(applied.value);
+                      queueMicrotask(() => {
+                        syncTextareaMention(el);
+                        syncTextareaCommand(el);
+                      });
+                    }
+                  }
                 }}
                 onFocus={onFocus}
                 placeholder={effectivePlaceholder}
@@ -19865,25 +23375,45 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           <ComposerBotMentionPopover
             open={taMention.open}
             caretRect={taMention.caretRect}
-            themeSource={null}
+            themeSource={composeEditorShellRef.current}
             bots={taMention.filtered}
             resolvedTheme={resolvedTheme}
             highlightIndex={taMention.highlight}
             onHighlightIndexChange={(next) =>
               setTaMention((s) => ({ ...s, highlight: next }))
             }
-            onSingleMatchClick={() => {
+            onPickIndex={(index) => {
               const el = textareaRef.current;
               if (!el) return;
+              if (mentionCommitModeRef.current === "select-persona") {
+                const act = composeMentionPersonaPlainTextAction(
+                  el.value,
+                  el.selectionStart ?? 0,
+                  mentionBotsRef.current,
+                  index
+                );
+                if (act.kind === "none") return;
+                pendingTextareaCaretRef.current = act.caret;
+                textareaValueRef.current = act.replacement;
+                onValueChange(act.replacement);
+                setTaMention((s) =>
+                  s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+                );
+                onMentionPersonaSelectRef.current?.(act.bot.id);
+                return;
+              }
               const act = composeMentionTabPlainTextAction(
                 el.value,
                 el.selectionStart ?? 0,
                 mentionBotsRef.current,
-                taMentionRef.current.highlight
+                index
               );
               if (act.kind === "none") return;
               pendingTextareaCaretRef.current = act.caret;
               onValueChange(act.replacement);
+              setTaMention((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
             }}
             renderBotGlyph={(glyph) => (
               <BotGlyph name={glyph} size={14} strokeWidth={2.25} />
@@ -19893,6 +23423,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             ensureContrast={ensureContrast}
             excludeInteractionRef={composeEditorShellRef}
             onDismiss={dismissTaMentionPopover}
+            footer={mentionPopoverFooter}
           />
           <ComposerCommandPopover
             open={taCommand.open}
@@ -20948,6 +24479,10 @@ function HomeContent(): React.JSX.Element {
   // save/deleteBot, generateImg, deleteAccount) route to `panelError`;
   // everything else stays on `error`.
   const [error, setError] = useState<string | null>(null);
+  const [backendUnavailable, setBackendUnavailable] =
+    useState<BackendUnavailableEventDetail | null>(null);
+  const [backendReconnectBusy, setBackendReconnectBusy] = useState(false);
+  const [backendRestartBusy, setBackendRestartBusy] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelNotice, setPanelNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20962,9 +24497,7 @@ function HomeContent(): React.JSX.Element {
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
-  const [, startDraftTransition] = useTransition();
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
-  const [composerCleanupBusy, setComposerCleanupBusy] = useState(false);
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
@@ -20974,20 +24507,53 @@ function HomeContent(): React.JSX.Element {
   const [composerPrimed, setComposerPrimed] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerSendTintActive, setComposerSendTintActive] = useState(false);
+  const [chatComposerLastTypedAtMs, setChatComposerLastTypedAtMs] =
+    useState<number | null>(null);
   const [chatHeaderChromeVisible, setChatHeaderChromeVisible] = useState(true);
   const [chatComposerChromeVisible, setChatComposerChromeVisible] = useState(true);
   const chatHeaderChromeVisibleRef = useRef(true);
   const chatComposerChromeVisibleRef = useRef(true);
   const chatChromeAutoHiddenRef = useRef(false);
+  const [zenCanvasSpeedNudgeState, setZenCanvasSpeedNudgeState] =
+    useState<ZenCanvasSpeedNudgeState>(() => createZenCanvasSpeedNudgeState());
+  const zenCanvasSpeedNudgePointerRef = useRef<{
+    pointerId: number;
+    revealKey: string;
+  } | null>(null);
+  const [askQuestionPatienceElapsedMs, setAskQuestionPatienceElapsedMs] =
+    useState(0);
+  const askQuestionPatienceElapsedMsRef = useRef(0);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
     useState<string | null>(null);
-  const [conversationStarterPrompts, setConversationStarterPrompts] = useState<{
-    conversationId: string;
-    prompts: string[];
-  } | null>(null);
+  const [conversationStarterPrompts, setConversationStarterPrompts] =
+    useState<ConversationStarterPromptState | null>(null);
+  const askQuestionPatienceLastTickMsRef = useRef<number | null>(null);
+  const askQuestionPatienceLastTypingAtMsRef = useRef<number | null>(null);
+  const askQuestionPatienceReportedKeysRef = useRef<Set<string>>(new Set());
+  const [
+    askQuestionPatienceClosedAssistantMessageIds,
+    setAskQuestionPatienceClosedAssistantMessageIds,
+  ] = useState<Set<string>>(() => new Set());
+  const askQuestionPatienceClosedAssistantMessageIdsRef = useRef(
+    askQuestionPatienceClosedAssistantMessageIds
+  );
+  askQuestionPatienceClosedAssistantMessageIdsRef.current =
+    askQuestionPatienceClosedAssistantMessageIds;
+  const askQuestionPatienceActiveKeyRef = useRef<string | null>(null);
+  const askQuestionPatienceCurrentKeyRef = useRef<string | null>(null);
+  const askQuestionPatienceElapsedByKeyRef = useRef<Map<string, number>>(
+    new Map()
+  );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
+  const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenAutonomyScheduleFrameRef = useRef<number | null>(null);
+  const zenAutonomyLastActivityAtMsRef = useRef(Date.now());
+  const zenAutonomyCooldownUntilMsRef = useRef(0);
+  const zenAutonomySpokenCountRef = useRef(0);
+  const zenAutonomyInFlightRef = useRef(false);
   const effectiveZenModeSettings = useMemo(
     () => normalizeZenModeSettingsFields(settings),
     [settings]
@@ -20996,11 +24562,14 @@ function HomeContent(): React.JSX.Element {
     zenSessionIdleGapMs,
     zenFreshStartGapMs,
     zenRecentContextMessages,
-    zenWallpaperTextMaskEnabled,
     zenWallpaperRegenMessageInterval,
     zenWallpaperRevealDelayMessageCount,
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
+    zenCanvasTypingSpeed,
+    zenAskQuestionPatienceEnabled,
+    zenAskQuestionPatienceMs,
+    zenAutonomyEnabled,
   } = effectiveZenModeSettings;
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
@@ -21120,10 +24689,16 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [botMemories, setBotMemories] = useState<UserMemory[]>([]);
+  const [botMemoryDossier, setBotMemoryDossier] =
+    useState<BotMemoryPanelDossier | null>(null);
   const [zenPreviousContext, setZenPreviousContext] =
     useState<ZenPreviousContextSummary | null>(null);
   const [zenSessionMemories, setZenSessionMemories] = useState<ZenSessionMemoryItem[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
+  const [psychicModeToast, setPsychicModeToast] =
+    useState<PsychicModeToast | null>(null);
+  const [localCommandToast, setLocalCommandToast] =
+    useState<LocalCommandToast | null>(null);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -21136,6 +24711,8 @@ function HomeContent(): React.JSX.Element {
   const [memoryPanelLoading, setMemoryPanelLoading] = useState(false);
   const [memoryPanelLoadingText, setMemoryPanelLoadingText] = useState("Loading memories...");
   const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
+  const [memoryBubbleDeletePrimedId, setMemoryBubbleDeletePrimedId] =
+    useState<string | null>(null);
   const [memoryBubbleLayoutsByScope, setMemoryBubbleLayoutsByScope] =
     useState<MemoryBubbleLayoutByScope>({});
   const memoryBubbleLayoutsRef = useRef<MemoryBubbleLayoutByScope>({});
@@ -21158,6 +24735,17 @@ function HomeContent(): React.JSX.Element {
   const memoryPhysicsFrameRef = useRef<number | null>(null);
   const [memoryPhysicsActive, setMemoryPhysicsActive] = useState(false);
   const [pendingReply, setPendingReply] = useState(false);
+  const [zenFollowupBuffer, setZenFollowupBuffer] = useState<{
+    conversationId: string | null;
+    messages: string[];
+    pendingMessageCleanupMessageIds: string[];
+    startedAtMs: number;
+    lastActivityAtMs: number;
+    generation: number;
+  } | null>(null);
+  const zenFollowupBufferRef = useRef<typeof zenFollowupBuffer>(null);
+  const zenFollowupCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenFollowupDispatchingRef = useRef(false);
   const [queuedChatPrompts, setQueuedChatPrompts] = useState<Array<{
     id: string;
     text: string;
@@ -21270,6 +24858,7 @@ function HomeContent(): React.JSX.Element {
   const zenOpenInFlightRef = useRef(false);
   const [chatAutoRestoreSuppressed, setChatAutoRestoreSuppressed] = useState(false);
   const [forceNewConversationOnNextSend, setForceNewConversationOnNextSend] = useState(false);
+  const pendingNvmTopicResetRef = useRef(false);
   const detailIdRef = useRef<string | null>(null);
   const CANVAS_BOT_SWITCH_MIN_LOADING_MS = 520;
   const CONVERSATION_SURFACE_LOADING_MIN_MS = 360;
@@ -21463,10 +25052,12 @@ function HomeContent(): React.JSX.Element {
   // collapse so keyboard users land on the control they just opened.
   const chatOverflowGearButtonRef = useRef<HTMLButtonElement>(null);
   const chatOverflowMenuOpenPrevRef = useRef(chatOverflowMenuOpen);
+  const [devToolsUnlocked, setDevToolsUnlocked] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const [devTogglesOpen, setDevTogglesOpen] = useState(false);
+  const [devToolsMinimized, setDevToolsMinimized] = useState(false);
   const [devToolsBusy, setDevToolsBusy] = useState(false);
   const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
+  const [devToolsConsoleOnly, setDevToolsConsoleOnly] = useState(false);
   const [devToolsActiveSection, setDevToolsActiveSection] =
     useState<DevToolsActiveSection>("observe");
   const [devToolsBotQuantity, setDevToolsBotQuantity] =
@@ -21481,9 +25072,18 @@ function HomeContent(): React.JSX.Element {
       x: DEV_TOOLS_PANEL_DEFAULT_X,
       y: DEV_TOOLS_PANEL_DEFAULT_Y,
     });
+  const [devToolsPanelSize, setDevToolsPanelSize] =
+    useState<DevToolsPanelSize | null>(null);
+  const devToolsPanelPositionRef = useRef(devToolsPanelPosition);
+  const devToolsPanelSizeRef = useRef(devToolsPanelSize);
+  const devToolsPanelResizePrimedRef = useRef(false);
+  const [zenPersonaBackdropTuning, setZenPersonaBackdropTuning] =
+    useState<ZenPersonaBackdropTuning>(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
   const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
+  const devToolsBubbleRef = useRef<HTMLButtonElement | null>(null);
   const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const [devMoodVisualEnabled, setDevMoodVisualEnabled] = useState(false);
+  const devToolsBubbleDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const devToolsBubbleSuppressClickRef = useRef(false);
   const [devMoodVisualOpen, setDevMoodVisualOpen] = useState(false);
   const [devMoodNowMs, setDevMoodNowMs] = useState(() => Date.now());
   const [devMoodDebugBusy, setDevMoodDebugBusy] = useState(false);
@@ -21499,13 +25099,75 @@ function HomeContent(): React.JSX.Element {
   const devMoodVisualRef = useRef<HTMLDivElement | null>(null);
   const devMoodVisualDragRef = useRef<DevMoodVisualDragState | null>(null);
   const devMoodVisualSuppressClickRef = useRef(false);
+  const [devZenPauseTesterOpen, setDevZenPauseTesterOpen] = useState(false);
+  const [zenToolLabOpen, setZenToolLabOpen] = useState(false);
+  const [devZenPauseTesterPosition, setDevZenPauseTesterPosition] =
+    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("right"));
+  const [zenToolLabPosition, setZenToolLabPosition] =
+    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("left"));
+  const devZenPauseTesterRef = useRef<HTMLDivElement | null>(null);
+  const zenToolLabRef = useRef<HTMLDivElement | null>(null);
+  const devZenPauseTesterDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const zenToolLabDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const devZenPauseTesterSuppressClickRef = useRef(false);
+  const zenToolLabSuppressClickRef = useRef(false);
+  const [devDebugComposerMinimized, setDevDebugComposerMinimized] = useState(false);
+  const [devToolsUiStorageLoaded, setDevToolsUiStorageLoaded] = useState(!DEV_TOOLS_ENABLED);
+  const [devZenPauseTiming, setDevZenPauseTiming] = useState<ChatRevealTimingSettings>(
+    DEFAULT_CHAT_REVEAL_TIMING
+  );
+  const [devZenPauseTesterStorageLoaded, setDevZenPauseTesterStorageLoaded] = useState(
+    !DEV_TOOLS_ENABLED
+  );
   const resolvedDevToolsBotQuantity =
     devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
+  const devToolsRuntimeActive = DEV_TOOLS_ENABLED && devToolsUnlocked;
   const closeDevTools = useCallback(() => {
+    setDevToolsUnlocked(false);
     setDevToolsOpen(false);
-    setDevTogglesOpen(false);
+    setDevToolsMinimized(true);
     setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
   }, []);
+  const openDevTools = useCallback((section?: DevToolsActiveSection) => {
+    setDevToolsUnlocked(true);
+    setDevToolsOpen(true);
+    setDevToolsMinimized(false);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+    if (section) setDevToolsActiveSection(section);
+  }, []);
+  const showDevToolsLayer = useCallback(() => {
+    setDevToolsUnlocked(true);
+    setDevToolsOpen(false);
+    setDevToolsMinimized(true);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+  }, []);
+  const toggleDevToolsLayer = useCallback(() => {
+    if (devToolsUnlocked) {
+      closeDevTools();
+    } else {
+      showDevToolsLayer();
+    }
+  }, [closeDevTools, devToolsUnlocked, showDevToolsLayer]);
+  const minimizeDevTools = useCallback(() => {
+    setDevToolsOpen(false);
+    setDevToolsMinimized(true);
+    setDevToolsMessage(null);
+    setDevToolsConsoleOnly(false);
+  }, []);
+  const zenCanvasTypingDelayMultiplier =
+    view === "chat" ? 1 / zenCanvasTypingSpeed : 1;
+  const effectiveChatRevealTiming =
+    devToolsRuntimeActive && view === "chat"
+      ? devZenPauseTiming
+      : scaleChatRevealTimingSettings(
+          DEFAULT_CHAT_REVEAL_TIMING,
+          zenCanvasTypingDelayMultiplier
+        );
+  const effectiveChatRevealAnimationMultiplier =
+    devToolsRuntimeActive && view === "chat" ? 1 : zenCanvasTypingDelayMultiplier;
 
   const closeBotContextMenu = useCallback(() => {
     setBotContextMenu(null);
@@ -21550,6 +25212,7 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterWildcardDecks, setCommandCenterWildcardDecks] = useState<
     CommandCenterWildcardDeck[]
   >(() => normalizeCommandCenterState(null).wildcardDecks);
+  const commandCenterImportInputRef = useRef<HTMLInputElement | null>(null);
   const promptCenterPromptComposerRef = useRef<ComposerInputHandle | null>(null);
   const [commandCenterSelectedCommandId, setCommandCenterSelectedCommandId] =
     useState<string | null>(null);
@@ -21563,10 +25226,79 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
     useState<string | null>(null);
   const [commandCenterHelpModalOpen, setCommandCenterHelpModalOpen] = useState(false);
-  const [expandedPromptShortcutMessageId, setExpandedPromptShortcutMessageId] =
-    useState<string | null>(null);
-  const [pendingPromptWildcardCleanupMessageIds, setPendingPromptWildcardCleanupMessageIds] =
+  const [promptCenterDrag, setPromptCenterDrag] =
+    useState<PromptCenterDragState | null>(null);
+  const [expandedPromptShortcutTargetsByMessageId, setExpandedPromptShortcutTargetsByMessageId] =
+    useState<Record<string, string[]>>(() => ({}));
+  const toggleExpandedPromptShortcutTarget = useCallback(
+    (messageId: string, target?: PromptShortcutToggleTarget) => {
+      const targetKey = promptShortcutToggleTargetKey(target);
+      setExpandedPromptShortcutTargetsByMessageId((current) => {
+        const activeTargets = new Set(current[messageId] ?? []);
+        if (activeTargets.has(targetKey)) {
+          activeTargets.delete(targetKey);
+        } else {
+          activeTargets.add(targetKey);
+        }
+        const next = { ...current };
+        if (activeTargets.size > 0) {
+          next[messageId] = [...activeTargets];
+        } else {
+          delete next[messageId];
+        }
+        return next;
+      });
+    },
+    []
+  );
+  const collapseExpandedPromptShortcutsForMessage = useCallback((messageId: string) => {
+    setExpandedPromptShortcutTargetsByMessageId((current) => {
+      if (!current[messageId]) return current;
+      const next = { ...current };
+      delete next[messageId];
+      return next;
+    });
+  }, []);
+  const [pendingMessageCleanupMessageIds, setPendingMessageCleanupMessageIds] =
     useState<Set<string>>(() => new Set());
+  const [cleanupRevealMessageKeys, setCleanupRevealMessageKeys] =
+    useState<Set<string>>(() => new Set());
+  const clearPendingMessageCleanupIds = useCallback((ids: readonly string[]): void => {
+    if (ids.length === 0) return;
+    const idsToClear = new Set(ids);
+    setPendingMessageCleanupMessageIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const id of idsToClear) {
+        if (next.delete(id)) changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, []);
+  const startCleanupMessageReveal = useCallback((messageKeys: readonly string[]): void => {
+    if (messageKeys.length === 0) return;
+    const uniqueMessageKeys = messageKeys.filter(
+      (key, index) => key && messageKeys.indexOf(key) === index
+    );
+    if (uniqueMessageKeys.length === 0) return;
+    setCleanupRevealMessageKeys((current) => {
+      const next = new Set(current);
+      for (const key of uniqueMessageKeys) next.add(key);
+      return next.size === current.size ? current : next;
+    });
+  }, []);
+  useEffect(() => {
+    if (pendingMessageCleanupMessageIds.size === 0) return;
+    const visibleMessageIds = new Set((detail?.messages ?? []).map((message) => message.id));
+    const staleIds = [...pendingMessageCleanupMessageIds].filter(
+      (id) => !visibleMessageIds.has(id)
+    );
+    clearPendingMessageCleanupIds(staleIds);
+  }, [
+    clearPendingMessageCleanupIds,
+    detail?.messages,
+    pendingMessageCleanupMessageIds,
+  ]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
@@ -21678,6 +25410,8 @@ function HomeContent(): React.JSX.Element {
   // contract so they still mean no memory/no history while preserving
   // the selected bot as prompt identity.
   const [pendingIncognito, setPendingIncognito] = useState(false);
+  const [zenPrivateReturnCheckpoint, setZenPrivateReturnCheckpoint] =
+    useState<ZenPrivateReturnCheckpoint | null>(null);
   // Pending mid-thread bot switch for the OPEN Chat-mode conversation.
   // Three-valued so the dropdown can distinguish "match the server's
   // current botId" (undefined) from "explicitly pick Default" (null)
@@ -21689,6 +25423,13 @@ function HomeContent(): React.JSX.Element {
   // (in sendMessage, once server truth has caught up to the pick).
   const [chatBotOverride, setChatBotOverride] =
     useState<string | null | undefined>(undefined);
+  const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
+  const zenPersonaBotIdRef = useRef<string | null>(null);
+  zenPersonaBotIdRef.current = zenPersonaBotId;
+  const [
+    zenPersonaTransitionChoice,
+    setZenPersonaTransitionChoice,
+  ] = useState<ZenPersonaTransitionChoice>("auto");
   const [images, setImages] = useState<ImageRecord[]>([]);
   /** Full-gallery fetch for bot tallies while the grid shows a filtered list. */
   const [imageBotDirectorySnapshot, setImageBotDirectorySnapshot] = useState<
@@ -21699,6 +25440,34 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [zenWallpaperError, setZenWallpaperError] = useState<string | null>(null);
   const [zenAtmosphereLayerOpacities, setZenAtmosphereLayerOpacities] = useState<Record<string, number>>({});
+  const [zenAtmosphereScrollBlendReadyKey, setZenAtmosphereScrollBlendReadyKey] =
+    useState<string | null>(null);
+  const [
+    zenRememberedWallpaperPreview,
+    setZenRememberedWallpaperPreview,
+  ] = useState<ZenRememberedWallpaperPreview | null>(null);
+  const [
+    zenRememberedWallpaperLookup,
+    setZenRememberedWallpaperLookup,
+  ] = useState<ZenRememberedWallpaperLookup | null>(null);
+  const [
+    zenFallbackWallpaperNewConversationSeed,
+    setZenFallbackWallpaperNewConversationSeed,
+  ] = useState(() => createZenFallbackWallpaperSeed());
+  const zenFallbackWallpaperNewConversationSeedRef = useRef(
+    zenFallbackWallpaperNewConversationSeed
+  );
+  zenFallbackWallpaperNewConversationSeedRef.current =
+    zenFallbackWallpaperNewConversationSeed;
+  const zenFallbackWallpaperSeedByConversationIdRef = useRef<Map<string, string>>(
+    new Map()
+  );
+  const rotateZenFallbackWallpaperSeed = useCallback(() => {
+    const nextSeed = createZenFallbackWallpaperSeed();
+    zenFallbackWallpaperNewConversationSeedRef.current = nextSeed;
+    setZenFallbackWallpaperNewConversationSeed(nextSeed);
+  }, []);
+  const zenRememberedWallpaperRequestRef = useRef(0);
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
   const zenWallpaperToggleAutoGenerationSuppressedRef = useRef<Map<string, number>>(new Map());
   const zenAtmosphereTimeline = useMemo(
@@ -21717,6 +25486,23 @@ function HomeContent(): React.JSX.Element {
         .join("|"),
     [zenAtmosphereTimeline]
   );
+  const zenAtmosphereInitialLayerOpacities = useMemo(() => {
+    if (view !== "chat" || zenAtmosphereTimeline.length === 0) return {};
+    const visibleMessageCount = detail?.messages.length ?? 0;
+    return calculateZenAtmosphereLayerOpacitiesForReader({
+      timeline: zenAtmosphereTimeline,
+      readerY: visibleMessageCount,
+      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
+      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      messageCountToY: (messageCount) => messageCount,
+    });
+  }, [
+    view,
+    detail?.messages.length,
+    zenAtmosphereTimelineKey,
+    zenWallpaperRevealDelayMessageCount,
+    zenWallpaperRevealSpanMessageCount,
+  ]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
     []
@@ -22143,11 +25929,8 @@ function HomeContent(): React.JSX.Element {
   const [botTransferOverlayNowMs, setBotTransferOverlayNowMs] = useState(() => Date.now());
   const botTransferBusy = botTransferOverlay !== null;
   const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] = useState(false);
-  const [devChatMetricsEnabled, setDevChatMetricsEnabledState] = useState(false);
-  const [devDebugComposerEnabled, setDevDebugComposerEnabledState] = useState(false);
-  const [devShowCompactedSummaryInChat, setDevShowCompactedSummaryInChatState] =
-    useState(false);
   const [devChatDebugEvents, setDevChatDebugEvents] = useState<DevChatDebugEvent[]>([]);
+  const devChatMetricsTerminalActive = devToolsRuntimeActive;
   const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
     setDevToolsBotImportPasteEnabledState(next);
     if (typeof window === "undefined") return;
@@ -22161,41 +25944,33 @@ function HomeContent(): React.JSX.Element {
       // private mode / quota — preference just won't survive reload
     }
   }, []);
-  const persistDevChatMetricsEnabled = useCallback((next: boolean) => {
-    setDevChatMetricsEnabledState(next);
+  const persistZenPersonaBackdropTuning = useCallback(
+    (patch: Partial<ZenPersonaBackdropTuning>) => {
+      setZenPersonaBackdropTuning((previous) => {
+        const next = normalizeZenPersonaBackdropTuning({ ...previous, ...patch });
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(
+              PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
+              JSON.stringify(next)
+            );
+          } catch {
+            // private mode / quota — preference just won't survive reload
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+  const resetZenPersonaBackdropTuning = useCallback(() => {
+    setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
     if (typeof window === "undefined") return;
     try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistDevDebugComposerEnabled = useCallback((next: boolean) => {
-    setDevDebugComposerEnabledState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistDevShowCompactedSummaryInChat = useCallback((next: boolean) => {
-    setDevShowCompactedSummaryInChatState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY, "1");
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY);
-      }
+      window.localStorage.setItem(
+        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
+        JSON.stringify(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING)
+      );
     } catch {
       // private mode / quota — preference just won't survive reload
     }
@@ -22206,20 +25981,17 @@ function HomeContent(): React.JSX.Element {
       setDevToolsBotImportPasteEnabledState(
         window.localStorage.getItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY) === "1"
       );
-      setDevChatMetricsEnabledState(
-        window.localStorage.getItem(PRISM_DEV_CHAT_METRICS_STORAGE_KEY) === "1"
+      const storedPersonaBackdrop = window.localStorage.getItem(
+        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY
       );
-      setDevDebugComposerEnabledState(
-        window.localStorage.getItem(PRISM_DEV_DEBUG_COMPOSER_STORAGE_KEY) === "1"
-      );
-      setDevShowCompactedSummaryInChatState(
-        window.localStorage.getItem(PRISM_DEV_SHOW_COMPACTED_SUMMARY_STORAGE_KEY) === "1"
-      );
+      if (storedPersonaBackdrop) {
+        setZenPersonaBackdropTuning(
+          normalizeZenPersonaBackdropTuning(JSON.parse(storedPersonaBackdrop))
+        );
+      }
     } catch {
       setDevToolsBotImportPasteEnabledState(false);
-      setDevChatMetricsEnabledState(false);
-      setDevDebugComposerEnabledState(false);
-      setDevShowCompactedSummaryInChatState(false);
+      setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
     }
   }, []);
   useEffect(() => {
@@ -22248,7 +26020,7 @@ function HomeContent(): React.JSX.Element {
   const commandCenterMentionById = useMemo(
     () =>
       new Map(
-        [...commandCenterCommands, ...commandCenterWildcardDeckPicks].map(
+        [...commandCenterCommands, ...BUILT_IN_WILDCARD_SLOT_PICKS, ...commandCenterWildcardDeckPicks].map(
           (command) => [command.id, command] as const
         )
       ),
@@ -22283,6 +26055,11 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
+  const [devPanelSafeAreaInsets, setDevPanelSafeAreaInsets] =
+    useState<DevPanelSafeAreaInsets>(DEV_PANEL_SAFE_AREA_DEFAULT_INSETS);
+  const devPanelSafeAreaInsetsRef = useRef<DevPanelSafeAreaInsets>(
+    DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+  );
   const sidebarDrawerMode = viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT;
   const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
   const comfyUiDraftHost = settings?.comfyUiHost?.trim() ?? "";
@@ -22290,6 +26067,80 @@ function HomeContent(): React.JSX.Element {
   const mobileKeyboardInset = useMobileKeyboardInset(
     composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
   );
+  useLayoutEffect(() => {
+    if (!DEV_TOOLS_ENABLED || !devToolsRuntimeActive || typeof document === "undefined") {
+      const defaultInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
+      if (!devPanelSafeAreaInsetsEqual(devPanelSafeAreaInsetsRef.current, defaultInsets)) {
+        devPanelSafeAreaInsetsRef.current = defaultInsets;
+        setDevPanelSafeAreaInsets(defaultInsets);
+      }
+      return;
+    }
+
+    let frame: number | null = null;
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => scheduleMeasure());
+
+    function observeSafeAreaNodes() {
+      resizeObserver?.disconnect();
+      document
+        .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
+        .forEach((node) => resizeObserver?.observe(node));
+    }
+
+    function measure() {
+      frame = null;
+      const next = stableMeasuredDevPanelSafeAreaInsets(
+        collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight)
+      );
+      if (devPanelSafeAreaInsetsEqual(devPanelSafeAreaInsetsRef.current, next)) return;
+      devPanelSafeAreaInsetsRef.current = next;
+      setDevPanelSafeAreaInsets(next);
+    }
+
+    function scheduleMeasure() {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(measure);
+    }
+
+    observeSafeAreaNodes();
+    scheduleMeasure();
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            observeSafeAreaNodes();
+            scheduleMeasure();
+          });
+    mutationObserver?.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "class",
+        "style",
+        DEV_PANEL_SAFE_AREA_ATTRIBUTE,
+        "data-chat-sidebar-hidden",
+        "data-choice-composer-hidden",
+        "data-session-active",
+        "data-transcript-open",
+        "data-zen-header-hidden",
+      ],
+    });
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("transitionend", scheduleMeasure, true);
+
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("transitionend", scheduleMeasure, true);
+    };
+  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
@@ -22401,6 +26252,21 @@ function HomeContent(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, [chatOverflowMenuOpen]);
 
+  useEffect(() => {
+    if (!zenToolLabOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setZenToolLabOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zenToolLabOpen]);
+
+  useEffect(() => {
+    if (view !== "chat" && zenToolLabOpen) {
+      setZenToolLabOpen(false);
+    }
+  }, [view, zenToolLabOpen]);
+
   // When the chat-tools accordion collapses, hand focus back to the wrench so
   // keyboard users (Escape, outside-click, action click) don't get stranded
   // inside an inert subtree. Skip on mount + when the menu opens.
@@ -22420,50 +26286,155 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return;
     try {
-      setDevMoodVisualEnabled(
-        window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_STORAGE_KEY) === "1"
-      );
-      const raw = window.localStorage.getItem(PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          typeof (parsed as { x?: unknown }).x === "number" &&
-          typeof (parsed as { y?: unknown }).y === "number"
-        ) {
-          const position = parsed as DevMoodVisualPosition;
-          setDevMoodVisualPosition(
-            clampDevToolsPanelPosition(
-              position.x,
-              position.y,
-              280,
-              220,
-              window.innerWidth,
-              window.innerHeight
-            )
-          );
-        }
+      const settingsRaw = window.localStorage.getItem(PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY);
+      if (settingsRaw) {
+        setDevZenPauseTiming(
+          normalizeChatRevealTimingSettings(JSON.parse(settingsRaw), DEFAULT_CHAT_REVEAL_TIMING)
+        );
       }
     } catch {
       // Local dev affordance only.
     }
+    setDevZenPauseTesterStorageLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
+    if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
     try {
       window.localStorage.setItem(
-        PRISM_DEV_MOOD_VISUAL_STORAGE_KEY,
-        devMoodVisualEnabled ? "1" : "0"
+        PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY,
+        JSON.stringify(devZenPauseTiming)
       );
     } catch {
       // Local dev affordance only.
     }
-  }, [devMoodVisualEnabled]);
+  }, [devZenPauseTesterStorageLoaded, devZenPauseTiming]);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    if (!DEV_TOOLS_ENABLED) return;
+    try {
+      const viewportW = Math.max(320, window.innerWidth);
+      const viewportH = Math.max(320, window.innerHeight);
+      const raw = window.localStorage.getItem(PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (isRecord(parsed)) {
+          const activeSection = parsed.activeSection;
+          if (
+            typeof activeSection === "string" &&
+            DEV_TOOLS_NAV_ITEMS.some((item) => item.id === activeSection)
+          ) {
+            setDevToolsActiveSection(activeSection as DevToolsActiveSection);
+          }
+
+          const panelSize = normalizeStoredDevToolsPanelSize(
+            parsed.panelSize,
+            viewportW,
+            viewportH
+          );
+          if (panelSize) setDevToolsPanelSize(panelSize);
+
+          const panelPosition = normalizeStoredDevToolsPosition(
+            parsed.panelPosition,
+            panelSize?.width ?? 46,
+            panelSize?.height ?? 42,
+            viewportW,
+            viewportH
+          );
+          if (panelPosition) setDevToolsPanelPosition(panelPosition);
+
+          const mood = isRecord(parsed.mood) ? parsed.mood : null;
+          if (typeof mood?.open === "boolean") setDevMoodVisualOpen(mood.open);
+          const moodPosition = normalizeStoredDevToolsPosition(
+            mood?.position,
+            280,
+            220,
+            viewportW,
+            viewportH
+          );
+          if (moodPosition) setDevMoodVisualPosition(moodPosition);
+
+          const pauseTester = isRecord(parsed.pauseTester) ? parsed.pauseTester : null;
+          if (typeof pauseTester?.open === "boolean") {
+            setDevZenPauseTesterOpen(pauseTester.open);
+          }
+          const pauseTesterPosition = normalizeStoredDevToolsPosition(
+            pauseTester?.position,
+            46,
+            46,
+            viewportW,
+            viewportH
+          );
+          if (pauseTesterPosition) setDevZenPauseTesterPosition(pauseTesterPosition);
+
+          const toolLab = isRecord(parsed.toolLab) ? parsed.toolLab : null;
+          if (typeof toolLab?.open === "boolean") setZenToolLabOpen(toolLab.open);
+          const toolLabPosition = normalizeStoredDevToolsPosition(
+            toolLab?.position,
+            46,
+            46,
+            viewportW,
+            viewportH
+          );
+          if (toolLabPosition) setZenToolLabPosition(toolLabPosition);
+
+          const debugComposer = isRecord(parsed.debugComposer) ? parsed.debugComposer : null;
+          if (typeof debugComposer?.minimized === "boolean") {
+            setDevDebugComposerMinimized(debugComposer.minimized);
+          }
+
+          const compactedContext = isRecord(parsed.compactedContext)
+            ? parsed.compactedContext
+            : null;
+          if (typeof compactedContext?.minimized === "boolean") {
+            setCompactedSummaryDebugMinimized(compactedContext.minimized);
+          }
+          const storedRect = compactedContext?.rect;
+          if (isRecord(storedRect)) {
+            const { x, y, width, height } = storedRect;
+            if (
+              typeof x === "number" &&
+              typeof y === "number" &&
+              typeof width === "number" &&
+              typeof height === "number" &&
+              Number.isFinite(x) &&
+              Number.isFinite(y) &&
+              Number.isFinite(width) &&
+              Number.isFinite(height)
+            ) {
+              setCompactedSummaryDebugPanelRect(
+                clampCompactedSummaryDebugPanelRect(
+                  { x, y, width, height },
+                  viewportW,
+                  viewportH
+                )
+              );
+            }
+          }
+        }
+      } else {
+        const legacyMoodRaw = window.localStorage.getItem(
+          PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY
+        );
+        const legacyMoodPosition = legacyMoodRaw
+          ? normalizeStoredDevToolsPosition(
+              JSON.parse(legacyMoodRaw) as unknown,
+              280,
+              220,
+              viewportW,
+              viewportH
+            )
+          : null;
+        if (legacyMoodPosition) setDevMoodVisualPosition(legacyMoodPosition);
+      }
+    } catch {
+      // Local dev affordance only.
+    }
+    setDevToolsUiStorageLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!devToolsRuntimeActive) return;
     setDevMoodNowMs(Date.now());
     const timer = window.setInterval(() => {
       setDevMoodNowMs(Date.now());
@@ -22471,11 +26442,36 @@ function HomeContent(): React.JSX.Element {
     return () => {
       window.clearInterval(timer);
     };
-  }, [devMoodVisualEnabled]);
+  }, [devToolsRuntimeActive]);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
+    if (!DEV_TOOLS_ENABLED || !devToolsUiStorageLoaded) return;
     try {
+      const snapshot: DevToolsUiStateStorage = {
+        activeSection: devToolsActiveSection,
+        panelPosition: devToolsPanelPosition,
+        panelSize: devToolsPanelSize ?? undefined,
+        mood: {
+          open: devMoodVisualOpen,
+          position: devMoodVisualPosition,
+        },
+        pauseTester: {
+          open: devZenPauseTesterOpen,
+          position: devZenPauseTesterPosition,
+        },
+        toolLab: {
+          open: zenToolLabOpen,
+          position: zenToolLabPosition,
+        },
+        debugComposer: {
+          minimized: devDebugComposerMinimized,
+        },
+        compactedContext: {
+          minimized: compactedSummaryDebugMinimized,
+          rect: compactedSummaryDebugPanelRect,
+        },
+      };
+      window.localStorage.setItem(PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY, JSON.stringify(snapshot));
       window.localStorage.setItem(
         PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY,
         JSON.stringify(devMoodVisualPosition)
@@ -22483,10 +26479,32 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Local dev affordance only.
     }
-  }, [devMoodVisualPosition]);
+  }, [
+    compactedSummaryDebugMinimized,
+    compactedSummaryDebugPanelRect,
+    devDebugComposerMinimized,
+    devMoodVisualOpen,
+    devMoodVisualPosition,
+    devToolsActiveSection,
+    devToolsPanelPosition,
+    devToolsPanelSize,
+    devToolsUiStorageLoaded,
+    devZenPauseTesterOpen,
+    devZenPauseTesterPosition,
+    zenToolLabOpen,
+    zenToolLabPosition,
+  ]);
 
   useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return;
+    devToolsPanelPositionRef.current = devToolsPanelPosition;
+  }, [devToolsPanelPosition]);
+
+  useEffect(() => {
+    devToolsPanelSizeRef.current = devToolsPanelSize;
+  }, [devToolsPanelSize]);
+
+  useEffect(() => {
+    if (!devToolsRuntimeActive) return;
     setDevMoodVisualPosition((current) =>
       clampDevToolsPanelPosition(
         current.x,
@@ -22494,10 +26512,37 @@ function HomeContent(): React.JSX.Element {
         devMoodVisualRef.current?.offsetWidth ?? 280,
         devMoodVisualRef.current?.offsetHeight ?? 220,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       )
     );
-  }, [devMoodVisualEnabled, viewportHeight, viewportWidth]);
+  }, [devPanelSafeAreaInsets, devToolsRuntimeActive, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    if (!devToolsRuntimeActive) return;
+    setDevZenPauseTesterPosition((current) =>
+      clampDevToolsPanelPosition(
+        current.x,
+        current.y,
+        devZenPauseTesterRef.current?.offsetWidth ?? 46,
+        devZenPauseTesterRef.current?.offsetHeight ?? 46,
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      )
+    );
+    setZenToolLabPosition((current) =>
+      clampDevToolsPanelPosition(
+        current.x,
+        current.y,
+        zenToolLabRef.current?.offsetWidth ?? 46,
+        zenToolLabRef.current?.offsetHeight ?? 46,
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      )
+    );
+  }, [devPanelSafeAreaInsets, devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     if (!sidebarDrawerMode) return;
@@ -22552,7 +26597,7 @@ function HomeContent(): React.JSX.Element {
       sidebarEdgeSwipeRef.current = null;
     }
   }, []);
-  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const panel = devToolsPanelRef.current;
     if (!panel) return;
@@ -22571,7 +26616,7 @@ function HomeContent(): React.JSX.Element {
     }
     event.preventDefault();
   }, []);
-  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const dragDevToolsPanel = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devToolsPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     const panel = devToolsPanelRef.current;
@@ -22584,13 +26629,14 @@ function HomeContent(): React.JSX.Element {
       rect.width,
       rect.height,
       window.innerWidth,
-      window.innerHeight
+      window.innerHeight,
+      devPanelSafeAreaInsets
     );
     panel.style.left = `${next.x}px`;
     panel.style.top = `${next.y}px`;
     setDevToolsPanelPosition(next);
-  }, []);
-  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  }, [devPanelSafeAreaInsets]);
+  const endDevToolsPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devToolsPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     devToolsPanelDragRef.current = null;
@@ -22601,6 +26647,83 @@ function HomeContent(): React.JSX.Element {
       // Safe no-op for environments without pointer capture support.
     }
   }, []);
+  const startDevLayerOrbDrag = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      panel: HTMLElement | null,
+      dragRef: { current: DevLayerOrbDragState | null },
+      suppressClickRef: { current: boolean }
+    ) => {
+      if (event.button !== 0 || !panel) return;
+      const rect = panel.getBoundingClientRect();
+      dragRef.current = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
+      suppressClickRef.current = false;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is missing in some test environments.
+      }
+    },
+    []
+  );
+  const dragDevLayerOrb = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      panel: HTMLElement | null,
+      dragRef: { current: DevLayerOrbDragState | null },
+      setPosition: (next: DevToolsPanelPosition) => void
+    ) => {
+      const dragState = dragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId || !panel) return;
+      const dx = Math.abs(event.clientX - dragState.startClientX);
+      const dy = Math.abs(event.clientY - dragState.startClientY);
+      if (dx > 3 || dy > 3) dragState.moved = true;
+      const rect = panel.getBoundingClientRect();
+      const next = clampDevToolsPanelPosition(
+        event.clientX - dragState.offsetX,
+        event.clientY - dragState.offsetY,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight,
+        devPanelSafeAreaInsets
+      );
+      panel.style.left = `${next.x}px`;
+      panel.style.top = `${next.y}px`;
+      setPosition(next);
+    },
+    [devPanelSafeAreaInsets]
+  );
+  const endDevLayerOrbDrag = useCallback(
+    <T extends HTMLElement,>(
+      event: React.PointerEvent<T>,
+      dragRef: { current: DevLayerOrbDragState | null },
+      suppressClickRef: { current: boolean }
+    ) => {
+      const dragState = dragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      dragRef.current = null;
+      suppressClickRef.current = dragState.moved;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+      if (dragState.moved) {
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
+    },
+    []
+  );
   const startDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const panel = devMoodVisualRef.current;
@@ -22640,10 +26763,11 @@ function HomeContent(): React.JSX.Element {
         rect.width,
         rect.height,
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
+        devPanelSafeAreaInsets
       )
     );
-  }, []);
+  }, [devPanelSafeAreaInsets]);
   const endDevMoodVisualDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = devMoodVisualDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -22699,12 +26823,13 @@ function HomeContent(): React.JSX.Element {
       rect.width,
       rect.height,
       window.innerWidth,
-      window.innerHeight
+      window.innerHeight,
+      devPanelSafeAreaInsets
     );
     panel.style.left = `${next.x}px`;
     panel.style.top = `${next.y}px`;
     setCoffeePollPanelPosition(next);
-  }, []);
+  }, [devPanelSafeAreaInsets]);
   const endCoffeePollPanelDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const dragState = coffeePollPanelDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -22803,6 +26928,8 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(panelCloseTimerRef.current);
       panelCloseTimerRef.current = null;
     }
+    setPanelError(null);
+    setPanelNotice(null);
     setPanelClosing(false);
     setPanel(nextPanel);
     if (nextPanel === "settings") {
@@ -22884,9 +27011,14 @@ function HomeContent(): React.JSX.Element {
   }
 
   const apiProxyLooksDown = useCallback((error: unknown): boolean => {
+    if (isPrismBackendUnavailableError(error)) return true;
     const text = error instanceof Error ? error.message : String(error ?? "");
     const lowered = text.toLowerCase();
-    return lowered.includes("prism api unreachable") || lowered.includes("lost connection loading /api");
+    return (
+      lowered.includes("backend_unavailable") ||
+      lowered.includes("prism api unreachable") ||
+      lowered.includes("lost connection loading /api")
+    );
   }, []);
 
   const requestApiWithLoopbackFallback = useCallback(
@@ -22929,6 +27061,7 @@ function HomeContent(): React.JSX.Element {
             if (!response.ok || payload?.ok === false) {
               continue;
             }
+            dispatchBackendAvailableEvent();
             return payload as T;
           } catch {
             // Try next loopback candidate.
@@ -22939,6 +27072,28 @@ function HomeContent(): React.JSX.Element {
     },
     [apiProxyLooksDown]
   );
+
+  useEffect(() => {
+    const handleBackendUnavailable = (event: Event): void => {
+      const detail =
+        event instanceof CustomEvent && event.detail
+          ? (event.detail as BackendUnavailableEventDetail)
+          : {
+              code: BACKEND_UNAVAILABLE_CODE,
+              message: "Prism is waiting for its local API.",
+            };
+      setBackendUnavailable(detail);
+    };
+    const handleBackendAvailable = (): void => {
+      setBackendUnavailable(null);
+    };
+    window.addEventListener(BACKEND_UNAVAILABLE_EVENT, handleBackendUnavailable);
+    window.addEventListener(BACKEND_AVAILABLE_EVENT, handleBackendAvailable);
+    return () => {
+      window.removeEventListener(BACKEND_UNAVAILABLE_EVENT, handleBackendUnavailable);
+      window.removeEventListener(BACKEND_AVAILABLE_EVENT, handleBackendAvailable);
+    };
+  }, []);
 
   const refreshDesktopFirstRunHealth = useCallback(async () => {
     setDesktopFirstRunChecklistBusy(true);
@@ -23104,10 +27259,14 @@ function HomeContent(): React.JSX.Element {
   }, [panel, editingBotId, bots]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsRuntimeActive) return;
     const panelNode = devToolsPanelRef.current;
-    if (!panelNode) return;
-    const rect = panelNode.getBoundingClientRect();
+    const node = panelNode ?? devToolsBubbleRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (panelNode) {
+      setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(rect.width, rect.height));
+    }
 
     setDevToolsPanelPosition((position) => {
       const next = clampDevToolsPanelPosition(
@@ -23116,11 +27275,19 @@ function HomeContent(): React.JSX.Element {
         rect.width,
         rect.height,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       );
       return next.x === position.x && next.y === position.y ? position : next;
     });
-  }, [devToolsOpen, viewportHeight, viewportWidth]);
+  }, [
+    devPanelSafeAreaInsets,
+    devToolsMinimized,
+    devToolsOpen,
+    devToolsRuntimeActive,
+    viewportHeight,
+    viewportWidth,
+  ]);
 
   useEffect(() => {
     const panelNode = devToolsPanelRef.current;
@@ -23129,31 +27296,67 @@ function HomeContent(): React.JSX.Element {
     panelNode.style.top = `${devToolsPanelPosition.y}px`;
     panelNode.style.setProperty("--dev-tools-panel-left", `${devToolsPanelPosition.x}px`);
     panelNode.style.setProperty("--dev-tools-panel-top", `${devToolsPanelPosition.y}px`);
-  }, [devToolsPanelPosition]);
+    if (devToolsPanelSize) {
+      panelNode.style.width = `${devToolsPanelSize.width}px`;
+      panelNode.style.height = `${devToolsPanelSize.height}px`;
+    } else {
+      panelNode.style.removeProperty("width");
+      panelNode.style.removeProperty("height");
+    }
+  }, [devToolsPanelPosition, devToolsPanelSize]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsOpen) {
+      devToolsPanelResizePrimedRef.current = false;
+      return;
+    }
     const panelNode = devToolsPanelRef.current;
     if (!panelNode || typeof ResizeObserver === "undefined") return;
 
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      setDevToolsPanelPosition((position) => {
-        const next = clampDevToolsPanelPosition(
-          position.x,
-          position.y,
+    const resizeObserver = new ResizeObserver(() => {
+      const rect = panelNode.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(width, height));
+      const position = devToolsPanelPositionRef.current;
+      const next = clampDevToolsPanelRect(
+        {
+          x: position.x,
+          y: position.y,
           width,
           height,
-          viewportWidth,
-          viewportHeight
-        );
-        return next.x === position.x && next.y === position.y ? position : next;
+        },
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      );
+      if (next.x !== position.x || next.y !== position.y) {
+        const nextPosition = { x: next.x, y: next.y };
+        devToolsPanelPositionRef.current = nextPosition;
+        setDevToolsPanelPosition(nextPosition);
+      }
+
+      const hasSeenInitialMeasurement = devToolsPanelResizePrimedRef.current;
+      devToolsPanelResizePrimedRef.current = true;
+      if (!hasSeenInitialMeasurement && !devToolsPanelSizeRef.current) return;
+
+      setDevToolsPanelSize((current) => {
+        if (
+          current &&
+          Math.abs(current.width - next.width) < 1 &&
+          Math.abs(current.height - next.height) < 1
+        ) {
+          return current;
+        }
+        const nextSize = { width: next.width, height: next.height };
+        devToolsPanelSizeRef.current = nextSize;
+        return nextSize;
       });
     });
 
     resizeObserver.observe(panelNode);
     return () => resizeObserver.disconnect();
-  }, [devToolsOpen, viewportHeight, viewportWidth]);
+  }, [devPanelSafeAreaInsets, devToolsOpen, viewportHeight, viewportWidth]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -23432,11 +27635,16 @@ function HomeContent(): React.JSX.Element {
     sentGeneratedImage: SentGeneratedImagePayload
   ): React.ReactElement {
     const privateBlurred = isPrivateGeneratedImageHidden(sentGeneratedImage.imageId);
+    const imageSrc =
+      isZenToolLabDevImageId(sentGeneratedImage.imageId) &&
+      sentGeneratedImage.displayUrl?.trim()
+        ? sentGeneratedImage.displayUrl.trim()
+        : apiGeneratedImageThumbUrl(sentGeneratedImage.imageId);
     const image = (
       <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={apiGeneratedImageThumbUrl(sentGeneratedImage.imageId)}
+          src={imageSrc}
           alt={
             privateBlurred
               ? "Private generated image hidden"
@@ -23520,6 +27728,12 @@ function HomeContent(): React.JSX.Element {
           explicitDefault: chatBotOverride === null,
         };
       }
+      if ((!detail || detail.id === "pending") && zenPersonaBotId !== null) {
+        return {
+          botId: zenPersonaBotId,
+          explicitDefault: false,
+        };
+      }
       if (detail?.id !== undefined && detail.id !== "pending") {
         return {
           botId: detail.botId,
@@ -23539,6 +27753,7 @@ function HomeContent(): React.JSX.Element {
     detail,
     chatBotOverride,
     privateChatActive,
+    zenPersonaBotId,
   ]);
 
   const activeBot = useMemo<Bot | null>(() => {
@@ -23547,6 +27762,12 @@ function HomeContent(): React.JSX.Element {
     bots,
     visualBotSelection.botId,
   ]);
+
+  const zenPersonaBot = useMemo<Bot | null>(() => {
+    return zenPersonaBotId
+      ? bots.find((bot) => bot.id === zenPersonaBotId) ?? null
+      : null;
+  }, [bots, zenPersonaBotId]);
 
   /**
    * Provider to actually treat as "preferred" for chat-side reads. When the
@@ -23560,9 +27781,10 @@ function HomeContent(): React.JSX.Element {
    * having to remember the rule independently.
    */
   const effectivePreferredProvider = useMemo<Provider>(() => {
-    if (activeBot?.online_enabled === 0) return "local";
+    const providerLockBot = view === "chat" ? zenPersonaBot : activeBot;
+    if (providerLockBot?.online_enabled === 0) return "local";
     return settings?.preferredProvider ?? "local";
-  }, [activeBot, settings?.preferredProvider]);
+  }, [activeBot, settings?.preferredProvider, view, zenPersonaBot]);
   /** Chat Images panel: visual bot is often null for Prism-default chats; use conversation locks instead. */
   const chatScopedGalleryBotId = useMemo(() => {
     if (view !== "chat") return null;
@@ -23570,6 +27792,7 @@ function HomeContent(): React.JSX.Element {
       return visualBotSelection.botId;
     }
     return (
+      zenPersonaBotId ??
       detail?.botId ??
       detail?.lastBotId ??
       selectedBotId ??
@@ -23579,6 +27802,7 @@ function HomeContent(): React.JSX.Element {
     view,
     privateChatActive,
     visualBotSelection.botId,
+    zenPersonaBotId,
     detail?.botId,
     detail?.lastBotId,
     selectedBotId,
@@ -23711,11 +27935,13 @@ function HomeContent(): React.JSX.Element {
   const shellStyle = useMemo<React.CSSProperties | undefined>(() => {
     const raw = activeBot?.color?.trim();
     if (!raw) return undefined;
+    const accent = displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
+    if (!accent) return undefined;
     return deriveAccentStyle(
-      normalizeAccentForTheme(raw, resolvedTheme),
+      accent,
       resolvedTheme
     );
-  }, [activeBot, resolvedTheme]);
+  }, [activeBot, appWidePrivateMode, resolvedTheme]);
 
   const composeBotAccentId = useMemo<string | null>(() => {
     if (privateChatActive) {
@@ -23725,9 +27951,7 @@ function HomeContent(): React.JSX.Element {
       return detail?.botId ?? selectedBotId ?? null;
     }
     if (view === "chat") {
-      if (chatBotOverride !== undefined) return chatBotOverride;
-      if (detail?.id !== undefined && detail.id !== "pending") return detail.botId;
-      return detail?.botId ?? selectedBotId ?? null;
+      return zenPersonaBotId;
     }
     return selectedBotId;
   }, [
@@ -23736,28 +27960,78 @@ function HomeContent(): React.JSX.Element {
     chatBotOverride,
     privateChatActive,
     selectedBotId,
+    zenPersonaBotId,
   ]);
 
   const selectedComposeBotAccent = useMemo<string | null>(() => {
     const raw = composeBotAccentId
       ? bots.find((bot) => bot.id === composeBotAccentId)?.color?.trim()
       : null;
-    return raw ? normalizeAccentForTheme(raw, resolvedTheme) : null;
-  }, [bots, composeBotAccentId, resolvedTheme]);
+    return displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
+  }, [appWidePrivateMode, bots, composeBotAccentId, resolvedTheme]);
+
+  const zenPersonaBackdropStyleVars = useMemo(
+    () => zenPersonaBackdropCssVars(zenPersonaBackdropTuning),
+    [zenPersonaBackdropTuning]
+  );
+
+  const zenPersonaContinuityWashStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (view !== "chat" || !selectedComposeBotAccent) return undefined;
+    return {
+      ...zenPersonaBackdropStyleVars,
+      ["--zen-persona-ink-color" as string]: selectedComposeBotAccent,
+    };
+  }, [selectedComposeBotAccent, view, zenPersonaBackdropStyleVars]);
+  const previousZenPersonaWashColorRef = useRef<string | null>(null);
+  const [exitingZenPersonaWash, setExitingZenPersonaWash] = useState<{
+    color: string;
+    id: number;
+  } | null>(null);
+  useEffect(() => {
+    const previousColor = previousZenPersonaWashColorRef.current;
+    if (view !== "chat") {
+      previousZenPersonaWashColorRef.current = null;
+      setExitingZenPersonaWash(null);
+      return;
+    }
+    if (selectedComposeBotAccent) {
+      previousZenPersonaWashColorRef.current = selectedComposeBotAccent;
+      setExitingZenPersonaWash(null);
+      return;
+    }
+    previousZenPersonaWashColorRef.current = null;
+    if (!previousColor) {
+      setExitingZenPersonaWash(null);
+      return;
+    }
+
+    const id = Date.now();
+    setExitingZenPersonaWash({ color: previousColor, id });
+    const timeout = window.setTimeout(() => {
+      setExitingZenPersonaWash((current) => (current?.id === id ? null : current));
+    }, ZEN_ATMOSPHERE_COLOR_TRANSITION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [selectedComposeBotAccent, view]);
+  const exitingZenPersonaWashStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!exitingZenPersonaWash) return undefined;
+    return {
+      ...zenPersonaBackdropStyleVars,
+      ["--zen-persona-ink-color" as string]: exitingZenPersonaWash.color,
+    };
+  }, [exitingZenPersonaWash, zenPersonaBackdropStyleVars]);
 
   const nextZenUserMessagePrismColor = useMemo<
     (typeof ZEN_USER_MESSAGE_PRISM_PALETTE)[number] | null
   >(() => {
     if (view !== "chat") return null;
-    const userMessageCount =
-      detail?.messages.reduce(
-        (count, message) => count + (message.role === "user" ? 1 : 0),
-        0
-      ) ?? 0;
+    if (composeBotAccentId !== null) return null;
+    const userMessageCount = detail
+      ? countZenPrismUserMessages(detail.messages)
+      : 0;
     return ZEN_USER_MESSAGE_PRISM_PALETTE[
       userMessageCount % ZEN_USER_MESSAGE_PRISM_PALETTE.length
     ]!;
-  }, [detail?.messages, view]);
+  }, [composeBotAccentId, detail?.messages, view]);
 
   const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (
@@ -24001,6 +28275,7 @@ function HomeContent(): React.JSX.Element {
   );
   const visibleLocalImageModelIdOrEmpty = (modelId: string | null | undefined): string => {
     const trimmed = modelId?.trim() ?? "";
+    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
     return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed) ? trimmed : "";
   };
   const visibleOpenAiImageModelIds = useMemo(
@@ -24011,6 +28286,7 @@ function HomeContent(): React.JSX.Element {
     modelId: string | null | undefined
   ): ReturnType<typeof normalizeOpenAiImageModelId> | "" => {
     const trimmed = modelId?.trim() ?? "";
+    if (modelChoiceIsDisabled(trimmed)) return "";
     if (!trimmed) return "";
     const normalized = normalizeOpenAiImageModelId(trimmed);
     return visibleOpenAiImageModelIds.has(normalized) ? normalized : "";
@@ -24023,14 +28299,44 @@ function HomeContent(): React.JSX.Element {
     modelId: string | null | undefined
   ): string => {
     const trimmed = modelId?.trim() ?? "";
+    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
     if (!trimmed) return "";
     if (visibleOnlineImageModelIds.has(trimmed)) return trimmed;
     return visibleOpenAiImageModelIdOrEmpty(trimmed);
   };
   const normalizeOnlineImageModelPreference = (modelId: string): string => {
     const trimmed = modelId.trim();
+    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
     if (!trimmed || trimmed === AUTO_MODEL_CHOICE) return "";
     return visibleOnlineImageModelIdOrEmpty(trimmed);
+  };
+  const defaultLocalImageModelChoice =
+    localImageModelCatalogEntries[0]?.id ?? DISABLED_MODEL_CHOICE;
+  const defaultOnlineImageModelChoice =
+    firstRunnableOnlineImageModelId ||
+    onlineImageModelCatalogEntries.find((model) => !model.disabledReason)?.id ||
+    onlineImageModelCatalogEntries[0]?.id ||
+    DISABLED_MODEL_CHOICE;
+  const settingsLocalImageModelChoice = (
+    modelId: string | null | undefined
+  ): string => {
+    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
+    return visibleLocalImageModelIdOrEmpty(modelId) || defaultLocalImageModelChoice;
+  };
+  const settingsOnlineImageModelChoice = (
+    modelId: string | null | undefined
+  ): string => {
+    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
+    return visibleOnlineImageModelIdOrEmpty(modelId) || defaultOnlineImageModelChoice;
+  };
+  const settingsLocalLlmModelChoice = (
+    modelId: string | null | undefined,
+    fallbackModelId: string
+  ): string => {
+    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
+    const trimmed = modelId?.trim() ?? "";
+    if (trimmed.length > 0) return trimmed;
+    return fallbackModelId;
   };
   const settingsModelGroups = useMemo(
     () =>
@@ -24088,7 +28394,10 @@ function HomeContent(): React.JSX.Element {
     () =>
       includeSelectedModelOption(
         modelOptionsForProvider(modelCatalog, settings, "local"),
-        (settings?.prismDefaultLlmModel ?? "").trim(),
+        settingsLocalLlmModelChoice(
+          settings?.prismDefaultLlmModel,
+          commandCenterAuxiliaryModelId(settings)
+        ),
         "local"
       ),
     [modelCatalog, settings]
@@ -24097,7 +28406,10 @@ function HomeContent(): React.JSX.Element {
     () =>
       includeSelectedModelOption(
         modelOptionsForProvider(modelCatalog, settings, "local"),
-        (settings?.prismImageToolLlmModel ?? "").trim(),
+        settingsLocalLlmModelChoice(
+          settings?.prismImageToolLlmModel,
+          defaultModelChoiceForProvider(modelCatalog, settings, "local")
+        ),
         "local"
       ),
     [modelCatalog, settings]
@@ -24121,10 +28433,9 @@ function HomeContent(): React.JSX.Element {
             </PanelSectionInfo>
           </span>
           <ComposerModelPicker
-            value={visibleLocalImageModelSelectValue(
+            value={settingsLocalImageModelChoice(
               settings.preferredZenWallpaperLocalImageModel
             )}
-            disabled={localImageModelCatalogEntries.length === 0}
             onChange={(next) => {
               setSettings((previous) =>
                 previous
@@ -24149,8 +28460,8 @@ function HomeContent(): React.JSX.Element {
             formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD}
             placement="down"
             minMenuWidthPx={260}
-            autoOptionValue=""
-            autoOptionMetaOverride="use image default"
+            showAutoOption={false}
+            showDisabledOption
             settingsDefaultModelId={null}
             dismissPopoversSignal={composerPopoverDismissSignal}
           />
@@ -24167,7 +28478,7 @@ function HomeContent(): React.JSX.Element {
             </PanelSectionInfo>
           </span>
           <ComposerModelPicker
-            value={visibleOnlineImageModelIdOrEmpty(
+            value={settingsOnlineImageModelChoice(
               settings.preferredZenWallpaperOpenAiImageModel
             )}
             onChange={(next) => {
@@ -24196,10 +28507,9 @@ function HomeContent(): React.JSX.Element {
                 : onlineImageModelCatalogEntries
             }
             provider="online"
-            disabled={!hasVisibleOnlineImageModels}
             title={
               hasRunnableOnlineImageModels
-                ? "Auto uses the first available online image model."
+                ? "Online image model."
                 : hasVisibleOnlineImageModels
                   ? "Online image models are visible, but no runnable model is available yet."
                   : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
@@ -24208,14 +28518,8 @@ function HomeContent(): React.JSX.Element {
             formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
             placement="down"
             minMenuWidthPx={260}
-            autoOptionValue=""
-            autoOptionMetaOverride={
-              hasRunnableOnlineImageModels
-                ? "first available online image model"
-                : hasVisibleOnlineImageModels
-                  ? "no runnable online image model"
-                  : "add online image key to enable"
-            }
+            showAutoOption={false}
+            showDisabledOption
             settingsDefaultModelId={null}
             dismissPopoversSignal={composerPopoverDismissSignal}
           />
@@ -24250,7 +28554,10 @@ function HomeContent(): React.JSX.Element {
               </PanelSectionInfo>
             </span>
             <ComposerModelPicker
-              value={(settings.prismDefaultLlmModel ?? "").trim()}
+              value={settingsLocalLlmModelChoice(
+                settings.prismDefaultLlmModel,
+                commandCenterAuxiliaryModelId(settings)
+              )}
               onChange={(nextValue) => {
                 const next = nextValue.trim();
                 setSettings((previous) =>
@@ -24263,10 +28570,7 @@ function HomeContent(): React.JSX.Element {
               formName={SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD}
               placement="down"
               minMenuWidthPx={260}
-              autoOptionValue=""
-              autoOptionMetaOverride={`server auxiliary (${
-                (settings.ollamaAuxiliaryModel ?? "").trim() || "llama3.2"
-              })`}
+              showAutoOption={false}
               dismissPopoversSignal={composerPopoverDismissSignal}
             />
           </div>
@@ -24282,7 +28586,10 @@ function HomeContent(): React.JSX.Element {
               </PanelSectionInfo>
             </span>
             <ComposerModelPicker
-              value={(settings.prismImageToolLlmModel ?? "").trim()}
+              value={settingsLocalLlmModelChoice(
+                settings.prismImageToolLlmModel,
+                defaultModelChoiceForProvider(modelCatalog, settings, "local")
+              )}
               onChange={(nextValue) => {
                 const next = nextValue.trim();
                 setSettings((previous) =>
@@ -24296,8 +28603,7 @@ function HomeContent(): React.JSX.Element {
               formName={SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD}
               placement="down"
               minMenuWidthPx={260}
-              autoOptionValue=""
-              autoOptionMetaOverride="hub chat model"
+              showAutoOption={false}
               dismissPopoversSignal={composerPopoverDismissSignal}
             />
           </div>
@@ -24326,7 +28632,7 @@ function HomeContent(): React.JSX.Element {
                 </PanelSectionInfo>
               </span>
               <ComposerModelPicker
-                value={visibleModelChoiceForProvider(
+                value={visibleConcreteModelChoiceForProvider(
                   modelCatalog,
                   settings,
                   "local",
@@ -24335,7 +28641,7 @@ function HomeContent(): React.JSX.Element {
                 onChange={(next) => {
                   setSettings((previous) =>
                     previous
-                      ? {
+                        ? {
                           ...previous,
                           preferredLocalModel:
                             next === AUTO_MODEL_CHOICE ? "" : next,
@@ -24349,7 +28655,8 @@ function HomeContent(): React.JSX.Element {
                 formName={SETTINGS_PREFERRED_LOCAL_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
-                autoOptionMetaOverride="first available local model"
+                showAutoOption={false}
+                showDisabledOption
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -24366,7 +28673,7 @@ function HomeContent(): React.JSX.Element {
                 </PanelSectionInfo>
               </span>
               <ComposerModelPicker
-                value={visiblePreferredOnlineModelChoice(
+                value={visibleConcreteOnlineModelChoice(
                   modelCatalog,
                   settings,
                   settings.preferredOnlineModel
@@ -24388,7 +28695,8 @@ function HomeContent(): React.JSX.Element {
                 formName={SETTINGS_PREFERRED_ONLINE_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
-                autoOptionMetaOverride="first available online model"
+                showAutoOption={false}
+                showDisabledOption
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -24411,8 +28719,7 @@ function HomeContent(): React.JSX.Element {
                 </PanelSectionInfo>
               </span>
               <ComposerModelPicker
-                value={visibleLocalImageModelSelectValue(settings.preferredLocalImageModel)}
-                disabled={localImageModelCatalogEntries.length === 0}
+                value={settingsLocalImageModelChoice(settings.preferredLocalImageModel)}
                 onChange={(next) => {
                   setSettings((previous) =>
                     previous ? { ...previous, preferredLocalImageModel: next } : previous
@@ -24435,8 +28742,8 @@ function HomeContent(): React.JSX.Element {
                 formName={SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
-                autoOptionValue=""
-                autoOptionMetaOverride="first detected local image model"
+                showAutoOption={false}
+                showDisabledOption
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -24453,7 +28760,7 @@ function HomeContent(): React.JSX.Element {
                 </PanelSectionInfo>
               </span>
               <ComposerModelPicker
-                value={visibleOnlineImageModelIdOrEmpty(settings.preferredOpenAiImageModel)}
+                value={settingsOnlineImageModelChoice(settings.preferredOpenAiImageModel)}
                 onChange={(next) => {
                   const stored = normalizeOnlineImageModelPreference(next);
                   setSettings((previous) =>
@@ -24474,26 +28781,19 @@ function HomeContent(): React.JSX.Element {
                     : onlineImageModelCatalogEntries
                 }
                 provider="online"
-                disabled={!hasVisibleOnlineImageModels}
                 title={
                   hasRunnableOnlineImageModels
-                    ? "Auto uses the first available online image model."
+                    ? "Online image model."
                     : hasVisibleOnlineImageModels
                       ? "Online image models are visible, but no runnable model is available yet."
-                    : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
+                      : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
                 }
                 ariaLabel="Default online image model"
                 formName={SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD}
                 placement="down"
                 minMenuWidthPx={260}
-                autoOptionValue=""
-                autoOptionMetaOverride={
-                  hasRunnableOnlineImageModels
-                    ? "first available online image model"
-                    : hasVisibleOnlineImageModels
-                      ? "no runnable online image model"
-                    : "add online image key to enable"
-                }
+                showAutoOption={false}
+                showDisabledOption
                 settingsDefaultModelId={null}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
@@ -24880,6 +29180,7 @@ function HomeContent(): React.JSX.Element {
         dismissPopoversSignal={composerPopoverDismissSignal}
         placement="down"
         minMenuWidthPx={180}
+        showDisabledOption
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
           isLocal ? "local" : "online"
@@ -24898,10 +29199,48 @@ function HomeContent(): React.JSX.Element {
       />
     );
   };
+  const renderZenPrivateModeToggle = (): React.ReactNode => {
+    if (view !== "chat") return null;
+    const label = appWidePrivateMode
+      ? "Private mode on. Click to return to the saved conversation."
+      : "Private mode off. Click to continue privately from here.";
+    return (
+      <button
+        type="button"
+        className={styles.zenPrivateModeToggle}
+        data-active={appWidePrivateMode ? "true" : undefined}
+        aria-pressed={appWidePrivateMode}
+        aria-label={label}
+        title={pendingReplyVisible ? "Wait for the current reply to finish." : label}
+        data-glyph-tooltip={
+          appWidePrivateMode
+            ? "Return from private mode"
+            : "Private mode"
+        }
+        disabled={pendingReplyVisible}
+        onClick={() => setAppWidePrivateMode(!appWidePrivateMode)}
+      >
+        <span
+          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleKey}`}
+          aria-hidden="true"
+        >
+          <IconKey />
+        </span>
+        <span
+          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleLock}`}
+          aria-hidden="true"
+        >
+          <BotGlyph name="lock" size={14} strokeWidth={2.05} />
+        </span>
+      </button>
+    );
+  };
   const renderHeaderModelPicker = (
     options: {
       modelMenuClassName?: string;
       modelMenuWidthPx?: number;
+      botMenuClassName?: string;
+      botMenuPlacement?: ComposeMenuPlacement;
     } = {}
   ): React.ReactNode => {
     // Use the effective provider so the picker shows local options whenever
@@ -24929,12 +29268,22 @@ function HomeContent(): React.JSX.Element {
       visibleModelChoice,
       modelProvider
     );
+    const effortAvailability = resolveChatZenReasoningEffortAvailability({
+      provider: modelProvider,
+      modelChoice: visibleModelChoice,
+      experimentalAllModelEffortEnabled:
+        settings?.experimentalAllModelEffortEnabled === true,
+    });
     const botHasCommenced = !!detail && detail.messages.length > 0;
     const botDisabled = view === "chat" ? !detail : false;
+    const zenPersonaPickerDisabled =
+      view === "chat" &&
+      pendingReplyVisible;
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     return (
       <div className={styles.chatHeaderModelPicker}>
         {renderProviderModeToggle(styles.chatHeaderModeToggle)}
+        {renderZenPrivateModeToggle()}
         <ComposerModelPicker
           value={visibleModelChoice}
           onChange={(nextChoice) => {
@@ -24975,14 +29324,17 @@ function HomeContent(): React.JSX.Element {
           placement="down"
           minMenuWidthPx={options.modelMenuWidthPx ?? 180}
           menuClassName={options.modelMenuClassName}
+          showDisabledOption
           settingsDefaultModelId={chatSettingsSavedDefaultModelId(
             settings,
             isLocal ? "local" : "online"
           )}
           effortControl={
-            modelChoiceSupportsReasoningEffort(modelProvider, visibleModelChoice)
+            effortAvailability.visible
               ? {
                   value: chatReasoningEffort,
+                  disabled: !effortAvailability.enabled,
+                  disabledReason: effortAvailability.disabledReason,
                   onChange: (next) => {
                     setChatReasoningEffort(next);
                     persistChatReasoningEffortForActiveScope(next);
@@ -24991,6 +29343,33 @@ function HomeContent(): React.JSX.Element {
               : undefined
           }
         />
+        {view === "chat" && zenPersonaPickerBots.length > 0 ? (
+          <ComposerBotPicker
+            value={zenPersonaBotId ?? ""}
+            onChange={handleZenPersonaSelectionChange}
+            bots={zenPersonaPickerBots}
+            resolvedTheme={resolvedTheme}
+            placement={options.botMenuPlacement ?? "down"}
+            disabled={zenPersonaPickerDisabled}
+            title={
+              pendingReplyVisible
+                ? "Wait for the current reply before changing Persona."
+                : "Persona for Zen replies"
+            }
+            ariaLabel="Zen Persona"
+            showName
+            enableFilters
+            hueFilterCenter={hueFilterCenter}
+            onHueChange={setHueFilterCenter}
+            hueLensAvailable={hueLensAvailable}
+            hueLensTrackGradient={hueLensTrackGradient}
+            hueLensTrackSegments={hueLensTrackSegments}
+            dismissPopoversSignal={composerPopoverDismissSignal}
+            menuFooter={renderZenPersonaTransitionChoiceControl()}
+            menuClassName={options.botMenuClassName}
+            privateTone={appWidePrivateMode}
+          />
+        ) : null}
         {view === "sandbox" && bots.length > 0 ? (
           <ComposerBotPicker
             value={selectedBotId ?? ""}
@@ -25013,6 +29392,7 @@ function HomeContent(): React.JSX.Element {
             hueLensTrackGradient={hueLensTrackGradient}
             hueLensTrackSegments={hueLensTrackSegments}
             dismissPopoversSignal={composerPopoverDismissSignal}
+            privateTone={appWidePrivateMode}
           />
         ) : null}
       </div>
@@ -25077,7 +29457,9 @@ function HomeContent(): React.JSX.Element {
       "openai"
     );
     const visibleLocalChoice =
-      trimmedChoice === AUTO_MODEL_CHOICE || trimmedChoice === ""
+      modelChoiceIsDisabled(trimmedChoice)
+        ? DISABLED_MODEL_CHOICE
+        : trimmedChoice === AUTO_MODEL_CHOICE || trimmedChoice === ""
         ? AUTO_MODEL_CHOICE
         : localImageModelCatalogEntries.some((entry) => entry.id === trimmedChoice)
           ? trimmedChoice
@@ -25128,6 +29510,7 @@ function HomeContent(): React.JSX.Element {
           placement="down"
           minMenuWidthPx={180}
           showAutoOption
+          showDisabledOption
           settingsDefaultModelId={imageSettingsSavedDefaultModelId(
             settings,
             modelProvider
@@ -25384,7 +29767,10 @@ function HomeContent(): React.JSX.Element {
   }, [commandCenterHelpModalOpen]);
 
   useEffect(() => {
-    if (!expandedPromptShortcutMessageId || typeof document === "undefined") return;
+    const hasExpandedPromptShortcuts = Object.values(
+      expandedPromptShortcutTargetsByMessageId
+    ).some((targets) => targets.length > 0);
+    if (!hasExpandedPromptShortcuts || typeof document === "undefined") return;
     const handlePointerDown = (event: PointerEvent): void => {
       const target = event.target;
       if (
@@ -25393,11 +29779,11 @@ function HomeContent(): React.JSX.Element {
       ) {
         return;
       }
-      setExpandedPromptShortcutMessageId(null);
+      setExpandedPromptShortcutTargetsByMessageId({});
     };
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
-        setExpandedPromptShortcutMessageId(null);
+        setExpandedPromptShortcutTargetsByMessageId({});
       }
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
@@ -25406,7 +29792,7 @@ function HomeContent(): React.JSX.Element {
       document.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [expandedPromptShortcutMessageId]);
+  }, [expandedPromptShortcutTargetsByMessageId]);
 
   useEffect(() => {
     if (!user) return;
@@ -25443,19 +29829,92 @@ function HomeContent(): React.JSX.Element {
   const chatEphemeralMode = view === "chat";
   const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
+  const zenPersonaInkSegmentByMessageId = useMemo(
+    () =>
+      buildZenPersonaInkSegmentMap(detail?.messages ?? [], {
+        trailingUserTarget:
+          view === "chat"
+            ? { botId: zenPersonaBot?.id ?? null, color: zenPersonaBot?.color ?? null }
+            : null,
+      }),
+    [detail?.messages, view, zenPersonaBot?.color, zenPersonaBot?.id]
+  );
   const chatMentionsEnabled = true;
   /** Autoscroll + dynamic type on Zen's chat-like surface. */
   const assistantRevealActive = chatEphemeralMode;
   /**
    * Word-at-a-time / token-scheduled reveals, fenced-code progressive unveil,
    * and the tap-to-interrupt typing pill — Zen chat mode only.
-   */
+  */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
+  const chatRevealDelayMultiplier = resolveChatRevealDelayMultiplierForTyping({
+    active: chatAssistantTypingMechanicsActive,
+    hasDraft: draft.trim().length > 0,
+    nowMs: chatEphemeralNowMs,
+    lastTypingAtMs: chatComposerLastTypedAtMs,
+    maxMultiplier: CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER,
+    idleHoldMs: CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS,
+    recoveryMs: CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS,
+  });
+  const resolveZenAssistantRevealDelayMultiplier = useCallback(
+    (revealKey: string): number =>
+      chatRevealDelayMultiplier *
+      resolveZenCanvasSpeedNudgeDelayMultiplier(zenCanvasSpeedNudgeState, {
+        revealKey,
+        nowMs: chatEphemeralNowMs,
+      }),
+    [chatEphemeralNowMs, chatRevealDelayMultiplier, zenCanvasSpeedNudgeState]
+  );
+  const zenFollowupActive = view === "chat" && zenFollowupBuffer !== null;
+  const zenFollowupModelPrompt = (messages: readonly string[]): string =>
+    messages
+      .slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT)
+      .map((message) => message.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join("\n");
+  const clearZenFollowupCooldownTimer = useCallback((): void => {
+    if (!zenFollowupCooldownTimerRef.current) return;
+    clearTimeout(zenFollowupCooldownTimerRef.current);
+    zenFollowupCooldownTimerRef.current = null;
+  }, []);
+  useEffect(() => {
+    zenFollowupBufferRef.current = zenFollowupBuffer;
+  }, [zenFollowupBuffer]);
+  useEffect(() => {
+    if (view === "chat") return;
+    clearZenFollowupCooldownTimer();
+    zenFollowupBufferRef.current = null;
+    setZenFollowupBuffer(null);
+  }, [clearZenFollowupCooldownTimer, view]);
+  useEffect(() => {
+    return () => {
+      clearZenFollowupCooldownTimer();
+    };
+  }, [clearZenFollowupCooldownTimer]);
+  const beginOrRefreshZenFollowupBuffer = useCallback(
+    (conversationId: string | null): void => {
+      if (view !== "chat") return;
+      const now = Date.now();
+      setZenFollowupBuffer((current) => {
+        const next = {
+          conversationId: current?.conversationId ?? conversationId,
+          messages: current?.messages ?? [],
+          pendingMessageCleanupMessageIds:
+            current?.pendingMessageCleanupMessageIds ?? [],
+          startedAtMs: current?.startedAtMs ?? now,
+          lastActivityAtMs: now,
+          generation: (current?.generation ?? 0) + 1,
+        };
+        zenFollowupBufferRef.current = next;
+        return next;
+      });
+    },
+    [view]
+  );
   const chatComposerChromePinned =
     composerFocused ||
     draft.trim().length > 0 ||
     editingMessageId !== null ||
-    composerCleanupBusy ||
     mobileKeyboardInset > 0;
   const chatHeaderChromePinned = chatOverflowMenuOpen;
 
@@ -25597,6 +30056,161 @@ function HomeContent(): React.JSX.Element {
       (pendingReplyConversationId !== null && detail?.id === pendingReplyConversationId) ||
       (pendingReplyIsNewConversation && detail?.id === "pending")
     );
+  const pendingMessageCleanupVisible =
+    pendingMessageCleanupMessageIds.size > 0;
+  const pendingReplyVisualVisible =
+    pendingReplyVisible && !pendingMessageCleanupVisible;
+  const requestZenAutonomyScheduleTick = useCallback((): void => {
+    if (typeof window === "undefined") {
+      setZenAutonomyScheduleTick((tick) => tick + 1);
+      return;
+    }
+    if (zenAutonomyScheduleFrameRef.current !== null) return;
+    zenAutonomyScheduleFrameRef.current = window.requestAnimationFrame(() => {
+      zenAutonomyScheduleFrameRef.current = null;
+      setZenAutonomyScheduleTick((tick) => tick + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (zenAutonomyScheduleFrameRef.current === null) return;
+      window.cancelAnimationFrame(zenAutonomyScheduleFrameRef.current);
+      zenAutonomyScheduleFrameRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (view === "chat" && zenAutonomyEnabled && user) return;
+    if (zenAutonomyTimerRef.current) {
+      clearTimeout(zenAutonomyTimerRef.current);
+      zenAutonomyTimerRef.current = null;
+    }
+    zenAutonomyInFlightRef.current = false;
+    zenAutonomySpokenCountRef.current = 0;
+    zenAutonomyCooldownUntilMsRef.current = 0;
+    zenAutonomyLastActivityAtMsRef.current = Date.now();
+    requestZenAutonomyScheduleTick();
+  }, [user?.id, view, zenAutonomyEnabled, requestZenAutonomyScheduleTick]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (view !== "chat" || !zenAutonomyEnabled || !user) return;
+    const markActivity = (): void => {
+      zenAutonomyLastActivityAtMsRef.current = Date.now();
+      requestZenAutonomyScheduleTick();
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        zenAutonomySpokenCountRef.current = 0;
+        markActivity();
+      } else if (zenAutonomyTimerRef.current) {
+        clearTimeout(zenAutonomyTimerRef.current);
+        zenAutonomyTimerRef.current = null;
+      }
+    };
+    window.addEventListener("pointerdown", markActivity, { passive: true });
+    window.addEventListener("keydown", markActivity);
+    window.addEventListener("wheel", markActivity, { passive: true });
+    window.addEventListener("touchstart", markActivity, { passive: true });
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointerdown", markActivity);
+      window.removeEventListener("keydown", markActivity);
+      window.removeEventListener("wheel", markActivity);
+      window.removeEventListener("touchstart", markActivity);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [user?.id, view, zenAutonomyEnabled, requestZenAutonomyScheduleTick]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (zenAutonomyTimerRef.current) {
+      clearTimeout(zenAutonomyTimerRef.current);
+      zenAutonomyTimerRef.current = null;
+    }
+    const hasConversation = Boolean(detail?.id && detail.id !== "pending");
+    const nowMs = Date.now();
+    const eligibility = resolveZenAutonomyEligibility({
+      view,
+      enabled: zenAutonomyEnabled,
+      documentVisible: document.visibilityState === "visible",
+      hasConversation,
+      pendingReply: pendingReplyVisible,
+      editingMessageId,
+      draft,
+      inFlight: zenAutonomyInFlightRef.current,
+      spokenCount: zenAutonomySpokenCountRef.current,
+      nowMs,
+      lastActivityAtMs: zenAutonomyLastActivityAtMsRef.current,
+      cooldownUntilMs: zenAutonomyCooldownUntilMsRef.current,
+    });
+    if (!eligibility.eligible) {
+      if (
+        (eligibility.reason === "idle" || eligibility.reason === "cooldown") &&
+        eligibility.delayMs > 0 &&
+        eligibility.delayMs < 2 ** 31 - 1
+      ) {
+        zenAutonomyTimerRef.current = setTimeout(() => {
+          zenAutonomyTimerRef.current = null;
+          requestZenAutonomyScheduleTick();
+        }, eligibility.delayMs);
+      }
+      return;
+    }
+    zenAutonomyInFlightRef.current = true;
+    const clientTurnId = `zen-auto-${nowMs.toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    let callbackCalled = false;
+    const finalizeDecision = (decision: ZenAutonomyDecision | null): void => {
+      callbackCalled = true;
+      const finishedAtMs = Date.now();
+      if (decision?.action === "speak") {
+        zenAutonomySpokenCountRef.current += 1;
+      }
+      zenAutonomyCooldownUntilMsRef.current = nextZenAutonomyCooldownUntilMs(
+        finishedAtMs,
+        decision
+      );
+    };
+    void sendMessage(
+      { preventDefault() {} } as React.FormEvent,
+      {
+        draftOverride: "",
+        skipComposerHistory: true,
+        zenAutonomy: {
+          source: "idle",
+          activeBotId: zenPersonaBotIdRef.current,
+          idleMs: eligibility.idleMs,
+          clientTurnId,
+        },
+        onZenAutonomyResult: finalizeDecision,
+      }
+    ).finally(() => {
+      if (!callbackCalled) {
+        finalizeDecision(null);
+      }
+      zenAutonomyInFlightRef.current = false;
+      requestZenAutonomyScheduleTick();
+    });
+    return () => {
+      if (zenAutonomyTimerRef.current) {
+        clearTimeout(zenAutonomyTimerRef.current);
+        zenAutonomyTimerRef.current = null;
+      }
+    };
+  }, [
+    detail?.id,
+    draft,
+    editingMessageId,
+    pendingReplyVisible,
+    user?.id,
+    view,
+    zenAutonomyEnabled,
+    zenAutonomyScheduleTick,
+    requestZenAutonomyScheduleTick,
+  ]);
   /** Wordmark header only (Chat / Sandbox pre-thread): surface full bot grid when picker is narrowed or a bot is armed. */
   const showHeaderShowAllBotsLink = useMemo(() => {
     if (bots.length === 0 || pendingReplyVisible || detail) return false;
@@ -25628,7 +30242,7 @@ function HomeContent(): React.JSX.Element {
     };
   }, [pendingReply]);
   const pendingReplyLikelyFallbackProcessing =
-    pendingReplyVisible &&
+    pendingReplyVisualVisible &&
     hasLenientFallbackConfigured &&
     pendingReplyDenialRisk &&
     pendingReplyStartedAtMs !== null &&
@@ -25739,6 +30353,7 @@ function HomeContent(): React.JSX.Element {
     completed,
     cancelledTokenCount,
     moodKey,
+    delayMultiplier,
   }: {
     revealKey: string;
     displayContent: string;
@@ -25746,6 +30361,7 @@ function HomeContent(): React.JSX.Element {
     completed: boolean;
     cancelledTokenCount?: number;
     moodKey: NonNullable<Message["moodKey"]>;
+    delayMultiplier?: number;
   }): number {
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
@@ -25764,7 +30380,12 @@ function HomeContent(): React.JSX.Element {
       nowMs,
       stateByRevealKey: chatRevealPaceByKeyRef.current,
       resolveStepDelayMs: (previousTokenIndex) =>
-        resolveRevealStepDelayMs(revealTokens[previousTokenIndex] ?? "", moodKey),
+        resolveRevealStepDelayMs(
+          revealTokens[previousTokenIndex] ?? "",
+          moodKey,
+          effectiveChatRevealTiming
+        ),
+      delayMultiplier,
     });
   }
   useEffect(() => {
@@ -25860,7 +30481,7 @@ function HomeContent(): React.JSX.Element {
       })();
       const messageIsOnScreen =
         messageViewportMeta !== false && messageViewportMeta.isOnScreen;
-      const lineCount = countEphemeralLines(resolveMessageDisplayContent(message));
+      const lineCount = countEphemeralLines(resolveMessageVisualSizingContent(message));
       const dissolveDurationMs =
         CHAT_MODE_OFFSCREEN_DISSOLVE_MS +
         Math.max(0, lineCount - 1) * CHAT_MODE_LINE_DISSOLVE_STAGGER_MS;
@@ -25889,7 +30510,9 @@ function HomeContent(): React.JSX.Element {
         ? firstSeenAt +
           resolveRevealDurationMsForTokens(
             tokenizeMessageReveal(resolveMessageDisplayContent(message)),
-            resolveMessageMoodKey(message)
+            resolveMessageMoodKey(message),
+            effectiveChatRevealTiming,
+            resolveZenAssistantRevealDelayMultiplier(temporalKey)
           )
         : firstSeenAt;
       const revealReadyAt = revealGatedAssistant ? estimatedRevealDoneAt : firstSeenAt;
@@ -25918,6 +30541,8 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
+    resolveZenAssistantRevealDelayMultiplier,
     chatArchiveRevealEpoch,
   ]);
   const chatArchiveLoadingActive =
@@ -25928,6 +30553,27 @@ function HomeContent(): React.JSX.Element {
     if (!chatEphemeralMode) return source;
     return source;
   }, [chatEphemeralMode, detail?.messages]);
+  const psychicThinkingDelayElapsed =
+    pendingReplyVisualVisible &&
+    pendingReplyStartedAtMs !== null &&
+    pendingReplyNowMs - pendingReplyStartedAtMs >= PSYCHIC_THINKING_INDICATOR_DELAY_MS;
+  const psychicThinkingTargetMessageId = useMemo(() => {
+    if (settings?.psychicModeEnabled !== true) return null;
+    if (effectivePreferredProvider !== "local") return null;
+    if (!psychicThinkingDelayElapsed) return null;
+    for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
+      const message = visibleDetailMessages[i];
+      if (message?.role === "user" && !message.psychicThought) {
+        return message.id;
+      }
+    }
+    return null;
+  }, [
+    effectivePreferredProvider,
+    psychicThinkingDelayElapsed,
+    settings?.psychicModeEnabled,
+    visibleDetailMessages,
+  ]);
   const promptShortcutColorIndexByMessageId = useMemo(() => {
     const colorIndexes = new Map<string, number>();
     let promptShortcutIndex = 0;
@@ -25944,6 +30590,8 @@ function HomeContent(): React.JSX.Element {
     let userMessageIndex = 0;
     for (const message of detail.messages) {
       if (message.role !== "user") continue;
+      const personaInkSegment = zenPersonaInkSegmentByMessageId.get(message.id);
+      if (personaInkSegment?.variant !== "default") continue;
       colors.set(
         message.id,
         ZEN_USER_MESSAGE_PRISM_PALETTE[
@@ -25953,7 +30601,7 @@ function HomeContent(): React.JSX.Element {
       userMessageIndex += 1;
     }
     return colors;
-  }, [view, detail?.messages]);
+  }, [view, detail?.messages, zenPersonaInkSegmentByMessageId]);
   const zenEraBoundaryLabelByMessageId = useMemo(() => {
     const labels = new Map<string, string>();
     if (view !== "chat" || detail?.mode !== "zen") return labels;
@@ -25964,7 +30612,7 @@ function HomeContent(): React.JSX.Element {
       const currentMs = messageCreatedAtMs(current);
       if (previousMs === null || currentMs === null) continue;
       if (currentMs - previousMs < zenSessionIdleGapMs) continue;
-      labels.set(current.id, formatZenEraBoundaryLabel(current));
+      labels.set(current.id, formatZenEraBoundaryLabel(source[i - 1]!, current));
     }
     return labels;
   }, [view, detail?.mode, detail?.messages, zenSessionIdleGapMs]);
@@ -26038,9 +30686,9 @@ function HomeContent(): React.JSX.Element {
     );
   }, [activeZenSessionBreak, visibleDetailMessages]);
   const renderZenSessionBreakNode = useCallback((sessionBreak: ZenSessionBreakState) => {
-    const effectiveGapMs = effectiveZenSessionBreakGapMs(sessionBreak);
+    const displayGapMs = displayZenSessionBreakGapMs(sessionBreak);
     const awayLabel = formatZenSessionAwayLabel(
-      effectiveGapMs,
+      displayGapMs,
       sessionBreak.previousActiveAt
     );
     return (
@@ -26173,7 +30821,7 @@ function HomeContent(): React.JSX.Element {
 
     let visualLineCount = 0;
     for (const message of activeMessages) {
-      const displayContent = resolveMessageDisplayContent(message);
+      const displayContent = resolveMessageVisualSizingContent(message);
       const sizingContent =
         chatAssistantTypingMechanicsActive &&
         message.role === "assistant" &&
@@ -26201,7 +30849,9 @@ function HomeContent(): React.JSX.Element {
                 resolveVisibleTokenCountAtElapsedMs(
                   revealTokens,
                   elapsedMs,
-                  resolveMessageMoodKey(message)
+                  resolveMessageMoodKey(message),
+                  effectiveChatRevealTiming,
+                  resolveZenAssistantRevealDelayMultiplier(revealKey)
                 )
               );
               return revealTokens.slice(0, visibleTokenCount).join("");
@@ -26220,6 +30870,8 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
+    resolveZenAssistantRevealDelayMultiplier,
     latestAssistantMessageId,
     latestUserMessageIndex,
   ]);
@@ -26336,16 +30988,39 @@ function HomeContent(): React.JSX.Element {
     }
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      DEFAULT_MESSAGE_MOOD
+      DEFAULT_MESSAGE_MOOD,
+      effectiveChatRevealTiming,
+      resolveZenAssistantRevealDelayMultiplier(revealKey)
     );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
+    resolveZenAssistantRevealDelayMultiplier,
     latestAssistantMessageId,
     chatEphemeralNowMs,
   ]);
+  const activeAssistantRevealKey =
+    chatAssistantRevealInProgress && detail?.id && latestAssistantMessageId
+      ? `${detail.id}:${latestAssistantMessageId}`
+      : null;
+  const zenCanvasSpeedNudgePulseActive =
+    activeAssistantRevealKey !== null &&
+    zenCanvasSpeedNudgeState.revealKey === activeAssistantRevealKey &&
+    chatEphemeralNowMs < zenCanvasSpeedNudgeState.pulseUntilMs;
+  const zenCanvasSpeedNudgeHolding =
+    activeAssistantRevealKey !== null &&
+    zenCanvasSpeedNudgeState.revealKey === activeAssistantRevealKey &&
+    zenCanvasSpeedNudgeState.holdActive === true;
+  useEffect(() => {
+    if (activeAssistantRevealKey !== null) return;
+    zenCanvasSpeedNudgePointerRef.current = null;
+    setZenCanvasSpeedNudgeState((current) =>
+      current.revealKey === null ? current : createZenCanvasSpeedNudgeState()
+    );
+  }, [activeAssistantRevealKey]);
 
   type ActiveAssistantRevealInterruption = {
     conversationId: string;
@@ -26385,7 +31060,9 @@ function HomeContent(): React.JSX.Element {
         : resolveVisibleTokenCountAtElapsedMs(
             revealTokens,
             Math.max(0, Date.now() - firstSeenAt),
-            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD
+            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+            effectiveChatRevealTiming,
+            resolveZenAssistantRevealDelayMultiplier(revealKey)
           )
     );
     const interruptionContent = interruptedMidWordSnippet(
@@ -26501,6 +31178,56 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function discardActiveAssistantRevealForGrace(
+    interruption: ActiveAssistantRevealInterruption
+  ): Promise<ConversationDetail | undefined> | null {
+    chatCommittedFontLineCountByKeyRef.current.delete(interruption.revealKey);
+    chatCancelledRevealTokenCountByKeyRef.current.delete(interruption.revealKey);
+    chatCompletedRevealKeysRef.current.add(interruption.revealKey);
+    chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
+    chatRevealPaceByKeyRef.current.delete(interruption.revealKey);
+    setDetail((current) => {
+      if (current?.id !== interruption.conversationId) return current;
+      const nextMessages = current.messages.filter(
+        (message) => message.id !== interruption.assistantMessageId
+      );
+      return {
+        ...current,
+        hasAssistantReply: nextMessages.some((message) => message.role === "assistant"),
+        messages: nextMessages,
+      };
+    });
+    setChatEphemeralNowMs(Date.now());
+    if (
+      String(interruption.assistantMessageId).startsWith("pending-") ||
+      interruption.conversationId === "pending"
+    ) {
+      return null;
+    }
+    return api<{
+      ok: true;
+      conversation?: ConversationDetail;
+      prismMood?: PrismMoodSnapshot;
+    }>(
+      `/api/messages/${encodeURIComponent(interruption.assistantMessageId)}/discard-latest-zen-assistant`,
+      { method: "POST" }
+    ).then((result) => {
+      const conversation = result.conversation
+        ? attachLivePsychicScratchpadToConversation(
+            applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
+            undefined,
+            settings?.psychicModeEnabled === true
+          )
+        : undefined;
+      if (conversation) {
+        setDetail((current) =>
+          current?.id === interruption.conversationId ? conversation : current
+        );
+      }
+      return conversation;
+    });
+  }
+
   const handleTypingIndicatorPress = useCallback((): void => {
     const interruption = prepareActiveAssistantRevealInterruption();
     if (!interruption) {
@@ -26559,6 +31286,53 @@ function HomeContent(): React.JSX.Element {
     setChatEphemeralNowMs(Date.now());
   }
 
+  function freezeActiveAssistantRevealForLocalTopicReset(): void {
+    if (
+      !chatAssistantTypingMechanicsActive ||
+      !chatAssistantRevealInProgress ||
+      !detail?.id ||
+      !latestAssistantMessageId
+    ) {
+      return;
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) return;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
+    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    const revealTokens = tokenizeMessageReveal(displayContent);
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const pacedVisibleTokenCount =
+      chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
+    const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
+    const visibleTokenCount = Math.min(
+      tokenTotal,
+      typeof pacedVisibleTokenCount === "number"
+        ? Math.max(1, pacedVisibleTokenCount)
+        : resolveVisibleTokenCountAtElapsedMs(
+            revealTokens,
+            Math.max(0, Date.now() - firstSeenAt),
+            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+            effectiveChatRevealTiming,
+            resolveZenAssistantRevealDelayMultiplier(revealKey)
+          )
+    );
+    const visibleText = revealTokens
+      .slice(0, Math.min(tokenTotal, Math.max(1, visibleTokenCount)))
+      .join("");
+    chatCommittedFontLineCountByKeyRef.current.set(
+      revealKey,
+      Math.max(
+        estimateVisualLineCount(visibleText),
+        chatCommittedFontLineCountByKeyRef.current.get(revealKey) ?? 0
+      )
+    );
+    chatCancelledRevealTokenCountByKeyRef.current.set(revealKey, visibleTokenCount);
+    chatRevealPaceByKeyRef.current.delete(revealKey);
+    setChatEphemeralNowMs(Date.now());
+  }
+
   function clearReplyWorkForManualCompaction(): void {
     const starterRequest = zenInitialStarterRequestRef.current;
     if (starterRequest) {
@@ -26611,14 +31385,54 @@ function HomeContent(): React.JSX.Element {
   }, [zenInitialReplyRevealActive, zenInitialThinkingActive]);
 
   const replyInFlightSignals =
-    pendingReplyVisible || chatAssistantRevealInProgress;
+    pendingReplyVisualVisible || chatAssistantRevealInProgress || zenFollowupActive;
   const replyRunwayActive = chatLikeSurface && replyInFlightSignals;
-  /** Chat shows the pill during stream + during word-reveal; Sandbox zen only during live API stream (same as ordinary Sandbox stop). */
+  const zenPendingReplyPlaceholderVisible =
+    chatLikeSurface && pendingReplyVisualVisible && !chatAssistantRevealInProgress;
+  const zenPendingReplyPlaceholderNode = useMemo(() => {
+    if (!zenPendingReplyPlaceholderVisible) return null;
+    const pendingRespondent =
+      composeBotAccentId !== null
+        ? bots.find((b) => b.id === composeBotAccentId) ?? null
+        : zenPersonaBot;
+    const edge = detail?.incognito
+      ? "private"
+      : composeBotAccentId !== null
+        ? "bot"
+        : "prism";
+    const voicePreset = resolveBotVoicePreset(pendingRespondent);
+    const style = selectedComposeBotAccent
+      ? ({ "--typing-accent": selectedComposeBotAccent } as React.CSSProperties)
+      : undefined;
+    return (
+      <article
+        className={`${styles.message} ${styles.messageAssistant} ${styles.zenPendingReplyPlaceholder}`}
+        data-message-edge={edge}
+        data-zen-pending-reply-placeholder="true"
+        role="status"
+        aria-live="polite"
+        aria-label="Assistant is preparing a reply"
+        style={style}
+      >
+        <TypingDots className={styles.zenPendingReplyDots} voicePreset={voicePreset} />
+      </article>
+    );
+  }, [
+    bots,
+    chatLikeSurface,
+    composeBotAccentId,
+    detail?.incognito,
+    pendingReplyVisualVisible,
+    selectedComposeBotAccent,
+    zenPersonaBot,
+    zenPendingReplyPlaceholderVisible,
+  ]);
+  /** Zen uses the in-canvas three-dot placeholder while waiting; keep the stop pill for active canvas reveal only. */
   const typingIndicatorVisible =
-    (pendingReplyVisible && !zenInitialThinkingActive) ||
-    (chatEphemeralMode &&
-      chatAssistantRevealInProgress &&
-      !zenInitialReplyRevealActive);
+    chatLikeSurface
+      ? chatAssistantRevealInProgress && !zenInitialReplyRevealActive
+      : zenFollowupActive ||
+        (pendingReplyVisualVisible && !zenInitialThinkingActive);
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
     const pendingRespondent =
@@ -26637,9 +31451,12 @@ function HomeContent(): React.JSX.Element {
         (latestAssistantMessageId !== null && fallbackMessageIds.has(latestAssistantMessageId))
       );
     // Keep the "gathering" phase varied, but make active typed reveal explicit.
-    const label = chatAssistantRevealInProgress
+    const label = zenFollowupActive
+      ? `${displayName} is waiting while you type…`
+      : chatAssistantRevealInProgress
       ? `${displayName} is replying…`
       : pickGeneratingLabel(displayName, salt);
+    const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
       ? ({ ["--typing-accent" as string]: selectedComposeBotAccent } as React.CSSProperties)
       : undefined;
@@ -26651,7 +31468,11 @@ function HomeContent(): React.JSX.Element {
         } ${styles.typingIndicatorStopButton} ${
           chatAssistantRevealInProgress ? styles.typingIndicatorReplyingLive : ""
         } ${
+          zenFollowupActive ? styles.typingIndicatorPaused : ""
+        } ${
           showFallbackCheckerboardRing ? styles.typingIndicatorFallbackProcessing : ""
+        } ${
+          zenCanvasSpeedNudgePulseActive ? styles.typingIndicatorSpeedNudged : ""
         }`}
         style={style}
         aria-label={`${label}. Tap or click to stop.`}
@@ -26659,15 +31480,12 @@ function HomeContent(): React.JSX.Element {
         onClick={handleTypingIndicatorPress}
       >
         <span>{label}</span>
-        <span className={styles.typingDots} aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
+        <TypingDots className={styles.typingDots} voicePreset={voicePreset} />
       </button>
     );
   }, [
-    pendingReplyVisible,
+    pendingReplyVisualVisible,
+    zenFollowupActive,
     chatAssistantRevealInProgress,
     chatEphemeralMode,
     composeBotAccentId,
@@ -26682,6 +31500,7 @@ function HomeContent(): React.JSX.Element {
     selectedComposeBotAccent,
     chatLikeSurface,
     handleTypingIndicatorPress,
+    zenCanvasSpeedNudgePulseActive,
   ]);
   const zenInitialThinkingNode = useMemo(() => {
     const active = zenInitialThinkingActive || zenInitialReplyRevealActive;
@@ -26704,10 +31523,19 @@ function HomeContent(): React.JSX.Element {
     const onActivate = compactPhase
       ? handleZenInitialReplyRevealCancel
       : handleZenInitialThinkingCancel;
+    const personaBot =
+      composeBotAccentId !== null
+        ? bots.find((bot) => bot.id === composeBotAccentId) ?? null
+        : zenPersonaBot;
+    const personaStyle = personaBot
+      ? botAccentStyle(personaBot.color, resolvedTheme)
+      : undefined;
     return (
       <div
         className={styles.zenInitialThinkingOverlay}
         data-phase={compactPhase ? "compact" : "thinking"}
+        data-persona={personaBot ? "bot" : "prism"}
+        style={personaStyle}
         role="status"
         aria-live="polite"
       >
@@ -26736,7 +31564,15 @@ function HomeContent(): React.JSX.Element {
           title={compactPhase ? "Stop reply" : "Cancel reply"}
         >
           <span className={styles.zenInitialThinkingGlyphHalo} aria-hidden="true">
-            <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+            {personaBot ? (
+              <BotGlyph
+                name={personaBot.glyph}
+                size={compactPhase ? 24 : 58}
+                className={styles.zenInitialThinkingGlyph}
+              />
+            ) : (
+              <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+            )}
           </span>
           <span className={styles.zenInitialThinkingLabel}>{label}</span>
         </button>
@@ -26745,11 +31581,15 @@ function HomeContent(): React.JSX.Element {
   }, [
     handleZenInitialReplyRevealCancel,
     handleZenInitialThinkingCancel,
+    bots,
+    composeBotAccentId,
     detail?.id,
     detail?.messages.length,
     latestAssistantMessageId,
     pendingReplyConversationId,
     pendingReplyStartedAtMs,
+    resolvedTheme,
+    zenPersonaBot,
     zenInitialReplyRevealActive,
     zenInitialThinkingActive,
   ]);
@@ -26800,6 +31640,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={`${styles.askQuestionRecallBubbleDock} ${styles.manualCompactionDock}`}
+        data-dev-panel-safe-area="bottom"
         data-compaction-state={manualCompactionStatus.state}
       >
         <div
@@ -26899,7 +31740,8 @@ function HomeContent(): React.JSX.Element {
           height: rect.height,
         },
         window.innerWidth,
-        window.innerHeight
+        window.innerHeight,
+        devPanelSafeAreaInsets
       );
       panel.style.setProperty("--compacted-summary-debug-left", `${next.x}px`);
       panel.style.setProperty("--compacted-summary-debug-top", `${next.y}px`);
@@ -26907,7 +31749,7 @@ function HomeContent(): React.JSX.Element {
       panel.style.setProperty("--compacted-summary-debug-height", `${next.height}px`);
       setCompactedSummaryDebugPanelRect(next);
     },
-    []
+    [devPanelSafeAreaInsets]
   );
   const endCompactedSummaryDebugPanelDrag = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -26930,7 +31772,8 @@ function HomeContent(): React.JSX.Element {
       const next = clampCompactedSummaryDebugPanelRect(
         current,
         viewportWidth,
-        viewportHeight
+        viewportHeight,
+        devPanelSafeAreaInsets
       );
       return next.x === current.x &&
         next.y === current.y &&
@@ -26939,13 +31782,18 @@ function HomeContent(): React.JSX.Element {
         ? current
         : next;
     });
-  }, [compactedSummaryDebugFloatingEnabled, viewportHeight, viewportWidth]);
+  }, [
+    compactedSummaryDebugFloatingEnabled,
+    devPanelSafeAreaInsets,
+    viewportHeight,
+    viewportWidth,
+  ]);
 
   useEffect(() => {
     if (
       !compactedSummaryDebugFloatingEnabled ||
       compactedSummaryDebugMinimized ||
-      !devShowCompactedSummaryInChat
+      !devToolsRuntimeActive
     ) {
       return;
     }
@@ -26962,7 +31810,8 @@ function HomeContent(): React.JSX.Element {
         return clampCompactedSummaryDebugPanelRect(
           { ...current, width, height },
           viewportWidth,
-          viewportHeight
+          viewportHeight,
+          devPanelSafeAreaInsets
         );
       });
     });
@@ -26971,14 +31820,15 @@ function HomeContent(): React.JSX.Element {
   }, [
     compactedSummaryDebugFloatingEnabled,
     compactedSummaryDebugMinimized,
-    devShowCompactedSummaryInChat,
+    devPanelSafeAreaInsets,
+    devToolsRuntimeActive,
     viewportHeight,
     viewportWidth,
   ]);
 
   const compactedSummaryDebugNode = useMemo(() => {
-    if (!DEV_TOOLS_ENABLED || !devShowCompactedSummaryInChat) return null;
-    if (view !== "chat" || !activeZenConversationId) return null;
+    if (!devToolsRuntimeActive) return null;
+    if (view !== "chat") return null;
     const summaryFromManual =
       manualCompactionStatus?.conversationId === activeZenConversationId &&
       (manualCompactionStatus.mode === "zen" || manualCompactionStatus.mode === "chat")
@@ -27186,7 +32036,7 @@ function HomeContent(): React.JSX.Element {
     detail?.zenWallpaper?.generationMessageCount,
     detail?.zenWallpaper?.promptSeed,
     detail?.id,
-    devShowCompactedSummaryInChat,
+    devToolsRuntimeActive,
     manualCompactionStatus,
     dragCompactedSummaryDebugPanel,
     endCompactedSummaryDebugPanelDrag,
@@ -27360,6 +32210,33 @@ function HomeContent(): React.JSX.Element {
   const coffeePollBubbleRef = useRef<HTMLButtonElement | null>(null);
   const coffeePollPanelDragRef = useRef<CoffeePollPanelDragState | null>(null);
   const coffeePollPanelSuppressClickRef = useRef(false);
+  useEffect(() => {
+    if (view !== "coffee" && !coffeeActivePoll) return;
+    const node = coffeePollPanelRef.current ?? coffeePollBubbleRef.current;
+    const fallbackSize = coffeePollResultsOpen && !coffeePollPanelMinimized ? 360 : 58;
+    const width = node?.offsetWidth ?? fallbackSize;
+    const height = node?.offsetHeight ?? fallbackSize;
+    setCoffeePollPanelPosition((current) => {
+      const next = clampCoffeePollPanelPosition(
+        current.x,
+        current.y,
+        width,
+        height,
+        viewportWidth,
+        viewportHeight,
+        devPanelSafeAreaInsets
+      );
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [
+    coffeeActivePoll,
+    coffeePollPanelMinimized,
+    coffeePollResultsOpen,
+    devPanelSafeAreaInsets,
+    view,
+    viewportHeight,
+    viewportWidth,
+  ]);
   const [coffeeSettingsModalOpen, setCoffeeSettingsModalOpen] = useState(false);
   const [coffeeSettingsDraft, setCoffeeSettingsDraft] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
@@ -27514,7 +32391,7 @@ function HomeContent(): React.JSX.Element {
     setEmptyStateSearchOpen(false);
     setTouchPreview(null);
     touchPreviewPointerIdRef.current = null;
-    setExpandedPromptShortcutMessageId(null);
+    setExpandedPromptShortcutTargetsByMessageId({});
     setCoffeeOpeningPollModalOpen(false);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
@@ -28228,7 +33105,9 @@ function HomeContent(): React.JSX.Element {
   const storyModelProvider = storyResolvedChoice.provider;
   const storyVisibleModelChoice = storyResolvedChoice.modelChoice;
   const storyEffectiveModelChoice =
-    storyResponseMode === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : storyVisibleModelChoice;
+    storyResponseMode === "local" && storyVisibleModelChoice !== DISABLED_MODEL_CHOICE
+      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
+      : storyVisibleModelChoice;
   const storyModelOptions =
     storyResponseMode === "local"
       ? [storyBaselineLocalModelOption]
@@ -28239,7 +33118,9 @@ function HomeContent(): React.JSX.Element {
           storyVisibleModelChoice
         );
   const storyModelOverride =
-    storyResponseMode === "local"
+    storyVisibleModelChoice === DISABLED_MODEL_CHOICE
+      ? undefined
+      : storyResponseMode === "local"
       ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
       : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
         ? storyVisibleModelChoice
@@ -28328,6 +33209,10 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
     if (!storySelectionValid || storyBusy) return;
+    if (storyVisibleModelChoice === DISABLED_MODEL_CHOICE) {
+      setStoryError("Story generation is disabled. Choose a model before starting.");
+      return;
+    }
     setStoryBusy(true);
     setStoryError(null);
     const reasoningEffortOverride = reasoningEffortForSend(
@@ -28373,6 +33258,7 @@ function HomeContent(): React.JSX.Element {
     storyBusy,
     storyModelProvider,
     storyModelOverride,
+    storyVisibleModelChoice,
     storyReasoningEffort,
     storyPremise,
     storySelectedBotIds,
@@ -28600,6 +33486,15 @@ function HomeContent(): React.JSX.Element {
         })),
     [bots, resolvedTheme, panelColorHarmonyActive]
   );
+  const zenPersonaPickerBots = useMemo(
+    () =>
+      [...bots]
+        .filter((bot) => bot.chat_enabled === 1)
+        .sort((a, b) =>
+          compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
+        ),
+    [bots, resolvedTheme, panelColorHarmonyActive]
+  );
   const chatEnabledBotMentionMap = useMemo(() => {
     const m = new Map<string, BotMentionPick>();
     for (const b of bots) {
@@ -28821,8 +33716,11 @@ function HomeContent(): React.JSX.Element {
     onlineChatModelOptions,
   ]);
   const coffeeSessionProvider = coffeeSessionResolvedChoice.provider;
+  const coffeeSessionModelDisabled =
+    coffeeSessionResolvedChoice.modelChoice === DISABLED_MODEL_CHOICE;
   const coffeeSessionModelOverride =
-    coffeeSessionResolvedChoice.modelChoice !== AUTO_MODEL_CHOICE
+    coffeeSessionResolvedChoice.modelChoice !== AUTO_MODEL_CHOICE &&
+    coffeeSessionResolvedChoice.modelChoice !== DISABLED_MODEL_CHOICE
       ? coffeeSessionResolvedChoice.modelChoice
       : undefined;
   const coffeeSessionReasoningEffortOverride = reasoningEffortForSend(
@@ -28833,6 +33731,7 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (!coffeeConversation || coffeeSessionPhase !== "finished") return;
+    if (coffeeSessionModelDisabled) return;
     if (coffeeConversationHasSessionSynopsis(coffeeConversation)) return;
     const sessionId = coffeeConversation.id;
     if (coffeeSynopsisRequestIdsRef.current.has(sessionId)) return;
@@ -28871,6 +33770,7 @@ function HomeContent(): React.JSX.Element {
     };
   }, [
     coffeeConversation,
+    coffeeSessionModelDisabled,
     coffeeSessionModelOverride,
     coffeeSessionPhase,
     coffeeSessionProvider,
@@ -28991,8 +33891,73 @@ function HomeContent(): React.JSX.Element {
     view === "chat" &&
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
-    !emptyStateSearchActive &&
-    !chatStartupSummaryVisible;
+    !emptyStateSearchActive;
+  useEffect(() => {
+    const requestId = zenRememberedWallpaperRequestRef.current + 1;
+    zenRememberedWallpaperRequestRef.current = requestId;
+    if (view !== "chat" || appWidePrivateMode || !zenPersonaBotId) {
+      setZenRememberedWallpaperPreview(null);
+      setZenRememberedWallpaperLookup(null);
+      return;
+    }
+    let cancelled = false;
+    setZenRememberedWallpaperPreview(null);
+    setZenRememberedWallpaperLookup({
+      botId: zenPersonaBotId,
+      resolved: false,
+      hasWallpaper: false,
+    });
+    void api<ZenRememberedWallpaperApiResponse>(
+      `/api/bots/${encodeURIComponent(zenPersonaBotId)}/zen-wallpaper`
+    )
+      .then((data) => {
+        if (
+          cancelled ||
+          zenRememberedWallpaperRequestRef.current !== requestId
+        ) {
+          return;
+        }
+        const wallpaper = data.wallpaper;
+        setZenRememberedWallpaperLookup({
+          botId: zenPersonaBotId,
+          resolved: true,
+          hasWallpaper: Boolean(wallpaper),
+        });
+        setZenRememberedWallpaperPreview(
+          wallpaper
+            ? {
+                botId: zenPersonaBotId,
+                imageId: wallpaper.imageId,
+                promptSeed: wallpaper.promptSeed,
+                createdAt: wallpaper.createdAt,
+              }
+            : null
+        );
+      })
+      .catch(() => {
+        if (
+          cancelled ||
+          zenRememberedWallpaperRequestRef.current !== requestId
+        ) {
+          return;
+        }
+        setZenRememberedWallpaperLookup({
+          botId: zenPersonaBotId,
+          resolved: true,
+          hasWallpaper: false,
+        });
+        setZenRememberedWallpaperPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appWidePrivateMode, view, zenPersonaBotId]);
+  const zenToolLabHasActiveThread = Boolean(
+    view === "chat" &&
+      detail?.id &&
+      detail.id !== "pending" &&
+      (visibleDetailMessages.length > 0 || pendingReplyVisible || zenInitialThinkingActive)
+  );
   const emptyStateTypingSearchAvailable =
     view !== "chat" &&
     pickerSourceBots.length > 0 &&
@@ -29172,7 +34137,20 @@ function HomeContent(): React.JSX.Element {
     if (chatBotOverride && !botIds.has(chatBotOverride)) {
       setChatBotOverride(undefined);
     }
-  }, [view, detail, selectedBotId, chatBotOverride, bots]);
+    if (zenPersonaBotId && !botIds.has(zenPersonaBotId)) {
+      setZenPersonaBotId(null);
+    }
+  }, [view, detail, selectedBotId, chatBotOverride, zenPersonaBotId, bots]);
+
+  useEffect(() => {
+    if (view !== "chat") return;
+    if (!detail || detail.id === "pending") return;
+    const nextPersonaBotId =
+      detail.lastBotId ?? null;
+    setZenPersonaBotId((current) =>
+      current === nextPersonaBotId ? current : nextPersonaBotId
+    );
+  }, [view, detail?.id, detail?.lastBotId]);
 
   useEffect(() => {
     if (view !== "chat") return;
@@ -29382,9 +34360,9 @@ function HomeContent(): React.JSX.Element {
     void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
   }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
   useEffect(() => {
-    if (!devShowCompactedSummaryInChat) return;
+    if (!devToolsRuntimeActive) return;
     void refreshSummaryDebug(view === "chat" ? "zen" : "sandbox");
-  }, [devShowCompactedSummaryInChat, view, detail?.id, selectedId]);
+  }, [devToolsRuntimeActive, view, detail?.id, selectedId]);
   useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
@@ -29554,7 +34532,7 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.22;
+    const EASE_FACTOR = 0.14;
     const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
@@ -29868,6 +34846,41 @@ function HomeContent(): React.JSX.Element {
       window.clearInterval(timer);
     };
   }, [chatAssistantTypingMechanicsActive, detail?.id]);
+  const cleanupMessageRevealActive = cleanupRevealMessageKeys.size > 0;
+  useEffect(() => {
+    if (!cleanupMessageRevealActive) return;
+    const timer = window.setTimeout(() => {
+      setCleanupRevealMessageKeys(new Set<string>());
+    }, CLEANUP_MESSAGE_REVEAL_SETTLE_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [cleanupMessageRevealActive, cleanupRevealMessageKeys]);
+  useEffect(() => {
+    if (!cleanupMessageRevealActive) return;
+    const activeMessageKeys = new Set<string>();
+    if (detail?.id) {
+      for (const message of detail.messages) {
+        activeMessageKeys.add(cleanupMessageRevealKey(detail.id, message.id));
+      }
+    }
+    setCleanupRevealMessageKeys((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const key of current) {
+        if (!activeMessageKeys.has(key)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [
+    cleanupMessageRevealActive,
+    cleanupRevealMessageKeys,
+    detail?.id,
+    detail?.messages,
+  ]);
   // Chat mode seeds `chatMessageFirstSeenAtRef` inside `chatMessageTemporalById`.
   // Token-scheduled assists also rely on anchored first-seen times per message key.
   useEffect(() => {
@@ -29907,7 +34920,9 @@ function HomeContent(): React.JSX.Element {
       chatRevealPaceByKeyRef.current.get(temporalKey)?.visibleTokenCount;
     const revealDurationMs = resolveRevealDurationMsForTokens(
       revealTokens,
-      DEFAULT_MESSAGE_MOOD
+      DEFAULT_MESSAGE_MOOD,
+      effectiveChatRevealTiming,
+      resolveZenAssistantRevealDelayMultiplier(temporalKey)
     );
     const visuallyComplete =
       typeof pacedVisibleTokenCount === "number"
@@ -29923,6 +34938,8 @@ function HomeContent(): React.JSX.Element {
     chatEphemeralNowMs,
     detail?.id,
     detail?.messages,
+    effectiveChatRevealTiming,
+    resolveZenAssistantRevealDelayMultiplier,
     pendingReplyVisible,
   ]);
   useEffect(() => {
@@ -30024,6 +35041,28 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearInterval(timer);
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
+  useEffect(() => {
+    if (!psychicModeToast) return;
+    const remainingMs = Math.max(0, psychicModeToast.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setPsychicModeToast((current) =>
+        current?.id === psychicModeToast.id ? null : current
+      );
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [psychicModeToast]);
+
+  useEffect(() => {
+    if (!localCommandToast) return;
+    const remainingMs = Math.max(0, localCommandToast.expiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setLocalCommandToast((current) =>
+        current?.id === localCommandToast.id ? null : current
+      );
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [localCommandToast]);
+
   // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
   // clears stale mode state too, then the restore effect below opens the
   // user's single continuous PRISM conversation.
@@ -30046,12 +35085,37 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    if (view === "chat") {
+      setZenPersonaBotId(null);
+    }
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
+      rotateZenFallbackWallpaperSeed();
     }
     setError(null);
-  }, [view]);
+  }, [rotateZenFallbackWallpaperSeed, view]);
+
+  useEffect(() => {
+    if (
+      view !== "chat" ||
+      !detail ||
+      detail.id === "pending" ||
+      !detail.mode ||
+      detail.mode === "zen"
+    ) {
+      return;
+    }
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
+  }, [view, detail?.id, detail?.mode]);
 
   useEffect(() => {
     if (
@@ -30074,6 +35138,7 @@ function HomeContent(): React.JSX.Element {
         setSelectedBotId(null);
         setSandboxGridSelectedBotId(null);
         setChatBotOverride(undefined);
+        setZenPersonaBotId(null);
         setConversationStarterPrompts(null);
         const d = await api<{ conversationId: string }>("/api/conversations/zen/open", {
           method: "POST",
@@ -30493,6 +35558,68 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }
+
+  async function retryBackendConnection(): Promise<void> {
+    setBackendReconnectBusy(true);
+    try {
+      await requestApiWithLoopbackFallback("/api/health");
+      setBackendUnavailable(null);
+      setError(null);
+      await bootstrap();
+      if (user) {
+        await refreshAll();
+      }
+    } catch (err) {
+      if (isPrismBackendUnavailableError(err)) {
+        setBackendUnavailable({
+          code: err.code,
+          message: err.message,
+          path: err.path,
+          status: err.status,
+          detail: err.detail,
+        });
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Connection check failed.");
+    } finally {
+      setBackendReconnectBusy(false);
+    }
+  }
+
+  async function restartBackendFromConnectionNotice(): Promise<void> {
+    setBackendRestartBusy(true);
+    try {
+      await api<{ restarting?: boolean; mode?: string }>("/api/dev/restart", {
+        method: "POST",
+      });
+      window.setTimeout(() => {
+        void retryBackendConnection();
+      }, 900);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Server restart failed.");
+    } finally {
+      setBackendRestartBusy(false);
+    }
+  }
+
+  function renderBackendUnavailableNotice(
+    variant: "full" | "banner"
+  ): React.JSX.Element | null {
+    if (!backendUnavailable) return null;
+    const showRestart = variant === "banner" && Boolean(user);
+    return (
+      <BackendUnavailableNotice
+        variant={variant}
+        message={backendUnavailable.message}
+        retryBusy={backendReconnectBusy}
+        restartBusy={backendRestartBusy}
+        showRestart={showRestart}
+        onRetry={() => void retryBackendConnection()}
+        onRestart={showRestart ? () => void restartBackendFromConnectionNotice() : undefined}
+      />
+    );
+  }
+
   async function refreshConversations(): Promise<ConversationSummary[]> {
     const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations");
     const next = d.conversations.filter(c => !c.incognito);
@@ -30569,6 +35696,7 @@ function HomeContent(): React.JSX.Element {
         await refreshBotMemories(nextPickedBotId);
       } else {
         setBotMemories([]);
+        setBotMemoryDossier(null);
       }
     } catch (err) {
       if (!sameSurface && selectedIdRef.current === id) {
@@ -30598,11 +35726,17 @@ function HomeContent(): React.JSX.Element {
 
   async function openZenMode(): Promise<void> {
     setPendingIncognito(false);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     setConversationStarterPrompts(null);
     navigateToView("chat");
+    rotateZenFallbackWallpaperSeed();
   }
 
   async function refreshConversationTitleAfterLeave(conversationId: string): Promise<void> {
@@ -30664,6 +35798,9 @@ function HomeContent(): React.JSX.Element {
       displayName,
       composerWritingAssist: d.settings.composerWritingAssist !== false,
       experimentalDualOllamaEnabled: d.settings.experimentalDualOllamaEnabled === true,
+      experimentalAllModelEffortEnabled:
+        d.settings.experimentalAllModelEffortEnabled === true,
+      psychicModeEnabled: d.settings.psychicModeEnabled === true,
       fallbackModelMessageStripe: d.settings.fallbackModelMessageStripe !== false,
       hiddenBotModelIds: Array.isArray(d.settings.hiddenBotModelIds)
         ? d.settings.hiddenBotModelIds
@@ -30969,14 +36106,23 @@ function HomeContent(): React.JSX.Element {
     );
   }
   async function refreshBotMemories(botId: string) {
-    const d = await api<{ memories: UserMemory[] }>(
-      `/api/memories?botId=${encodeURIComponent(botId)}`
+    const conversationId =
+      detailIdRef.current && detailIdRef.current !== "pending"
+        ? detailIdRef.current
+        : selectedIdRef.current;
+    const query = conversationId
+      ? `?conversationId=${encodeURIComponent(conversationId)}`
+      : "";
+    const d = await api<BotMemoryPanelDossier & { ok?: boolean }>(
+      `/api/bots/${encodeURIComponent(botId)}/memory-panel${query}`
     );
     setBotMemories(d.memories);
+    setBotMemoryDossier(d);
   }
   async function refreshDefaultMemories() {
     const d = await api<{ memories: UserMemory[] }>("/api/memories?scope=default");
     setBotMemories(d.memories);
+    setBotMemoryDossier(null);
   }
   async function refreshZenSessionMemory() {
     const conversationId =
@@ -31062,7 +36208,7 @@ function HomeContent(): React.JSX.Element {
     kind: DevChatDebugEvent["kind"];
     text: string;
   }>) => {
-    if (!devChatMetricsEnabled || entries.length === 0) return;
+    if (!devChatMetricsTerminalActive || entries.length === 0) return;
     const createdAt = new Date().toISOString();
     const nextEvents = entries.map((entry, index) => ({
       id: `dev-metric-${createdAt}-${index}-${Math.random().toString(36).slice(2, 9)}`,
@@ -31071,7 +36217,7 @@ function HomeContent(): React.JSX.Element {
       text: entry.text,
     }));
     setDevChatDebugEvents((current) => [...current.slice(-60), ...nextEvents]);
-  }, [devChatMetricsEnabled]);
+  }, [devChatMetricsTerminalActive]);
 
   function collectDebugLinesFromEnvelope(
     envelope: ChatPostEnvelope,
@@ -31137,6 +36283,38 @@ function HomeContent(): React.JSX.Element {
           `${prefix} lenient fallback invoked (${invocation.trigger}). ` +
           `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
       });
+    }
+    if (envelope.psychicDebug) {
+      const debug = envelope.psychicDebug;
+      lines.push({
+        kind: "summary",
+        text:
+          `${prefix} psychic ${debug.simulated ? "simulated effort" : "summary"} ` +
+          `(${debug.provider}${debug.model ? `:${debug.model}` : ""}, effort=${debug.effort}): ` +
+          debug.summary,
+      });
+      if (typeof debug.passCount === "number" || typeof debug.guidanceChars === "number") {
+        lines.push({
+          kind: "summary",
+          text:
+            `${prefix} psychic diagnostics: passes=${debug.passCount ?? 0}; ` +
+            `guidance=${debug.guidanceChars ?? 0} chars`,
+        });
+      }
+      for (const pass of debug.passes ?? []) {
+        lines.push({
+          kind: "summary",
+          text:
+            `${prefix} psychic pass ${pass.name}: ${pass.chars} chars` +
+            (pass.warning ? `; warning=${pass.warning}` : ""),
+        });
+      }
+      if (debug.scratchpad.trim().length > 0) {
+        lines.push({
+          kind: "summary",
+          text: `${prefix} psychic scratchpad: ${debug.scratchpad}`,
+        });
+      }
     }
     const toolCallEvents = envelope.toolCalls ?? [];
     for (const event of toolCallEvents) {
@@ -31525,6 +36703,7 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setMemories([]);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
@@ -31636,7 +36815,7 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterSelectedCommandId(null);
     setCommandCenterSpecsCommandId(null);
     setCommandCenterHelpModalOpen(false);
-    setExpandedPromptShortcutMessageId(null);
+    setExpandedPromptShortcutTargetsByMessageId({});
     setConversationGroupOrder([]);
     setBotLibraryGroups([createFavoritesBotGroup()]);
     setConversations([]);
@@ -31648,6 +36827,7 @@ function HomeContent(): React.JSX.Element {
     setBotOpinion(null);
     setMemories([]);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     setSettings(null);
     setModelCatalog(null);
     setBots([]);
@@ -31656,6 +36836,7 @@ function HomeContent(): React.JSX.Element {
     setCanvasSelectedBotIds(new Set());
     setCanvasBotMarqueeRect(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     setDraft("");
     setError(null);
     setChatModelChoiceByProvider(modelDefaults);
@@ -31970,16 +37151,28 @@ function HomeContent(): React.JSX.Element {
       sessionEnding?: boolean;
       sessionResumeContext?: SessionResumeContext;
       forceNewConversation?: boolean;
+      topicReset?: boolean;
       commandCenterModelChoice?: string;
       commandCenterPrompt?: boolean;
       resolvedCommandCenterPrompt?: string;
+      promptInputOverride?: string;
       promptShortcut?: PromptShortcutMetadata;
       promptWildcards?: PromptWildcardRunMetadata;
       prismInterruption?: PrismMoodInterruptionInput;
+      conversationIdOverride?: string | null;
+      zenPersonaBotId?: string | null;
+      personaTransition?: ZenPersonaTransitionInput;
+      zenAutonomy?: ZenAutonomyInput;
+      zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
-    const privateForSend = false;
+    const privateForSend =
+      isZenMode && (detail?.incognito === true || pendingIncognito);
+    const privateConversationId =
+      privateForSend && detail?.incognito === true
+        ? selectedId ?? detail.id
+        : undefined;
     const mode: "zen" | "sandbox" = isZenMode ? "zen" : "sandbox";
     const commandCenterModelChoice = parseCommandCenterModelChoice(
       options.commandCenterModelChoice ?? AUTO_MODEL_CHOICE
@@ -32002,16 +37195,33 @@ function HomeContent(): React.JSX.Element {
       ? commandCenterModelChoice.modelId
       : resolvedChatChoice.modelChoice;
     const modelOverride =
-      modelChoice !== AUTO_MODEL_CHOICE
+      modelChoice !== AUTO_MODEL_CHOICE && modelChoice !== DISABLED_MODEL_CHOICE
         ? modelChoice
         : undefined;
     const reasoningEffortOverride = reasoningEffortForSend(
       providerForSend,
       modelOverride,
-      chatReasoningEffort
+      chatReasoningEffort,
+      settings?.experimentalAllModelEffortEnabled === true
     );
+    const hasZenPersonaBotOverride = Object.prototype.hasOwnProperty.call(
+      options,
+      "zenPersonaBotId"
+    );
+    const zenPersonaBotIdForRequest =
+      mode === "zen"
+        ? hasZenPersonaBotOverride
+          ? options.zenPersonaBotId
+          : zenPersonaBotId ?? undefined
+        : undefined;
+    const conversationIdForSend =
+      options.conversationIdOverride !== undefined
+        ? options.conversationIdOverride ?? undefined
+        : selectedId ?? undefined;
     return {
-      conversationId: options.forceNewConversation ? undefined : selectedId ?? undefined,
+      conversationId: privateForSend
+        ? privateConversationId
+        : options.forceNewConversation ? undefined : conversationIdForSend,
       message,
       ...(options.starterPrompt ? { starterPrompt: true } : {}),
       ...(options.starterPromptWarrantsIntro
@@ -32023,6 +37233,7 @@ function HomeContent(): React.JSX.Element {
         ? { sessionResumeContext: options.sessionResumeContext }
         : {}),
       ...(options.forceNewConversation ? { forceNewConversation: true } : {}),
+      ...(mode === "zen" && options.topicReset ? { topicReset: true } : {}),
       mode,
       ...(mode === "zen"
         ? {
@@ -32035,7 +37246,13 @@ function HomeContent(): React.JSX.Element {
       botId:
         mode === "sandbox"
           ? (selectedBotId ?? undefined)
-          : undefined,
+          : zenPersonaBotIdForRequest,
+      ...(privateForSend
+        ? {
+            incognito: true,
+            ephemeralMessages: options.ephemeralMessages ?? detail?.messages ?? [],
+          }
+        : {}),
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
@@ -32043,8 +37260,20 @@ function HomeContent(): React.JSX.Element {
       ...(options.resolvedCommandCenterPrompt
         ? { resolvedCommandCenterPrompt: options.resolvedCommandCenterPrompt }
         : {}),
+      ...(options.promptInputOverride
+        ? { promptInputOverride: options.promptInputOverride }
+        : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
       ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
+      ...(mode === "zen" && options.personaTransition
+        ? { personaTransition: options.personaTransition }
+        : {}),
+      ...(mode === "zen" && options.zenAutonomy
+        ? { zenAutonomy: options.zenAutonomy }
+        : {}),
+      ...(mode === "zen" && options.zenAskQuestionPatience
+        ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
+        : {}),
     };
   }
 
@@ -32195,8 +37424,10 @@ function HomeContent(): React.JSX.Element {
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -32240,8 +37471,10 @@ function HomeContent(): React.JSX.Element {
         captureFallbackMessageIdFromEnvelope(d);
         pushMemoryToasts(d.memoryLearned);
         appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -32292,6 +37525,55 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text, options);
   }
 
+  function buildZenToolLabEphemeralMessage(toolId: ZenToolLabToolId): Message {
+    const sample = buildZenToolLabMessageSample(toolId);
+    return {
+      id: `dev-tool-lab-${toolId}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      role: "assistant",
+      createdAt: new Date().toISOString(),
+      provider: "local",
+      model: "dev/tool-lab",
+      content: sample.content,
+      ...(sample.askQuestion ? { askQuestion: sample.askQuestion } : {}),
+      ...(sample.tellFictionalStory
+        ? { tellFictionalStory: sample.tellFictionalStory }
+        : {}),
+      ...(sample.sentGeneratedImage
+        ? { sentGeneratedImage: sample.sentGeneratedImage }
+        : {}),
+      ...(sample.zenDisplay ? { zenDisplay: sample.zenDisplay } : {}),
+    };
+  }
+
+  function appendZenToolLabSample(toolId: ZenToolLabToolId): boolean {
+    const activeDetail = detail;
+    if (!activeDetail || !zenToolLabHasActiveThread) {
+      setError("Start a Zen thread before using Tool Lab.");
+      return false;
+    }
+    const message = buildZenToolLabEphemeralMessage(toolId);
+    setConversationStarterPrompts(null);
+    setAskQuestionComposerRevealed(false);
+    setStarterComposerRevealed(false);
+    setError(null);
+    setDetail((current) => {
+      if (!current || current.id !== activeDetail.id) return current;
+      const previousMessages = current.messages.map((existing) => {
+        if (!existing.id.startsWith("dev-tool-lab-")) return existing;
+        const rest = { ...existing };
+        delete rest.askQuestion;
+        delete rest.tellFictionalStory;
+        return rest;
+      });
+      return {
+        ...current,
+        hasAssistantReply: true,
+        messages: [...previousMessages, message],
+      };
+    });
+    return true;
+  }
+
   /** `/dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
   function consumePrismDevComposerCommand(trimmedLine: string): boolean {
     if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
@@ -32304,20 +37586,9 @@ function HomeContent(): React.JSX.Element {
     setConversationStarterPrompts(null);
     setError(null);
 
-    const devAssistShell = (): Pick<Message, "id" | "role" | "createdAt"> & {
-      provider?: Message["provider"];
-      model?: string;
-    } => ({
-      id: `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      role: "assistant",
-      createdAt: new Date().toISOString(),
-      provider: "local",
-      model: "dev/ui",
-    });
-
     if (parsed.kind === "unknown") {
       setError(
-        `Unknown dev command "${parsed.token}". Type /dev to open Developer Tools.`,
+        `Unknown dev command "${parsed.token}". Type /dev to toggle developer tools.`,
       );
       return true;
     }
@@ -32327,9 +37598,11 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
-      setDevToolsMessage(null);
-      setDevTogglesOpen(false);
-      setDevToolsOpen(true);
+      if (trimmedLine.trimStart().slice(4).trim().length === 0) {
+        toggleDevToolsLayer();
+        return true;
+      }
+      openDevTools();
       return true;
     }
 
@@ -32343,9 +37616,8 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
-      setDevToolsMessage(null);
-      setDevToolsOpen(true);
-      setDevTogglesOpen(true);
+      openDevTools("system");
+      setDevToolsMessage("Dev toggles live in System.");
       return true;
     }
 
@@ -32354,39 +37626,21 @@ function HomeContent(): React.JSX.Element {
         setError("Developer tools are not enabled in this build.");
         return true;
       }
+      openDevTools("system");
       setDevToolsMessage("Dev commands are listed in System.");
-      setDevToolsActiveSection("system");
-      setDevTogglesOpen(false);
-      setDevToolsOpen(true);
       return true;
     }
 
-    if (!detail) {
+    if (!detail || detail.id === "pending") {
       setError("Open a chat first - then try /dev askquestion in the composer.");
       return true;
     }
 
-    const m: Message = {
-      ...devAssistShell(),
-      content:
-        "Sample **AskQuestion** rail preview from `/dev askquestion`.\n\n" +
-        "_Ephemeral — this row is only in memory in this browser tab._",
-      askQuestion: {
-        v: 1,
-        name: "AskQuestion",
-        prompt: "Dev preview (tap a chip)",
-        options: [
-          { id: "a", label: "🟢 Smoke A" },
-          { id: "b", label: "🟡 Smoke B" },
-          { id: "c", label: "🔴 Smoke C" },
-        ],
-      },
-    };
-    setDetail({
-      ...detail,
-      hasAssistantReply: true,
-      messages: [...detail.messages, m],
-    });
+    setDevToolsUnlocked(true);
+    setDevDebugComposerMinimized(false);
+    setCompactedSummaryDebugMinimized(false);
+    setZenToolLabOpen(true);
+    appendZenToolLabSample("ask-question");
     return true;
   }
 
@@ -32654,14 +37908,21 @@ function HomeContent(): React.JSX.Element {
     setComposerPrimed(false);
     setStarterComposerRevealed(false);
     setAskQuestionComposerRevealed(false);
+    rotateZenFallbackWallpaperSeed();
     revealZenHeaderForFreshSurface();
     void refreshConversations();
   }
 
-  async function clearConversationFromSlashCommand(): Promise<void> {
-    if (pendingReplyVisible) {
+  async function clearConversationFromSlashCommand(
+    options: {
+      conversationIdOverride?: string | null;
+      preserveComposer?: boolean;
+      allowPendingReply?: boolean;
+    } = {}
+  ): Promise<boolean> {
+    if (pendingReplyVisible && !options.allowPendingReply) {
       setError("Wait for the current reply to finish before clearing this chat.");
-      return;
+      return false;
     }
     const activeConversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
@@ -32669,20 +37930,26 @@ function HomeContent(): React.JSX.Element {
       view === "chat"
         ? conversations.find((conversation) => conversation.mode === "zen" && !conversation.incognito)?.id ?? null
         : null;
-    const conversationId = activeConversationId ?? fallbackChatConversationId;
+    const conversationId =
+      options.conversationIdOverride !== undefined
+        ? options.conversationIdOverride
+        : activeConversationId ?? fallbackChatConversationId;
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
-    if (editingMessageId !== null) {
-      setEditingMessageId(null);
-      setEditingOriginalText("");
+    pendingNvmTopicResetRef.current = false;
+    if (!options.preserveComposer) {
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
     }
     if (!conversationId || conversationId === "pending" || detail?.incognito === true) {
       clearAllDisplayedConversationState();
       setForceNewConversationOnNextSend(false);
       setComposerPrimed(false);
-      return;
+      return true;
     }
     try {
       await api<{
@@ -32733,8 +38000,10 @@ function HomeContent(): React.JSX.Element {
       setForceNewConversationOnNextSend(false);
       setComposerPrimed(false);
       await refreshConversations();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Conversation clear failed.");
+      return false;
     }
   }
 
@@ -32769,6 +38038,191 @@ function HomeContent(): React.JSX.Element {
       setPanelNotice("Prism mood reset.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Prism mood reset failed.");
+    }
+  }
+
+  function clearPendingReplyForUndo(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    const activeController = pendingReplyAbortControllerRef.current;
+    if (activeController) {
+      activeController.abort();
+      pendingReplyAbortControllerRef.current = null;
+    }
+    setPendingReply(false);
+    setPendingReplyStartedAtMs(null);
+    setPendingReplyDenialRisk(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+    zenInitialThinkingCancelControllerRef.current = null;
+  }
+
+  function clearRevealStateForUndo(conversationId: string, messageIds: readonly string[]): void {
+    const cleanupRevealKeys = messageIds.map((messageId) =>
+      cleanupMessageRevealKey(conversationId, messageId)
+    );
+    for (const messageId of messageIds) {
+      const revealKey = `${conversationId}:${messageId}`;
+      chatCommittedFontLineCountByKeyRef.current.delete(revealKey);
+      chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+      chatCompletedRevealKeysRef.current.add(revealKey);
+      chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+      chatRevealPaceByKeyRef.current.delete(revealKey);
+      chatMessageFirstSeenAtRef.current.delete(revealKey);
+    }
+    if (cleanupRevealKeys.length > 0) {
+      const cleanupRevealKeySet = new Set(cleanupRevealKeys);
+      setCleanupRevealMessageKeys((current) => {
+        let changed = false;
+        const next = new Set(current);
+        for (const revealKey of cleanupRevealKeySet) {
+          if (next.delete(revealKey)) changed = true;
+        }
+        return changed ? next : current;
+      });
+    }
+    setChatEphemeralNowMs(Date.now());
+  }
+
+  function removeTailMessagesFromConversationDetail(
+    conversation: ConversationDetail,
+    count: 1 | 2
+  ): ConversationDetail {
+    const removeCount = Math.min(count, conversation.messages.length);
+    if (removeCount <= 0) return conversation;
+    const nextMessages = conversation.messages.slice(0, -removeCount);
+    const removedIds = conversation.messages.slice(-removeCount).map((message) => message.id);
+    clearPendingMessageCleanupIds(removedIds);
+    if (conversation.id) {
+      clearRevealStateForUndo(conversation.id, removedIds);
+    }
+    const lastAssistant = [...nextMessages]
+      .reverse()
+      .find((message): message is Message => message.role === "assistant");
+    if (!lastAssistant) {
+      return {
+        ...conversation,
+        messages: nextMessages,
+        hasAssistantReply: false,
+        lastBotId: null,
+        lastBotColor: null,
+      };
+    }
+    const normalizedBotName = lastAssistant.botName?.trim() ?? "";
+    const matchingBots =
+      normalizedBotName.length > 0
+        ? bots.filter((candidate) => candidate.name.trim() === normalizedBotName)
+        : [];
+    const inferredLastBotId =
+      normalizedBotName.length === 0 ||
+      normalizedBotName.toLowerCase() === DEFAULT_ASSISTANT_NAME.toLowerCase()
+        ? null
+        : matchingBots.length === 1
+          ? matchingBots[0]?.id ?? null
+          : lastAssistant.botId ?? null;
+    return {
+      ...conversation,
+      messages: nextMessages,
+      hasAssistantReply: true,
+      lastBotId: inferredLastBotId,
+      lastBotColor: lastAssistant.botColor ?? null,
+    };
+  }
+
+  async function undoLatestMessageFromSlashCommand(count: 1 | 2): Promise<void> {
+    closeMessageContextOverlay();
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    const latestMessage = detail?.messages.at(-1) ?? null;
+    const localOnly =
+      detail?.incognito === true ||
+      !activeConversationId ||
+      activeConversationId === "pending" ||
+      (latestMessage !== null && String(latestMessage.id).startsWith("pending-"));
+
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (pendingReplyVisible) {
+      clearPendingReplyForUndo();
+    }
+
+    if (!detail || detail.messages.length === 0) {
+      setError("Nothing to undo.");
+      return;
+    }
+
+    if (localOnly) {
+      setDetail((current) => current ? removeTailMessagesFromConversationDetail(current, count) : current);
+      setPanelNotice(count === 2 ? "Undid latest messages." : "Undid latest message.");
+      return;
+    }
+    if (!activeConversationId) {
+      setError("Open a saved conversation before using /undo.");
+      return;
+    }
+
+    const previousDetail = detail;
+    const removedIds = previousDetail.messages.slice(-count).map((message) => message.id);
+    setDetail((current) => current ? removeTailMessagesFromConversationDetail(current, count) : current);
+    clearRevealStateForUndo(activeConversationId, removedIds);
+    try {
+      const result = await api<{
+        ok: true;
+        conversation: ConversationDetail;
+        prismMood?: PrismMoodSnapshot;
+        undone?: {
+          count?: number;
+          messageIds?: string[];
+          deletedMemories?: number;
+          updatedMemories?: number;
+          deletedSummaries?: number;
+          deletedZenSessionMemories?: number;
+          deletedMoodEvents?: number;
+          deletedImages?: number;
+          cancelledImageJobId?: string;
+        };
+      }>(`/api/conversations/${encodeURIComponent(activeConversationId)}/undo`, {
+        method: "POST",
+        body: JSON.stringify({ count }),
+      });
+      const patchedConversation = attachLivePsychicScratchpadToConversation(
+        applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
+        undefined,
+        settings?.psychicModeEnabled === true
+      );
+      setDetail(patchedConversation);
+      setSelectedId(patchedConversation.id);
+      if (result.prismMood) {
+        setDevMoodDebugSnapshot({ conversationId: patchedConversation.id, mood: result.prismMood });
+      }
+      setSessionOpinion(null);
+      setBotOpinion(null);
+      hardResetChatArchiveStateForConversation(patchedConversation.id);
+      await refreshConversations();
+      await refreshOpenMemoryViews();
+      if (view === "chat") {
+        void refreshSummaryDebug("zen");
+      }
+      setPanelNotice(
+        (result.undone?.count ?? count) === 1
+          ? "Undid latest message."
+          : "Undid latest messages."
+      );
+    } catch (err) {
+      setDetail(previousDetail);
+      setError(err instanceof Error ? err.message : "Undo failed.");
     }
   }
 
@@ -32894,6 +38348,180 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function showPsychicModeToast(
+    enabled: boolean,
+    source: "chat" | "coffee"
+  ): void {
+    const now = Date.now();
+    setPsychicModeToast({
+      id: `psychic-mode:${now}`,
+      enabled,
+      source,
+      expiresAt: now + PSYCHIC_MODE_TOAST_DISMISS_MS,
+    });
+  }
+
+  function showLocalCommandToast(title: string, detail: string): void {
+    const now = Date.now();
+    setLocalCommandToast({
+      id: `local-command:${now}`,
+      title,
+      detail,
+      expiresAt: now + LOCAL_COMMAND_TOAST_DISMISS_MS,
+    });
+  }
+
+  function clearReplyWorkForLocalTopicReset(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    clearZenFollowupCooldownTimer();
+    zenFollowupBufferRef.current = null;
+    setZenFollowupBuffer(null);
+    zenInitialThinkingCancelControllerRef.current = null;
+    priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+    stopPendingReply();
+    freezeActiveAssistantRevealForLocalTopicReset();
+    setPendingMessageCleanupMessageIds(new Set<string>());
+    setCleanupRevealMessageKeys(new Set<string>());
+  }
+
+  async function resetTopicFromNvmSlashCommand(source: "chat" | "coffee"): Promise<void> {
+    if (pendingReply || chatAssistantRevealInProgress || zenFollowupBufferRef.current) {
+      clearReplyWorkForLocalTopicReset();
+    } else {
+      clearZenFollowupCooldownTimer();
+      zenFollowupBufferRef.current = null;
+      setZenFollowupBuffer(null);
+    }
+    setError(null);
+    if (source === "chat") {
+      pendingNvmTopicResetRef.current = true;
+      setConversationStarterPrompts(null);
+      setStarterComposerRevealed(false);
+      setAskQuestionComposerRevealed(false);
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
+      showLocalCommandToast("Topic reset", "Next message starts fresh.");
+      return;
+    }
+    if (source === "coffee") {
+      setCoffeeError(null);
+      setCoffeeDraft("");
+      showLocalCommandToast("Topic reset", "Next message starts fresh.");
+    }
+  }
+
+  async function togglePsychicModeFromSlashCommand(
+    options: { clearChatComposer?: boolean; source?: "chat" | "coffee" } = {}
+  ): Promise<void> {
+    const source = options.source ?? "chat";
+    const nextEnabled = settings?.psychicModeEnabled === true ? false : true;
+    setError(null);
+    if (options.clearChatComposer !== false) {
+      setConversationStarterPrompts(null);
+      setDraft("");
+      setComposerSendTintActive(false);
+      if (editingMessageId !== null) {
+        setEditingMessageId(null);
+        setEditingOriginalText("");
+      }
+    }
+    setSettings((previous) =>
+      previous ? { ...previous, psychicModeEnabled: nextEnabled } : previous
+    );
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ psychicModeEnabled: nextEnabled }),
+      });
+      await refreshSettings();
+      showPsychicModeToast(nextEnabled, source);
+      const stateText = nextEnabled ? "enabled" : "disabled";
+      appendDevChatDebugLines([
+        {
+          kind: "backend",
+          text: `[/psychic] Psychic mode ${stateText}${
+            source === "coffee" ? " from Coffee" : ""
+          }.`,
+        },
+      ]);
+    } catch (err) {
+      setSettings((previous) =>
+        previous ? { ...previous, psychicModeEnabled: !nextEnabled } : previous
+      );
+      setError(err instanceof Error ? err.message : "Could not update Psychic mode.");
+    }
+  }
+
+  function firstComposerCommandToken(trimmedLine: string): string {
+    return trimmedLine.split(/\s+/)[0]?.trim().toLowerCase() ?? "";
+  }
+
+  function isBuiltInOperationalSlashCommand(trimmedLine: string): boolean {
+    const normalizedCommand = firstComposerCommandToken(trimmedLine);
+    return (
+      normalizedCommand === "/compact" ||
+      normalizedCommand === "/summarize" ||
+      normalizedCommand === "/clear" ||
+      normalizedCommand === "/cls" ||
+      BUILT_IN_ATMOSPHERE_SLASH_COMMANDS.has(normalizedCommand) ||
+      normalizedCommand === "/refresh" ||
+      normalizedCommand === "/restart" ||
+      normalizedCommand === "/new-session" ||
+      normalizedCommand === "/forgive-me" ||
+      normalizedCommand === "/undo" ||
+      normalizedCommand === "/undo-turn" ||
+      normalizedCommand === PSYCHIC_SLASH_COMMAND ||
+      normalizedCommand === NVM_SLASH_COMMAND ||
+      BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)
+    );
+  }
+
+  function isDevOnlySlashCommand(trimmedLine: string): boolean {
+    if (DEV_TOOLS_ENABLED) {
+      const normalizedCommand = firstComposerCommandToken(trimmedLine);
+      if (normalizedCommand === "/forget" || normalizedCommand === "/forget-all") {
+        return true;
+      }
+    }
+    return (
+      PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED &&
+      parsePrismDevChatCommand(trimmedLine) !== null
+    );
+  }
+
+  function isLocalOnlyComposerCommand(trimmedLine: string): boolean {
+    if (parseGlobalClearCommand(trimmedLine).kind !== "none") return true;
+    return (
+      isBuiltInOperationalSlashCommand(trimmedLine) ||
+      isDevOnlySlashCommand(trimmedLine)
+    );
+  }
+
+  function ignoreLocalOnlyComposerCommandWhileReplying(trimmedLine: string): boolean {
+    if (parseUndoSlashCommand(trimmedLine).kind !== "none") return false;
+    if (parseNvmSlashCommand(trimmedLine).kind !== "none") return false;
+    const replyBusy =
+      (pendingReply && !canSendTextWhileReplyPending()) ||
+      chatAssistantRevealInProgress;
+    if (!replyBusy) return false;
+    if (!isLocalOnlyComposerCommand(trimmedLine)) return false;
+    setDraft("");
+    setComposerSendTintActive(false);
+    setError(null);
+    return true;
+  }
+
   /** Built-in operational slash commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(trimmedLine: string): Promise<boolean> {
     const tokens = trimmedLine
@@ -32902,25 +38530,33 @@ function HomeContent(): React.JSX.Element {
       .filter((token) => token.length > 0);
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
-    if (
-      normalizedCommand !== "/compact" &&
-      normalizedCommand !== "/summarize" &&
-      normalizedCommand !== "/clear" &&
-      normalizedCommand !== "/cls" &&
-      normalizedCommand !== "/atmosphere" &&
-      normalizedCommand !== "/refresh" &&
-      normalizedCommand !== "/restart" &&
-      normalizedCommand !== "/new-session" &&
-      normalizedCommand !== "/forgive-me" &&
-      normalizedCommand !== "/help"
-    ) {
+    if (!isBuiltInOperationalSlashCommand(trimmedLine)) {
       return false;
     }
-    if (normalizedCommand === "/help") {
+    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
+    const nvmCommand = parseNvmSlashCommand(trimmedLine);
+    if (BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)) {
       setDraft("");
       setComposerSendTintActive(false);
       setConversationStarterPrompts(null);
       openCommandCenterHelpModal();
+      return true;
+    }
+    const undoCommand = parseUndoSlashCommand(trimmedLine);
+    if (undoCommand.kind === "error") {
+      setError(undoCommand.error);
+      return true;
+    }
+    if (undoCommand.kind === "ok") {
+      await undoLatestMessageFromSlashCommand(undoCommand.count);
+      return true;
+    }
+    if (nvmCommand.kind === "error") {
+      setError(nvmCommand.error);
+      return true;
+    }
+    if (nvmCommand.kind === "ok") {
+      await resetTopicFromNvmSlashCommand("chat");
       return true;
     }
     if (tokens.length > 1) {
@@ -32931,7 +38567,7 @@ function HomeContent(): React.JSX.Element {
       await clearConversationFromSlashCommand();
       return true;
     }
-    if (normalizedCommand === "/atmosphere") {
+    if (BUILT_IN_ATMOSPHERE_SLASH_COMMANDS.has(normalizedCommand)) {
       await generateAtmosphereFromSlashCommand();
       return true;
     }
@@ -32949,6 +38585,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/forgive-me") {
       await resetPrismMoodFromSlashCommand();
+      return true;
+    }
+    if (psychicCommand.kind === "ok") {
+      await togglePsychicModeFromSlashCommand({ source: "chat" });
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -33044,24 +38684,34 @@ function HomeContent(): React.JSX.Element {
     const promptRandomizationReplacements: NonNullable<
       PromptShortcutMetadata["wildcardReplacements"]
     > = [];
+    const promptRuns: PromptShortcutRunMetadata[] = [];
     for (let index = 0; index < ranges.length; index += 1) {
       const range = ranges[index]!;
       const command = commandByInvocation.get(range.name.toLowerCase());
       if (!command) continue;
-      const basePromptResolution = resolvePromptRandomizationGroups(command.command.trim(), {
+      const randomizationResolution = resolvePromptRandomizationGroups(command.command.trim(), {
         decks: commandCenterWildcardDecks,
       });
+      const basePromptResolution = resolveBuiltInPromptWildcardInvocations(
+        randomizationResolution.prompt,
+        randomizationResolution.replacements
+      );
       const basePrompt = basePromptResolution.prompt;
       if (!basePrompt) {
         return { kind: "error", error: `/${command.name} has no prompt text configured yet.` };
       }
       prompt += rawDraft.slice(cursor, range.start);
-      const casedBasePrompt = withSentenceCasedPromptInsertion(basePrompt, prompt);
+      const casedBasePrompt = formatPromptShortcutInsertion(
+        basePrompt,
+        prompt,
+        rawDraft.slice(range.end)
+      );
       const replacementOffset = prompt.length;
       const casedBasePromptReplacements = promptShortcutWildcardReplacementsForPromptText(
         casedBasePrompt,
         basePromptResolution.replacements
-      ).map((replacement) => ({
+      );
+      const fullPromptReplacements = casedBasePromptReplacements.map((replacement) => ({
         ...replacement,
         start:
           typeof replacement.start === "number"
@@ -33072,11 +38722,22 @@ function HomeContent(): React.JSX.Element {
             ? replacementOffset + replacement.end
             : replacement.end,
       }));
+      promptRuns.push({
+        commandId: command.id,
+        name: command.name,
+        invocation: rawDraft.slice(range.start, range.end),
+        sourceStart: range.start,
+        sourceEnd: range.end,
+        resolvedPrompt: casedBasePrompt,
+        ...(casedBasePromptReplacements.length > 0
+          ? { wildcardReplacements: casedBasePromptReplacements }
+          : {}),
+      });
       if (!firstCommand) {
         firstCommand = command;
         firstInvocation = rawDraft.slice(range.start, range.end);
       }
-      promptRandomizationReplacements.push(...casedBasePromptReplacements);
+      promptRandomizationReplacements.push(...fullPromptReplacements);
       prompt += casedBasePrompt;
       cursor = range.end;
     }
@@ -33108,11 +38769,13 @@ function HomeContent(): React.JSX.Element {
       commandId: firstCommand.id,
       name: firstCommand.name,
       invocation: firstInvocation,
+      template: rawDraft,
       flags: [],
       resolvedPrompt,
       ...(wildcardReplacements.length > 0
         ? { wildcardReplacements }
         : {}),
+      ...(promptRuns.length > 0 ? { promptRuns } : {}),
     };
     return {
       kind: "resolved",
@@ -33123,7 +38786,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function draftContainsTrueWildcardSlots(value: string): boolean {
-    return promptContainsBuiltInWildcardSlots(value);
+    return promptContainsModelFilledWildcardSlots(value);
   }
 
   function resolveComposerWildcardDraft(rawDraft: string): {
@@ -33310,8 +38973,10 @@ function HomeContent(): React.JSX.Element {
     envelope: ChatPostEnvelope,
     options: { consumeCache: boolean }
   ): void {
-    const patchedConversation = applyCommandDisplayAliases(
-      applyExplicitAskQuestionFallback(envelope.conversation)
+    const patchedConversation = attachLivePsychicScratchpadToConversation(
+      applyCommandDisplayAliases(applyExplicitAskQuestionFallback(envelope.conversation)),
+      envelope.psychicDebug,
+      settings?.psychicModeEnabled === true
     );
     if (options.consumeCache) {
       clearZenInitialStarterReplyCache();
@@ -33344,6 +39009,7 @@ function HomeContent(): React.JSX.Element {
       setConversationStarterPrompts({
         conversationId: patchedConversation.id,
         prompts: envelope.conversationStarters.slice(0, 3),
+        assistantMessageId: getLatestAssistantMessageId(patchedConversation.messages),
       });
     } else {
       setConversationStarterPrompts(null);
@@ -33429,6 +39095,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function clearAllDisplayedConversationState(): void {
+    pendingNvmTopicResetRef.current = false;
     setDetail((current) =>
       current
         ? {
@@ -33478,6 +39145,9 @@ function HomeContent(): React.JSX.Element {
           }
         : current
     );
+    if (view === "chat") {
+      rotateZenFallbackWallpaperSeed();
+    }
   }
 
   function consumeGlobalClearCommand(trimmedLine: string, source: "chat" | "coffee"): boolean {
@@ -33496,22 +39166,159 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
+  function appendOptimisticZenFollowupMessage(input: {
+    content: string;
+    pendingMessageCleanup?: boolean;
+    promptWildcards?: PromptWildcardRunMetadata | null;
+  }): string {
+    const optimisticZenPersonaBot =
+      zenPersonaBotIdRef.current
+        ? bots.find((bot) => bot.id === zenPersonaBotIdRef.current) ?? null
+        : null;
+    const optimisticMessageId = `pending-zen-followup-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const optimisticMessage: Message = {
+      id: optimisticMessageId,
+      role: "user",
+      content: input.content,
+      createdAt: new Date().toISOString(),
+      ...(zenPersonaBotIdRef.current ? { botId: zenPersonaBotIdRef.current } : {}),
+      ...(optimisticZenPersonaBot?.color ? { botColor: optimisticZenPersonaBot.color } : {}),
+      ...(input.promptWildcards ? { promptWildcards: input.promptWildcards } : {}),
+    };
+    if (input.pendingMessageCleanup === true) {
+      setPendingMessageCleanupMessageIds((current) => {
+        const next = new Set(current);
+        next.add(optimisticMessageId);
+        return next;
+      });
+    }
+    setDetail((current) =>
+      current ? { ...current, messages: [...current.messages, optimisticMessage] } : current
+    );
+    return optimisticMessageId;
+  }
+
+  function scheduleZenFollowupMergedSend(): void {
+    clearZenFollowupCooldownTimer();
+    zenFollowupCooldownTimerRef.current = setTimeout(() => {
+      zenFollowupCooldownTimerRef.current = null;
+      if (zenFollowupDispatchingRef.current) return;
+      const snapshot = zenFollowupBufferRef.current;
+      const messages = snapshot?.messages.slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT) ?? [];
+      const pendingMessageCleanupIds =
+        snapshot?.pendingMessageCleanupMessageIds ?? [];
+      const latest = messages[messages.length - 1]?.replace(/\s+/g, " ").trim() ?? "";
+      if (!snapshot || !latest) {
+        clearPendingMessageCleanupIds(pendingMessageCleanupIds);
+        setZenFollowupBuffer(null);
+        return;
+      }
+      const promptInputOverride = zenFollowupModelPrompt(messages);
+      zenFollowupDispatchingRef.current = true;
+      zenFollowupBufferRef.current = null;
+      setZenFollowupBuffer(null);
+      const dispatch = async (): Promise<void> => {
+        const conversationId = snapshot.conversationId;
+        if (conversationId && conversationId !== "pending") {
+          for (const buffered of messages.slice(0, -1)) {
+            const content = buffered.replace(/\s+/g, " ").trim();
+            if (!content) continue;
+            await api(`/api/conversations/${encodeURIComponent(conversationId)}/messages/user`, {
+              method: "POST",
+              body: JSON.stringify({ content }),
+            });
+          }
+        }
+        await sendMessage(
+          { preventDefault() {} } as React.FormEvent,
+          {
+            draftOverride: latest,
+            promptInputOverride,
+            queuedConversationId: conversationId,
+            skipComposerHistory: true,
+            zenFollowupDispatch: true,
+            zenFollowupCleanupMessageIds: pendingMessageCleanupIds,
+          }
+        );
+      };
+      void dispatch()
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Could not send buffered Zen follow-up.");
+          setDraft(latest);
+          setComposerSendTintActive(true);
+        })
+        .finally(() => {
+          zenFollowupDispatchingRef.current = false;
+        });
+    }, COFFEE_SEND_COOLDOWN_MS);
+  }
+
+  function disabledTextModelSendMessage(): string | null {
+    if (!settings) return null;
+    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: effectivePreferredProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        chatModelChoiceByProvider
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const settingsDefaultDisabled =
+      responseMode === "local"
+        ? modelChoiceIsDisabled(settings.preferredLocalModel)
+        : modelChoiceIsDisabled(settings.preferredOnlineModel);
+    if (
+      resolvedChoice.modelChoice === AUTO_MODEL_CHOICE &&
+      settingsDefaultDisabled
+    ) {
+      return `${responseModeShortLabel(responseMode)} replies are disabled in Settings. Choose a model in Settings, or pick a model here before sending.`;
+    }
+    if (resolvedChoice.modelChoice !== DISABLED_MODEL_CHOICE) return null;
+    return `${responseModeShortLabel(responseMode)} replies are disabled. Choose Auto or a model before sending.`;
+  }
+
   async function sendMessage(
     e: React.FormEvent | React.KeyboardEvent<HTMLTextAreaElement | HTMLFormElement>,
     options: {
       starterPrompt?: boolean;
       starterPromptWarrantsIntro?: boolean;
       draftOverride?: string;
+      promptInputOverride?: string;
       queuedConversationId?: string | null;
       skipComposerHistory?: boolean;
+      personaTransition?: ZenPersonaTransitionInput;
+      zenAutonomy?: ZenAutonomyInput;
+      zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+      zenFollowupDispatch?: boolean;
+      zenFollowupCleanupMessageIds?: string[];
+      onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
     } = {}
   ) {
     e.preventDefault();
+    const isPersonaTransition = options.personaTransition !== undefined;
+    const isZenAutonomy = options.zenAutonomy !== undefined;
+    const isAskQuestionPatienceTurn = options.zenAskQuestionPatience !== undefined;
+    const isAssistantOnlyTurn =
+      isPersonaTransition || isZenAutonomy || isAskQuestionPatienceTurn;
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
+      ignoreLocalOnlyComposerCommandWhileReplying(rawTrimmed)
+    ) {
+      return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
       await consumeBuiltInOperationalSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33522,6 +39329,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
       consumeGlobalClearCommand(rawTrimmed, "chat")
     ) {
       if (!options.skipComposerHistory) {
@@ -33532,6 +39340,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
       await consumeDevSlashCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33542,6 +39351,7 @@ function HomeContent(): React.JSX.Element {
     if (
       rawTrimmed.length > 0 &&
       !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
       consumePrismDevComposerCommand(rawTrimmed)
     ) {
       if (!options.skipComposerHistory) {
@@ -33552,7 +39362,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const commandCenterResolution =
-      rawTrimmed.length > 0 && !options.starterPrompt
+      rawTrimmed.length > 0 && !options.starterPrompt && !isAssistantOnlyTurn
         ? resolveCommandCenterPromptShortcuts(rawDraft)
         : { kind: "none" as const };
     if (commandCenterResolution.kind === "error") {
@@ -33567,17 +39377,45 @@ function HomeContent(): React.JSX.Element {
             modelCatalog
           )
         : AUTO_MODEL_CHOICE;
+    if (commandCenterModelChoice === DISABLED_MODEL_CHOICE) {
+      setError(
+        "Prompt runs are disabled. Choose Auto or a local model in Command Center before using that command."
+      );
+      return;
+    }
+    if (!isAssistantOnlyTurn) {
+      const disabledMessage = disabledTextModelSendMessage();
+      if (disabledMessage) {
+        setError(disabledMessage);
+        return;
+      }
+    }
     const commandCenterPromptShortcut =
       commandCenterResolution.kind === "resolved"
         ? commandCenterResolution.promptShortcut
         : null;
     const commandCenterPromptActive = commandCenterResolution.kind === "resolved";
+    const naturalContextResetRequested =
+      rawTrimmed.length > 0 &&
+      view === "chat" &&
+      !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
+      !editingMessageId &&
+      !commandCenterPromptActive &&
+      shouldResetPreviousSessionContext(rawTrimmed);
+    let naturalContextResetApplied = false;
     const commandCenterSubmitActive =
       commandCenterPromptActive && commandCenterResolution.promptShortcut !== null;
     const composerWildcardResolution =
       commandCenterResolution.kind === "resolved"
-        ? { prompt: commandCenterResolution.prompt, promptWildcards: null }
-        : resolveComposerWildcardDraft(rawDraft);
+        ? resolveComposerWildcardDraft(commandCenterResolution.prompt)
+        : isPersonaTransition
+          ? { prompt: "", promptWildcards: null }
+          : isZenAutonomy
+            ? { prompt: "", promptWildcards: null }
+          : isAskQuestionPatienceTurn
+            ? { prompt: "", promptWildcards: null }
+          : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
     const trimmed = composerWildcardResolution.prompt.trim();
     const displayTrimmed = commandCenterPromptActive ? rawTrimmed : trimmed;
@@ -33589,32 +39427,146 @@ function HomeContent(): React.JSX.Element {
       commandCenterPromptActive && draftContainsTrueWildcardSlots(trimmed);
     const composerPromptHasTrueWildcardSlots =
       composerPromptWildcards !== null && draftContainsTrueWildcardSlots(trimmed);
-    const promptWildcardCleanupAwaitsServer =
+    const standaloneComposerWildcardRun =
+      !commandCenterPromptActive &&
+      composerPromptWildcards !== null &&
+      isStandaloneWildcardComposerDraft(rawTrimmed);
+    const composerPromptWildcardsForSend =
+      standaloneComposerWildcardRun && !composerPromptHasTrueWildcardSlots
+        ? null
+        : composerPromptWildcards;
+    const commandCenterPromptHasWildcardReplacements =
+      (commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0;
+    const composerPromptHasWildcardRun = composerPromptWildcardsForSend !== null;
+    const promptHasWildcardFinalization =
+      commandCenterPromptHasTrueWildcardSlots ||
+      composerPromptHasTrueWildcardSlots ||
+      commandCenterPromptHasWildcardReplacements ||
+      composerPromptHasWildcardRun;
+    const messageCleanupAwaitsServer =
       settings?.composerWritingAssist !== false &&
-      ((commandCenterPromptShortcut?.wildcardReplacements?.length ?? 0) > 0 ||
-        (composerPromptWildcards?.wildcardReplacements?.length ?? 0) > 0);
-    const promptWildcardFillAwaitsServerCleanup =
-      promptWildcardCleanupAwaitsServer ||
+      !standaloneComposerWildcardRun &&
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      !isPersonaTransition &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      promptHasWildcardFinalization &&
+      trimmed.length > 0;
+    const messageFinalizationAwaitsServer =
+      messageCleanupAwaitsServer ||
       commandCenterPromptHasTrueWildcardSlots ||
       composerPromptHasTrueWildcardSlots;
+    const zenFollowupBufferingSend =
+      view === "chat" &&
+      !options.zenFollowupDispatch &&
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      editingMessageId === null &&
+      !commandCenterPromptActive &&
+      zenFollowupBufferRef.current !== null &&
+      displayTrimmed.length > 0;
+    if (zenFollowupBufferingSend) {
+      const activeConversationId =
+        detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+      const interruption = prepareActiveAssistantRevealInterruption();
+      if (interruption) {
+        const sentenceComplete = visibleChatRevealHasCompletedFirstSentence(
+          interruption.interruptedText,
+          interruption.visibleTokenCount
+        );
+        const persistPromise = sentenceComplete
+          ? applyActiveAssistantRevealInterruption(interruption)
+          : discardActiveAssistantRevealForGrace(interruption);
+        if (persistPromise) {
+          try {
+            await persistPromise;
+          } catch (err) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Prism was interrupted, but the saved thread could not be updated."
+            );
+            setDraft(rawDraft);
+            setComposerSendTintActive(rawDraft.trim().length > 0);
+            return;
+          }
+        }
+      }
+      beginOrRefreshZenFollowupBuffer(activeConversationId);
+      const followupMessageFinalizationAwaitsServer =
+        messageFinalizationAwaitsServer || composerPromptWildcards !== null;
+      const optimisticFollowupContent = pendingCleanupOptimisticMessageContent({
+        rawDraft: rawTrimmed,
+        resolvedDisplayContent: displayTrimmed,
+        pendingCleanup: followupMessageFinalizationAwaitsServer,
+      });
+      const optimisticFollowupMessageId = appendOptimisticZenFollowupMessage({
+        content: optimisticFollowupContent,
+        pendingMessageCleanup: followupMessageFinalizationAwaitsServer,
+        promptWildcards: followupMessageFinalizationAwaitsServer
+          ? composerPromptWildcardsForSend
+          : null,
+      });
+      setZenFollowupBuffer((current) => {
+        const now = Date.now();
+        const messages = [
+          ...(current?.messages ?? []),
+          displayTrimmed,
+        ].slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT);
+        const pendingMessageCleanupIds = [
+          ...(current?.pendingMessageCleanupMessageIds ?? []),
+          ...(followupMessageFinalizationAwaitsServer ? [optimisticFollowupMessageId] : []),
+        ];
+        const next = {
+          conversationId: current?.conversationId ?? activeConversationId,
+          messages,
+          pendingMessageCleanupMessageIds: pendingMessageCleanupIds,
+          startedAtMs: current?.startedAtMs ?? now,
+          lastActivityAtMs: now,
+          generation: (current?.generation ?? 0) + 1,
+        };
+        zenFollowupBufferRef.current = next;
+        return next;
+      });
+      if (!options.skipComposerHistory) {
+        appendComposerHistoryEntry(rawDraft);
+      }
+      setDraft("");
+      setComposerSendTintActive(false);
+      setError(null);
+      scheduleZenFollowupMergedSend();
+      return;
+    }
     let detailForSend = detail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
-    const isInitialZenStarterPrompt =
+    const isInitialZenOpeningTurn =
       view === "chat" &&
-      isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      !editingMessageId &&
+      (isStarterPrompt || trimmed.length > 0) &&
       baselineMessageCount === 0 &&
       detailForSend?.hasAssistantReply !== true;
+    const isInitialZenStarterPrompt = isInitialZenOpeningTurn && isStarterPrompt;
     if (isInitialZenStarterPrompt) {
       if (replayCachedZenInitialStarterReply()) return;
       if (armCanceledZenInitialStarterReplay()) return;
       setZenInitialStarterOverlayActive(true);
+    } else if (isInitialZenOpeningTurn) {
+      setZenInitialStarterOverlayActive(true);
+      clearZenInitialStarterReplyCache();
+      zenInitialStarterLiveEnvelopeRef.current = null;
     } else if (!isStarterPrompt && view === "chat") {
       setZenInitialStarterOverlayActive(false);
       clearZenInitialStarterReplyCache();
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
-    const forceNewConversation = !isStarterPrompt && forceNewConversationOnNextSend;
-    if (!trimmed && !isStarterPrompt) return;
+    const forceNewConversation =
+      !isStarterPrompt &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      forceNewConversationOnNextSend;
+    if (!trimmed && !isStarterPrompt && !isAssistantOnlyTurn) return;
     let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
     if (
       commandCenterSubmitActive &&
@@ -33691,6 +39643,41 @@ function HomeContent(): React.JSX.Element {
       }
       return;
     }
+    if (naturalContextResetRequested) {
+      const contextResetConversationId =
+        detailForSend?.id && detailForSend.id !== "pending"
+          ? detailForSend.id
+          : selectedId;
+      const cleared = await clearConversationFromSlashCommand({
+        conversationIdOverride: contextResetConversationId,
+        preserveComposer: true,
+        allowPendingReply: true,
+      });
+      if (!cleared) {
+        setDraft(rawDraft);
+        setComposerSendTintActive(rawDraft.trim().length > 0);
+        return;
+      }
+      naturalContextResetApplied = true;
+      setPendingZenSessionBreak(null);
+      setPendingZenSessionResumeContext(null);
+      setZenSessionBreak(null);
+      persistZenSessionBreak(null);
+      chatSummaryRefreshMarkerRef.current = null;
+      prismInterruptionForSend = undefined;
+      detailForSend = detailForSend
+        ? {
+            ...detailForSend,
+            title: "New chat",
+            hasAssistantReply: false,
+            lastBotId: null,
+            lastBotColor: null,
+            zenWallpaper: resetZenWallpaperForFreshConversation(detailForSend.zenWallpaper),
+            messages: [],
+          }
+        : null;
+      baselineMessageCount = 0;
+    }
     if (chatAutoRestoreSuppressed) {
       setChatAutoRestoreSuppressed(false);
     }
@@ -33718,20 +39705,22 @@ function HomeContent(): React.JSX.Element {
         ...(commandCenterPromptShortcut
           ? { promptShortcut: commandCenterPromptShortcut }
           : {}),
-        ...(composerPromptWildcards
-          ? { promptWildcards: composerPromptWildcards }
+        ...(composerPromptWildcardsForSend
+          ? { promptWildcards: composerPromptWildcardsForSend }
           : {}),
       });
       return;
     }
-    hideZenHeaderForConversationAction();
-    // Any typed/chosen follow-up supersedes the starter quick-replies row.
-    if (!isStarterPrompt) {
-      setConversationStarterPrompts(null);
-    }
-    if (view === "chat") {
-      setChatStartupSummary(null);
-      chatSummaryRefreshMarkerRef.current = null;
+    if (!isZenAutonomy) {
+      hideZenHeaderForConversationAction();
+      // Any typed/chosen follow-up supersedes the starter quick-replies row.
+      if (!isStarterPrompt) {
+        setConversationStarterPrompts(null);
+      }
+      if (view === "chat") {
+        setChatStartupSummary(null);
+        chatSummaryRefreshMarkerRef.current = null;
+      }
     }
     const requestConversationId = options.queuedConversationId ?? (
       detailForSend?.id && detailForSend.id !== "pending"
@@ -33739,22 +39728,32 @@ function HomeContent(): React.JSX.Element {
         : selectedId
     );
     const requestStartedNewConversation = requestConversationId === null || forceNewConversation;
-    resumeChatModeAutoscrollForOutgoingTurn(
-      requestConversationId ??
-        detailForSend?.id ??
-        selectedId ??
-        (requestStartedNewConversation ? "pending" : null)
-    );
+    if (!isZenAutonomy) {
+      resumeChatModeAutoscrollForOutgoingTurn(
+        requestConversationId ??
+          detailForSend?.id ??
+          selectedId ??
+          (requestStartedNewConversation ? "pending" : null)
+      );
+    }
     const archiveConversationId =
       requestConversationId ??
       (detailForSend?.id && detailForSend.id !== "pending" ? detailForSend.id : null);
-    if (view === "chat" && archiveConversationId) {
+    if (!isZenAutonomy && view === "chat" && archiveConversationId) {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
     const chatRequestController = new AbortController();
-    pendingReplyAbortControllerRef.current = chatRequestController;
+    if (!isZenAutonomy) {
+      pendingReplyAbortControllerRef.current = chatRequestController;
+    }
     const clearPendingReplyVisuals = () => {
+      if (isZenAutonomy) {
+        if (pendingReplyAbortControllerRef.current === chatRequestController) {
+          pendingReplyAbortControllerRef.current = null;
+        }
+        return;
+      }
       setPendingReply(false);
       setPendingReplyStartedAtMs(null);
       setPendingReplyDenialRisk(false);
@@ -33764,22 +39763,52 @@ function HomeContent(): React.JSX.Element {
         pendingReplyAbortControllerRef.current = null;
       }
     };
-    setPendingReply(true);
-    setPendingReplyStartedAtMs(Date.now());
-    setPendingReplyDenialRisk(
-      promptLooksDenialProne(isStarterPrompt ? "" : trimmed)
-    );
-    setPendingReplyStartMessageCount(baselineMessageCount);
-    setPendingReplyConversationId(requestConversationId);
-    setPendingReplyIsNewConversation(requestStartedNewConversation);
+    if (!isZenAutonomy) {
+      setPendingReply(true);
+      setPendingReplyStartedAtMs(Date.now());
+      setPendingReplyDenialRisk(
+        promptLooksDenialProne(isStarterPrompt ? "" : trimmed)
+      );
+      setPendingReplyStartMessageCount(baselineMessageCount);
+      setPendingReplyConversationId(requestConversationId);
+      setPendingReplyIsNewConversation(requestStartedNewConversation);
+    }
     setError(null);
+
+    const mentionedZenPersonaBotId =
+      view === "chat" && !isStarterPrompt && !isAssistantOnlyTurn
+        ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
+        : null;
+    const zenPersonaBotIdForSend =
+      view === "chat"
+        ? isPersonaTransition
+          ? options.personaTransition!.toBotId
+          : isZenAutonomy
+            ? options.zenAutonomy!.activeBotId
+          : isAskQuestionPatienceTurn
+            ? options.zenAskQuestionPatience!.activeBotId
+          : mentionedZenPersonaBotId ?? zenPersonaBotId
+        : undefined;
+    const optimisticZenPersonaBot =
+      view === "chat" && zenPersonaBotIdForSend
+        ? bots.find((bot) => bot.id === zenPersonaBotIdForSend) ?? null
+        : null;
+    if (mentionedZenPersonaBotId) {
+      setZenPersonaBotId(mentionedZenPersonaBotId);
+    }
 
     const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
+    const previousZenPersonaBotId = zenPersonaBotIdRef.current;
     let optimisticPromptCleanupMessageId: string | null = null;
     const optimisticIncognito = detailForSend?.incognito === true || pendingIncognito;
     const optimisticBotId =
-      detailForSend?.botId ?? ((view === "chat" || optimisticIncognito) ? selectedBotId ?? null : null);
+      detailForSend?.botId ??
+      (view === "chat"
+        ? zenPersonaBotIdForSend ?? selectedBotId ?? null
+        : optimisticIncognito
+          ? selectedBotId ?? null
+          : null);
     const optimisticLastBotId =
       detailForSend?.lastBotId ??
       (view === "sandbox" && !optimisticIncognito ? selectedBotId ?? null : optimisticBotId);
@@ -33806,20 +39835,18 @@ function HomeContent(): React.JSX.Element {
         ? pendingStarterDetail
         : initialZenStarterPendingDetail;
       setDetail(pendingStarterDetail);
-    } else if (!isStarterPrompt) {
+    } else if (!isStarterPrompt && !isAssistantOnlyTurn && !options.zenFollowupDispatch) {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
-      const optimisticUserContent =
-        promptWildcardFillAwaitsServerCleanup
-          ? maskBuiltInWildcardSlotsForPending(
-              trimmed,
-              PENDING_COMPOSER_WILDCARD_SLOT_TEXT
-            ).trim()
-          : displayTrimmed;
-      if (promptWildcardFillAwaitsServerCleanup) {
+      const optimisticUserContent = pendingCleanupOptimisticMessageContent({
+        rawDraft: rawTrimmed,
+        resolvedDisplayContent: displayTrimmed,
+        pendingCleanup: messageFinalizationAwaitsServer,
+      });
+      if (messageFinalizationAwaitsServer) {
         optimisticPromptCleanupMessageId = optimisticMessageId;
-        setPendingPromptWildcardCleanupMessageIds((current) => {
+        setPendingMessageCleanupMessageIds((current) => {
           const next = new Set(current);
           next.add(optimisticMessageId);
           return next;
@@ -33830,11 +39857,15 @@ function HomeContent(): React.JSX.Element {
         role: "user",
         content: optimisticUserContent,
         createdAt: new Date().toISOString(),
-        ...(commandCenterPromptShortcut && !promptWildcardFillAwaitsServerCleanup
+        ...(view === "chat" ? { botId: zenPersonaBotIdForSend ?? null } : {}),
+        ...(view === "chat" && optimisticZenPersonaBot?.color
+          ? { botColor: optimisticZenPersonaBot.color }
+          : {}),
+        ...(commandCenterPromptShortcut
           ? { promptShortcut: commandCenterPromptShortcut }
           : {}),
-        ...(composerPromptWildcards && !promptWildcardFillAwaitsServerCleanup
-          ? { promptWildcards: composerPromptWildcards }
+        ...(composerPromptWildcardsForSend
+          ? { promptWildcards: composerPromptWildcardsForSend }
           : {}),
       };
       const optimisticTitle =
@@ -33885,7 +39916,13 @@ function HomeContent(): React.JSX.Element {
       };
       zenInitialStarterLiveEnvelopeRef.current = null;
     }
-    if (!isStarterPrompt && !editingMessageId && !options.skipComposerHistory) {
+    if (
+      !isStarterPrompt &&
+      !isZenAutonomy &&
+      !isAskQuestionPatienceTurn &&
+      !editingMessageId &&
+      !options.skipComposerHistory
+    ) {
       appendComposerHistoryEntry(rawDraft);
     }
     setDraft("");
@@ -33901,6 +39938,7 @@ function HomeContent(): React.JSX.Element {
         zenFreshStartGapMs
       );
     const pendingZenSessionResumeContextForSend =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       forceNewConversation &&
@@ -33908,6 +39946,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingZenSessionResumeContext
         : null;
     const pendingZenSessionBreakForSend =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       forceNewConversation &&
@@ -33915,6 +39954,7 @@ function HomeContent(): React.JSX.Element {
         ? pendingZenSessionBreak
         : null;
     const activeZenSessionBreakResumeContext =
+      !naturalContextResetApplied &&
       !isStarterPrompt &&
       view === "chat" &&
       activeZenSessionBreak &&
@@ -33936,34 +39976,63 @@ function HomeContent(): React.JSX.Element {
     const sessionResumeContextForSend: SessionResumeContext | undefined =
       pendingZenSessionResumeContextForSend ??
       activeZenSessionBreakResumeContext;
+    const topicResetForSend =
+      view === "chat" &&
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      pendingNvmTopicResetRef.current;
 
     try {
-      const chatBody = buildChatRequestBody(isStarterPrompt ? "" : displayTrimmed, {
-        starterPrompt: isStarterPrompt,
-        ...(options.starterPromptWarrantsIntro
-          ? { starterPromptWarrantsIntro: true }
-          : {}),
-        ...(forceNewConversation ? { forceNewConversation: true } : {}),
-        ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
-          ? { commandCenterModelChoice }
-          : {}),
-        ...(commandCenterPromptActive ? { commandCenterPrompt: true } : {}),
-        ...(commandCenterPromptActive
-          ? { resolvedCommandCenterPrompt: trimmed }
-          : {}),
-        ...(commandCenterPromptShortcut
-          ? { promptShortcut: commandCenterPromptShortcut }
-          : {}),
-        ...(composerPromptWildcards
-          ? { promptWildcards: composerPromptWildcards }
-          : {}),
-        ...(sessionResumeContextForSend
-          ? { sessionResumeContext: sessionResumeContextForSend }
-          : {}),
-        ...(prismInterruptionForSend
-          ? { prismInterruption: prismInterruptionForSend }
-          : {}),
-      });
+      const chatBody = buildChatRequestBody(
+        isStarterPrompt || isZenAutonomy || isAskQuestionPatienceTurn
+          ? ""
+          : displayTrimmed,
+        {
+          starterPrompt: isStarterPrompt,
+          ...(options.starterPromptWarrantsIntro
+            ? { starterPromptWarrantsIntro: true }
+            : {}),
+          ...(forceNewConversation ? { forceNewConversation: true } : {}),
+          ...(commandCenterModelChoice !== AUTO_MODEL_CHOICE
+            ? { commandCenterModelChoice }
+            : {}),
+          ...(commandCenterPromptActive ? { commandCenterPrompt: true } : {}),
+          ...(commandCenterPromptActive
+            ? { resolvedCommandCenterPrompt: trimmed }
+            : {}),
+          ...(commandCenterPromptShortcut
+            ? { promptShortcut: commandCenterPromptShortcut }
+            : {}),
+          ...(composerPromptWildcardsForSend
+            ? { promptWildcards: composerPromptWildcardsForSend }
+            : {}),
+          ...(sessionResumeContextForSend
+            ? { sessionResumeContext: sessionResumeContextForSend }
+            : {}),
+          ...(topicResetForSend ? { topicReset: true } : {}),
+          ...(prismInterruptionForSend
+            ? { prismInterruption: prismInterruptionForSend }
+            : {}),
+          ...(view === "chat"
+            ? { zenPersonaBotId: zenPersonaBotIdForSend ?? null }
+            : {}),
+          ...(options.personaTransition
+            ? { personaTransition: options.personaTransition }
+            : {}),
+          ...(options.zenAutonomy
+            ? { zenAutonomy: options.zenAutonomy }
+            : {}),
+          ...(options.zenAskQuestionPatience
+            ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
+            : {}),
+          ...(options.promptInputOverride
+            ? { promptInputOverride: options.promptInputOverride }
+            : {}),
+          ...(options.queuedConversationId !== undefined
+            ? { conversationIdOverride: options.queuedConversationId }
+            : {}),
+        }
+      );
       appendDevChatRouteStart("send", chatBody);
       const d = await api<ChatPostEnvelope>("/api/chat", {
         method: "POST",
@@ -33975,6 +40044,9 @@ function HomeContent(): React.JSX.Element {
       }
       if (priorityCommandCancelControllerRef.current === chatRequestController) {
         return;
+      }
+      if (topicResetForSend) {
+        pendingNvmTopicResetRef.current = false;
       }
       const activeInitialStarterRequest = zenInitialStarterRequestId
         ? zenInitialStarterRequestRef.current
@@ -33994,7 +40066,18 @@ function HomeContent(): React.JSX.Element {
       captureFallbackMessageIdFromEnvelope(d);
       pushMemoryToasts(d.memoryLearned);
       appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
+      options.onZenAutonomyResult?.(d.zenAutonomyDecision ?? null);
       successfulConversationId = d.conversation.id;
+      if (
+        view === "chat" &&
+        requestStartedNewConversation &&
+        !d.conversation.incognito
+      ) {
+        zenFallbackWallpaperSeedByConversationIdRef.current.set(
+          d.conversation.id,
+          zenFallbackWallpaperNewConversationSeedRef.current
+        );
+      }
       if (sessionResumeContextForSend) {
         if (pendingZenSessionResumeContextForSend) {
           const nextSessionBreak = pendingZenSessionBreakForSend
@@ -34030,9 +40113,13 @@ function HomeContent(): React.JSX.Element {
         ? selectedIdRef.current === requestConversationId ||
           detailIdRef.current === requestConversationId
         : selectedIdRef.current === null && detailIdRef.current === "pending";
+      const zenAutonomySpoke =
+        isZenAutonomy && d.zenAutonomyDecision?.action === "speak";
       if (stillViewingRequest) {
-        const patchedConversation = applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(d.conversation)
+        const patchedConversation = attachLivePsychicScratchpadToConversation(
+          applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
+          d.psychicDebug,
+          settings?.psychicModeEnabled === true
         );
         if (isInitialZenStarterPrompt) {
           zenInitialStarterLiveEnvelopeRef.current = {
@@ -34040,9 +40127,34 @@ function HomeContent(): React.JSX.Element {
             conversation: patchedConversation,
           };
         }
-        markLatestAssistantRevealEligible(patchedConversation);
+        if (!isZenAutonomy || zenAutonomySpoke) {
+          markLatestAssistantRevealEligible(patchedConversation);
+        }
+        const pendingCleanupIdsForReveal = [
+          ...(optimisticPromptCleanupMessageId ? [optimisticPromptCleanupMessageId] : []),
+          ...(options.zenFollowupCleanupMessageIds ?? []),
+        ];
+        const cleanupRevealKeys =
+          pendingCleanupIdsForReveal.length > 0
+            ? mapPendingCleanupMessagesToFinalRevealKeys({
+                conversationId: patchedConversation.id,
+                pendingMessageIds: pendingCleanupIdsForReveal,
+                previousMessages: previousDetail?.messages ?? [],
+                finalMessages: patchedConversation.messages,
+              })
+            : [];
+        startCleanupMessageReveal(cleanupRevealKeys);
         if (view === "chat") {
-          hardResetChatArchiveStateForConversation(d.conversation.id);
+          if (!isZenAutonomy || zenAutonomySpoke) {
+            hardResetChatArchiveStateForConversation(d.conversation.id);
+          }
+          setZenPersonaBotId(
+            options.personaTransition
+              ? options.personaTransition.toBotId
+              : isZenAutonomy && d.zenAutonomyDecision?.action !== "speak"
+                ? zenPersonaBotIdRef.current
+              : patchedConversation.lastBotId ?? null
+          );
         }
         setDetail(patchedConversation);
         wirePendingImageJobFromEnvelope(d, {
@@ -34095,6 +40207,7 @@ function HomeContent(): React.JSX.Element {
           setConversationStarterPrompts({
             conversationId: d.conversation.id,
             prompts: d.conversationStarters.slice(0, 3),
+            assistantMessageId: getLatestAssistantMessageId(d.conversation.messages),
           });
         } else {
           setStarterComposerRevealed(false);
@@ -34153,7 +40266,8 @@ function HomeContent(): React.JSX.Element {
       }
       await refreshOpenMemoryViews();
       if (stillViewingRequest) {
-        const nextBotId = d.conversation.lastBotId ?? d.conversation.botId;
+        const nextBotId =
+          options.personaTransition?.toBotId ?? d.conversation.lastBotId ?? d.conversation.botId;
         if (memoryPanelScope === "default") {
           await refreshPrismMemoryPanel();
         } else if (memoryPanelScope === "session") {
@@ -34162,6 +40276,7 @@ function HomeContent(): React.JSX.Element {
           await refreshBotMemories(nextBotId);
         } else {
           setBotMemories([]);
+          setBotMemoryDossier(null);
         }
       }
     } catch (err) {
@@ -34186,6 +40301,7 @@ function HomeContent(): React.JSX.Element {
         } else if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
           setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
+          setZenPersonaBotId(previousZenPersonaBotId);
           setDraft(
             isStarterPrompt || requestWasZenInitialThinkingCancelled
               ? ""
@@ -34220,6 +40336,7 @@ function HomeContent(): React.JSX.Element {
       if (stillViewingRequest) {
         setDetail(previousDetail);
         setPendingIncognito(previousPendingIncognito);
+        setZenPersonaBotId(previousZenPersonaBotId);
         setDraft(isStarterPrompt ? "" : restoreDraftAfterSendStops);
         setComposerSendTintActive(
           !isStarterPrompt && restoreDraftAfterSendStops.trim().length > 0
@@ -34246,7 +40363,7 @@ function HomeContent(): React.JSX.Element {
       clearPendingReplyVisuals();
       if (optimisticPromptCleanupMessageId) {
         const cleanupMessageId = optimisticPromptCleanupMessageId;
-        setPendingPromptWildcardCleanupMessageIds((current) => {
+        setPendingMessageCleanupMessageIds((current) => {
           if (!current.has(cleanupMessageId)) return current;
           const next = new Set(current);
           next.delete(cleanupMessageId);
@@ -34254,6 +40371,7 @@ function HomeContent(): React.JSX.Element {
         });
       }
       if (successfulConversationId) {
+        clearPendingMessageCleanupIds(options.zenFollowupCleanupMessageIds ?? []);
         scheduleNextQueuedPrompt(successfulConversationId);
       }
     }
@@ -34267,6 +40385,7 @@ function HomeContent(): React.JSX.Element {
     action: "send" | "other";
     otherSource?: "askquestion" | "starter" | "story";
     sendValue?: string;
+    promptInputOverride?: string;
   };
 
   type AskQuestionInteraction = {
@@ -34304,20 +40423,23 @@ function HomeContent(): React.JSX.Element {
         id: "continue-story",
         label: continueLabel,
         action: "send",
-        sendValue: `${continueLabel} — continue the fictional story from exactly where you left off, preserving all established context, characters, tone, and continuity.`,
+        sendValue: continueLabel,
+        promptInputOverride: `${continueLabel}\n\nContinue the fictional story from the previous story passage. Start from where it left off; do not recap unless the story naturally needs a brief bridge.`,
       },
       {
         id: "bookmark-story",
         label: bookmarkLabel,
         sublabel: "Save my place",
         action: "send",
-        sendValue: `${bookmarkLabel} — bookmark my current place in this fictional story in session memory. Briefly note the current scene, key characters, unresolved threads, and where to resume.`,
+        sendValue: bookmarkLabel,
+        promptInputOverride: `${bookmarkLabel}\n\nBookmark the current place in the fictional story from the previous passage. Briefly note the current scene, key characters, unresolved threads, and where to resume.`,
       },
       {
         id: "finish-story",
         label: finishLabel,
         action: "send",
-        sendValue: `${finishLabel} — wrap up the fictional story cleanly. Resolve the active scene naturally, then provide the full prose of the story so far in one Markdown code block for easy copy-paste.`,
+        sendValue: finishLabel,
+        promptInputOverride: `${finishLabel}\n\nWrap up the fictional story from the previous passage. Resolve the active scene naturally, then provide the full prose of the story so far in one Markdown code block for easy copy-paste.`,
       },
     ];
   }
@@ -34377,10 +40499,12 @@ function HomeContent(): React.JSX.Element {
     ) {
       return null;
     }
-    const latestAssistant = [...detail.messages]
-      .reverse()
-      .find((message) => message.role === "assistant");
-    if (!latestAssistant || latestAssistant.id !== msg.id) return null;
+    const anchorAssistant = findConversationStarterAnchorMessage(
+      detail.messages,
+      conversationStarterPrompts.assistantMessageId
+    );
+    if (!anchorAssistant || anchorAssistant.id !== msg.id) return null;
+    if (hasUserReplyAfterMessage(detail.messages, anchorAssistant.id)) return null;
     const options = conversationStarterPrompts.prompts
       .slice(0, 3)
       .map((prompt, index) => ({
@@ -34484,13 +40608,23 @@ function HomeContent(): React.JSX.Element {
         /* no-op — used so sendMessage can share the submit pathway */
       },
     } as React.FormEvent<HTMLFormElement>;
-    void sendMessage(syntheticSubmit, { draftOverride: chip.sendValue ?? chip.label });
+    void sendMessage(syntheticSubmit, {
+      draftOverride: chip.sendValue ?? chip.label,
+      ...(chip.promptInputOverride
+        ? { promptInputOverride: chip.promptInputOverride }
+        : {}),
+    });
   }
 
   function resendUserMessage(msg: Message): void {
     if (msg.role !== "user") return;
     const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
-    const resendText = (commandAlias?.originalText ?? msg.content).trim();
+    const resendText = resendDraftTextForMessage({
+      content: msg.content,
+      commandAliasOriginalText: commandAlias?.originalText,
+      promptShortcutTemplate: msg.promptShortcut?.template,
+      promptWildcardTemplate: msg.promptWildcards?.template,
+    });
     if (resendText.length === 0) return;
     closeMessageContextOverlay();
     // Force normal send mode if an edit draft was active.
@@ -34698,7 +40832,7 @@ function HomeContent(): React.JSX.Element {
       } as React.CSSProperties;
 
       return (
-        <div className={styles.askQuestionRecallBubbleDock}>
+        <div className={styles.askQuestionRecallBubbleDock} data-dev-panel-safe-area="bottom">
           <button
             type="button"
             className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
@@ -34730,11 +40864,15 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={askQuestionRailRef}
           className={styles.askQuestionCollapsedPromptDock}
+          data-dev-panel-safe-area="bottom"
           data-ask-question-collapsed-prompt="true"
           role="status"
           aria-live="polite"
         >
           <p className={styles.askQuestionCollapsedPromptText}>{prompt}</p>
+          {askQuestionPatienceAssistantMessageId
+            ? renderAskQuestionPatienceMeter(askQuestionPatienceAssistantMessageId, "dock")
+            : null}
         </div>
       );
     }
@@ -34746,6 +40884,7 @@ function HomeContent(): React.JSX.Element {
         role="group"
         aria-label="Suggested replies"
         className={railClassName}
+        data-dev-panel-safe-area="bottom"
       >
         {rail.source === "askquestion" || rail.source === "story" ? (
           <div className={styles.conversationStarterHeadingRow}>
@@ -34768,6 +40907,9 @@ function HomeContent(): React.JSX.Element {
         ) : rail.heading ? (
           <p className={styles.conversationStarterChipHeading}>{rail.heading}</p>
         ) : null}
+        {askQuestionPatienceAssistantMessageId
+          ? renderAskQuestionPatienceMeter(askQuestionPatienceAssistantMessageId, "rail")
+          : null}
         {rail.chips.map((chip, chipIndex) => (
           <button
             key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
@@ -34790,6 +40932,53 @@ function HomeContent(): React.JSX.Element {
             })}
           </button>
         ))}
+      </div>
+    );
+  }
+
+  function renderPsychicThoughtLine(msg: Message): React.ReactNode {
+    const pendingThinking = msg.id === psychicThinkingTargetMessageId;
+    const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
+      pendingThinking,
+      pendingDelayElapsed: pendingThinking,
+      showScratchpad: devToolsRuntimeActive,
+    });
+    if (!psychicLine) return null;
+    return (
+      <div
+        className={styles.psychicThoughtBlock}
+        data-psychic-state={psychicLine.state}
+        data-psychic-animated={psychicLine.animated ? "true" : "false"}
+        role={psychicLine.state === "thinking" ? "status" : undefined}
+        aria-live={psychicLine.state === "thinking" ? "polite" : undefined}
+        aria-label={psychicLine.ariaLabel}
+      >
+        <span className={styles.psychicThoughtLabel}>{psychicLine.label}</span>
+        <p>
+          <span className={styles.psychicThoughtText}>{psychicLine.summary}</span>
+          {psychicLine.state === "thinking" ? (
+            <span className={styles.psychicThoughtShimmer} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : null}
+        </p>
+        {psychicLine.scratchpad ? (
+          <div className={styles.psychicScratchpadBlock}>
+            <div className={styles.psychicScratchpadHeader}>
+              <span className={styles.psychicScratchpadLabel}>Scratchpad</span>
+              {psychicLine.scratchpadMeta ? (
+                <span className={styles.psychicScratchpadMeta}>
+                  {psychicLine.scratchpadMeta}
+                </span>
+              ) : null}
+            </div>
+            <pre className={styles.psychicScratchpadText}>
+              {psychicLine.scratchpad}
+            </pre>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -34823,6 +41012,7 @@ function HomeContent(): React.JSX.Element {
         {prompt ? (
           <p className={styles.askQuestionInlinePrompt}>{prompt}</p>
         ) : null}
+        {renderAskQuestionPatienceMeter(interaction.assistantMessageId, "inline")}
         <div
           className={styles.askQuestionInlineChoices}
           data-choices-disabled={choicesDisabled ? "true" : undefined}
@@ -34918,7 +41108,10 @@ function HomeContent(): React.JSX.Element {
       "--memory-bubble-line-count": 1,
     } as React.CSSProperties;
     return (
-      <div className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}>
+      <div
+        className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}
+        data-dev-panel-safe-area="bottom"
+      >
         <div
           className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
           style={bubbleStyle}
@@ -35081,12 +41274,16 @@ function HomeContent(): React.JSX.Element {
       nowMs: chatEphemeralNowMs,
       completed: false,
       moodKey: DEFAULT_MESSAGE_MOOD,
+      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
     });
     return visibleTokenCount < tokenTotal;
   }
 
   const pendingAskQuestionState = detail
-    ? getConversationPendingAskQuestionState(detail.messages)
+    ? getConversationPendingAskQuestionState(
+        detail.messages,
+        askQuestionPatienceClosedAssistantMessageIds
+      )
     : undefined;
   const pendingAskQuestion = pendingAskQuestionState?.askQuestion;
   const pendingAskQuestionAssistantMessage =
@@ -35116,36 +41313,59 @@ function HomeContent(): React.JSX.Element {
           nowMs: chatEphemeralNowMs,
           completed: false,
           moodKey: DEFAULT_MESSAGE_MOOD,
+          delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
         });
         return visibleTokenCount < tokenTotal;
       })()
     );
   const askQuestionInteractive = pendingAskQuestion !== undefined && !pendingAskQuestionWaitingForReveal;
-  const pendingAskQuestionKey = pendingAskQuestion
-    ? `${detail?.id ?? ""}:${pendingAskQuestion.prompt}:${pendingAskQuestion.options
-        .map((opt) => `${opt.id}:${opt.label}`)
-        .join("|")}`
-    : null;
+  const pendingAskQuestionKey =
+    pendingAskQuestion && pendingAskQuestionState && detail?.id
+      ? buildAskQuestionInteractionKey({
+          conversationId: detail.id,
+          assistantMessageId: pendingAskQuestionState.assistantMessageId,
+          prompt: pendingAskQuestion.prompt,
+          options: pendingAskQuestion.options,
+        })
+      : null;
   const pendingAskQuestionInteractiveKey = askQuestionInteractive ? pendingAskQuestionKey : null;
   const starterPromptsAvailable =
     conversationStarterPrompts !== null &&
     conversationStarterPrompts.conversationId === detail?.id &&
     conversationStarterPrompts.prompts.length > 0;
-  const starterPromptsLatestAssistantMessage =
+  const starterPromptsAnchorMessage =
     starterPromptsAvailable && detail
-      ? [...detail.messages].reverse().find((message) => message.role === "assistant")
+      ? findConversationStarterAnchorMessage(
+          detail.messages,
+          conversationStarterPrompts.assistantMessageId
+        )
       : undefined;
+  const starterPromptsAnswered =
+    starterPromptsAvailable && detail
+      ? hasUserReplyAfterMessage(
+          detail.messages,
+          starterPromptsAnchorMessage?.id ?? null
+        )
+      : false;
   const starterPromptsWaitingForReveal =
     starterPromptsAvailable &&
-    assistantRevealStillTyping(starterPromptsLatestAssistantMessage);
+    !starterPromptsAnswered &&
+    assistantRevealStillTyping(starterPromptsAnchorMessage);
   const starterPromptsInteractive =
-    starterPromptsAvailable && !starterPromptsWaitingForReveal;
+    starterPromptsAvailable &&
+    Boolean(starterPromptsAnchorMessage) &&
+    !starterPromptsAnswered &&
+    !starterPromptsWaitingForReveal;
   const starterPromptCenteredMessageId =
-    starterPromptsAvailable && !starterComposerRevealed
-      ? starterPromptsLatestAssistantMessage?.id ?? null
+    starterPromptsInteractive && !starterComposerRevealed
+      ? starterPromptsAnchorMessage?.id ?? null
       : null;
   const starterPromptsInteractiveKey = starterPromptsInteractive && conversationStarterPrompts
-    ? `${conversationStarterPrompts.conversationId}:${conversationStarterPrompts.prompts.join("|")}`
+    ? [
+        conversationStarterPrompts.conversationId,
+        conversationStarterPrompts.assistantMessageId ?? "starter",
+        conversationStarterPrompts.prompts.join("|"),
+      ].join(":")
     : null;
   const choiceChipRailInteractiveKey =
     pendingAskQuestionInteractiveKey ?? starterPromptsInteractiveKey;
@@ -35153,8 +41373,13 @@ function HomeContent(): React.JSX.Element {
     pendingAskQuestionInteractiveKey !== null
       ? pendingAskQuestionState?.assistantMessageId ?? null
       : starterPromptsInteractive
-        ? starterPromptsLatestAssistantMessage?.id ?? null
+        ? starterPromptsAnchorMessage?.id ?? null
         : null;
+  const choiceChipRailControlsViewport = shouldChoiceChipRailControlViewport({
+    chatSurface: view === "chat",
+    anchorMessageId: choiceChipRailAnchorMessageId,
+    latestAssistantMessageId,
+  });
   const choiceChipRailComposerRevealed =
     pendingAskQuestionInteractiveKey !== null
       ? askQuestionComposerRevealed
@@ -35171,6 +41396,281 @@ function HomeContent(): React.JSX.Element {
       : activeChoiceComposerSource === "starter"
         ? !starterComposerRevealed
         : false;
+  const zenComposerActionPreview = useMemo(
+    () =>
+      chatLikeSurface && !composerHiddenByChoiceChips
+        ? resolveZenActionPreview(draft)
+        : null,
+    [chatLikeSurface, composerHiddenByChoiceChips, draft]
+  );
+  const askQuestionPatienceAssistantMessageId =
+    pendingAskQuestionInteractiveKey !== null
+      ? pendingAskQuestionState?.assistantMessageId ?? null
+      : null;
+  const askQuestionPatienceConversationId =
+    detail?.id && detail.id !== "pending" ? detail.id : null;
+  const askQuestionPatienceKey =
+    view === "chat" &&
+    zenAskQuestionPatienceEnabled &&
+    pendingAskQuestionInteractiveKey !== null &&
+    askQuestionPatienceConversationId !== null &&
+    askQuestionPatienceAssistantMessageId !== null
+      ? `${askQuestionPatienceConversationId}:${askQuestionPatienceAssistantMessageId}`
+      : null;
+  const askQuestionPatienceDurationMs =
+    normalizeZenAskQuestionPatienceMsSetting(zenAskQuestionPatienceMs);
+  askQuestionPatienceCurrentKeyRef.current = askQuestionPatienceKey;
+  const askQuestionPatienceElapsedForProgress = askQuestionPatienceKey
+    ? askQuestionPatienceActiveKeyRef.current === askQuestionPatienceKey
+      ? askQuestionPatienceElapsedMs
+      : askQuestionPatienceElapsedByKeyRef.current.get(askQuestionPatienceKey) ?? 0
+    : 0;
+  const askQuestionPatienceProgress = askQuestionPatienceKey
+    ? Math.max(
+        0,
+        Math.min(
+          1,
+          1 -
+            askQuestionPatienceElapsedForProgress /
+              Math.max(1, askQuestionPatienceDurationMs)
+        )
+      )
+    : 1;
+
+  async function reportAskQuestionPatienceTimeout(args: {
+    key: string;
+    conversationId: string;
+    assistantMessageId: string;
+    askQuestion?: NonNullable<Message["askQuestion"]>;
+    activeBotId: string | null;
+    timeoutMs: number;
+    activeElapsedMs: number;
+  }): Promise<void> {
+    try {
+      const result = await api<{
+        ok: true;
+        applied?: boolean;
+        duplicate?: boolean;
+        reason?: string;
+        penaltyLevel?: ZenAskQuestionPatienceInput["penaltyLevel"];
+        prismMood?: PrismMoodSnapshot;
+      }>(
+        `/api/conversations/${encodeURIComponent(args.conversationId)}/prism-mood/ask-question-timeout`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            assistantMessageId: args.assistantMessageId,
+            timeoutMs: args.timeoutMs,
+            activeElapsedMs: args.activeElapsedMs,
+          }),
+        }
+      );
+      if (result.prismMood) {
+        setDetail((current) =>
+          current?.id === args.conversationId
+            ? { ...current, prismMood: result.prismMood }
+            : current
+        );
+      }
+      const stillViewingConversation =
+        selectedIdRef.current === args.conversationId ||
+        detailIdRef.current === args.conversationId;
+      const stillActiveOrLocallyClosed =
+        askQuestionPatienceCurrentKeyRef.current === args.key ||
+        askQuestionPatienceClosedAssistantMessageIdsRef.current.has(
+          args.assistantMessageId
+        );
+      if (
+        !stillViewingConversation ||
+        !stillActiveOrLocallyClosed ||
+        (result.applied !== true &&
+          !(result.reason === "missing_message" && args.assistantMessageId.startsWith("dev-tool-lab-")))
+      ) {
+        return;
+      }
+      const syntheticSubmit = {
+        preventDefault: () => {
+          /* no-op - used so sendMessage can share the assistant-only pathway */
+        },
+      } as React.FormEvent<HTMLFormElement>;
+      void sendMessage(syntheticSubmit, {
+        skipComposerHistory: true,
+        zenAskQuestionPatience: {
+          source: "ask_question_patience",
+          activeBotId: args.activeBotId,
+          assistantMessageId: args.assistantMessageId,
+          ...(args.askQuestion?.prompt
+            ? { prompt: args.askQuestion.prompt }
+            : {}),
+          ...(args.askQuestion?.options?.length
+            ? { options: args.askQuestion.options.map((option) => ({
+                id: option.id,
+                label: option.label,
+              })) }
+            : {}),
+          timeoutMs: args.timeoutMs,
+          activeElapsedMs: args.activeElapsedMs,
+          ...(result.penaltyLevel ? { penaltyLevel: result.penaltyLevel } : {}),
+          clientTurnId: `askq-patience-${Date.now().toString(36)}-${Math.random()
+            .toString(36)
+            .slice(2, 8)}`,
+        },
+      });
+    } catch {
+      // Keep this quiet: a timer miss should not interrupt the conversation UI.
+    }
+  }
+
+  function renderAskQuestionPatienceMeter(
+    assistantMessageId: string,
+    placement: "inline" | "rail" | "dock"
+  ): React.ReactNode {
+    if (
+      !askQuestionPatienceKey ||
+      assistantMessageId !== askQuestionPatienceAssistantMessageId
+    ) {
+      return null;
+    }
+    const meterStyle = {
+      "--ask-question-patience-progress": askQuestionPatienceProgress.toFixed(4),
+      "--ask-question-patience-progress-width": `${(
+        askQuestionPatienceProgress * 100
+      ).toFixed(2)}%`,
+    } as React.CSSProperties;
+    return (
+      <div
+        className={styles.askQuestionPatienceMeter}
+        data-placement={placement}
+        data-expired={askQuestionPatienceProgress <= 0 ? "true" : undefined}
+        style={meterStyle}
+        aria-hidden="true"
+      >
+        <span />
+      </div>
+    );
+  }
+
+  useEffect(() => {
+    askQuestionPatienceLastTickMsRef.current = null;
+    askQuestionPatienceLastTypingAtMsRef.current = null;
+
+    if (!askQuestionPatienceKey) {
+      return;
+    }
+
+    if (askQuestionPatienceActiveKeyRef.current !== askQuestionPatienceKey) {
+      askQuestionPatienceActiveKeyRef.current = askQuestionPatienceKey;
+      const restoredElapsedMs = Math.max(
+        0,
+        Math.min(
+          askQuestionPatienceDurationMs,
+          askQuestionPatienceElapsedByKeyRef.current.get(askQuestionPatienceKey) ??
+            0
+        )
+      );
+      askQuestionPatienceElapsedMsRef.current = restoredElapsedMs;
+      setAskQuestionPatienceElapsedMs(restoredElapsedMs);
+      return;
+    }
+
+    const clampedElapsedMs = Math.max(
+      0,
+      Math.min(askQuestionPatienceDurationMs, askQuestionPatienceElapsedMsRef.current)
+    );
+    if (clampedElapsedMs !== askQuestionPatienceElapsedMsRef.current) {
+      askQuestionPatienceElapsedMsRef.current = clampedElapsedMs;
+      askQuestionPatienceElapsedByKeyRef.current.set(
+        askQuestionPatienceKey,
+        clampedElapsedMs
+      );
+      setAskQuestionPatienceElapsedMs(clampedElapsedMs);
+    }
+  }, [askQuestionPatienceKey, askQuestionPatienceDurationMs]);
+
+  useEffect(() => {
+    if (
+      !askQuestionPatienceKey ||
+      !askQuestionPatienceConversationId ||
+      !askQuestionPatienceAssistantMessageId
+    ) {
+      askQuestionPatienceLastTickMsRef.current = null;
+      return;
+    }
+    let frameId = 0;
+    let cancelled = false;
+    const tick = (nowMs: number): void => {
+      if (cancelled) return;
+      const fromMs = askQuestionPatienceLastTickMsRef.current ?? nowMs;
+      const paused = shouldPauseAskQuestionPatience({
+        active: true,
+        pendingReply: Boolean(pendingReply),
+        documentHidden: typeof document !== "undefined" ? document.hidden : false,
+        composerRevealed: choiceChipRailComposerRevealed,
+        nowMs,
+        lastTypingAtMs: askQuestionPatienceLastTypingAtMsRef.current,
+      });
+      const result = advanceAskQuestionPatience({
+        durationMs: askQuestionPatienceDurationMs,
+        elapsedMs: askQuestionPatienceElapsedMsRef.current,
+        fromMs,
+        toMs: nowMs,
+        paused,
+      });
+      askQuestionPatienceLastTickMsRef.current = nowMs;
+      if (result.elapsedMs !== askQuestionPatienceElapsedMsRef.current) {
+        askQuestionPatienceElapsedMsRef.current = result.elapsedMs;
+        askQuestionPatienceElapsedByKeyRef.current.set(
+          askQuestionPatienceKey,
+          result.elapsedMs
+        );
+        setAskQuestionPatienceElapsedMs(result.elapsedMs);
+      }
+      const alreadyReported =
+        askQuestionPatienceReportedKeysRef.current.has(askQuestionPatienceKey);
+      if (
+        shouldReportAskQuestionPatienceExpiry({
+          expired: result.expired,
+          alreadyReported,
+        })
+      ) {
+        askQuestionPatienceReportedKeysRef.current.add(askQuestionPatienceKey);
+        setAskQuestionPatienceClosedAssistantMessageIds((current) => {
+          if (current.has(askQuestionPatienceAssistantMessageId)) {
+            askQuestionPatienceClosedAssistantMessageIdsRef.current = current;
+            return current;
+          }
+          const next = new Set(current);
+          next.add(askQuestionPatienceAssistantMessageId);
+          askQuestionPatienceClosedAssistantMessageIdsRef.current = next;
+          return next;
+        });
+        void reportAskQuestionPatienceTimeout({
+          key: askQuestionPatienceKey,
+          conversationId: askQuestionPatienceConversationId,
+          assistantMessageId: askQuestionPatienceAssistantMessageId,
+          ...(pendingAskQuestion ? { askQuestion: pendingAskQuestion } : {}),
+          activeBotId: zenPersonaBotIdRef.current ?? null,
+          timeoutMs: askQuestionPatienceDurationMs,
+          activeElapsedMs: result.elapsedMs,
+        });
+      }
+      if (!result.expired) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [
+    askQuestionPatienceAssistantMessageId,
+    askQuestionPatienceConversationId,
+    askQuestionPatienceDurationMs,
+    askQuestionPatienceKey,
+    choiceChipRailComposerRevealed,
+    pendingReply,
+  ]);
 
   useLayoutEffect(() => {
     if (!choiceComposerFocusAfterRevealRef.current || composerHiddenByChoiceChips) {
@@ -35205,7 +41705,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function revealChoiceComposerForOther(
-    source: "askquestion" | "starter" | undefined,
+    source: ComposerChip["otherSource"],
     options: { flushRender?: boolean } = {}
   ): void {
     hideZenHeaderForConversationAction();
@@ -35254,6 +41754,7 @@ function HomeContent(): React.JSX.Element {
     setComposerFocused(true);
     setComposerSendTintActive(true);
     setComposerPrimed(false);
+    markComposerTypingActivity();
     setDraft((current) => `${current}${text}`);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -35349,6 +41850,7 @@ function HomeContent(): React.JSX.Element {
 
   function centerActiveChoicePanelInMessages(): void {
     if (!choiceChipRailInteractiveKey || !choiceChipRailAnchorMessageId) return;
+    if (!choiceChipRailControlsViewport) return;
     if (choiceChipRailComposerRevealed) return;
     if (
       askQuestionComposerHiddenForReadingKeyRef.current ===
@@ -35401,7 +41903,13 @@ function HomeContent(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!choiceChipRailInteractiveKey || choiceChipRailComposerRevealed) return;
+    if (
+      !choiceChipRailInteractiveKey ||
+      !choiceChipRailControlsViewport ||
+      choiceChipRailComposerRevealed
+    ) {
+      return;
+    }
     let settleTimerA: number | null = null;
     let settleTimerB: number | null = null;
     requestAnimationFrame(() => {
@@ -35416,21 +41924,31 @@ function HomeContent(): React.JSX.Element {
   }, [
     choiceChipRailAnchorMessageId,
     choiceChipRailComposerRevealed,
+    choiceChipRailControlsViewport,
     choiceChipRailInteractiveKey,
     detail?.id,
   ]);
   const askQuestionPromptDockSpaceActive =
     choiceChipRailInteractiveKey !== null &&
+    choiceChipRailControlsViewport &&
     choiceChipRailComposerRevealed &&
     viewportWidth <= PICKER_MOBILE_BREAKPOINT;
   const askQuestionTailSpaceActive =
-    choiceChipRailInteractiveKey !== null && !askQuestionPromptDockSpaceActive;
+    choiceChipRailInteractiveKey !== null &&
+    choiceChipRailControlsViewport &&
+    !askQuestionPromptDockSpaceActive;
   const askQuestionCollapsedBubbleActive = false;
 
   function snapAskQuestionComposerToChatBottom(force = false): void {
     const rail = getComposerChipRail();
     if (!rail?.collapsed) return;
-    if (!choiceChipRailInteractiveKey || (!force && !choiceChipRailComposerRevealed)) return;
+    if (
+      !choiceChipRailInteractiveKey ||
+      !choiceChipRailControlsViewport ||
+      (!force && !choiceChipRailComposerRevealed)
+    ) {
+      return;
+    }
     const el = messagesScrollRef.current;
     if (!el) return;
     chatProgrammaticScrollUntilMsRef.current = Date.now() + 160;
@@ -35500,66 +42018,39 @@ function HomeContent(): React.JSX.Element {
       );
       return scrollRoot.scrollHeight + (count - messages.length) * averageMessageHeight;
     };
-    const anchors = zenAtmosphereTimeline
-      .map((entry) => {
-        const revealStartMessageCount =
-          entry.revealStartMessageCount ??
-          entry.generationMessageCount + zenWallpaperRevealDelayMessageCount;
-        const revealFullMessageCount = Math.max(
-          revealStartMessageCount,
-          entry.revealFullMessageCount ??
-            revealStartMessageCount + zenWallpaperRevealSpanMessageCount
-        );
-        const startY = messageCountToY(revealStartMessageCount);
-        const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
-        return { ...entry, startY, fullY, revealStartMessageCount, revealFullMessageCount };
-      })
-      .sort((a, b) => {
-        const yDelta = a.startY - b.startY;
-        if (Math.abs(yDelta) > 0.5) return yDelta;
-        return a.revealStartMessageCount - b.revealStartMessageCount;
-      });
-
-    const next: Record<string, number> = {};
-    for (const entry of zenAtmosphereTimeline) {
-      next[entry.imageId] = 0;
-    }
     const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
-    if (readerY < anchors[0].startY) {
-      if (anchors.length === 1) {
-        next[anchors[0].imageId] = 1;
-      }
-      return next;
-    }
-    for (let index = 0; index < anchors.length; index += 1) {
-      const current = anchors[index];
-      const previous = anchors[index - 1] ?? null;
-      const upcoming = anchors[index + 1] ?? null;
-      if (readerY >= current.startY && readerY <= current.fullY) {
-        const progress = Math.max(
-          0,
-          Math.min(1, (readerY - current.startY) / Math.max(1, current.fullY - current.startY))
-        );
-        if (previous) next[previous.imageId] = 1 - progress;
-        next[current.imageId] = progress;
-        return next;
-      }
-      if (readerY > current.fullY && (!upcoming || readerY < upcoming.startY)) {
-        next[current.imageId] = 1;
-        return next;
-      }
-    }
-    next[anchors[anchors.length - 1].imageId] = 1;
-    return next;
+    return calculateZenAtmosphereLayerOpacitiesForReader({
+      timeline: zenAtmosphereTimeline,
+      readerY,
+      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
+      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      messageCountToY,
+    });
   }
 
   function updateZenAtmosphereScrollBlend(scrollRoot: HTMLDivElement | null): void {
     if (!scrollRoot) {
-      applyZenAtmosphereLayerOpacities({});
+      if (zenAtmosphereTimeline.length === 0) {
+        applyZenAtmosphereLayerOpacities({});
+        setZenAtmosphereScrollBlendReadyKey(null);
+      }
       return;
     }
-    applyZenAtmosphereLayerOpacities(
-      calculateZenAtmosphereLayerOpacities(scrollRoot)
+    const measuredLayerOpacities = calculateZenAtmosphereLayerOpacities(scrollRoot);
+    const initialLayerOpacity = maxZenAtmosphereLayerOpacity(
+      zenAtmosphereInitialLayerOpacities
+    );
+    if (
+      zenAtmosphereScrollBlendReadyKey !== zenAtmosphereTimelineKey &&
+      initialLayerOpacity > 0.01 &&
+      maxZenAtmosphereLayerOpacity(measuredLayerOpacities) <= 0.01
+    ) {
+      applyZenAtmosphereLayerOpacities(zenAtmosphereInitialLayerOpacities);
+      return;
+    }
+    applyZenAtmosphereLayerOpacities(measuredLayerOpacities);
+    setZenAtmosphereScrollBlendReadyKey((current) =>
+      current === zenAtmosphereTimelineKey ? current : zenAtmosphereTimelineKey
     );
   }
 
@@ -35574,6 +42065,7 @@ function HomeContent(): React.JSX.Element {
   useLayoutEffect(() => {
     if (view !== "chat" || zenAtmosphereTimeline.length === 0) {
       applyZenAtmosphereLayerOpacities({});
+      setZenAtmosphereScrollBlendReadyKey(null);
       return;
     }
     const scrollRoot = messagesScrollRef.current;
@@ -35831,6 +42323,67 @@ function HomeContent(): React.JSX.Element {
     resetChatModeScrollElastic();
   }
 
+  const handleZenCanvasSpeedNudgePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (!activeAssistantRevealKey) return;
+      if (event.defaultPrevented) return;
+      if (event.pointerType === "touch") return;
+      if (event.button !== 0) return;
+      if (canvasBotMarqueeRect !== null) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!event.currentTarget.contains(target)) return;
+      if (target.closest(ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      zenCanvasSpeedNudgePointerRef.current = {
+        pointerId: event.pointerId,
+        revealKey: activeAssistantRevealKey,
+      };
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is optional in tests and older embedded webviews.
+      }
+      const now = Date.now();
+      setZenCanvasSpeedNudgeState((current) =>
+        beginZenCanvasSpeedNudgeHold(current, {
+          revealKey: activeAssistantRevealKey,
+          nowMs: now,
+        }).state
+      );
+      setChatEphemeralNowMs(now);
+    },
+    [activeAssistantRevealKey, canvasBotMarqueeRect]
+  );
+
+  const handleZenCanvasSpeedNudgePointerEnd = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const activePointer = zenCanvasSpeedNudgePointerRef.current;
+      if (!activePointer || activePointer.pointerId !== event.pointerId) return;
+      zenCanvasSpeedNudgePointerRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Capture may already be released by the browser.
+      }
+      const now = Date.now();
+      setZenCanvasSpeedNudgeState((current) =>
+        endZenCanvasSpeedNudgeHold(current, {
+          revealKey: activePointer.revealKey,
+          nowMs: now,
+        })
+      );
+      setChatEphemeralNowMs(now);
+    },
+    []
+  );
+
   function resetComposerHistoryCursor(): void {
     composerHistoryIndexRef.current = null;
     composerHistoryDraftBeforeRecallRef.current = null;
@@ -35965,10 +42518,11 @@ function HomeContent(): React.JSX.Element {
     chatSummaryRefreshMarkerRef.current = null;
     setError(null);
     setDebugComposerDraft("");
-    const fallbackBotId = selectedBotId ?? null;
+    const fallbackBotId = zenPersonaBotId;
     const fallbackBot = fallbackBotId
       ? bots.find((bot) => bot.id === fallbackBotId) ?? null
       : null;
+    const debugBot = zenPersonaBot ?? fallbackBot;
     const nowIso = new Date().toISOString();
     const debugAssistantMessage: Message = {
       id: `debug-echo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -35977,24 +42531,21 @@ function HomeContent(): React.JSX.Element {
       createdAt: nowIso,
       provider: "local",
       model: "dev/debug-echo",
-      botName: activeBot?.name ?? fallbackBot?.name ?? DEFAULT_ASSISTANT_NAME,
-      botColor: activeBot?.color ?? fallbackBot?.color ?? undefined,
-      botGlyph: activeBot?.glyph ?? fallbackBot?.glyph ?? undefined,
+      botId: fallbackBotId,
+      botName: debugBot?.name ?? DEFAULT_ASSISTANT_NAME,
+      botColor: debugBot?.color ?? undefined,
+      botGlyph: debugBot?.glyph ?? undefined,
       moodKey: "neutral",
       moodConfidence: 1,
     };
     setDetail((current) => {
-      const conversationBotId = current?.botId ?? fallbackBotId;
-      const conversationBot = conversationBotId
-        ? bots.find((bot) => bot.id === conversationBotId) ?? null
-        : null;
-      const nextBotId = conversationBotId;
-      const nextBotColor = conversationBot?.color ?? null;
+      const nextBotId = fallbackBotId;
+      const nextBotColor = debugBot?.color ?? null;
       const baseMessages = current?.messages ?? [];
       return {
         id: current?.id ?? "pending",
         title: current?.title ?? "New chat",
-        botId: nextBotId,
+        botId: current?.botId ?? null,
         incognito: current?.incognito ?? pendingIncognito,
         lastBotId: nextBotId,
         lastBotColor: nextBotColor,
@@ -36011,6 +42562,11 @@ function HomeContent(): React.JSX.Element {
     }
   }, [detail]);
 
+  function markComposerTypingActivity(): void {
+    askQuestionPatienceLastTypingAtMsRef.current = performance.now();
+    setChatComposerLastTypedAtMs(Date.now());
+  }
+
   function updateComposerDraft(nextDraft: string) {
     const normalizedNextDraft = clampTextAfterLeadingCommandChip(
       nextDraft,
@@ -36019,10 +42575,22 @@ function HomeContent(): React.JSX.Element {
     resetComposerHistoryCursor();
     if (normalizedNextDraft !== draft) {
       setComposerSendTintActive(true);
+      markComposerTypingActivity();
+      if (
+        view === "chat" &&
+        normalizedNextDraft.trim().length > 0 &&
+        (pendingReplyVisible || chatAssistantRevealInProgress)
+      ) {
+        beginOrRefreshZenFollowupBuffer(
+          detail?.id && detail.id !== "pending" ? detail.id : selectedId
+        );
+        if (pendingReplyVisible) {
+          priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
+          stopPendingReply();
+        }
+      }
     }
-    startDraftTransition(() => {
-      setDraft(normalizedNextDraft);
-    });
+    setDraft(normalizedNextDraft);
     if (normalizedNextDraft !== draft) {
       snapAskQuestionComposerToChatBottom();
     }
@@ -36030,68 +42598,6 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     updateComposerDraft(e.currentTarget.value);
-  }
-
-  async function cleanupComposerDraft(): Promise<void> {
-    const currentDraft = draft;
-    if (
-      currentDraft.trim().length === 0 ||
-      composerCleanupBusy ||
-      pendingReply ||
-      settings?.composerWritingAssist === false
-    ) {
-      return;
-    }
-    setComposerCleanupBusy(true);
-    setError(null);
-    try {
-      const response = await api<{
-        text: string;
-        changed?: boolean;
-        provider?: Provider;
-        model?: string;
-      }>("/api/composer/cleanup", {
-        method: "POST",
-        body: JSON.stringify({
-          text: currentDraft,
-          forceLocal: effectivePreferredProvider === "local",
-        }),
-      });
-      if (typeof response.text !== "string" || response.text.trim().length === 0) {
-        throw new Error("Writing cleanup returned an empty draft.");
-      }
-      updateComposerDraft(response.text);
-      requestAnimationFrame(() => draftComposerRef.current?.focus());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Writing cleanup failed.");
-    } finally {
-      setComposerCleanupBusy(false);
-    }
-  }
-
-  function renderComposerWritingAssistAction(): React.ReactNode {
-    if (
-      composerHiddenByChoiceChips ||
-      settings?.composerWritingAssist === false ||
-      draft.trim().length === 0
-    ) {
-      return null;
-    }
-    const disabled = composerCleanupBusy || pendingReply;
-    return (
-      <div className={styles.composeWritingAssistRow}>
-        <button
-          type="button"
-          className={styles.composeWritingAssistButton}
-          onClick={() => void cleanupComposerDraft()}
-          disabled={disabled}
-          aria-busy={composerCleanupBusy ? "true" : undefined}
-          title="Clean up spelling and grammar without sending the message."
-        >
-          {composerCleanupBusy ? "Cleaning..." : "Fix spelling & grammar"}
-        </button>
-      </div>
-    );
   }
 
   function handleComposerFocus() {
@@ -36174,6 +42680,7 @@ function HomeContent(): React.JSX.Element {
   const hideMobileEmptySend = false;
 
   function startFreshConversation(privateMode: boolean) {
+    setZenPrivateReturnCheckpoint(null);
     setImagePrivateMode(privateMode);
     if (view === "chat") {
       const switchingPrivacyMode = pendingIncognito !== privateMode;
@@ -36186,14 +42693,17 @@ function HomeContent(): React.JSX.Element {
       setPendingZenSessionBreak(null);
       setPendingZenSessionResumeContext(null);
       chatSummaryRefreshMarkerRef.current = null;
+      setChatAutoRestoreSuppressed(true);
       setSelectedId(null);
       setDetail(null);
       setSelectedBotId(null);
       setChatBotOverride(undefined);
+      setZenPersonaBotId(null);
       closeEmptyStateBotSearch();
       setHueFilterCenter(null);
       setPendingIncognito(privateMode);
       setSidebarOpen(false);
+      rotateZenFallbackWallpaperSeed();
       return;
     }
     const normalStarterBotId = detail
@@ -36231,12 +42741,36 @@ function HomeContent(): React.JSX.Element {
   function setAppWidePrivateMode(privateMode: boolean): void {
     setImagePrivateMode(privateMode);
     if (privateMode) {
+      if (view === "chat" && !appWidePrivateMode && !zenPrivateReturnCheckpoint) {
+        setZenPrivateReturnCheckpoint({
+          selectedId,
+          detail,
+          selectedBotId,
+          zenPersonaBotId,
+          chatBotOverride,
+          sessionOpinion,
+          botOpinion,
+        });
+      }
       setPendingIncognito(true);
       return;
     }
+    setPendingIncognito(false);
+    if (view === "chat" && zenPrivateReturnCheckpoint) {
+      setSelectedId(zenPrivateReturnCheckpoint.selectedId);
+      setDetail(zenPrivateReturnCheckpoint.detail);
+      setSelectedBotId(zenPrivateReturnCheckpoint.selectedBotId);
+      setZenPersonaBotId(zenPrivateReturnCheckpoint.zenPersonaBotId);
+      setChatBotOverride(zenPrivateReturnCheckpoint.chatBotOverride);
+      setSessionOpinion(zenPrivateReturnCheckpoint.sessionOpinion);
+      setBotOpinion(zenPrivateReturnCheckpoint.botOpinion);
+      setZenPrivateReturnCheckpoint(null);
+      setError(null);
+      return;
+    }
+    setZenPrivateReturnCheckpoint(null);
     const restoreConversationId =
       selectedId ?? (detail?.id && detail.id !== "pending" ? detail.id : null);
-    setPendingIncognito(false);
     if (detail?.incognito && restoreConversationId) {
       void refreshConversation(restoreConversationId).catch(() => {});
     }
@@ -36294,6 +42828,20 @@ function HomeContent(): React.JSX.Element {
     return typeof value === "string" ? value : fallbackValue;
   }
 
+  function normalizeSettingsPickerSubmit(
+    rawValue: string,
+    currentValue: string | null | undefined,
+    visibleLegacyValue: string,
+    options: { normalizeOnlineImage?: boolean } = {}
+  ): string {
+    const raw = rawValue.trim();
+    const current = currentValue?.trim() ?? "";
+    if (!current && raw === visibleLegacyValue) return "";
+    if (modelChoiceIsDisabled(raw)) return DISABLED_MODEL_CHOICE;
+    if (!raw || raw === AUTO_MODEL_CHOICE) return "";
+    return options.normalizeOnlineImage ? normalizeOnlineImageModelPreference(raw) : raw;
+  }
+
   function buildZenModeSettingsPayload(
     source: UserSettings,
     options: { resetModels?: boolean } = {}
@@ -36303,11 +42851,18 @@ function HomeContent(): React.JSX.Element {
       ...zenFields,
       preferredZenWallpaperLocalImageModel: options.resetModels
         ? ""
-        : source.preferredZenWallpaperLocalImageModel.trim(),
+        : normalizeSettingsPickerSubmit(
+            source.preferredZenWallpaperLocalImageModel,
+            settings?.preferredZenWallpaperLocalImageModel,
+            settingsLocalImageModelChoice(settings?.preferredZenWallpaperLocalImageModel)
+          ),
       preferredZenWallpaperOpenAiImageModel: options.resetModels
         ? ""
-        : normalizeOnlineImageModelPreference(
-            source.preferredZenWallpaperOpenAiImageModel
+        : normalizeSettingsPickerSubmit(
+            source.preferredZenWallpaperOpenAiImageModel,
+            settings?.preferredZenWallpaperOpenAiImageModel,
+            settingsOnlineImageModelChoice(settings?.preferredZenWallpaperOpenAiImageModel),
+            { normalizeOnlineImage: true }
           ),
     };
   }
@@ -36431,31 +42986,81 @@ function HomeContent(): React.JSX.Element {
         SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD,
         settings.lenientLocalImageFallbackModel
       ).trim();
-      const preferredOnlineModelChoice = visiblePreferredOnlineModelChoice(
+      const visiblePrismDefaultLlmModel = settingsLocalLlmModelChoice(
+        settings.prismDefaultLlmModel,
+        commandCenterAuxiliaryModelId(settings)
+      );
+      const visiblePrismImageToolLlmModel = settingsLocalLlmModelChoice(
+        settings.prismImageToolLlmModel,
+        defaultModelChoiceForProvider(modelCatalog, settings, "local")
+      );
+      const visiblePreferredLocalModel = visibleConcreteModelChoiceForProvider(
         modelCatalog,
         settings,
-        preferredOnlineModelRaw
+        "local",
+        settings.preferredLocalModel
+      );
+      const visiblePreferredOnlineModel = visibleConcreteOnlineModelChoice(
+        modelCatalog,
+        settings,
+        settings.preferredOnlineModel
+      );
+      const visiblePreferredLocalImageModel = settingsLocalImageModelChoice(
+        settings.preferredLocalImageModel
+      );
+      const visiblePreferredOpenAiImageModel = settingsOnlineImageModelChoice(
+        settings.preferredOpenAiImageModel
+      );
+      const visiblePreferredZenWallpaperLocalImageModel = settingsLocalImageModelChoice(
+        settings.preferredZenWallpaperLocalImageModel
+      );
+      const visiblePreferredZenWallpaperOpenAiImageModel = settingsOnlineImageModelChoice(
+        settings.preferredZenWallpaperOpenAiImageModel
       );
       const body: Record<string, unknown> = {
         ...settings,
-        prismDefaultLlmModel,
-        prismImageToolLlmModel,
-        preferredLocalModel:
-          preferredLocalModelRaw === AUTO_MODEL_CHOICE ? "" : preferredLocalModelRaw,
-        preferredOnlineModel:
-          preferredOnlineModelChoice === AUTO_MODEL_CHOICE
-            ? ""
-            : preferredOnlineModelChoice,
-        preferredLocalImageModel,
-        preferredOpenAiImageModel:
-          preferredOpenAiImageModelRaw.length > 0
-            ? normalizeOnlineImageModelPreference(preferredOpenAiImageModelRaw)
-            : "",
-        preferredZenWallpaperLocalImageModel,
-        preferredZenWallpaperOpenAiImageModel:
-          preferredZenWallpaperOpenAiImageModelRaw.length > 0
-            ? normalizeOnlineImageModelPreference(preferredZenWallpaperOpenAiImageModelRaw)
-            : "",
+        prismDefaultLlmModel: normalizeSettingsPickerSubmit(
+          prismDefaultLlmModel,
+          settings.prismDefaultLlmModel,
+          visiblePrismDefaultLlmModel
+        ),
+        prismImageToolLlmModel: normalizeSettingsPickerSubmit(
+          prismImageToolLlmModel,
+          settings.prismImageToolLlmModel,
+          visiblePrismImageToolLlmModel
+        ),
+        preferredLocalModel: normalizeSettingsPickerSubmit(
+          preferredLocalModelRaw,
+          settings.preferredLocalModel,
+          visiblePreferredLocalModel
+        ),
+        preferredOnlineModel: normalizeSettingsPickerSubmit(
+          preferredOnlineModelRaw,
+          settings.preferredOnlineModel,
+          visiblePreferredOnlineModel
+        ),
+        preferredLocalImageModel: normalizeSettingsPickerSubmit(
+          preferredLocalImageModel,
+          settings.preferredLocalImageModel,
+          visiblePreferredLocalImageModel
+        ),
+        preferredOpenAiImageModel: normalizeSettingsPickerSubmit(
+          preferredOpenAiImageModelRaw,
+          settings.preferredOpenAiImageModel,
+          visiblePreferredOpenAiImageModel,
+          { normalizeOnlineImage: true }
+        ),
+        preferredZenWallpaperLocalImageModel: normalizeSettingsPickerSubmit(
+          preferredZenWallpaperLocalImageModel,
+          settings.preferredZenWallpaperLocalImageModel,
+          visiblePreferredZenWallpaperLocalImageModel
+        ),
+        preferredZenWallpaperOpenAiImageModel: normalizeSettingsPickerSubmit(
+          preferredZenWallpaperOpenAiImageModelRaw,
+          settings.preferredZenWallpaperOpenAiImageModel,
+          visiblePreferredZenWallpaperOpenAiImageModel,
+          { normalizeOnlineImage: true }
+        ),
         lenientLocalFallbackModel,
         lenientLocalImageFallbackModel,
       };
@@ -37841,6 +44446,134 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function commandCenterBundleSummary(
+    commandCount: number,
+    wildcardDeckCount: number
+  ): string {
+    const parts: string[] = [];
+    if (commandCount > 0) {
+      parts.push(`${commandCount} prompt${commandCount === 1 ? "" : "s"}`);
+    }
+    if (wildcardDeckCount > 0) {
+      parts.push(
+        `${wildcardDeckCount} wildcard deck${wildcardDeckCount === 1 ? "" : "s"}`
+      );
+    }
+    return parts.join(" and ") || "no custom items";
+  }
+
+  function exportCommandCenterAsPrismArchive(): void {
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const exportableCommands = commandCenterCommands.filter(
+        (command) =>
+          isCommandCenterPromptShortcut(command) &&
+          commandCenterPromptHasRequiredDetails(command)
+      );
+      const exportableWildcardDecks = commandCenterWildcardDecks.filter(
+        commandCenterWildcardDeckHasRequiredDetails
+      );
+      const exportedAt = new Date().toISOString();
+      const bundle: CommandCenterExportBundleV1 = {
+        schema: "prism-command-center-v1",
+        exportedAt,
+        preferredModel: commandCenterPreferredModel,
+        commands: exportableCommands,
+        wildcardDecks: exportableWildcardDecks,
+      };
+      const files: Record<string, Uint8Array> = {
+        [COMMAND_CENTER_ARCHIVE_ENTRY_NAME]: strToU8(
+          `${JSON.stringify(bundle, null, 2)}\n`
+        ),
+      };
+      const zipped = zipSync(files, { level: 6 });
+      const blob = new Blob([zipped], { type: COMMAND_CENTER_ARCHIVE_MIME });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const stamp = exportedAt.replace(/[:.]/g, "-");
+      anchor.href = url;
+      anchor.download = `prism-command-center-${stamp}.prism`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      const summary = commandCenterBundleSummary(
+        exportableCommands.length,
+        exportableWildcardDecks.length
+      );
+      setCommandCenterSaveNotice("Exported");
+      setPanelNotice(`Command Center exported with ${summary}.`);
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Command Center export failed.");
+    }
+  }
+
+  async function importCommandCenterFromPrismFile(
+    file: File
+  ): Promise<CommandCenterImportMergeResult> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const importedRaw = parseCommandCenterBundleBytes(bytes);
+    const merged = mergeCommandCenterImportBundle({
+      currentCommands: commandCenterCommands,
+      currentWildcardDecks: commandCenterWildcardDecks,
+      importedRaw,
+    });
+    if (
+      merged.importedCommandIds.length === 0 &&
+      merged.importedWildcardDeckIds.length === 0
+    ) {
+      throw new Error(
+        "That Command Center bundle has no custom prompts or wildcard decks to import."
+      );
+    }
+    setCommandCenterCommands(merged.commands);
+    setCommandCenterWildcardDecks(merged.wildcardDecks);
+    setCommandCenterDraft(null);
+    setCommandCenterWildcardDraft(null);
+    const firstImportedCommandId = merged.importedCommandIds[0] ?? null;
+    const firstImportedWildcardDeckId = merged.importedWildcardDeckIds[0] ?? null;
+    setCommandCenterSelectedCommandId(firstImportedCommandId);
+    setCommandCenterSelectedWildcardDeckId(
+      firstImportedCommandId ? null : firstImportedWildcardDeckId
+    );
+    setCommandCenterSpecsCommandId(null);
+    return merged;
+  }
+
+  async function handleCommandCenterImportFileSelection(
+    event: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.name.trim().toLowerCase().endsWith(".prism")) {
+      setPanelError("Only Command Center .prism files can be imported here.");
+      return;
+    }
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const merged = await importCommandCenterFromPrismFile(file);
+      const summary = commandCenterBundleSummary(
+        merged.importedCommandIds.length,
+        merged.importedWildcardDeckIds.length
+      );
+      setCommandCenterSaveNotice("Imported");
+      setPanelNotice(`Imported ${summary}. Existing Command Center items were kept.`);
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Command Center import failed."
+      );
+    }
+  }
+
+  function openCommandCenterImportPicker(): void {
+    setPanelError(null);
+    setPanelNotice(null);
+    queueMicrotask(() => {
+      commandCenterImportInputRef.current?.click();
+    });
+  }
+
   function parseBotExportPayload(raw: string): Partial<BotExportPayloadV1> {
     const normalized = stripOptionalLeadingUtf8Bom(raw);
     if (botImportUtf8ByteLength(normalized) > BOT_IMPORT_EXPORT_RAW_MAX_UTF8_BYTES) {
@@ -38488,7 +45221,7 @@ function HomeContent(): React.JSX.Element {
     setImportBotPasteError(null);
     setImportBotPasteText("");
     setImportBotPasteBusy(false);
-    if (!devToolsBotImportPasteEnabled) {
+    if (!devToolsRuntimeActive || !devToolsBotImportPasteEnabled) {
       setImportBotModalPhase("closed");
       queueMicrotask(() => {
         botImportInputRef.current?.click();
@@ -38766,6 +45499,7 @@ function HomeContent(): React.JSX.Element {
   function resetEmptyStateToPrismHome(): void {
     closeEmptyStateBotSearch();
     resetEmptyStateBotSelection();
+    setZenPersonaBotId(null);
     setPendingIncognito(false);
     if (hueFilterCenter !== null) {
       startBotPickerReturnToAll();
@@ -38868,6 +45602,96 @@ function HomeContent(): React.JSX.Element {
     },
     [view]
   );
+
+  function zenSessionHasNotStarted(): boolean {
+    return view === "chat" && (!detail || detail.messages.length === 0);
+  }
+
+  function armFreshZenPersona(nextBotId: string | null): void {
+    if (zenSessionHasNotStarted() && zenPersonaBotIdRef.current !== nextBotId) {
+      rotateZenFallbackWallpaperSeed();
+    }
+    setZenPersonaBotId(nextBotId);
+    setSelectedBotId(nextBotId);
+    setChatBotOverride(undefined);
+    closeEmptyStateBotSearch();
+    focusDraftInput();
+  }
+
+  function commitZenPersonaOff(): void {
+    setZenPersonaBotId(null);
+    if (zenSessionHasNotStarted()) {
+      setSelectedBotId(null);
+    }
+    focusDraftInput();
+  }
+
+  function commitZenPersonaTransition(nextBotId: string | null): void {
+    if (pendingReplyVisible) return;
+    const fromBotId = zenPersonaBotIdRef.current;
+    if (fromBotId === nextBotId) return;
+    if (nextBotId === null) {
+      commitZenPersonaOff();
+      return;
+    }
+
+    const style = resolveZenPersonaTransitionStyle(zenPersonaTransitionChoice, {
+      fromBotId,
+      toBotId: nextBotId,
+    });
+
+    setZenPersonaBotId(nextBotId);
+    const syntheticSubmit = {
+      preventDefault() {
+        // no-op; used so Persona transitions share the normal submit path
+      },
+    } as React.FormEvent<HTMLFormElement>;
+    void sendMessage(syntheticSubmit, {
+      draftOverride: "",
+      skipComposerHistory: true,
+      personaTransition: {
+        fromBotId,
+        toBotId: nextBotId,
+        source: "picker",
+        style,
+      },
+    });
+  }
+
+  function handleZenPersonaSelectionChange(next: string): void {
+    const nextBotId = next || null;
+    if (zenSessionHasNotStarted()) {
+      armFreshZenPersona(nextBotId);
+      return;
+    }
+    commitZenPersonaTransition(nextBotId);
+  }
+
+  function handleZenMentionPersonaSelection(botId: string): void {
+    if (zenSessionHasNotStarted()) {
+      armFreshZenPersona(botId);
+      return;
+    }
+    commitZenPersonaTransition(botId);
+  }
+
+  function handleZenEmptyComposerBackspace(): boolean {
+    if (view !== "chat" || pendingReplyVisible || zenPersonaBotIdRef.current === null) {
+      return false;
+    }
+    commitZenPersonaOff();
+    return true;
+  }
+
+  function renderZenPersonaTransitionChoiceControl(compact = false): React.ReactNode {
+    return (
+      <ZenPersonaTransitionChoiceControl
+        value={zenPersonaTransitionChoice}
+        onChange={setZenPersonaTransitionChoice}
+        compact={compact}
+      />
+    );
+  }
 
   useEffect(() => {
     if (!emptyStateTypingSearchAvailable) return;
@@ -39527,20 +46351,16 @@ function HomeContent(): React.JSX.Element {
   }, [sweepUndoToast]);
 
   useEffect(() => {
-    if (!devToolsOpen) return;
+    if (!devToolsOpen && !devToolsMinimized) return;
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        if (devTogglesOpen) {
-          setDevTogglesOpen(false);
-          return;
-        }
         closeDevTools();
       }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [devToolsOpen, devTogglesOpen, closeDevTools]);
+  }, [devToolsMinimized, devToolsOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -41136,6 +47956,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelSelectedFamily(botPrismGroup(bot.color));
     setFocusedMemoryId(null);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad(`Loading ${bot.name} memories...`, async () => {
       await refreshBotMemories(bot.id);
     });
@@ -41153,6 +47974,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
     setBotMemories([]);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad(view === "chat" ? "Loading Prism memories..." : "Loading Prism shared memories...", async () => {
       await refreshPrismMemoryPanel();
     });
@@ -41164,6 +47986,7 @@ function HomeContent(): React.JSX.Element {
     setMemoryPanelBotId(null);
     setMemoryPanelSelectedFamily(null);
     setFocusedMemoryId(null);
+    setBotMemoryDossier(null);
     await runMemoryPanelLoad("Loading memory directories...", async () => {
       await refreshMemories();
     });
@@ -41198,15 +48021,28 @@ function HomeContent(): React.JSX.Element {
 
   function handleHeaderHubClick() {
     pendingPrivateExitOnHubRef.current = true;
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setSelectedBotId(null);
+    setSandboxGridSelectedBotId(null);
+    setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
+    setConversationStarterPrompts(null);
     navigateToView("hub");
   }
 
   function resetCurrentModeStartSurface(): void {
     setConversationStarterPrompts(null);
+    if (view === "chat") {
+      setChatAutoRestoreSuppressed(true);
+    }
     setSelectedId(null);
     setDetail(null);
     setSelectedBotId(null);
     setChatBotOverride(undefined);
+    setZenPersonaBotId(null);
     closeEmptyStateBotSearch();
     if (hueFilterCenter !== null) {
       startBotPickerReturnToAll();
@@ -41216,6 +48052,7 @@ function HomeContent(): React.JSX.Element {
     if (view === "chat") {
       setChatStartupSummary(DEFAULT_CHAT_STARTUP_SUMMARY);
       chatSummaryRefreshMarkerRef.current = null;
+      rotateZenFallbackWallpaperSeed();
     }
   }
 
@@ -41237,6 +48074,10 @@ function HomeContent(): React.JSX.Element {
     closeEmptyStateBotSearch();
     startBotPickerReturnToAll();
     setSelectedBotId(spotlightBotId);
+    if (view === "chat") {
+      rotateZenFallbackWallpaperSeed();
+      setZenPersonaBotId(spotlightBotId);
+    }
     setSandboxGridSelectedBotId(spotlightBotId);
     setComposerPrimed(false);
     setConversationStarterPrompts(null);
@@ -41325,6 +48166,30 @@ function HomeContent(): React.JSX.Element {
     const { fields } = parseStoredBotPrompt(memoryPanelBot.system_prompt ?? "");
     return listBotProfileFacts(fields.facts);
   }, [memoryPanelBot]);
+
+  const activeBotMemoryDossier = useMemo(
+    () =>
+      memoryPanelBot?.id && botMemoryDossier?.botId === memoryPanelBot.id
+        ? botMemoryDossier
+        : null,
+    [botMemoryDossier, memoryPanelBot?.id]
+  );
+
+  const botAboutYouMemories = activeBotMemoryDossier?.aboutYouMemories ?? [];
+  const botMemoryDossierCurrentSessionOpinion = botMemoryDossierSessionOpinion(
+    activeBotMemoryDossier,
+    memoryPanelBot?.id
+  );
+  const botMemoryDossierSectionCounts = useMemo(
+    () => resolveBotMemoryDossierSectionCounts(botMemories, botAboutYouMemories),
+    [botAboutYouMemories, botMemories]
+  );
+  const botMemoryDossierStats = activeBotMemoryDossier
+    ? botMemoryDossierStatItems(
+        activeBotMemoryDossier.counts,
+        botMemoryDossierSectionCounts
+      )
+    : [];
 
   const memoryPanelAccent = normalizeAccentForTheme(
     memoryPanelScope === "bot"
@@ -41718,6 +48583,28 @@ function HomeContent(): React.JSX.Element {
     ),
     [memoryPanelScope, botMemories]
   );
+  const lastLearnedVisibleMemoryId = useMemo(() => {
+    let lastLearnedMemory: UserMemory | null = null;
+    let lastLearnedAtMs = Number.NEGATIVE_INFINITY;
+    for (const memory of visibleMemoryBubbles) {
+      const createdAtMs = Date.parse(memory.createdAt);
+      const comparableCreatedAtMs = Number.isFinite(createdAtMs)
+        ? createdAtMs
+        : Number.NEGATIVE_INFINITY;
+      if (
+        !lastLearnedMemory ||
+        comparableCreatedAtMs > lastLearnedAtMs ||
+        (
+          comparableCreatedAtMs === lastLearnedAtMs &&
+          memory.id.localeCompare(lastLearnedMemory.id) > 0
+        )
+      ) {
+        lastLearnedMemory = memory;
+        lastLearnedAtMs = comparableCreatedAtMs;
+      }
+    }
+    return lastLearnedMemory?.id ?? null;
+  }, [visibleMemoryBubbles]);
 
   const longTermMemoryCounts = useMemo(() => {
     const counts: Record<MemoryCategory, number> = {
@@ -42062,6 +48949,43 @@ function HomeContent(): React.JSX.Element {
       formatMemoryPanelText(memory.text, memoryPanelSubjectLabel, memoryCategory(memory)),
     [memoryPanelSubjectLabel]
   );
+  const handleMemoryBubbleActivate = useCallback((memory: UserMemory) => {
+    const actionKey = memoryCardDeleteKey(memory.id);
+    if (pendingDeleteKey === actionKey) {
+      disarmDelete();
+      setMemoryBubbleDeletePrimedId(null);
+      void deleteMemory(memory.id, memoryDeleteApiOptions(memory));
+      return;
+    }
+    if (focusedMemoryId !== memory.id) {
+      if (pendingDeleteKey?.startsWith(MEMORY_CARD_DELETE_PREFIX)) {
+        disarmDelete();
+      }
+      setMemoryBubbleDeletePrimedId(null);
+      setFocusedMemoryId(memory.id);
+      return;
+    }
+    if (memoryBubbleDeletePrimedId === memory.id) {
+      setMemoryBubbleDeletePrimedId(null);
+      armDelete(actionKey);
+      return;
+    }
+    setMemoryBubbleDeletePrimedId(memory.id);
+  }, [
+    armDelete,
+    deleteMemory,
+    disarmDelete,
+    focusedMemoryId,
+    memoryBubbleDeletePrimedId,
+    pendingDeleteKey,
+  ]);
+
+  useEffect(() => {
+    if (!memoryBubbleDeletePrimedId) return;
+    if (focusedMemoryId === memoryBubbleDeletePrimedId) return;
+    setMemoryBubbleDeletePrimedId(null);
+  }, [focusedMemoryId, memoryBubbleDeletePrimedId]);
+
   const renderZenSessionMemorySection = (): React.JSX.Element => (
     <>
       <section
@@ -42656,6 +49580,47 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  const visibleLocalImageCandidateOrEmpty = (
+    modelId: string | null | undefined
+  ): string => {
+    if (modelChoiceIsDisabled(modelId)) return "";
+    const visible = visibleLocalImageModelIdOrEmpty(modelId);
+    return modelChoiceIsDisabled(visible) ? "" : visible;
+  };
+
+  const visibleOpenAiImageCandidateOrEmpty = (
+    modelId: string | null | undefined
+  ): ReturnType<typeof normalizeOpenAiImageModelId> | "" =>
+    modelChoiceIsDisabled(modelId) ? "" : visibleOpenAiImageModelIdOrEmpty(modelId);
+
+  function imagesPanelImageLaneDisabled(provider: "local" | "openai"): boolean {
+    if (provider === "local") {
+      return (
+        modelChoiceIsDisabled(imageGenModelChoiceByProvider.local) ||
+        modelChoiceIsDisabled(settings?.preferredLocalImageModel)
+      );
+    }
+    return (
+      modelChoiceIsDisabled(imageGenModelChoiceByProvider.openai) ||
+      modelChoiceIsDisabled(settings?.preferredOpenAiImageModel)
+    );
+  }
+
+  function zenWallpaperImageLaneDisabled(provider: "local" | "openai"): boolean {
+    if (provider === "local") {
+      return (
+        modelChoiceIsDisabled(imageGenModelChoiceByProvider.local) ||
+        modelChoiceIsDisabled(settings?.preferredZenWallpaperLocalImageModel) ||
+        modelChoiceIsDisabled(settings?.preferredLocalImageModel)
+      );
+    }
+    return (
+      modelChoiceIsDisabled(imageGenModelChoiceByProvider.openai) ||
+      modelChoiceIsDisabled(settings?.preferredZenWallpaperOpenAiImageModel) ||
+      modelChoiceIsDisabled(settings?.preferredOpenAiImageModel)
+    );
+  }
+
   /** Effective image model for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
   function resolveImagesPanelImageModels(): {
     localModelId: string;
@@ -42673,30 +49638,35 @@ function HomeContent(): React.JSX.Element {
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
         ? ""
-        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
+        : visibleLocalImageCandidateOrEmpty(headerLocalRaw);
 
-    const localModelId =
-      headerLocal ||
-      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
-      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
-      localImageModelCatalogEntries[0]?.id ||
-      "";
+    const localModelId = imagesPanelImageLaneDisabled("local")
+      ? ""
+      : headerLocal ||
+        visibleLocalImageCandidateOrEmpty(botLocalImage) ||
+        visibleLocalImageCandidateOrEmpty(settings?.preferredLocalImageModel) ||
+        localImageModelCatalogEntries[0]?.id ||
+        "";
 
     const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
     const headerOpenAi =
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
-        : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
+        : visibleOpenAiImageCandidateOrEmpty(headerOpenAiRaw);
     const fallbackOpenAiImageModel =
-      visibleOpenAiImageModelIdOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
+      visibleOpenAiImageCandidateOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
 
     const openAiModelCandidates: Array<
       ReturnType<typeof normalizeOpenAiImageModelId> | ""
     > = [
-      headerOpenAi,
-      visibleOpenAiImageModelIdOrEmpty(botOpenAiImage),
-      visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel),
-      fallbackOpenAiImageModel,
+      ...(imagesPanelImageLaneDisabled("openai")
+        ? []
+        : [
+            headerOpenAi,
+            visibleOpenAiImageCandidateOrEmpty(botOpenAiImage),
+            visibleOpenAiImageCandidateOrEmpty(settings?.preferredOpenAiImageModel),
+            fallbackOpenAiImageModel,
+          ]),
     ];
     const openAiModelId =
       openAiModelCandidates.find(
@@ -42709,8 +49679,13 @@ function HomeContent(): React.JSX.Element {
 
   function zenWallpaperImageGenerationAvailable(): boolean {
     if (!settings) return false;
-    if (effectivePreferredProvider !== "local") return hasRunnableOnlineImageModels;
-    return localImageModelCatalogEntries.length > 0;
+    if (effectivePreferredProvider !== "local") {
+      if (hasRunnableOnlineImageModels && !zenWallpaperImageLaneDisabled("openai")) {
+        return true;
+      }
+      return localImageModelCatalogEntries.length > 0 && !zenWallpaperImageLaneDisabled("local");
+    }
+    return localImageModelCatalogEntries.length > 0 && !zenWallpaperImageLaneDisabled("local");
   }
 
   function resolveZenWallpaperImageModels(): {
@@ -42727,29 +49702,34 @@ function HomeContent(): React.JSX.Element {
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
         ? ""
-        : visibleLocalImageModelIdOrEmpty(headerLocalRaw);
-    const localModelId =
-      headerLocal ||
-      visibleLocalImageModelIdOrEmpty(botLocalImage) ||
-      visibleLocalImageModelIdOrEmpty(settings?.preferredZenWallpaperLocalImageModel) ||
-      visibleLocalImageModelIdOrEmpty(settings?.preferredLocalImageModel) ||
-      localImageModelCatalogEntries[0]?.id ||
-      "";
+        : visibleLocalImageCandidateOrEmpty(headerLocalRaw);
+    const localModelId = zenWallpaperImageLaneDisabled("local")
+      ? ""
+      : headerLocal ||
+        visibleLocalImageCandidateOrEmpty(botLocalImage) ||
+        visibleLocalImageCandidateOrEmpty(settings?.preferredZenWallpaperLocalImageModel) ||
+        visibleLocalImageCandidateOrEmpty(settings?.preferredLocalImageModel) ||
+        localImageModelCatalogEntries[0]?.id ||
+        "";
     const headerOpenAiRaw = imageGenModelChoiceByProvider.openai?.trim() ?? "";
     const headerOpenAi =
       headerOpenAiRaw === AUTO_MODEL_CHOICE || headerOpenAiRaw === ""
         ? ""
-        : visibleOpenAiImageModelIdOrEmpty(headerOpenAiRaw);
+        : visibleOpenAiImageCandidateOrEmpty(headerOpenAiRaw);
     const fallbackOpenAiImageModel =
-      visibleOpenAiImageModelIdOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
+      visibleOpenAiImageCandidateOrEmpty(availableOpenAiImageModelCatalogEntries[0]?.id);
     const openAiModelCandidates: Array<
       ReturnType<typeof normalizeOpenAiImageModelId> | ""
     > = [
-      headerOpenAi,
-      visibleOpenAiImageModelIdOrEmpty(botOpenAiImage),
-      visibleOpenAiImageModelIdOrEmpty(settings?.preferredZenWallpaperOpenAiImageModel),
-      visibleOpenAiImageModelIdOrEmpty(settings?.preferredOpenAiImageModel),
-      fallbackOpenAiImageModel,
+      ...(zenWallpaperImageLaneDisabled("openai")
+        ? []
+        : [
+            headerOpenAi,
+            visibleOpenAiImageCandidateOrEmpty(botOpenAiImage),
+            visibleOpenAiImageCandidateOrEmpty(settings?.preferredZenWallpaperOpenAiImageModel),
+            visibleOpenAiImageCandidateOrEmpty(settings?.preferredOpenAiImageModel),
+            fallbackOpenAiImageModel,
+          ]),
     ];
     const openAiModelId =
       openAiModelCandidates.find(
@@ -42813,14 +49793,22 @@ function HomeContent(): React.JSX.Element {
       }
       if (options.enabled && generationRequested) {
         if (effectivePreferredProvider === "local") {
-          body.preferredProvider = "local";
-          if (localModelId) body.model = localModelId;
-        } else {
-          body.preferredProvider = "openai";
-          if (!openAiModelId) {
-            throw new Error("Add an OpenAI key in Settings to enable online image models.");
+        body.preferredProvider = "local";
+        if (localModelId) body.model = localModelId;
+      } else {
+          if (zenWallpaperImageLaneDisabled("openai")) {
+            if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
+              throw new Error("Online Atmosphere images are disabled. Choose a local image model before generating.");
+            }
+            body.preferredProvider = "local";
+            body.model = localModelId;
+          } else {
+            body.preferredProvider = "openai";
+            if (!openAiModelId) {
+              throw new Error("Add an OpenAI key in Settings to enable online image models.");
+            }
+            body.model = openAiModelId;
           }
-          body.model = openAiModelId;
         }
       }
       const data = await api<ZenWallpaperApiResponse>(
@@ -42875,7 +49863,13 @@ function HomeContent(): React.JSX.Element {
       zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
     }
     const lastGeneratedAt = zenWallpaper.generationMessageCount ?? 0;
-    if (!zenWallpaper.imageId) return;
+    if (!zenWallpaper.imageId) {
+      void requestZenWallpaperUpdate(detail.id, {
+        enabled: true,
+        force: true,
+      });
+      return;
+    }
     const shouldGenerateForIdleEra =
       zenLatestIdleEraBoundaryMessageCount !== null &&
       lastGeneratedAt < zenLatestIdleEraBoundaryMessageCount;
@@ -43135,12 +50129,23 @@ function HomeContent(): React.JSX.Element {
       // Uses the EFFECTIVE provider so the body honors the offline-only lock
       // when the active chat bot is protected.
       if (effectivePreferredProvider !== "local") {
-        body.preferredProvider = "openai";
-        if (!openAiModelId) {
-          throw new Error("Add an OpenAI key in Settings to enable online image models.");
+        if (imagesPanelImageLaneDisabled("openai")) {
+          if (imagesPanelImageLaneDisabled("local") || !localModelId) {
+            throw new Error("Online image generation is disabled. Choose a local image model before generating.");
+          }
+          body.preferredProvider = "local";
+          body.model = localModelId;
+        } else {
+          body.preferredProvider = "openai";
+          if (!openAiModelId) {
+            throw new Error("Add an OpenAI key in Settings to enable online image models.");
+          }
+          body.model = openAiModelId;
         }
-        body.model = openAiModelId;
       } else if (settings) {
+        if (imagesPanelImageLaneDisabled("local")) {
+          throw new Error("Local image generation is disabled. Choose a local image model before generating.");
+        }
         body.preferredProvider = "local";
         if (localModelId) {
           body.model = localModelId;
@@ -43361,6 +50366,15 @@ function HomeContent(): React.JSX.Element {
   const shouldShowPreAuthChecklist = !user && !hasAnyAccounts && !preAuthChecklistComplete;
   const shouldShowAuthForm = !user && (hasAnyAccounts || preAuthChecklistComplete);
 
+  if (!user && backendUnavailable) {
+    return (
+      <main className={`${styles.authLayout} ${themeClass}`}>
+        {renderBackendUnavailableNotice("full")}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  }
+
   if (clientAccessState !== "allowed") {
     const isChecking = clientAccessState === "checking";
     return (
@@ -43567,7 +50581,7 @@ function HomeContent(): React.JSX.Element {
       {
         id: "extras",
         title: "Extra servers (optional)",
-        subtitle: "Pair matching Ollama models or add ComfyUI for local image workflows.",
+        subtitle: "Use paired Ollama models or add ComfyUI for local image workflows.",
         state: backupConfigured ? "done" : "optional",
       },
     ] as const;
@@ -44408,13 +51422,17 @@ function HomeContent(): React.JSX.Element {
     index: number
   ): React.CSSProperties => {
     const rawRowColor = resolveRowColor(c, bots);
-    const rowAccent = rawRowColor
+    const normalRowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
       : !c.incognito
         ? neutralRowColor(resolvedTheme)
         : null;
+    const rowAccent =
+      rawRowColor && appWidePrivateMode
+        ? privateModeAccentHex(rawRowColor, resolvedTheme) ?? normalRowAccent
+        : normalRowAccent;
     const privateRowTint =
-      privateChatActive && rowAccent
+      appWidePrivateMode && rowAccent
         ? mixHex(
             rowAccent,
             resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
@@ -44428,10 +51446,10 @@ function HomeContent(): React.JSX.Element {
             "--row-color": privateRowTint,
             "--row-glyph-color": rowAccent ?? privateRowTint,
             "--row-border-mix": `${rowBorderMixPercent(privateRowTint, resolvedTheme)}%`,
-            "--row-selected-text-color": privateChatActive
+            "--row-selected-text-color": appWidePrivateMode
               ? (rowAccent ?? privateRowTint)
               : selectedRowTextColor(privateRowTint, resolvedTheme),
-            ...(privateChatActive
+            ...(appWidePrivateMode
               ? { "--row-text-color": rowAccent ?? privateRowTint }
               : {}),
           }
@@ -44444,10 +51462,14 @@ function HomeContent(): React.JSX.Element {
     index: number
   ): React.CSSProperties => {
     const rawRowColor = group.color;
-    const rowAccent = rawRowColor
+    const normalRowAccent = rawRowColor
       ? normalizeAccentForTheme(rawRowColor, resolvedTheme)
       : neutralRowColor(resolvedTheme);
-    const privateRowTint = privateChatActive
+    const rowAccent =
+      rawRowColor && appWidePrivateMode
+        ? privateModeAccentHex(rawRowColor, resolvedTheme) ?? normalRowAccent
+        : normalRowAccent;
+    const privateRowTint = appWidePrivateMode
       ? mixHex(
           rowAccent,
           resolvedTheme === "dark" ? "#b9b0a5" : "#2c251e",
@@ -45131,6 +52153,71 @@ function HomeContent(): React.JSX.Element {
   const renderZenMemoryToasts = () =>
     view === "chat" ? renderMemoryToasts("zen") : null;
 
+  const renderMobileSidebarMenuToggle = (): React.JSX.Element | null => {
+    if (!sidebarDrawerMode) return null;
+
+    const hidden = sidebarOpen || panel !== null;
+    const label = sidebarOpen ? "Close navigation menu" : "Open navigation menu";
+
+    return (
+      <button
+        type="button"
+        className={`${styles.menuToggle} ${hidden ? styles.menuToggleHidden : ""}`}
+        data-dev-panel-safe-area="top"
+        onClick={() => {
+          setSidebarOpen(open => !open);
+        }}
+        aria-controls={APP_SIDEBAR_NAVIGATION_ID}
+        aria-expanded={sidebarOpen}
+        aria-label={label}
+        data-glyph-tooltip={label}
+        aria-hidden={hidden}
+        tabIndex={hidden ? -1 : 0}
+      >
+        <MenuIcon className={styles.menuToggleGlyph} aria-hidden="true" />
+      </button>
+    );
+  };
+
+  const renderPsychicModeToast = () => {
+    if (!psychicModeToast) return null;
+    return (
+      <div
+        className={styles.psychicModeToast}
+        data-psychic-active={psychicModeToast.enabled ? "true" : "false"}
+        role="status"
+        aria-live="polite"
+      >
+        <span className={styles.psychicModeToastDot} aria-hidden="true" />
+        <span className={styles.psychicModeToastCopy}>
+          <strong>{psychicModeToast.enabled ? "Psychic on" : "Psychic off"}</strong>
+          <small>
+            {psychicModeToast.enabled
+              ? "Summaries will appear under new sends."
+              : "Summaries hidden for new sends."}
+          </small>
+        </span>
+      </div>
+    );
+  };
+
+  const renderLocalCommandToast = () => {
+    if (!localCommandToast) return null;
+    return (
+      <div
+        className={`${styles.psychicModeToast} ${styles.localCommandToast}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className={styles.psychicModeToastDot} aria-hidden="true" />
+        <span className={styles.psychicModeToastCopy}>
+          <strong>{localCommandToast.title}</strong>
+          <small>{localCommandToast.detail}</small>
+        </span>
+      </div>
+    );
+  };
+
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
@@ -45166,37 +52253,34 @@ function HomeContent(): React.JSX.Element {
     const privateFocusedBotHeaderMode = privateChatActive && privateCustomBotActive;
     const privateFocusedBotBase =
       (activeBot?.color ?? headerIdentity?.color ?? PRISM_DEFAULT_ACCENT).trim();
-    const privateFocusedBotNormalized = normalizeAccentForTheme(
-      privateFocusedBotBase,
-      resolvedTheme
-    );
-    const privateFocusedBotHeaderTint = mixHex(
-      privateFocusedBotNormalized,
-      "#ffffff",
-      resolvedTheme === "dark" ? 0.52 : 0.4
+    const privateFocusedBotHeaderTint =
+      privateModeAccentHex(privateFocusedBotBase, resolvedTheme) ??
+      normalizeAccentForTheme(privateFocusedBotBase, resolvedTheme);
+    const privateHeaderToolTints = PRISM_WORDMARK_PALETTE.map(
+      (color) => privateModeAccentHex(color, resolvedTheme) ?? color
     );
     const privateDefaultMemoriesStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[0] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[0] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultAtmosphereStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[1] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[1] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultImagesStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[2] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[2] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultBotsStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[3] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[3] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
     const privateDefaultThemeStyle = privateDefaultHeaderMode
-      ? ({ color: PRISM_WORDMARK_PALETTE[4] } as React.CSSProperties)
+      ? ({ color: privateHeaderToolTints[4] } as React.CSSProperties)
       : privateFocusedBotHeaderMode
         ? ({ color: privateFocusedBotHeaderTint } as React.CSSProperties)
         : undefined;
@@ -46529,117 +53613,61 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderDevTogglesModal = (): React.JSX.Element | null => {
-    if (!devTogglesOpen) return null;
-    return (
-      <div
-        className={`${styles.deleteAllModalBackdrop} ${styles.devTogglesModalBackdrop}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) setDevTogglesOpen(false);
-        }}
-      >
-        <div
-          id="dev-toggles-modal"
-          className={styles.deleteAllModalPanel}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="dev-toggles-title"
-          aria-describedby="dev-toggles-desc"
-          onClick={(event) => event.stopPropagation()}
+  const renderDebugComposer = (): React.JSX.Element | null => {
+    if (!devToolsRuntimeActive) return null;
+    if (devDebugComposerMinimized) {
+      return (
+        <button
+          type="button"
+          className={styles.debugComposerRestoreButton}
+          onClick={() => setDevDebugComposerMinimized(false)}
+          aria-label="Restore debug composer"
         >
-          <h2 id="dev-toggles-title" className={styles.deleteAllModalTitle}>
-            Dev toggles
-          </h2>
-          <p id="dev-toggles-desc" className={styles.deleteAllModalBody}>
-            Local-only switches for developer workflows.
-          </p>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devToolsBotImportPasteEnabled}
-              onChange={(event) => persistDevToolsBotImportPaste(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Allow paste JSON when importing</strong>
-              <small>
-                Off opens the .bot/.bots file picker directly. On adds a paste-from-clipboard
-                import choice.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devChatMetricsEnabled}
-              onChange={(event) => persistDevChatMetricsEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Show developer metrics terminal</strong>
-              <small>
-                Streams summary runs, memory updates, backend routes, model calls, and tool diagnostics
-                into the floating developer terminal.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devDebugComposerEnabled}
-              onChange={(event) => persistDevDebugComposerEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Show Zen debug composer</strong>
-              <small>
-                Adds a debug-only composer above Zen mode&apos;s normal composer. Send echoes text
-                locally as an assistant reply and skips model calls.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devShowCompactedSummaryInChat}
-              onChange={(event) =>
-                persistDevShowCompactedSummaryInChat(event.currentTarget.checked)
-              }
-            />
-            <span>
-              <strong>Show compacted summary in chat</strong>
-              <small>
-                Renders the latest thread-compaction payload at the bottom of the current chat
-                so context can be inspected after /compact or /summarize.
-              </small>
-            </span>
-          </label>
-          <label className={styles.devTogglesModalOption}>
-            <input
-              type="checkbox"
-              checked={devMoodVisualEnabled}
-              onChange={(event) => setDevMoodVisualEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Show Prism mood visual</strong>
-              <small>
-                Displays a draggable mood face with mood diagnostics and debug controls.
-              </small>
-            </span>
-          </label>
-          <div className={styles.deleteAllModalActions}>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={() => setDevTogglesOpen(false)}
-            >
-              Close
-            </button>
+          <Maximize2 aria-hidden="true" size={14} />
+          <span>Debug composer</span>
+        </button>
+      );
+    }
+    return (
+      <div className={styles.debugComposerBox}>
+        <div className={styles.debugComposerHeader}>
+          <div className={styles.debugComposerLabel} aria-live="polite">
+            DEBUG COMPOSER (local echo only)
           </div>
+          <button
+            type="button"
+            className={styles.debugComposerMinimizeButton}
+            onClick={() => setDevDebugComposerMinimized(true)}
+            aria-label="Minimize debug composer"
+          >
+            <Minimize2 aria-hidden="true" size={13} />
+          </button>
+        </div>
+        <div className={styles.debugComposerRow} data-debug-composer="true">
+          <textarea
+            value={debugComposerDraft}
+            onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
+            placeholder="Type text to echo as a bot reply..."
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey) return;
+              event.preventDefault();
+              submitDebugComposerEcho();
+            }}
+          />
+          <button
+            type="button"
+            onClick={submitDebugComposerEcho}
+            disabled={debugComposerDraft.trim().length === 0 || pendingReply}
+          >
+            Send debug echo
+          </button>
         </div>
       </div>
     );
   };
 
   const renderDevMoodVisual = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devMoodVisualEnabled) return null;
+    if (!devToolsRuntimeActive) return null;
     const coffeeMood =
       view === "coffee"
         ? coffeeSocialByIdToPrismMood(coffeeConversation?.coffeeBotSocialById)
@@ -46673,6 +53701,49 @@ function HomeContent(): React.JSX.Element {
         : null;
     const debugControlsDisabled =
       devMoodDebugBusy || !debugConversationId || debugConversationId === "pending";
+    const chatRevealVisibleLength = (() => {
+      if (!chatAssistantRevealInProgress || !detail?.id || !latestAssistantMessageId) {
+        return null;
+      }
+      const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+      if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return null;
+      const latestAssistant =
+        detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+      if (!latestAssistant) return null;
+      const displayContent = resolveMessageDisplayContent(latestAssistant);
+      const revealTokens = tokenizeMessageReveal(displayContent);
+      const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
+        revealKey,
+        displayContent,
+        nowMs: chatEphemeralNowMs,
+        completed: false,
+        moodKey: DEFAULT_MESSAGE_MOOD,
+        delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+      });
+      return revealTokens.slice(0, visibleTokenCount).join("").length;
+    })();
+    const coffeeRevealVisibleLength = (() => {
+      if (view !== "coffee") return null;
+      if (coffeeTurnRhythmState === "tableTyping" && coffeePendingSpeakerBotId) {
+        return coffeeTypewriterLength;
+      }
+      if (!coffeeReplayActive || !coffeeConversation || coffeeConversation.messages.length === 0) {
+        return null;
+      }
+      const replayIndex = Math.max(
+        0,
+        Math.min(coffeeReplayMessageIndex, coffeeConversation.messages.length - 1)
+      );
+      const replayMessage = coffeeConversation.messages[replayIndex] ?? null;
+      if (!replayMessage || replayMessage.role !== "assistant") return null;
+      const displayLength = coffeeReplayDisplayLengthForMessage(replayMessage);
+      if (displayLength <= 0 || coffeeReplayTypewriterLength >= displayLength) return null;
+      return coffeeReplayTypewriterLength;
+    })();
+    const devMoodFaceVisibleLength = chatRevealVisibleLength ?? coffeeRevealVisibleLength;
+    const devMoodFaceTalking = devMoodFaceVisibleLength !== null;
+    const devMoodFaceMouthOpen =
+      devMoodFaceTalking && coffeeSeatMouthOpenFromVisibleLength(devMoodFaceVisibleLength);
     return (
       <div
         ref={devMoodVisualRef}
@@ -46703,6 +53774,8 @@ function HomeContent(): React.JSX.Element {
             variant="prism"
             color={activeBot?.color}
             voicePreset={coffeeSeatVoicePreset(activeBot)}
+            isTalking={devMoodFaceTalking}
+            mouthOpen={devMoodFaceMouthOpen}
           />
         </button>
         {ignoreRemainingLabel ? (
@@ -46863,8 +53936,357 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const updateDevZenPauseTiming = (
+    key: keyof ChatRevealTimingSettings,
+    valueSeconds: string
+  ): void => {
+    const seconds = Number.parseFloat(valueSeconds);
+    setDevZenPauseTiming((current) =>
+      normalizeChatRevealTimingSettings(
+        {
+          ...current,
+          [key]: Number.isFinite(seconds) ? seconds * 1000 : current[key],
+        },
+        current
+      )
+    );
+  };
+
+  const formatDevZenPauseSeconds = (ms: number): string => (ms / 1000).toFixed(3);
+  const formatDevZenPauseSummarySeconds = (ms: number): string =>
+    ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${(ms / 1000).toFixed(3)}s`;
+  const devZenPauseKindLabel = (kind: ReturnType<typeof resolveChatRevealPauseKind>): string => {
+    switch (kind) {
+      case "ellipsis":
+        return "Ellipsis";
+      case "sentence":
+        return "Sentence";
+      case "clause":
+        return "Clause";
+      case "base":
+      default:
+        return "Word";
+    }
+  };
+  const devZenPauseTokenPreview = (token: string): string => {
+    const display = formatChatRevealTokenDisplay(token, {
+      ellipsisPhase: isChatRevealEllipsisToken(token) ? "complete" : undefined,
+    }).trim();
+    if (!display) return "whitespace";
+    return display.length > 28 ? `${display.slice(0, 25)}...` : display;
+  };
+  const resolveDevZenPauseTesterStatus = (): {
+    active: boolean;
+    label: string;
+    delayMs: number;
+    token: string;
+  } => {
+    if (!detail?.id || !latestAssistantMessageId) {
+      return { active: false, label: "Idle", delayMs: 0, token: "No active reveal" };
+    }
+    const latestAssistant =
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
+    if (!latestAssistant) {
+      return { active: false, label: "Idle", delayMs: 0, token: "No active reveal" };
+    }
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (
+      !chatAssistantRevealEligibleKeysRef.current.has(revealKey) ||
+      chatCompletedRevealKeysRef.current.has(revealKey) ||
+      chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)
+    ) {
+      return { active: false, label: "Idle", delayMs: 0, token: "Reveal complete" };
+    }
+    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
+    const tokenTotal = Math.max(1, revealTokens.length);
+    const pacedVisibleTokenCount =
+      chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount ?? 1;
+    const previousTokenIndex = Math.max(
+      0,
+      Math.min(tokenTotal - 1, Math.max(1, pacedVisibleTokenCount) - 1)
+    );
+    const token = revealTokens[previousTokenIndex] ?? "";
+    const pauseKind = resolveChatRevealPauseKind(token);
+    return {
+      active: true,
+      label: devZenPauseKindLabel(pauseKind),
+      delayMs: resolveRevealStepDelayMs(token, DEFAULT_MESSAGE_MOOD, effectiveChatRevealTiming),
+      token: devZenPauseTokenPreview(token),
+    };
+  };
+
+  const renderDevZenPauseTester = (): React.JSX.Element | null => {
+    if (!devToolsRuntimeActive || view !== "chat") return null;
+    const status = resolveDevZenPauseTesterStatus();
+    return (
+      <div
+        ref={devZenPauseTesterRef}
+        className={styles.devZenPauseTester}
+        data-open={devZenPauseTesterOpen ? "true" : undefined}
+        style={{
+          left: `${devZenPauseTesterPosition.x}px`,
+          top: `${devZenPauseTesterPosition.y}px`,
+        }}
+      >
+        <button
+          type="button"
+          className={styles.devZenPauseTesterBubble}
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              devZenPauseTesterRef.current,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              devZenPauseTesterRef.current,
+              devZenPauseTesterDragRef,
+              setDevZenPauseTesterPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(
+              event,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(
+              event,
+              devZenPauseTesterDragRef,
+              devZenPauseTesterSuppressClickRef
+            )
+          }
+          onClick={() => {
+            if (devZenPauseTesterSuppressClickRef.current) return;
+            setDevZenPauseTesterOpen((open) => !open);
+          }}
+          aria-label={devZenPauseTesterOpen ? "Collapse Zen pause tester" : "Open Zen pause tester"}
+          aria-expanded={devZenPauseTesterOpen}
+          data-glyph-tooltip={devZenPauseTesterOpen ? "Collapse pause tester" : "Zen pause tester"}
+        >
+          <Timer size={18} aria-hidden="true" />
+        </button>
+        {devZenPauseTesterOpen ? (
+          <div className={styles.devZenPauseTesterPanel} role="dialog" aria-label="Zen pause tester">
+            <div className={styles.devZenPauseTesterHeader}>
+              <div>
+                <span className={styles.devToolsKicker}>Zen timing</span>
+                <strong>Pause tester</strong>
+              </div>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={() => setDevZenPauseTesterOpen(false)}
+                aria-label="Collapse Zen pause tester"
+              >
+                ×
+              </button>
+            </div>
+            <p
+              className={styles.devZenPauseTesterStatus}
+              data-active={status.active ? "true" : undefined}
+              aria-live="polite"
+            >
+              <span>Current pause</span>
+              <strong>
+                {status.active
+                  ? `${status.label} · ${formatDevZenPauseSummarySeconds(status.delayMs)}`
+                  : "Idle"}
+              </strong>
+              <small>{status.token}</small>
+            </p>
+            <div className={styles.devZenPauseTesterControls}>
+              {DEV_ZEN_PAUSE_TESTER_CONTROLS.map((control) => (
+                <label key={control.key} className={styles.devZenPauseTesterControl}>
+                  <span>
+                    {control.label}
+                    <strong>{formatDevZenPauseSummarySeconds(effectiveChatRevealTiming[control.key])}</strong>
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.001}
+                    value={formatDevZenPauseSeconds(effectiveChatRevealTiming[control.key])}
+                    onChange={(event) =>
+                      updateDevZenPauseTiming(control.key, event.currentTarget.value)
+                    }
+                    aria-label={`${control.label} seconds`}
+                  />
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={`${styles.devToolsAction} ${styles.devZenPauseTesterReset}`}
+              onClick={() => setDevZenPauseTiming(DEFAULT_CHAT_REVEAL_TIMING)}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              Reset defaults
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderZenToolLab = (): React.JSX.Element | null => {
+    if (!devToolsRuntimeActive || view !== "chat") return null;
+    return (
+      <div
+        ref={zenToolLabRef}
+        className={styles.zenToolLabDock}
+        data-open={zenToolLabOpen ? "true" : undefined}
+        style={{
+          left: `${zenToolLabPosition.x}px`,
+          top: `${zenToolLabPosition.y}px`,
+        }}
+      >
+        <button
+          type="button"
+          className={styles.zenToolLabBubble}
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              zenToolLabRef.current,
+              zenToolLabDragRef,
+              zenToolLabSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              zenToolLabRef.current,
+              zenToolLabDragRef,
+              setZenToolLabPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(event, zenToolLabDragRef, zenToolLabSuppressClickRef)
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(event, zenToolLabDragRef, zenToolLabSuppressClickRef)
+          }
+          onClick={() => {
+            if (zenToolLabSuppressClickRef.current) return;
+            setZenToolLabOpen((open) => !open);
+          }}
+          aria-label={zenToolLabOpen ? "Collapse Zen Tool Lab" : "Open Zen Tool Lab"}
+          aria-expanded={zenToolLabOpen}
+          aria-controls="zen-tool-lab-panel"
+          data-glyph-tooltip={zenToolLabOpen ? "Collapse Tool Lab" : "Zen Tool Lab"}
+        >
+          <Play size={17} aria-hidden="true" />
+        </button>
+        {zenToolLabOpen ? (
+          <div
+            id="zen-tool-lab-panel"
+            className={styles.zenToolLabPanel}
+            role="dialog"
+            aria-label="Zen Tool Lab"
+          >
+            <div className={styles.zenToolLabHeader}>
+              <div>
+                <span className={styles.devToolsKicker}>Zen tools</span>
+                <strong>Tool Lab</strong>
+              </div>
+              <button
+                type="button"
+                className={styles.devToolsIconButton}
+                onClick={() => setZenToolLabOpen(false)}
+                aria-label="Collapse Zen Tool Lab"
+              >
+                ×
+              </button>
+            </div>
+            <p
+              className={styles.zenToolLabStatus}
+              data-active={zenToolLabHasActiveThread ? "true" : undefined}
+              role="status"
+            >
+              {zenToolLabHasActiveThread
+                ? "Samples append to this thread only."
+                : "Start a Zen thread to enable tool samples."}
+            </p>
+            <div className={styles.zenToolLabGrid} aria-label="Zen Tool Lab samples">
+              {ZEN_TOOL_LAB_TOOLS.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  className={styles.zenToolLabToolButton}
+                  disabled={!zenToolLabHasActiveThread}
+                  onClick={() => appendZenToolLabSample(tool.id)}
+                >
+                  <span className={styles.zenToolLabToolIcon} aria-hidden="true">
+                    <Play size={13} strokeWidth={2.4} />
+                  </span>
+                  <span>
+                    <strong>{tool.label}</strong>
+                    <small>{tool.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderDevToolsPanel = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devToolsOpen) return null;
+    if (!DEV_TOOLS_ENABLED || !devToolsUnlocked) return null;
+    if (!devToolsOpen || devToolsMinimized) {
+      return (
+        <button
+          ref={devToolsBubbleRef}
+          type="button"
+          className={styles.devToolsBubble}
+          style={
+            {
+              left: `${devToolsPanelPosition.x}px`,
+              top: `${devToolsPanelPosition.y}px`,
+            } as React.CSSProperties
+          }
+          onPointerDown={(event) =>
+            startDevLayerOrbDrag(
+              event,
+              devToolsBubbleRef.current,
+              devToolsBubbleDragRef,
+              devToolsBubbleSuppressClickRef
+            )
+          }
+          onPointerMove={(event) =>
+            dragDevLayerOrb(
+              event,
+              devToolsBubbleRef.current,
+              devToolsBubbleDragRef,
+              setDevToolsPanelPosition
+            )
+          }
+          onPointerUp={(event) =>
+            endDevLayerOrbDrag(event, devToolsBubbleDragRef, devToolsBubbleSuppressClickRef)
+          }
+          onPointerCancel={(event) =>
+            endDevLayerOrbDrag(event, devToolsBubbleDragRef, devToolsBubbleSuppressClickRef)
+          }
+          onClick={() => {
+            if (devToolsBubbleSuppressClickRef.current) return;
+            setDevToolsMinimized(false);
+            setDevToolsOpen(true);
+          }}
+          aria-label="Restore developer tools"
+          title="Developer tools"
+        >
+          <Maximize2 aria-hidden="true" size={15} />
+          <span className={styles.devToolsBubbleLabel}>Dev</span>
+        </button>
+      );
+    }
     const densityStageTargets = pickerDensityStageTargets(
       viewportWidth,
       viewportHeight
@@ -46924,6 +54346,73 @@ function HomeContent(): React.JSX.Element {
             ? "Zen session"
           : "All bots";
     const devToolsTraceCount = devChatDebugEvents.length;
+    const renderDevMetricsTerminalLog = (): React.JSX.Element => (
+      <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
+        {!devChatMetricsTerminalActive ? (
+          <div className={styles.devMetricsTerminalEmpty}>
+            Open this panel with /dev to stream backend traces here.
+          </div>
+        ) : devChatDebugEvents.length === 0 ? (
+          <div className={styles.devMetricsTerminalEmpty}>
+            Waiting for the next chat request...
+          </div>
+        ) : (
+          devChatDebugEvents.slice(-80).map((event) => {
+            const kind = inferDevChatDebugKind(event);
+            const eventDate = new Date(event.createdAt);
+            const timestampTitle = Number.isNaN(eventDate.getTime())
+              ? event.createdAt
+              : eventDate.toLocaleTimeString();
+            return (
+              <div
+                key={event.id}
+                className={styles.devMetricsTerminalLine}
+                data-kind={kind}
+              >
+                <time
+                  className={styles.devMetricsTerminalTime}
+                  dateTime={event.createdAt}
+                  title={timestampTitle}
+                >
+                  {formatDevMetricsTimestamp(event.createdAt)}
+                </time>
+                <code>{renderDevMetricsInlineText(event.text)}</code>
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+    const renderDevMetricsTerminal = (consoleOnly = false): React.JSX.Element => (
+      <section
+        className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
+        aria-labelledby="dev-metrics-terminal-title"
+        data-console-only={consoleOnly ? "true" : undefined}
+      >
+        <div className={styles.devMetricsTerminalHeader}>
+          <div>
+            <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
+            <p>
+              Backend route, model, memory, summary, and tool events for the current chat run.
+            </p>
+          </div>
+          <div className={styles.devMetricsTerminalActions}>
+            <span data-enabled={devChatMetricsTerminalActive ? "true" : "false"}>
+              {devChatMetricsTerminalActive ? "Live" : "Off"}
+            </span>
+            <button
+              type="button"
+              className={styles.devToolsAction}
+              onClick={() => setDevChatDebugEvents([])}
+              disabled={devChatDebugEvents.length === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        {renderDevMetricsTerminalLog()}
+      </section>
+    );
     const devToolsSectionContent = (() => {
       switch (devToolsActiveSection) {
         case "seed":
@@ -47329,37 +54818,40 @@ function HomeContent(): React.JSX.Element {
               <section className={styles.devToolsCard}>
                 <div className={styles.devToolsCardHeader}>
                   <span>Local controls</span>
-                  <strong>Commands on</strong>
+                  <strong>{devToolsRuntimeActive ? "Layer on" : "Layer off"}</strong>
                 </div>
                 <div className={styles.devToolsStatGrid}>
                   <span className={styles.devToolsStat}>
-                    <small>Dev commands</small>
-                    <strong>Panel-only</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Metrics</small>
-                    <strong>{devChatMetricsEnabled ? "On" : "Off"}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
                     <small>Debug composer</small>
-                    <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong>
+                    <strong>{devDebugComposerMinimized ? "Minimized" : "Visible"}</strong>
                   </span>
                   <span className={styles.devToolsStat}>
-                    <small>JSON import paste</small>
-                    <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong>
+                    <small>Mood visual</small>
+                    <strong>{devMoodVisualOpen ? "Open" : "Bubble"}</strong>
+                  </span>
+                  <span className={styles.devToolsStat}>
+                    <small>Context dock</small>
+                    <strong>{compactedSummaryDebugMinimized ? "Minimized" : "Visible"}</strong>
                   </span>
                 </div>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => setDevTogglesOpen(true)}
-                    aria-haspopup="dialog"
-                    aria-expanded={devTogglesOpen}
-                    aria-controls="dev-toggles-modal"
-                  >
-                    Open toggles
-                  </button>
+                <p className={styles.devToolsSectionHint}>
+                  Visual dev tools appear together while /dev is active. Minimize individual
+                  surfaces when they get in the way; /dev close hides the whole layer.
+                </p>
+                <div className={styles.devToolsToggleList}>
+                  <label className={styles.devToolsToggleOption}>
+                    <input
+                      type="checkbox"
+                      checked={devToolsBotImportPasteEnabled}
+                      onChange={(event) =>
+                        persistDevToolsBotImportPaste(event.currentTarget.checked)
+                      }
+                    />
+                    <span>
+                      <strong>Bot import paste</strong>
+                      <small>Add a clipboard JSON choice to bot imports.</small>
+                    </span>
+                  </label>
                 </div>
               </section>
 
@@ -47450,57 +54942,7 @@ function HomeContent(): React.JSX.Element {
         default:
           return (
             <div className={styles.devToolsCardGrid}>
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
-                aria-labelledby="dev-metrics-terminal-title"
-              >
-                <div className={styles.devMetricsTerminalHeader}>
-                  <div>
-                    <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
-                    <p>
-                      Backend route, model, memory, summary, and tool events for the current chat run.
-                    </p>
-                  </div>
-                  <div className={styles.devMetricsTerminalActions}>
-                    <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
-                      {devChatMetricsEnabled ? "Live" : "Off"}
-                    </span>
-                    <button
-                      type="button"
-                      className={styles.devToolsAction}
-                      onClick={() => setDevChatDebugEvents([])}
-                      disabled={devChatDebugEvents.length === 0}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-                <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
-                  {!devChatMetricsEnabled ? (
-                    <div className={styles.devMetricsTerminalEmpty}>
-                      Enable “Show developer metrics terminal” in System to stream backend traces here.
-                    </div>
-                  ) : devChatDebugEvents.length === 0 ? (
-                    <div className={styles.devMetricsTerminalEmpty}>
-                      Waiting for the next chat request...
-                    </div>
-                  ) : (
-                    devChatDebugEvents.slice(-80).map((event) => {
-                      const kind = inferDevChatDebugKind(event);
-                      return (
-                        <div
-                          key={event.id}
-                          className={styles.devMetricsTerminalLine}
-                          data-kind={kind}
-                        >
-                          <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
-                          <code>{event.text}</code>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </section>
+              {renderDevMetricsTerminal()}
 
               <section className={styles.devToolsCard}>
                 <div className={styles.devToolsCardHeader}>
@@ -47537,6 +54979,125 @@ function HomeContent(): React.JSX.Element {
                   </span>
                 </div>
               </section>
+
+              {view === "chat" ? (
+                <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
+                  <div className={styles.devToolsCardHeader}>
+                    <span>Zen Persona backdrop</span>
+                    <strong>
+                      {selectedComposeBotAccent ? (zenPersonaBot?.name ?? "Equipped") : "No Persona"}
+                    </strong>
+                  </div>
+                  <div className={styles.devToolsBackdropPreview}>
+                    <span
+                      className={styles.devToolsBackdropSwatch}
+                      style={
+                        selectedComposeBotAccent
+                          ? ({
+                              "--dev-tools-backdrop-color": selectedComposeBotAccent,
+                            } as React.CSSProperties)
+                          : undefined
+                      }
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Blend {Math.round(zenPersonaBackdropTuning.blend)}% · opacity{" "}
+                      {formatZenPersonaBackdropPercent(zenPersonaBackdropTuning.opacity)} · saturation{" "}
+                      {formatZenPersonaBackdropPercent(zenPersonaBackdropTuning.saturation)} · dark{" "}
+                      {formatZenPersonaBackdropBlendMode(zenPersonaBackdropTuning.darkBlendMode)} · light{" "}
+                      {formatZenPersonaBackdropBlendMode(zenPersonaBackdropTuning.lightBlendMode)}
+                    </span>
+                  </div>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Blend strength</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_BLEND}
+                      max={MAX_ZEN_PERSONA_BACKDROP_BLEND}
+                      step={1}
+                      value={zenPersonaBackdropTuning.blend}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ blend: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Opacity</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_OPACITY}
+                      max={MAX_ZEN_PERSONA_BACKDROP_OPACITY}
+                      step={0.01}
+                      value={zenPersonaBackdropTuning.opacity}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ opacity: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Saturation</span>
+                    <input
+                      type="range"
+                      min={MIN_ZEN_PERSONA_BACKDROP_SATURATION}
+                      max={MAX_ZEN_PERSONA_BACKDROP_SATURATION}
+                      step={0.01}
+                      value={zenPersonaBackdropTuning.saturation}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({ saturation: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Dark blend mode</span>
+                    <select
+                      value={zenPersonaBackdropTuning.darkBlendMode}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({
+                          darkBlendMode: normalizeZenPersonaBackdropBlendMode(
+                            event.target.value,
+                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode
+                          ),
+                        })
+                      }
+                    >
+                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={`dark:${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.devToolsCountControl}>
+                    <span>Light blend mode</span>
+                    <select
+                      value={zenPersonaBackdropTuning.lightBlendMode}
+                      onChange={(event) =>
+                        persistZenPersonaBackdropTuning({
+                          lightBlendMode: normalizeZenPersonaBackdropBlendMode(
+                            event.target.value,
+                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode
+                          ),
+                        })
+                      }
+                    >
+                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={`light:${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className={styles.devToolsActions}>
+                    <button
+                      type="button"
+                      className={styles.devToolsAction}
+                      onClick={resetZenPersonaBackdropTuning}
+                    >
+                      Reset backdrop tuning
+                    </button>
+                  </div>
+                </section>
+              ) : null}
 
               {view === "coffee" ? (
                 <section className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}>
@@ -47603,727 +55164,332 @@ function HomeContent(): React.JSX.Element {
           ref={devToolsPanelRef}
           className={styles.devToolsFloatingPanel}
           role="dialog"
-          aria-labelledby="dev-tools-title"
+          aria-label={devToolsConsoleOnly ? "Developer metrics terminal" : undefined}
+          aria-labelledby={devToolsConsoleOnly ? undefined : "dev-tools-title"}
           aria-busy={devToolsBusy ? "true" : undefined}
           data-section={devToolsActiveSection}
+          data-console-only={devToolsConsoleOnly ? "true" : undefined}
+          style={
+            {
+              left: `${devToolsPanelPosition.x}px`,
+              top: `${devToolsPanelPosition.y}px`,
+              "--dev-tools-panel-left": `${devToolsPanelPosition.x}px`,
+              "--dev-tools-panel-top": `${devToolsPanelPosition.y}px`,
+              ...(devToolsPanelSize
+                ? {
+                    width: `${devToolsPanelSize.width}px`,
+                    height: `${devToolsPanelSize.height}px`,
+                  }
+                : {}),
+            } as React.CSSProperties
+          }
         >
-          <div
-            className={styles.devToolsHeader}
-            onPointerDown={startDevToolsPanelDrag}
-            onPointerMove={dragDevToolsPanel}
-            onPointerUp={endDevToolsPanelDrag}
-            onPointerCancel={endDevToolsPanelDrag}
-          >
-            <div className={styles.devToolsHeaderCopy}>
-              <span className={styles.devToolsKicker}>Local control center</span>
-              <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-                Developer tools
-              </h2>
-              <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+          {!devToolsConsoleOnly ? (
+            <div
+              className={styles.devToolsHeader}
+              onPointerDown={startDevToolsPanelDrag}
+              onPointerMove={dragDevToolsPanel}
+              onPointerUp={endDevToolsPanelDrag}
+              onPointerCancel={endDevToolsPanelDrag}
+            >
+              <div className={styles.devToolsHeaderCopy}>
+                <span className={styles.devToolsKicker}>Local control center</span>
+                <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
+                  Developer tools
+                </h2>
+                <p>Inspect, seed, and stress-test PRISM without losing your place.</p>
+              </div>
+              <div className={styles.devToolsHeaderMeta}>
+                <span
+                  className={styles.devToolsPill}
+                  data-tone={devToolsBusy ? "busy" : "ready"}
+                >
+                  {devToolsBusy ? "Working" : "Ready"}
+                </span>
+                <span className={styles.devToolsDragHint} aria-hidden="true">
+                  drag
+                </span>
+                <button
+                  type="button"
+                  className={styles.devToolsIconButton}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={minimizeDevTools}
+                  aria-label="Minimize developer tools"
+                >
+                  <Minimize2 aria-hidden="true" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.devToolsIconButton}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={closeDevTools}
+                  aria-label="Close developer tools"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div className={styles.devToolsHeaderMeta}>
-              <span
-                className={styles.devToolsPill}
-                data-tone={devToolsBusy ? "busy" : "ready"}
-              >
-                {devToolsBusy ? "Working" : "Ready"}
-              </span>
-              <span className={styles.devToolsDragHint} aria-hidden="true">
-                drag
-              </span>
-              <button
-                type="button"
-                className={styles.devToolsIconButton}
-                onClick={closeDevTools}
-                aria-label="Close developer tools"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
-            <span className={styles.devToolsOverviewItem}>
-              <small>Surface</small>
-              <strong>{view}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Viewport</small>
-              <strong>{viewportWidth}×{viewportHeight}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Bots</small>
-              <strong>{bots.length.toLocaleString()}</strong>
-            </span>
-            <span className={styles.devToolsOverviewItem}>
-              <small>Memories</small>
-              <strong>{memories.length.toLocaleString()}</strong>
-            </span>
-          </div>
-
-          {devToolsMessage ? (
-            <p className={styles.devToolsStatus} role="status">
-              {devToolsMessage}
-            </p>
           ) : null}
 
-          <div className={styles.devToolsLayout}>
-            <nav className={styles.devToolsNav} aria-label="Developer tool categories">
-              {DEV_TOOLS_NAV_ITEMS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={styles.devToolsNavButton}
-                  data-active={item.id === devToolsActiveSection ? "true" : undefined}
-                  onClick={() => setDevToolsActiveSection(item.id)}
-                  aria-pressed={item.id === devToolsActiveSection}
-                >
-                  <span>{item.label}</span>
-                  <small>{item.description}</small>
-                </button>
-              ))}
-            </nav>
-
-            <main className={styles.devToolsContent}>
-              <header className={styles.devToolsContentHeader}>
-                <div>
-                  <span className={styles.devToolsKicker}>Category</span>
-                  <h3>{activeDevToolsNavItem.label}</h3>
-                </div>
-                <p>{activeDevToolsNavItem.description}</p>
-              </header>
-              {devToolsSectionContent}
-            </main>
-          </div>
-
-          <footer className={styles.devToolsFooter}>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={sendRandomConversationNudge}
-              disabled={pendingReply && view !== "chat"}
-              data-glyph-tooltip="Send random suggested prompt"
-            >
-              Random prompt
-            </button>
-            <button
-              type="button"
-              className={styles.deleteAllModalCancel}
-              onClick={closeDevTools}
-            >
-              Close
-            </button>
-          </footer>
-        </div>
-        {renderDevTogglesModal()}
-      </>
-    );
-    return (
-      <>
-        <div
-          ref={devToolsPanelRef}
-          className={styles.devToolsFloatingPanel}
-          role="dialog"
-          aria-labelledby="dev-tools-title"
-        >
-        <div
-          className={styles.devToolsHeader}
-          onPointerDown={startDevToolsPanelDrag}
-          onPointerMove={dragDevToolsPanel}
-          onPointerUp={endDevToolsPanelDrag}
-          onPointerCancel={endDevToolsPanelDrag}
-        >
-          <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-            Developer tools
-          </h2>
-          <span className={styles.devToolsDragHint} aria-hidden="true">
-            ::
-          </span>
-        </div>
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Dev toggles</span>
-            <span className={styles.devToolsToggleSummary}>
-              Debug composer: <strong>{devDebugComposerEnabled ? "On" : "Off"}</strong> · Paste
-              JSON import: <strong>{devToolsBotImportPasteEnabled ? "On" : "Off"}</strong> · Compact
-              view: <strong>{devShowCompactedSummaryInChat ? "On" : "Off"}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Off (default): Import opens the file picker for .bot/.bots files. On: Import shows upload plus paste-from-clipboard.
-          </p>
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => setDevTogglesOpen(true)}
-              aria-haspopup="dialog"
-              aria-expanded={devTogglesOpen}
-              aria-controls="dev-toggles-modal"
-            >
-              Open dev toggles
-            </button>
-          </div>
-        </details>
-
-        <section className={styles.devMetricsTerminalSection} aria-labelledby="dev-metrics-terminal-title">
-          <div className={styles.devMetricsTerminalHeader}>
-            <div>
-              <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
-              <p>
-                Backend route, model, memory, summary, and tool events for the current chat run.
-              </p>
-            </div>
-            <div className={styles.devMetricsTerminalActions}>
-              <span data-enabled={devChatMetricsEnabled ? "true" : "false"}>
-                {devChatMetricsEnabled ? "Live" : "Off"}
-              </span>
+          {devToolsConsoleOnly ? (
+            <>
               <button
                 type="button"
-                className={styles.devToolsAction}
-                onClick={() => setDevChatDebugEvents([])}
-                disabled={devChatDebugEvents.length === 0}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-          <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
-            {!devChatMetricsEnabled ? (
-              <div className={styles.devMetricsTerminalEmpty}>
-                Enable “Show developer metrics terminal” in Dev toggles to stream backend traces here.
-              </div>
-            ) : devChatDebugEvents.length === 0 ? (
-              <div className={styles.devMetricsTerminalEmpty}>
-                Waiting for the next chat request...
-              </div>
-            ) : (
-              devChatDebugEvents.slice(-80).map((event) => {
-                const kind = inferDevChatDebugKind(event);
-                return (
-                  <div
-                    key={event.id}
-                    className={styles.devMetricsTerminalLine}
-                    data-kind={kind}
-                  >
-                    <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
-                    <code>{event.text}</code>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Viewport</span>
-            <span className={styles.devToolsToggleSummary}>
-              <strong>{viewportWidth}px</strong> × <strong>{viewportHeight}px</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsViewportStatus} aria-live="polite">
-            <span>
-              Width <strong>{viewportWidth}px</strong>
-            </span>
-            <span>
-              Height <strong>{viewportHeight}px</strong>
-            </span>
-          </p>
-        </details>
-
-        {view === "coffee" && (
-          <details className={styles.devToolsSection}>
-            <summary className={styles.devToolsSectionSummary}>
-              <span className={styles.devToolsSectionTitle}>Coffee social diagnostics</span>
-              <span className={styles.devToolsToggleSummary}>
-                {coffeeSocialById
-                  ? <>Bots <strong>{Object.keys(coffeeSocialById ?? {}).length}</strong></>
-                  : "No social snapshot yet"}
-              </span>
-            </summary>
-            <p className={styles.devToolsSectionHint}>
-              Hidden per-bot metrics for this Coffee conversation. Player-facing UI never shows this.
-            </p>
-            {coffeeSocialById ? (
-              coffeeSocialOrderedBotIds.length > 0 ? (
-                <div className={styles.devToolsSectionHint}>
-                  {coffeeSocialOrderedBotIds.map((botId) => {
-                    const social = coffeeSocialById?.[botId];
-                    if (!social) return null;
-                    const bot = coffeeBotsById.get(botId);
-                    return (
-                      <p key={botId} className={styles.devToolsSectionHint}>
-                        <strong>{bot?.name ?? botId}</strong> · disposition{" "}
-                        <strong>{formatSocialPercent(social.disposition)}</strong> · values friction{" "}
-                        <strong>{formatSocialPercent(social.valuesFriction)}</strong> · restraint{" "}
-                        <strong>{formatSocialPercent(social.restraint)}</strong> · engagement{" "}
-                        <strong>{formatSocialPercent(social.engagement)}</strong> · leave pressure{" "}
-                        <strong>{formatSocialPercent(social.leavePressure)}</strong>
-                      </p>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className={styles.devToolsSectionHint}>No seated bots in this snapshot.</p>
-              )
-            ) : (
-              <p className={styles.devToolsSectionHint}>
-                Start or continue a Coffee turn to populate social diagnostics.
-              </p>
-            )}
-          </details>
-        )}
-
-        {view === "coffee" && (
-          <details className={styles.devToolsSection}>
-            <summary className={styles.devToolsSectionSummary}>
-              <span className={styles.devToolsSectionTitle}>Coffee seat emotions</span>
-              <span className={styles.devToolsToggleSummary}>
-                All seats:{" "}
-                <strong>
-                  {coffeeSeatMoodDevSlotLabel(
-                    COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex]
-                  )}
-                </strong>
-              </span>
-            </summary>
-            <p className={styles.devToolsSectionHint}>
-              Cycles every seat plate through the same Prism mood so you can preview animations and
-              CSS hooks (<code>data-prism-mood</code> on each seat). Does not change model output.
-              In-memory until reload.
-            </p>
-            <div className={styles.devToolsActions}>
-              <button
-                type="button"
-                className={styles.devToolsAction}
-                onClick={() =>
-                  setCoffeeSeatMoodDevCycleIndex(
-                    (i) => (i + 1) % COFFEE_SEAT_MOOD_DEV_CYCLE.length
-                  )
-                }
-              >
-                Cycle all seat moods
-              </button>
-            </div>
-          </details>
-        )}
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Seed data</span>
-            <span className={styles.devToolsToggleSummary}>
-              Bots <strong>{bots.length}</strong> · chats <strong>{visibleConversations.length}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Bots: <strong>{bots.length}</strong> | Sidebar chats:{" "}
-            <strong>{visibleConversations.length}</strong>
-          </p>
-          <label className={styles.devToolsCountControl}>
-            <span>Quantity</span>
-            <input
-              type="number"
-              min={DEV_TOOLS_BOT_QUANTITY_MIN}
-              max={DEV_TOOLS_BOT_QUANTITY_MAX}
-              step={1}
-              value={devToolsBotQuantity}
-              aria-label="Quantity for developer tools add actions"
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setDevToolsBotQuantity(
-                  next === "" ? "" : clampDevToolsBotQuantity(Number(next))
-                );
-              }}
-              disabled={devToolsBusy}
-            />
-          </label>
-          <div className={styles.devToolsQuantityRail} aria-label="Quick quantities">
-            {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
-              <button
-                key={quantity}
-                type="button"
-                className={`${styles.devToolsPresetButton} ${
-                  resolvedDevToolsBotQuantity === quantity ? styles.devToolsPresetButtonActive : ""
-                }`}
-                onClick={() => setDevToolsBotQuantity(quantity)}
-                disabled={devToolsBusy}
-              >
-                {quantity}
-              </button>
-            ))}
-          </div>
-          <p className={styles.devToolsSectionHint}>
-            Stage buttons set total bots for the current viewport.
-          </p>
-          <div
-            className={styles.devToolsStageRail}
-            aria-label="Bot picker density stages"
-          >
-            {densityStageTargets.map((stage) => {
-              const isCurrentTarget = bots.length === stage.targetCount;
-              return (
-                <button
-                  key={stage.id}
-                  type="button"
-                  className={`${styles.devToolsStageButton} ${
-                    isCurrentTarget ? styles.devToolsStageButtonActive : ""
-                  }`}
-                  onClick={() => void devToolsSetBotDensityStage(stage.id)}
-                  disabled={devToolsBusy}
-                >
-                  <span>{stage.label}</span>
-                  <strong>{stage.targetCount}</strong>
-                  <small>{stage.description}</small>
-                </button>
-              );
-            })}
-          </div>
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddRandomBots()}
-              disabled={devToolsBusy}
-            >
-              Add bots
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsAddSeedChats()}
-              disabled={devToolsBusy}
-            >
-              Add chats
-            </button>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-              onClick={() => void devToolsDeleteAllBots()}
-              disabled={devToolsBusy || bots.length === 0}
-            >
-              Clear all bots
-            </button>
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Connection</span>
-            <span className={styles.devToolsToggleSummary}>
-              {devToolsHasSavedConversation
-                ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}%`
-                  : "No read yet"
-                : "No saved chat"}
-              {botOpinion ? ` | ${botOpinionBandTitle(botOpinion!.band)} · ${botOpinion!.score}%` : ""}
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Current chat:{" "}
-            <strong>
-              {devToolsHasSavedConversation
-                ? sessionOpinion
-                  ? `${opinionBandTitle(sessionOpinion!.band)} · ${sessionOpinion!.score}% · ${opinionTrendLabel(sessionOpinion!.trend)}`
-                  : "No Connection read yet"
-                : "Open a saved chat first"}
-            </strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Sets the selected chat Connection state and opens the panel for quick visual checks.
-          </p>
-          <div
-            className={styles.devToolsConnectionRail}
-            aria-label="Connection panel presets"
-          >
-            {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.devToolsPresetButton}
-                onClick={() => void devToolsSetConnectionPreset(preset)}
-                disabled={devToolsBusy || !devToolsHasSavedConversation}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <p className={styles.devToolsSectionHint}>
-            Bot opinion extremes force the long-term relationship state for the active bot or Default Prism.
-          </p>
-          <div
-            className={styles.devToolsConnectionRail}
-            aria-label="Bot opinion presets"
-          >
-            {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.devToolsPresetButton}
-                onClick={() => void devToolsSetBotOpinionPreset(preset)}
-                disabled={devToolsBusy}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Dev memories</span>
-            <span className={styles.devToolsToggleSummary}>
-              Status <strong>{settings?.devMemoriesEnabled ? "On" : "Off"}</strong>
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Global rule layer for testing hardcoded behavior before making it permanent.
-            Applies to every bot, including Prism/default.
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Toggle:{" "}
-            <strong>{settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}</strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Rules text{" "}
-            <strong>
-              {(settings?.devMemoriesText?.trim().length ?? 0).toLocaleString()} chars
-            </strong>
-          </p>
-          <textarea
-            className={styles.devToolsTextarea}
-            value={settings?.devMemoriesText ?? ""}
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setSettings((previous) =>
-                previous
-                  ? { ...previous, devMemoriesText: nextValue }
-                  : previous
-              );
-            }}
-            disabled={devToolsBusy || !settings}
-            rows={5}
-            placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
-          />
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() =>
-                setSettings((previous) =>
-                  previous
-                    ? { ...previous, devMemoriesEnabled: !previous.devMemoriesEnabled }
-                    : previous
-                )
-              }
-              disabled={devToolsBusy || !settings}
-            >
-              {settings?.devMemoriesEnabled ? "Disable dev memories" : "Enable dev memories"}
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsSaveDevMemories()}
-              disabled={devToolsBusy || !settings}
-            >
-              Save dev memories
-            </button>
-          </div>
-        </details>
-
-        <details className={styles.devToolsSection}>
-          <summary className={styles.devToolsSectionSummary}>
-            <span className={styles.devToolsSectionTitle}>Summarization</span>
-            <span className={styles.devToolsToggleSummary}>
-              Mode <strong>{devToolsSummaryMode}</strong>
-              {summaryDebug ? (
-                <> · in progress: <strong>{summaryDebug!.inProgress ? "yes" : "no"}</strong></>
-              ) : null}
-            </span>
-          </summary>
-          <p className={styles.devToolsSectionHint}>
-            Latest summary time:{" "}
-            <strong>{summaryDebug?.latestSummaryAt ?? "none yet"}</strong>
-          </p>
-          <p className={styles.devToolsSectionHint}>
-            Messages since compaction:{" "}
-            <strong>{summaryDebug?.messagesSinceLastCompaction ?? 0}</strong> · summary count:{" "}
-            <strong>{summaryDebug?.summaryCount ?? 0}</strong>
-          </p>
-          {devToolsSummaryPreview ? (
-            <p className={styles.devToolsSectionHint}>
-              Latest payload: <strong>{devToolsSummaryPreview}</strong>
-            </p>
-          ) : (
-            <p className={styles.devToolsSectionHint}>
-              Latest payload: <strong>none</strong>
-            </p>
-          )}
-          <div className={styles.devToolsActions}>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void devToolsRunSummaryNow(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Run summary now
-            </button>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => void refreshSummaryDebug(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Refresh summary metrics
-            </button>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-              onClick={() => void devToolsResetSummary(devToolsSummaryMode)}
-              disabled={devToolsBusy || !devToolsHasSavedConversation}
-            >
-              Reset summary state
-            </button>
-          </div>
-        </details>
-
-        {devToolsMemoryPanelOpen && (
-          <div className={styles.devToolsSection}>
-            <h3 className={styles.devToolsSectionTitle}>Memories</h3>
-            <p className={styles.devToolsSectionHint}>
-              All: <strong>{memories.length}</strong>
-              {memoryPanelScope === "bot" && memoryPanelBot ? (
-                <>
-                  {" "}· {memoryPanelBot!.name}: <strong>{botMemories.length}</strong>
-                </>
-              ) : memoryPanelScope === "session" ? (
-                <>
-                  {" "}· Session: <strong>{zenSessionMemories.length}</strong>
-                </>
-              ) : null}
-            </p>
-            <p className={styles.devToolsSectionHint}>
-              {memoryPanelScope === "session"
-                ? "Session checkpoints are created by Zen pause/resume turns."
-                : memoryPanelScope === "bot" && memoryPanelBot
-                ? `Adds the chosen quantity to ${devToolsMemoryScopeLabel}.`
-                : "Distributes the chosen quantity randomly across all bots."}
-            </p>
-            <label className={styles.devToolsCountControl}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>Seed type</span>
-                <PanelSectionInfo
-                  id="memory-panel-seed-type-info"
-                  label="About seed type"
-                  variant="control"
-                >
-                  Chooses whether generated seed memories are direct facts, inferred assumptions, or compiled summaries.
-                </PanelSectionInfo>
-              </span>
-              <select
-                value={devToolsMemorySeedSource}
-                onChange={(event) =>
-                  setDevToolsMemorySeedSource(event.currentTarget.value as DevToolsMemorySeedSource)
-                }
-                disabled={devToolsBusy}
-              >
-                <option value="direct">Direct memories</option>
-                <option value="inferred">Inferred assumptions</option>
-                <option value="compiled">Compiled assumptions</option>
-              </select>
-            </label>
-            <label className={styles.devToolsCountControl}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>
-                  Certainty{" "}
-                  <strong>{Math.round(devToolsMemoryCertainty * 100)}%</strong>
-                </span>
-                <PanelSectionInfo
-                  id="memory-panel-certainty-info"
-                  label="About memory certainty"
-                  variant="control"
-                >
-                  Sets the confidence score assigned to generated non-direct memory seeds.
-                </PanelSectionInfo>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={devToolsMemoryCertainty}
-                onChange={(event) =>
-                  setDevToolsMemoryCertainty(
-                    Math.max(0, Math.min(1, Number(event.currentTarget.value)))
-                  )
-                }
-                disabled={devToolsBusy || devToolsMemorySeedSource === "direct"}
+                className={styles.devToolsConsoleDragGrip}
+                onPointerDown={startDevToolsPanelDrag}
+                onPointerMove={dragDevToolsPanel}
+                onPointerUp={endDevToolsPanelDrag}
+                onPointerCancel={endDevToolsPanelDrag}
+                aria-label="Drag developer metrics terminal"
               />
-            </label>
-            <div className={styles.devToolsActions}>
-              {memoryPanelScope === "session" ? null : memoryPanelScope === "bot" || memoryPanelScope === "default" ? (
-                <button
-                  type="button"
-                  className={styles.devToolsAction}
-                  onClick={() => void devToolsAddBotMemories()}
-                  disabled={devToolsBusy || !memoryPanelBot}
-                >
-                  Add {devToolsMemorySeedSource}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.devToolsAction}
-                  onClick={() => void devToolsAddAllMemories()}
-                  disabled={devToolsBusy || bots.length === 0}
-                >
-                  Add {devToolsMemorySeedSource}
-                </button>
-              )}
               <button
                 type="button"
-                className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                onClick={() => void devToolsClearAllMemories()}
-                disabled={devToolsBusy || memories.length === 0}
+                className={styles.devToolsConsoleMinimizeButton}
+                onClick={minimizeDevTools}
+                aria-label="Minimize developer metrics terminal"
+                title="Minimize"
               >
-                Clear all memories
+                <Minimize2 aria-hidden="true" size={13} />
               </button>
-            </div>
-          </div>
-        )}
+              <main className={styles.devToolsConsoleOnlyContent}>
+                {renderDevMetricsTerminal(true)}
+              </main>
+            </>
+          ) : (
+            <>
+              <div className={styles.devToolsOverviewGrid} aria-label="Developer tool status">
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Surface</small>
+                  <strong>{view}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Viewport</small>
+                  <strong>{viewportWidth}×{viewportHeight}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Bots</small>
+                  <strong>{bots.length.toLocaleString()}</strong>
+                </span>
+                <span className={styles.devToolsOverviewItem}>
+                  <small>Memories</small>
+                  <strong>{memories.length.toLocaleString()}</strong>
+                </span>
+              </div>
 
-        {devToolsMessage && (
-          <p className={styles.devToolsStatus} role="status">
-            {devToolsMessage}
-          </p>
-        )}
+              {devToolsMessage ? (
+                <p className={styles.devToolsStatus} role="status">
+                  {devToolsMessage}
+                </p>
+              ) : null}
 
-        <div className={styles.deleteAllModalActions}>
-          <button
-            type="button"
-            className={styles.deleteAllModalCancel}
-            onClick={sendRandomConversationNudge}
-            disabled={pendingReply && view !== "chat"}
-            data-glyph-tooltip="Send random suggested prompt"
-          >
-            Random prompt
-          </button>
-          <button
-            type="button"
-            className={styles.deleteAllModalCancel}
-            onClick={closeDevTools}
-          >
-            Close
-          </button>
+              <div className={styles.devToolsLayout}>
+                <nav className={styles.devToolsNav} aria-label="Developer tool categories">
+                  {DEV_TOOLS_NAV_ITEMS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={styles.devToolsNavButton}
+                      data-active={item.id === devToolsActiveSection ? "true" : undefined}
+                      onClick={() => setDevToolsActiveSection(item.id)}
+                      aria-pressed={item.id === devToolsActiveSection}
+                    >
+                      <span>{item.label}</span>
+                      <small>{item.description}</small>
+                    </button>
+                  ))}
+                </nav>
+
+                <main className={styles.devToolsContent}>
+                  <header className={styles.devToolsContentHeader}>
+                    <div>
+                      <span className={styles.devToolsKicker}>Category</span>
+                      <h3>{activeDevToolsNavItem.label}</h3>
+                    </div>
+                    <p>{activeDevToolsNavItem.description}</p>
+                  </header>
+                  {devToolsSectionContent}
+                </main>
+              </div>
+            </>
+          )}
         </div>
-        </div>
-        {renderDevTogglesModal()}
       </>
     );
   };
 
-  const renderMemoryConnectionMeter = (): React.JSX.Element => {
-    if (!sessionOpinion) {
+  const renderMemoryDetailMeta = (memory: UserMemory): React.JSX.Element => {
+    const signal = Math.round(memoryBubbleSignalValue(memory) * 100);
+    const detailLabel = isAssumptionMemory(memory) ? "certainty" : "confidence";
+    return (
+      <div className={styles.memoryFullProseMeta} aria-label="Memory details">
+        <span>{botMemorySourceLabel(memory.source)}</span>
+        <span>{botMemoryCategoryLabel(memoryCategory(memory))}</span>
+        <span>{botMemoryTierLabel(memoryTier(memory))}</span>
+        <span>{detailLabel} {signal}%</span>
+        <span>{formatMemoryDossierDate(memory.createdAt)}</span>
+      </div>
+    );
+  };
+
+  const renderBotMemoryDossierStats = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !activeBotMemoryDossier) return null;
+    return (
+      <div className={styles.memoryDossierStats} aria-label="Bot memory counts">
+        {botMemoryDossierStats.map((item) => (
+          <span key={item.id}>
+            <strong>{item.value}</strong>
+            <small>{item.label}</small>
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBotMemoryFactsSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !memoryPanelBot) return null;
+    return (
+      <section className={styles.memoryFactsSection} aria-label={`${memoryPanelBot.name} permanent facts`}>
+        <div className={styles.memoryFactsHeader}>
+          <div>
+            <strong>Permanent facts</strong>
+            <span>Profile facts belong to the bot, separate from learned memories.</span>
+          </div>
+        </div>
+        {memoryPanelBotFacts.length > 0 ? (
+          <ul className={styles.memoryFactsList}>
+            {memoryPanelBotFacts.map((fact) => (
+              <li key={fact.key}>
+                <span className={styles.memoryFactLabel}>{fact.label}</span>
+                <span className={styles.memoryFactValue}>{fact.value}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={styles.memoryFactsEmpty}>
+            No permanent facts yet. Add them from the bot profile when this bot needs stable identity details.
+          </p>
+        )}
+      </section>
+    );
+  };
+
+  const renderBotMemoryRelationshipSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || !memoryPanelBot) return null;
+    const durableOpinion = activeBotMemoryDossier?.botOpinion ?? null;
+    const statusSummary = activeBotMemoryDossier?.botStatusSummary ?? null;
+    return (
+      <section className={styles.memoryRelationshipSection} aria-label={`${memoryPanelBot.name} relationship state`}>
+        <div className={styles.memoryRelationshipHeader}>
+          <div>
+            <strong>Relationship memory</strong>
+            <span>Longer-lived tone, separate from the current chat.</span>
+          </div>
+        </div>
+        <div className={styles.memoryRelationshipGrid}>
+          <article className={styles.memoryRelationshipCard}>
+            <span className={styles.opinionEyebrow}>Durable read</span>
+            {durableOpinion ? (
+              <>
+                <strong>{botOpinionBandTitle(durableOpinion.band)} · {durableOpinion.score}%</strong>
+                <p>{botOpinionBandDescription(durableOpinion.band)}</p>
+                <small>
+                  {opinionTrendDescription(durableOpinion.trend)} · {botOpinionBoundaryDescription(durableOpinion.boundaryLevel)}
+                </small>
+              </>
+            ) : (
+              <>
+                <strong>Still forming</strong>
+                <p>This bot has not built a long-term relationship read yet.</p>
+                <small>No durable shifts recorded</small>
+              </>
+            )}
+          </article>
+          <article className={styles.memoryRelationshipCard}>
+            <span className={styles.opinionEyebrow}>Status note</span>
+            {statusSummary ? (
+              <>
+                <strong>Latest note</strong>
+                <p>{statusSummary}</p>
+                <small>Existing bot-status summary</small>
+              </>
+            ) : (
+              <>
+                <strong>No status note yet</strong>
+                <p>When this bot has a saved status recap, it will appear here.</p>
+                <small>No new summary is generated by opening this panel</small>
+              </>
+            )}
+          </article>
+        </div>
+      </section>
+    );
+  };
+
+  const renderProtectedAboutYouSection = (): React.JSX.Element | null => {
+    if (memoryPanelScope !== "bot" || botAboutYouMemories.length === 0) return null;
+    return (
+      <section className={styles.protectedAboutYouSection} aria-label="Protected about-you memories">
+        <div className={styles.longTermMemoryHeader}>
+          <div>
+            <strong>About you</strong>
+            <span>Protected user facts this bot can use.</span>
+          </div>
+        </div>
+        <ul className={styles.longTermMemoryList}>
+          {botAboutYouMemories.map((memory) => {
+            const actionKey = longTermMemoryActionKey(memory.id);
+            const isArmed = pendingDeleteKey === actionKey;
+            const text = renderMemoryPanelText(memory);
+            return (
+              <li key={`about-you:${memory.id}`}>
+                <div>
+                  <p>{text}</p>
+                  {renderMemoryDetailMeta(memory)}
+                </div>
+                <button
+                  type="button"
+                  className={[
+                    styles.conversationDelete,
+                    styles.longTermMemoryRowAction,
+                    isArmed ? styles.conversationDeleteArmed : "",
+                  ].filter(Boolean).join(" ")}
+                  data-delete-affordance="true"
+                  aria-label={isArmed ? `Confirm remove memory: ${text}` : `Remove memory: ${text}`}
+                  data-glyph-tooltip={isArmed ? `Confirm remove: ${text}` : "Remove memory"}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (isArmed) {
+                      disarmDelete();
+                      void deleteMemory(memory.id, {
+                        allowLongTerm: true,
+                        allowAboutYou: true,
+                      });
+                      return;
+                    }
+                    armDelete(actionKey);
+                  }}
+                >
+                  {isArmed && (
+                    <span className={styles.conversationDeletePrompt}>
+                      Are you sure?
+                    </span>
+                  )}
+                  <span className={styles.conversationDeleteGlyph}>
+                    {isArmed ? "✓" : "×"}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
+  };
+
+  const renderMemoryConnectionMeter = (
+    opinion: SessionOpinion | null = sessionOpinion
+  ): React.JSX.Element => {
+    if (!opinion) {
       return (
         <section
           className={styles.memoryConnectionMeter}
@@ -48345,14 +55511,14 @@ function HomeContent(): React.JSX.Element {
     return (
       <section
         className={styles.memoryConnectionMeter}
-        data-band={sessionOpinion.band}
-        data-trend={sessionOpinion.trend}
+        data-band={opinion.band}
+        data-trend={opinion.trend}
         style={
           {
-            "--opinion-score": `${sessionOpinion.score}%`,
+            "--opinion-score": `${opinion.score}%`,
           } as React.CSSProperties
         }
-        aria-label={`${opinionBandTitle(sessionOpinion.band)} connection, ${sessionOpinion.score} percent, ${opinionScoreCaption(sessionOpinion.score)}`}
+        aria-label={`${opinionBandTitle(opinion.band)} connection, ${opinion.score} percent, ${opinionScoreCaption(opinion.score)}`}
       >
         <div className={styles.memoryConnectionGauge} aria-hidden="true">
           <span />
@@ -48361,11 +55527,11 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.memoryConnectionHeader}>
             <span className={styles.opinionEyebrow}>Connection</span>
             <strong>
-              {opinionBandTitle(sessionOpinion.band)} · {sessionOpinion.score}%
+              {opinionBandTitle(opinion.band)} · {opinion.score}%
             </strong>
           </div>
-          <p>{opinionBandDescription(sessionOpinion.band)}</p>
-          <small>{opinionTrendDescription(sessionOpinion.trend)}</small>
+          <p>{opinionBandDescription(opinion.band)}</p>
+          <small>{opinionTrendDescription(opinion.trend)}</small>
         </div>
       </section>
     );
@@ -48411,6 +55577,7 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={memoryPanelRef}
           className={`${styles.panel} ${styles.panelMemories}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           data-memory-scope={memoryPanelScope}
           data-memory-physics-active={memoryPhysicsActive ? "true" : undefined}
@@ -48511,18 +55678,16 @@ function HomeContent(): React.JSX.Element {
                   <span>Only this bot can use these memories.</span>
                 </div>
               </div>
-              {memoryPanelBotFacts.length > 0 && (
-                <button
-                  type="button"
-                  className={styles.memoryFactsEditButton}
-                  onClick={() => {
-                    if (memoryPanelBot) openBotCustomizerFacts(memoryPanelBot);
-                  }}
-                  aria-label={`Edit ${memoryPanelBot.name} permanent facts`}
-                >
-                  Edit facts
-                </button>
-              )}
+              <button
+                type="button"
+                className={styles.memoryFactsEditButton}
+                onClick={() => {
+                  if (memoryPanelBot) openBotCustomizerFacts(memoryPanelBot);
+                }}
+                aria-label={`Edit ${memoryPanelBot.name} permanent facts`}
+              >
+                Edit facts
+              </button>
             </div>
           )}
           {memoryPanelScope === "default" && (
@@ -48564,7 +55729,10 @@ function HomeContent(): React.JSX.Element {
                   ? "Previous context stays; session checkpoints fade after about four days."
                   : "Short-term memories float here; protected long-term memories stack below by category."}
           </p>
-          {memoryPanelScope === "bot" ? renderMemoryConnectionMeter() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryDossierStats() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryFactsSection() : null}
+          {memoryPanelScope === "bot" ? renderBotMemoryRelationshipSection() : null}
+          {memoryPanelScope === "bot" ? renderMemoryConnectionMeter(botMemoryDossierCurrentSessionOpinion) : null}
           {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
             <div className={styles.memoryBubbleCloud} role="list" aria-label="PRISM memory directories">
               <button
@@ -48645,6 +55813,7 @@ function HomeContent(): React.JSX.Element {
                       // drill-down view instead of jumping all the way
                       // to the directory.
                       setBotMemories([]);
+                      setBotMemoryDossier(null);
                       await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
                         if (!cluster.botId) return;
                         await refreshBotMemories(cluster.botId);
@@ -48662,6 +55831,7 @@ function HomeContent(): React.JSX.Element {
                         setMemoryPanelBotId(cluster.botId);
                         setFocusedMemoryId(null);
                         setBotMemories([]);
+                        setBotMemoryDossier(null);
                         await runMemoryPanelLoad(`Loading ${cluster.botName} memories...`, async () => {
                           if (!cluster.botId) return;
                           await refreshBotMemories(cluster.botId);
@@ -48705,7 +55875,10 @@ function HomeContent(): React.JSX.Element {
             <div className={styles.memoryPanelMemoryStacks}>
               {renderZenSessionMemorySection()}
             </div>
-          ) : visibleMemoryBubbles.length > 0 || visibleLongTermMemories.length > 0 || showZenSessionMemoryInPrismPanel ? (
+          ) : visibleMemoryBubbles.length > 0 ||
+              visibleLongTermMemories.length > 0 ||
+              botAboutYouMemories.length > 0 ||
+              showZenSessionMemoryInPrismPanel ? (
             <div className={styles.memoryPanelMemoryStacks}>
               {showZenSessionMemoryInPrismPanel ? renderZenSessionMemorySection() : null}
               {visibleMemoryBubbles.length > 0 ? (
@@ -48725,8 +55898,19 @@ function HomeContent(): React.JSX.Element {
                     const selected = focusedMemoryId === memory.id;
                     const dimmed = Boolean(focusedMemoryId && !selected);
                     const inferred = isAssumptionMemory(memory);
+                    const lastLearned = memory.id === lastLearnedVisibleMemoryId;
                     const signalPercent = Math.round(memoryBubbleSignalValue(memory) * 100);
                     const memoryDisplayText = renderMemoryPanelText(memory);
+                    const memoryBubbleDeleteActionKey = memoryCardDeleteKey(memory.id);
+                    const memoryBubbleDeleteArmed =
+                      pendingDeleteKey === memoryBubbleDeleteActionKey;
+                    const memoryBubbleDeletePrimed =
+                      selected && memoryBubbleDeletePrimedId === memory.id;
+                    const memoryBubbleDeleteState = memoryBubbleDeleteArmed
+                      ? "armed"
+                      : memoryBubbleDeletePrimed
+                        ? "focused"
+                        : undefined;
                     return (
                       <li
                         key={`memory:${memoryPhysicsSeed}:${memory.id}`}
@@ -48736,6 +55920,9 @@ function HomeContent(): React.JSX.Element {
                         data-memory-selected={selected ? "true" : undefined}
                         data-memory-dimmed={dimmed ? "true" : undefined}
                         data-memory-inferred={inferred ? "true" : undefined}
+                        data-memory-recent={lastLearned ? "true" : undefined}
+                        data-memory-delete-state={memoryBubbleDeleteState}
+                        data-delete-affordance={memoryBubbleDeleteArmed ? "true" : undefined}
                         data-memory-physics-id={`memory:${memory.id}`}
                         style={{
                           ...layout?.style,
@@ -48746,13 +55933,19 @@ function HomeContent(): React.JSX.Element {
                         title={memoryDisplayText}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${memoryDisplayText}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`}
+                        aria-label={
+                          memoryBubbleDeleteArmed
+                            ? `Confirm delete ${lastLearned ? "newest " : ""}memory: ${memoryDisplayText}`
+                            : memoryBubbleDeletePrimed
+                              ? `Delete preview for ${lastLearned ? "newest " : ""}memory: ${memoryDisplayText}. Press again to show delete mark.`
+                              : `${lastLearned ? "Newest memory. " : ""}${memoryDisplayText}. ${inferred ? "Certainty" : "Confidence"} ${signalPercent} percent.`
+                        }
                         onClick={() => {
                           if (memoryBubbleSuppressClickRef.current === memory.id) {
                             memoryBubbleSuppressClickRef.current = null;
                             return;
                           }
-                          setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                          handleMemoryBubbleActivate(memory);
                         }}
                         onPointerDown={(event) => {
                           handleMemoryBubblePointerDown(event, memory.id);
@@ -48760,7 +55953,7 @@ function HomeContent(): React.JSX.Element {
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return;
                           event.preventDefault();
-                          setFocusedMemoryId((current) => (current === memory.id ? null : memory.id));
+                          handleMemoryBubbleActivate(memory);
                         }}
                         data-memory-draggable={
                           memoryBubbleScopeKey && !focusedMemoryId ? "true" : undefined
@@ -48769,6 +55962,9 @@ function HomeContent(): React.JSX.Element {
                           memoryBubbleDraggingId === memory.id ? "true" : undefined
                         }
                       >
+                        {lastLearned && !selected && !dimmed && !memoryBubbleDeleteState ? (
+                          <span className={styles.memoryRecentBeacon} aria-hidden="true" />
+                        ) : null}
                         {selected ? (
                           <span className={styles.memoryBubbleScore}>
                             {signalPercent}%
@@ -48776,6 +55972,11 @@ function HomeContent(): React.JSX.Element {
                         ) : (
                           <span className={styles.memoryUncertainCore} aria-hidden="true" />
                         )}
+                        {memoryBubbleDeleteArmed ? (
+                          <span className={styles.memoryDeleteGlyph} aria-hidden="true">
+                            ×
+                          </span>
+                        ) : null}
                       </li>
                     );
                   })}
@@ -48783,6 +55984,7 @@ function HomeContent(): React.JSX.Element {
                       <li className={styles.memoryFullProseCard} role="status" aria-live="polite">
                         <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
                         <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
+                        {renderMemoryDetailMeta(selectedVisibleMemory)}
                         <button
                           type="button"
                           className={`${styles.memoryFullProseDeleteButton} ${
@@ -48835,6 +56037,7 @@ function HomeContent(): React.JSX.Element {
                     >
                       <strong>{isAssumptionMemory(selectedVisibleMemory) ? "Assumption" : "Memory"}</strong>
                       <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
+                      {renderMemoryDetailMeta(selectedVisibleMemory)}
                       <button
                         type="button"
                         className={`${styles.memoryFullProseDeleteButton} ${
@@ -48925,7 +56128,10 @@ function HomeContent(): React.JSX.Element {
                             .join(" ");
                           return (
                           <li key={`long-term:${memory.id}`}>
-                            <p>{text}</p>
+                            <div>
+                              <p>{text}</p>
+                              {renderMemoryDetailMeta(memory)}
+                            </div>
                             <button
                               type="button"
                               className={buttonClass}
@@ -48984,6 +56190,7 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </section>
               )}
+              {renderProtectedAboutYouSection()}
             </div>
           ) : (
             <div className={styles.memoryEmptyState}>
@@ -49015,22 +56222,68 @@ function HomeContent(): React.JSX.Element {
       {panel === "command-center" && (
         <div
           className={`${styles.panel} ${styles.panelPromptCenter}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
         >
-          <div className={styles.panelHeader}>
-            <div className={styles.panelHeaderTitle}>
-              <span className={styles.panelHeaderKicker}>Prompt Center</span>
-              <h3>Commands</h3>
+          <div className={styles.promptCenterPanelTop}>
+            <div className={styles.panelHeader}>
+              <div className={styles.panelHeaderTitle}>
+                <span className={styles.panelHeaderKicker}>Prompt Center</span>
+                <h3>Commands</h3>
+              </div>
+              <div className={styles.panelHeaderActions}>
+                <input
+                  ref={commandCenterImportInputRef}
+                  type="file"
+                  accept=".prism"
+                  className={styles.panelHiddenFileInput}
+                  onChange={(event) => {
+                    void handleCommandCenterImportFileSelection(event);
+                  }}
+                />
+                <button
+                  type="button"
+                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderSaveButton}`}
+                  onClick={exportCommandCenterAsPrismArchive}
+                  disabled={busy}
+                  aria-label="Export Command Center as .prism file"
+                  data-glyph-tooltip="Export Command Center as .prism"
+                >
+                  <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                    <IconSave />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderImportButton}`}
+                  onClick={openCommandCenterImportPicker}
+                  disabled={busy}
+                  aria-label="Import Command Center from .prism file"
+                  data-glyph-tooltip="Import Command Center .prism"
+                >
+                  <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                    <IconUpload />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.panelClose}
+                  onClick={closePanel}
+                  aria-label="Close panel"
+                  data-glyph-tooltip="Close panel"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              className={styles.panelClose}
-              onClick={closePanel}
-              aria-label="Close panel"
-              data-glyph-tooltip="Close panel"
-            >
-              ×
-            </button>
+            {(panelNotice || panelError) && (
+              <div className={styles.promptCenterPanelMessages}>
+                {panelNotice && (
+                  <p className={styles.panelNotice} role="status">{panelNotice}</p>
+                )}
+                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+              </div>
+            )}
           </div>
           {(() => {
             const commandCenterSelectedLocalModelId =
@@ -49135,6 +56388,13 @@ function HomeContent(): React.JSX.Element {
                 : selectedCommandDraftDirty
                   ? "Unsaved"
                   : commandCenterSaveNotice ?? "Saved";
+            const selectedCommandStatusState = selectedCommand?.readOnly
+              ? "readonly"
+              : !selectedCommandDraftCanSave
+                ? "invalid"
+                : selectedCommandDraftDirty
+                  ? "dirty"
+                  : "saved";
             const selectedWildcardDeck =
               commandCenterWildcardDecks.find(
                 (candidate) => candidate.id === commandCenterSelectedWildcardDeckId
@@ -49214,6 +56474,11 @@ function HomeContent(): React.JSX.Element {
               : selectedWildcardDeckDraftDirty
                 ? "Unsaved"
                 : commandCenterSaveNotice ?? "Saved";
+            const selectedWildcardDeckStatusState = !selectedWildcardDeckDraftCanSave
+              ? "invalid"
+              : selectedWildcardDeckDraftDirty
+                ? "dirty"
+                : "saved";
             const updateSelectedCommandDraft = (
               updater: (draft: CommandCenterEditableDraft) => CommandCenterEditableDraft
             ): void => {
@@ -49268,6 +56533,57 @@ function HomeContent(): React.JSX.Element {
               );
               setCommandCenterDraft(savedDraft);
               setCommandCenterSaveNotice("Saved");
+            };
+            const cloneSelectedCommandDraft = (): void => {
+              if (!selectedCommand || !selectedCommandDraft || !selectedCommandDraftCanSave) return;
+              const now = new Date().toISOString();
+              const clonedId = createCommandCenterCommandId();
+              const clonedName = uniqueCommandNameForList(
+                `${selectedCommandDraft.name || selectedCommand.name}-copy`,
+                commandCenterCommands,
+                clonedId
+              );
+              const clonedCommand: CommandCenterCommand = {
+                id: clonedId,
+                name: clonedName,
+                title: clonedName,
+                command: selectedCommandDraft.command,
+                colorTag: selectedCommandDraft.colorTag,
+                aliases: [],
+                arguments: [],
+                builtIn: false,
+                readOnly: false,
+                createdAt: now,
+                updatedAt: now,
+              };
+              setCommandCenterCommands((current) => {
+                const next: CommandCenterCommand[] = [];
+                let inserted = false;
+                for (const entry of current) {
+                  next.push(entry);
+                  if (entry.id === selectedCommand.id) {
+                    next.push(clonedCommand);
+                    inserted = true;
+                  }
+                }
+                if (!inserted) next.push(clonedCommand);
+                return normalizeCommandCenterState({
+                  schema: "prism-command-center-v1",
+                  preferredModel: commandCenterPreferredModel,
+                  commands: next,
+                }).commands;
+              });
+              setCommandCenterDraft({
+                id: clonedId,
+                name: clonedName,
+                command: clonedCommand.command,
+                colorTag: clonedCommand.colorTag,
+                aliases: [],
+              });
+              setCommandCenterSelectedCommandId(clonedId);
+              setCommandCenterSelectedWildcardDeckId(null);
+              setCommandCenterSpecsCommandId(null);
+              setCommandCenterSaveNotice("Cloned");
             };
             const updateSelectedWildcardDeckDraft = (
               updater: (
@@ -49333,13 +56649,67 @@ function HomeContent(): React.JSX.Element {
               setCommandCenterWildcardDraft(wildcardDeckToDraft(savedDeck));
               setCommandCenterSaveNotice("Saved");
             };
+            const cloneSelectedWildcardDeckDraft = (): void => {
+              if (
+                !selectedWildcardDeck ||
+                !selectedWildcardDeckDraft ||
+                !selectedWildcardDeckDraftCanSave
+              ) {
+                return;
+              }
+              const now = new Date().toISOString();
+              const clonedId = createCommandCenterWildcardDeckId();
+              const clonedName = uniqueWildcardDeckNameForList(
+                `${selectedWildcardDeckDraft.name || selectedWildcardDeck.name}-copy`,
+                commandCenterWildcardDecks,
+                clonedId
+              );
+              const clonedValues = normalizeWildcardDeckValueList(
+                selectedWildcardDeckDraft.valuesText
+              );
+              if (clonedValues.length === 0) return;
+              const clonedDeck: CommandCenterWildcardDeck = {
+                id: clonedId,
+                name: clonedName,
+                description: selectedWildcardDeckDraft.description
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .slice(0, 220),
+                values: clonedValues,
+                ...(selectedWildcardDeckDraft.colorTag
+                  ? { colorTag: selectedWildcardDeckDraft.colorTag }
+                  : {}),
+                aliases: [],
+                createdAt: now,
+                updatedAt: now,
+              };
+              setCommandCenterWildcardDecks((current) => {
+                const next: CommandCenterWildcardDeck[] = [];
+                let inserted = false;
+                for (const entry of current) {
+                  next.push(entry);
+                  if (entry.id === selectedWildcardDeck.id) {
+                    next.push(clonedDeck);
+                    inserted = true;
+                  }
+                }
+                if (!inserted) next.push(clonedDeck);
+                return sanitizeWildcardDeckAliases(next);
+              });
+              setCommandCenterWildcardDraft(wildcardDeckToDraft(clonedDeck));
+              setCommandCenterSelectedWildcardDeckId(clonedId);
+              setCommandCenterSelectedCommandId(null);
+              setCommandCenterSpecsCommandId(null);
+              setCommandCenterSaveNotice("Cloned");
+            };
             const builtInCommandCenterCommands = commandCenterCommands.filter(
               (command) => command.builtIn || command.readOnly
             );
             const userPromptCenterCommands = commandCenterCommands.filter(
               (command) => !command.builtIn && !command.readOnly
             );
-            const promptCenterWildcardDockItemCount = BUILT_IN_WILDCARD_SLOT_PICKS.length;
+            const promptCenterWildcardDockItemCount =
+              PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS.length;
             const incompletePromptForCreation =
               userPromptCenterCommands.find(
                 (command) => !commandCenterPromptHasRequiredDetails(command)
@@ -49487,10 +56857,114 @@ function HomeContent(): React.JSX.Element {
                 };
               });
             };
+            const promptCenterDropPlacementFromDragEvent = (
+              event: React.DragEvent<HTMLElement>
+            ): CommandCenterDropPlacement => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+            };
+            const startPromptCenterDrag = (
+              kind: PromptCenterDragKind,
+              id: string,
+              label: string,
+              event: React.DragEvent<HTMLDivElement>
+            ): void => {
+              const target = event.target;
+              if (
+                target instanceof Element &&
+                target.closest('[data-delete-affordance="true"]')
+              ) {
+                event.preventDefault();
+                return;
+              }
+              disarmDelete();
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(
+                PROMPT_CENTER_DRAG_MIME,
+                JSON.stringify({ kind, id })
+              );
+              event.dataTransfer.setData("text/plain", label);
+              setPromptCenterDrag({ kind, id, overId: null, placement: null });
+            };
+            const updatePromptCenterDragTarget = (
+              kind: PromptCenterDragKind,
+              targetId: string,
+              event: React.DragEvent<HTMLDivElement>
+            ): void => {
+              if (!promptCenterDrag || promptCenterDrag.kind !== kind) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              const placement =
+                promptCenterDrag.id === targetId
+                  ? null
+                  : promptCenterDropPlacementFromDragEvent(event);
+              setPromptCenterDrag((current) => {
+                if (!current || current.kind !== kind) return current;
+                if (
+                  current.overId === (placement ? targetId : null) &&
+                  current.placement === placement
+                ) {
+                  return current;
+                }
+                return {
+                  ...current,
+                  overId: placement ? targetId : null,
+                  placement,
+                };
+              });
+            };
+            const dropPromptCenterDragOnTarget = (
+              kind: PromptCenterDragKind,
+              targetId: string,
+              event: React.DragEvent<HTMLDivElement>
+            ): void => {
+              if (!promptCenterDrag || promptCenterDrag.kind !== kind) return;
+              event.preventDefault();
+              disarmDelete();
+              const placement =
+                promptCenterDrag.id === targetId
+                  ? null
+                  : promptCenterDropPlacementFromDragEvent(event);
+              if (promptCenterDrag.id !== targetId && placement) {
+                if (kind === "prompt") {
+                  setCommandCenterCommands((current) =>
+                    moveCommandCenterItemToTarget(
+                      current,
+                      promptCenterDrag.id,
+                      targetId,
+                      placement,
+                      isCommandCenterPromptShortcut
+                    )
+                  );
+                } else {
+                  setCommandCenterWildcardDecks((current) =>
+                    moveCommandCenterItemToTarget(
+                      current,
+                      promptCenterDrag.id,
+                      targetId,
+                      placement
+                    )
+                  );
+                }
+                setCommandCenterSaveNotice("Moved");
+              }
+              setPromptCenterDrag(null);
+            };
             const renderPromptCenterCommandRow = (
-              command: CommandCenterCommand
+              command: CommandCenterCommand,
+              promptIndex?: number,
+              promptCount = 0
             ): React.ReactNode => {
               const canDeletePrompt = !command.builtIn && !command.readOnly;
+              const canReorderPrompt =
+                canDeletePrompt &&
+                typeof promptIndex === "number" &&
+                promptCount > 1;
+              const promptDropPlacement =
+                promptCenterDrag?.kind === "prompt" &&
+                promptCenterDrag.overId === command.id
+                  ? promptCenterDrag.placement
+                  : null;
               const promptNeedsDetails =
                 canDeletePrompt && !commandCenterPromptHasRequiredDetails(command);
               const deleteKey = commandCenterPromptDeleteKey(command.id);
@@ -49522,6 +56996,43 @@ function HomeContent(): React.JSX.Element {
                   key={command.id}
                   className={styles.promptCenterPromptRowFrame}
                   data-deletable={canDeletePrompt ? "true" : undefined}
+                  data-draggable={canReorderPrompt ? "true" : undefined}
+                  data-dragging={
+                    promptCenterDrag?.kind === "prompt" &&
+                    promptCenterDrag.id === command.id
+                      ? "true"
+                      : undefined
+                  }
+                  data-drop-placement={promptDropPlacement ?? undefined}
+                  draggable={canReorderPrompt}
+                  onDragStart={
+                    canReorderPrompt
+                      ? (event) =>
+                          startPromptCenterDrag(
+                            "prompt",
+                            command.id,
+                            `/${command.name}`,
+                            event
+                          )
+                      : undefined
+                  }
+                  onDragOver={
+                    canReorderPrompt
+                      ? (event) =>
+                          updatePromptCenterDragTarget("prompt", command.id, event)
+                      : undefined
+                  }
+                  onDrop={
+                    canReorderPrompt
+                      ? (event) =>
+                          dropPromptCenterDragOnTarget("prompt", command.id, event)
+                      : undefined
+                  }
+                  onDragEnd={
+                    canReorderPrompt
+                      ? () => setPromptCenterDrag(null)
+                      : undefined
+                  }
                   role="listitem"
                 >
                   <button
@@ -49561,44 +57072,54 @@ function HomeContent(): React.JSX.Element {
                     </span>
                   </button>
                   {canDeletePrompt ? (
-                    <button
-                      type="button"
-                      className={deleteButtonClassName}
-                      data-delete-affordance="true"
-                      aria-label={
-                        deleteArmed
-                          ? `Confirm delete prompt /${command.name}`
-                          : `Delete prompt /${command.name}`
-                      }
-                      data-glyph-tooltip={
-                        deleteArmed ? `Confirm delete /${command.name}` : "Delete prompt"
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (deleteArmed) {
-                          disarmDelete();
-                          deletePrompt();
-                          return;
+                    <span className={styles.promptCenterPromptRowActions}>
+                      <button
+                        type="button"
+                        className={deleteButtonClassName}
+                        data-delete-affordance="true"
+                        aria-label={
+                          deleteArmed
+                            ? `Confirm delete prompt /${command.name}`
+                            : `Delete prompt /${command.name}`
                         }
-                        armDelete(deleteKey);
-                      }}
-                    >
-                      {deleteArmed && (
-                        <span className={styles.conversationDeletePrompt}>
-                          Are you sure?
+                        data-glyph-tooltip={
+                          deleteArmed ? `Confirm delete /${command.name}` : "Delete prompt"
+                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (deleteArmed) {
+                            disarmDelete();
+                            deletePrompt();
+                            return;
+                          }
+                          armDelete(deleteKey);
+                        }}
+                      >
+                        {deleteArmed && (
+                          <span className={styles.conversationDeletePrompt}>
+                            Are you sure?
+                          </span>
+                        )}
+                        <span className={styles.conversationDeleteGlyph}>
+                          {deleteArmed ? "✓" : "×"}
                         </span>
-                      )}
-                      <span className={styles.conversationDeleteGlyph}>
-                        {deleteArmed ? "✓" : "×"}
-                      </span>
-                    </button>
+                      </button>
+                    </span>
                   ) : null}
                 </div>
               );
             };
             const renderPromptCenterWildcardDeckRow = (
-              deck: CommandCenterWildcardDeck
+              deck: CommandCenterWildcardDeck,
+              deckIndex: number,
+              deckCount: number
             ): React.ReactNode => {
+              const canReorderDeck = deckCount > 1;
+              const deckDropPlacement =
+                promptCenterDrag?.kind === "wildcard" &&
+                promptCenterDrag.overId === deck.id
+                  ? promptCenterDrag.placement
+                  : null;
               const deckNeedsDetails = !commandCenterWildcardDeckHasRequiredDetails(deck);
               const deleteKey = commandCenterWildcardDeleteKey(deck.id);
               const deleteArmed = pendingDeleteKey === deleteKey;
@@ -49625,6 +57146,43 @@ function HomeContent(): React.JSX.Element {
                   key={deck.id}
                   className={styles.promptCenterPromptRowFrame}
                   data-deletable="true"
+                  data-draggable={canReorderDeck ? "true" : undefined}
+                  data-dragging={
+                    promptCenterDrag?.kind === "wildcard" &&
+                    promptCenterDrag.id === deck.id
+                      ? "true"
+                      : undefined
+                  }
+                  data-drop-placement={deckDropPlacement ?? undefined}
+                  draggable={canReorderDeck}
+                  onDragStart={
+                    canReorderDeck
+                      ? (event) =>
+                          startPromptCenterDrag(
+                            "wildcard",
+                            deck.id,
+                            `!${deck.name}`,
+                            event
+                          )
+                      : undefined
+                  }
+                  onDragOver={
+                    canReorderDeck
+                      ? (event) =>
+                          updatePromptCenterDragTarget("wildcard", deck.id, event)
+                      : undefined
+                  }
+                  onDrop={
+                    canReorderDeck
+                      ? (event) =>
+                          dropPromptCenterDragOnTarget("wildcard", deck.id, event)
+                      : undefined
+                  }
+                  onDragEnd={
+                    canReorderDeck
+                      ? () => setPromptCenterDrag(null)
+                      : undefined
+                  }
                   role="listitem"
                 >
                   <button
@@ -49658,33 +57216,35 @@ function HomeContent(): React.JSX.Element {
                       </span>
                     ) : null}
                   </button>
-                  <button
-                    type="button"
-                    className={deleteButtonClassName}
-                    data-delete-affordance="true"
-                    aria-label={
-                      deleteArmed
-                        ? `Confirm delete wildcard deck !${deck.name}`
-                        : `Delete wildcard deck !${deck.name}`
-                    }
-                    data-glyph-tooltip={deleteArmed ? `Confirm delete !${deck.name}` : "Delete deck"}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (deleteArmed) {
-                        disarmDelete();
-                        deleteWildcardDeckAndCollapsePrompts(deck);
-                        return;
+                  <span className={styles.promptCenterPromptRowActions}>
+                    <button
+                      type="button"
+                      className={deleteButtonClassName}
+                      data-delete-affordance="true"
+                      aria-label={
+                        deleteArmed
+                          ? `Confirm delete wildcard deck !${deck.name}`
+                          : `Delete wildcard deck !${deck.name}`
                       }
-                      armDelete(deleteKey);
-                    }}
-                  >
-                    {deleteArmed && (
-                      <span className={styles.conversationDeletePrompt}>Are you sure?</span>
-                    )}
-                    <span className={styles.conversationDeleteGlyph}>
-                      {deleteArmed ? "✓" : "×"}
-                    </span>
-                  </button>
+                      data-glyph-tooltip={deleteArmed ? `Confirm delete !${deck.name}` : "Delete deck"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (deleteArmed) {
+                          disarmDelete();
+                          deleteWildcardDeckAndCollapsePrompts(deck);
+                          return;
+                        }
+                        armDelete(deleteKey);
+                      }}
+                    >
+                      {deleteArmed && (
+                        <span className={styles.conversationDeletePrompt}>Are you sure?</span>
+                      )}
+                      <span className={styles.conversationDeleteGlyph}>
+                        {deleteArmed ? "✓" : "×"}
+                      </span>
+                    </button>
+                  </span>
                 </div>
               );
             };
@@ -49717,6 +57277,7 @@ function HomeContent(): React.JSX.Element {
                         minMenuWidthPx={260}
                         autoOptionLabel="Auto"
                         autoOptionMetaOverride={`Prism auxiliary · ${commandCenterAutoModelId}`}
+                        showDisabledOption
                         settingsDefaultModelId={null}
                         dismissPopoversSignal={composerPopoverDismissSignal}
                       />
@@ -49730,7 +57291,9 @@ function HomeContent(): React.JSX.Element {
                       className={`${styles.promptCenterPromptList} ${styles.promptCenterScrollArea}`}
                       role="list"
                     >
-                      {builtInCommandCenterCommands.map(renderPromptCenterCommandRow)}
+                      {builtInCommandCenterCommands.map((command) =>
+                        renderPromptCenterCommandRow(command)
+                      )}
                     </CommandCenterScrollArea>
                   </section>
                   <section className={styles.promptCenterListSection} data-kind="prompts">
@@ -49754,7 +57317,13 @@ function HomeContent(): React.JSX.Element {
                       role="list"
                     >
                       {userPromptCenterCommands.length > 0 ? (
-                        userPromptCenterCommands.map(renderPromptCenterCommandRow)
+                        userPromptCenterCommands.map((command, index) =>
+                          renderPromptCenterCommandRow(
+                            command,
+                            index,
+                            userPromptCenterCommands.length
+                          )
+                        )
                       ) : (
                         <p className={styles.promptCenterListEmpty}>No prompts yet.</p>
                       )}
@@ -49781,7 +57350,13 @@ function HomeContent(): React.JSX.Element {
                       role="list"
                     >
                       {commandCenterWildcardDecks.length > 0 ? (
-                        commandCenterWildcardDecks.map(renderPromptCenterWildcardDeckRow)
+                        commandCenterWildcardDecks.map((deck, index) =>
+                          renderPromptCenterWildcardDeckRow(
+                            deck,
+                            index,
+                            commandCenterWildcardDecks.length
+                          )
+                        )
                       ) : (
                         <p className={styles.promptCenterListEmpty}>No wildcard decks yet.</p>
                       )}
@@ -49799,30 +57374,42 @@ function HomeContent(): React.JSX.Element {
                         Back to Prompt Center
                       </button>
                       <header className={styles.promptCenterEditorHeader}>
-                        <div>
+                        <div className={styles.promptCenterEditorTitleBlock}>
                           <span className={styles.promptCenterEyebrow}>
                             {selectedCommand.readOnly ? "Built-in command" : "Prompt"}
                           </span>
                           <h4>
                             {`/${selectedCommand.readOnly ? selectedCommand.name : selectedCommandName}`}
                           </h4>
-                        </div>
-                        <div className={styles.promptCenterEditorHeaderActions}>
                           <span
                             className={styles.promptCenterStatusBadge}
-                            data-read-only={selectedCommand.readOnly ? "true" : undefined}
+                            data-state={selectedCommandStatusState}
                           >
                             {selectedCommandStatusLabel}
                           </span>
+                        </div>
+                        <div className={styles.promptCenterEditorHeaderActions}>
                           {!selectedCommand.readOnly ? (
-                            <button
-                              type="button"
-                              className={styles.promptCenterSaveButton}
-                              onClick={saveSelectedCommandDraft}
-                              disabled={!selectedCommandDraftDirty || !selectedCommandDraftCanSave}
-                            >
-                              Save
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className={`${styles.promptCenterSaveButton} ${styles.promptCenterCloneButton}`}
+                                onClick={cloneSelectedCommandDraft}
+                                disabled={!selectedCommandDraftCanSave}
+                                aria-label={`Clone prompt /${selectedCommandName || selectedCommand.name}`}
+                                data-glyph-tooltip="Clone prompt"
+                              >
+                                <IconClone />
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.promptCenterSaveButton}
+                                onClick={saveSelectedCommandDraft}
+                                disabled={!selectedCommandDraftDirty || !selectedCommandDraftCanSave}
+                              >
+                                Save
+                              </button>
+                            </>
                           ) : null}
                         </div>
                       </header>
@@ -49960,6 +57547,7 @@ function HomeContent(): React.JSX.Element {
                                 commandPicks={[]}
                                 promptPicks={[]}
                                 wildcardPicks={composerWildcardDeckPicks}
+                                chipPointerBehavior="delete"
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                                 onChange={(event) => {
                                   const nextCommandText = event.currentTarget.value;
@@ -50085,12 +57673,9 @@ function HomeContent(): React.JSX.Element {
                             </div>
                             {promptCenterWildcardDockItemCount > 0 ? (
                               <div className={styles.promptCenterPromptWildcardGrid}>
-                                {BUILT_IN_WILDCARD_SLOT_PICKS.map((command) => {
+                                {PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS.map((command) => {
                                   const token = composerTrueWildcardSlotFallback(command);
-                                  const aliases =
-                                    command.aliases.length > 0
-                                      ? command.aliases.map((alias) => `!${alias}`).join(", ")
-                                      : `!${command.name}`;
+                                  const aliases = composerTrueWildcardSlotDisplayTokens(command);
                                   return (
                                     <button
                                       key={command.id}
@@ -50134,14 +57719,27 @@ function HomeContent(): React.JSX.Element {
                         Back to Prompt Center
                       </button>
                       <header className={styles.promptCenterEditorHeader}>
-                        <div>
+                        <div className={styles.promptCenterEditorTitleBlock}>
                           <span className={styles.promptCenterEyebrow}>Wildcard deck</span>
                           <h4>{`!${selectedWildcardDeckName || selectedWildcardDeck.name}`}</h4>
-                        </div>
-                        <div className={styles.promptCenterEditorHeaderActions}>
-                          <span className={styles.promptCenterStatusBadge}>
+                          <span
+                            className={styles.promptCenterStatusBadge}
+                            data-state={selectedWildcardDeckStatusState}
+                          >
                             {selectedWildcardDeckStatusLabel}
                           </span>
+                        </div>
+                        <div className={styles.promptCenterEditorHeaderActions}>
+                          <button
+                            type="button"
+                            className={`${styles.promptCenterSaveButton} ${styles.promptCenterCloneButton}`}
+                            onClick={cloneSelectedWildcardDeckDraft}
+                            disabled={!selectedWildcardDeckDraftCanSave}
+                            aria-label={`Clone wildcard deck !${selectedWildcardDeckName || selectedWildcardDeck.name}`}
+                            data-glyph-tooltip="Clone deck"
+                          >
+                            <IconClone />
+                          </button>
                           <button
                             type="button"
                             className={styles.promptCenterSaveButton}
@@ -50341,8 +57939,7 @@ function HomeContent(): React.JSX.Element {
                             );
                           })}
                         </div>
-                        <label className={styles.promptCenterField}>
-                          <span>Values</span>
+                        <div className={styles.promptCenterField}>
                           <WildcardDeckValuesInput
                             value={selectedWildcardDeckDraft.valuesText}
                             onChange={(valuesText) => {
@@ -50352,8 +57949,26 @@ function HomeContent(): React.JSX.Element {
                               }));
                             }}
                           />
-                        </label>
+                        </div>
                         <div className={styles.promptCenterDangerRow}>
+                          <button
+                            type="button"
+                            className={styles.promptCenterClearDeckButton}
+                            disabled={selectedWildcardDeckValues.length === 0}
+                            title={
+                              selectedWildcardDeckValues.length === 0
+                                ? "Add values before clearing the deck"
+                                : "Clear all wildcard values from this deck"
+                            }
+                            onClick={() => {
+                              updateSelectedWildcardDeckDraft((draft) => ({
+                                ...draft,
+                                valuesText: "",
+                              }));
+                            }}
+                          >
+                            Clear deck
+                          </button>
                           <button
                             type="button"
                             onClick={() => {
@@ -50414,36 +58029,52 @@ function HomeContent(): React.JSX.Element {
                 const customPrompts = commandCenterCommands.filter(
                   (command) => !command.builtIn && !command.readOnly
                 );
-                const renderCommandHelpRows = (
+                const renderCommandHelpRow = (
                   command: CommandCenterCommand,
                   kind: "command" | "prompt"
-                ): React.ReactNode[] => {
+                ): React.ReactNode => {
                   const description =
                     command.command.trim() ||
                     (kind === "command" ? "Runs a built-in command." : "Runs this prompt.");
-                  return commandInvocationNames(command).map((name, index) => (
+                  const aliases = command.aliases
+                    .map((alias) => alias.trim())
+                    .filter(Boolean)
+                    .map((alias) => `/${alias}`);
+                  return (
                     <button
-                      key={`${command.id}:${name}`}
+                      key={command.id}
                       type="button"
                       className={styles.commandHelpRow}
                       data-color-tag={command.colorTag ?? undefined}
                       style={commandCenterColorStyle(command.colorTag)}
-                      onClick={() => insertCommandCenterInvocation(`/${name}`)}
+                      onClick={() => insertCommandCenterInvocation(`/${command.name}`)}
+                      aria-label={
+                        aliases.length > 0
+                          ? `Insert /${command.name}. Aliases: ${aliases.join(", ")}. ${description}`
+                          : `Insert /${command.name}. ${description}`
+                      }
                     >
-                      <span className={styles.commandHelpSlash}>/{name}</span>
+                      <span className={styles.commandHelpNames}>
+                        <span className={styles.commandHelpSlash}>/{command.name}</span>
+                        {aliases.length > 0 ? (
+                          <span className={styles.commandHelpAliases}>
+                            {aliases.join(", ")}
+                          </span>
+                        ) : null}
+                      </span>
                       <span className={styles.commandHelpDescription}>
-                        {index === 0 ? description : `Alias for /${command.name}. ${description}`}
+                        {description}
                       </span>
                     </button>
-                  ));
+                  );
                 };
                 return (
                   <div className={styles.commandHelpBody}>
                     <section className={styles.commandHelpSection}>
                       <h5>Commands</h5>
                       <div className={styles.commandHelpList}>
-                        {builtInCommands.flatMap((command) =>
-                          renderCommandHelpRows(command, "command")
+                        {builtInCommands.map((command) =>
+                          renderCommandHelpRow(command, "command")
                         )}
                       </div>
                     </section>
@@ -50451,8 +58082,8 @@ function HomeContent(): React.JSX.Element {
                       <h5>Prompts</h5>
                       {customPrompts.length > 0 ? (
                         <div className={styles.commandHelpList}>
-                          {customPrompts.flatMap((command) =>
-                            renderCommandHelpRows(command, "prompt")
+                          {customPrompts.map((command) =>
+                            renderCommandHelpRow(command, "prompt")
                           )}
                         </div>
                       ) : (
@@ -50473,6 +58104,7 @@ function HomeContent(): React.JSX.Element {
       {panel === "settings" && (
         <div
           className={`${styles.panel} ${styles.panelSettings}`}
+          data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
         >
           <div className={styles.panelHeader}>
@@ -50744,6 +58376,32 @@ function HomeContent(): React.JSX.Element {
                         }}
                       />
                     </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={effectiveZenModeSettings.zenWallpaperBlurredEdgesEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperBlurredEdgesEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Blurred edges</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-wallpaper-blurred-edges"
+                          label="About blurred edges"
+                          variant="control"
+                        >
+                          Softens the sides of the Zen Atmosphere readability layer.
+                        </PanelSectionInfo>
+                      </span>
+                    </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -50810,6 +58468,36 @@ function HomeContent(): React.JSX.Element {
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
+                          <span>Canvas typing speed</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-canvas-typing-speed"
+                            label="About canvas typing speed"
+                            variant="control"
+                          >
+                            Adjusts how quickly Zen reveals assistant text on the canvas.
+                          </PanelSectionInfo>
+                        </span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenCanvasTypingSpeed(settings.zenCanvasTypingSpeed)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_CANVAS_TYPING_SPEED}
+                        max={MAX_ZEN_CANVAS_TYPING_SPEED}
+                        step={0.05}
+                        value={zenCanvasTypingSpeed}
+                        onChange={(event) => {
+                          const next = normalizeZenCanvasTypingSpeedSetting(event.target.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, zenCanvasTypingSpeed: next } : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span className={styles.controlLabelWithInfo}>
                           <span>Mood sensitivity</span>
                           <PanelSectionInfo
                             id="settings-control-info-zen-mood-sensitivity"
@@ -50837,6 +58525,85 @@ function HomeContent(): React.JSX.Element {
                         }}
                       />
                     </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenAskQuestionPatienceEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenAskQuestionPatienceEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      Question patience timer
+                    </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={zenAutonomyEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenAutonomyEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Let Zen reach out</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-autonomy"
+                          label="About Zen Autonomy"
+                          variant="control"
+                        >
+                          Allows Zen to occasionally initiate a brief idle message and choose a Persona while the Zen surface is open and visible.
+                        </PanelSectionInfo>
+                      </span>
+                    </label>
+                    {zenAskQuestionPatienceEnabled ? (
+                      <label className={styles.settingsRangeField}>
+                        <span className={styles.settingsRangeHeader}>
+                          <span className={styles.controlLabelWithInfo}>
+                            <span>Question patience</span>
+                            <PanelSectionInfo
+                              id="settings-control-info-zen-question-patience"
+                              label="About question patience"
+                              variant="control"
+                            >
+                              Sets how long a pending AskQuestion waits before Prism reads silence as hesitation.
+                            </PanelSectionInfo>
+                          </span>
+                          <span className={styles.settingsRangeValue}>
+                            {formatZenAskQuestionPatience(settings.zenAskQuestionPatienceMs)}
+                          </span>
+                        </span>
+                        <input
+                          type="range"
+                          min={MIN_ZEN_ASK_QUESTION_PATIENCE_MS}
+                          max={MAX_ZEN_ASK_QUESTION_PATIENCE_MS}
+                          step={10_000}
+                          value={zenAskQuestionPatienceMs}
+                          onChange={(event) => {
+                            const next = normalizeZenAskQuestionPatienceMsSetting(
+                              event.target.value
+                            );
+                            setSettings((previous) =>
+                              previous
+                                ? { ...previous, zenAskQuestionPatienceMs: next }
+                                : previous
+                            );
+                          }}
+                        />
+                      </label>
+                    ) : null}
                   </div>
                 </section>
 
@@ -50855,7 +58622,7 @@ function HomeContent(): React.JSX.Element {
                         id="settings-section-info-zen-wallpaper"
                         label="About Zen wallpaper settings"
                       >
-                        Controls Zen Atmosphere wallpaper model choices, opacity, masking, and generation timing.
+                        Controls Zen Atmosphere wallpaper model choices, opacity, style, and generation timing.
                       </PanelSectionInfo>
                     </div>
                   </header>
@@ -50870,6 +58637,75 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </div>
                   <div className={styles.settingsFieldGrid}>
+                    <div
+                      className={`${styles.settingsTextField} ${styles.settingsFieldFull}`}
+                      role="group"
+                      aria-labelledby="zen-wallpaper-style-title"
+                    >
+                      <span className={styles.settingsRangeHeader}>
+                        <span
+                          id="zen-wallpaper-style-title"
+                          className={`${styles.controlLabelWithInfo} ${styles.settingsTextFieldLabel}`}
+                        >
+                          <span>Atmosphere style</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-wallpaper-style-notes"
+                            label="About atmosphere style"
+                            variant="control"
+                          >
+                            Chooses a visual style preset for normal Zen Atmosphere wallpaper prompts.
+                          </PanelSectionInfo>
+                        </span>
+                      </span>
+                      <div
+                        className={styles.zenWallpaperStyleOptionGrid}
+                        aria-label="Atmosphere style presets"
+                      >
+                        {ZEN_WALLPAPER_STYLE_OPTIONS.map((option) => {
+                          const selected = zenWallpaperStyleOptionSelected(
+                            settings.zenWallpaperStyleNotes,
+                            option.notes
+                          );
+                          const StyleGlyph = option.glyph;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              className={styles.zenWallpaperStyleOptionButton}
+                              data-selected={selected ? "true" : undefined}
+                              data-default={option.id === "default" ? "true" : undefined}
+                              aria-pressed={selected}
+                              aria-label={option.ariaLabel}
+                              style={
+                                {
+                                  "--zen-wallpaper-style-color": option.color,
+                                } as CSSProperties
+                              }
+                              onClick={() => {
+                                setSettings((previous) =>
+                                  previous
+                                    ? {
+                                        ...previous,
+                                        zenWallpaperStyleNotes: option.notes,
+                                      }
+                                    : previous
+                                );
+                              }}
+                            >
+                              <span
+                                className={styles.zenWallpaperStyleOrb}
+                                aria-hidden="true"
+                              >
+                                <StyleGlyph size={28} strokeWidth={1.8} />
+                              </span>
+                              <span className={styles.zenWallpaperStyleOptionLabel}>
+                                {option.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <label className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
@@ -50899,23 +58735,6 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
-                    </label>
-                    <label
-                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={zenWallpaperTextMaskEnabled}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperTextMaskEnabled: next }
-                              : previous
-                          );
-                        }}
-                      />
-                      Mask behind Zen text
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
@@ -51027,7 +58846,7 @@ function HomeContent(): React.JSX.Element {
                 {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
                 <div className={styles.settingsDockRow}>
-                  <span>Save Zen Mode timing, mood, context, and Atmosphere settings.</span>
+                  <span>Save Zen Mode timing, mood, autonomy, context, and Atmosphere settings.</span>
                   <div className={styles.settingsDockActions}>
                     <button
                       type="button"
@@ -51269,6 +59088,51 @@ function HomeContent(): React.JSX.Element {
                         </span>
                       </span>
                     </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="settings-experimental-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Experimental</span>
+                      <h4 id="settings-experimental-title">Experimental Features</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Saved with Settings.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-experimental"
+                        label="About experimental features"
+                      >
+                        Enables opt-in behavior that may change as Prism learns what belongs in the main experience.
+                      </PanelSectionInfo>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <div className={styles.settingsHostField}>
+                      <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                        <input
+                          type="checkbox"
+                          checked={settings.experimentalAllModelEffortEnabled === true}
+                          onChange={(event) =>
+                            setSettings((previous) =>
+                              previous
+                                ? {
+                                    ...previous,
+                                    experimentalAllModelEffortEnabled: event.target.checked,
+                                  }
+                                : previous
+                            )
+                          }
+                        />
+                        Give local models simulated effort
+                      </label>
+                      <small className={styles.settingsHostHint}>
+                        Local models can use Prism's simulated effort; online models only show effort when they support it natively.
+                      </small>
+                    </div>
                   </div>
                 </section>
 
@@ -51798,9 +59662,9 @@ function HomeContent(): React.JSX.Element {
                           </span>
                         </span>
                         <small className={styles.settingsHostHint}>
-                          Use host:port only, for example <code>192.168.1.50:11434</code>. Only
-                          matching local models become paired choices; you do not need to mirror your
-                          whole Ollama library.
+                          Use host:port only, for example <code>192.168.1.50:11434</code>. Models
+                          on the paired host appear as paired choices; dual routing only uses models
+                          installed on both devices.
                         </small>
                       </label>
                       <div className={styles.settingsHostField}>
@@ -51844,6 +59708,29 @@ function HomeContent(): React.JSX.Element {
                           Prism checks this address live and lists detected workflows in Images.
                         </small>
                       </label>
+                      <div className={styles.settingsHostField}>
+                        <span className={styles.settingsHostLabel}>Experimental features</span>
+                        <label className={`${styles.checkbox} ${styles.settingsInlineToggle}`}>
+                          <input
+                            type="checkbox"
+                            checked={settings.experimentalAllModelEffortEnabled === true}
+                            onChange={(event) =>
+                              setSettings((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      experimentalAllModelEffortEnabled: event.target.checked,
+                                    }
+                                  : previous
+                              )
+                            }
+                          />
+                          Give local models simulated effort
+                        </label>
+                        <small className={styles.settingsHostHint}>
+                          Local models can use Prism's simulated effort; online models only show effort when they support it natively.
+                        </small>
+                      </div>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
                         When Prism can reach this address, each workflow <code>.json</code> under ComfyUI’s user
                         folders appears in the <strong>Images</strong> model list. The usual <strong>Save</strong>{" "}
@@ -52351,6 +60238,7 @@ function HomeContent(): React.JSX.Element {
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
+            data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
@@ -53583,7 +61471,7 @@ function HomeContent(): React.JSX.Element {
                           <strong>Upload from file</strong>
                           <small>.bot or .bots file from disk</small>
                         </button>
-                        {devToolsBotImportPasteEnabled ? (
+                        {devToolsRuntimeActive && devToolsBotImportPasteEnabled ? (
                           <button
                             type="button"
                             className={styles.importBotModalChoiceButton}
@@ -53712,7 +61600,10 @@ function HomeContent(): React.JSX.Element {
           imagePanelThemeBot != null
             ? (() => {
                 if (imagePrivateMode) {
-                  const accentNormalized = normalizeAccentForTheme(
+                  const accentNormalized = privateModeAccentHex(
+                    imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
+                    resolvedTheme
+                  ) ?? normalizeAccentForTheme(
                     imagePanelThemeBot.color ?? PRISM_DEFAULT_ACCENT,
                     resolvedTheme
                   );
@@ -53762,18 +61653,22 @@ function HomeContent(): React.JSX.Element {
             : undefined;
         const imagesGenOverlayAccentHex = (() => {
           if (imagePanelScope === "bot" && imagePanelBot) {
-            return normalizeAccentForTheme(
+            return displayAccentForMode(
               imagePanelBot.color ?? PRISM_DEFAULT_ACCENT,
-              resolvedTheme
-            );
+              resolvedTheme,
+              imagePrivateMode
+            ) ?? normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
           }
           if (imagePanelScope === "general") {
-            return normalizeAccentForTheme("#2fd3e3", resolvedTheme);
+            return displayAccentForMode("#2fd3e3", resolvedTheme, imagePrivateMode) ??
+              normalizeAccentForTheme("#2fd3e3", resolvedTheme);
           }
           if (activeBot?.color?.trim()) {
-            return normalizeAccentForTheme(activeBot.color, resolvedTheme);
+            return displayAccentForMode(activeBot.color, resolvedTheme, imagePrivateMode) ??
+              normalizeAccentForTheme(activeBot.color, resolvedTheme);
           }
-          return normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
+          return displayAccentForMode(PRISM_DEFAULT_ACCENT, resolvedTheme, imagePrivateMode) ??
+            normalizeAccentForTheme(PRISM_DEFAULT_ACCENT, resolvedTheme);
         })();
         const imagesGenOverlayAccentStyle = deriveAccentStyle(
           imagesGenOverlayAccentHex,
@@ -53817,19 +61712,39 @@ function HomeContent(): React.JSX.Element {
         const privateOverlayGlyphStyle: React.CSSProperties | undefined =
           imagesGenOverlayPrivate && overlayTintBot?.color?.trim()
             ? ({
-                ["--private-overlay-glyph" as string]: normalizeAccentForTheme(
+                ["--private-overlay-glyph" as string]: privateModeAccentHex(
                   overlayTintBot.color,
                   resolvedTheme
-                ),
+                ) ?? normalizeAccentForTheme(overlayTintBot.color, resolvedTheme),
               } as React.CSSProperties)
             : undefined;
         const prismGenOverlayPaletteStyle = imagesGenOverlayPrismDefault
           ? ({
-              ["--prism-gen-c1" as string]: PRISM_WORDMARK_PALETTE[0],
-              ["--prism-gen-c2" as string]: PRISM_WORDMARK_PALETTE[1],
-              ["--prism-gen-c3" as string]: PRISM_WORDMARK_PALETTE[2],
-              ["--prism-gen-c4" as string]: PRISM_WORDMARK_PALETTE[3],
-              ["--prism-gen-c5" as string]: PRISM_WORDMARK_PALETTE[4],
+              ["--prism-gen-c1" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[0] ?? "#ff5f5f",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[0] ?? "#ff5f5f",
+              ["--prism-gen-c2" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[1] ?? "#f8c84a",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[1] ?? "#f8c84a",
+              ["--prism-gen-c3" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[2] ?? "#6bd97d",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[2] ?? "#6bd97d",
+              ["--prism-gen-c4" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[3] ?? "#5cc8ff",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[3] ?? "#5cc8ff",
+              ["--prism-gen-c5" as string]: displayAccentForMode(
+                PRISM_WORDMARK_PALETTE[4] ?? "#b07cff",
+                resolvedTheme,
+                imagesGenOverlayPrivate
+              ) ?? PRISM_WORDMARK_PALETTE[4] ?? "#b07cff",
             } as React.CSSProperties)
           : undefined;
         const genOverlayPrimary =
@@ -53865,6 +61780,7 @@ function HomeContent(): React.JSX.Element {
           <>
           <div
             className={`${styles.panel} ${styles.panelImages}`}
+            data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-image-scope={imagePanelScope}
             data-private-mode={appWidePrivateMode ? "true" : undefined}
@@ -54253,6 +62169,7 @@ function HomeContent(): React.JSX.Element {
                   resolvedTheme={resolvedTheme}
                   selectedBotId={imagePanelScope === "bot" ? imagePanelBotId : null}
                   dismissPopoversSignal={composerPopoverDismissSignal}
+                  privateTone={appWidePrivateMode}
                   onPick={(botId) => {
                     setImagePanelScope("bot");
                     setImagePanelBotId(botId);
@@ -55444,6 +63361,10 @@ function HomeContent(): React.JSX.Element {
     directedSpeakerBotId?: string
   ) => {
     if (!conversationId || coffeeBusy || coffeeAutoBusy) return;
+    if (coffeeSessionModelDisabled) {
+      setCoffeeError("Coffee replies are disabled. Choose Auto or a model before continuing.");
+      return;
+    }
     const convSnap = coffeeConversationRef.current;
     if (convSnap && convSnap.id === conversationId && !convSnap.coffeeTopic?.trim()) {
       return;
@@ -55566,11 +63487,44 @@ function HomeContent(): React.JSX.Element {
     event.preventDefault();
     setCoffeeDraft(recalled);
   };
+  const consumeCoffeePsychicCommand = async (trimmedLine: string): Promise<boolean> => {
+    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
+    if (psychicCommand.kind === "none") return false;
+    setCoffeeDraft("");
+    setCoffeeError(null);
+    if (psychicCommand.kind === "error") {
+      setCoffeeError(psychicCommand.error);
+      return true;
+    }
+    await togglePsychicModeFromSlashCommand({
+      clearChatComposer: false,
+      source: "coffee",
+    });
+    return true;
+  };
+  const consumeCoffeeNvmCommand = async (trimmedLine: string): Promise<boolean> => {
+    const nvmCommand = parseNvmSlashCommand(trimmedLine);
+    if (nvmCommand.kind === "none") return false;
+    setCoffeeDraft("");
+    setCoffeeError(null);
+    if (nvmCommand.kind === "error") {
+      setCoffeeError(nvmCommand.error);
+      return true;
+    }
+    await resetTopicFromNvmSlashCommand("coffee");
+    return true;
+  };
   const triggerDirectedCoffeeTurn = async (botId: string) => {
     if (!coffeeConversation || !coffeeAutoplayPaused || coffeeSessionPhase !== "live") return;
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmedLiveDraft = liveDraft.trim();
     if (trimmedLiveDraft.length > 0 && consumeGlobalClearCommand(trimmedLiveDraft, "coffee")) {
+      return;
+    }
+    if (await consumeCoffeeNvmCommand(trimmedLiveDraft)) {
+      return;
+    }
+    if (await consumeCoffeePsychicCommand(trimmedLiveDraft)) {
       return;
     }
     const echoCommand = parseCoffeeDevCommand(liveDraft);
@@ -55625,6 +63579,8 @@ function HomeContent(): React.JSX.Element {
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
+    if (await consumeCoffeeNvmCommand(trimmed)) return;
+    if (await consumeCoffeePsychicCommand(trimmed)) return;
     if (liveDraft !== coffeeDraft) {
       setCoffeeDraft(liveDraft);
     }
@@ -55756,6 +63712,10 @@ function HomeContent(): React.JSX.Element {
         speakerBotId: speaker.id,
         includeCooldown: false,
       });
+      return;
+    }
+    if (coffeeSessionModelDisabled) {
+      setCoffeeError("Coffee replies are disabled. Choose Auto or a model before sending.");
       return;
     }
     setCoffeeBusy(true);
@@ -56494,6 +64454,7 @@ function HomeContent(): React.JSX.Element {
         />
         <aside
           className={styles.coffeeTranscriptPanel}
+          data-dev-panel-safe-area="right"
           data-closing={coffeeTranscriptClosing ? "true" : undefined}
           aria-label="Coffee Session transcript"
         >
@@ -56574,6 +64535,7 @@ function HomeContent(): React.JSX.Element {
         />
         <aside
           className={styles.coffeeTranscriptPanel}
+          data-dev-panel-safe-area="right"
           data-closing={coffeeTranscriptClosing ? "true" : undefined}
           data-blank="true"
           aria-label="Coffee settings"
@@ -57513,8 +65475,7 @@ function HomeContent(): React.JSX.Element {
                   )
                 : moodDevSlot;
             const mouthOpenWhileTyping = isTableTypingThisSeat
-              ? Math.floor(activeTypewriterLength / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE) % 2 ===
-                0
+              ? coffeeSeatMouthOpenFromVisibleLength(activeTypewriterLength)
               : false;
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
@@ -57648,11 +65609,7 @@ function HomeContent(): React.JSX.Element {
                         : `${bot.name} is preparing a reply`
                     }
                   >
-                    <span className={styles.typingDots} aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
+                    <TypingDots className={styles.typingDots} voicePreset={seatVoicePreset} />
                   </div>
                 ) : notifiedBotIds.has(bot.id) ? (
                   <div
@@ -57715,7 +65672,7 @@ function HomeContent(): React.JSX.Element {
           ) : null}
         </div>
         {coffeeSessionJoinedDock ? (
-          <div className={styles.coffeeAutoplayDock}>
+          <div className={styles.coffeeAutoplayDock} data-dev-panel-safe-area="bottom">
             <p className={styles.coffeeAutoplayDockCaption}>
               {coffeeReplayActive
                 ? "Replay mode — watching the saved session back with shorter pauses."
@@ -58389,7 +66346,7 @@ function HomeContent(): React.JSX.Element {
         onContextMenu={handleCoffeeShellContextMenu}
       >
         {!coffeeSessionJoined && (
-        <aside className={styles.coffeeSidebar}>
+        <aside className={styles.coffeeSidebar} data-dev-panel-safe-area="left">
           <button
             type="button"
             className={styles.coffeeHubButton}
@@ -58451,7 +66408,7 @@ function HomeContent(): React.JSX.Element {
         )}
 
         <section className={styles.coffeeMain}>
-          <header className={styles.coffeeHeader}>
+          <header className={styles.coffeeHeader} data-dev-panel-safe-area="top">
             <div className={styles.coffeeTitleBlock}>
               <div>
                 <p className={styles.coffeeEyebrow}>Coffee Mode</p>
@@ -58676,6 +66633,7 @@ function HomeContent(): React.JSX.Element {
           {coffeeFinishedControlsVisible && (
             <section
               className={`${styles.coffeeComposer} ${styles.coffeeReplayComposerControls}`}
+              data-dev-panel-safe-area="bottom"
               aria-label="Coffee replay controls"
             >
               <div className={styles.coffeeReplayTimelineRow}>
@@ -58822,6 +66780,7 @@ function HomeContent(): React.JSX.Element {
             <form
               ref={coffeeComposerFormRef}
               className={styles.coffeeComposer}
+              data-dev-panel-safe-area="bottom"
               data-prism-compose-field="true"
               onKeyDown={handleCoffeeComposerKeyDown}
               onSubmit={(event) => {
@@ -58884,7 +66843,10 @@ function HomeContent(): React.JSX.Element {
         {renderCoffeeGroupSettingsModal()}
 
         {renderSharedPanels()}
+        {renderPsychicModeToast()}
+        {renderLocalCommandToast()}
         {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
@@ -58980,7 +66942,13 @@ function HomeContent(): React.JSX.Element {
       <ComposerModelPicker
         value={storyEffectiveModelChoice}
         onChange={(nextChoice) => {
-          if (storyResponseMode === "local") return;
+          if (storyResponseMode === "local") {
+            setStoryModelChoiceByProvider((previous) => ({
+              ...previous,
+              local: nextChoice,
+            }));
+            return;
+          }
           const applied = applyOnlineModelChoice({
             currentChoices: storyModelChoiceByProvider,
             nextChoice,
@@ -59008,6 +66976,7 @@ function HomeContent(): React.JSX.Element {
         placement="down"
         minMenuWidthPx={180}
         showAutoOption={storyResponseMode !== "local"}
+        showDisabledOption
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
           storyResponseMode === "local" ? "local" : "online"
@@ -59213,7 +67182,11 @@ function HomeContent(): React.JSX.Element {
   const renderStoryMapPanel = (episode: StoryEpisodeManifest): React.JSX.Element | null => {
     if (!storyMapOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story map">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story map"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Map</p>
@@ -59258,7 +67231,11 @@ function HomeContent(): React.JSX.Element {
   const renderStoryInventoryPanel = (): React.JSX.Element | null => {
     if (!storyInventoryOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story inventory">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story inventory"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Inventory</p>
@@ -59295,7 +67272,11 @@ function HomeContent(): React.JSX.Element {
   ): React.JSX.Element | null => {
     if (!storyTranscriptOpen) return null;
     return (
-      <aside className={styles.storyOverlayPanel} aria-label="Story transcript">
+      <aside
+        className={styles.storyOverlayPanel}
+        data-dev-panel-safe-area="right"
+        aria-label="Story transcript"
+      >
         <div className={styles.storyOverlayHeader}>
           <div>
             <p className={styles.storyEyebrow}>Log</p>
@@ -59510,7 +67491,7 @@ function HomeContent(): React.JSX.Element {
         style={appShellStyle ?? undefined}
         onContextMenu={handleStoryShellContextMenu}
       >
-        <aside className={styles.storySidebar}>
+        <aside className={styles.storySidebar} data-dev-panel-safe-area="left">
           <button
             type="button"
             className={styles.storyHomeButton}
@@ -59615,6 +67596,7 @@ function HomeContent(): React.JSX.Element {
         </section>
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
@@ -59896,6 +67878,7 @@ function HomeContent(): React.JSX.Element {
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {renderViewSwitchOverlay()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
   );
@@ -59906,27 +67889,113 @@ function HomeContent(): React.JSX.Element {
   // controls row exposed so users can pick bot, provider mode, and model
   // directly from Chat.
   if (view === "chat") {
-    const zenAtmosphereWallpaperVisible = zenAtmosphereTimeline.some(
-      (entry) => (zenAtmosphereLayerOpacities[entry.imageId] ?? 0) > 0.01
-    );
+    const zenRememberedWallpaperVisible =
+      zenEmptyHeroVisible &&
+      !appWidePrivateMode &&
+      zenPersonaBotId !== null &&
+      zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
+    const zenFallbackWallpaperBotId =
+      zenPersonaBotId ?? detail?.lastBotId ?? detail?.botId ?? null;
+    const zenFallbackWallpaperConversationId =
+      detail?.id && detail.id !== "pending"
+        ? detail.id
+        : selectedId && selectedId !== "pending"
+          ? selectedId
+          : null;
+    const zenFallbackWallpaperSeed = zenFallbackWallpaperConversationId
+      ? (zenFallbackWallpaperSeedByConversationIdRef.current.get(
+          zenFallbackWallpaperConversationId
+        ) ??
+        `${zenFallbackWallpaperConversationId}:${zenFallbackWallpaperBotId ?? ""}`)
+      : zenFallbackWallpaperNewConversationSeed;
+    const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
+      chatSurface: chatLikeSurface,
+      hasRememberedWallpaper: zenRememberedWallpaperVisible,
+      atmosphereTimelineLength: zenAtmosphereTimeline.length,
+      hasConversationMessages:
+        (detail?.messages.length ?? 0) > 0 || pendingReplyVisible,
+    });
+    const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
+      ? resolveZenFallbackWallpaperVariant(zenFallbackWallpaperSeed)
+      : null;
+    const zenFallbackWallpaperVisible = Boolean(zenFallbackWallpaperVariant);
+    const zenRememberedAtmosphereEntry: ZenWallpaperHistoryEntry | null =
+      zenRememberedWallpaperVisible && zenRememberedWallpaperPreview
+        ? {
+            imageId: zenRememberedWallpaperPreview.imageId,
+            promptSeed: zenRememberedWallpaperPreview.promptSeed,
+            generationMessageCount: 0,
+            revealStartMessageCount: 0,
+            revealFullMessageCount: 0,
+            createdAt: zenRememberedWallpaperPreview.createdAt,
+          }
+        : null;
+    const zenAtmosphereDisplayTimeline = zenRememberedAtmosphereEntry
+      ? [zenRememberedAtmosphereEntry]
+      : zenAtmosphereTimeline;
+    const zenAtmosphereMeasuredLayerOpacities =
+      zenAtmosphereScrollBlendReadyKey === zenAtmosphereTimelineKey
+        ? zenAtmosphereLayerOpacities
+        : zenAtmosphereInitialLayerOpacities;
+    const zenAtmosphereDisplayLayerOpacities = zenRememberedAtmosphereEntry
+      ? { [zenRememberedAtmosphereEntry.imageId]: 1 }
+      : zenAtmosphereMeasuredLayerOpacities;
+    const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
+      (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
+    ) || zenFallbackWallpaperVisible;
+    const zenAtmosphereReadabilityOverlayOpacity = zenRememberedWallpaperVisible
+      ? 0
+      : zenFallbackWallpaperVisible
+        ? 1
+      : maxZenAtmosphereLayerOpacity(zenAtmosphereDisplayLayerOpacities);
+    const zenAtmosphereBlurredEdgesEnabled =
+      normalizeZenWallpaperBlurredEdgesSetting(
+        settings?.zenWallpaperBlurredEdgesEnabled
+      );
+    const zenAtmosphereReadabilityOverlayStyle = {
+      "--zen-atmosphere-overlay-opacity": String(
+        zenAtmosphereReadabilityOverlayOpacity
+      ),
+    } as React.CSSProperties;
+    const zenPersonaFallbackAtmosphereVisible =
+      zenEmptyHeroVisible &&
+      Boolean(zenPersonaBot) &&
+      !zenRememberedWallpaperVisible &&
+      !zenFallbackWallpaperVisible;
+    const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
+      ? botAccentStyle(zenPersonaBot.color, resolvedTheme)
+      : undefined;
+    const zenAtmospherePrismColorActive =
+      !appWidePrivateMode && composeBotAccentId === null;
     const zenAtmosphereBackdropStyle = {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
+      "--zen-atmosphere-color-amount": zenAtmospherePrismColorActive ? "1" : "0",
     } as React.CSSProperties;
-    const zenSplashModelPickerActive = zenEmptyHeroVisible;
+    const zenFirstReplyPending =
+      pendingReplyVisible &&
+      pendingReplyStartMessageCount === 0 &&
+      detail?.hasAssistantReply !== true;
+    const zenHeroSurfaceVisible =
+      (!detail || detail.messages.length === 0) && !pendingReplyVisible;
+    const zenCanvasModelPickerActive =
+      zenHeroSurfaceVisible && !emptyStateSearchActive;
+    const zenHeaderModelPickerActive =
+      !zenCanvasModelPickerActive && !zenFirstReplyPending;
     return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
       data-private-active={privateChatActive ? "true" : undefined}
+      data-zen-private-tone={appWidePrivateMode ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden="true"
       data-zen-surface="true"
       data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
+      data-zen-fallback-wallpaper-active={zenFallbackWallpaperVisible ? "true" : undefined}
       data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
       data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
-      data-zen-text-mask={zenWallpaperTextMaskEnabled ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onPointerMove={handleZenSurfacePointerMove}
@@ -59942,6 +68011,7 @@ function HomeContent(): React.JSX.Element {
       >
         <header
           className={styles.chatHeader}
+          data-dev-panel-safe-area="top"
           onPointerEnter={handleZenHeaderPointerEnter}
           onPointerLeave={handleZenHeaderPointerLeave}
           onFocusCapture={handleZenHeaderFocusCapture}
@@ -59982,7 +68052,7 @@ function HomeContent(): React.JSX.Element {
               ? renderMemoryToasts()
               : null}
           </div>
-          {zenSplashModelPickerActive ? null : renderHeaderModelPicker()}
+          {zenHeaderModelPickerActive ? renderHeaderModelPicker() : null}
           {renderChatOverflowGear()}
           {!chatLikeSurface ? (
             <div className={styles.chatHeaderComposeToolsRow}>
@@ -60026,6 +68096,7 @@ function HomeContent(): React.JSX.Element {
                           hueLensTrackGradient={hueLensTrackGradient}
                           hueLensTrackSegments={hueLensTrackSegments}
                           dismissPopoversSignal={composerPopoverDismissSignal}
+                          privateTone={appWidePrivateMode}
                         />
                       )}
                     </>
@@ -60063,6 +68134,12 @@ function HomeContent(): React.JSX.Element {
                     visibleModelChoice,
                     modelProvider
                   );
+                  const effortAvailability = resolveChatZenReasoningEffortAvailability({
+                    provider: modelProvider,
+                    modelChoice: visibleModelChoice,
+                    experimentalAllModelEffortEnabled:
+                      settings?.experimentalAllModelEffortEnabled === true,
+                  });
                   return (
                     <>
                       <ComposerModelPicker
@@ -60106,12 +68183,11 @@ function HomeContent(): React.JSX.Element {
                           isLocal ? "local" : "online"
                         )}
                         effortControl={
-                          modelChoiceSupportsReasoningEffort(
-                            modelProvider,
-                            visibleModelChoice
-                          )
+                          effortAvailability.visible
                             ? {
                                 value: chatReasoningEffort,
+                                disabled: !effortAvailability.enabled,
+                                disabledReason: effortAvailability.disabledReason,
                                 onChange: (next) => {
                                   setChatReasoningEffort(next);
                                   persistChatReasoningEffortForActiveScope(next);
@@ -60130,6 +68206,22 @@ function HomeContent(): React.JSX.Element {
           ) : null}
         </header>
         {renderZenMemoryToasts()}
+        {zenPersonaContinuityWashStyle ? (
+          <div
+            className={styles.zenPersonaComposerBrushWash}
+            style={zenPersonaContinuityWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
+        {exitingZenPersonaWashStyle ? (
+          <div
+            key={`composer-brush-${exitingZenPersonaWash?.id}`}
+            className={styles.zenPersonaComposerBrushWash}
+            data-exiting="true"
+            style={exitingZenPersonaWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <div
           className={styles.messagesFrame}
@@ -60140,33 +68232,82 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
-          {zenAtmosphereTimeline.length > 0 ? (
+          {zenAtmosphereDisplayTimeline.length > 0 || zenFallbackWallpaperVariant ? (
             <div
               className={styles.zenAtmosphereBackdrop}
               style={zenAtmosphereBackdropStyle}
               aria-hidden="true"
             >
-              {zenAtmosphereTimeline.map((entry) => {
-                const layerOpacity =
-                  zenAtmosphereLayerOpacities[entry.imageId] ?? 0;
-                return (
-                  <img
-                    key={`${entry.imageId}:${entry.generationMessageCount}`}
-                    src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
-                    alt=""
-                    decoding="async"
-                    style={
-                      {
-                        "--zen-atmosphere-layer-opacity": String(layerOpacity),
-                      } as React.CSSProperties
-                    }
-                  />
-                );
-              })}
+              {zenFallbackWallpaperVariant ? (
+                <img
+                  key={`fallback:${zenFallbackWallpaperVariant.src}:${zenFallbackWallpaperSeed}`}
+                  src={zenFallbackWallpaperVariant.src}
+                  alt=""
+                  decoding="async"
+                  data-zen-fallback-wallpaper="true"
+                  style={
+                    {
+                      "--zen-atmosphere-layer-opacity": "1",
+                      "--zen-fallback-wallpaper-scale-x":
+                        zenFallbackWallpaperVariant.flipX ? "-1" : "1",
+                      "--zen-fallback-wallpaper-scale-y":
+                        zenFallbackWallpaperVariant.flipY ? "-1" : "1",
+                    } as React.CSSProperties
+                  }
+                />
+              ) : (
+                zenAtmosphereDisplayTimeline.map((entry) => {
+                  const layerOpacity =
+                    zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0;
+                  return (
+                    <img
+                      key={`${entry.imageId}:${entry.generationMessageCount}`}
+                      src={`/api/images/${encodeURIComponent(entry.imageId)}/file`}
+                      alt=""
+                      decoding="async"
+                      style={
+                        {
+                          "--zen-atmosphere-layer-opacity": String(layerOpacity),
+                        } as React.CSSProperties
+                      }
+                    />
+                  );
+                })
+              )}
             </div>
           ) : null}
-          {zenAtmosphereWallpaperVisible && zenWallpaperTextMaskEnabled ? (
-            <div className={styles.zenAtmosphereTextCutout} aria-hidden="true" />
+          {zenAtmosphereWallpaperVisible && !zenRememberedWallpaperVisible ? (
+            <div
+              className={styles.zenAtmosphereReadabilityOverlay}
+              data-edge-mode={
+                zenAtmosphereBlurredEdgesEnabled ? "soft" : "hard"
+              }
+              style={zenAtmosphereReadabilityOverlayStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {zenPersonaFallbackAtmosphereVisible && zenPersonaBot ? (
+            <div
+              className={styles.zenPersonaStartupAtmosphere}
+              style={zenPersonaFallbackAtmosphereStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {zenPersonaContinuityWashStyle ? (
+            <div
+              className={styles.zenPersonaContinuityWash}
+              style={zenPersonaContinuityWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {exitingZenPersonaWashStyle ? (
+            <div
+              key={exitingZenPersonaWash?.id}
+              className={styles.zenPersonaContinuityWash}
+              data-exiting="true"
+              style={exitingZenPersonaWashStyle}
+              aria-hidden="true"
+            />
           ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
@@ -60197,10 +68338,16 @@ function HomeContent(): React.JSX.Element {
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-reply-runway-active={replyRunwayActive ? "true" : undefined}
+            data-zen-speed-nudge-pulse={zenCanvasSpeedNudgePulseActive ? "true" : undefined}
+            data-zen-speed-nudge-holding={zenCanvasSpeedNudgeHolding ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
+            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
@@ -60223,7 +68370,7 @@ function HomeContent(): React.JSX.Element {
               }}
             />
           ) : null}
-          {chatStartupSummaryVisible ? (
+          {chatStartupSummaryVisible && !zenHeroSurfaceVisible ? (
             <div className={styles.chatCanvasSummaryContainer}>
               <div className={styles.chatSessionSummaryBubble} role="status" aria-live="polite">
                 <div className={styles.chatSummaryBubbleContent}>
@@ -60235,7 +68382,7 @@ function HomeContent(): React.JSX.Element {
                       bot={activeBot}
                       previewBot={null}
                       previewAsBotGlyph={false}
-                      privateHero={privateChatActive}
+                      privateHero={appWidePrivateMode}
                       forceTrianglePreview={lensInteracting}
                       resolvedTheme={resolvedTheme}
                     />
@@ -60252,47 +68399,56 @@ function HomeContent(): React.JSX.Element {
             //     strip (matches the "calm personal chat" shell).
             //   • ARMED — hero becomes the bot's full-color glyph; tapping
             //     the hero primes the starter hello + focuses compose.
-            // `activeBot` resolves the committed bot only, so hover never
-            // changes the hero, title, hint, or shell accent.
+            // Fresh Zen can arm a persona without starting the conversation.
+            // The first actual turn is still controlled by the user unless
+            // they tap the Talk to Me hero.
             const suppressHeroCopy = false;
             const isPreviewing = false;
-            const heroBot: Bot | null = null;
-            const privateBotName = "";
-            const title = "Zen with PRISM";
-            const descriptionPreview = "";
-            const selectedBotPromptPreview = "";
+            const heroBot: Bot | null = zenPersonaBot;
+            const heroBotName = heroBot?.name?.trim() ?? "";
+            const descriptionPreview = heroBot
+              ? botHeroPreview(heroBot.system_prompt)
+              : "";
+            const selectedBotPromptPreview = heroBot ? descriptionPreview : "";
             // While the hue lens has zoomed into a color group AND nothing is
             // armed yet, the hero is just a tinted Prism placeholder
             // — tapping it would commit the user to a "start with default"
             // conversation when their actual intent is "let me pick from this
             // filtered group." Block the click + nudge them to pick a tile.
             const heroLensPlaceholder = false;
-            const heroStartLabel =
-              "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
+            const heroStartLabel = heroBotName
+              ? `Send a message below, or tap the symbol to have ${heroBotName} open.`
+              : "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
             const hint = (() => {
+              if (chatStartupSummaryVisible && chatStartupSummary) {
+                return chatStartupSummary;
+              }
               if (selectedBotPromptPreview) return selectedBotPromptPreview;
               if (descriptionPreview) return `${descriptionPreview} ${heroStartLabel}`;
               return heroStartLabel;
             })();
-            const emptyStateStyle = undefined;
             const emptyStateClassName = [
               styles.emptyState,
               emptyStateSearchActive ? styles.emptyStateSearching : null,
               suppressHeroCopy ? styles.emptyStateDensePicker : null,
             ].filter(Boolean).join(" ");
+            const titleSubject = heroBotName || "PRISM";
+            const titleSubjectFontCapRem = Math.max(
+              2.4,
+              Math.min(4.8, 4.8 - Math.max(0, Array.from(titleSubject).length - 12) * 0.15)
+            );
+            const titleSubjectStyle = {
+              "--zen-title-subject-font-cap": `${titleSubjectFontCapRem.toFixed(2)}rem`,
+            } as React.CSSProperties;
             const renderHero = () => (
               <EmptyStateIcon
                 bot={isPreviewing ? null : heroBot}
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
-                privateHero={false}
-                /* Triangle hero replaces the rainbow brand mark whenever
-                   the surface isn't in home mode and there's no bot
-                   armed — its currentColor follows --accent, which
-                   means the triangle matches whatever the rest of the
-                   interface is currently tinted to (lens hue while
-                   engaged, theme fg in private). Drag-mode keeps its
-                   override regardless. */
+                privateHero={appWidePrivateMode}
+                /* Fresh Zen keeps the focused persona visible without
+                   starting the session; the user decides whether to type
+                   first or tap the Talk to Me hero. */
                 forceTrianglePreview={false}
                 resolvedTheme={resolvedTheme}
               />
@@ -60301,8 +68457,12 @@ function HomeContent(): React.JSX.Element {
               pendingReply ||
               !isStarterPromptAvailable(draft) ||
               heroLensPlaceholder;
-            const heroStartTitle = "Start with PRISM";
-            const heroStartAriaLabel = "Start Zen conversation with PRISM";
+            const heroStartTitle = heroBotName
+              ? `Start with ${heroBotName}`
+              : "Start with PRISM";
+            const heroStartAriaLabel = heroBotName
+              ? `Start Zen conversation with ${heroBotName}`
+              : "Start Zen conversation with PRISM";
             const shouldShowHeroNudge =
               !heroStartDisabled &&
               !emptyStateSearchActive &&
@@ -60311,7 +68471,6 @@ function HomeContent(): React.JSX.Element {
             return (
               <div
                 className={emptyStateClassName}
-                style={emptyStateStyle}
                 onClick={handleEmptyStateBackgroundClick}
               >
                 {/* Tap any hero (armed bot or default Prism) to dispatch a
@@ -60335,31 +68494,48 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 {emptyStateSearchActive ? renderEmptyStateBotSearch() : null}
-                {!emptyStateSearchActive && !suppressHeroCopy && !chatStartupSummaryVisible ? (
-                  <button
-                    type="button"
-                    className={[
-                      styles.emptyStateIconButton,
-                      shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
-                    ].filter(Boolean).join(" ")}
-                    data-bot-talk-hero="true"
-                    onClick={handleHeroStartConversation}
-                    disabled={heroStartDisabled}
-                    title={heroStartTitle}
-                    aria-label={heroStartAriaLabel}
-                  >
-                    {renderHero()}
-                  </button>
-                ) : null}
-                {!emptyStateSearchActive && !chatStartupSummaryVisible ? (
+                {!emptyStateSearchActive ? (
                   <div className={styles.emptyStateTitleBlock}>
-                    <div className={styles.emptyStateTitle}>{title}</div>
+                    <div
+                      className={styles.emptyStateTitle}
+                      data-zen-title-with-hero="true"
+                    >
+                      <span className={styles.emptyStateTitlePhrase}>
+                        <span className={styles.emptyStateTitleLead}>Zen</span>
+                        {!suppressHeroCopy ? (
+                          <button
+                            type="button"
+                            className={[
+                              styles.emptyStateIconButton,
+                              styles.zenInlineHeroGlyph,
+                            ].filter(Boolean).join(" ")}
+                            data-bot-talk-hero="true"
+                            onClick={handleHeroStartConversation}
+                            disabled={heroStartDisabled}
+                            title={heroStartTitle}
+                            aria-label={heroStartAriaLabel}
+                          >
+                            {renderHero()}
+                          </button>
+                        ) : null}
+                        <span className={styles.emptyStateTitleLead}>with</span>
+                      </span>
+                      <span
+                        className={styles.emptyStateTitleSubject}
+                        style={titleSubjectStyle}
+                        data-title={titleSubject}
+                      >
+                        {titleSubject}
+                      </span>
+                    </div>
                     <p className={styles.emptyStateHint}>{hint}</p>
-                    {zenSplashModelPickerActive ? (
+                    {zenCanvasModelPickerActive ? (
                       <div className={styles.zenSplashModelPicker}>
                         {renderHeaderModelPicker({
                           modelMenuClassName: styles.zenSplashModelMenu,
                           modelMenuWidthPx: 220,
+                          botMenuClassName: styles.zenSplashBotMenu,
+                          botMenuPlacement: "right",
                         })}
                       </div>
                     ) : null}
@@ -60484,8 +68660,9 @@ function HomeContent(): React.JSX.Element {
               detail?.id
                 ? (() => {
                     const displayContent = resolveMessageDisplayContent(msg);
+                    const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
-                      revealKey: `${detail.id}:${msg.id}`,
+                      revealKey,
                       displayContent,
                       nowMs: chatEphemeralNowMs,
                       completed: messageRevealAlreadyCompleted,
@@ -60493,10 +68670,17 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
+                      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
                     });
                   })()
                 : undefined;
-            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const cleanupRevealKey =
+              msg.role === "user" && detail?.id
+                ? cleanupMessageRevealKey(detail.id, msg.id)
+                : null;
+            const cleanupRevealActive =
+              cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
+            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -60522,6 +68706,8 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const assistantMoodKey =
               msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const assistantVoicePreset =
+              msg.role === "assistant" ? resolveMessageVoicePreset(msg, bots) : "neutral";
             const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
               message: msg,
               view,
@@ -60533,7 +68719,12 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
-            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const zenSessionBreakImmediatelyBeforeMessage =
+              zenSessionBreakAnchorIndex !== null &&
+              zenSessionBreakAnchorIndex === messageIndex - 1;
+            const zenEraBoundaryLabel = zenSessionBreakImmediatelyBeforeMessage
+              ? null
+              : zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             const starterPromptAlignment =
               msg.id === starterPromptCenteredMessageId
                 ? "centered"
@@ -60543,6 +68734,35 @@ function HomeContent(): React.JSX.Element {
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
+            const zenPersonaInkSegment =
+              chatLikeSurface
+                ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
+                : null;
+            const zenPersonaInkStyle = zenPersonaInkSegment
+              ? ({
+                  ...zenPersonaBackdropStyleVars,
+                  "--zen-persona-ink-color": zenPersonaInkSegment.color,
+                } as React.CSSProperties)
+              : undefined;
+            const zenUserMessageColor =
+              msg.role === "user"
+                ? resolveZenUserMessageColor(
+                    zenPersonaInkSegment,
+                    zenUserPrismColor,
+                    resolvedTheme
+                  )
+                : undefined;
+            const zenUserMessageColorStyle = zenUserMessageColor
+              ? ({ "--zen-user-message-color": zenUserMessageColor } as React.CSSProperties)
+              : undefined;
+            const expandedPromptShortcutTargetKeys = new Set(
+              expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
+            );
+            const promptShortcutUnfolded =
+              chatLikeSurface &&
+              ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
+              msg.role === "user" &&
+              Boolean(msg.promptShortcut);
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -60559,6 +68779,8 @@ function HomeContent(): React.JSX.Element {
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
+                  ...(zenPersonaInkStyle ?? {}),
+                  ...(zenUserMessageColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -60582,6 +68804,8 @@ function HomeContent(): React.JSX.Element {
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
                 data-command-display={commandPromptDisplay ? "prompt" : undefined}
+                data-zen-persona-ink={zenPersonaInkSegment?.variant}
+                data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -60604,6 +68828,13 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
               >
+                {zenPersonaInkSegment ? (
+                  <span
+                    className={styles.zenPersonaInkWash}
+                    style={zenPersonaInkStyle}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {showMessageHeader && (
                   <h4>
                     {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
@@ -60678,33 +68909,59 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  youtubeEmbedsEnabled={chatEphemeralMode}
                   zenDisplay={
                     chatLikeSurface && msg.role === "assistant" ? msg.zenDisplay : undefined
+                  }
+                  zenTextEffectsEnabled={chatLikeSurface && msg.role === "assistant"}
+                  zenActionsEnabled={
+                    chatLikeSurface &&
+                    (msg.role === "assistant" || msg.role === "user") &&
+                    !msg.promptShortcut &&
+                    !msg.promptWildcards
+                  }
+                  zenActionActorLabel={
+                    msg.role === "user"
+                      ? "You"
+                      : msg.botName?.trim() || DEFAULT_ASSISTANT_NAME
                   }
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  typingVoicePreset={assistantVoicePreset}
+                  chatRevealTiming={effectiveChatRevealTiming}
+                  chatRevealAnimationMultiplier={
+                    chatLikeSurface
+                      ? resolveZenAssistantRevealDelayMultiplier(temporalKey ?? "") *
+                        effectiveChatRevealAnimationMultiplier
+                      : 1
+                  }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
-                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                  pendingMessageCleanup={pendingMessageCleanupMessageIds.has(
                     msg.id
                   )}
+                  cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
-                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
-                  renderPromptMetadataAsProse={chatLikeSurface}
-                  onTogglePromptShortcut={() =>
-                    setExpandedPromptShortcutMessageId((current) =>
-                      current === msg.id ? null : msg.id
-                    )
+                  promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
+                    msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
+                  )}
+                  expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
+                  promptShortcutPresentation="expandable"
+                  promptShortcutUnfolded={promptShortcutUnfolded}
+                  renderPromptMetadataAsProse={false}
+                  onTogglePromptShortcut={(target) =>
+                    toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
-                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
+                  onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
+                {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -60774,6 +69031,7 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {zenPendingReplyPlaceholderNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -60792,6 +69050,7 @@ function HomeContent(): React.JSX.Element {
 
         <form
           className={styles.compose}
+          data-dev-panel-safe-area="bottom"
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
@@ -60838,37 +69097,14 @@ function HomeContent(): React.JSX.Element {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
           {!composerHiddenByChoiceChips ? (
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
-                {devDebugComposerEnabled && (
-                  <div className={styles.debugComposerBox}>
-                    <div className={styles.debugComposerLabel} aria-live="polite">
-                      DEBUG COMPOSER (local echo only)
-                    </div>
-                    <div className={styles.debugComposerRow} data-debug-composer="true">
-                      <textarea
-                        value={debugComposerDraft}
-                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
-                        placeholder="Type text to echo as a bot reply..."
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey) return;
-                          event.preventDefault();
-                          submitDebugComposerEcho();
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={submitDebugComposerEcho}
-                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
-                      >
-                        Send debug echo
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {renderDebugComposer()}
+                {zenComposerActionPreview ? (
+                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -60887,6 +69123,10 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    mentionCommitMode="select-persona"
+                    onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
+                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
@@ -60933,8 +69173,12 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
+      {renderPsychicModeToast()}
+      {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
+      {renderZenToolLab()}
+      {renderDevZenPauseTester()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={
@@ -60948,6 +69192,7 @@ function HomeContent(): React.JSX.Element {
         />
       )}
       {renderViewSwitchOverlay()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
     );
@@ -60972,44 +69217,35 @@ function HomeContent(): React.JSX.Element {
       onTouchEnd={endSidebarEdgeSwipe}
       onTouchCancel={endSidebarEdgeSwipe}
     >
-      {/* Mobile menu toggle — faded out while either drawer is open
-          (sidebar on the left, Settings/Bots/Images panel on the right)
-          so the fixed hamburger doesn't overlap the profile avatar or
-          poke through the panel overlay dimmer. */}
+      {renderMobileSidebarMenuToggle()}
+      {/* Mid-width drawer handle — faded out while either drawer is open
+          (sidebar on the left, Settings/Bots/Images panel on the right). */}
       {FLOATING_SHELL_APPLETS_ENABLED ? (
-        <>
-          <button
-            type="button"
-            className={`${styles.menuToggle} ${(sidebarOpen || panel !== null) ? styles.menuToggleHidden : ""}`}
-            onClick={() => {
-              setSidebarOpen(o => !o);
-            }}
-            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-            aria-hidden={sidebarOpen || panel !== null}
-            tabIndex={(sidebarOpen || panel !== null) ? -1 : 0}
-          >☰</button>
-          <button
-            type="button"
-            className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
-              panel !== null ? styles.sidebarHandleHidden : ""
-            }`}
-            onClick={() => {
-              setSidebarOpen(o => !o);
-            }}
-            aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
-            aria-pressed={sidebarOpen}
-            data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
-          >
-            <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
-          </button>
-        </>
+        <button
+          type="button"
+          className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
+            panel !== null ? styles.sidebarHandleHidden : ""
+          }`}
+          data-dev-panel-safe-area="left"
+          onClick={() => {
+            setSidebarOpen(o => !o);
+          }}
+          aria-controls={APP_SIDEBAR_NAVIGATION_ID}
+          aria-label={sidebarOpen ? "Close conversation panel" : "Open conversation panel"}
+          aria-pressed={sidebarOpen}
+          data-glyph-tooltip={sidebarOpen ? "Close conversations" : "Open conversations"}
+        >
+          <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+        </button>
       ) : null}
       {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
       <aside
+        id={APP_SIDEBAR_NAVIGATION_ID}
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
+        data-dev-panel-safe-area="left"
+        aria-label="Primary navigation"
         aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
         inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
       >
@@ -61085,6 +69321,7 @@ function HomeContent(): React.JSX.Element {
       >
         <header
           className={styles.chatHeader}
+          data-dev-panel-safe-area="top"
           onPointerEnter={revealChatHeaderChrome}
           onFocusCapture={revealChatHeaderChrome}
         >
@@ -61104,9 +69341,10 @@ function HomeContent(): React.JSX.Element {
                   style={
                     headerIdentity.color
                       ? ({
-                          "--header-identity-color": normalizeAccentForTheme(
+                          "--header-identity-color": displayAccentForMode(
                             headerIdentity.color,
-                            resolvedTheme
+                            resolvedTheme,
+                            appWidePrivateMode
                           ),
                         } as React.CSSProperties)
                       : undefined
@@ -61185,6 +69423,22 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderChatOverflowGear()}
         </header>
+        {zenPersonaContinuityWashStyle ? (
+          <div
+            className={styles.zenPersonaComposerBrushWash}
+            style={zenPersonaContinuityWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
+        {exitingZenPersonaWashStyle ? (
+          <div
+            key={`composer-brush-${exitingZenPersonaWash?.id}`}
+            className={styles.zenPersonaComposerBrushWash}
+            data-exiting="true"
+            style={exitingZenPersonaWashStyle}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <div
           className={styles.messagesFrame}
@@ -61195,6 +69449,22 @@ function HomeContent(): React.JSX.Element {
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
+          {zenPersonaContinuityWashStyle ? (
+            <div
+              className={styles.zenPersonaContinuityWash}
+              style={zenPersonaContinuityWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
+          {exitingZenPersonaWashStyle ? (
+            <div
+              key={exitingZenPersonaWash?.id}
+              className={styles.zenPersonaContinuityWash}
+              data-exiting="true"
+              style={exitingZenPersonaWashStyle}
+              aria-hidden="true"
+            />
+          ) : null}
           {showMessagesFrameStateLoadingOverlay ? (
             <div
               className={styles.messagesFrameBotSwitchLoading}
@@ -61220,10 +69490,16 @@ function HomeContent(): React.JSX.Element {
             data-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
             data-replying-live={replyInFlightSignals ? "true" : undefined}
             data-reply-runway-active={replyRunwayActive ? "true" : undefined}
+            data-zen-speed-nudge-pulse={zenCanvasSpeedNudgePulseActive ? "true" : undefined}
+            data-zen-speed-nudge-holding={zenCanvasSpeedNudgeHolding ? "true" : undefined}
             data-drag-selecting={
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
+            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
+            onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
@@ -61657,7 +69933,11 @@ function HomeContent(): React.JSX.Element {
                         const isProtected = b.delete_protected === 1;
                         const rawColor = b.color?.trim();
                         const accent = rawColor
-                          ? normalizeAccentForTheme(rawColor, resolvedTheme)
+                          ? displayAccentForMode(
+                              rawColor,
+                              resolvedTheme,
+                              appWidePrivateMode
+                            )
                           : null;
                         const tileStyle = accent
                           ? ({ "--bot-color": accent } as React.CSSProperties)
@@ -61882,7 +70162,11 @@ function HomeContent(): React.JSX.Element {
             // inherits the same in-range hex.
             const normalizedBotColor =
               msg.role === "assistant" && msg.botColor
-                ? normalizeAccentForTheme(msg.botColor, resolvedTheme)
+                ? displayAccentForMode(
+                    msg.botColor,
+                    resolvedTheme,
+                    detail?.incognito === true
+                  )
                 : null;
             const messageEdge =
               msg.role !== "assistant"
@@ -61945,8 +70229,9 @@ function HomeContent(): React.JSX.Element {
               detail?.id
                 ? (() => {
                     const displayContent = resolveMessageDisplayContent(msg);
+                    const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
-                      revealKey: `${detail.id}:${msg.id}`,
+                      revealKey,
                       displayContent,
                       nowMs: chatEphemeralNowMs,
                       completed: messageRevealAlreadyCompleted,
@@ -61954,10 +70239,17 @@ function HomeContent(): React.JSX.Element {
                         ? { cancelledTokenCount: canceledRevealTokenCount }
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
+                      delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
                     });
                   })()
                 : undefined;
-            const messageDisplayContent = resolveMessageDisplayContent(msg);
+            const cleanupRevealKey =
+              msg.role === "user" && detail?.id
+                ? cleanupMessageRevealKey(detail.id, msg.id)
+                : null;
+            const cleanupRevealActive =
+              cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
+            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -61983,6 +70275,8 @@ function HomeContent(): React.JSX.Element {
                 : undefined;
             const assistantMoodKey =
               msg.role === "assistant" ? resolveMessageMoodKey(msg) : null;
+            const assistantVoicePreset =
+              msg.role === "assistant" ? resolveMessageVoicePreset(msg, bots) : "neutral";
             const messageUsesFallbackModel = messageUsesConfiguredFallbackModel({
               message: msg,
               view,
@@ -61994,7 +70288,12 @@ function HomeContent(): React.JSX.Element {
               msg.role === "assistant" &&
               !chatLikeSurface &&
               messageContextMenu?.message.id === msg.id;
-            const zenEraBoundaryLabel = zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
+            const zenSessionBreakImmediatelyBeforeMessage =
+              zenSessionBreakAnchorIndex !== null &&
+              zenSessionBreakAnchorIndex === messageIndex - 1;
+            const zenEraBoundaryLabel = zenSessionBreakImmediatelyBeforeMessage
+              ? null
+              : zenEraBoundaryLabelByMessageId.get(msg.id) ?? null;
             const starterPromptAlignment =
               msg.id === starterPromptCenteredMessageId
                 ? "centered"
@@ -62004,6 +70303,35 @@ function HomeContent(): React.JSX.Element {
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
+            const expandedPromptShortcutTargetKeys = new Set(
+              expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
+            );
+            const promptShortcutUnfolded =
+              chatLikeSurface &&
+              ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
+              msg.role === "user" &&
+              Boolean(msg.promptShortcut);
+            const zenPersonaInkSegment =
+              chatLikeSurface
+                ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
+                : null;
+            const zenPersonaInkStyle = zenPersonaInkSegment
+              ? ({
+                  ...zenPersonaBackdropStyleVars,
+                  "--zen-persona-ink-color": zenPersonaInkSegment.color,
+                } as React.CSSProperties)
+              : undefined;
+            const zenUserMessageColor =
+              msg.role === "user"
+                ? resolveZenUserMessageColor(
+                    zenPersonaInkSegment,
+                    zenUserPrismColor,
+                    resolvedTheme
+                  )
+                : undefined;
+            const zenUserMessageColorStyle = zenUserMessageColor
+              ? ({ "--zen-user-message-color": zenUserMessageColor } as React.CSSProperties)
+              : undefined;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -62020,6 +70348,8 @@ function HomeContent(): React.JSX.Element {
                   ...(headingColorStyle ?? {}),
                   ...userInkStyle,
                   ...(zenUserPrismColorStyle ?? {}),
+                  ...(zenPersonaInkStyle ?? {}),
+                  ...(zenUserMessageColorStyle ?? {}),
                   ...mobileFocusAccentStyle,
                   ...messageDynamicTypeStyle,
                 }}
@@ -62043,6 +70373,8 @@ function HomeContent(): React.JSX.Element {
                   messageUsesFallbackModel && showFallbackModelStripe ? "true" : undefined
                 }
                 data-command-display={commandPromptDisplay ? "prompt" : undefined}
+                data-zen-persona-ink={zenPersonaInkSegment?.variant}
+                data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
                   if (chatLikeSurface) return;
                   event.preventDefault();
@@ -62065,6 +70397,13 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
               >
+                {zenPersonaInkSegment ? (
+                  <span
+                    className={styles.zenPersonaInkWash}
+                    style={zenPersonaInkStyle}
+                    aria-hidden="true"
+                  />
+                ) : null}
                 {showMessageHeader && (
                   <h4>
                     {msg.role === "assistant" && !chatLikeSurface && !detail?.incognito ? (
@@ -62136,33 +70475,59 @@ function HomeContent(): React.JSX.Element {
                   // Use line-by-line typed reveal only while actively typing;
                   // settled content falls back to full Markdown rendering.
                   renderAsEphemeralLines={chatLikeSurface}
+                  youtubeEmbedsEnabled={chatEphemeralMode}
                   zenDisplay={
                     chatLikeSurface && msg.role === "assistant" ? msg.zenDisplay : undefined
+                  }
+                  zenTextEffectsEnabled={chatLikeSurface && msg.role === "assistant"}
+                  zenActionsEnabled={
+                    chatLikeSurface &&
+                    (msg.role === "assistant" || msg.role === "user") &&
+                    !msg.promptShortcut &&
+                    !msg.promptWildcards
+                  }
+                  zenActionActorLabel={
+                    msg.role === "user"
+                      ? "You"
+                      : msg.botName?.trim() || DEFAULT_ASSISTANT_NAME
                   }
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
+                  typingVoicePreset={assistantVoicePreset}
+                  chatRevealTiming={effectiveChatRevealTiming}
+                  chatRevealAnimationMultiplier={
+                    chatLikeSurface
+                      ? resolveZenAssistantRevealDelayMultiplier(temporalKey ?? "") *
+                        effectiveChatRevealAnimationMultiplier
+                      : 1
+                  }
                   mentionRenderBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                   resolvedTheme={resolvedTheme}
                   commandMentionsById={commandCenterMentionById}
                   onOpenCommandMention={openCommandCenterMentionEditor}
                   promptShortcut={msg.promptShortcut}
                   promptWildcards={msg.promptWildcards}
-                  pendingPromptWildcardCleanup={pendingPromptWildcardCleanupMessageIds.has(
+                  pendingMessageCleanup={pendingMessageCleanupMessageIds.has(
                     msg.id
                   )}
+                  cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
-                  promptShortcutExpanded={expandedPromptShortcutMessageId === msg.id}
-                  renderPromptMetadataAsProse={chatLikeSurface}
-                  onTogglePromptShortcut={() =>
-                    setExpandedPromptShortcutMessageId((current) =>
-                      current === msg.id ? null : msg.id
-                    )
+                  promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
+                    msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
+                  )}
+                  expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
+                  promptShortcutPresentation="expandable"
+                  promptShortcutUnfolded={promptShortcutUnfolded}
+                  renderPromptMetadataAsProse={false}
+                  onTogglePromptShortcut={(target) =>
+                    toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
-                  onCollapsePromptShortcut={() => setExpandedPromptShortcutMessageId(null)}
+                  onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
+                {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -62232,6 +70597,7 @@ function HomeContent(): React.JSX.Element {
               </Fragment>
             );
           })}
+          {zenPendingReplyPlaceholderNode}
           {devChatDebugEventsNode}
           {!chatLikeSurface ? typingIndicatorNode : null}
           {sandboxSummaryIndicatorNode}
@@ -62252,6 +70618,7 @@ function HomeContent(): React.JSX.Element {
 
         <form
           className={styles.compose}
+          data-dev-panel-safe-area="bottom"
           data-starter-compose-surface="true"
           data-compose-bot-selected={selectedComposeBotAccent ? "true" : undefined}
           data-compose-ready={!composerSubmitDisabled(draft) ? "true" : undefined}
@@ -62287,37 +70654,14 @@ function HomeContent(): React.JSX.Element {
               <button type="button" onClick={cancelEditMessage}>Cancel</button>
             </div>
           )}
-          {renderComposerWritingAssistAction()}
           {renderQueuedPromptRail()}
           {!composerHiddenByChoiceChips ? (
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
-                {devDebugComposerEnabled && (
-                  <div className={styles.debugComposerBox}>
-                    <div className={styles.debugComposerLabel} aria-live="polite">
-                      DEBUG COMPOSER (local echo only)
-                    </div>
-                    <div className={styles.debugComposerRow} data-debug-composer="true">
-                      <textarea
-                        value={debugComposerDraft}
-                        onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
-                        placeholder="Type text to echo as a bot reply..."
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey) return;
-                          event.preventDefault();
-                          submitDebugComposerEcho();
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={submitDebugComposerEcho}
-                        disabled={debugComposerDraft.trim().length === 0 || pendingReply}
-                      >
-                        Send debug echo
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {renderDebugComposer()}
+                {zenComposerActionPreview ? (
+                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
                     ref={draftComposerRef}
@@ -62336,6 +70680,10 @@ function HomeContent(): React.JSX.Element {
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
+                    mentionCommitMode="select-persona"
+                    onMentionPersonaSelect={handleZenMentionPersonaSelection}
+                    mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
+                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
@@ -62382,6 +70730,8 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
+      {renderPsychicModeToast()}
+      {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {touchPreview && (
@@ -62399,6 +70749,7 @@ function HomeContent(): React.JSX.Element {
       {renderViewSwitchOverlay()}
       {renderModeTutorialOverlay()}
       {renderDesktopFirstRunChecklist()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
   );

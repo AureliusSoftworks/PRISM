@@ -30,6 +30,48 @@ export interface WildcardDeckDuplicateValueIssue {
   firstIndex: number;
 }
 
+export type WildcardDeckValueInflectionMode = "singular" | "plural";
+
+const WILDCARD_DECK_UNCOUNTABLE_VALUE_WORDS = new Set([
+  "deer",
+  "fish",
+  "moose",
+  "series",
+  "sheep",
+  "species",
+]);
+
+const WILDCARD_DECK_IRREGULAR_PLURALS = new Map<string, string>([
+  ["analysis", "analyses"],
+  ["axis", "axes"],
+  ["child", "children"],
+  ["crisis", "crises"],
+  ["foot", "feet"],
+  ["goose", "geese"],
+  ["man", "men"],
+  ["mouse", "mice"],
+  ["ox", "oxen"],
+  ["person", "people"],
+  ["tooth", "teeth"],
+  ["woman", "women"],
+]);
+
+const WILDCARD_DECK_IRREGULAR_SINGULARS = new Map(
+  [...WILDCARD_DECK_IRREGULAR_PLURALS.entries()].map(([singular, plural]) => [
+    plural,
+    singular,
+  ])
+);
+
+const WILDCARD_DECK_O_ES_WORDS = new Set([
+  "echo",
+  "hero",
+  "potato",
+  "tomato",
+  "torpedo",
+  "veto",
+]);
+
 function splitWildcardDeckValueInput(value: string): string[] {
   return value.split(WILDCARD_DECK_VALUE_DELIMITER_RE);
 }
@@ -106,6 +148,98 @@ export function findDuplicateWildcardDeckValueIssues(
     normalizedIndex += 1;
   }
   return issues;
+}
+
+function applyWildcardDeckWordCase(source: string, transformed: string): string {
+  if (source.toUpperCase() === source) return transformed.toUpperCase();
+  const first = source.charAt(0);
+  if (first.toUpperCase() === first && first.toLowerCase() !== first) {
+    return `${transformed.charAt(0).toUpperCase()}${transformed.slice(1)}`;
+  }
+  return transformed;
+}
+
+function pluralizeWildcardDeckWord(word: string): string {
+  const lower = word.toLowerCase();
+  if (WILDCARD_DECK_UNCOUNTABLE_VALUE_WORDS.has(lower)) return word;
+  const irregular = WILDCARD_DECK_IRREGULAR_PLURALS.get(lower);
+  if (irregular) return applyWildcardDeckWordCase(word, irregular);
+  if (/[bcdfghjklmnpqrstvwxyz]y$/iu.test(word)) {
+    return `${word.slice(0, -1)}ies`;
+  }
+  if (/(?:s|x|z|ch|sh)$/iu.test(word)) return `${word}es`;
+  if (/fe$/iu.test(word)) return `${word.slice(0, -2)}ves`;
+  if (/f$/iu.test(word) && !/(?:chef|roof|belief|cliff)$/iu.test(word)) {
+    return `${word.slice(0, -1)}ves`;
+  }
+  if (WILDCARD_DECK_O_ES_WORDS.has(lower)) return `${word}es`;
+  return `${word}s`;
+}
+
+function singularizeWildcardDeckWord(word: string): string {
+  const lower = word.toLowerCase();
+  if (WILDCARD_DECK_UNCOUNTABLE_VALUE_WORDS.has(lower)) return word;
+  const irregular = WILDCARD_DECK_IRREGULAR_SINGULARS.get(lower);
+  if (irregular) return applyWildcardDeckWordCase(word, irregular);
+  if (/ies$/iu.test(word) && word.length > 3) return `${word.slice(0, -3)}y`;
+  if (/oes$/iu.test(word) && word.length > 3) {
+    const stem = word.slice(0, -2);
+    if (WILDCARD_DECK_O_ES_WORDS.has(stem.toLowerCase())) return stem;
+  }
+  if (/ves$/iu.test(word) && word.length > 3) {
+    const stem = word.slice(0, -3);
+    return /(?:i|l)$/iu.test(stem) ? `${stem}fe` : `${stem}f`;
+  }
+  if (/(?:ches|shes|xes|zes|ses)$/iu.test(word)) return word.slice(0, -2);
+  if (
+    /s$/iu.test(word) &&
+    !/(?:ss|us|is)$/iu.test(word) &&
+    word.length > 1
+  ) {
+    return word.slice(0, -1);
+  }
+  return word;
+}
+
+function inflectWildcardDeckValue(value: string, mode: WildcardDeckValueInflectionMode): string {
+  const normalized = normalizeWildcardDeckValueInput(value);
+  const match = normalized.match(/([A-Za-z]+)([^A-Za-z]*)$/u);
+  if (!match || match.index === undefined) return normalized;
+  const word = match[1] ?? "";
+  const suffix = match[2] ?? "";
+  const base = normalized.slice(0, match.index);
+  const singular = singularizeWildcardDeckWord(word);
+  const inflected =
+    mode === "singular" ? singular : pluralizeWildcardDeckWord(singular);
+  return normalizeWildcardDeckValueInput(`${base}${inflected}${suffix}`);
+}
+
+export function inferWildcardDeckValueInflectionMode(
+  value: unknown
+): WildcardDeckValueInflectionMode {
+  const values = normalizeWildcardDeckValueList(value);
+  let pluralCount = 0;
+  let singularCount = 0;
+  for (const item of values) {
+    const singular = inflectWildcardDeckValue(item, "singular");
+    const plural = inflectWildcardDeckValue(item, "plural");
+    const key = normalizeWildcardDeckValueKey(item);
+    if (key === normalizeWildcardDeckValueKey(plural) && key !== normalizeWildcardDeckValueKey(singular)) {
+      pluralCount += 1;
+    } else {
+      singularCount += 1;
+    }
+  }
+  return pluralCount > singularCount ? "singular" : "plural";
+}
+
+export function inflectWildcardDeckValues(
+  value: unknown,
+  mode: WildcardDeckValueInflectionMode
+): string[] {
+  return normalizeWildcardDeckValueList(value).map((item) =>
+    inflectWildcardDeckValue(item, mode)
+  );
 }
 
 function normalizeWildcardDeckColorTag(value: unknown): WildcardDeckColorTag | undefined {

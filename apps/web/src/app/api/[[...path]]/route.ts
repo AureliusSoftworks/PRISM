@@ -1,5 +1,9 @@
-import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server.js";
+import { NextResponse } from "next/server.js";
+import {
+  BACKEND_UNAVAILABLE_CODE,
+  type BackendUnavailablePayload,
+} from "../../backendUnavailable.ts";
 
 /**
  * Reverse-proxy all `/api/*` traffic to the Prism API process.
@@ -22,6 +26,17 @@ export const maxDuration = 1200;
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
 };
+
+function backendUnavailableResponse(detail: string): Response {
+  const payload: BackendUnavailablePayload = {
+    ok: false,
+    code: BACKEND_UNAVAILABLE_CODE,
+    error: "Prism is waiting for its local API.",
+    retryable: true,
+    detail,
+  };
+  return NextResponse.json(payload, { status: 503 });
+}
 
 async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response> {
   try {
@@ -67,16 +82,7 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
   } catch (err) {
     const message =
       err instanceof Error ? err.message : typeof err === "string" ? err : "fetch failed";
-    return NextResponse.json(
-      {
-        ok: false as const,
-        error: "Prism API unreachable",
-        detail: message,
-        upstream: url.toString(),
-        hint: `Start the API server or set LOCALAI_API_ORIGIN (current: ${API_ORIGIN})`,
-      },
-      { status: 502 }
-    );
+    return backendUnavailableResponse(message);
   }
 
   const hopByHopResponse = new Set([
@@ -105,15 +111,7 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
   } catch (err) {
     const message =
       err instanceof Error ? err.message : typeof err === "string" ? err : "proxy failed";
-    return NextResponse.json(
-      {
-        ok: false as const,
-        error: "Prism API proxy error",
-        detail: message,
-        hint: `Start the API server or set LOCALAI_API_ORIGIN (current: ${API_ORIGIN})`,
-      },
-      { status: 502 }
-    );
+    return backendUnavailableResponse(message);
   }
 }
 

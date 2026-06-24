@@ -5,17 +5,21 @@ import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
+  dedupeActiveZenWallpaperGeneration,
   deleteAllConversations,
   deleteConversation,
   deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
+  getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
+  mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
   rewindConversation,
   setZenStarterConversationSuppression,
   sweepConversations,
+  undoLatestConversationMessages,
   undoLatestConversationSweep,
 } from "../conversations.ts";
 
@@ -46,6 +50,10 @@ function createTestDb(): DatabaseSync {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      zen_mood_sensitivity REAL
+    );
     CREATE TABLE bots (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -62,7 +70,10 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
       bot_id TEXT,
+      tool_payload TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE conversation_exports (
@@ -79,6 +90,8 @@ function createTestDb(): DatabaseSync {
       bot_id TEXT,
       prompt TEXT NOT NULL,
       url TEXT NOT NULL,
+      local_rel_path TEXT,
+      purpose TEXT NOT NULL DEFAULT 'gallery',
       created_at TEXT NOT NULL
     );
     CREATE TABLE memory_summaries (
@@ -92,11 +105,40 @@ function createTestDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
+    );
+    CREATE TABLE prism_mood_state (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      annoyance REAL NOT NULL DEFAULT 0.12,
+      warmth REAL NOT NULL DEFAULT 0.62,
+      engagement REAL NOT NULL DEFAULT 0.62,
+      restraint REAL NOT NULL DEFAULT 0.68,
+      recent_deltas TEXT NOT NULL DEFAULT '[]',
+      ignore_until TEXT,
+      ignore_cooldown_ms INTEGER,
+      ignore_forgiveness_chance REAL,
+      ignore_penalty_level INTEGER,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, mode)
+    );
+    CREATE TABLE prism_mood_events (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (user_id, conversation_id, message_id, event_type)
     );
     CREATE TABLE session_opinions (
       user_id TEXT NOT NULL,
@@ -200,6 +242,68 @@ function seedBotChat(
     "UPDATE conversations SET bot_id = ? WHERE id = ? AND user_id = ?"
   ).run(botId, conversationId, userId);
 }
+
+describe("getLatestRememberedZenWallpaperForBot", () => {
+  it("returns the newest wallpaper for one bot and ignores gallery/other bot images", () => {
+    const db = createTestDb();
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-old",
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      "older shore",
+      "/old",
+      "wallpaper",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-gallery",
+      "user-1",
+      "conversation-2",
+      "bot-1",
+      "gallery shore",
+      "/gallery",
+      "gallery",
+      "2026-03-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "other-new",
+      "user-1",
+      "conversation-3",
+      "bot-2",
+      "other shore",
+      "/other",
+      "wallpaper",
+      "2026-04-01T00:00:00.000Z"
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "bot-new",
+      "user-1",
+      "conversation-4",
+      "bot-1",
+      "newer shore",
+      "/new",
+      "wallpaper",
+      "2026-02-01T00:00:00.000Z"
+    );
+
+    assert.deepEqual(getLatestRememberedZenWallpaperForBot(db, "user-1", "bot-1"), {
+      imageId: "bot-new",
+      promptSeed: "newer shore",
+      createdAt: "2026-02-01T00:00:00.000Z",
+    });
+    assert.equal(getLatestRememberedZenWallpaperForBot(db, "user-1", "missing"), null);
+    assert.equal(getLatestRememberedZenWallpaperForBot(db, "user-1", null), null);
+  });
+});
 
 describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
   it("rebases absolute wallpaper reveal counts to the restored message window", () => {
@@ -375,7 +479,11 @@ describe("recoverStaleZenWallpaperGenerationStatus", () => {
       CREATE TABLE conversations (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
+        zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
         zen_wallpaper_image_id TEXT,
+        zen_wallpaper_prompt_seed TEXT,
+        zen_wallpaper_message_count INTEGER,
+        zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
         zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle'
       );
     `);
@@ -415,6 +523,163 @@ describe("recoverStaleZenWallpaperGenerationStatus", () => {
       .prepare("SELECT zen_wallpaper_status FROM conversations WHERE id = ?")
       .get("conv-1") as { zen_wallpaper_status: string };
     assert.equal(row.zen_wallpaper_status, "generating");
+    db.close();
+  });
+});
+
+describe("dedupeActiveZenWallpaperGeneration", () => {
+  function createActiveWallpaperDb(): DatabaseSync {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+        zen_wallpaper_image_id TEXT,
+        zen_wallpaper_prompt_seed TEXT,
+        zen_wallpaper_message_count INTEGER,
+        zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle',
+        zen_wallpaper_history TEXT NOT NULL DEFAULT '[]'
+      );
+    `);
+    return db;
+  }
+
+  it("keeps the previous wallpaper metadata while marking the active job generating", () => {
+    const db = createActiveWallpaperDb();
+    const history = JSON.stringify([
+      {
+        imageId: "wallpaper-old",
+        promptSeed: "blue dusk",
+        generationMessageCount: 7,
+        revealStartMessageCount: 7,
+        revealFullMessageCount: 9,
+        createdAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_image_id,
+         zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+         zen_wallpaper_status, zen_wallpaper_history)
+       VALUES (?, ?, 1, ?, ?, ?, 'ready', ?)`
+    ).run("conv-1", "user-1", "wallpaper-old", "blue dusk", 7, history);
+
+    const deduped = dedupeActiveZenWallpaperGeneration(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: "conv-1",
+      enabled: true,
+    });
+
+    assert.equal(deduped, true);
+    const row = db
+      .prepare(
+        `SELECT zen_wallpaper_enabled, zen_wallpaper_image_id,
+                zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations WHERE id = ?`
+      )
+      .get("conv-1") as {
+      zen_wallpaper_enabled: number;
+      zen_wallpaper_image_id: string | null;
+      zen_wallpaper_prompt_seed: string | null;
+      zen_wallpaper_message_count: number | null;
+      zen_wallpaper_status: string;
+      zen_wallpaper_history: string;
+    };
+    assert.equal(row.zen_wallpaper_enabled, 1);
+    assert.equal(row.zen_wallpaper_image_id, "wallpaper-old");
+    assert.equal(row.zen_wallpaper_prompt_seed, "blue dusk");
+    assert.equal(row.zen_wallpaper_message_count, 7);
+    assert.equal(row.zen_wallpaper_status, "generating");
+    assert.equal(row.zen_wallpaper_history, history);
+    assert.deepEqual(mapZenWallpaperMetadata(row), {
+      enabled: true,
+      imageId: "wallpaper-old",
+      promptSeed: "blue dusk",
+      generationMessageCount: 7,
+      status: "generating",
+      history: [
+        {
+          imageId: "wallpaper-old",
+          promptSeed: "blue dusk",
+          generationMessageCount: 7,
+          revealStartMessageCount: 7,
+          revealFullMessageCount: 9,
+          createdAt: "2026-06-20T00:00:00.000Z",
+        },
+      ],
+    });
+    db.close();
+  });
+
+  it("marks an active first wallpaper generation without inventing an image", () => {
+    const db = createActiveWallpaperDb();
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_status)
+       VALUES (?, ?, 1, 'idle')`
+    ).run("conv-1", "user-1");
+
+    const deduped = dedupeActiveZenWallpaperGeneration(db, "user-1", {
+      conversationId: "conv-1",
+      activeZenWallpaperConversationId: "conv-1",
+      enabled: true,
+    });
+
+    assert.equal(deduped, true);
+    const row = db
+      .prepare(
+        `SELECT zen_wallpaper_image_id, zen_wallpaper_message_count,
+                zen_wallpaper_status, zen_wallpaper_history
+           FROM conversations WHERE id = ?`
+      )
+      .get("conv-1") as {
+      zen_wallpaper_image_id: string | null;
+      zen_wallpaper_message_count: number | null;
+      zen_wallpaper_status: string;
+      zen_wallpaper_history: string;
+    };
+    assert.equal(row.zen_wallpaper_image_id, null);
+    assert.equal(row.zen_wallpaper_message_count, null);
+    assert.equal(row.zen_wallpaper_status, "generating");
+    assert.equal(row.zen_wallpaper_history, "[]");
+    db.close();
+  });
+
+  it("dedupes enabled requests, including forced-style retries, but not disable requests", () => {
+    const db = createActiveWallpaperDb();
+    db.prepare(
+      `INSERT INTO conversations
+        (id, user_id, zen_wallpaper_enabled, zen_wallpaper_image_id,
+         zen_wallpaper_status)
+       VALUES (?, ?, 1, ?, 'ready')`
+    ).run("conv-1", "user-1", "wallpaper-old");
+
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "conv-1",
+        enabled: true,
+      }),
+      true
+    );
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "conv-1",
+        enabled: false,
+      }),
+      false
+    );
+    assert.equal(
+      dedupeActiveZenWallpaperGeneration(db, "user-1", {
+        conversationId: "conv-1",
+        activeZenWallpaperConversationId: "other-conv",
+        enabled: true,
+      }),
+      false
+    );
     db.close();
   });
 });
@@ -1555,6 +1820,194 @@ describe("rewindConversation", () => {
     assert.ok(
       after.updated_at > before.updated_at,
       `expected updated_at to advance (${before.updated_at} → ${after.updated_at})`
+    );
+  });
+});
+
+describe("undoLatestConversationMessages", () => {
+  function seedUndoBase(db: DatabaseSync, mode = "zen"): void {
+    db.prepare("INSERT INTO users (id, zen_mood_sensitivity) VALUES (?, ?)")
+      .run("user-1", 0.5);
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      "undo-chat",
+      "user-1",
+      "Undo chat",
+      mode,
+      "2026-06-23T10:00:00.000Z",
+      "2026-06-23T10:00:00.000Z"
+    );
+  }
+
+  function insertUndoMessage(
+    db: DatabaseSync,
+    id: string,
+    role: "user" | "assistant",
+    content: string,
+    createdAt: string,
+    toolPayload: string | null = null
+  ): void {
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, "undo-chat", "user-1", role, content, toolPayload, createdAt);
+  }
+
+  function insertUndoMemory(
+    db: DatabaseSync,
+    id: string,
+    sourceMessageIds: string[],
+    tier = "short_term",
+    source = "direct"
+  ): void {
+    db.prepare(
+      `INSERT INTO memories (
+        id, user_id, conversation_id, ciphertext, iv, tag, confidence,
+        tier, source, certainty, source_message_ids, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      "user-1",
+      "undo-chat",
+      "cipher",
+      "iv",
+      "tag",
+      0.8,
+      tier,
+      source,
+      0.8,
+      JSON.stringify(sourceMessageIds),
+      "2026-06-23T10:00:05.000Z"
+    );
+  }
+
+  it("undoes the latest assistant message and rolls back linked artifacts", () => {
+    const db = createTestDb();
+    seedUndoBase(db);
+    insertUndoMessage(db, "m1", "user", "hello", "2026-06-23T10:00:01.000Z");
+    insertUndoMessage(db, "m2", "assistant", "hi", "2026-06-23T10:00:02.000Z");
+    insertUndoMessage(
+      db,
+      "m3",
+      "assistant",
+      "",
+      "2026-06-23T10:00:03.000Z",
+      JSON.stringify({ v: 1, sentGeneratedImage: { imageId: "img-undo" } })
+    );
+    db.prepare(
+      "INSERT INTO images (id, user_id, conversation_id, prompt, url, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("img-undo", "user-1", "undo-chat", "prompt", "/img", "generated-images/user-1/img.png", "2026-06-23T10:00:03.000Z");
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run("sum-old", "user-1", "undo-chat", "old", "2026-06-23T10:00:01.000Z");
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run("sum-new", "user-1", "undo-chat", "new", "2026-06-23T10:00:03.000Z");
+    db.prepare(
+      "INSERT INTO zen_session_memories (id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run("zen-new", "user-1", "undo-chat", "cipher", "iv", "tag", "2026-06-23T10:00:03.000Z", "2026-06-24T10:00:03.000Z");
+    insertUndoMemory(db, "mem-only", ["m3"], "long_term", "about_you");
+    insertUndoMemory(db, "mem-mixed", ["m1", "m3"]);
+    db.prepare(
+      "INSERT INTO prism_mood_events (user_id, conversation_id, message_id, event_type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("user-1", "undo-chat", "m3", "ignored_question", "2026-06-23T10:00:04.000Z", "{}");
+
+    const result = undoLatestConversationMessages(db, "user-1", "undo-chat");
+
+    assert.deepEqual(result.messageIds, ["m3"]);
+    assert.equal(result.deletedMessages, 1);
+    assert.equal(result.deletedSummaries, 1);
+    assert.deepEqual(result.deletedSummaryIds, ["sum-new"]);
+    assert.equal(result.deletedZenSessionMemories, 1);
+    assert.equal(result.deletedMemories, 1);
+    assert.equal(result.updatedMemories, 1);
+    assert.equal(result.deletedMoodEvents, 1);
+    assert.equal(result.deletedImages, 1);
+    assert.deepEqual(result.deletedImageRelPaths, ["generated-images/user-1/img.png"]);
+    assert.deepEqual(
+      db.prepare("SELECT id FROM messages ORDER BY created_at").all().map((row) => (row as { id: string }).id),
+      ["m1", "m2"]
+    );
+    assert.equal(db.prepare("SELECT id FROM images WHERE id = ?").get("img-undo"), undefined);
+    assert.equal(db.prepare("SELECT id FROM memories WHERE id = ?").get("mem-only"), undefined);
+    const mixed = db.prepare("SELECT source_message_ids FROM memories WHERE id = ?").get("mem-mixed") as
+      | { source_message_ids: string }
+      | undefined;
+    assert.deepEqual(JSON.parse(mixed?.source_message_ids ?? "[]"), ["m1"]);
+    assert.equal(db.prepare("SELECT id FROM memory_summaries WHERE id = ?").get("sum-old") != null, true);
+    assert.equal(db.prepare("SELECT id FROM memory_summaries WHERE id = ?").get("sum-new"), undefined);
+  });
+
+  it("undoes the latest two messages when requested", () => {
+    const db = createTestDb();
+    seedUndoBase(db);
+    insertUndoMessage(db, "m1", "user", "hello", "2026-06-23T10:00:01.000Z");
+    insertUndoMessage(db, "m2", "assistant", "hi", "2026-06-23T10:00:02.000Z");
+    insertUndoMessage(db, "m3", "user", "followup", "2026-06-23T10:00:03.000Z");
+    insertUndoMessage(db, "m4", "assistant", "answer", "2026-06-23T10:00:04.000Z");
+    db.prepare(
+      "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run("sum-tail", "user-1", "undo-chat", "tail", "2026-06-23T10:00:03.000Z");
+    insertUndoMemory(db, "mem-tail", ["m3", "m4"]);
+
+    const result = undoLatestConversationMessages(db, "user-1", "undo-chat", 2);
+
+    assert.deepEqual(result.messageIds, ["m4", "m3"]);
+    assert.equal(result.deletedMessages, 2);
+    assert.equal(result.deletedMemories, 1);
+    assert.deepEqual(
+      db.prepare("SELECT id FROM messages ORDER BY created_at").all().map((row) => (row as { id: string }).id),
+      ["m1", "m2"]
+    );
+    assert.equal(db.prepare("SELECT id FROM memory_summaries WHERE id = ?").get("sum-tail"), undefined);
+  });
+
+  it("rebuilds mood from remaining messages after undo", () => {
+    const db = createTestDb();
+    seedUndoBase(db);
+    insertUndoMessage(db, "m1", "user", "thank you?", "2026-06-23T10:00:01.000Z");
+    insertUndoMessage(db, "m2", "user", "stupid", "2026-06-23T10:00:02.000Z");
+    db.prepare(
+      `INSERT INTO prism_mood_state (
+        user_id, conversation_id, mode, mood_key, confidence, annoyance,
+        warmth, engagement, restraint, recent_deltas, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "user-1",
+      "undo-chat",
+      "zen",
+      "strained",
+      0.9,
+      0.9,
+      0.2,
+      0.2,
+      0.8,
+      "[]",
+      "2026-06-23T10:00:02.000Z"
+    );
+
+    const result = undoLatestConversationMessages(db, "user-1", "undo-chat");
+
+    assert.deepEqual(result.messageIds, ["m2"]);
+    assert.ok(result.prismMood.annoyance < 0.25);
+    assert.ok(result.prismMood.warmth > 0.62);
+    assert.deepEqual(
+      db.prepare("SELECT id FROM messages ORDER BY created_at").all().map((row) => (row as { id: string }).id),
+      ["m1"]
+    );
+  });
+
+  it("rejects empty and cross-user undo requests", () => {
+    const db = createTestDb();
+    seedUndoBase(db);
+    assert.throws(
+      () => undoLatestConversationMessages(db, "user-1", "undo-chat"),
+      /Nothing to undo/
+    );
+    insertUndoMessage(db, "m1", "user", "hello", "2026-06-23T10:00:01.000Z");
+    assert.throws(
+      () => undoLatestConversationMessages(db, "user-2", "undo-chat"),
+      /Conversation not found/
     );
   });
 });

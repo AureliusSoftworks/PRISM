@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { LlmProvider, ProviderMessage } from "../providers.ts";
 import {
   buildZenSessionMemoryPromptContext,
+  createZenPersonaSessionMemoryCheckpoint,
   createZenSessionMemoryCheckpoint,
   deleteZenSessionMemoryById,
   getZenPreviousContextSummary,
@@ -35,10 +36,27 @@ function createTestDb(): DatabaseSync {
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE bots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'user-1',
+      name TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'private'
+    );
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      bot_id TEXT,
+      tool_payload TEXT,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE zen_session_memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -259,6 +277,182 @@ describe("Zen session memory checkpoints", () => {
     assert.equal(ordinary, null);
     assert.equal(userMessageSuggestsZenSessionDeferral("Let's finish this later."), true);
     assert.equal(userMessageSuggestsZenSessionDeferral("Tell me more."), false);
+  });
+
+  it("creates automatic Persona checkpoints only for substantial player-facing spans", async () => {
+    const db = createTestDb();
+    insertConversation(db, "conversation-1", "2026-06-20T12:00:00.000Z");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+      "mario",
+      "user-1",
+      "Mario"
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "mario-assistant-only",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "It's-a me, Mario!",
+      "mario",
+      null,
+      "2026-06-20T12:00:01.000Z"
+    );
+
+    const tooShort = await createZenPersonaSessionMemoryCheckpoint({
+      db,
+      provider: fakeProvider("Mario", "Should not save."),
+      userId: "user-1",
+      conversationId: "conversation-1",
+      botId: "mario",
+      userKey: USER_KEY,
+      now: new Date("2026-06-20T12:00:02.000Z"),
+    });
+    assert.equal(tooShort, null);
+
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "mario-user",
+      "conversation-1",
+      "user-1",
+      "user",
+      "Tell me about Mushroom Kingdom tax code.",
+      "mario",
+      null,
+      "2026-06-20T12:00:03.000Z"
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "mario-reply",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "The Mushroom Kingdom had a strict coin levy.",
+      "mario",
+      null,
+      "2026-06-20T12:00:04.000Z"
+    );
+
+    const checkpoint = await createZenPersonaSessionMemoryCheckpoint({
+      db,
+      provider: fakeProvider("Mario Taxes", "Mario should resume the tax-code story."),
+      userId: "user-1",
+      conversationId: "conversation-1",
+      botId: "mario",
+      userKey: USER_KEY,
+      now: new Date("2026-06-20T12:00:05.000Z"),
+    });
+    assert.ok(checkpoint);
+    assert.equal(checkpoint.botId, "mario");
+    assert.equal(checkpoint.text, "Mario should resume the tax-code story.");
+  });
+
+  it("excludes previous-persona handoff and bridge user replies from Persona checkpoints", async () => {
+    const db = createTestDb();
+    insertConversation(db, "conversation-1", "2026-06-20T12:00:00.000Z");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+      "spongebob",
+      "user-1",
+      "Spongebob"
+    );
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+      "mario",
+      "user-1",
+      "Mario"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "handoff",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "But what about that guy with the mustache?",
+      "spongebob",
+      JSON.stringify({
+        v: 1,
+        zenTurn: {
+          kind: "persona-transition",
+          fromBotId: "spongebob",
+          toBotId: "mario",
+          style: "previous-introduces",
+        },
+      }),
+      "2026-06-20T12:00:01.000Z"
+    );
+    insertMessage.run(
+      "bridge-user",
+      "conversation-1",
+      "user-1",
+      "user",
+      "Oh, Mario?",
+      "mario",
+      null,
+      "2026-06-20T12:00:02.000Z"
+    );
+    insertMessage.run(
+      "mario-intro",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "It's-a me, Mario!",
+      "mario",
+      null,
+      "2026-06-20T12:00:03.000Z"
+    );
+    insertMessage.run(
+      "mario-user",
+      "conversation-1",
+      "user-1",
+      "user",
+      "Tell me a long story about Mushroom Kingdom tax code.",
+      "mario",
+      null,
+      "2026-06-20T12:00:04.000Z"
+    );
+    insertMessage.run(
+      "mario-reply",
+      "conversation-1",
+      "user-1",
+      "assistant",
+      "The tax code begins with a coin stamp and a royal audit.",
+      "mario",
+      null,
+      "2026-06-20T12:00:05.000Z"
+    );
+
+    let transcript = "";
+    const checkpoint = await createZenPersonaSessionMemoryCheckpoint({
+      db,
+      provider: {
+        name: "local",
+        async generateResponse(messages) {
+          transcript = messages.map((message) => message.content).join("\n");
+          return JSON.stringify({
+            title: "Mario Tax Code",
+            text: "Mario should resume the Mushroom Kingdom tax-code story.",
+          });
+        },
+        async embedText() {
+          return [];
+        },
+      },
+      userId: "user-1",
+      conversationId: "conversation-1",
+      botId: "mario",
+      userKey: USER_KEY,
+      now: new Date("2026-06-20T12:00:06.000Z"),
+    });
+
+    assert.ok(checkpoint);
+    assert.doesNotMatch(transcript, /Oh, Mario/);
+    assert.doesNotMatch(transcript, /guy with the mustache/);
+    assert.match(transcript, /Mushroom Kingdom tax code/);
+    assert.match(transcript, /royal audit/);
   });
 });
 

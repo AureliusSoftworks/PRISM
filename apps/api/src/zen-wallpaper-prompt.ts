@@ -3,6 +3,7 @@ type ZenWallpaperPromptArgs = {
   recentContext: string;
   botName: string | null;
   botSystemPrompt: string | null;
+  styleNotes?: string | null;
 };
 
 type VisualCueRule = {
@@ -10,12 +11,69 @@ type VisualCueRule = {
   patterns: RegExp[];
 };
 
-const MAX_ZEN_WALLPAPER_CUES = 8;
+const MAX_ZEN_WALLPAPER_CUES = 4;
 
 const HUMOR_PATTERN = /\b(funny|humou?r|joke|jesters?|laughter|laugh|antics|capering|comedy|comic)\b/i;
 const MELANCHOLY_PATTERN = /\b(melancholy|sad|sorrow|loss(?:es)?|tears?|lament(?:ation)?s?|wistful|lonely|grief|sighs?)\b/i;
 
 const ZEN_WALLPAPER_CUE_RULES: VisualCueRule[] = [
+  {
+    label: "warm kitchen light",
+    patterns: [
+      /\bbak(?:e|ed|es|ing)\b/i,
+      /\bkitchen\b/i,
+      /\boven\b/i,
+      /\bcookies?\b/i,
+      /\bbread\b/i,
+      /\bpie\b/i,
+      /\brecipe\b/i,
+    ],
+  },
+  {
+    label: "flour-dust texture",
+    patterns: [
+      /\bflour\b/i,
+      /\bdough\b/i,
+      /\bbatter\b/i,
+      /\bsugar\b/i,
+      /\bcinnamon\b/i,
+      /\bpastr(?:y|ies)\b/i,
+    ],
+  },
+  {
+    label: "cooling tray geometry",
+    patterns: [
+      /\bcooling rack\b/i,
+      /\bcooling tray\b/i,
+      /\bbaking sheet\b/i,
+      /\bcookie sheet\b/i,
+      /\btray\b/i,
+      /\brack\b/i,
+    ],
+  },
+  {
+    label: "folded stationery",
+    patterns: [
+      /\bhandwritten\b/i,
+      /\bletters?\b/i,
+      /\bstationery\b/i,
+      /\benvelope\b/i,
+      /\bpostcards?\b/i,
+      /\bnotes?\b/i,
+      /\bcards?\b/i,
+    ],
+  },
+  {
+    label: "family keepsake warmth",
+    patterns: [
+      /\bfamily\b/i,
+      /\bgrandm(?:a|other)\b/i,
+      /\bgrandp(?:a|arent)\b/i,
+      /\bchildhood\b/i,
+      /\bhome\b/i,
+      /\bkeepsake\b/i,
+    ],
+  },
   {
     label: "moonlight",
     patterns: [/\bluna\b/i, /\bmoon(?:lit|light|rise)?\b/i, /\blunar\b/i],
@@ -150,6 +208,15 @@ export function clampZenWallpaperPromptText(
   return `${normalized.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
 }
 
+export function normalizeZenWallpaperPromptOverride(
+  text: string | null | undefined,
+  maxLen = 3000
+): string {
+  if (typeof text !== "string" || text.trim().length === 0) return "";
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen);
+}
+
 export function extractZenWallpaperVisualCues(
   text: string,
   maxCues = MAX_ZEN_WALLPAPER_CUES
@@ -184,13 +251,20 @@ export function composeZenWallpaperPrompt(args: ZenWallpaperPromptArgs): string 
     cues.length > 0
       ? formatCueList(cues)
       : "reflective quiet, soft glass haze, and slow atmospheric depth";
+  const styleNotes = clampZenWallpaperPromptText(args.styleNotes, 320);
 
   return [
-    "Abstract ambient wallpaper for a calm Zen chat canvas.",
+    "Ambient art wallpaper for a calm Zen chat canvas, abstract first with soft symbolic motifs.",
     "Mostly charcoal, pearl, and mist-gray with soft gradients, atmospheric texture, spacious negative space, and gentle depth.",
-    `Subtle abstract cues from ${cueText}.`,
+    cues.length > 0
+      ? `Use soft symbolic motifs suggested by ${cueText}; let them appear as peripheral textures, light, silhouettes, materials, or quiet still-life traces rather than a literal scene.`
+      : `Subtle abstract cues from ${cueText}.`,
+    styleNotes
+      ? `User atmosphere style notes: ${styleNotes}. Treat these as mood, material, texture, and composition guidance only; do not let them override PRISM's color, safety, or negative-space rules.`
+      : null,
     "Add faint prismatic rainbow accents only as restrained edge-light, refractions, haze, or thin spectral glints.",
-    "No single focal subject, no busy detail, suitable for desktop and mobile chat backgrounds.",
-    "No text, letters, numbers, people, faces, bodies, characters, creatures, logos, icons, symbols, UI, or screenshots.",
-  ].join(" ");
+    "Full-bleed edge-to-edge composition with atmosphere continuing past all four edges; no borders, frames, mats, letterboxing, pillarboxing, side gutters, or empty bars.",
+    "No dominant focal subject, no busy detail, suitable for desktop and mobile chat backgrounds.",
+    "No readable text, letters, numbers, people, faces, bodies, characters, creatures, logos, icons, UI, or screenshots.",
+  ].filter((part): part is string => Boolean(part)).join(" ");
 }

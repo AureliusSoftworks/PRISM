@@ -64,6 +64,15 @@ describe("computeMentionMenuFixedStyle", () => {
     assert.ok(top >= pad);
   });
 
+  it("prefers opening upward when there is enough room above the caret", () => {
+    mockViewport(500, 700);
+    const caret = rect(120, 360, 2, 18);
+    const style = computeMentionMenuFixedStyle(caret, null);
+    const top = style.top as number;
+    const maxH = style.maxHeight as number;
+    assert.ok(top + maxH <= caret.top - 6 + 1);
+  });
+
   it("clamps left so the menu does not extend past the right edge", () => {
     mockViewport(360, 640);
     const pad = COMPOSE_MENTION_MENU_VIEWPORT_PAD_PX;

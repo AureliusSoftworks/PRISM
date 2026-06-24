@@ -1,9 +1,58 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  resolveChatRevealDelayMultiplierForTyping,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing.ts";
+import {
+  CLEANUP_MESSAGE_REVEAL_DURATION_MS,
+  CLEANUP_MESSAGE_REVEAL_SETTLE_MS,
+  cleanupMessageRevealKey,
+  mapPendingCleanupMessagesToFinalRevealKeys,
+} from "./messageCleanupReveal.ts";
+
+describe("resolveChatRevealDelayMultiplierForTyping", () => {
+  const base = {
+    active: true,
+    hasDraft: true,
+    lastTypingAtMs: 1000,
+    maxMultiplier: 2,
+    idleHoldMs: 1000,
+    recoveryMs: 1200,
+  };
+
+  it("holds the slowdown for one second after typing stops", () => {
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 1000 }), 2);
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 1999 }), 2);
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 2000 }), 2);
+  });
+
+  it("gradually restores to normal speed after the idle hold", () => {
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 2600 }), 1.5);
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 3200 }), 1);
+    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 5000 }), 1);
+  });
+
+  it("does not slow down without active typing context", () => {
+    assert.equal(
+      resolveChatRevealDelayMultiplierForTyping({ ...base, active: false, nowMs: 1000 }),
+      1
+    );
+    assert.equal(
+      resolveChatRevealDelayMultiplierForTyping({ ...base, hasDraft: false, nowMs: 1000 }),
+      1
+    );
+    assert.equal(
+      resolveChatRevealDelayMultiplierForTyping({
+        ...base,
+        lastTypingAtMs: null,
+        nowMs: 1000,
+      }),
+      1
+    );
+  });
+});
 
 describe("resolvePacedChatRevealVisibleTokenCount", () => {
   it("starts a late reveal at one visible token instead of catching up immediately", () => {
@@ -34,6 +83,88 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 450 }), 2);
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 450 }), 2);
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 900 }), 3);
+  });
+
+  it("recalculates the pending step when delay settings change", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const base = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+    };
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 0,
+        resolveStepDelayMs: () => 1000,
+      }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 400,
+        resolveStepDelayMs: () => 1000,
+      }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 450,
+        resolveStepDelayMs: () => 300,
+      }),
+      2
+    );
+  });
+
+  it("slows the pending step when the delay multiplier increases", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const base = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...base, nowMs: 0 }), 1);
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 100,
+        delayMultiplier: 2,
+      }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 200,
+        delayMultiplier: 2,
+      }),
+      2
+    );
+  });
+
+  it("speeds the pending step when the delay multiplier decreases", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const base = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...base, nowMs: 0 }), 1);
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 60,
+        delayMultiplier: 0.5,
+      }),
+      2
+    );
   });
 
   it("resets pacing when the token signature changes", () => {
@@ -67,6 +198,39 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
         nowMs: 400,
       }),
       1
+    );
+  });
+});
+
+describe("message cleanup reveal helpers", () => {
+  it("keeps a settle window longer than the whole-message reveal animation", () => {
+    assert.ok(CLEANUP_MESSAGE_REVEAL_DURATION_MS > 0);
+    assert.ok(CLEANUP_MESSAGE_REVEAL_SETTLE_MS > CLEANUP_MESSAGE_REVEAL_DURATION_MS);
+  });
+
+  it("maps pending optimistic cleanup messages to final user messages by send order", () => {
+    assert.deepEqual(
+      mapPendingCleanupMessagesToFinalRevealKeys({
+        conversationId: "conversation",
+        pendingMessageIds: ["pending-a", "pending-b"],
+        previousMessages: [
+          { id: "old-user", role: "user" },
+          { id: "old-assistant", role: "assistant" },
+          { id: "pending-a", role: "user" },
+          { id: "pending-b", role: "user" },
+        ],
+        finalMessages: [
+          { id: "old-user", role: "user" },
+          { id: "old-assistant", role: "assistant" },
+          { id: "final-a", role: "user" },
+          { id: "final-b", role: "user" },
+          { id: "final-assistant", role: "assistant" },
+        ],
+      }),
+      [
+        cleanupMessageRevealKey("conversation", "final-a"),
+        cleanupMessageRevealKey("conversation", "final-b"),
+      ]
     );
   });
 });

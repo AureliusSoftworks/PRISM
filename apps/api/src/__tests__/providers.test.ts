@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   ANTHROPIC_DEFAULT_MODEL,
   buildModelCatalog,
+  checkAnthropicApiKeyStatus,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
+  checkOpenAiApiKeyStatus,
   embedTextLocal,
   getAuxiliaryProvider,
   AnthropicProvider,
@@ -275,7 +277,7 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
     assert.equal(
       catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
-      "Claude Haiku 4.5"
+      "Haiku 4.5"
     );
     assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });
@@ -423,7 +425,7 @@ describe("buildModelCatalog", () => {
     );
   });
 
-  it("lists paired secondary Ollama models only when the same model exists locally", async () => {
+  it("lists every paired secondary Ollama model even when it is not installed locally", async () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("192.168.1.50") && url.includes("/api/tags")) {
@@ -460,10 +462,12 @@ describe("buildModelCatalog", () => {
     assert.equal(secondaryLlama?.label, "Llama 3.2 (Paired host)");
     assert.equal(secondaryLlama?.hostLabel, "Paired host");
     assert.equal(secondaryLlama?.localHost, "secondary");
-    assert.equal(
-      catalog.local.find((model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`),
-      undefined
+    const secondaryMistral = catalog.local.find(
+      (model) => model.id === `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest`
     );
+    assert.equal(secondaryMistral?.label, "Mistral (Paired host)");
+    assert.equal(secondaryMistral?.hostLabel, "Paired host");
+    assert.equal(secondaryMistral?.localHost, "secondary");
   });
 });
 

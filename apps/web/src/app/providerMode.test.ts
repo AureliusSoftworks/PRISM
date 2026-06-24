@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { DISABLED_MODEL_CHOICE } from "@localai/shared";
+
 import {
   applyOnlineModelChoice,
   combinedOnlineModelOptions,
@@ -157,6 +159,74 @@ describe("provider mode helpers", () => {
           anthropic: "claude-sonnet-4-6",
         },
       }
+    );
+  });
+
+  it("keeps a disabled local choice explicit for local response mode", () => {
+    assert.deepEqual(
+      resolveModelChoiceForResponseMode({
+        responseMode: "local",
+        providerPreference: "local",
+        choices: {
+          local: DISABLED_MODEL_CHOICE,
+          openai: "auto",
+          anthropic: "auto",
+        },
+        onlineOptions: combinedOnlineModelOptions(openAiModels, anthropicModels),
+      }),
+      { provider: "local", modelChoice: DISABLED_MODEL_CHOICE }
+    );
+  });
+
+  it("keeps a disabled online choice attached to the selected online provider", () => {
+    const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
+    assert.deepEqual(
+      applyOnlineModelChoice({
+        currentChoices: {
+          local: "llama3.2",
+          openai: "gpt-4o",
+          anthropic: "claude-opus-4-1",
+        },
+        nextChoice: DISABLED_MODEL_CHOICE,
+        onlineOptions: combined,
+        providerPreference: "anthropic",
+      }),
+      {
+        provider: "anthropic",
+        choices: {
+          local: "llama3.2",
+          openai: "auto",
+          anthropic: DISABLED_MODEL_CHOICE,
+        },
+      }
+    );
+    assert.deepEqual(
+      resolveModelChoiceForResponseMode({
+        responseMode: "online",
+        providerPreference: "anthropic",
+        choices: {
+          openai: "auto",
+          anthropic: DISABLED_MODEL_CHOICE,
+        },
+        onlineOptions: combined,
+      }),
+      { provider: "anthropic", modelChoice: DISABLED_MODEL_CHOICE }
+    );
+  });
+
+  it("does not let a disabled non-preferred online slot block Auto", () => {
+    const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
+    assert.deepEqual(
+      resolveModelChoiceForResponseMode({
+        responseMode: "online",
+        providerPreference: "openai",
+        choices: {
+          openai: "auto",
+          anthropic: DISABLED_MODEL_CHOICE,
+        },
+        onlineOptions: combined,
+      }),
+      { provider: "openai", modelChoice: "auto" }
     );
   });
 });

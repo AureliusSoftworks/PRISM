@@ -77,6 +77,16 @@ export interface StoredAssistantMoodPayload {
   confidence?: number;
 }
 
+export type StoredZenAssistantTurnKind = "persona-transition" | "zen-autonomy";
+
+export interface StoredZenAssistantTurnPayload {
+  kind: StoredZenAssistantTurnKind;
+  fromBotId?: string | null;
+  toBotId?: string | null;
+  activeBotId?: string | null;
+  style?: "new-speaks" | "previous-introduces";
+}
+
 export interface StoredAssistantToolEnvelope {
   v: 1;
   askQuestion?: AskQuestionPayload;
@@ -84,6 +94,8 @@ export interface StoredAssistantToolEnvelope {
   mood?: StoredAssistantMoodPayload;
   /** Display-only Zen layout hint. Ignored by non-Zen clients. */
   zenDisplay?: ZenDisplayMetadata;
+  /** Internal Zen turn marker used by server-side checkpoint extraction. */
+  zenTurn?: StoredZenAssistantTurnPayload;
   /** Persisted assistant-generated image attachment (never the raw model stub). */
   sentGeneratedImage?: SentGeneratedImagePayload;
 }
@@ -113,6 +125,7 @@ export interface ParsedStoredAssistantToolPayload {
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
+  zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
 }
 
@@ -216,6 +229,8 @@ function normalizeTellFictionalStoryEnvelope(
   const finishLabel = normalizeStoryChipLabel(
     row.finishLabel ?? row.finishStoryLabel ?? row.finish
   );
+
+  if (!rawName && !continueLabel && !bookmarkLabel && !finishLabel) return undefined;
 
   return {
     v: 1,
@@ -353,6 +368,39 @@ export function normalizeZenDisplayMetadata(value: unknown): ZenDisplayMetadata 
     v: 1,
     ...(placement ? { placement } : {}),
     ...(lines.length > 0 ? { lines } : {}),
+  };
+}
+
+function normalizeBotIdMarker(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function normalizeStoredZenAssistantTurnPayload(
+  value: unknown
+): StoredZenAssistantTurnPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const kind =
+    row.kind === "persona-transition" || row.kind === "zen-autonomy"
+      ? row.kind
+      : undefined;
+  if (!kind) return undefined;
+  const fromBotId = normalizeBotIdMarker(row.fromBotId);
+  const toBotId = normalizeBotIdMarker(row.toBotId);
+  const activeBotId = normalizeBotIdMarker(row.activeBotId);
+  const style =
+    row.style === "previous-introduces" || row.style === "new-speaks"
+      ? row.style
+      : undefined;
+  return {
+    kind,
+    ...(fromBotId !== undefined ? { fromBotId } : {}),
+    ...(toBotId !== undefined ? { toBotId } : {}),
+    ...(activeBotId !== undefined ? { activeBotId } : {}),
+    ...(style ? { style } : {}),
   };
 }
 
@@ -775,6 +823,9 @@ export function parseStoredAssistantToolPayload(
           ? normalizeStoredSentGeneratedImagePayload(root.sentGeneratedImage)
           : undefined;
       const zenDisplay = root ? normalizeZenDisplayMetadata(root.zenDisplay) : undefined;
+      const zenTurn = root
+        ? normalizeStoredZenAssistantTurnPayload(root.zenTurn)
+        : undefined;
       const story = root
         ? normalizeTellFictionalStoryEnvelope(root.tellFictionalStory)
         : undefined;
@@ -783,6 +834,7 @@ export function parseStoredAssistantToolPayload(
         ...(sent ? { sentGeneratedImage: sent } : {}),
         ...(story ? { tellFictionalStory: story } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
+        ...(zenTurn ? { zenTurn } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -791,6 +843,7 @@ export function parseStoredAssistantToolPayload(
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
+    const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -817,6 +870,7 @@ export function parseStoredAssistantToolPayload(
       ...(moodKey ? { moodKey } : {}),
       ...(moodConfidence !== undefined ? { moodConfidence } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
+      ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
     };
   } catch {
@@ -866,6 +920,7 @@ export function serializeAssistantToolPayload(args: {
   moodKey?: StoredMoodKey;
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
+  zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
@@ -873,13 +928,17 @@ export function serializeAssistantToolPayload(args: {
   const hasMood = args.moodKey !== undefined;
   const hasImage = args.sentGeneratedImage !== undefined;
   const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
-  const hasZen = zenDisplay !== undefined;
-  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasZen) return null;
+  const hasZenDisplay = zenDisplay !== undefined;
+  const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
+  const hasZenTurn = zenTurn !== undefined;
+  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasZenDisplay && !hasZenTurn) {
+    return null;
+  }
 
-  if (!hasAsk && !hasStory && !hasMood && !hasZen && hasImage) {
+  if (!hasAsk && !hasStory && !hasMood && !hasZenDisplay && !hasZenTurn && hasImage) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasZen) {
+  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasZenDisplay && !hasZenTurn) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
@@ -898,7 +957,8 @@ export function serializeAssistantToolPayload(args: {
           },
         }
       : {}),
-    ...(hasZen ? { zenDisplay } : {}),
+    ...(hasZenDisplay ? { zenDisplay } : {}),
+    ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
   };
   return JSON.stringify(payload);

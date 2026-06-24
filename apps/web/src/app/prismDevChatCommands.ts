@@ -3,12 +3,14 @@
  * client-side only (never POSTed to `/api/chat`).
  */
 
-/** True in `next dev` / non-production builds, or when explicitly opted in via env. */
-export const PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED =
-  process.env.NODE_ENV !== "production" ||
-  (typeof process.env.NEXT_PUBLIC_PRISM_DEV_COMMANDS === "string" &&
-    (process.env.NEXT_PUBLIC_PRISM_DEV_COMMANDS === "1" ||
-      process.env.NEXT_PUBLIC_PRISM_DEV_COMMANDS.toLowerCase() === "true"));
+import { prismWebDevChatCommandsEnabled } from "./prismDevGating";
+
+/** True in development/non-main builds, or when explicitly opted in off main. */
+export const PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED = prismWebDevChatCommandsEnabled({
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+  NEXT_PUBLIC_PRISM_DEV_COMMANDS: process.env.NEXT_PUBLIC_PRISM_DEV_COMMANDS,
+});
 
 export function isPrismDevChatCommandLine(line: string): boolean {
   if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;

@@ -54,12 +54,20 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PsychicThoughtPayload,
   PrismMoodInterruptionInput,
   PrismMoodSnapshot,
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
+  ReasoningEffort,
   SessionOpinion,
   SentGeneratedImagePayload,
+  TellFictionalStoryPayload,
+  ZenAskQuestionPatienceInput,
+  ZenAutonomyDecision,
+  ZenAutonomyInput,
+  ZenPersonaTransitionInput,
+  ZenPersonaTransitionStyle,
   ZenSessionMemoryOverview,
 } from "@localai/shared";
 import {
@@ -73,13 +81,17 @@ import {
   createDefaultPrismMoodState,
   decayPrismMood,
   hydrateAssistantMessageParts,
+  isDisabledModelChoice,
   isPrismMoodIgnoring,
+  normalizeReasoningEffort,
+  openAiModelSupportsReasoningEffort,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
+  parseStoredPsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   sanitizePrismMoodState,
@@ -99,16 +111,22 @@ import {
   startChatImageBackgroundJob,
 } from "./image-job-slot.ts";
 import {
+  buildRememberedZenWallpaperHistory,
+  getLatestRememberedZenWallpaperForBot,
   mapZenWallpaperMetadata,
   rebaseZenWallpaperMetadataForVisibleWindow,
   recoverStaleZenWallpaperGenerationStatus,
+  serializeZenWallpaperHistory,
 } from "./conversations.ts";
 import {
+  loadPrismMoodEventMessageIds,
   loadPrismMoodState,
   upsertPrismMoodState,
 } from "./db.ts";
 import {
   buildZenSessionMemoryPromptContext,
+  buildZenPersonaContinuityPromptContext,
+  createZenPersonaSessionMemoryCheckpoint,
   createZenSessionMemoryCheckpoint,
   loadZenSessionMemoryOverview,
   pruneExpiredZenSessionMemories,
@@ -179,6 +197,22 @@ export interface ChatBackendDebugEvent {
   elapsedMs: number;
 }
 
+export interface PsychicDebugPayload {
+  summary: string;
+  scratchpad: string;
+  effort: ReasoningEffort;
+  provider: ProviderName;
+  model?: string;
+  simulated: boolean;
+  passCount?: number;
+  passes?: Array<{
+    name: "plan" | "draft" | "audit" | "revision";
+    chars: number;
+    warning?: string;
+  }>;
+  guidanceChars?: number;
+}
+
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
 export interface ProcessChatMessageResult {
   conversation: Conversation;
@@ -219,6 +253,10 @@ export interface ProcessChatMessageResult {
   toolCalls?: ChatToolCallEvent[];
   /** Developer-only backend trace for the floating metrics terminal. */
   backendEvents?: ChatBackendDebugEvent[];
+  /** Live-only planning artifact for the developer metrics terminal. */
+  psychicDebug?: PsychicDebugPayload;
+  /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
+  zenAutonomyDecision?: ZenAutonomyDecision;
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -1064,6 +1102,7 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   if (
     !args.isStarterPrompt &&
     imageModel.length > 0 &&
+    !isDisabledModelChoice(imageModel) &&
     userMessageSuggestsInChatImageRequest(args.rawUserMessage, args.recentMessages ?? [])
   ) {
     return {
@@ -1082,21 +1121,625 @@ export function resolvePrimaryChatProviderForPossibleImageToolTurn(args: {
   };
 }
 
+interface PsychicPlanningTrace {
+  psychicThought?: PsychicThoughtPayload;
+  debug: PsychicDebugPayload;
+  answerGuidance: string;
+  shouldGuideFinalAnswer: boolean;
+}
+
+type PsychicPrivatePassName = "plan" | "draft" | "audit" | "revision";
+
+interface PsychicPrivatePassDiagnostic {
+  name: PsychicPrivatePassName;
+  chars: number;
+  warning?: string;
+}
+
+interface PsychicPrivateTextPassResult {
+  name: Exclude<PsychicPrivatePassName, "plan">;
+  content: string;
+  diagnostic: PsychicPrivatePassDiagnostic;
+}
+
+const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
+  "You are Prism's private planning pass for the next assistant reply.",
+  "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
+  "All three fields must be non-empty.",
+  "summary: one concise user-visible reasoning summary under 80 words, written from the assistant's first-person perspective.",
+  "The summary should sound like a short intent line, not a system caption. Prefer forms like \"I've decided it makes the most sense to ___ based on ___ in regard to ___\" or \"I'm helping the user ___, so I'm going to tell them ___\".",
+  "Do not write the summary as raw chain-of-thought, a detached label, or a third-person sentence about Prism.",
+  "scratchpad: 2-4 short private planning notes about constraints, risks, and answer shape. This is a developer-only simulated planning artifact, not hidden chain-of-thought from a provider.",
+  "answerGuidance: 2-4 concrete instructions for the final reply. Preserve exact requested formats, labels, word limits, and forbidden-word rules. If the user asks for labels like S1-S6, use those exact labels and do not convert them to 1-6. Do not include secrets or long reasoning.",
+  "When the user assigns requirements to rows, bullets, or labels, restate those label requirements in answerGuidance and preserve required key terms.",
+  "If the user says local-only, prefer local machine, local device, local provider, or Ollama wording; never replace local-only with infrastructure-only wording.",
+  "If the user asks for a UI indicator, prefer concrete indicator words like toast, badge, line, or label instead of turning the indicator into a settings toggle.",
+].join("\n");
+
+const PSYCHIC_PLANNING_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summary: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Concise user-visible first-person assistant intent summary under 80 words.",
+    },
+    scratchpad: {
+      type: "string",
+      minLength: 1,
+      description: "Developer-only simulated planning notes.",
+    },
+    answerGuidance: {
+      type: "string",
+      minLength: 1,
+      description: "Concise private guidance for the final reply.",
+    },
+  },
+  required: ["summary", "scratchpad", "answerGuidance"],
+} satisfies Record<string, unknown>;
+
+function psychicPlanPromptForEffort(effort: ReasoningEffort): string {
+  if (effort === "minimal") {
+    return PSYCHIC_PLANNING_SYSTEM_PROMPT;
+  }
+  return [
+    PSYCHIC_PLANNING_SYSTEM_PROMPT,
+    "For this effort level, make the scratchpad more useful: explicitly note required constraints, forbidden words, likely failure modes, and the answer structure.",
+    "Keep it concise, but do not leave the final answer to rediscover the constraints.",
+  ].join("\n");
+}
+
+function clampPsychicPlanningText(value: unknown, maxLength: number): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function psychicPlanningTokenBudget(effort: ReasoningEffort): number {
+  switch (effort) {
+    case "xhigh":
+      return 900;
+    case "high":
+      return 720;
+    case "medium":
+      return 560;
+    case "low":
+      return 420;
+    case "minimal":
+      return 300;
+    case "none":
+    case "auto":
+    default:
+      return 260;
+  }
+}
+
+function psychicPrivateTextPassTokenBudget(
+  effort: ReasoningEffort,
+  passName: Exclude<PsychicPrivatePassName, "plan">
+): number {
+  switch (passName) {
+    case "draft":
+      return effort === "xhigh" ? 1100 : 900;
+    case "audit":
+      return effort === "medium" ? 420 : effort === "xhigh" ? 760 : 620;
+    case "revision":
+      return 760;
+  }
+}
+
+function simulatedEffortTextPasses(
+  effort: ReasoningEffort
+): Array<Exclude<PsychicPrivatePassName, "plan">> {
+  switch (effort) {
+    case "medium":
+      return ["audit"];
+    case "high":
+      return ["draft", "audit"];
+    case "xhigh":
+      return ["draft", "audit", "revision"];
+    case "minimal":
+    case "low":
+    case "none":
+    case "auto":
+    default:
+      return [];
+  }
+}
+
+function providerModelSupportsNativeReasoningEffort(
+  provider: LlmProvider,
+  botOverrides: GenerateOptions | undefined
+): boolean {
+  if (provider.name !== "openai") return false;
+  return openAiModelSupportsReasoningEffort(describeRequestedModel(provider, botOverrides));
+}
+
+function simulatedEffortNoticeDetail(args: {
+  experimentalAllModelEffortEnabled?: boolean;
+  provider: LlmProvider;
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+}): string | null {
+  if (args.experimentalAllModelEffortEnabled !== true) return null;
+  if (args.effort === "auto" || args.effort === "none") return null;
+  if (args.provider.name === "local") return null;
+  const model = describeRequestedModel(args.provider, args.botOverrides);
+  if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
+    return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
+  }
+  return `online_simulated_effort_disabled; provider=${args.provider.name}; model=${model}; effort=${args.effort}; reason=local_only`;
+}
+
+function shouldSimulateReasoningEffort(args: {
+  experimentalAllModelEffortEnabled?: boolean;
+  provider: LlmProvider;
+  effort: ReasoningEffort;
+}): boolean {
+  if (args.experimentalAllModelEffortEnabled !== true) return false;
+  if (args.effort === "auto" || args.effort === "none") return false;
+  return args.provider.name === "local";
+}
+
+function parsePsychicPlanningResponse(raw: string): {
+  summary: string;
+  scratchpad: string;
+  answerGuidance: string;
+} | null {
+  try {
+    const parsed = JSON.parse(extractJsonObjectPayload(raw)) as unknown;
+    if (!isRecord(parsed)) return null;
+    const summary = clampPsychicPlanningText(parsed.summary, 1200);
+    const scratchpad = clampPsychicPlanningText(parsed.scratchpad, 4000);
+    const answerGuidance = clampPsychicPlanningText(parsed.answerGuidance, 1400);
+    if (!summary || !scratchpad || !answerGuidance) return null;
+    return { summary, scratchpad, answerGuidance };
+  } catch {
+    return null;
+  }
+}
+
+function buildPsychicDraftPrompt(plan: {
+  summary: string;
+  scratchpad: string;
+  answerGuidance: string;
+}): string {
+  return [
+    "You are Prism's private draft pass for the next assistant reply.",
+    "Write a private draft answer that follows the plan. This draft is never shown to the user.",
+    "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
+    "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes or summaries.",
+    "If the user says local-only, use local machine, local device, local provider, or Ollama wording; do not replace local-only with infrastructure-only wording.",
+    "If Psychic mode needs a visible indicator, name a toast, badge, subtle line, or label, not a toggle.",
+    "Do not reveal chain-of-thought. Do not mention that this is a draft.",
+    "",
+    `Planning summary: ${plan.summary}`,
+    `Planning notes: ${plan.scratchpad}`,
+    `Answer guidance: ${plan.answerGuidance}`,
+  ].join("\n");
+}
+
+function buildPsychicAuditPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  draft?: string;
+}): string {
+  return [
+    "You are Prism's private audit pass for the next assistant reply.",
+    "Return ONLY 3-5 short bullet lines of guidance, no more than 120 words total.",
+    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
+    "Each bullet must start with '- Fix:' or '- Keep:'.",
+    "Check missing constraints, privacy issues, answer shape, and likely user-facing mistakes.",
+    "Specifically check exact row/step labels, forbidden words, word limits, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
+    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
+    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
+    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    "Do not include raw chain-of-thought.",
+    "",
+    "User request to audit against:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    "",
+    `Planning summary: ${args.plan.summary}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    `Planning notes to audit: ${args.plan.scratchpad}`,
+    args.draft
+      ? "A private draft was produced. Audit it against the user request and plan, but do not quote or copy it."
+      : "",
+  ].join("\n");
+}
+
+function buildPsychicRevisionPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  draft?: string;
+  audit?: string;
+}): string {
+  return [
+    "You are Prism's private revision-guidance pass for the next assistant reply.",
+    "Return ONLY 3-5 short bullet lines of final-answer guidance, no more than 120 words total.",
+    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
+    "Each bullet must start with '- Final:'.",
+    "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
+    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
+    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
+    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    "",
+    "User request to revise against:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    "",
+    `Planning summary: ${args.plan.summary}`,
+    `Initial guidance: ${args.plan.answerGuidance}`,
+    args.audit ? `Audit guidance: ${clampPsychicPlanningText(args.audit, 1800)}` : "",
+    args.draft
+      ? "A private draft was produced. Use the audit to improve final-answer instructions, but do not quote or copy the draft."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function appendPsychicPrivateArtifactsToScratchpad(args: {
+  planScratchpad: string;
+  draft?: string;
+  audit?: string;
+  revision?: string;
+}): string {
+  const parts = [
+    `Plan scratchpad:\n${args.planScratchpad}`,
+    args.draft ? `Private draft:\n${args.draft}` : "",
+    args.audit ? `Private audit:\n${args.audit}` : "",
+    args.revision ? `Private revision guidance:\n${args.revision}` : "",
+  ].filter(Boolean);
+  return clampPsychicPlanningText(parts.join("\n\n"), 8000);
+}
+
+function composePsychicFinalGuidance(args: {
+  planGuidance: string;
+  audit?: string;
+  revision?: string;
+}): string {
+  const latestGuidance = args.revision || args.audit;
+  const parts = [
+    "Non-negotiable final-answer rules: follow the user's exact requested format, labels, word limits, and forbidden-word rules; preserve required key terms; if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase; if labels like S1-S6 are requested, use those exact labels and do not convert them to 1-6; include every named item; never add a Note or summary after an exact table/list request; do not mention private planning; if Psychic mode needs an indicator, use toast, badge, line, or label.",
+    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 520)}`,
+    latestGuidance
+      ? `Latest checklist: ${clampPsychicPlanningText(latestGuidance, 520)}`
+      : "",
+  ].filter(Boolean);
+  return clampPsychicPlanningText(parts.join("\n"), 1100);
+}
+
+function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): string {
+  for (let index = promptMessages.length - 1; index >= 0; index -= 1) {
+    const message = promptMessages[index];
+    if (message?.role === "user") return message.content;
+  }
+  return "";
+}
+
+function sanitizeExplicitConstraintLine(line: string): string {
+  return line
+    .replace(/^\s*[-*]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(
+      /\bwithout using the word\s+["'`]?([A-Za-z0-9_-]+)["'`]?/gi,
+      "without using the forbidden word"
+    );
+}
+
+function extractExplicitUserConstraints(
+  promptMessages: readonly ProviderMessage[]
+): string[] {
+  const latestUserMessage = latestUserPromptContent(promptMessages);
+  if (!latestUserMessage.trim()) return [];
+  const constraints: string[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of latestUserMessage.split(/\r?\n/)) {
+    const line = sanitizeExplicitConstraintLine(rawLine);
+    if (!line || /^constraints:?$/i.test(line)) continue;
+    const isConstraint =
+      /^S\d+\s+must\b/i.test(line) ||
+      /^(?:do not|keep\b|use columns:)/i.test(line) ||
+      /\bexactly\s+\d+\b.*\blabeled\s+S\d+/i.test(line);
+    if (!isConstraint || seen.has(line.toLowerCase())) continue;
+    seen.add(line.toLowerCase());
+    constraints.push(line);
+    if (constraints.length >= 10) break;
+  }
+  return constraints;
+}
+
+async function runPsychicPrivateTextPass(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+  passName: Exclude<PsychicPrivatePassName, "plan">;
+  systemPrompt: string;
+  includeOriginalPromptAsUser?: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+}): Promise<PsychicPrivateTextPassResult> {
+  const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
+  let raw = "";
+  try {
+    raw = await args.provider.generateResponse(
+      [
+        { role: "system", content: args.systemPrompt },
+        ...(args.includeOriginalPromptAsUser === false
+          ? []
+          : args.promptMessages.filter((message) => message.role !== "system")),
+      ],
+      {
+        ...args.botOverrides,
+        maxTokens: psychicPrivateTextPassTokenBudget(args.effort, args.passName),
+        temperature: 0,
+        reasoningEffort: args.effort === "auto" ? undefined : args.effort,
+        jsonMode: false,
+        jsonSchema: undefined,
+        jsonSchemaName: undefined,
+        ...(args.signal ? { signal: args.signal } : {}),
+      }
+    );
+    throwIfChatRequestCancelled(args.signal);
+  } catch (error) {
+    const warning = `${args.passName}_failed; provider=${
+      args.provider.name
+    }; model=${requestedModel}; detail=${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    args.onPlanningWarning?.(warning);
+    return {
+      name: args.passName,
+      content: "",
+      diagnostic: { name: args.passName, chars: 0, warning },
+    };
+  }
+
+  const content = clampPsychicPlanningText(raw, 3200);
+  if (!content) {
+    const warning = `${args.passName}_empty; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`;
+    args.onPlanningWarning?.(warning);
+    return {
+      name: args.passName,
+      content: "",
+      diagnostic: { name: args.passName, chars: 0, warning },
+    };
+  }
+  return {
+    name: args.passName,
+    content,
+    diagnostic: { name: args.passName, chars: content.length },
+  };
+}
+
+function appendPsychicAnswerGuidance(
+  promptMessages: ProviderMessage[],
+  planningTrace: PsychicPlanningTrace | null
+): ProviderMessage[] {
+  if (!planningTrace?.shouldGuideFinalAnswer || !planningTrace.answerGuidance) {
+    return promptMessages;
+  }
+  const latestUserMessage = latestUserPromptContent(promptMessages);
+  const explicitConstraints = extractExplicitUserConstraints(promptMessages);
+  const targetedConstraintHints = [
+    /\blocal[-\s]?only\b/i.test(latestUserMessage)
+      ? "Local-only wording: use the word local plus machine, device, provider, or Ollama; do not replace local-only with infrastructure-only wording."
+      : "",
+    /\bprivate planning pass\b/i.test(latestUserMessage)
+      ? "Private planning wording: use the exact phrase private planning pass where that requirement applies."
+      : "",
+    /\bscratchpads?\s+are\s+not\s+persisted\b/i.test(latestUserMessage)
+      ? "Scratchpad wording: use the exact phrase scratchpads are not persisted where that requirement applies."
+      : "",
+  ].filter(Boolean);
+  const content = [
+    "Private guidance from Prism's simulated planning pass. Use this to answer well, but do not mention the planning pass.",
+    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 are requested, use S1-S6 and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
+    `Reasoning summary: ${planningTrace.debug.summary}`,
+    `Answer guidance: ${planningTrace.answerGuidance}`,
+    ...targetedConstraintHints,
+    ...(explicitConstraints.length > 0
+      ? [
+          "Explicit user constraints to obey exactly:",
+          ...explicitConstraints.map((constraint) => `- ${constraint}`),
+        ]
+      : []),
+  ].join("\n");
+  return [...promptMessages, { role: "system", content }];
+}
+
+async function runPsychicPlanningPass(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  effort: ReasoningEffort;
+  simulated: boolean;
+  psychicModeEnabled?: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+}): Promise<PsychicPlanningTrace | null> {
+  const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
+  const shouldPlan =
+    args.simulated || (args.psychicModeEnabled === true && args.provider.name === "local");
+  if (!shouldPlan) {
+    if (args.psychicModeEnabled === true) {
+      const nativeReasoning = providerModelSupportsNativeReasoningEffort(
+        args.provider,
+        args.botOverrides
+      );
+      const summary = nativeReasoning
+        ? "I'm using the selected online reasoning model here, so I'll keep the reasoning provider-side instead of running local private passes."
+        : "I'm helping with this turn using the selected online model, so I won't run extra local Psychic passes here.";
+      const createdAt = new Date().toISOString();
+      const debug: PsychicDebugPayload = {
+        summary,
+        scratchpad: "",
+        effort: args.effort,
+        provider: args.provider.name,
+        model: requestedModel,
+        simulated: false,
+        passCount: 0,
+        passes: [],
+        guidanceChars: 0,
+      };
+      return {
+        psychicThought: {
+          v: 1,
+          summary,
+          effort: args.effort,
+          provider: args.provider.name,
+          model: requestedModel,
+          createdAt,
+        },
+        debug,
+        answerGuidance: "",
+        shouldGuideFinalAnswer: false,
+      };
+    }
+    return null;
+  }
+
+  const planningMessages: ProviderMessage[] = [
+    { role: "system", content: psychicPlanPromptForEffort(args.effort) },
+    ...args.promptMessages.filter((message) => message.role !== "system"),
+  ];
+  let raw = "";
+  try {
+    raw = await args.provider.generateResponse(planningMessages, {
+      ...args.botOverrides,
+      maxTokens: psychicPlanningTokenBudget(args.effort),
+      temperature: 0,
+      reasoningEffort: args.effort === "auto" ? undefined : args.effort,
+      jsonMode: true,
+      jsonSchema: PSYCHIC_PLANNING_JSON_SCHEMA,
+      jsonSchemaName: "psychic_planning",
+      ...(args.signal ? { signal: args.signal } : {}),
+    });
+    throwIfChatRequestCancelled(args.signal);
+  } catch (error) {
+    args.onPlanningWarning?.(
+      `planning_failed; provider=${args.provider.name}; model=${requestedModel}; detail=${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return null;
+  }
+
+  const parsed = parsePsychicPlanningResponse(raw);
+  if (!parsed) {
+    args.onPlanningWarning?.(
+      `invalid_json; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`
+    );
+    return null;
+  }
+  const createdAt = new Date().toISOString();
+  const latestUserRequest = latestUserPromptContent(args.promptMessages);
+  const passDiagnostics: PsychicPrivatePassDiagnostic[] = [
+    { name: "plan", chars: parsed.scratchpad.length },
+  ];
+  let draft = "";
+  let audit = "";
+  let revision = "";
+  if (args.simulated) {
+    for (const passName of simulatedEffortTextPasses(args.effort)) {
+      const systemPrompt =
+        passName === "draft"
+          ? buildPsychicDraftPrompt(parsed)
+        : passName === "audit"
+          ? buildPsychicAuditPrompt({ plan: parsed, userRequest: latestUserRequest, draft })
+          : buildPsychicRevisionPrompt({
+              plan: parsed,
+              userRequest: latestUserRequest,
+              draft,
+              audit,
+            });
+      const result = await runPsychicPrivateTextPass({
+        provider: args.provider,
+        promptMessages: args.promptMessages,
+        botOverrides: args.botOverrides,
+        effort: args.effort,
+        passName,
+        systemPrompt,
+        includeOriginalPromptAsUser: passName === "draft",
+        signal: args.signal,
+        onPlanningWarning: args.onPlanningWarning,
+      });
+      passDiagnostics.push(result.diagnostic);
+      if (!result.content) continue;
+      if (passName === "draft") draft = result.content;
+      if (passName === "audit") audit = result.content;
+      if (passName === "revision") revision = result.content;
+    }
+  }
+  const answerGuidance = composePsychicFinalGuidance({
+    planGuidance: parsed.answerGuidance,
+    audit,
+    revision,
+  });
+  const liveScratchpad = appendPsychicPrivateArtifactsToScratchpad({
+    planScratchpad: parsed.scratchpad,
+    draft,
+    audit,
+    revision,
+  });
+  const debug: PsychicDebugPayload = {
+    summary: parsed.summary,
+    scratchpad: liveScratchpad,
+    effort: args.effort,
+    provider: args.provider.name,
+    model: requestedModel,
+    simulated: args.simulated,
+    passCount: passDiagnostics.filter((pass) => pass.chars > 0).length,
+    passes: passDiagnostics,
+    guidanceChars: answerGuidance.length,
+  };
+  return {
+    ...(args.psychicModeEnabled
+      ? {
+          psychicThought: {
+            v: 1,
+            summary: parsed.summary,
+            effort: args.effort,
+            provider: args.provider.name,
+            model: requestedModel,
+            createdAt,
+          },
+        }
+      : {}),
+    debug,
+    answerGuidance,
+    shouldGuideFinalAnswer: args.simulated,
+  };
+}
+
 async function generateWithLenientLocalFallback(args: {
   provider: LlmProvider;
   promptMessages: ProviderMessage[];
   botOverrides: GenerateOptions | undefined;
   secondaryOllamaHost?: string | null;
   lenientLocalFallbackModel?: string | null;
+  experimentalAllModelEffortEnabled?: boolean;
+  psychicModeEnabled?: boolean;
   denialBoundaryProvider?: LlmProvider;
   denialBoundaryModel?: string;
   botSystemPrompt?: string;
   userMessage?: string;
   signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+  onSimulatedEffortNotice?: (detail: string) => void;
 }): Promise<{
   assistantReplyRaw: string;
   providerNameUsed: ProviderName;
   modelUsed: string;
+  psychicThought?: PsychicThoughtPayload;
+  psychicDebug?: PsychicDebugPayload;
   fallbackInvocation?: {
     trigger:
       | "copyright_refusal_text"
@@ -1117,15 +1760,59 @@ async function generateWithLenientLocalFallback(args: {
   const canAttemptFallback =
     fallbackModel !== null &&
     !(args.provider.name === "local" && requestedModel === fallbackModel);
+  const requestedEffort = normalizeReasoningEffort(args.botOverrides?.reasoningEffort);
+  const simulatedEffort = shouldSimulateReasoningEffort({
+    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
+    provider: args.provider,
+    effort: requestedEffort,
+  });
+  const simulatedEffortNotice = simulatedEffortNoticeDetail({
+    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
+    provider: args.provider,
+    botOverrides: args.botOverrides,
+    effort: requestedEffort,
+  });
+  if (simulatedEffortNotice) {
+    args.onSimulatedEffortNotice?.(simulatedEffortNotice);
+  }
+  const planningTrace = await runPsychicPlanningPass({
+    provider: args.provider,
+    promptMessages: args.promptMessages,
+    botOverrides: args.botOverrides,
+    effort: requestedEffort,
+    simulated: simulatedEffort,
+    psychicModeEnabled: args.psychicModeEnabled,
+    signal: args.signal,
+    onPlanningWarning: args.onPlanningWarning,
+  });
+  const promptMessagesForFinalAnswer = appendPsychicAnswerGuidance(
+    args.promptMessages,
+    planningTrace
+  );
 
-  const runOrganicBoundary = () =>
-    generateOrganicTextBoundaryReply({
+  const withPlanningTrace = <T extends {
+    assistantReplyRaw: string;
+    providerNameUsed: ProviderName;
+    modelUsed: string;
+  }>(result: T): T & {
+    psychicThought?: PsychicThoughtPayload;
+    psychicDebug?: PsychicDebugPayload;
+  } => ({
+    ...result,
+    ...(planningTrace?.psychicThought
+      ? { psychicThought: planningTrace.psychicThought }
+      : {}),
+    ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
+  });
+
+  const runOrganicBoundary = async () =>
+    withPlanningTrace(await generateOrganicTextBoundaryReply({
       boundaryProvider: args.denialBoundaryProvider,
       boundaryModel: args.denialBoundaryModel,
       botSystemPrompt: args.botSystemPrompt,
       userMessage: args.userMessage,
       signal: args.signal,
-    });
+    }));
 
   const runLenientFallback = async (
     trigger:
@@ -1138,6 +1825,8 @@ async function generateWithLenientLocalFallback(args: {
     assistantReplyRaw: string;
     providerNameUsed: ProviderName;
     modelUsed: string;
+    psychicThought?: PsychicThoughtPayload;
+    psychicDebug?: PsychicDebugPayload;
     fallbackInvocation?: {
       trigger:
         | "copyright_refusal_text"
@@ -1158,7 +1847,7 @@ async function generateWithLenientLocalFallback(args: {
     });
     let reply = "";
     try {
-      reply = await fallbackProvider.generateResponse(args.promptMessages, {
+      reply = await fallbackProvider.generateResponse(promptMessagesForFinalAnswer, {
         ...args.botOverrides,
         model: fallbackModel,
         ...(args.signal ? { signal: args.signal } : {}),
@@ -1176,7 +1865,7 @@ async function generateWithLenientLocalFallback(args: {
     if (shouldSuppressAssistantReply(reply)) {
       return runOrganicBoundary();
     }
-    return {
+    return withPlanningTrace({
       assistantReplyRaw: reply,
       providerNameUsed: "local",
       modelUsed: fallbackModel,
@@ -1186,12 +1875,12 @@ async function generateWithLenientLocalFallback(args: {
         primaryModel,
         fallbackModel,
       },
-    };
+    });
   };
 
   try {
     const assistantReplyRaw = await args.provider.generateResponse(
-      args.promptMessages,
+      promptMessagesForFinalAnswer,
       withGenerationSignal(args.botOverrides, args.signal)
     );
     if (shouldSuppressAssistantReply(assistantReplyRaw)) {
@@ -1201,11 +1890,11 @@ async function generateWithLenientLocalFallback(args: {
       if (canAttemptFallback) return runLenientFallback(trigger);
       return runOrganicBoundary();
     }
-    return {
+    return withPlanningTrace({
       assistantReplyRaw,
       providerNameUsed: args.provider.name,
       modelUsed: primaryModel,
-    };
+    });
   } catch (error) {
     const isDenialError =
       isCopyrightRefusalError(error) ||
@@ -1628,6 +2317,32 @@ function buildStarterAskQuestion(starters: string[] | undefined): AskQuestionPay
   };
 }
 
+const TELL_FICTIONAL_STORY_MIN_DISPLAY_CHARS = 240;
+
+function normalizeTellFictionalStoryDisplayContent(displayContent: string): string {
+  return displayContent.replace(/\s+/g, " ").trim();
+}
+
+function displayLooksLikeShortSetupQuestion(displayContent: string): boolean {
+  const normalized = normalizeTellFictionalStoryDisplayContent(displayContent);
+  if (!normalized.endsWith("?")) return false;
+  if (normalized.length >= TELL_FICTIONAL_STORY_MIN_DISPLAY_CHARS) return false;
+  const questionMarks = normalized.match(/\?/g)?.length ?? 0;
+  return questionMarks > 0;
+}
+
+function chooseTellFictionalStoryForTurn(args: {
+  displayContent: string;
+  parsed: TellFictionalStoryPayload | undefined;
+  askQuestion: AskQuestionPayload | undefined;
+}): TellFictionalStoryPayload | undefined {
+  if (!args.parsed || args.askQuestion) return undefined;
+  const normalizedDisplay = normalizeTellFictionalStoryDisplayContent(args.displayContent);
+  if (displayLooksLikeShortSetupQuestion(normalizedDisplay)) return undefined;
+  if (normalizedDisplay.length < TELL_FICTIONAL_STORY_MIN_DISPLAY_CHARS) return undefined;
+  return args.parsed;
+}
+
 /** Background chrome call: names a conversation for the sidebar/history list. */
 async function inferConversationTitle(
   provider: LlmProvider,
@@ -1894,6 +2609,10 @@ export interface UserChatSettings {
   secondaryOllamaHost?: string | null;
   /** Experimental: route Prism-owned local work to a matching second Ollama host. */
   experimentalDualOllamaEnabled?: boolean;
+  /** Experimental: allow non-reasoning models to simulate effort with a planning pass. */
+  experimentalAllModelEffortEnabled?: boolean;
+  /** Show concise simulated reasoning summaries below future user turns. */
+  psychicModeEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
   /**
@@ -1933,10 +2652,18 @@ export interface UserChatSettings {
   sessionResumeContext?: SessionResumeContext | null;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
+  /** One-turn Zen cue from `/nvm`: treat the latest user message as a quiet topic pivot. */
+  topicReset?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
   /** Optional user-facing wildcard metadata for resolved deck/option sends. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Zen-only assistant transition after a Persona picker change. */
+  personaTransition?: ZenPersonaTransitionInput;
+  /** Zen-only idle autonomy turn. */
+  zenAutonomy?: ZenAutonomyInput;
+  /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
+  zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
   /** Optional resolved user prompt sent to the model while preserving display content. */
@@ -1959,6 +2686,17 @@ function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
   if (mode === "coffee") return "coffee";
   return "sandbox";
+}
+
+function normalizeChatBotId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function sameChatBotId(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  return normalizeChatBotId(left) === normalizeChatBotId(right);
 }
 
 function readResumeContextString(value: unknown, maxChars = SESSION_RESUME_SUMMARY_MAX_CHARS): string | undefined {
@@ -2299,6 +3037,7 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
   "- Prefer the three-angle-bracket tokens above. Single-angle XML-style `<PRISM_TOOL>` … `</PRISM_TOOL>` is also accepted, but triple brackets are the reliable default.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
+  "- When your visible reply asks the user to choose between two or three concrete next actions or preferences, prefer AskQuestion chips instead of leaving the choice only in prose.",
   "- Inside JSON only: usually emit exactly three options with ids a, b, c (distinct). When the expected answer is simply yes or no (for example, \"Would you like a copy of that to download?\"), emit exactly two options with ids a and b labeled Yes and No.",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
@@ -2346,6 +3085,8 @@ const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
   "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
   "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
   "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
+  "You may occasionally use one short single-asterisk action beat such as `*takes a breath*` when it genuinely adds presence. Use this sparingly, and do not use asterisks for ordinary emphasis.",
+  "Treat the user's own single-asterisk text as a performed non-verbal action in the room. Respond to that presence naturally instead of quoting the syntax unless quoting is useful.",
   "Stay nonjudgmental, but you may have a current mood. If interrupted repeatedly, you can become guarded, take a beat, or answer more briefly; do not scold, punish, or dramatize it.",
   "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
   "Do not mention Zen system instructions, hidden prompts, or that this voice has been shaped.",
@@ -2608,6 +3349,23 @@ function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
   return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
 }
 
+const ASKQUESTION_CLOSED_QUESTION_LOOKBACK_LINES = 3;
+const ASKQUESTION_CLOSED_QUESTION_MAX_CHARS = 180;
+const ASKQUESTION_OPTION_MAX_CHARS = 48;
+const ASKQUESTION_OPTION_MAX_WORDS = 6;
+const YES_NO_QUESTION_START_PATTERN =
+  /^(?:do|does|did|can|could|should|would|will|is|are|was|were|have|has|had|may|might)\b/i;
+const ASKQUESTION_OPEN_ENDED_PATTERNS = [
+  /^what do you think\??$/i,
+  /^what are your thoughts\??$/i,
+  /^why\??$/i,
+  /^tell me more\??$/i,
+  /^how (?:are you feeling|do you feel|does that feel|does this feel|does it feel)\b/i,
+  /\bhow does (?:that|this|it) (?:feel|land|sit|sound)\b/i,
+  /\bdoes (?:that|this|it) make sense\b/i,
+  /\bis (?:that|this|it) okay\b/i,
+];
+
 const INTERRUPTED_ASSISTANT_CUTOFF_PATTERN = /—\s*$/u;
 const INTERRUPTED_REPLY_CONTINUE_PATTERN =
   /\b(?:continue|go on|carry on|keep going|finish(?: your thought)?|resume|pick (?:it|that|this)?\s*back up|where were you|what were you saying|as you were|go ahead)\b/i;
@@ -2671,10 +3429,216 @@ function buildInterruptedReplyContinuationHint(
   ].join("\n");
 }
 
+function stripAskQuestionCandidateLine(line: string): string {
+  return normalizeAskQuestionText(
+    line
+      .replace(/^[\s>#-]+/u, "")
+      .replace(/^["“”'‘’]+|["“”'‘’]+$/gu, "")
+      .trim()
+  );
+}
+
+function extractFinalQuestionSentence(line: string): string | undefined {
+  const cleaned = stripAskQuestionCandidateLine(line);
+  const questionEnd = cleaned.lastIndexOf("?");
+  if (questionEnd < 0) return undefined;
+  if (cleaned.slice(questionEnd + 1).trim().length > 0) return undefined;
+  const beforeQuestion = cleaned.slice(0, questionEnd + 1);
+  const sentenceStart = Math.max(
+    beforeQuestion.lastIndexOf(". "),
+    beforeQuestion.lastIndexOf("! "),
+    beforeQuestion.lastIndexOf("\n")
+  );
+  const question =
+    sentenceStart >= 0
+      ? beforeQuestion.slice(sentenceStart + 2).trim()
+      : beforeQuestion.trim();
+  if (!question || (question.match(/\?/g) ?? []).length !== 1) return undefined;
+  if (question.length > ASKQUESTION_CLOSED_QUESTION_MAX_CHARS) return undefined;
+  return question;
+}
+
+function extractNearFinalQuestionLine(displayContent: string): string | undefined {
+  const lines = displayContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const start = Math.max(0, lines.length - ASKQUESTION_CLOSED_QUESTION_LOOKBACK_LINES);
+  for (let i = lines.length - 1; i >= start; i -= 1) {
+    const question = extractFinalQuestionSentence(lines[i]!);
+    if (question) return question;
+  }
+  return undefined;
+}
+
+function titleCaseAskQuestionOption(label: string): string {
+  const words = label.split(/\s+/).filter((word) => word.length > 0);
+  if (
+    words.length === 0 ||
+    !/^[a-z][a-z\s-]*$/u.test(label) ||
+    words.length > ASKQUESTION_OPTION_MAX_WORDS
+  ) {
+    return label;
+  }
+  return words
+    .map((word) =>
+      word
+        .split("-")
+        .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+        .join("-")
+    )
+    .join(" ");
+}
+
+function cleanAskQuestionAlternativeLabel(raw: string): string | undefined {
+  const cleaned = normalizeAskQuestionText(raw)
+    .replace(/^(?:and|or|versus|vs\.?)\s+/i, "")
+    .replace(
+      /^(?:go\s+with|go|use|try|choose|pick|make|keep|turn|set|lean(?:\s+into)?)\s+/i,
+      ""
+    )
+    .replace(/[?!.;:]+$/u, "")
+    .trim();
+  if (!cleaned) return undefined;
+  if (cleaned.length > ASKQUESTION_OPTION_MAX_CHARS) return undefined;
+  if (cleaned.split(/\s+/).length > ASKQUESTION_OPTION_MAX_WORDS) return undefined;
+  if (/^(?:it|this|that|we|you|i|me|the|a|an)$/i.test(cleaned)) return undefined;
+  if (/^(?:me|us|you)\s+to\b/i.test(cleaned)) return undefined;
+  if (/[?]/u.test(cleaned)) return undefined;
+  return titleCaseAskQuestionOption(cleaned);
+}
+
+function splitAskQuestionAlternativeList(raw: string): string[] {
+  const prepared = raw
+    .replace(/\s+(?:vs\.?|versus)\s+/gi, " or ")
+    .replace(/\s*\/\s*/g, " or ")
+    .replace(/[?!.;:]+$/u, "")
+    .trim();
+  if (!prepared) return [];
+  let parts = prepared.includes(",")
+    ? prepared.split(",")
+    : prepared.split(/\s+or\s+/i);
+  if (prepared.includes(",") && parts.length === 2 && /\s+or\s+/i.test(parts[1] ?? "")) {
+    parts = [parts[0]!, ...(parts[1] ?? "").split(/\s+or\s+/i)];
+  }
+  if (parts.length < 2 || parts.length > 3) return [];
+  const options = parts
+    .map((part) => cleanAskQuestionAlternativeLabel(part))
+    .filter((part): part is string => Boolean(part));
+  const distinct = new Set(options.map((option) => normalizeAskQuestionComparisonText(option)));
+  return options.length >= 2 && options.length <= 3 && distinct.size === options.length
+    ? options
+    : [];
+}
+
+function stripAskQuestionOpenEndedPreface(question: string): string {
+  return question
+    .replace(
+      /^(?:(?:i\s+wonder|i['’]?m\s+curious|curious|tell\s+me|i\s+want\s+to\s+know|i['’]?d\s+like\s+to\s+know|can\s+i\s+ask|may\s+i\s+ask)[,;:]\s*)/i,
+      ""
+    )
+    .trim();
+}
+
+function extractAlternativeAskQuestionOptions(question: string): string[] {
+  const core = stripAskQuestionCandidateLine(question).replace(/[?!.]+$/u, "").trim();
+  if (!core) return [];
+
+  const colonIdx = core.lastIndexOf(":");
+  if (colonIdx >= 0 && colonIdx < core.length - 1) {
+    const options = splitAskQuestionAlternativeList(core.slice(colonIdx + 1));
+    if (options.length >= 2) return options;
+  }
+
+  const commaChoice = core.match(/^(?:which|what)\b[^,]*,\s*(.+)$/i);
+  if (commaChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(commaChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  const betweenChoice = core.match(/\bbetween\s+(.+)$/i);
+  if (betweenChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(betweenChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  const modalChoice = core.match(
+    /^(?:(?:should|would|could|can)\s+(?:we|i|you)\s+(?:make|keep|use|try|choose|pick|go with|lean(?: into)?|take|set|turn)\s+(?:it|this|that)?\s*|(?:do|does|did|would|could|should|can)\s+(?:you|we|i)\s+(?:prefer|want|like|choose|pick|use|try|go with|rather)\s+)(.+)$/i
+  );
+  if (modalChoice?.[1]) {
+    const options = splitAskQuestionAlternativeList(modalChoice[1]);
+    if (options.length >= 2) return options;
+  }
+
+  const coreWithoutOpenEndedPreface = stripAskQuestionOpenEndedPreface(core);
+  if (
+    coreWithoutOpenEndedPreface !== core &&
+    /^(?:what|why|how)\b/i.test(coreWithoutOpenEndedPreface)
+  ) {
+    return [];
+  }
+
+  if (
+    !/^(?:who|what|when|where|why|how|which|do|does|did|would|could|should|can|is|are|will|have|has|may|might)\b/i.test(
+      core
+    )
+  ) {
+    const options = splitAskQuestionAlternativeList(core);
+    if (options.length >= 2) return options;
+  }
+
+  return [];
+}
+
+function questionLooksOpenEndedForChips(question: string): boolean {
+  const cleaned = stripAskQuestionCandidateLine(question);
+  const openEndedCandidate = stripAskQuestionOpenEndedPreface(cleaned);
+  const normalized = normalizeAskQuestionComparisonText(openEndedCandidate);
+  if (!normalized) return true;
+  if (ASKQUESTION_OPEN_ENDED_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
+  return /^(?:what|why|how)\b/i.test(openEndedCandidate);
+}
+
+function extractClosedChoiceAskQuestion(displayContent: string): AskQuestionPayload | undefined {
+  const question = extractNearFinalQuestionLine(displayContent);
+  if (!question) return undefined;
+
+  const alternativeOptions = extractAlternativeAskQuestionOptions(question);
+  if (alternativeOptions.length >= 2) {
+    return {
+      v: 1,
+      name: "AskQuestion",
+      prompt: question,
+      options: alternativeOptions.map((label, index) => ({
+        id: String.fromCharCode(97 + index),
+        label,
+      })),
+    };
+  }
+
+  if (questionLooksOpenEndedForChips(question)) return undefined;
+  if (!YES_NO_QUESTION_START_PATTERN.test(question)) return undefined;
+  if (/\bor\b/i.test(question)) return undefined;
+  if ((question.match(/[;,]/g) ?? []).length > 0) return undefined;
+
+  return {
+    v: 1,
+    name: "AskQuestion",
+    prompt: question,
+    options: [
+      { id: "a", label: "Yes" },
+      { id: "b", label: "No" },
+    ],
+  };
+}
+
 function assistantLikelyIntendedAskQuestion(displayContent: string): boolean {
   const text = displayContent.trim();
   if (!text) return false;
   if (extractDynamicAskQuestion(text)) return true;
+  if (extractClosedChoiceAskQuestion(text)) return true;
   return (
     /\bone block below\b/i.test(text) ||
     /\b(?:choose|pick|select)\s+(?:one|an?\s+option)\b/i.test(text) ||
@@ -2822,8 +3786,11 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
   };
 }
 
-function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
-  return extractDynamicAskQuestion(displayContent);
+export function buildAskQuestionFallback(displayContent: string): AskQuestionPayload | undefined {
+  return (
+    extractDynamicAskQuestion(displayContent) ??
+    extractClosedChoiceAskQuestion(displayContent)
+  );
 }
 
 function normalizeAskQuestionComparisonText(text: string): string {
@@ -3409,6 +4376,7 @@ type MessageRow = {
   content: string;
   provider: string | null;
   model: string | null;
+  bot_id: string | null;
   bot_name: string | null;
   bot_color: string | null;
   bot_glyph: string | null;
@@ -3416,7 +4384,11 @@ type MessageRow = {
   created_at: string;
 };
 
-function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
+function hydrateMessages(
+  rows: MessageRow[],
+  options: { askQuestionTimedOutMessageIds?: ReadonlySet<string> } = {}
+): ChatMessage[] {
+  const askQuestionTimedOutMessageIds = options.askQuestionTimedOutMessageIds;
   return rows.map((row) => {
     const base: ChatMessage = {
       id: row.id,
@@ -3424,10 +4396,11 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
       content: row.content,
       createdAt: row.created_at,
       provider:
-        row.provider === "local" || row.provider === "openai"
+        row.provider === "local" || row.provider === "openai" || row.provider === "anthropic"
           ? row.provider
           : undefined,
       model: row.model ?? undefined,
+      botId: row.bot_id ?? null,
       botName: row.bot_name ? row.bot_name : undefined,
       botColor: row.bot_color ? row.bot_color : undefined,
       botGlyph: row.bot_glyph ? row.bot_glyph : undefined,
@@ -3443,6 +4416,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         promptWildcards,
         promptWildcards?.resolvedPrompt ?? row.content
       );
+      const psychicThought = parseStoredPsychicThoughtPayload(row.tool_payload);
       return {
         ...base,
         ...(promptShortcutWithResolvedPrompt
@@ -3451,6 +4425,7 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ...(promptWildcardsWithResolvedPrompt
           ? { promptWildcards: promptWildcardsWithResolvedPrompt }
           : {}),
+        ...(psychicThought ? { psychicThought } : {}),
       };
     }
     if (row.role !== "assistant") {
@@ -3468,6 +4443,9 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         ? { moodConfidence: assembled.moodConfidence }
         : {}),
       ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+      ...(assembled.askQuestion && askQuestionTimedOutMessageIds?.has(row.id)
+        ? { askQuestionTimedOut: true }
+        : {}),
       ...(assembled.tellFictionalStory
         ? { tellFictionalStory: assembled.tellFictionalStory }
         : {}),
@@ -3477,6 +4455,293 @@ function hydrateMessages(rows: MessageRow[]): ChatMessage[] {
         : {}),
     };
   });
+}
+
+function readBotNameForZenPersona(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null
+): string {
+  if (!botId) return "PRISM";
+  const row = db
+    .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')")
+    .get(botId, userId) as { name?: string | null } | undefined;
+  return row?.name?.trim() || "the selected Persona";
+}
+
+function buildZenPersonaTransitionInstruction(args: {
+  db: DatabaseSync;
+  userId: string;
+  fromBotId: string | null;
+  toBotId: string | null;
+  toPersonaLabel?: string | null;
+  style: ZenPersonaTransitionStyle;
+}): string {
+  const fromName = readBotNameForZenPersona(args.db, args.userId, args.fromBotId);
+  const toName =
+    args.toPersonaLabel?.trim() ||
+    readBotNameForZenPersona(args.db, args.userId, args.toBotId);
+  if (args.style === "previous-introduces") {
+    if (!args.toBotId) {
+      return [
+        "The user has turned off the active Zen Persona and returned Zen Mode to default PRISM.",
+        `The previous active Persona was ${fromName}.`,
+        `Write one brief, natural handoff as ${fromName} that yields the conversation back to PRISM.`,
+        "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+      ].join("\n");
+    }
+    return [
+      `The user is switching Zen Mode from ${fromName} to ${toName}.`,
+      `Write one brief, natural handoff as ${fromName} that introduces ${toName} or passes the conversation to them.`,
+      "Do not speak as the incoming Persona after the handoff.",
+      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+    ].join("\n");
+  }
+  if (!args.toBotId) {
+    return [
+      "The user has returned Zen Mode to the default PRISM persona.",
+      `The previous active Persona was ${fromName}.`,
+      "Write one brief, natural handoff as PRISM that gently re-centers the conversation.",
+      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+    ].join("\n");
+  }
+  return [
+    `The user has equipped the ${toName} Persona in Zen Mode.`,
+    `The previous active Persona was ${fromName}.`,
+    `Write one brief, natural first message as ${toName} that enters the ongoing conversation smoothly.`,
+    "It may acknowledge the handoff or simply respond from the new perspective, whichever feels more natural from the recent context.",
+    "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+  ].join("\n");
+}
+
+interface ZenAutonomyPersonaCandidate {
+  botId: string | null;
+  name: string;
+}
+
+function zenAutonomyPersonaCandidates(
+  db: DatabaseSync,
+  userId: string
+): ZenAutonomyPersonaCandidate[] {
+  const botColumns = new Set(
+    (db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>).map(
+      (column) => column.name
+    )
+  );
+  const chatEnabledPredicate = botColumns.has("chat_enabled")
+    ? "AND chat_enabled = 1"
+    : "";
+  const orderBy = botColumns.has("updated_at")
+    ? "updated_at DESC, name ASC"
+    : "name ASC";
+  const rows = db
+    .prepare(
+      `SELECT id, name
+         FROM bots
+        WHERE (user_id = ? OR visibility = 'public')
+          ${chatEnabledPredicate}
+        ORDER BY ${orderBy}
+        LIMIT 40`
+    )
+    .all(userId) as Array<{ id: string; name: string }>;
+  return [
+    { botId: null, name: "PRISM" },
+    ...rows
+      .map((row) => ({
+        botId: row.id,
+        name: row.name?.trim() || "Unnamed Persona",
+      }))
+      .filter((row) => row.botId && row.name.length > 0),
+  ];
+}
+
+function recentZenAutonomyContextLines(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT m.role, m.content, COALESCE(b.name, '') AS bot_name
+         FROM messages m
+         LEFT JOIN bots b ON b.id = m.bot_id
+        WHERE m.conversation_id = ?
+          AND m.user_id = ?
+          AND m.role IN ('user', 'assistant')
+        ORDER BY m.created_at DESC
+        LIMIT 14`
+    )
+    .all(conversationId, userId) as Array<{
+    role: string;
+    content: string;
+    bot_name: string | null;
+  }>;
+  return rows.reverse().map((row) => {
+    const speaker =
+      row.role === "assistant"
+        ? row.bot_name?.trim() || "PRISM"
+        : "User";
+    return `${speaker}: ${clampBoundaryContext(row.content, 420)}`;
+  });
+}
+
+function parseZenAutonomyDecision(
+  raw: string,
+  candidates: readonly ZenAutonomyPersonaCandidate[]
+): ZenAutonomyDecision {
+  const trimmed = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const candidateIds = new Set(
+    candidates
+      .map((candidate) => candidate.botId)
+      .filter((botId): botId is string => typeof botId === "string")
+  );
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object") return { action: "silent" };
+    const record = parsed as Record<string, unknown>;
+    if (record.action !== "speak") return { action: "silent" };
+    const botId =
+      typeof record.botId === "string" && record.botId.trim().length > 0
+        ? record.botId.trim()
+        : null;
+    if (botId !== null && !candidateIds.has(botId)) return { action: "silent" };
+    return { action: "speak", botId };
+  } catch {
+    return { action: "silent" };
+  }
+}
+
+export async function decideZenAutonomyTurn(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  provider: LlmProvider;
+  activeBotId: string | null;
+  idleMs: number;
+  prismMood?: PrismMoodSnapshot | null;
+  signal?: AbortSignal;
+}): Promise<ZenAutonomyDecision> {
+  const candidates = zenAutonomyPersonaCandidates(args.db, args.userId);
+  const activeName =
+    candidates.find((candidate) => candidate.botId === args.activeBotId)?.name ?? "PRISM";
+  const recentLines = recentZenAutonomyContextLines(
+    args.db,
+    args.userId,
+    args.conversationId
+  );
+  const candidateLines = candidates.map((candidate) =>
+    candidate.botId
+      ? `- ${candidate.name}: ${candidate.botId}`
+      : "- PRISM: null"
+  );
+  const idleMinutes = Math.max(0, Math.round(args.idleMs / 60_000));
+  const promptMessages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You are the Zen Autonomy router for Prism.",
+        "Choose whether Zen should stay silent or initiate one brief assistant message after user idleness.",
+        "Silence is preferred unless a small, natural check-in would feel alive and welcome.",
+        "If speaking, choose PRISM/default or one chat-enabled Persona from the candidate list.",
+        "Never guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
+        "Return only JSON: {\"action\":\"silent\"} or {\"action\":\"speak\",\"botId\":null|string}.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Idle minutes: ${idleMinutes}.`,
+        `Active Persona: ${activeName} (${args.activeBotId ?? "PRISM"}).`,
+        args.prismMood
+          ? `PRISM mood: ${args.prismMood.moodKey}; annoyance=${args.prismMood.annoyance}; warmth=${args.prismMood.warmth}; engagement=${args.prismMood.engagement}.`
+          : "PRISM mood: unavailable.",
+        `Candidates:\n${candidateLines.join("\n")}`,
+        recentLines.length > 0
+          ? `Recent conversation:\n${recentLines.map((line) => `- ${line}`).join("\n")}`
+          : "Recent conversation: none.",
+      ].join("\n\n"),
+    },
+  ];
+  try {
+    const raw = await args.provider.generateResponse(promptMessages, {
+      temperature: 0.25,
+      maxTokens: 120,
+      jsonMode: true,
+      signal: args.signal,
+    });
+    return parseZenAutonomyDecision(raw, candidates);
+  } catch {
+    return { action: "silent" };
+  }
+}
+
+function normalizeZenPersonaTransition(
+  transition: ZenPersonaTransitionInput
+): Required<ZenPersonaTransitionInput> {
+  return {
+    fromBotId: transition.fromBotId,
+    toBotId: transition.toBotId,
+    source: "picker",
+    style:
+      transition.style === "previous-introduces"
+        ? "previous-introduces"
+        : "new-speaks",
+  };
+}
+
+function resolveZenPersonaTransitionSpeakerBotId(
+  transition: Required<ZenPersonaTransitionInput>
+): string | null {
+  return transition.style === "previous-introduces"
+    ? transition.fromBotId
+    : transition.toBotId;
+}
+
+function buildZenAutonomyInstruction(
+  autonomy: ZenAutonomyInput,
+  personaLabel: string | null | undefined
+): string {
+  const idleMinutes = Math.max(0, Math.round(autonomy.idleMs / 60_000));
+  const speaker = personaLabel?.trim() || "PRISM";
+  return [
+    `Zen Autonomy is enabled. The user has been quietly idle in Zen Mode for about ${idleMinutes} minutes.`,
+    `Write one brief, natural assistant message as ${speaker}.`,
+    "You may initiate a gentle new thread, make a small observation, or show mild boredom/frustration only as natural flavor.",
+    "Do not guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
+    "Do not use tools, AskQuestion JSON, image generation, or action rails.",
+  ].join("\n");
+}
+
+function buildZenAskQuestionPatienceInstruction(
+  patience: ZenAskQuestionPatienceInput,
+  personaLabel: string | null | undefined
+): string {
+  const speaker = personaLabel?.trim() || "PRISM";
+  const question = patience.prompt?.trim();
+  const penaltyLevel = patience.penaltyLevel ?? "normal";
+  const optionLabels = (patience.options ?? [])
+    .map((option) => option.label.trim())
+    .filter(Boolean);
+  const openingGuidance =
+    penaltyLevel === "light"
+      ? "An explicit AskQuestion you just offered in Zen Mode went unanswered; it may simply mean the user stepped away or had nothing to add."
+      : "An explicit AskQuestion you just offered in Zen Mode went unanswered long enough to read as hesitation, indecision, or the user going quiet.";
+  const contextGuidance =
+    penaltyLevel === "light"
+      ? "This looks like a simple missed choice; the user may have stepped away, so stay easygoing and do not sound offended."
+      : penaltyLevel === "elevated"
+        ? "The missed question followed a longer, story-like, or emotionally involved context; let that tint the reply a little more if it fits, but keep it human and restrained."
+        : "Treat the silence as mild hesitation or indecision, not as an insult.";
+  return [
+    openingGuidance,
+    `Write one brief, natural assistant message as ${speaker}.`,
+    question ? `The unanswered question was: "${question}".` : "",
+    optionLabels.length > 0 ? `The visible choices were: ${optionLabels.join(" / ")}.` : "",
+    contextGuidance,
+    "If the user returns shortly and explains they stepped away, accept that naturally and continue from the conversation.",
+    "Do not guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
+    "Do not answer the question for the user. Do not use tools, AskQuestion JSON, image generation, or action rails.",
+  ].filter(Boolean).join("\n");
 }
 
 type OpinionRow = {
@@ -3697,6 +4962,9 @@ function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): str
   if (!mood) return null;
   const snapshot = sanitizePrismMoodState(mood, mood.mode, mood.lastUpdatedAt);
   const declineReason = prismMoodDeclineReason(snapshot);
+  const recentIgnoredQuestion = snapshot.recentDeltas
+    .slice(0, 3)
+    .some((delta) => delta.kind === "ignored_question");
   return [
     "Current Prism mood context for this turn (not persona identity):",
     "- Use this as short-term conversational state only; do not rewrite, redefine, or override the persona.",
@@ -3705,6 +4973,11 @@ function prismMoodPromptContext(mood: PrismMoodSnapshot | null | undefined): str
     `- Exact 1-10 self-report values: annoyance ${formatMoodScale(snapshot.annoyance)}, warmth ${formatMoodScale(snapshot.warmth)}, engagement ${formatMoodScale(snapshot.engagement)}, restraint ${formatMoodScale(snapshot.restraint)}.`,
     `- Current self-report anchor: ${prismMoodSelfReportAnchor(snapshot)}. If the user asks about your current mood or asks for a 1-10 rating, answer with these exact Prism mood values rather than inferring a higher or lower number from the conversation text; 90-100% should read as 9-10/10.`,
     `- ${prismMoodBehaviorGuidance(snapshot)}`,
+    ...(recentIgnoredQuestion
+      ? [
+          "- Recent behavior signal: the user left your explicit question unanswered long enough to read as hesitation or indecision; let this tint your tone lightly without scolding.",
+        ]
+      : []),
     "- Let the mood noticeably affect tone, pacing, and brevity while still responding to the user's actual message.",
     ...(declineReason
       ? [`- ${declineReason} If that fits the latest message, keep the reply to one quiet line and stop.`]
@@ -3869,10 +5142,13 @@ function buildPromptMessages(args: {
   moodBoundaryHint?: string | null;
   threadSummary?: string | null;
   zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
+  zenPersonaContinuityContext?: ZenSessionMemoryOverview | null;
+  zenPersonaContinuityLabel?: string | null;
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
   sessionResumeContext?: SessionResumeContext | null;
+  topicReset?: boolean;
   chatHistory: ChatMessage[];
   userMessage: string;
   mode: ChatMode;
@@ -3955,6 +5231,13 @@ function buildPromptMessages(args: {
   if (zenSessionMemoryHint) {
     promptMessages.push({ role: "system", content: zenSessionMemoryHint });
   }
+  const zenPersonaContinuityHint = buildZenPersonaContinuityPromptContext(
+    args.zenPersonaContinuityContext,
+    args.zenPersonaContinuityLabel
+  );
+  if (zenPersonaContinuityHint) {
+    promptMessages.push({ role: "system", content: zenPersonaContinuityHint });
+  }
   if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
       role: "system",
@@ -3984,6 +5267,13 @@ function buildPromptMessages(args: {
   );
   if (resumeContextHint) {
     promptMessages.push({ role: "system", content: resumeContextHint });
+  }
+  if (isZenMode(args.mode) && args.topicReset === true) {
+    promptMessages.push({
+      role: "system",
+      content:
+        "The user used /nvm before this turn. Treat the latest user message as a clean topic pivot. Do not continue, answer, or revive the previous topic unless the latest message explicitly references it. Do not mention /nvm.",
+    });
   }
   const hint = args.imageSlotSystemHint?.trim();
   if (hint && hint.length > 0) {
@@ -4248,7 +5538,7 @@ async function ensureAboutYouMemory(args: {
   });
 }
 
-function loadPersistedConversationForChatResponse(args: {
+export function loadPersistedConversationForChatResponse(args: {
   db: DatabaseSync;
   userId: string;
   activeConversationId: string;
@@ -4328,7 +5618,7 @@ function loadPersistedConversationForChatResponse(args: {
         : "sandbox";
   const messageRowsDescOrAsc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -4366,6 +5656,12 @@ function loadPersistedConversationForChatResponse(args: {
       )
     );
   }
+  const askQuestionTimedOutMessageIds = loadPrismMoodEventMessageIds(
+    db,
+    userId,
+    activeConversationId,
+    "ignored_question"
+  );
 
   return {
     id: conversationRow.id,
@@ -4381,7 +5677,7 @@ function loadPersistedConversationForChatResponse(args: {
     prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
-    messages: hydrateMessages(messageRows),
+    messages: hydrateMessages(messageRows, { askQuestionTimedOutMessageIds }),
   };
 }
 
@@ -4409,6 +5705,45 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
+  // Incognito is a Chat-mode concept (see shared types): keeps the thread
+  // client-held and skips all memory. Provider choice remains the normal
+  // local/online user setting; Sandbox ignores `incognito` entirely.
+  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
+  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
+  // In Zen this is per-turn Persona attribution; the conversation row itself
+  // still reports botId null so Zen remains one continuous PRISM thread.
+  const activeBotId = settings.botId;
+  const activeMemoryBotId =
+    typeof activeBotId === "string" && activeBotId.trim().length > 0
+      ? activeBotId.trim()
+      : null;
+  const personaTransition =
+    isZenMode(mode) && settings.personaTransition?.source === "picker"
+      ? normalizeZenPersonaTransition(settings.personaTransition)
+      : null;
+  const personaTransitionTurn = personaTransition !== null;
+  const zenAutonomy =
+    isZenMode(mode) && settings.zenAutonomy?.source === "idle"
+      ? settings.zenAutonomy
+      : null;
+  const zenAutonomyTurn = zenAutonomy !== null;
+  const zenAskQuestionPatience =
+    isZenMode(mode) &&
+    settings.zenAskQuestionPatience?.source === "ask_question_patience"
+      ? settings.zenAskQuestionPatience
+      : null;
+  const zenAskQuestionPatienceTurn = zenAskQuestionPatience !== null;
+  const transitionSpeakerBotId = personaTransitionTurn
+    ? resolveZenPersonaTransitionSpeakerBotId(personaTransition)
+    : activeMemoryBotId;
+  const assistantBotId = personaTransitionTurn
+    ? transitionSpeakerBotId
+    : activeBotId;
+  const assistantMemoryBotId =
+    typeof assistantBotId === "string" && assistantBotId.trim().length > 0
+      ? assistantBotId.trim()
+      : null;
+  const opinionBotIdForTurn = personaTransitionTurn ? assistantBotId : activeBotId;
   const effectiveBotSystemPrompt = isZenMode(mode)
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
     : settings.botSystemPrompt;
@@ -4421,14 +5756,28 @@ export async function processChatMessage(
       : "";
   const modelUserMessage = promptInputOverride || message;
   const explicitAskQuestionRequest =
-    !isStarterPrompt && userExplicitlyRequestedAskQuestion(modelUserMessage);
-  const promptUserMessage = isStarterPrompt
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    userExplicitlyRequestedAskQuestion(modelUserMessage);
+  const promptUserMessage = personaTransitionTurn
+    ? buildZenPersonaTransitionInstruction({
+        db,
+        userId,
+        fromBotId: personaTransition.fromBotId,
+        toBotId: activeMemoryBotId,
+        toPersonaLabel:
+          personaTransition.style === "new-speaks" ? settings.starterPromptLabel : null,
+        style: personaTransition.style,
+      })
+    : zenAutonomyTurn
+    ? buildZenAutonomyInstruction(zenAutonomy, settings.starterPromptLabel)
+    : zenAskQuestionPatienceTurn
+    ? buildZenAskQuestionPatienceInstruction(zenAskQuestionPatience, settings.starterPromptLabel)
+    : isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : modelUserMessage;
-  // Incognito is a Chat-mode concept (see shared types): keeps the thread
-  // client-held and skips all memory. Provider choice remains the normal
-  // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -4438,16 +5787,9 @@ export async function processChatMessage(
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
     }; retrieval=${retrievalMode}; memory=${
-      skipPersonalFacts || commandCenterPromptTurn ? "skipped" : "enabled"
+      skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
-  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
-  // UI surfaces can still choose to lock Chat mode by omitting that field.
-  const activeBotId = isZenMode(mode) ? null : settings.botId;
-  const activeMemoryBotId =
-    typeof activeBotId === "string" && activeBotId.trim().length > 0
-      ? activeBotId.trim()
-      : null;
   const provider = selectProvider(
     effectiveProvider,
     settings.openAiApiKey,
@@ -4478,6 +5820,7 @@ export async function processChatMessage(
       memoryLines: [],
       memoryClarification: null,
       sessionResumeContext: settings.sessionResumeContext,
+      topicReset: settings.topicReset === true,
       chatHistory: history,
       userMessage: promptUserMessage,
       mode,
@@ -4514,17 +5857,25 @@ export async function processChatMessage(
       providerNameUsed,
       modelUsed,
       fallbackInvocation,
+      psychicThought,
+      psychicDebug,
     } = await generateWithLenientLocalFallback({
       provider: primaryProvider,
       promptMessages,
       botOverrides: primaryBotOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+      experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+      psychicModeEnabled: settings.psychicModeEnabled,
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
       botSystemPrompt: effectiveBotSystemPrompt,
       userMessage: modelUserMessage,
       signal: settings.signal,
+      onPlanningWarning: (detail) =>
+        pushBackendEvent("model", "Psychic planning unavailable", detail),
+      onSimulatedEffortNotice: (detail) =>
+        pushBackendEvent("model", "Simulated effort skipped", detail),
     });
     throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
@@ -4602,7 +5953,7 @@ export async function processChatMessage(
       const acq = await tryAcquireImageSlot({
         userId,
         conversationId: conversationId ?? null,
-        botId: activeBotId ?? null,
+        botId: assistantBotId ?? null,
         mode,
         incognito: true,
         captionPrompt: sendImgPromptInc,
@@ -4664,6 +6015,11 @@ export async function processChatMessage(
     }
     const assistantAskQuestionForTurn =
       askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
+    const tellFictionalStoryForTurn = chooseTellFictionalStoryForTurn({
+      displayContent: assistantDisplay,
+      parsed: parsedAssistant.tellFictionalStory,
+      askQuestion: assistantAskQuestionForTurn,
+    });
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
       rawReply: assistantReplyRaw,
       ...((parsedAssistant.sendGeneratedImage ||
@@ -4680,8 +6036,8 @@ export async function processChatMessage(
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
     const assistantCreatedAt = new Date().toISOString();
-    const activeBotName =
-      typeof activeBotId === "string"
+    const assistantBotName =
+      typeof assistantBotId === "string"
         ? settings.starterPromptLabel?.trim() ?? ""
         : "";
     const assistantMessageProse: ChatMessage = {
@@ -4691,12 +6047,13 @@ export async function processChatMessage(
       createdAt: assistantCreatedAt,
       provider: providerNameUsed,
       model: modelUsed,
+      botId: assistantBotId ?? null,
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
-      ...(activeBotName ? { botName: activeBotName } : {}),
+      ...(assistantBotName ? { botName: assistantBotName } : {}),
       ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
-      ...(parsedAssistant.tellFictionalStory
-        ? { tellFictionalStory: parsedAssistant.tellFictionalStory }
+      ...(tellFictionalStoryForTurn
+        ? { tellFictionalStory: tellFictionalStoryForTurn }
         : {}),
       ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
     };
@@ -4715,9 +6072,11 @@ export async function processChatMessage(
             role: "user" as const,
             content: message,
             createdAt: now,
+            botId: activeBotId ?? null,
             ...(promptShortcutWithResolvedPrompt
               ? { promptShortcut: promptShortcutWithResolvedPrompt }
               : {}),
+            ...(psychicThought ? { psychicThought } : {}),
           }]
       ),
       ...assistantTail,
@@ -4729,7 +6088,7 @@ export async function processChatMessage(
       mode,
       botId: activeBotId ?? null,
       incognito: true,
-      lastBotId: activeBotId ?? null,
+      lastBotId: assistantBotId ?? null,
       lastBotColor: null,
       hasAssistantReply: true,
       createdAt: nextMessages[0]?.createdAt ?? now,
@@ -4771,6 +6130,7 @@ export async function processChatMessage(
         ? { toolCalls: incognitoToolCallEvents }
         : {}),
       backendEvents,
+      ...(psychicDebug ? { psychicDebug } : {}),
       ...(conversationStartersIncognito
         ? { conversationStarters: conversationStartersIncognito }
         : {}),
@@ -4854,23 +6214,79 @@ export async function processChatMessage(
     }
   }
   throwIfChatRequestCancelled(settings.signal);
+  const rememberedZenWallpaperForNewConversation =
+    !activeConversationId && isZenMode(mode) && !incognitoForTurn
+      ? getLatestRememberedZenWallpaperForBot(db, userId, activeMemoryBotId)
+      : null;
   if (!activeConversationId) {
     activeConversationId = randomId(12);
     createdConversationForTurn = true;
-    db.prepare(
-      "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(
-      activeConversationId,
-      userId,
-      isStarterPrompt
+    const conversationTitle = isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
-        : generateConversationTitle(modelUserMessage),
-      isZenMode(mode) ? "zen" : mode,
-      activeBotId ?? null,
-      incognitoForTurn ? 1 : 0,
-      now,
-      now
-    );
+        : personaTransitionTurn
+          ? "Zen"
+        : zenAutonomyTurn || zenAskQuestionPatienceTurn
+          ? "Zen"
+        : generateConversationTitle(modelUserMessage);
+    const conversationMode = isZenMode(mode) ? "zen" : mode;
+    const conversationBotId = isZenMode(mode) ? null : activeBotId ?? null;
+    if (rememberedZenWallpaperForNewConversation) {
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          zen_wallpaper_enabled, zen_wallpaper_image_id,
+          zen_wallpaper_prompt_seed, zen_wallpaper_message_count,
+          zen_wallpaper_status, zen_wallpaper_history,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0, 'ready', ?, ?, ?)`
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        rememberedZenWallpaperForNewConversation.imageId,
+        rememberedZenWallpaperForNewConversation.promptSeed,
+        serializeZenWallpaperHistory(
+          buildRememberedZenWallpaperHistory(
+            rememberedZenWallpaperForNewConversation
+          )
+        ),
+        now,
+        now
+      );
+    } else if (isZenMode(mode) && !incognitoForTurn && activeMemoryBotId) {
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          zen_wallpaper_enabled, zen_wallpaper_status,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, 'idle', ?, ?)`
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        now,
+        now
+      );
+    } else {
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(
+        activeConversationId,
+        userId,
+        conversationTitle,
+        conversationMode,
+        conversationBotId,
+        incognitoForTurn ? 1 : 0,
+        now,
+        now
+      );
+    }
   } else {
     const owned = db
       .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
@@ -4900,7 +6316,7 @@ export async function processChatMessage(
   );
   const historyRowsDesc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -4922,17 +6338,46 @@ export async function processChatMessage(
   const askQuestionMode: "off" | "explicit" | "continuation" =
     explicitAskQuestionRequest ? "explicit" : "off";
 
+  let outgoingZenPersonaCheckpointBotId: string | null | undefined;
+  if (isZenMode(mode) && !incognitoForTurn && personaTransitionTurn) {
+    outgoingZenPersonaCheckpointBotId = personaTransition.fromBotId;
+  } else if (
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    zenAutonomyTurn &&
+    !sameChatBotId(zenAutonomy.activeBotId, activeMemoryBotId)
+  ) {
+    outgoingZenPersonaCheckpointBotId = zenAutonomy.activeBotId;
+  }
+  if (outgoingZenPersonaCheckpointBotId !== undefined) {
+    const checkpoint = await createZenPersonaSessionMemoryCheckpoint({
+      db,
+      provider: auxiliaryProvider,
+      userId,
+      conversationId: activeConversationId,
+      botId: outgoingZenPersonaCheckpointBotId,
+      userKey,
+    });
+    if (checkpoint) {
+      pushBackendEvent(
+        "memory",
+        "Zen Persona checkpoint saved",
+        `bot=${checkpoint.botId ?? "default"}; title=${checkpoint.title}; expiresAt=${checkpoint.expiresAt}`
+      );
+    }
+  }
+
   const existingSessionOpinion = readSessionOpinion(
     db,
     userId,
     activeConversationId,
-    activeBotId
+    opinionBotIdForTurn
   );
-  const existingBotOpinion = readBotOpinion(db, userId, activeBotId);
-  const turnEvaluation = isStarterPrompt || commandCenterPromptTurn
+  const existingBotOpinion = readBotOpinion(db, userId, opinionBotIdForTurn);
+  const turnEvaluation = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || commandCenterPromptTurn
+  const repairSignal = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   const zenMoodSensitivity = normalizePrismMoodSensitivity(
@@ -4945,7 +6390,7 @@ export async function processChatMessage(
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || commandCenterPromptTurn) {
+  if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -5028,14 +6473,26 @@ export async function processChatMessage(
   }
 
   const memoryIntent =
-    !isStarterPrompt && !commandCenterPromptTurn && !skipMemoryForMoodCooldownTurn
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    !commandCenterPromptTurn &&
+    !skipMemoryForMoodCooldownTurn
       ? analyzeMemoryIntent(message)
       : null;
 
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
-  if (!incognitoForTurn && !skipMemoryForMoodCooldownTurn && !prismMoodIgnoreTurn) {
+  if (
+    !incognitoForTurn &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    !skipMemoryForMoodCooldownTurn &&
+    !prismMoodIgnoreTurn
+  ) {
     throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
       isZenMode(mode)
@@ -5072,13 +6529,18 @@ export async function processChatMessage(
   );
 
   let userMessageId: string | null = null;
-  const insertUserMessageForTurn = (): void => {
-    if (isStarterPrompt || userMessageId !== null) return;
-    userMessageId = randomId(12);
-    const promptShortcutPayload = serializePromptToolPayload({
+  const buildUserMessageToolPayload = (
+    psychicThought?: PsychicThoughtPayload
+  ): string | null =>
+    serializePromptToolPayload({
       promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
       promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
+      ...(psychicThought ? { psychicThought } : {}),
     });
+  const insertUserMessageForTurn = (): void => {
+    if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || userMessageId !== null) return;
+    userMessageId = randomId(12);
+    const promptShortcutPayload = buildUserMessageToolPayload();
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?, ?)"
     ).run(
@@ -5132,6 +6594,9 @@ export async function processChatMessage(
   if (
     !skipPersonalFacts &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
     !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
@@ -5160,6 +6625,9 @@ export async function processChatMessage(
   const zenSessionMemoryContext =
     isZenMode(mode) &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
     !commandCenterPromptTurn &&
     userMessageRequestsZenSessionMemory(message)
       ? loadZenSessionMemoryOverview({
@@ -5169,11 +6637,31 @@ export async function processChatMessage(
           activeConversationId,
         })
       : null;
+  const zenPersonaContinuityContext =
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    !isStarterPrompt &&
+    !commandCenterPromptTurn
+      ? loadZenSessionMemoryOverview({
+          db,
+          userId,
+          userKey,
+          activeConversationId,
+          botId: activeMemoryBotId,
+        })
+      : null;
   if (zenSessionMemoryContext) {
     pushBackendEvent(
       "context",
       "Loaded Zen session memory context",
       `previousContext=${zenSessionMemoryContext.previousContext ? "yes" : "no"}; checkpoints=${zenSessionMemoryContext.sessionMemories.length}`
+    );
+  }
+  if (zenPersonaContinuityContext?.sessionMemories.length) {
+    pushBackendEvent(
+      "context",
+      "Loaded Zen Persona continuity",
+      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
     );
   }
   const promptMessages = buildPromptMessages({
@@ -5187,10 +6675,13 @@ export async function processChatMessage(
     moodBoundaryHint: prismMoodForgivenessSystemHint,
     threadSummary,
     zenSessionMemoryContext,
+    zenPersonaContinuityContext,
+    zenPersonaContinuityLabel: settings.starterPromptLabel,
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
     sessionResumeContext: settings.sessionResumeContext,
+    topicReset: settings.topicReset === true,
     chatHistory: history,
     userMessage: promptUserMessage,
     mode,
@@ -5225,6 +6716,8 @@ export async function processChatMessage(
   let providerNameUsed: ProviderName = provider.name;
   let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
   let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+  let psychicThoughtForTurn: PsychicThoughtPayload | undefined;
+  let psychicDebugForTurn: PsychicDebugPayload | undefined;
   if (prismMoodPauseTurn) {
     assistantReplyRaw = ZEN_MOOD_PAUSE_REPLY;
     pushBackendEvent(
@@ -5259,17 +6752,25 @@ export async function processChatMessage(
         providerNameUsed,
         modelUsed,
         fallbackInvocation,
+        psychicThought: psychicThoughtForTurn,
+        psychicDebug: psychicDebugForTurn,
       } = await generateWithLenientLocalFallback({
         provider: primaryProvider,
         promptMessages,
         botOverrides: primaryBotOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
         lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+        experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+        psychicModeEnabled: settings.psychicModeEnabled,
         denialBoundaryProvider: auxiliaryProvider,
         denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
         userMessage: modelUserMessage,
         signal: settings.signal,
+        onPlanningWarning: (detail) =>
+          pushBackendEvent("model", "Psychic planning unavailable", detail),
+        onSimulatedEffortNotice: (detail) =>
+          pushBackendEvent("model", "Simulated effort skipped", detail),
       }));
     } catch (error) {
       rollbackIfCancelledBeforeAssistantReply(error);
@@ -5304,15 +6805,29 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
+  if (userMessageId && psychicThoughtForTurn) {
+    db.prepare(
+      "UPDATE messages SET tool_payload = ? WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'user'"
+    ).run(
+      buildUserMessageToolPayload(psychicThoughtForTurn),
+      userMessageId,
+      activeConversationId,
+      userId
+    );
+  }
   const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const shouldBackfillAskQuestion =
-    explicitAskQuestionRequest ||
-    assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    (explicitAskQuestionRequest ||
+      assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent));
   const askQuestionRaw =
-    parsedAssistant.askQuestion ??
-    (shouldBackfillAskQuestion
-      ? buildAskQuestionFallback(parsedAssistant.displayContent)
-      : undefined);
+    zenAutonomyTurn || zenAskQuestionPatienceTurn
+      ? undefined
+      : parsedAssistant.askQuestion ??
+        (shouldBackfillAskQuestion
+          ? buildAskQuestionFallback(parsedAssistant.displayContent)
+          : undefined);
   const askQuestionForTurn = askQuestionRaw
     ? refineAskQuestionPayloadFromDisplay(
         parsedAssistant.displayContent,
@@ -5337,7 +6852,7 @@ export async function processChatMessage(
         key: prismMood.moodKey,
         confidence: prismMood.confidence,
       }
-    : commandCenterPromptTurn
+    : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
         assistantContent: assistantDisplay,
@@ -5346,7 +6861,9 @@ export async function processChatMessage(
         botOpinion: existingBotOpinion,
         repairSignal,
       });
-  const sendImgPromptPersistedRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn
+    ? undefined
+    : parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
     userMessage: modelUserMessage,
@@ -5369,7 +6886,7 @@ export async function processChatMessage(
       acq = await tryAcquireImageSlot({
         userId,
         conversationId: activeConversationId,
-        botId: activeBotId ?? null,
+        botId: assistantBotId ?? null,
         mode,
         incognito: false,
         captionPrompt: sendImgPromptPersisted,
@@ -5436,29 +6953,54 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
-  const assistantAskQuestionForTurn =
-    askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
-  const persistedToolCallEvents = buildAssistantToolCallEvents({
-    rawReply: assistantReplyRaw,
-    ...((parsedAssistant.sendGeneratedImage ||
-      sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
-    sendImgPromptPersistedRequested
+  const assistantAskQuestionForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn
+    ? undefined
+    : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
+  const tellFictionalStoryForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn
+    ? undefined
+    : chooseTellFictionalStoryForTurn({
+        displayContent: assistantDisplay,
+        parsed: parsedAssistant.tellFictionalStory,
+        askQuestion: assistantAskQuestionForTurn,
+      });
+  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn
+    ? []
+    : buildAssistantToolCallEvents({
+        rawReply: assistantReplyRaw,
+        ...((parsedAssistant.sendGeneratedImage ||
+          sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
+        sendImgPromptPersistedRequested
+          ? {
+              parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
+            }
+          : {}),
+        ...(assistantAskQuestionForTurn
+          ? { parsedAskQuestion: assistantAskQuestionForTurn }
+          : {}),
+        imageSlot: persistedImageSlot,
+        ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
+      });
+  const zenTurnMarker = personaTransitionTurn
+    ? {
+        kind: "persona-transition" as const,
+        fromBotId: personaTransition.fromBotId,
+        toBotId: personaTransition.toBotId,
+        style: personaTransition.style,
+      }
+    : zenAutonomyTurn
       ? {
-          parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
+          kind: "zen-autonomy" as const,
+          activeBotId: zenAutonomy.activeBotId,
+          toBotId: assistantMemoryBotId,
         }
-      : {}),
-    ...(assistantAskQuestionForTurn
-      ? { parsedAskQuestion: assistantAskQuestionForTurn }
-      : {}),
-    imageSlot: persistedImageSlot,
-    ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
-  });
+      : undefined;
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
-    tellFictionalStory: parsedAssistant.tellFictionalStory,
+    tellFictionalStory: tellFictionalStoryForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
-    zenDisplay: parsedAssistant.zenDisplay,
+    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn ? undefined : parsedAssistant.zenDisplay,
+    zenTurn: zenTurnMarker,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -5488,7 +7030,7 @@ export async function processChatMessage(
     assistantDisplay,
     providerNameUsed,
     modelUsed,
-    activeBotId ?? null,
+    assistantBotId ?? null,
     toolPayloadProseOnly,
     assistantCreatedAt
   );
@@ -5503,7 +7045,7 @@ export async function processChatMessage(
       "",
       providerNameUsed,
       sentGeneratedImagePersisted.imageModel?.trim() || modelUsed,
-      activeBotId ?? null,
+      assistantBotId ?? null,
       toolPayloadImageOnly,
       imageFollowUpCreatedAt
     );
@@ -5519,7 +7061,7 @@ export async function processChatMessage(
   // key (legacy callers, Sandbox, scripts) so we leave bot_id alone.
   // Explicit null (client chose "Default") and strings (specific bot)
   // both flow through as real UPDATEs.
-  if (activeBotId !== undefined) {
+  if (!isZenMode(mode) && activeBotId !== undefined) {
     db.prepare(
       "UPDATE conversations SET updated_at = ?, bot_id = ? WHERE id = ? AND user_id = ?"
     ).run(
@@ -5533,8 +7075,8 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt || commandCenterPromptTurn
-    ? readSessionOpinion(db, userId, activeConversationId, activeBotId) ??
+  const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+    ? readSessionOpinion(db, userId, activeConversationId, opinionBotIdForTurn) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
         "steady",
@@ -5546,22 +7088,25 @@ export async function processChatMessage(
         db,
         userId,
         conversationId: activeConversationId,
-        botId: activeBotId,
+        botId: opinionBotIdForTurn,
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt || commandCenterPromptTurn
-    ? readBotOpinion(db, userId, activeBotId)
+  const botOpinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+    ? readBotOpinion(db, userId, opinionBotIdForTurn)
     : upsertBotOpinionFromTurn({
         db,
         userId,
-        botId: activeBotId,
+        botId: opinionBotIdForTurn,
         message,
         updatedAt: assistantCreatedAt,
       });
   if (
     isZenMode(mode) &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
     !commandCenterPromptTurn &&
     userMessageId
   ) {
@@ -5570,6 +7115,7 @@ export async function processChatMessage(
       provider: auxiliaryProvider,
       userId,
       conversationId: activeConversationId,
+      botId: activeMemoryBotId,
       userKey,
       history,
       userMessage: {
@@ -5616,7 +7162,7 @@ export async function processChatMessage(
       )
       .get(activeConversationId, userId) as { n: number }
   ).n;
-  if (assistantCountBefore === 0 && assistantMessageCount >= 1) {
+  if (assistantCountBefore === 0 && assistantMessageCount >= 1 && !zenAutonomyTurn) {
     const starterFallbackTitle = isStarterPrompt
       ? inferStarterConversationTitleFromOpening(assistantDisplay, settings.starterPromptLabel)
       : null;
@@ -5673,6 +7219,9 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
     !commandCenterPromptTurn
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
@@ -5875,6 +7424,9 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
     !commandCenterPromptTurn
   ) {
     await ensureAboutYouMemory({
@@ -6030,7 +7582,7 @@ export async function processChatMessage(
         : "sandbox";
   const messageRowsDescOrAsc = db
     .prepare(
-      `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+      `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
@@ -6068,6 +7620,12 @@ export async function processChatMessage(
       )
     );
   }
+  const askQuestionTimedOutMessageIds = loadPrismMoodEventMessageIds(
+    db,
+    userId,
+    activeConversationId,
+    "ignored_question"
+  );
 
   const conversationPersisted: Conversation = {
     id: conversationRow.id,
@@ -6083,7 +7641,7 @@ export async function processChatMessage(
     prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
-    messages: hydrateMessages(messageRows),
+    messages: hydrateMessages(messageRows, { askQuestionTimedOutMessageIds }),
   };
 
   pushBackendEvent(
@@ -6106,6 +7664,10 @@ export async function processChatMessage(
     ...(pendingImageJob ? { pendingImageJob } : {}),
     ...(persistedToolCallEvents.length > 0
       ? { toolCalls: persistedToolCallEvents }
+      : {}),
+    ...(psychicDebugForTurn ? { psychicDebug: psychicDebugForTurn } : {}),
+    ...(zenAutonomyTurn
+      ? { zenAutonomyDecision: { action: "speak", botId: assistantMemoryBotId } satisfies ZenAutonomyDecision }
       : {}),
     backendEvents,
   };

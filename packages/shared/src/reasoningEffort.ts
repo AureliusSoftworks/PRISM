@@ -9,7 +9,7 @@ export const REASONING_EFFORT_VALUES = [
 ] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
-export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto">;
+export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto" | "none">;
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   if (typeof value !== "string") return "auto";
@@ -23,7 +23,7 @@ export function reasoningEffortForRequest(
   value: unknown
 ): RequestReasoningEffort | null {
   const normalized = normalizeReasoningEffort(value);
-  return normalized === "auto" ? null : normalized;
+  return normalized === "auto" || normalized === "none" ? null : normalized;
 }
 
 export function openAiModelSupportsReasoningEffort(modelId: string): boolean {

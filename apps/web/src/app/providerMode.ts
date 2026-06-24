@@ -1,3 +1,5 @@
+import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
+
 export type Provider = "local" | "openai" | "anthropic";
 export type OnlineProvider = Exclude<Provider, "local">;
 export type ResponseMode = "local" | "online";
@@ -16,6 +18,7 @@ export function normalizeProviderModeModelChoice(
   value: string | null | undefined
 ): string {
   const trimmed = value?.trim() ?? "";
+  if (isDisabledModelChoice(trimmed)) return DISABLED_MODEL_CHOICE;
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
@@ -71,6 +74,9 @@ export function inferOnlineProviderForModelChoice(
   fallbackProvider: Provider = "openai"
 ): OnlineProvider {
   const normalized = normalizeProviderModeModelChoice(choice);
+  if (normalized === DISABLED_MODEL_CHOICE) {
+    return onlineProviderFallback(fallbackProvider);
+  }
   if (normalized !== AUTO_MODEL_CHOICE) {
     const exact = onlineOptions.find(
       (model) =>
@@ -110,6 +116,12 @@ export function resolveModelChoiceForResponseMode(args: {
   const preferredChoice = normalizeProviderModeModelChoice(
     args.choices[preferredProvider]
   );
+  if (preferredChoice === DISABLED_MODEL_CHOICE) {
+    return {
+      provider: preferredProvider,
+      modelChoice: preferredChoice,
+    };
+  }
   if (preferredChoice !== AUTO_MODEL_CHOICE) {
     return {
       provider: inferOnlineProviderForModelChoice(
@@ -122,7 +134,10 @@ export function resolveModelChoiceForResponseMode(args: {
   }
 
   const otherChoice = normalizeProviderModeModelChoice(args.choices[otherProvider]);
-  if (otherChoice !== AUTO_MODEL_CHOICE) {
+  if (
+    otherChoice !== AUTO_MODEL_CHOICE &&
+    otherChoice !== DISABLED_MODEL_CHOICE
+  ) {
     return {
       provider: inferOnlineProviderForModelChoice(
         otherChoice,
