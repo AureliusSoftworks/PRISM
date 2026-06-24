@@ -1,6 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
-import { composeVerbatimFirstImagePrompt } from "@localai/shared";
+import {
+  composeVerbatimFirstImagePrompt,
+  isDisabledModelChoice,
+} from "@localai/shared";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import { generateImage } from "./image-provider.ts";
@@ -469,11 +472,22 @@ export async function runAssistantSentImageGeneration(args: {
 
   const botLocalImageModel = botPersona?.local_image_model?.trim() ?? "";
   const preferredLocalImageModel = args.prefs.preferredLocalImageModel?.trim() ?? "";
-  const resolvedLocalImageModel = botLocalImageModel || preferredLocalImageModel;
-  const resolvedOpenAiImageModel =
-    (botPersona?.openai_image_model?.trim() ?? "") ||
-    (args.prefs.preferredOpenAiImageModel?.trim() ?? "");
-  const lenientFb = args.prefs.lenientLocalImageFallbackModel?.trim() ?? "";
+  const botOpenAiImageModel = botPersona?.openai_image_model?.trim() ?? "";
+  const preferredOpenAiImageModel = args.prefs.preferredOpenAiImageModel?.trim() ?? "";
+  const localImageDisabled =
+    isDisabledModelChoice(botLocalImageModel) ||
+    isDisabledModelChoice(preferredLocalImageModel);
+  const onlineImageDisabled =
+    isDisabledModelChoice(botOpenAiImageModel) ||
+    isDisabledModelChoice(preferredOpenAiImageModel);
+  const resolvedLocalImageModel = localImageDisabled
+    ? ""
+    : botLocalImageModel || preferredLocalImageModel;
+  const resolvedOpenAiImageModel = onlineImageDisabled
+    ? ""
+    : botOpenAiImageModel || preferredOpenAiImageModel;
+  const lenientFbRaw = args.prefs.lenientLocalImageFallbackModel?.trim() ?? "";
+  const lenientFb = isDisabledModelChoice(lenientFbRaw) ? "" : lenientFbRaw;
 
   const imageId = randomId(12);
   const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
@@ -548,10 +562,15 @@ export async function runAssistantSentImageGeneration(args: {
   });
 
   try {
-    if (args.preferredProvider === "local") {
-      if (!resolvedLocalImageModel) {
+    const shouldRunLocal =
+      args.preferredProvider === "local" ||
+      (onlineImageDisabled && Boolean(resolvedLocalImageModel));
+    if (shouldRunLocal) {
+      if (localImageDisabled || !resolvedLocalImageModel) {
         console.warn(
-          "[assistant-sent-image] skipped: no local image model (bot default or Settings → preferred local image model)."
+          localImageDisabled
+            ? "[assistant-sent-image] skipped: local image generation disabled."
+            : "[assistant-sent-image] skipped: no local image model (bot default or Settings → preferred local image model)."
         );
         return { status: "failed" };
       }
@@ -641,6 +660,11 @@ export async function runAssistantSentImageGeneration(args: {
         modelUsed: localOut.modelUsed,
       });
       return successPayload(prompt, localOut.modelUsed);
+    }
+
+    if (onlineImageDisabled) {
+      console.warn("[assistant-sent-image] skipped: online image generation disabled.");
+      return { status: "failed" };
     }
 
     const apiKey = args.openAiApiKey ?? config.openAiApiKey;

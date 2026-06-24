@@ -2,12 +2,12 @@ import { Extension } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { parseBuiltInPromptWildcardReference } from "@localai/shared";
 
-const DEV_COMMAND_RE = /^\/[a-z0-9][a-z0-9-]*(?=\s|$)/iu;
+const DEV_COMMAND_RE = /^\/(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
-const BUILT_IN_WILDCARD_BANG_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
-const TRUE_WILDCARD_SLOT_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
+const TRUE_WILDCARD_SLOT_RE = /\{([^{}\r\n]{1,80})\}/g;
 
 export interface PendingWildcardSlotDecoration {
   from: number;
@@ -55,10 +55,13 @@ export interface PromptShortcutTextRange {
   start: number;
   end: number;
   name: string;
+  reference?: string | null;
+  labelEnd?: number;
+  badge?: string | null;
 }
 
 export interface WildcardSlotTextRange extends PromptShortcutTextRange {
-  syntax: "bang" | "brace";
+  syntax: "brace";
 }
 
 interface KnownDevCommand {
@@ -121,8 +124,8 @@ function resolveKnownCommand(
   if (!commandMatch) return null;
   const commandText = commandMatch[0] ?? "";
   const commandName = normalizeCommandName(commandText);
-  if (commandName.length < 3) return null;
   const knownCommands = normalizedKnownCommands(options);
+  if (commandName.length < 3 && !knownCommands?.has(commandName)) return null;
   if (knownCommands && !knownCommands.has(commandName)) return null;
   commandMatch.commandText = commandText;
   commandMatch.argumentNames =
@@ -160,11 +163,26 @@ function resolveKnownArgumentRange(
 
 function normalizeTrueWildcardSlotName(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value
-    .trim()
-    .replace(/[{}]/g, "")
+  const reference = parseBuiltInPromptWildcardReference(value);
+  if (reference) return reference.key;
+  const normalized = value.trim().replace(/[{}]/g, "");
+  if (!/^[A-Z][A-Z0-9_ ]{1,63}$/u.test(normalized)) return "";
+  return normalized
     .replace(/[-_\s]+/g, "_")
     .toUpperCase();
+}
+
+function wildcardReferenceBadge(reference: string | null | undefined): string | null {
+  if (!reference) return null;
+  const index = Number.parseInt(reference, 10);
+  if (!Number.isFinite(index) || index < 1 || index > 26) return null;
+  return String.fromCharCode("A".charCodeAt(0) + index - 1);
+}
+
+function wildcardSlotLabelLength(rawName: string, reference: string | null | undefined): number {
+  if (!reference) return rawName.length;
+  const referenceStart = rawName.length - reference.length;
+  return referenceStart > 0 ? referenceStart : rawName.length;
 }
 
 export function resolveLeadingDevCommandTextRanges(
@@ -339,10 +357,19 @@ export function resolvePendingWildcardSlotTextRanges(
     const matchIndex = match.index ?? -1;
     if (matchIndex < 0 || !name) continue;
     if (known && !known.has(name.toLowerCase())) continue;
+    const reference = parseBuiltInPromptWildcardReference(rawName)?.reference ?? null;
+    const badge = wildcardReferenceBadge(reference);
+    const labelEnd =
+      badge && reference
+        ? matchIndex + 1 + wildcardSlotLabelLength(rawName, reference)
+        : undefined;
     ranges.push({
       start: matchIndex,
       end: matchIndex + (match[0]?.length ?? 0),
       name,
+      ...(reference ? { reference } : {}),
+      ...(labelEnd ? { labelEnd } : {}),
+      ...(badge ? { badge } : {}),
     });
   }
   return ranges;
@@ -359,33 +386,11 @@ export function resolveWildcardSlotTextRanges(
     options.wildcardSlotNames?.map(normalizeTrueWildcardSlotName) ?? null
   );
   if (known && known.size === 0) return [];
-  const excludedBangNames = normalizedKnownNameList(options.excludedBangNames);
   const ranges: WildcardSlotTextRange[] = [];
   for (const range of resolvePendingWildcardSlotTextRanges(text, {
     pendingWildcardSlotNames: options.wildcardSlotNames,
   })) {
     ranges.push({ ...range, syntax: "brace" });
-  }
-  for (const match of text.matchAll(BUILT_IN_WILDCARD_BANG_RE)) {
-    const raw = match[0] ?? "";
-    const rawName = match[2] ?? "";
-    const matchIndex = match.index ?? -1;
-    if (matchIndex < 0 || !rawName) continue;
-    const delimiterLength = raw.startsWith("!") ? 0 : 1;
-    const start = matchIndex + delimiterLength;
-    const afterBang = text.slice(start + 1).toLowerCase();
-    if (excludedBangNames?.some((candidate) => afterBang.startsWith(candidate))) {
-      continue;
-    }
-    const name = normalizeTrueWildcardSlotName(rawName);
-    if (!name) continue;
-    if (known && !known.has(name.toLowerCase())) continue;
-    ranges.push({
-      start,
-      end: start + 1 + rawName.length,
-      name,
-      syntax: "bang",
-    });
   }
   return ranges.sort((a, b) => a.start - b.start || b.end - a.end);
 }
@@ -497,8 +502,24 @@ export function findWildcardSlotTokenRanges(
   doc: ProseMirrorNode,
   wildcardSlotNames?: readonly string[] | null,
   excludedBangNames?: readonly string[] | null
-): Array<{ from: number; to: number; name: string; syntax: "bang" | "brace" }> {
-  const ranges: Array<{ from: number; to: number; name: string; syntax: "bang" | "brace" }> = [];
+): Array<{
+  from: number;
+  to: number;
+  name: string;
+  syntax: "brace";
+  reference?: string | null;
+  labelEnd?: number;
+  badge?: string | null;
+}> {
+  const ranges: Array<{
+    from: number;
+    to: number;
+    name: string;
+    syntax: "brace";
+    reference?: string | null;
+    labelEnd?: number;
+    badge?: string | null;
+  }> = [];
   doc.descendants((node: ProseMirrorNode, pos: number) => {
     if (!node.isTextblock) return true;
     const textRanges = resolveWildcardSlotTextRanges(node.textContent, {
@@ -511,6 +532,9 @@ export function findWildcardSlotTokenRanges(
         to: pos + 1 + range.end,
         name: range.name,
         syntax: range.syntax,
+        ...(range.reference ? { reference: range.reference } : {}),
+        ...(range.labelEnd ? { labelEnd: pos + 1 + range.labelEnd } : {}),
+        ...(range.badge ? { badge: range.badge } : {}),
       });
     }
     return true;
@@ -642,29 +666,37 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
               );
             }
             for (const wildcardSlotRange of wildcardSlotRanges) {
-              const tokenStart =
-                wildcardSlotRange.syntax === "brace"
-                  ? wildcardSlotRange.from + 1
-                  : wildcardSlotRange.from + 1;
-              const tokenEnd =
-                wildcardSlotRange.syntax === "brace"
-                  ? wildcardSlotRange.to - 1
-                  : wildcardSlotRange.to;
+              const tokenStart = wildcardSlotRange.from + 1;
+              const tokenEnd = wildcardSlotRange.to - 1;
+              const visibleTokenEnd =
+                wildcardSlotRange.badge && wildcardSlotRange.labelEnd
+                  ? wildcardSlotRange.labelEnd
+                  : tokenEnd;
               decorations.push(
                 Decoration.inline(wildcardSlotRange.from, wildcardSlotRange.from + 1, {
                   class: "tiptapPrismWildcardSlotHiddenSyntax",
                 })
               );
-              if (wildcardSlotRange.syntax === "brace") {
+              decorations.push(
+                Decoration.inline(wildcardSlotRange.to - 1, wildcardSlotRange.to, {
+                  class: "tiptapPrismWildcardSlotHiddenSyntax",
+                })
+              );
+              if (visibleTokenEnd < tokenEnd) {
                 decorations.push(
-                  Decoration.inline(wildcardSlotRange.to - 1, wildcardSlotRange.to, {
+                  Decoration.inline(visibleTokenEnd, tokenEnd, {
                     class: "tiptapPrismWildcardSlotHiddenSyntax",
                   })
                 );
               }
               decorations.push(
-                Decoration.inline(tokenStart, tokenEnd, {
+                Decoration.inline(tokenStart, visibleTokenEnd, {
                   class: "tiptapPrismWildcardSlotToken",
+                  ...(wildcardSlotRange.badge
+                    ? {
+                        "data-prism-wildcard-badge": wildcardSlotRange.badge,
+                      }
+                    : {}),
                 })
               );
             }

@@ -38,6 +38,8 @@ export interface DbUserRecord {
   comfyUiHost: string | null;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
+  experimentalAllModelEffortEnabled: number;
+  psychicModeEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
   openAiKeyTag: string | null;
@@ -130,6 +132,8 @@ export function createDatabase(): DatabaseSync {
       lenient_local_fallback_model TEXT,
       secondary_ollama_host TEXT,
       experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
+      experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
+      psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
       preferred_local_image_model TEXT,
@@ -138,6 +142,9 @@ export function createDatabase(): DatabaseSync {
       preferred_zen_wallpaper_openai_image_model TEXT,
       zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
       zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1,
+      zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '',
       zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000,
       zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
       zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
@@ -145,6 +152,10 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
       zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
+      zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
+      zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
+      zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -338,6 +349,7 @@ export function createDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       conversation_id TEXT,
+      bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -413,6 +425,18 @@ export function createDatabase(): DatabaseSync {
       PRIMARY KEY (user_id, conversation_id, mode),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS prism_mood_events (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      PRIMARY KEY (user_id, conversation_id, message_id, event_type),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS coffee_groups (
       id TEXT PRIMARY KEY,
@@ -493,6 +517,18 @@ export function createDatabase(): DatabaseSync {
   const userColumns = db
     .prepare("PRAGMA table_info(users)")
     .all() as Array<{ name: string }>;
+  const zenSessionMemoryColumns = db
+    .prepare("PRAGMA table_info(zen_session_memories)")
+    .all() as Array<{ name: string }>;
+  const hasZenSessionMemoryBotId = zenSessionMemoryColumns.some(
+    (column) => column.name === "bot_id"
+  );
+  if (!hasZenSessionMemoryBotId) {
+    db.exec("ALTER TABLE zen_session_memories ADD COLUMN bot_id TEXT;");
+  }
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);"
+  );
   const hasLastActiveAt = userColumns.some((column) => column.name === "last_active_at");
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
@@ -530,6 +566,20 @@ export function createDatabase(): DatabaseSync {
     db.exec(
       "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;"
     );
+  }
+  const hasExperimentalAllModelEffortEnabled = userColumns.some(
+    (column) => column.name === "experimental_all_model_effort_enabled"
+  );
+  if (!hasExperimentalAllModelEffortEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
+  const hasPsychicModeEnabled = userColumns.some(
+    (column) => column.name === "psychic_mode_enabled"
+  );
+  if (!hasPsychicModeEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;");
   }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled"
@@ -607,6 +657,24 @@ export function createDatabase(): DatabaseSync {
   if (!hasZenWallpaperTextMaskEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;");
   }
+  const hasZenWallpaperGrayscaleEnabled = userColumns.some(
+    (column) => column.name === "zen_wallpaper_grayscale_enabled"
+  );
+  if (!hasZenWallpaperGrayscaleEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenWallpaperBlurredEdgesEnabled = userColumns.some(
+    (column) => column.name === "zen_wallpaper_blurred_edges_enabled"
+  );
+  if (!hasZenWallpaperBlurredEdgesEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1;");
+  }
+  const hasZenWallpaperStyleNotes = userColumns.some(
+    (column) => column.name === "zen_wallpaper_style_notes"
+  );
+  if (!hasZenWallpaperStyleNotes) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '';");
+  }
   const hasZenSessionIdleGapMs = userColumns.some(
     (column) => column.name === "zen_session_idle_gap_ms"
   );
@@ -648,6 +716,30 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenMoodSensitivity) {
     db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
+  }
+  const hasZenCanvasTypingSpeed = userColumns.some(
+    (column) => column.name === "zen_canvas_typing_speed"
+  );
+  if (!hasZenCanvasTypingSpeed) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;");
+  }
+  const hasZenAskQuestionPatienceEnabled = userColumns.some(
+    (column) => column.name === "zen_ask_question_patience_enabled"
+  );
+  if (!hasZenAskQuestionPatienceEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenAskQuestionPatienceMs = userColumns.some(
+    (column) => column.name === "zen_ask_question_patience_ms"
+  );
+  if (!hasZenAskQuestionPatienceMs) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000;");
+  }
+  const hasZenAutonomyEnabled = userColumns.some(
+    (column) => column.name === "zen_autonomy_enabled"
+  );
+  if (!hasZenAutonomyEnabled) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
@@ -1202,6 +1294,9 @@ export function createDatabase(): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);"
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
   );
   db.exec(
@@ -1506,4 +1601,50 @@ export function upsertPrismMoodState(
     mood.lastUpdatedAt
   );
   return mood;
+}
+
+export function recordPrismMoodEventOnce(
+  db: DatabaseSync,
+  args: {
+    userId: string;
+    conversationId: string;
+    messageId: string;
+    eventType: string;
+    createdAt: string;
+    payload?: Record<string, unknown>;
+  }
+): boolean {
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO prism_mood_events (
+        user_id, conversation_id, message_id, event_type, created_at, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      args.userId,
+      args.conversationId,
+      args.messageId,
+      args.eventType,
+      args.createdAt,
+      JSON.stringify(args.payload ?? {})
+  ) as { changes?: number | bigint };
+  return Number(result.changes ?? 0) > 0;
+}
+
+export function loadPrismMoodEventMessageIds(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  eventType: string
+): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT message_id
+         FROM prism_mood_events
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND event_type = ?`
+    )
+    .all(userId, conversationId, eventType) as Array<{ message_id: string }>;
+  return new Set(rows.map((row) => row.message_id));
 }

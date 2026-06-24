@@ -1,5 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
+import { upsertPrismMoodState } from "./db.ts";
+import {
+  applyPrismMoodIgnoredQuestion,
+  applyPrismMoodIgnoreCooldown,
+  applyPrismMoodInterruption,
+  applyPrismMoodNegativeTurn,
+  applyPrismMoodPositiveTurn,
+  createDefaultPrismMoodState,
+  decayPrismMood,
+  shouldPrismMoodStartIgnoreCooldown,
+  type PrismMoodIgnoredQuestionPenaltyLevel,
+  type PrismMoodInterruptionInput,
+  type PrismMoodMode,
+  type PrismMoodSnapshot,
+} from "@localai/shared";
 
 export type ZenWallpaperStatus = "idle" | "generating" | "ready" | "error";
 
@@ -19,6 +34,12 @@ export interface ZenWallpaperHistoryEntry {
   revealStartMessageCount?: number;
   revealFullMessageCount?: number;
   createdAt?: string;
+}
+
+export interface RememberedZenWallpaper {
+  imageId: string;
+  promptSeed: string | null;
+  createdAt: string;
 }
 
 export interface ConversationSummary {
@@ -55,6 +76,22 @@ export interface ConversationSweepState {
   latestSweepAt: string | null;
 }
 
+export interface UndoLatestConversationMessagesResult {
+  conversationId: string;
+  conversationMode: string | null;
+  messageIds: string[];
+  deletedMessages: number;
+  deletedMemories: number;
+  updatedMemories: number;
+  deletedSummaries: number;
+  deletedSummaryIds: string[];
+  deletedZenSessionMemories: number;
+  deletedMoodEvents: number;
+  deletedImages: number;
+  deletedImageRelPaths: string[];
+  prismMood: PrismMoodSnapshot;
+}
+
 const DEV_SEED_CHAT_USER_MESSAGE = "Dev tools seeded this sidebar chat.";
 const DEV_SEED_CHAT_ASSISTANT_MESSAGE =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
@@ -78,6 +115,270 @@ function parseIdList(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function uniqueIdList(values: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function sentGeneratedImageIdFromToolPayload(raw: string | null | undefined): string | null {
+  const parsed = parseJsonObject(raw);
+  const sent = parsed?.sentGeneratedImage;
+  if (!sent || typeof sent !== "object" || Array.isArray(sent)) return null;
+  const imageId = (sent as { imageId?: unknown }).imageId;
+  return typeof imageId === "string" && imageId.trim().length > 0
+    ? imageId.trim()
+    : null;
+}
+
+function repairMemoriesLinkedToUndo(
+  db: DatabaseSync,
+  userId: string,
+  messageIds: readonly string[]
+): { deleted: number; updated: number } {
+  const undoneIds = new Set(uniqueIdList(messageIds));
+  if (undoneIds.size === 0) return { deleted: 0, updated: 0 };
+  const rows = db
+    .prepare("SELECT id, source_message_ids FROM memories WHERE user_id = ?")
+    .all(userId) as Array<{ id: string; source_message_ids: string }>;
+  let deleted = 0;
+  let updated = 0;
+  const deleteStmt = db.prepare("DELETE FROM memories WHERE id = ? AND user_id = ?");
+  const updateStmt = db.prepare(
+    "UPDATE memories SET source_message_ids = ? WHERE id = ? AND user_id = ?"
+  );
+  for (const row of rows) {
+    const sourceIds = uniqueIdList(parseIdList(row.source_message_ids));
+    if (!sourceIds.some((id) => undoneIds.has(id))) continue;
+    const survivingIds = sourceIds.filter((id) => !undoneIds.has(id));
+    if (survivingIds.length === 0) {
+      deleted += Number(deleteStmt.run(row.id, userId).changes ?? 0);
+      continue;
+    }
+    updated += Number(
+      updateStmt.run(JSON.stringify(survivingIds), row.id, userId).changes ?? 0
+    );
+  }
+  return { deleted, updated };
+}
+
+function normalizeUndoPrismMoodMode(value: string | null | undefined): PrismMoodMode {
+  if (value === "chat") return "chat";
+  if (value === "sandbox") return "sandbox";
+  if (value === "coffee") return "coffee";
+  return "zen";
+}
+
+const UNDO_MOOD_POSITIVE_PHRASES = [
+  "thank",
+  "thanks",
+  "appreciate",
+  "please",
+  "sorry",
+  "my bad",
+  "that helped",
+  "great",
+  "good job",
+] as const;
+
+const UNDO_MOOD_NEGATIVE_PHRASES = [
+  "stupid",
+  "dumb",
+  "useless",
+  "annoying",
+  "hate",
+  "shut up",
+  "wrong again",
+  "terrible",
+] as const;
+
+const UNDO_MOOD_BRUSQUE_PHRASES = [
+  "whatever",
+  "nevermind",
+  "forget it",
+  "just do it",
+] as const;
+
+function countUndoMoodPhraseHits(text: string, phrases: readonly string[]): number {
+  return phrases.reduce((count, phrase) => count + (text.includes(phrase) ? 1 : 0), 0);
+}
+
+function evaluateUndoMoodTurn(message: string): number {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return 0;
+  let delta = 0;
+  delta += Math.min(countUndoMoodPhraseHits(normalized, UNDO_MOOD_POSITIVE_PHRASES) * 3, 6);
+  delta -= Math.min(countUndoMoodPhraseHits(normalized, UNDO_MOOD_NEGATIVE_PHRASES) * 7, 14);
+  delta -= Math.min(countUndoMoodPhraseHits(normalized, UNDO_MOOD_BRUSQUE_PHRASES) * 3, 6);
+  if (normalized.includes("?")) delta += 2;
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= 2 && !normalized.includes("?")) delta -= 2;
+  return delta;
+}
+
+function readIgnoredQuestionPenaltyLevel(
+  rawPayload: string | null | undefined
+): PrismMoodIgnoredQuestionPenaltyLevel {
+  const payload = parseJsonObject(rawPayload);
+  const level = payload?.penaltyLevel;
+  return level === "light" || level === "elevated" ? level : "normal";
+}
+
+function readInterruptionPayload(rawPayload: string | null | undefined): PrismMoodInterruptionInput {
+  const payload = parseJsonObject(rawPayload);
+  const kind = payload?.kind === "pending_reply" ? "pending_reply" : "assistant_reveal";
+  const assistantMessageId =
+    typeof payload?.assistantMessageId === "string"
+      ? payload.assistantMessageId
+      : undefined;
+  const visibleTokenCount =
+    typeof payload?.visibleTokenCount === "number" && Number.isFinite(payload.visibleTokenCount)
+      ? payload.visibleTokenCount
+      : undefined;
+  const totalTokenCount =
+    typeof payload?.totalTokenCount === "number" && Number.isFinite(payload.totalTokenCount)
+      ? payload.totalTokenCount
+      : undefined;
+  return {
+    kind,
+    ...(assistantMessageId ? { assistantMessageId } : {}),
+    ...(visibleTokenCount !== undefined ? { visibleTokenCount } : {}),
+    ...(totalTokenCount !== undefined ? { totalTokenCount } : {}),
+  };
+}
+
+function rebuildPrismMoodAfterUndo(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  conversationMode: string | null,
+  nowIso: string
+): PrismMoodSnapshot {
+  const mode = normalizeUndoPrismMoodMode(conversationMode);
+  const sensitivityRow = db
+    .prepare("SELECT zen_mood_sensitivity FROM users WHERE id = ?")
+    .get(userId) as { zen_mood_sensitivity?: number | null } | undefined;
+  const sensitivity =
+    typeof sensitivityRow?.zen_mood_sensitivity === "number"
+      ? sensitivityRow.zen_mood_sensitivity
+      : undefined;
+  const messages = db
+    .prepare(
+      `SELECT id, role, content, created_at
+         FROM messages
+        WHERE user_id = ? AND conversation_id = ?
+        ORDER BY created_at ASC, id ASC`
+    )
+    .all(userId, conversationId) as Array<{
+      id: string;
+      role: string;
+      content: string;
+      created_at: string;
+    }>;
+  const events = db
+    .prepare(
+      `SELECT message_id, event_type, created_at, payload_json
+         FROM prism_mood_events
+        WHERE user_id = ? AND conversation_id = ?
+        ORDER BY created_at ASC, message_id ASC, event_type ASC`
+    )
+    .all(userId, conversationId) as Array<{
+      message_id: string;
+      event_type: string;
+      created_at: string;
+      payload_json: string | null;
+    }>;
+
+  type MoodAction =
+    | { kind: "message"; at: string; content: string }
+    | { kind: "event"; at: string; eventType: string; payloadJson: string | null };
+  const actions: MoodAction[] = [
+    ...messages
+      .filter((message) => message.role === "user")
+      .map((message) => ({
+        kind: "message" as const,
+        at: message.created_at,
+        content: message.content,
+      })),
+    ...events.map((event) => ({
+      kind: "event" as const,
+      at: event.created_at,
+      eventType: event.event_type,
+      payloadJson: event.payload_json,
+    })),
+  ].sort((a, b) => {
+    const byTime = a.at.localeCompare(b.at);
+    if (byTime !== 0) return byTime;
+    return a.kind === b.kind ? 0 : a.kind === "message" ? -1 : 1;
+  });
+
+  let mood = createDefaultPrismMoodState(mode, messages[0]?.created_at ?? nowIso);
+  for (const action of actions) {
+    if (action.kind === "message") {
+      mood = decayPrismMood(mood, action.at);
+      const delta = evaluateUndoMoodTurn(action.content);
+      if (delta < 0) {
+        mood = applyPrismMoodNegativeTurn(
+          mood,
+          Math.min(1, Math.max(0.2, Math.abs(delta) / 8)),
+          action.at,
+          sensitivity
+        );
+        if (
+          mood.mode === "zen" &&
+          shouldPrismMoodStartIgnoreCooldown(mood, sensitivity)
+        ) {
+          mood = applyPrismMoodIgnoreCooldown(mood, action.at);
+        }
+      } else if (delta > 0) {
+        mood = applyPrismMoodPositiveTurn(
+          mood,
+          Math.min(1, Math.max(0.2, delta / 8)),
+          action.at
+        );
+      }
+      continue;
+    }
+    if (action.eventType === "ignored_question") {
+      mood = applyPrismMoodIgnoredQuestion(
+        mood,
+        action.at,
+        sensitivity,
+        readIgnoredQuestionPenaltyLevel(action.payloadJson)
+      );
+    } else if (action.eventType === "interruption") {
+      mood = applyPrismMoodInterruption(
+        mood,
+        readInterruptionPayload(action.payloadJson),
+        action.at,
+        sensitivity
+      );
+    }
+  }
+  return upsertPrismMoodState(db, userId, conversationId, {
+    ...mood,
+    lastUpdatedAt: actions.at(-1)?.at ?? nowIso,
+  });
 }
 
 export function normalizeZenWallpaperStatus(value: unknown): ZenWallpaperStatus {
@@ -192,6 +493,49 @@ export function appendZenWallpaperHistoryEntry(
 
 export function serializeZenWallpaperHistory(entries: readonly ZenWallpaperHistoryEntry[]): string {
   return JSON.stringify(normalizeZenWallpaperHistory(entries));
+}
+
+export function getLatestRememberedZenWallpaperForBot(
+  db: DatabaseSync,
+  userId: string,
+  botId: string | null | undefined
+): RememberedZenWallpaper | null {
+  const normalizedBotId = botId?.trim();
+  if (!normalizedBotId) return null;
+  const row = db
+    .prepare(
+      `SELECT id, prompt, created_at
+         FROM images
+        WHERE user_id = ?
+          AND bot_id = ?
+          AND COALESCE(purpose, 'gallery') = 'wallpaper'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .get(userId, normalizedBotId) as
+    | { id: string; prompt: string | null; created_at: string }
+    | undefined;
+  if (!row?.id) return null;
+  return {
+    imageId: row.id,
+    promptSeed: row.prompt?.trim() || null,
+    createdAt: row.created_at,
+  };
+}
+
+export function buildRememberedZenWallpaperHistory(
+  wallpaper: RememberedZenWallpaper
+): ZenWallpaperHistoryEntry[] {
+  return normalizeZenWallpaperHistory([
+    {
+      imageId: wallpaper.imageId,
+      promptSeed: wallpaper.promptSeed,
+      generationMessageCount: 0,
+      revealStartMessageCount: 0,
+      revealFullMessageCount: 0,
+      createdAt: wallpaper.createdAt,
+    },
+  ]);
 }
 
 export function buildZenWallpaperHistoryForGeneratedImage(
@@ -508,6 +852,28 @@ export function recoverStaleZenWallpaperGenerationStatus(
         AND zen_wallpaper_status = 'generating'
         ${conversationClause}`
   ).run(...params);
+}
+
+export function dedupeActiveZenWallpaperGeneration(
+  db: DatabaseSync,
+  userId: string,
+  options: {
+    conversationId: string;
+    activeZenWallpaperConversationId?: string | null;
+    enabled?: boolean;
+  }
+): boolean {
+  if (options.enabled === false) return false;
+  const conversationId = options.conversationId.trim();
+  const activeConversationId = options.activeZenWallpaperConversationId?.trim();
+  if (!conversationId || activeConversationId !== conversationId) return false;
+  db.prepare(
+    `UPDATE conversations
+        SET zen_wallpaper_enabled = 1,
+            zen_wallpaper_status = 'generating'
+      WHERE id = ? AND user_id = ?`
+  ).run(conversationId, userId);
+  return true;
 }
 
 export function deleteCoffeePollsForConversations(
@@ -1376,6 +1742,155 @@ export function rewindConversation(
       content: target.content,
       deletedMessages: Number(deletedMessages.changes ?? 0),
       deletedMemories: 0,
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function undoLatestConversationMessages(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  count = 1,
+  nowIso = new Date().toISOString()
+): UndoLatestConversationMessagesResult {
+  const undoCount = count === 2 ? 2 : 1;
+  const conversation = db
+    .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+    .get(conversationId, userId) as
+    | { id: string; conversation_mode: string | null }
+    | undefined;
+  if (!conversation?.id) {
+    throw new Error("Conversation not found.");
+  }
+
+  const targets = db
+    .prepare(
+      `SELECT id, role, created_at, tool_payload
+         FROM messages
+        WHERE conversation_id = ? AND user_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`
+    )
+    .all(conversationId, userId, undoCount) as Array<{
+      id: string;
+      role: string;
+      created_at: string;
+      tool_payload: string | null;
+    }>;
+  if (targets.length === 0) {
+    throw new Error("Nothing to undo.");
+  }
+
+  const messageIds = targets.map((target) => target.id);
+  const cutoff = targets.reduce(
+    (earliest, target) => target.created_at < earliest ? target.created_at : earliest,
+    targets[0]!.created_at
+  );
+  const imageIds = uniqueIdList(
+    targets.flatMap((target) => {
+      const imageId = sentGeneratedImageIdFromToolPayload(target.tool_payload);
+      return imageId ? [imageId] : [];
+    })
+  );
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const deletedSummaryRows = db
+      .prepare(
+        `SELECT id
+           FROM memory_summaries
+          WHERE user_id = ? AND conversation_id = ? AND created_at >= ?
+          ORDER BY created_at ASC, id ASC`
+      )
+      .all(userId, conversationId, cutoff) as Array<{ id: string }>;
+    const deletedSummaryIds = deletedSummaryRows.map((row) => row.id);
+    const summaryDelete = db
+      .prepare(
+        "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ? AND created_at >= ?"
+      )
+      .run(userId, conversationId, cutoff);
+    const zenSessionDelete = db
+      .prepare(
+        "DELETE FROM zen_session_memories WHERE user_id = ? AND conversation_id = ? AND created_at >= ?"
+      )
+      .run(userId, conversationId, cutoff);
+    const memoryRepair = repairMemoriesLinkedToUndo(db, userId, messageIds);
+
+    let deletedImageRelPaths: string[] = [];
+    let deletedImages = 0;
+    if (imageIds.length > 0) {
+      const imagePlaceholders = inClausePlaceholders(imageIds.length);
+      const imageRows = db
+        .prepare(
+          `SELECT id, local_rel_path
+             FROM images
+            WHERE user_id = ? AND id IN (${imagePlaceholders})`
+        )
+        .all(userId, ...imageIds) as Array<{ id: string; local_rel_path: string | null }>;
+      deletedImageRelPaths = imageRows
+        .map((row) => row.local_rel_path?.trim() ?? "")
+        .filter((value) => value.length > 0);
+      deletedImages = Number(
+        db
+          .prepare(
+            `DELETE FROM images
+              WHERE user_id = ? AND id IN (${imagePlaceholders})`
+          )
+          .run(userId, ...imageIds).changes ?? 0
+      );
+    }
+
+    const messagePlaceholders = inClausePlaceholders(messageIds.length);
+    const moodEventDelete = db
+      .prepare(
+        `DELETE FROM prism_mood_events
+          WHERE user_id = ? AND conversation_id = ? AND message_id IN (${messagePlaceholders})`
+      )
+      .run(userId, conversationId, ...messageIds);
+    const messageDelete = db
+      .prepare(
+        `DELETE FROM messages
+          WHERE user_id = ? AND conversation_id = ? AND id IN (${messagePlaceholders})`
+      )
+      .run(userId, conversationId, ...messageIds);
+    const latestRemaining = db
+      .prepare(
+        `SELECT created_at
+           FROM messages
+          WHERE user_id = ? AND conversation_id = ?
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`
+      )
+      .get(userId, conversationId) as { created_at: string } | undefined;
+    const nextUpdatedAt = latestRemaining?.created_at ?? nowIso;
+    db.prepare(
+      "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+    ).run(nextUpdatedAt, conversationId, userId);
+    const prismMood = rebuildPrismMoodAfterUndo(
+      db,
+      userId,
+      conversationId,
+      conversation.conversation_mode,
+      nowIso
+    );
+    db.exec("COMMIT");
+    return {
+      conversationId,
+      conversationMode: conversation.conversation_mode,
+      messageIds,
+      deletedMessages: Number(messageDelete.changes ?? 0),
+      deletedMemories: memoryRepair.deleted,
+      updatedMemories: memoryRepair.updated,
+      deletedSummaries: Number(summaryDelete.changes ?? 0),
+      deletedSummaryIds,
+      deletedZenSessionMemories: Number(zenSessionDelete.changes ?? 0),
+      deletedMoodEvents: Number(moodEventDelete.changes ?? 0),
+      deletedImages,
+      deletedImageRelPaths,
+      prismMood,
     };
   } catch (error) {
     db.exec("ROLLBACK");

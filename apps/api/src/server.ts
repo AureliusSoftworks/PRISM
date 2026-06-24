@@ -6,7 +6,9 @@ import { pipeline } from "node:stream/promises";
 import { getAppConfig } from "@localai/config";
 import {
   createDatabase,
+  loadPrismMoodEventMessageIds,
   loadPrismMoodState,
+  recordPrismMoodEventOnce,
   upsertPrismMoodState,
 } from "./db.ts";
 import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
@@ -16,6 +18,10 @@ import {
   requireValidSession,
   resolveSessionToken,
 } from "./auth.ts";
+import {
+  classifyAskQuestionTimeoutPenalty,
+  resolveAskQuestionTimeoutApplicability,
+} from "./ask-question-timeout.ts";
 import { buildHealthResponse } from "./health.ts";
 import {
   validateApiKeyCredential,
@@ -28,6 +34,8 @@ import {
 } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import {
+  decideZenAutonomyTurn,
+  loadPersistedConversationForChatResponse,
   normalizeSessionResumeContext,
   processChatMessage,
   readBotOpinion,
@@ -35,6 +43,7 @@ import {
   upsertBotOpinion,
 } from "./chat.ts";
 import {
+  cancelActiveImageJobForConversation,
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
@@ -76,18 +85,22 @@ import {
 import { parseMemoryListQueryOptions } from "./memory-list-query.ts";
 import { inferAndStoreBotMemories } from "./memory-inference.ts";
 import {
+  createZenPersonaSessionMemoryCheckpoint,
   deleteZenSessionMemoryById,
   loadZenSessionMemoryOverview,
 } from "./zen-session-memory.ts";
+import { discardLatestZenAssistantMessage } from "./zen-message-discard.ts";
 import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
   createDevSeedConversations,
+  dedupeActiveZenWallpaperGeneration,
   deleteAllConversations,
   deleteConversation,
   deleteConversationMessage,
   deleteConversationsByBot,
   getConversationSweepState,
+  getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
   mapZenWallpaperMetadata,
   normalizeZenWallpaperStatus,
@@ -98,6 +111,7 @@ import {
   serializeZenWallpaperHistory,
   setZenStarterConversationSuppression,
   sweepConversations,
+  undoLatestConversationMessages,
   undoLatestConversationSweep,
 } from "./conversations.ts";
 import {
@@ -126,14 +140,21 @@ import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
+  normalizeZenAskQuestionPatienceEnabled,
+  normalizeZenAskQuestionPatienceMs,
+  normalizeZenAutonomyEnabled,
+  normalizeZenCanvasTypingSpeed,
   normalizeZenFreshStartGapMs,
+  normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
   normalizeZenSessionIdleGapMs,
+  normalizeZenWallpaperGrayscaleEnabled,
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperRegenMessageInterval,
   normalizeZenWallpaperRevealDelayMessageCount,
   normalizeZenWallpaperRevealSpanMessageCount,
+  normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
@@ -152,13 +173,9 @@ import {
   selectProvider,
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
+import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
-  cleanupComposerTextWithModel,
-  cleanupResolvedPromptWithModel,
-  readComposerCleanupText,
-} from "./composer-cleanup.ts";
-import {
-  normalizeComposerWildcardValueResponse,
+  generateScriptedPromptWildcardValue,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
 } from "./prompt-wildcards.ts";
@@ -176,16 +193,21 @@ import {
   formatComfyUiRemoteWorkflowLabel,
   hydrateAssistantMessageParts,
   isAllowedInAppOllamaPullModelName,
+  isDisabledModelChoice,
+  isDisabledPromptWildcardToken,
   getBuiltInPromptWildcardSlot,
   normalizePromptShortcutMetadata,
   normalizePromptWildcardRunMetadata,
   reasoningEffortForRequest,
+  parseBuiltInPromptWildcardReference,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
+  parseStoredToolPayload,
   parseStoredComfyUiWorkflows,
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
   applyPrismMoodExpiredIgnoreCooldown,
+  applyPrismMoodIgnoredQuestion,
   applyPrismMoodInterruption,
   createDefaultPrismMoodState,
   debugPatchPrismMood,
@@ -197,7 +219,13 @@ import {
   type ChatMessage,
   type OpinionBand,
   type OpinionTrend,
+  type PromptShortcutMetadata,
+  type PromptShortcutWildcardReplacement,
+  type PrismMoodIgnoredQuestionPenaltyLevel,
   type SessionOpinion,
+  type ZenAskQuestionPatienceInput,
+  type ZenAutonomyInput,
+  type ZenPersonaTransitionInput,
 } from "@localai/shared";
 import { generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -212,8 +240,8 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import {
-  clampZenWallpaperPromptText,
   composeZenWallpaperPrompt,
+  normalizeZenWallpaperPromptOverride,
 } from "./zen-wallpaper-prompt.ts";
 import {
   buildGeneratedImageRelativePath,
@@ -234,12 +262,13 @@ import {
   summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "./memory-summarizer.ts";
+import { loadBotMemoryPanelPayload } from "./bot-memory-panel.ts";
 import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
 } from "./account-retention.ts";
 import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
-import { deleteVectorsForUser } from "./qdrant.ts";
+import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
@@ -289,8 +318,89 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
 } as const;
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
-const COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT =
-  "You generate one random wildcard value for a composer helper. Use only the requested wildcard type, not conversation context. Return JSON only in this exact shape: {\"value\":\"...\"}. The value must be short, natural, vivid, and must not include braces, quotes, labels, explanations, or multiple options.";
+const PROMPT_RUN_WILDCARD_TOKEN_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+function isPromptRunWildcardTokenName(value: string): boolean {
+  if (isDisabledPromptWildcardToken(value)) return false;
+  if (parseBuiltInPromptWildcardReference(value)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(value.trim());
+}
+
+function escapePromptRunRegexLiteral(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function buildPromptRunResolvedPattern(prompt: string): RegExp | null {
+  const source = prompt.trim();
+  if (!source) return null;
+  let pattern = "";
+  let cursor = 0;
+  for (const match of source.matchAll(PROMPT_RUN_WILDCARD_TOKEN_RE)) {
+    const token = match[0] ?? "";
+    const name = match[1] ?? "";
+    const start = match.index ?? -1;
+    if (!token || start < 0) continue;
+    if (!isPromptRunWildcardTokenName(name)) continue;
+    pattern += escapePromptRunRegexLiteral(source.slice(cursor, start)).replace(/\s+/g, "\\s+");
+    pattern += "[\\s\\S]{1,120}?";
+    cursor = start + token.length;
+  }
+  pattern += escapePromptRunRegexLiteral(source.slice(cursor)).replace(/\s+/g, "\\s+");
+  return pattern ? new RegExp(pattern, "u") : null;
+}
+
+function replacementsWithinPromptRun(
+  replacements: readonly PromptShortcutWildcardReplacement[],
+  start: number,
+  end: number
+): PromptShortcutWildcardReplacement[] {
+  return replacements
+    .filter((replacement) => {
+      const replacementStart = replacement.start;
+      const replacementEnd = replacement.end;
+      return (
+        typeof replacementStart === "number" &&
+        typeof replacementEnd === "number" &&
+        replacementStart >= start &&
+        replacementEnd <= end &&
+        replacementEnd > replacementStart
+      );
+    })
+    .map((replacement) => ({
+      ...replacement,
+      start: replacement.start! - start,
+      end: replacement.end! - start,
+    }));
+}
+
+function refreshPromptShortcutRunsFromResolvedPrompt(
+  promptShortcut: PromptShortcutMetadata | undefined,
+  resolvedPrompt: string,
+  replacements: readonly PromptShortcutWildcardReplacement[]
+): PromptShortcutMetadata | undefined {
+  const normalized = normalizePromptShortcutMetadata(promptShortcut);
+  if (!normalized?.promptRuns?.length || !resolvedPrompt.trim()) return normalized;
+  let cursor = 0;
+  const promptRuns = normalized.promptRuns.map((run) => {
+    const pattern = buildPromptRunResolvedPattern(run.resolvedPrompt);
+    if (!pattern) return run;
+    const remaining = resolvedPrompt.slice(cursor);
+    const match = pattern.exec(remaining);
+    if (!match || match.index < 0) return run;
+    const start = cursor + match.index;
+    const end = start + match[0].length;
+    cursor = end;
+    const wildcardReplacements = replacementsWithinPromptRun(replacements, start, end);
+    return {
+      ...run,
+      resolvedPrompt: resolvedPrompt.slice(start, end),
+      ...(wildcardReplacements.length > 0
+        ? { wildcardReplacements }
+        : { wildcardReplacements: undefined }),
+    };
+  });
+  return normalizePromptShortcutMetadata({ ...normalized, promptRuns });
+}
 
 function scorePromptTags(promptLower: string, tags: readonly string[]): number {
   let score = 0;
@@ -342,6 +452,8 @@ interface UserDbRow {
   lenient_local_image_fallback_model: string | null;
   secondary_ollama_host: string | null;
   experimental_dual_ollama_enabled: number;
+  experimental_all_model_effort_enabled: number;
+  psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
   preferred_openai_image_model: string | null;
@@ -349,6 +461,9 @@ interface UserDbRow {
   preferred_zen_wallpaper_openai_image_model: string | null;
   zen_wallpaper_opacity: number | null;
   zen_wallpaper_text_mask_enabled: number | null;
+  zen_wallpaper_grayscale_enabled: number | null;
+  zen_wallpaper_blurred_edges_enabled: number | null;
+  zen_wallpaper_style_notes: string | null;
   zen_session_idle_gap_ms: number | null;
   zen_fresh_start_gap_ms: number | null;
   zen_recent_context_messages: number | null;
@@ -356,6 +471,10 @@ interface UserDbRow {
   zen_wallpaper_reveal_delay_message_count: number | null;
   zen_wallpaper_reveal_span_message_count: number | null;
   zen_mood_sensitivity: number | null;
+  zen_canvas_typing_speed: number | null;
+  zen_ask_question_patience_enabled: number | null;
+  zen_ask_question_patience_ms: number | null;
+  zen_autonomy_enabled: number | null;
   comfyui_workflows: string | null;
   prism_default_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
@@ -497,7 +616,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -514,6 +633,51 @@ function dualOllamaWorkloadOptions(user: UserDbRow): {
     secondaryOllamaHost: user.secondary_ollama_host,
     experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
   };
+}
+
+async function inferBotMemoriesIfNeeded(
+  userId: string,
+  botId: string,
+  userKey: Buffer
+): Promise<void> {
+  const inferenceState = db.prepare(`
+    SELECT
+      MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
+      MAX(CASE WHEN source = 'inferred' THEN created_at END) AS latest_inferred_at
+    FROM memories
+    WHERE user_id = ?
+      AND bot_id = ?
+      AND source IN ('direct', 'inferred')
+  `).get(userId, botId) as {
+    latest_direct_at?: string | null;
+    latest_inferred_at?: string | null;
+  } | undefined;
+  const latestDirectAt = inferenceState?.latest_direct_at ?? null;
+  const latestInferredAt = inferenceState?.latest_inferred_at ?? null;
+  const inferenceScopeKey = `${userId}:${botId}`;
+  const shouldInfer =
+    latestDirectAt !== null &&
+    latestDirectAt > (latestInferredAt ?? "1970-01-01") &&
+    memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
+  if (!shouldInfer) return;
+
+  try {
+    const prismModel = (
+      db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
+        | { m: string | null }
+        | undefined
+    )?.m;
+    const memoryUser = getUserRow(userId);
+    const auxiliaryProvider = getAuxiliaryProvider(
+      prismModel,
+      dualOllamaWorkloadOptions(memoryUser)
+    );
+    await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
+  } catch (error) {
+    console.warn("Memory inference skipped:", error);
+  } finally {
+    memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
+  }
 }
 
 function seedModelVisibilityDefaultsIfNeeded(
@@ -665,6 +829,14 @@ function readOptionalString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function readModelOverride(value: unknown): string | null {
+  const model = readOptionalString(value);
+  if (model && isDisabledModelChoice(model)) {
+    throw new HttpError(400, "This model lane is disabled. Choose Auto or a model before sending.");
+  }
+  return model;
+}
+
 function readPrismMoodMode(value: unknown): PrismMoodMode {
   if (value === "chat") return "zen";
   return value === "coffee" || value === "sandbox" || value === "zen" ? value : "zen";
@@ -685,6 +857,115 @@ function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | und
     ...(typeof record.totalTokenCount === "number" && Number.isFinite(record.totalTokenCount)
       ? { totalTokenCount: Math.max(1, Math.floor(record.totalTokenCount)) }
       : {}),
+  };
+}
+
+function readZenPersonaTransition(
+  value: unknown
+): Required<ZenPersonaTransitionInput> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "picker") return undefined;
+  const fromBotId =
+    typeof record.fromBotId === "string" && record.fromBotId.trim().length > 0
+      ? record.fromBotId.trim()
+      : null;
+  const toBotId =
+    typeof record.toBotId === "string" && record.toBotId.trim().length > 0
+      ? record.toBotId.trim()
+      : null;
+  const style =
+    record.style === "previous-introduces" ? "previous-introduces" : "new-speaks";
+  return { fromBotId, toBotId, source: "picker", style };
+}
+
+function readZenAutonomy(value: unknown): ZenAutonomyInput | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "idle") return undefined;
+  const activeBotId =
+    typeof record.activeBotId === "string" && record.activeBotId.trim().length > 0
+      ? record.activeBotId.trim()
+      : null;
+  const idleMs =
+    typeof record.idleMs === "number" && Number.isFinite(record.idleMs)
+      ? Math.max(0, Math.round(record.idleMs))
+      : 0;
+  const clientTurnId =
+    typeof record.clientTurnId === "string" && record.clientTurnId.trim().length > 0
+      ? record.clientTurnId.trim().slice(0, 80)
+      : randomId(8);
+  return { source: "idle", activeBotId, idleMs, clientTurnId };
+}
+
+function readAskQuestionPenaltyLevel(
+  value: unknown
+): PrismMoodIgnoredQuestionPenaltyLevel | undefined {
+  return value === "light" || value === "normal" || value === "elevated"
+    ? value
+    : undefined;
+}
+
+function readZenAskQuestionPatience(
+  value: unknown
+): ZenAskQuestionPatienceInput | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.source !== "ask_question_patience") return undefined;
+  const activeBotId =
+    typeof record.activeBotId === "string" && record.activeBotId.trim().length > 0
+      ? record.activeBotId.trim()
+      : null;
+  const assistantMessageId =
+    typeof record.assistantMessageId === "string" &&
+    record.assistantMessageId.trim().length > 0
+      ? record.assistantMessageId.trim().slice(0, 120)
+      : undefined;
+  const prompt =
+    typeof record.prompt === "string" && record.prompt.trim().length > 0
+      ? record.prompt.trim().replace(/\s+/g, " ").slice(0, 500)
+      : undefined;
+  const options = Array.isArray(record.options)
+    ? record.options
+        .map((option) => {
+          if (!option || typeof option !== "object") return null;
+          const row = option as Record<string, unknown>;
+          const id =
+            typeof row.id === "string" && row.id.trim().length > 0
+              ? row.id.trim().slice(0, 80)
+              : null;
+          const label =
+            typeof row.label === "string" && row.label.trim().length > 0
+              ? row.label.trim().replace(/\s+/g, " ").slice(0, 160)
+              : null;
+          return id && label ? { id, label } : null;
+        })
+        .filter((option): option is { id: string; label: string } => option !== null)
+        .slice(0, 4)
+    : undefined;
+  const timeoutMs =
+    typeof record.timeoutMs === "number" && Number.isFinite(record.timeoutMs)
+      ? Math.max(0, Math.round(record.timeoutMs))
+      : undefined;
+  const activeElapsedMs =
+    typeof record.activeElapsedMs === "number" && Number.isFinite(record.activeElapsedMs)
+      ? Math.max(0, Math.round(record.activeElapsedMs))
+      : undefined;
+  const penaltyLevel = readAskQuestionPenaltyLevel(record.penaltyLevel);
+  const clientTurnId =
+    typeof record.clientTurnId === "string" && record.clientTurnId.trim().length > 0
+      ? record.clientTurnId.trim().slice(0, 80)
+      : randomId(8);
+  return {
+    source: "ask_question_patience",
+    activeBotId,
+    ...(assistantMessageId ? { assistantMessageId } : {}),
+    ...(prompt ? { prompt } : {}),
+    ...(options && options.length > 0 ? { options } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(activeElapsedMs !== undefined ? { activeElapsedMs } : {}),
+    ...(penaltyLevel ? { penaltyLevel } : {}),
+    clientTurnId,
   };
 }
 
@@ -1394,7 +1675,7 @@ function buildRoutes(): RouteDefinition[] {
       const anyOfflineProtected = storyBots.some((bot) => !bot.onlineEnabled);
       let effectiveProvider: ProviderName =
         anyOfflineProtected ? "local" : requestedProvider ?? user.preferred_provider;
-      const explicitModelOverride = anyOfflineProtected ? null : readOptionalString(body.modelOverride);
+      const explicitModelOverride = anyOfflineProtected ? null : readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const storyModelOverride =
         effectiveProvider === "local" ? REQUIRED_PRIMARY_LOCAL_MODEL_ID : explicitModelOverride;
@@ -1643,7 +1924,7 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const messageRowsRaw = db
         .prepare(
-          `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
+          `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
                   b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
@@ -1661,6 +1942,7 @@ function buildRoutes(): RouteDefinition[] {
         content: string;
         provider: string | null;
         model: string | null;
+        bot_id: string | null;
         tool_payload: string | null;
         bot_name: string | null;
         bot_color: string | null;
@@ -1681,6 +1963,12 @@ function buildRoutes(): RouteDefinition[] {
                 .get(conversationId, userId) as { n: number }
             ).n
           : messageRows.length;
+      const askQuestionTimedOutMessageIds = loadPrismMoodEventMessageIds(
+        db,
+        userId,
+        conversationId,
+        "ignored_question"
+      );
       // Match the shared ChatMessage shape used by POST /api/chat and the
       // web UI so both endpoints agree.
       const messages = messageRows.map((row): ChatMessage => {
@@ -1694,6 +1982,7 @@ function buildRoutes(): RouteDefinition[] {
               ? row.provider
               : undefined,
           model: row.model ?? undefined,
+          botId: row.bot_id ?? null,
           botName: row.bot_name ?? undefined,
           botColor: row.bot_color ?? undefined,
           botGlyph: row.bot_glyph ?? undefined,
@@ -1732,6 +2021,9 @@ function buildRoutes(): RouteDefinition[] {
             ? { moodConfidence: assembled.moodConfidence }
             : {}),
           ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
+          ...(assembled.askQuestion && askQuestionTimedOutMessageIds.has(row.id)
+            ? { askQuestionTimedOut: true }
+            : {}),
           ...(assembled.tellFictionalStory
             ? { tellFictionalStory: assembled.tellFictionalStory }
             : {}),
@@ -1874,6 +2166,50 @@ function buildRoutes(): RouteDefinition[] {
         ...(botOpinion ? { botOpinion } : {}),
       });
     }),
+    route("POST", "/api/conversations/:id/messages/user", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      let content = readString(body.content, "message").trim();
+      if (!content) {
+        throw new Error("Message cannot be empty.");
+      }
+      const conversation = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
+      }
+      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+        throw new Error("Only Zen conversations can append buffered user messages.");
+      }
+      const now = new Date().toISOString();
+      const messageId = randomId();
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        db.prepare(
+          `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+           VALUES (?, ?, ?, 'user', ?, ?)`
+        ).run(messageId, conversation.id, userId, content, now);
+        db.prepare(
+          "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
+        ).run(now, conversation.id, userId);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        message: {
+          id: messageId,
+          role: "user",
+          content,
+          createdAt: now,
+        },
+      });
+    }),
     route("POST", "/api/conversations/:id/zen-wallpaper", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
@@ -1887,13 +2223,15 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
-      const bodyModel =
+      const bodyModelRaw =
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
-          : undefined;
+          : "";
+      const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
+      const bodyModel = bodyModelRaw && !bodyModelDisabled ? bodyModelRaw : undefined;
       const promptOverride =
         typeof body.promptOverride === "string"
-          ? clampZenWallpaperPromptText(body.promptOverride, 3000)
+          ? normalizeZenWallpaperPromptOverride(body.promptOverride, 3000)
           : "";
       if (body.promptOverride !== undefined && promptOverride.length === 0) {
         throw new HttpError(400, "Type a custom Atmosphere prompt before generating.");
@@ -1904,6 +2242,13 @@ function buildRoutes(): RouteDefinition[] {
                   c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
                   c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
                   c.zen_wallpaper_status, c.zen_wallpaper_history,
+                  (SELECT m.bot_id
+                     FROM messages m
+                    WHERE m.conversation_id = c.id
+                      AND m.user_id = c.user_id
+                      AND m.role = 'assistant'
+                    ORDER BY m.created_at DESC
+                    LIMIT 1) AS last_assistant_bot_id,
                   b.name AS bot_name, b.system_prompt AS bot_system_prompt,
                   b.local_image_model AS bot_local_image_model,
                   b.openai_image_model AS bot_openai_image_model,
@@ -1923,6 +2268,7 @@ function buildRoutes(): RouteDefinition[] {
             zen_wallpaper_message_count: number | null;
             zen_wallpaper_status: string | null;
             zen_wallpaper_history: string | null;
+            last_assistant_bot_id: string | null;
             bot_name: string | null;
             bot_system_prompt: string | null;
             bot_local_image_model: string | null;
@@ -1941,6 +2287,47 @@ function buildRoutes(): RouteDefinition[] {
           "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
         ).run(conversationId, userId);
       }
+      const activeImageJob = peekActiveImageJobForUser(userId);
+      if (
+        dedupeActiveZenWallpaperGeneration(db, userId, {
+          conversationId,
+          activeZenWallpaperConversationId:
+            activeImageJob?.source === "zen_wallpaper"
+              ? activeImageJob.conversationId
+              : null,
+          enabled,
+        })
+      ) {
+        json(ctx.res, 200, {
+          ok: true,
+          zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+        });
+        return;
+      }
+      const wallpaperBotId =
+        conversation.last_assistant_bot_id?.trim() ||
+        conversation.bot_id?.trim() ||
+        null;
+      const wallpaperBot = wallpaperBotId
+        ? (db
+            .prepare(
+              `SELECT id, name, system_prompt, local_image_model,
+                      openai_image_model, online_enabled
+                 FROM bots
+                WHERE id = ? AND user_id = ?`
+            )
+            .get(wallpaperBotId, userId) as
+            | {
+                id: string;
+                name: string | null;
+                system_prompt: string | null;
+                local_image_model: string | null;
+                openai_image_model: string | null;
+                online_enabled: number | null;
+              }
+            | undefined)
+        : undefined;
+      const wallpaperPersonaBotId = wallpaperBot?.id ?? null;
 
       if (!enabled) {
         db.prepare(
@@ -2022,26 +2409,74 @@ function buildRoutes(): RouteDefinition[] {
         composeZenWallpaperPrompt({
           initialUserPrompt: firstUserMessage,
           recentContext,
-          botName: conversation.bot_name,
-          botSystemPrompt: conversation.bot_system_prompt,
+          botName: wallpaperBot?.name ?? conversation.bot_name,
+          botSystemPrompt:
+            wallpaperBot?.system_prompt ?? conversation.bot_system_prompt,
+          styleNotes: user.zen_wallpaper_style_notes,
         });
 
-      const botForcesLocal = conversation.bot_online_enabled === 0;
+      const botForcesLocal =
+        (wallpaperBot?.online_enabled ?? conversation.bot_online_enabled) === 0;
       const effectiveProvider =
         botForcesLocal
           ? "local"
           : requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
-      const resolvedLocalImageModel =
-        (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
-        (conversation.bot_local_image_model?.trim() ?? "") ||
-        (user.preferred_zen_wallpaper_local_image_model?.trim() ?? "") ||
-        (user.preferred_local_image_model?.trim() ?? "");
-      const resolvedOpenAiImageModel =
-        (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
-        (conversation.bot_openai_image_model?.trim() ?? "") ||
-        (user.preferred_zen_wallpaper_openai_image_model?.trim() ?? "") ||
-        (user.preferred_openai_image_model?.trim() ?? "");
-      if (effectiveProvider === "local" && !resolvedLocalImageModel) {
+      const wallpaperLocalImageModel = wallpaperBot?.local_image_model?.trim() ?? "";
+      const conversationLocalImageModel = conversation.bot_local_image_model?.trim() ?? "";
+      const preferredZenWallpaperLocalImageModel =
+        user.preferred_zen_wallpaper_local_image_model?.trim() ?? "";
+      const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
+      const wallpaperOpenAiImageModel = wallpaperBot?.openai_image_model?.trim() ?? "";
+      const conversationOpenAiImageModel = conversation.bot_openai_image_model?.trim() ?? "";
+      const preferredZenWallpaperOpenAiImageModel =
+        user.preferred_zen_wallpaper_openai_image_model?.trim() ?? "";
+      const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+      const localWallpaperDisabled =
+        (effectiveProvider === "local" && bodyModelDisabled) ||
+        isDisabledModelChoice(wallpaperLocalImageModel) ||
+        isDisabledModelChoice(conversationLocalImageModel) ||
+        isDisabledModelChoice(preferredZenWallpaperLocalImageModel) ||
+        isDisabledModelChoice(preferredLocalImageModel);
+      const onlineWallpaperDisabled =
+        (effectiveProvider !== "local" && bodyModelDisabled) ||
+        isDisabledModelChoice(wallpaperOpenAiImageModel) ||
+        isDisabledModelChoice(conversationOpenAiImageModel) ||
+        isDisabledModelChoice(preferredZenWallpaperOpenAiImageModel) ||
+        isDisabledModelChoice(preferredOpenAiImageModel);
+      const resolvedLocalImageModel = localWallpaperDisabled
+        ? ""
+        : (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
+          wallpaperLocalImageModel ||
+          conversationLocalImageModel ||
+          preferredZenWallpaperLocalImageModel ||
+          preferredLocalImageModel;
+      const resolvedOpenAiImageModel = onlineWallpaperDisabled
+        ? ""
+        : (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
+          wallpaperOpenAiImageModel ||
+          conversationOpenAiImageModel ||
+          preferredZenWallpaperOpenAiImageModel ||
+          preferredOpenAiImageModel;
+      const shouldRunLocalWallpaper =
+        effectiveProvider === "local" ||
+        (onlineWallpaperDisabled && Boolean(resolvedLocalImageModel));
+      if (
+        (effectiveProvider === "local" && localWallpaperDisabled) ||
+        (!shouldRunLocalWallpaper && onlineWallpaperDisabled)
+      ) {
+        db.prepare(
+          `UPDATE conversations
+              SET zen_wallpaper_status = 'error'
+            WHERE id = ? AND user_id = ?`
+        ).run(conversationId, userId);
+        throw new HttpError(
+          400,
+          effectiveProvider === "local" && localWallpaperDisabled
+            ? "Local Atmosphere image generation is disabled. Choose a local image model before generating."
+            : "Online Atmosphere image generation is disabled. Choose an online image model before generating."
+        );
+      }
+      if (shouldRunLocalWallpaper && !resolvedLocalImageModel) {
         db.prepare(
           `UPDATE conversations
               SET zen_wallpaper_status = 'error'
@@ -2056,7 +2491,7 @@ function buildRoutes(): RouteDefinition[] {
       const acqWallpaper = await tryAcquireImageSlot({
         userId,
         conversationId,
-        botId: null,
+        botId: wallpaperPersonaBotId,
         mode: "zen",
         incognito: false,
         captionPrompt: prompt,
@@ -2067,6 +2502,19 @@ function buildRoutes(): RouteDefinition[] {
         requestedSize: ZEN_WALLPAPER_SIZE,
       });
       if (!acqWallpaper.ok) {
+        if (
+          acqWallpaper.busyJob.source === "zen_wallpaper" &&
+          dedupeActiveZenWallpaperGeneration(db, userId, {
+            conversationId,
+            activeZenWallpaperConversationId: acqWallpaper.busyJob.conversationId,
+          })
+        ) {
+          json(ctx.res, 200, {
+            ok: true,
+            zenWallpaper: zenWallpaperResponseForConversation(conversationId),
+          });
+          return;
+        }
         throw new HttpError(
           503,
           "Another image is generating right now. Wait for it to finish, then try Atmosphere again."
@@ -2090,6 +2538,9 @@ function buildRoutes(): RouteDefinition[] {
         normalizeZenWallpaperRevealSpanMessageCount(
           user.zen_wallpaper_reveal_span_message_count
         );
+      const generatedWallpaperRevealDelayMessageCount = existingWallpaper.imageId
+        ? zenWallpaperRevealDelayMessageCount
+        : 0;
       const nextWallpaperHistoryJson = (imageId: string, createdAt: string): string =>
         serializeZenWallpaperHistory(
           buildZenWallpaperHistoryForGeneratedImage(
@@ -2099,10 +2550,10 @@ function buildRoutes(): RouteDefinition[] {
               promptSeed: prompt,
               generationMessageCount: messageCount,
               revealStartMessageCount:
-                messageCount + zenWallpaperRevealDelayMessageCount,
+                messageCount + generatedWallpaperRevealDelayMessageCount,
               revealFullMessageCount:
                 messageCount +
-                zenWallpaperRevealDelayMessageCount +
+                generatedWallpaperRevealDelayMessageCount +
                 zenWallpaperRevealSpanMessageCount,
               createdAt,
             },
@@ -2184,7 +2635,7 @@ function buildRoutes(): RouteDefinition[] {
         const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
         const promptForModel = prompt;
 
-        if (effectiveProvider === "local") {
+        if (shouldRunLocalWallpaper) {
           const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
           const runLocalBytes = (modelId: string) =>
             generateLocalImageBytesByModelId({
@@ -2227,7 +2678,7 @@ function buildRoutes(): RouteDefinition[] {
               imageId,
               userId,
               conversationId,
-              null,
+              wallpaperPersonaBotId,
               prompt,
               prompt,
               storedUrl,
@@ -2288,7 +2739,7 @@ function buildRoutes(): RouteDefinition[] {
                 imageId,
                 userId,
                 conversationId,
-                null,
+                wallpaperPersonaBotId,
                 prompt,
                 prompt,
                 storedUrl,
@@ -2336,7 +2787,7 @@ function buildRoutes(): RouteDefinition[] {
             imageId,
             userId,
             conversationId,
-            null,
+            wallpaperPersonaBotId,
             prompt,
             result.revisedPrompt,
             storedUrl,
@@ -2390,6 +2841,44 @@ function buildRoutes(): RouteDefinition[] {
         summary: getLatestThreadDisplaySummary(db, userId, conversationId, mode),
         internalSummary: getLatestThreadSummary(db, userId, conversationId, mode),
         latestSummaryAt: debug.latestSummaryAt,
+      });
+    }),
+    route("GET", "/api/bots/:id/zen-wallpaper", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      if (!botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        wallpaper: getLatestRememberedZenWallpaperForBot(db, userId, botId),
+      });
+    }),
+    route("GET", "/api/bots/:id/memory-panel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      if (!botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      deleteOrphanedBotMemories(db, userId);
+      await inferBotMemoriesIfNeeded(userId, botId, userKey);
+      const panel = loadBotMemoryPanelPayload({
+        db,
+        userId,
+        userKey,
+        botId,
+        conversationId: ctx.query.get("conversationId"),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        ...panel,
       });
     }),
     route("GET", "/api/bots/:id/summary", async (ctx) => {
@@ -2481,16 +2970,41 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       const user = getUserRow(userId);
+      const auxiliaryProvider = getAuxiliaryProvider(
+        user.prism_default_llm_model,
+        dualOllamaWorkloadOptions(user)
+      );
       const compacted = await summarizeThreadCompact(
         db,
-        getAuxiliaryProvider(
-          user.prism_default_llm_model,
-          dualOllamaWorkloadOptions(user)
-        ),
+        auxiliaryProvider,
         userId,
         conversationId,
         { mode, reason, force: true }
       );
+      if (mode === "zen" && reason === "mode_exit") {
+        const conversation = db
+          .prepare("SELECT incognito FROM conversations WHERE id = ? AND user_id = ?")
+          .get(conversationId, userId) as { incognito: number } | undefined;
+        if (conversation?.incognito !== 1) {
+          const latest = db
+            .prepare(
+              `SELECT bot_id
+                 FROM messages
+                WHERE conversation_id = ? AND user_id = ? AND role IN ('user', 'assistant')
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1`
+            )
+            .get(conversationId, userId) as { bot_id: string | null } | undefined;
+          await createZenPersonaSessionMemoryCheckpoint({
+            db,
+            provider: auxiliaryProvider,
+            userId,
+            conversationId,
+            botId: latest?.bot_id ?? null,
+            userKey: decryptUserKey(userId),
+          });
+        }
+      }
       if (mode === "sandbox" && reason === "mode_exit") {
         const conversation = db
           .prepare("SELECT bot_id, incognito FROM conversations WHERE id = ? AND user_id = ?")
@@ -2506,10 +3020,7 @@ function buildRoutes(): RouteDefinition[] {
           const userKey = decryptUserKey(userId);
           await summarizeSandboxBotStatus(
             db,
-            getAuxiliaryProvider(
-              user.prism_default_llm_model,
-              dualOllamaWorkloadOptions(user)
-            ),
+            auxiliaryProvider,
             userId,
             conversationBotId,
             { reason: "mode_exit", userKey }
@@ -2741,69 +3252,129 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, prismMood: persisted });
     }),
-    route("POST", "/api/composer/cleanup", async (ctx) => {
+    route("POST", "/api/conversations/:id/prism-mood/ask-question-timeout", async (ctx) => {
       const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const text = readComposerCleanupText(body.text);
-      const user = getUserRow(userId);
-      if (user.composer_writing_assist === 0) {
-        throw new Error("Composer writing assistance is disabled in Settings.");
+      const conversation = db
+        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .get(ctx.params.id, userId) as
+        | { id: string; conversation_mode: string | null }
+        | undefined;
+      if (!conversation) {
+        throw new Error("Conversation not found.");
       }
-
-      const forceLocal = body.forceLocal === true;
-      const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      let effectiveProvider = forceLocal ? "local" : user.preferred_provider;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride: null,
-        botPreferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
-      });
-      effectiveProvider = resolvedAuto.provider;
-
-      const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      try {
-        const cleanedText = await cleanupComposerTextWithModel({
-          text,
-          provider,
-          model: resolvedAuto.model,
-        });
+      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+        throw new Error("Only Zen conversations can record AskQuestion patience.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const assistantMessageId = readString(body.assistantMessageId, "assistantMessageId").trim();
+      const message = db
+        .prepare(
+          `SELECT id, conversation_id, role, content, created_at, tool_payload
+             FROM messages
+            WHERE id = ? AND conversation_id = ? AND user_id = ?
+            LIMIT 1`
+        )
+        .get(assistantMessageId, conversation.id, userId) as
+        | {
+            id: string;
+            conversation_id: string;
+            role: string;
+            content: string;
+            created_at: string;
+            tool_payload: string | null;
+          }
+        | undefined;
+      const mode = readPrismMoodMode(conversation.conversation_mode);
+      const now = new Date().toISOString();
+      const currentMood = loadPrismMoodState(db, userId, conversation.id, mode) ??
+        createDefaultPrismMoodState(mode, now);
+      if (!message) {
         json(ctx.res, 200, {
           ok: true,
-          text: cleanedText,
-          changed: cleanedText !== text,
-          provider: effectiveProvider,
-          model: resolvedAuto.model,
+          applied: false,
+          reason: "missing_message",
+          prismMood: currentMood,
         });
-      } catch (error) {
-        if (resolvedAuto.usedRequiredLocalFallback) {
-          throw new Error(
-            `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
+        return;
+      }
+      const laterMessage = db
+        .prepare(
+          `SELECT id, role, created_at
+             FROM messages
+            WHERE conversation_id = ? AND user_id = ? AND created_at > ?
+            ORDER BY created_at ASC
+            LIMIT 1`
+        )
+        .get(conversation.id, userId, message.created_at) as
+        | { id: string; role: string; created_at: string }
+        | undefined;
+      const applicability = resolveAskQuestionTimeoutApplicability(message, laterMessage);
+      if (!applicability.applies) {
+        json(ctx.res, 200, {
+          ok: true,
+          applied: false,
+          reason: applicability.reason,
+          prismMood: currentMood,
+        });
+        return;
+      }
+      const timeoutMessageId = applicability.messageId;
+      const penaltyLevel = classifyAskQuestionTimeoutPenalty(message);
+
+      const timeoutMs =
+        typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
+          ? Math.max(0, Math.round(body.timeoutMs))
+          : null;
+      const activeElapsedMs =
+        typeof body.activeElapsedMs === "number" && Number.isFinite(body.activeElapsedMs)
+          ? Math.max(0, Math.round(body.activeElapsedMs))
+          : null;
+      const user = getUserRow(userId);
+      let persistedMood = currentMood;
+      let applied = false;
+      db.exec("BEGIN IMMEDIATE TRANSACTION");
+      try {
+        applied = recordPrismMoodEventOnce(db, {
+          userId,
+          conversationId: conversation.id,
+          messageId: timeoutMessageId,
+          eventType: "ignored_question",
+          createdAt: now,
+          payload: {
+            ...(timeoutMs !== null ? { timeoutMs } : {}),
+            ...(activeElapsedMs !== null ? { activeElapsedMs } : {}),
+            penaltyLevel,
+          },
+        });
+        if (applied) {
+          persistedMood = upsertPrismMoodState(
+            db,
+            userId,
+            conversation.id,
+            applyPrismMoodIgnoredQuestion(
+              currentMood,
+              now,
+              normalizeZenMoodSensitivity(user.zen_mood_sensitivity),
+              penaltyLevel
+            )
           );
         }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
         throw error;
       }
+
+      json(ctx.res, 200, {
+        ok: true,
+        applied,
+        duplicate: !applied,
+        penaltyLevel,
+        prismMood: persistedMood,
+      });
     }),
     route("POST", "/api/composer/wildcard-value", async (ctx) => {
-      const userId = requireAuth(ctx);
+      requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const slot = getBuiltInPromptWildcardSlot(
         body.key ?? body.slotKey ?? body.label ?? body.name
@@ -2811,78 +3382,14 @@ function buildRoutes(): RouteDefinition[] {
       if (!slot) {
         throw new HttpError(400, "Unknown wildcard slot.");
       }
-      if (slot.key === "NUM") {
-        json(ctx.res, 200, {
-          ok: true,
-          key: slot.key,
-          value: String(1 + Math.floor(Math.random() * 100)),
-        });
-        return;
+      const value = generateScriptedPromptWildcardValue(slot);
+      if (!value) {
+        throw new HttpError(500, "Wildcard slot could not be generated.");
       }
-      const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
-      const explicitModelOverride = readOptionalString(body.modelOverride);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride,
-        botPreferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.prism_default_llm_model) ??
-              readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
-      });
-      effectiveProvider = resolvedAuto.provider;
-      const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const raw = await provider.generateResponse(
-        [
-          {
-            role: "system",
-            content: COMPOSER_WILDCARD_VALUE_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: [
-              `Wildcard key: ${slot.key}`,
-              `Display label: ${slot.label}`,
-              `Generation rule: ${slot.generationHint}`,
-              "Choose one genuinely random value that fits the wildcard type.",
-              "Do not use conversation context, user context, current prompt text, or adjacent words.",
-              `Random nonce: ${randomId(10)}`,
-              "Return JSON only: {\"value\":\"...\"}",
-            ].join("\n"),
-          },
-        ],
-        {
-          model: resolvedAuto.model,
-          temperature: 1.08,
-          maxTokens: 80,
-          jsonMode: true,
-        }
-      );
-      const value = normalizeComposerWildcardValueResponse(raw, slot);
       json(ctx.res, 200, {
         ok: true,
         key: slot.key,
         value,
-        provider: effectiveProvider,
-        model: resolvedAuto.model,
       });
     }),
     route("POST", "/api/composer/random-prompt", async (ctx) => {
@@ -2903,7 +3410,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
-      const explicitModelOverride = readOptionalString(body.modelOverride);
+      const explicitModelOverride = readModelOverride(body.modelOverride);
       let botPreferredModel: string | null = null;
       let botName = "Prism";
       let botSystemPrompt: string | undefined;
@@ -2960,14 +3467,25 @@ function buildRoutes(): RouteDefinition[] {
         user.secondary_ollama_host,
         anthropicApiKey
       );
+      const accountPreferredModel =
+        effectiveProvider === "local"
+          ? readOptionalString(user.preferred_local_model)
+          : readOptionalString(user.preferred_online_model);
+      const preferredModelForAuto = botPreferredModel ?? accountPreferredModel;
+      const explicitModelForAuto = botForcesLocalProvider ? null : explicitModelOverride;
+      if (
+        !explicitModelForAuto &&
+        isDisabledModelChoice(preferredModelForAuto)
+      ) {
+        throw new HttpError(
+          400,
+          `${effectiveProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before sending.`
+        );
+      }
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
-        explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
-        botPreferredModel:
-          botPreferredModel ??
-          (effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model)),
+        explicitModelOverride: explicitModelForAuto,
+        botPreferredModel: preferredModelForAuto,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
       });
@@ -3071,13 +3589,38 @@ function buildRoutes(): RouteDefinition[] {
       const starterPrompt = body.starterPrompt === true;
       const starterPromptWarrantsIntro =
         starterPrompt && body.starterPromptWarrantsIntro === true;
-      const message = starterPrompt ? "" : readString(body.message, "message");
+      // Which post-auth surface this turn came from. Default to "sandbox"
+      // so that any client that forgets to send `mode` gets the safer
+      // no-side-effects posture (no memory writes) rather than silently
+      // leaking a sandbox turn into cross-session storage. processChatMessage
+      // enforces the same default as defense in depth.
+      const mode =
+        body.mode === "zen" || body.mode === "chat"
+          ? "zen"
+          : "sandbox";
+      const requestedPersonaTransition =
+        mode === "zen" ? readZenPersonaTransition(body.personaTransition) : undefined;
+      const requestedZenAutonomy =
+        mode === "zen" ? readZenAutonomy(body.zenAutonomy) : undefined;
+      const requestedAskQuestionPatience =
+        mode === "zen" ? readZenAskQuestionPatience(body.zenAskQuestionPatience) : undefined;
+      const message =
+        starterPrompt ||
+        requestedPersonaTransition ||
+        requestedZenAutonomy ||
+        requestedAskQuestionPatience
+          ? ""
+          : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
       const promptWildcards = normalizePromptWildcardRunMetadata(body.promptWildcards);
       const commandCenterPrompt = body.commandCenterPrompt === true || Boolean(promptShortcut);
       const resolvedCommandCenterPrompt =
         !starterPrompt && commandCenterPrompt
           ? readOptionalString(body.resolvedCommandCenterPrompt)
+          : null;
+      const promptInputOverride =
+        !starterPrompt && !commandCenterPrompt
+          ? readOptionalString(body.promptInputOverride)
           : null;
       const conversationId =
         typeof body.conversationId === "string" ? body.conversationId : undefined;
@@ -3093,29 +3636,22 @@ function buildRoutes(): RouteDefinition[] {
           : body.botId === null
             ? null
             : undefined;
-      // Which post-auth surface this turn came from. Default to "sandbox"
-      // so that any client that forgets to send `mode` gets the safer
-      // no-side-effects posture (no memory writes) rather than silently
-      // leaking a sandbox turn into cross-session storage. processChatMessage
-      // enforces the same default as defense in depth.
-      const mode =
-        body.mode === "zen" || body.mode === "chat"
-          ? "zen"
-          : "sandbox";
-      // Zen is a continuous PRISM-only lane: no private/incognito turns.
-      // Sandbox ignores incognito as before.
-      const incognito = false;
+      // Zen private mode keeps the visible branch client-held: the request can
+      // carry an ephemeral transcript snapshot, but the server skips memory and
+      // persistence for the turn. Sandbox ignores incognito as before.
+      const incognito = mode === "zen" && body.incognito === true;
       // Per-request provider/model override so a fresh playground/Zen switch
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.
-      const explicitModelOverride = readOptionalString(body.modelOverride);
+      const explicitModelOverride = readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const effectiveBotId = mode === "zen" ? null : botId;
+      let effectiveBotId = botId;
+      let zenAutonomyDecision: Awaited<ReturnType<typeof decideZenAutonomyTurn>> | undefined;
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
         : undefined;
@@ -3123,20 +3659,76 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen"
           ? normalizeSessionResumeContext(body.sessionResumeContext)
           : null;
+      const topicReset = mode === "zen" && body.topicReset === true;
       const prismInterruption =
         mode === "zen" ? readPrismInterruption(body.prismInterruption) : undefined;
+      const personaTransition =
+        mode === "zen" ? requestedPersonaTransition : undefined;
+      const zenAutonomy = mode === "zen" ? requestedZenAutonomy : undefined;
+      const zenAskQuestionPatience =
+        mode === "zen" ? requestedAskQuestionPatience : undefined;
+      if (zenAskQuestionPatience && botId === undefined) {
+        effectiveBotId = zenAskQuestionPatience.activeBotId;
+      }
+      if (zenAutonomy) {
+        if (!normalizeZenAutonomyEnabled(user.zen_autonomy_enabled)) {
+          throw new HttpError(403, "Zen Autonomy is disabled.");
+        }
+        if (!conversationId) {
+          throw new HttpError(400, "Zen Autonomy requires an active Zen conversation.");
+        }
+        const now = new Date().toISOString();
+        const currentMood =
+          loadPrismMoodState(db, userId, conversationId, "zen") ??
+          createDefaultPrismMoodState("zen", now);
+        const auxiliaryProvider = getAuxiliaryProvider(user.prism_default_llm_model, {
+          secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+        });
+        zenAutonomyDecision = await decideZenAutonomyTurn({
+          db,
+          userId,
+          conversationId,
+          provider: auxiliaryProvider,
+          activeBotId: zenAutonomy.activeBotId,
+          idleMs: zenAutonomy.idleMs,
+          prismMood: currentMood,
+        });
+        if (zenAutonomyDecision.action === "silent") {
+          const conversation = loadPersistedConversationForChatResponse({
+            db,
+            userId,
+            activeConversationId: conversationId,
+            prismMood: currentMood,
+          });
+          json(ctx.res, 200, {
+            ok: true,
+            conversation,
+            prismMood: currentMood,
+            zenAutonomyDecision,
+          });
+          return;
+        }
+        effectiveBotId = zenAutonomyDecision.botId;
+      }
+      const runtimeBotId =
+        mode === "zen" && personaTransition
+          ? personaTransition.style === "previous-introduces"
+            ? personaTransition.fromBotId
+            : personaTransition.toBotId
+          : effectiveBotId;
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
       let botForcesLocalProvider = false;
       let botPreferredModel: string | null = null;
       const generationOverrides: GenerateOptions = {};
-      if (effectiveBotId) {
+      if (runtimeBotId) {
         const bot = db
           .prepare(
             "SELECT name, system_prompt, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
-          .get(effectiveBotId, userId) as
+          .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
@@ -3175,7 +3767,7 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
       }
-      if (!starterPromptLabel && effectiveBotId === null) {
+      if (!starterPromptLabel && mode === "zen" && runtimeBotId == null) {
         starterPromptLabel = "Prism";
       }
 
@@ -3220,7 +3812,7 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onChatClientClose);
       ctx.req.once("aborted", onChatClientClose);
       ctx.res.once("close", onChatClientClose);
-      let messageForChat = resolvedCommandCenterPrompt ?? message;
+      let messageForChat = resolvedCommandCenterPrompt ?? promptInputOverride ?? message;
       let promptShortcutForChat = promptShortcut;
       let promptWildcardsForChat = promptWildcards;
       let resolvedWildcardReplacements =
@@ -3250,23 +3842,19 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (
         !starterPrompt &&
-        (commandCenterPrompt || promptWildcards) &&
         user.composer_writing_assist !== 0 &&
         resolvedWildcardReplacements.length > 0 &&
         messageForChat.trim().length > 0
       ) {
-        const cleanupProvider = selectProvider(
-          effectiveProvider,
-          openAiApiKey,
-          user.secondary_ollama_host,
-          anthropicApiKey
+        const cleanupProvider = getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
         );
         try {
           const cleanup = await cleanupResolvedPromptWithModel({
             prompt: messageForChat,
             replacements: resolvedWildcardReplacements,
             provider: cleanupProvider,
-            model: resolvedAuto.model,
             signal: chatAbort.signal,
           });
           messageForChat = cleanup.prompt;
@@ -3289,6 +3877,11 @@ function buildRoutes(): RouteDefinition[] {
             }
           : undefined,
         messageForChat
+      );
+      promptShortcutForChat = refreshPromptShortcutRunsFromResolvedPrompt(
+        promptShortcutForChat,
+        messageForChat,
+        resolvedWildcardReplacements
       );
       promptWildcardsForChat = withPromptWildcardResolvedPrompt(
         promptWildcards
@@ -3326,6 +3919,9 @@ function buildRoutes(): RouteDefinition[] {
               user.zen_mood_sensitivity
             ),
             experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+            experimentalAllModelEffortEnabled:
+              user.experimental_all_model_effort_enabled === 1,
+            psychicModeEnabled: user.psychic_mode_enabled === 1,
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
             assistantImageUserPrefs: {
@@ -3337,6 +3933,9 @@ function buildRoutes(): RouteDefinition[] {
               secondaryOllamaHost: user.secondary_ollama_host,
             },
             botId: effectiveBotId,
+            ...(personaTransition ? { personaTransition } : {}),
+            ...(zenAutonomy ? { zenAutonomy } : {}),
+            ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
             incognito,
             ephemeralMessages,
             botSystemPrompt,
@@ -3345,6 +3944,7 @@ function buildRoutes(): RouteDefinition[] {
             sessionEnding,
             sessionResumeContext,
             forceNewConversation,
+            topicReset,
             prismInterruption,
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
@@ -3378,6 +3978,8 @@ function buildRoutes(): RouteDefinition[] {
         pendingImageJob,
         toolCalls,
         backendEvents,
+        psychicDebug,
+        zenAutonomyDecision: resultZenAutonomyDecision,
       } = result;
       json(ctx.res, 200, {
         ok: true,
@@ -3392,6 +3994,10 @@ function buildRoutes(): RouteDefinition[] {
         ...(pendingImageJob ? { pendingImageJob } : {}),
         ...(toolCalls ? { toolCalls } : {}),
         ...(backendEvents ? { backendEvents } : {}),
+        ...(psychicDebug ? { psychicDebug } : {}),
+        ...(resultZenAutonomyDecision ?? zenAutonomyDecision
+          ? { zenAutonomyDecision: resultZenAutonomyDecision ?? zenAutonomyDecision }
+          : {}),
       });
     }),
     route("GET", "/api/image-jobs/:id", async (ctx) => {
@@ -3657,7 +4263,7 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const sessionSpeakerModel = readModelOverride(body.modelOverride);
       const result = await collectCoffeePollVotes(
         db,
         userId,
@@ -3724,7 +4330,7 @@ function buildRoutes(): RouteDefinition[] {
         Number.isFinite(body.sessionRemainingMs)
           ? Math.max(0, body.sessionRemainingMs)
           : null;
-      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const sessionSpeakerModel = readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -3770,7 +4376,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = readProvider(body.preferredProvider);
-      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const sessionSpeakerModel = readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -3848,7 +4454,7 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readOptionalString(body.modelOverride);
+      const sessionSpeakerModel = readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const result = await processCoffeeTurn(
         db,
@@ -3894,44 +4500,7 @@ function buildRoutes(): RouteDefinition[] {
         parseMemoryListQueryOptions(ctx.query);
       deleteOrphanedBotMemories(db, userId);
       if (botId && inferBotMemories) {
-        const inferenceState = db.prepare(`
-          SELECT
-            MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
-            MAX(CASE WHEN source = 'inferred' THEN created_at END) AS latest_inferred_at
-          FROM memories
-          WHERE user_id = ?
-            AND bot_id = ?
-            AND source IN ('direct', 'inferred')
-        `).get(userId, botId) as {
-          latest_direct_at?: string | null;
-          latest_inferred_at?: string | null;
-        } | undefined;
-        const latestDirectAt = inferenceState?.latest_direct_at ?? null;
-        const latestInferredAt = inferenceState?.latest_inferred_at ?? null;
-        const inferenceScopeKey = `${userId}:${botId}`;
-        const shouldInfer =
-          latestDirectAt !== null &&
-          latestDirectAt > (latestInferredAt ?? "1970-01-01") &&
-          memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
-        if (shouldInfer) {
-          try {
-            const prismModel = (
-              db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
-                | { m: string | null }
-                | undefined
-            )?.m;
-            const memoryUser = getUserRow(userId);
-            const auxiliaryProvider = getAuxiliaryProvider(
-              prismModel,
-              dualOllamaWorkloadOptions(memoryUser)
-            );
-            await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
-          } catch (error) {
-            console.warn("Memory inference skipped:", error);
-          } finally {
-            memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
-          }
-        }
+        await inferBotMemoriesIfNeeded(userId, botId, userKey);
       }
       type MemoryRow = {
         id: string;
@@ -4434,6 +5003,82 @@ function buildRoutes(): RouteDefinition[] {
         prismMood: persistedMood,
       });
     }),
+    route("POST", "/api/messages/:id/discard-latest-zen-assistant", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const result = discardLatestZenAssistantMessage(db, userId, ctx.params.id);
+      const mode = readPrismMoodMode(result.conversationMode);
+      const prismMood = loadPrismMoodState(db, userId, result.conversationId, mode) ??
+        createDefaultPrismMoodState(mode, new Date().toISOString());
+
+      const conversation = loadPersistedConversationForChatResponse({
+        db,
+        userId,
+        activeConversationId: result.conversationId,
+        prismMood,
+      });
+      json(ctx.res, 200, { ok: true, conversation, prismMood });
+    }),
+    route("POST", "/api/conversations/:id/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const rawCount = body?.count;
+      if (
+        rawCount !== undefined &&
+        rawCount !== null &&
+        rawCount !== 1 &&
+        rawCount !== 2
+      ) {
+        throw new HttpError(400, "Use /undo, /undo 2, or /undo-turn.");
+      }
+      const result = undoLatestConversationMessages(
+        db,
+        userId,
+        ctx.params.id,
+        rawCount === 2 ? 2 : 1
+      );
+      const cancelledImageJobId = cancelActiveImageJobForConversation(
+        userId,
+        result.conversationId
+      );
+      if (result.deletedSummaryIds.length > 0) {
+        await Promise.allSettled(
+          result.deletedSummaryIds.map((summaryId) => deleteVector(summaryId))
+        );
+      }
+      for (const relPath of result.deletedImageRelPaths) {
+        try {
+          tryUnlinkGeneratedImageFile(relPath);
+        } catch (error) {
+          console.error(
+            `[undo] orphan file after image rollback path=${relPath}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      const conversation = loadPersistedConversationForChatResponse({
+        db,
+        userId,
+        activeConversationId: result.conversationId,
+        prismMood: result.prismMood,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+        prismMood: result.prismMood,
+        undone: {
+          count: result.deletedMessages,
+          messageIds: result.messageIds,
+          deletedMemories: result.deletedMemories,
+          updatedMemories: result.updatedMemories,
+          deletedSummaries: result.deletedSummaries,
+          deletedZenSessionMemories: result.deletedZenSessionMemories,
+          deletedMoodEvents: result.deletedMoodEvents,
+          deletedImages: result.deletedImages,
+          ...(cancelledImageJobId ? { cancelledImageJobId } : {}),
+        },
+      });
+    }),
     route("DELETE", "/api/messages/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const messageId = ctx.params.id;
@@ -4457,6 +5102,9 @@ function buildRoutes(): RouteDefinition[] {
           autoMemory: Boolean(user.auto_memory),
           composerWritingAssist: user.composer_writing_assist !== 0,
           experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+          experimentalAllModelEffortEnabled:
+            user.experimental_all_model_effort_enabled === 1,
+          psychicModeEnabled: user.psychic_mode_enabled === 1,
           fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
@@ -4501,6 +5149,15 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
             user.zen_wallpaper_text_mask_enabled
           ),
+          zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleEnabled(
+            user.zen_wallpaper_grayscale_enabled
+          ),
+          zenWallpaperBlurredEdgesEnabled: normalizeZenWallpaperBlurredEdgesEnabled(
+            user.zen_wallpaper_blurred_edges_enabled
+          ),
+          zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+            user.zen_wallpaper_style_notes
+          ),
           zenSessionIdleGapMs: normalizeZenSessionIdleGapMs(
             user.zen_session_idle_gap_ms
           ),
@@ -4525,6 +5182,18 @@ function buildRoutes(): RouteDefinition[] {
             ),
           zenMoodSensitivity: normalizeZenMoodSensitivity(
             user.zen_mood_sensitivity
+          ),
+          zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeed(
+            user.zen_canvas_typing_speed
+          ),
+          zenAskQuestionPatienceEnabled: normalizeZenAskQuestionPatienceEnabled(
+            user.zen_ask_question_patience_enabled
+          ),
+          zenAskQuestionPatienceMs: normalizeZenAskQuestionPatienceMs(
+            user.zen_ask_question_patience_ms
+          ),
+          zenAutonomyEnabled: normalizeZenAutonomyEnabled(
+            user.zen_autonomy_enabled
           ),
           comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
           devMemoriesEnabled: user.dev_memories_enabled === 1,
@@ -4696,6 +5365,9 @@ function buildRoutes(): RouteDefinition[] {
         autoMemory: user.auto_memory,
         composerWritingAssist: user.composer_writing_assist,
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled,
+        experimentalAllModelEffortEnabled:
+          user.experimental_all_model_effort_enabled,
+        psychicModeEnabled: user.psychic_mode_enabled,
         fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
@@ -4713,6 +5385,10 @@ function buildRoutes(): RouteDefinition[] {
           user.preferred_zen_wallpaper_openai_image_model,
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
         zenWallpaperTextMaskEnabled: user.zen_wallpaper_text_mask_enabled,
+        zenWallpaperGrayscaleEnabled: user.zen_wallpaper_grayscale_enabled,
+        zenWallpaperBlurredEdgesEnabled:
+          user.zen_wallpaper_blurred_edges_enabled,
+        zenWallpaperStyleNotes: user.zen_wallpaper_style_notes,
         zenSessionIdleGapMs: user.zen_session_idle_gap_ms,
         zenFreshStartGapMs: user.zen_fresh_start_gap_ms,
         zenRecentContextMessages: user.zen_recent_context_messages,
@@ -4723,6 +5399,10 @@ function buildRoutes(): RouteDefinition[] {
         zenWallpaperRevealSpanMessageCount:
           user.zen_wallpaper_reveal_span_message_count,
         zenMoodSensitivity: user.zen_mood_sensitivity,
+        zenCanvasTypingSpeed: user.zen_canvas_typing_speed,
+        zenAskQuestionPatienceEnabled: user.zen_ask_question_patience_enabled,
+        zenAskQuestionPatienceMs: user.zen_ask_question_patience_ms,
+        zenAutonomyEnabled: user.zen_autonomy_enabled,
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
@@ -4780,9 +5460,9 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -4801,6 +5481,8 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.hiddenComfyUiWorkflowIds),
         modelVisibilityDefaultsVersion,
         next.experimentalDualOllamaEnabled,
+        next.experimentalAllModelEffortEnabled,
+        next.psychicModeEnabled,
         next.preferredLocalModel,
         next.preferredOnlineModel,
         next.lenientLocalFallbackModel,
@@ -4813,6 +5495,9 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredZenWallpaperOpenAiImageModel,
         next.zenWallpaperOpacity,
         next.zenWallpaperTextMaskEnabled ? 1 : 0,
+        next.zenWallpaperGrayscaleEnabled ? 1 : 0,
+        next.zenWallpaperBlurredEdgesEnabled ? 1 : 0,
+        next.zenWallpaperStyleNotes,
         next.zenSessionIdleGapMs,
         next.zenFreshStartGapMs,
         next.zenRecentContextMessages,
@@ -4820,6 +5505,10 @@ function buildRoutes(): RouteDefinition[] {
         next.zenWallpaperRevealDelayMessageCount,
         next.zenWallpaperRevealSpanMessageCount,
         next.zenMoodSensitivity,
+        next.zenCanvasTypingSpeed,
+        next.zenAskQuestionPatienceEnabled ? 1 : 0,
+        next.zenAskQuestionPatienceMs,
+        next.zenAutonomyEnabled ? 1 : 0,
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,
@@ -4840,6 +5529,9 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         settings: {
           displayName: next.displayName,
+          experimentalAllModelEffortEnabled:
+            next.experimentalAllModelEffortEnabled === 1,
+          psychicModeEnabled: next.psychicModeEnabled === 1,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
@@ -4947,10 +5639,12 @@ function buildRoutes(): RouteDefinition[] {
         ? requestedSize
         : inferImageGenerationSizeFromPrompt(prompt);
       const quality = (body.quality as string) ?? "standard";
-      const bodyModel =
+      const bodyModelRaw =
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
-          : undefined;
+          : "";
+      const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
+      const bodyModel = bodyModelRaw && !bodyModelDisabled ? bodyModelRaw : undefined;
       const conversationIdRaw =
         typeof body.conversationId === "string" ? body.conversationId.trim() : "";
       const bodyBotId =
@@ -5003,16 +5697,45 @@ function buildRoutes(): RouteDefinition[] {
         }
       }
 
-      const resolvedLocalImageModel =
-        (bodyModel && effectiveProvider === "local" ? bodyModel.trim() : "") ||
-        (botPersona?.local_image_model?.trim() ?? "") ||
-        (user.preferred_local_image_model?.trim() ?? "");
+      const botLocalImageModel = botPersona?.local_image_model?.trim() ?? "";
+      const botOpenAiImageModel = botPersona?.openai_image_model?.trim() ?? "";
+      const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
+      const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+      const localImageDisabled =
+        (effectiveProvider === "local" && bodyModelDisabled) ||
+        isDisabledModelChoice(botLocalImageModel) ||
+        isDisabledModelChoice(preferredLocalImageModel);
+      const openAiImageDisabled =
+        (effectiveProvider !== "local" && bodyModelDisabled) ||
+        isDisabledModelChoice(botOpenAiImageModel) ||
+        isDisabledModelChoice(preferredOpenAiImageModel);
+      const resolvedLocalImageModel = localImageDisabled
+        ? ""
+        : (bodyModel && effectiveProvider === "local" ? bodyModel.trim() : "") ||
+          botLocalImageModel ||
+          preferredLocalImageModel;
 
-      const resolvedOpenAiImageModel =
-        (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
-        (botPersona?.openai_image_model?.trim() ?? "") ||
-        (user.preferred_openai_image_model?.trim() ?? "");
-      if (effectiveProvider === "local" && !resolvedLocalImageModel) {
+      const resolvedOpenAiImageModel = openAiImageDisabled
+        ? ""
+        : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
+          botOpenAiImageModel ||
+          preferredOpenAiImageModel;
+      const shouldRunLocal =
+        effectiveProvider === "local" ||
+        (openAiImageDisabled && Boolean(resolvedLocalImageModel));
+      if (effectiveProvider === "local" && localImageDisabled) {
+        throw new HttpError(
+          400,
+          "Local image generation is disabled. Choose a local image model before generating."
+        );
+      }
+      if (!shouldRunLocal && openAiImageDisabled) {
+        throw new HttpError(
+          400,
+          "Online image generation is disabled. Choose an online image model before generating."
+        );
+      }
+      if (shouldRunLocal && !resolvedLocalImageModel) {
         throw new Error(
           "Pick a local image model in the Images panel header, then try again."
         );
@@ -5038,7 +5761,7 @@ function buildRoutes(): RouteDefinition[] {
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
 
-      if (effectiveProvider === "local") {
+      if (shouldRunLocal) {
         const lenientImageFb = user.lenient_local_image_fallback_model?.trim() ?? "";
         const runLocalBytes = (modelId: string) =>
           generateLocalImageBytesByModelId({

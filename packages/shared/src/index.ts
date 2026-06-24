@@ -1,8 +1,10 @@
 import type { TellFictionalStoryPayload } from "./prismTool.js";
+import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 
 export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
+  applyPrismMoodIgnoredQuestion,
   applyPrismMoodInterruption,
   applyPrismMoodIgnoreCooldown,
   applyPrismMoodIgnoredTurn,
@@ -36,6 +38,7 @@ export {
   type PrismMoodDebugPatch,
   type PrismMoodDelta,
   type PrismMoodDeltaKind,
+  type PrismMoodIgnoredQuestionPenaltyLevel,
   type PrismMoodInterruptionInput,
   type PrismMoodKey,
   type PrismMoodMode,
@@ -94,6 +97,7 @@ export {
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
   normalizeZenDisplayMetadata,
+  normalizeStoredZenAssistantTurnPayload,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -108,6 +112,8 @@ export {
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
+  type StoredZenAssistantTurnKind,
+  type StoredZenAssistantTurnPayload,
   type ZenDisplayAlign,
   type ZenDisplayLinePlacement,
   type ZenDisplayMetadata,
@@ -116,22 +122,29 @@ export {
 
 export {
   normalizePromptShortcutMetadata,
+  isDisabledPromptWildcardToken,
   normalizeBuiltInPromptWildcardSlotKey,
   normalizePromptWildcardRunMetadata,
+  parseBuiltInPromptWildcardReference,
+  normalizePsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
+  parseStoredPsychicThoughtPayload,
   serializePromptShortcutPayload,
   serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
   getBuiltInPromptWildcardSlot,
+  type BuiltInPromptWildcardReference,
   type BuiltInPromptWildcardSlot,
   type BuiltInPromptWildcardSlotKey,
   type PromptShortcutFlag,
   type PromptShortcutMetadata,
+  type PromptShortcutRunMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  type PsychicThoughtPayload,
 } from "./promptShortcut.js";
 
 export {
@@ -284,6 +297,7 @@ import type {
 import type {
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
+  PsychicThoughtPayload,
 } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
 import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
@@ -317,6 +331,8 @@ export interface ChatMessage {
   provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
+  /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
+  botId?: string | null;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -331,6 +347,8 @@ export interface ChatMessage {
   zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
   askQuestion?: AskQuestionPayload;
+  /** True once the pending AskQuestion was closed by the Zen patience timer. */
+  askQuestionTimedOut?: boolean;
   /** Story action rail metadata for long fictional prose. */
   tellFictionalStory?: TellFictionalStoryPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
@@ -339,6 +357,8 @@ export interface ChatMessage {
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** Concise visible summary from Psychic mode for this user turn. */
+  psychicThought?: PsychicThoughtPayload;
 }
 
 /**
@@ -658,6 +678,7 @@ export type MemoryTier = "short_term" | "long_term";
 export interface ZenSessionMemoryItem {
   id: string;
   conversationId?: string;
+  botId?: string | null;
   title: string;
   text: string;
   trigger?: string;
@@ -682,9 +703,11 @@ export interface ZenSessionMemoryOverview {
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  DISABLED_MODEL_CHOICE,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
+  isDisabledModelChoice,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
@@ -786,6 +809,14 @@ export interface ChatRequestPayload {
   modelOverride?: string;
   reasoningEffort?: ReasoningEffort;
   botId?: string | null;
+  /** When true in Zen, keep this turn client-held and skip memory/persistence. */
+  incognito?: boolean;
+  /** Zen-only automatic Persona handoff turn. */
+  personaTransition?: ZenPersonaTransitionInput;
+  /** Zen-only idle autonomy check/turn. */
+  zenAutonomy?: ZenAutonomyInput;
+  /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
+  zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
@@ -794,9 +825,44 @@ export interface ChatRequestPayload {
   ephemeralMessages?: ChatMessage[];
   /** Optional signal to trigger end-of-session rolling compaction. */
   sessionEnding?: boolean;
+  /** Zen-only one-turn cue that the next user message should pivot away from the prior topic. */
+  topicReset?: boolean;
   /** Optional metadata when the latest Zen send interrupted Prism. */
   prismInterruption?: PrismMoodInterruptionInput;
 }
+
+export type ZenPersonaTransitionStyle = "new-speaks" | "previous-introduces";
+
+export interface ZenPersonaTransitionInput {
+  fromBotId: string | null;
+  toBotId: string | null;
+  source: "picker";
+  /** Missing style is treated as "new-speaks" for older clients. */
+  style?: ZenPersonaTransitionStyle;
+}
+
+export interface ZenAutonomyInput {
+  source: "idle";
+  activeBotId: string | null;
+  idleMs: number;
+  clientTurnId: string;
+}
+
+export interface ZenAskQuestionPatienceInput {
+  source: "ask_question_patience";
+  activeBotId: string | null;
+  assistantMessageId?: string;
+  prompt?: string;
+  options?: Array<{ id: string; label: string }>;
+  timeoutMs?: number;
+  activeElapsedMs?: number;
+  penaltyLevel?: PrismMoodIgnoredQuestionPenaltyLevel;
+  clientTurnId: string;
+}
+
+export type ZenAutonomyDecision =
+  | { action: "silent" }
+  | { action: "speak"; botId: string | null };
 
 /**
  * Optional quick-reply labels inferred from the assistant's opening turn when

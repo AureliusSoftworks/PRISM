@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   ChatMessage,
+  StoredZenAssistantTurnPayload,
   ZenPreviousContextSummary,
   ZenSessionMemoryItem,
   ZenSessionMemoryOverview,
 } from "@localai/shared";
+import { normalizeStoredZenAssistantTurnPayload } from "@localai/shared";
 import { decryptJson, encryptJson, randomId } from "./security.ts";
 import type { LlmProvider } from "./providers.ts";
 import {
@@ -24,6 +26,12 @@ The user has asked to pause, save, or finish the current thread later. Given onl
 Return JSON only in this shape: {"title":"3-8 word label","text":"1-3 concise sentences preserving the story/task checkpoint, open variables, names, choices, and where to resume."}
 Do not invent hidden text. Do not mention that this is a memory.`;
 
+const ZEN_PERSONA_SESSION_MEMORY_EXTRACT_PROMPT = `You write short-lived Zen Persona checkpoints for Prism.
+Given only the ordinary one-on-one transcript between this Persona and the human user, extract what this Persona should remember about their interaction with the user.
+Return JSON only in this shape: {"title":"3-8 word label","text":"1-3 concise sentences preserving the player-facing story/task checkpoint, emotional beat, open variables, and where this Persona should resume."}
+Do not write memories of bots talking to each other, meeting each other, watching each other, or having relationships with each other.
+Do not mention hidden memory, checkpoints, UI, or metadata.`;
+
 type ZenSessionMemoryPayload = {
   title: string;
   text: string;
@@ -34,11 +42,21 @@ type ZenSessionMemoryPayload = {
 type ZenSessionMemoryRow = {
   id: string;
   conversation_id: string | null;
+  bot_id: string | null;
   ciphertext: string;
   iv: string;
   tag: string;
   created_at: string;
   expires_at: string;
+};
+
+type ZenSessionMemoryMessageRow = {
+  id: string;
+  role: string;
+  content: string;
+  bot_id: string | null;
+  tool_payload: string | null;
+  created_at: string;
 };
 
 function clampText(value: string, maxChars: number): string {
@@ -97,6 +115,7 @@ function decryptSessionMemoryRow(
     return {
       id: row.id,
       ...(row.conversation_id ? { conversationId: row.conversation_id } : {}),
+      botId: row.bot_id ?? null,
       title: payload.title,
       text: payload.text,
       ...(payload.trigger ? { trigger: payload.trigger } : {}),
@@ -124,12 +143,38 @@ export function pruneExpiredZenSessionMemories(
   return Number(result.changes ?? 0);
 }
 
-function pruneOverflowZenSessionMemories(db: DatabaseSync, userId: string): number {
-  const rows = db
-    .prepare(
-      "SELECT id FROM zen_session_memories WHERE user_id = ? ORDER BY created_at DESC, id DESC"
-    )
-    .all(userId) as Array<{ id: string }>;
+function normalizeBotId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function pruneOverflowZenSessionMemories(
+  db: DatabaseSync,
+  userId: string,
+  botId?: string | null
+): number {
+  const scoped = arguments.length >= 3;
+  const normalizedBotId = normalizeBotId(botId);
+  const rows = scoped
+    ? normalizedBotId
+      ? db
+          .prepare(
+            `SELECT id FROM zen_session_memories
+              WHERE user_id = ? AND bot_id = ?
+              ORDER BY created_at DESC, id DESC`
+          )
+          .all(userId, normalizedBotId) as Array<{ id: string }>
+      : db
+          .prepare(
+            `SELECT id FROM zen_session_memories
+              WHERE user_id = ? AND bot_id IS NULL
+              ORDER BY created_at DESC, id DESC`
+          )
+          .all(userId) as Array<{ id: string }>
+    : db
+        .prepare(
+          "SELECT id FROM zen_session_memories WHERE user_id = ? ORDER BY created_at DESC, id DESC"
+        )
+        .all(userId) as Array<{ id: string }>;
   const staleIds = rows.slice(ZEN_SESSION_MEMORY_LIMIT).map((row) => row.id);
   if (staleIds.length === 0) return 0;
   const deleteStmt = db.prepare("DELETE FROM zen_session_memories WHERE user_id = ? AND id = ?");
@@ -145,18 +190,42 @@ export function listZenSessionMemories(
   db: DatabaseSync,
   userId: string,
   userKey: Buffer,
-  now = new Date()
+  now = new Date(),
+  options: { botId?: string | null; limit?: number } = {}
 ): ZenSessionMemoryItem[] {
   pruneExpiredZenSessionMemories(db, userId, now);
-  const rows = db
-    .prepare(
-      `SELECT id, conversation_id, ciphertext, iv, tag, created_at, expires_at
-         FROM zen_session_memories
-        WHERE user_id = ?
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?`
-    )
-    .all(userId, ZEN_SESSION_MEMORY_LIMIT) as ZenSessionMemoryRow[];
+  const scoped = Object.prototype.hasOwnProperty.call(options, "botId");
+  const normalizedBotId = normalizeBotId(options.botId);
+  const limit = Math.max(1, Math.min(24, Math.round(options.limit ?? ZEN_SESSION_MEMORY_LIMIT)));
+  const rows = scoped
+    ? normalizedBotId
+      ? db
+          .prepare(
+            `SELECT id, conversation_id, bot_id, ciphertext, iv, tag, created_at, expires_at
+               FROM zen_session_memories
+              WHERE user_id = ? AND bot_id = ?
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?`
+          )
+          .all(userId, normalizedBotId, limit) as ZenSessionMemoryRow[]
+      : db
+          .prepare(
+            `SELECT id, conversation_id, bot_id, ciphertext, iv, tag, created_at, expires_at
+               FROM zen_session_memories
+              WHERE user_id = ? AND bot_id IS NULL
+              ORDER BY created_at DESC, id DESC
+              LIMIT ?`
+          )
+          .all(userId, limit) as ZenSessionMemoryRow[]
+    : db
+        .prepare(
+          `SELECT id, conversation_id, bot_id, ciphertext, iv, tag, created_at, expires_at
+             FROM zen_session_memories
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?`
+        )
+        .all(userId, limit) as ZenSessionMemoryRow[];
   return rows
     .map((row) => decryptSessionMemoryRow(row, userKey))
     .filter((item): item is ZenSessionMemoryItem => item !== null);
@@ -278,6 +347,7 @@ export async function createZenSessionMemoryCheckpoint(args: {
   provider: LlmProvider;
   userId: string;
   conversationId: string;
+  botId?: string | null;
   userKey: Buffer;
   history: ChatMessage[];
   userMessage: ChatMessage;
@@ -315,6 +385,7 @@ export async function createZenSessionMemoryCheckpoint(args: {
 
   const createdAt = now.toISOString();
   const expiresAt = isoFromMs(now.getTime() + ZEN_SESSION_MEMORY_TTL_MS);
+  const botId = normalizeBotId(args.botId);
   const payload: ZenSessionMemoryPayload = {
     title,
     text,
@@ -326,25 +397,221 @@ export async function createZenSessionMemoryCheckpoint(args: {
   const id = randomId(12);
   db.prepare(
     `INSERT INTO zen_session_memories
-       (id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     userId,
     conversationId,
+    botId,
     encrypted.ciphertext,
     encrypted.iv,
     encrypted.tag,
     createdAt,
     expiresAt
   );
-  pruneOverflowZenSessionMemories(db, userId);
+  pruneOverflowZenSessionMemories(db, userId, botId);
   return {
     id,
     conversationId,
+    botId,
     title,
     text,
     trigger: payload.trigger,
+    sourceMessageIds: payload.sourceMessageIds,
+    createdAt,
+    expiresAt,
+  };
+}
+
+function parseStoredZenTurnMarker(
+  raw: string | null | undefined
+): StoredZenAssistantTurnPayload | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    return normalizeStoredZenAssistantTurnPayload(
+      (parsed as Record<string, unknown>).zenTurn
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function sameBotId(left: string | null | undefined, right: string | null | undefined): boolean {
+  return normalizeBotId(left) === normalizeBotId(right);
+}
+
+function isOrdinaryPersonaAssistantMessage(
+  row: ZenSessionMemoryMessageRow,
+  botId: string | null
+): boolean {
+  if (row.role !== "assistant") return false;
+  if (!sameBotId(row.bot_id, botId)) return false;
+  if (!row.content.trim()) return false;
+  return parseStoredZenTurnMarker(row.tool_payload) === undefined;
+}
+
+function buildPersonaCheckpointTranscript(args: {
+  rows: ZenSessionMemoryMessageRow[];
+  botId: string | null;
+}): { transcript: string; sourceMessageIds: string[]; userCount: number; assistantCount: number } | null {
+  const lastAssistantIndex = args.rows.reduce((latest, row, index) =>
+    isOrdinaryPersonaAssistantMessage(row, args.botId) ? index : latest,
+    -1
+  );
+  if (lastAssistantIndex < 0) return null;
+
+  let previousOtherAssistantIndex = -1;
+  for (let index = lastAssistantIndex - 1; index >= 0; index -= 1) {
+    const row = args.rows[index];
+    if (row?.role === "assistant" && !sameBotId(row.bot_id, args.botId)) {
+      previousOtherAssistantIndex = index;
+      break;
+    }
+  }
+
+  const previousOtherAssistant =
+    previousOtherAssistantIndex >= 0 ? args.rows[previousOtherAssistantIndex] : undefined;
+  const previousMarker = parseStoredZenTurnMarker(previousOtherAssistant?.tool_payload);
+  const suppressBridgeUsers =
+    previousMarker?.kind === "persona-transition" &&
+    previousMarker.style === "previous-introduces" &&
+    sameBotId(previousMarker.toBotId, args.botId);
+
+  const relevantRows: ZenSessionMemoryMessageRow[] = [];
+  let sawTargetAssistant = false;
+  for (const row of args.rows.slice(previousOtherAssistantIndex + 1)) {
+    if (row.role === "assistant") {
+      if (isOrdinaryPersonaAssistantMessage(row, args.botId)) {
+        sawTargetAssistant = true;
+        relevantRows.push(row);
+      }
+      continue;
+    }
+    if (row.role === "user" && sameBotId(row.bot_id, args.botId) && row.content.trim()) {
+      if (suppressBridgeUsers && !sawTargetAssistant) continue;
+      relevantRows.push(row);
+    }
+  }
+
+  const userCount = relevantRows.filter((row) => row.role === "user").length;
+  const assistantCount = relevantRows.filter((row) => row.role === "assistant").length;
+  if (userCount < 1 || assistantCount < 1) return null;
+
+  const transcript = relevantRows
+    .slice(-ZEN_SESSION_MEMORY_TRANSCRIPT_MAX_MESSAGES)
+    .map((row) => `${row.role === "user" ? "User" : "Persona"}: ${clampText(row.content, 900)}`)
+    .join("\n");
+  if (!transcript.trim()) return null;
+  return {
+    transcript,
+    sourceMessageIds: relevantRows.map((row) => row.id).slice(-12),
+    userCount,
+    assistantCount,
+  };
+}
+
+function fallbackPersonaCheckpointTitle(personaName: string): string {
+  return clampText(`${personaName} checkpoint`, ZEN_SESSION_MEMORY_TITLE_MAX_CHARS);
+}
+
+function fallbackPersonaCheckpointText(transcript: string): string {
+  return fallbackCheckpointText(transcript);
+}
+
+function resolvePersonaName(db: DatabaseSync, userId: string, botId: string | null): string {
+  if (!botId) return "Prism";
+  const row = db
+    .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public') LIMIT 1")
+    .get(botId, userId) as { name?: string | null } | undefined;
+  return row?.name?.trim() || "Persona";
+}
+
+export async function createZenPersonaSessionMemoryCheckpoint(args: {
+  db: DatabaseSync;
+  provider: LlmProvider;
+  userId: string;
+  conversationId: string;
+  botId: string | null;
+  userKey: Buffer;
+  now?: Date;
+}): Promise<ZenSessionMemoryItem | null> {
+  const { db, provider, userId, conversationId, userKey } = args;
+  const botId = normalizeBotId(args.botId);
+  const now = args.now ?? new Date();
+  pruneExpiredZenSessionMemories(db, userId, now);
+
+  const rows = db
+    .prepare(
+      `SELECT id, role, content, bot_id, tool_payload, created_at
+         FROM messages
+        WHERE conversation_id = ? AND user_id = ? AND role IN ('user', 'assistant')
+        ORDER BY created_at ASC, id ASC`
+    )
+    .all(conversationId, userId) as ZenSessionMemoryMessageRow[];
+  const checkpointTranscript = buildPersonaCheckpointTranscript({ rows, botId });
+  if (!checkpointTranscript) return null;
+
+  const personaName = resolvePersonaName(db, userId, botId);
+  let title = fallbackPersonaCheckpointTitle(personaName);
+  let text = fallbackPersonaCheckpointText(checkpointTranscript.transcript);
+
+  try {
+    const raw = await provider.generateResponse([
+      { role: "system", content: ZEN_PERSONA_SESSION_MEMORY_EXTRACT_PROMPT },
+      {
+        role: "user",
+        content: [
+          `Persona: ${personaName}`,
+          "[Ordinary one-on-one transcript]",
+          checkpointTranscript.transcript,
+        ].join("\n"),
+      },
+    ]);
+    const parsed = parseCheckpointJson(raw);
+    if (parsed?.text && parsed.text.trim().length > 0) {
+      text = parsed.text;
+      title = parsed.title && parsed.title.trim().length > 0
+        ? parsed.title
+        : clampText(firstNonEmptyLine(parsed.text), ZEN_SESSION_MEMORY_TITLE_MAX_CHARS);
+    }
+  } catch {
+    // Deterministic fallback still creates a usable Persona continuity marker.
+  }
+
+  const createdAt = now.toISOString();
+  const expiresAt = isoFromMs(now.getTime() + ZEN_SESSION_MEMORY_TTL_MS);
+  const payload: ZenSessionMemoryPayload = {
+    title,
+    text,
+    sourceMessageIds: checkpointTranscript.sourceMessageIds,
+  };
+  const encrypted = encryptJson(payload as unknown as Record<string, unknown>, userKey);
+  const id = randomId(12);
+  db.prepare(
+    `INSERT INTO zen_session_memories
+       (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    userId,
+    conversationId,
+    botId,
+    encrypted.ciphertext,
+    encrypted.iv,
+    encrypted.tag,
+    createdAt,
+    expiresAt
+  );
+  pruneOverflowZenSessionMemories(db, userId, botId);
+  return {
+    id,
+    conversationId,
+    botId,
+    title,
+    text,
     sourceMessageIds: payload.sourceMessageIds,
     createdAt,
     expiresAt,
@@ -418,16 +685,24 @@ export function loadZenSessionMemoryOverview(args: {
   userId: string;
   userKey: Buffer;
   activeConversationId?: string | null;
+  botId?: string | null;
   now?: Date;
 }): ZenSessionMemoryOverview {
   const now = args.now ?? new Date();
+  const scoped = Object.prototype.hasOwnProperty.call(args, "botId");
   return {
     previousContext: getZenPreviousContextSummary({
       db: args.db,
       userId: args.userId,
       activeConversationId: args.activeConversationId,
     }),
-    sessionMemories: listZenSessionMemories(args.db, args.userId, args.userKey, now),
+    sessionMemories: listZenSessionMemories(
+      args.db,
+      args.userId,
+      args.userKey,
+      now,
+      scoped ? { botId: args.botId, limit: 1 } : {}
+    ),
   };
 }
 
@@ -456,4 +731,20 @@ export function buildZenSessionMemoryPromptContext(
     return null;
   }
   return lines.join("\n");
+}
+
+export function buildZenPersonaContinuityPromptContext(
+  overview: ZenSessionMemoryOverview | null | undefined,
+  personaName?: string | null
+): string | null {
+  const memory = overview?.sessionMemories[0];
+  if (!memory) return null;
+  const label = personaName?.trim() || (memory.botId ? "this Persona" : "Prism");
+  return [
+    "Zen Persona continuity context:",
+    `This is private short-term continuity for ${label}'s one-on-one relationship with the human user.`,
+    "Use it only when it helps the current reply feel continuous. Do not announce hidden memory or metadata.",
+    "Do not treat this as memory of bots talking to, meeting, watching, or being with each other.",
+    `Latest checkpoint (${memory.title}): ${memory.text}`,
+  ].join("\n");
 }

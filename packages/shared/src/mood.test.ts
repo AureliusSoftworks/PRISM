@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyPrismMoodIgnoredQuestion,
   applyPrismMoodInterruption,
   applyPrismMoodIgnoreCooldown,
   applyPrismMoodIgnoredTurn,
@@ -70,6 +71,60 @@ test("mood sensitivity clamps values and scales irritation jumps", () => {
 
   assert.ok(high.annoyance > low.annoyance);
   assert.ok(high.warmth < low.warmth);
+});
+
+test("ignored AskQuestion nudges mood without counting as an interruption", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const ignored = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z"
+  );
+
+  assert.equal(ignored.recentDeltas[0]?.kind, "ignored_question");
+  assert.ok(ignored.annoyance > base.annoyance);
+  assert.ok(ignored.warmth < base.warmth);
+  assert.ok(ignored.engagement < base.engagement);
+  assert.equal(prismMoodInterruptionStreak(ignored), 0);
+  assert.equal(shouldPrismMoodDeclineResponse(ignored), false);
+});
+
+test("ignored AskQuestion respects mood sensitivity", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const low = applyPrismMoodIgnoredQuestion(base, "2026-06-19T12:00:45.000Z", 0);
+  const high = applyPrismMoodIgnoredQuestion(base, "2026-06-19T12:00:45.000Z", 1);
+
+  assert.ok(high.annoyance > low.annoyance);
+  assert.ok(high.warmth < low.warmth);
+  assert.ok(high.engagement < low.engagement);
+});
+
+test("ignored AskQuestion penalty levels stay modest but ordered", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-06-19T12:00:00.000Z");
+  const light = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "light"
+  );
+  const normal = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "normal"
+  );
+  const elevated = applyPrismMoodIgnoredQuestion(
+    base,
+    "2026-06-19T12:00:45.000Z",
+    0.5,
+    "elevated"
+  );
+
+  assert.ok(light.annoyance < normal.annoyance);
+  assert.ok(normal.annoyance < elevated.annoyance);
+  assert.ok(light.warmth > normal.warmth);
+  assert.ok(normal.warmth > elevated.warmth);
+  assert.equal(shouldPrismMoodStartIgnoreCooldown(elevated), false);
+  assert.equal(shouldPrismMoodDeclineResponse(elevated), false);
 });
 
 test("high mood sensitivity crosses boundaries sooner", () => {

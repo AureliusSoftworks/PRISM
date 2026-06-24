@@ -100,3 +100,33 @@ export function applyComposeMentionTabToEditor(
     .run();
   return true;
 }
+
+export type MentionPersonaEditorAction =
+  | { kind: "none" }
+  | { kind: "select-persona"; bot: BotMentionPick };
+
+/**
+ * Zen Persona picker action: commits the highlighted bot as UI state and removes
+ * only the active `@...` token from the rich editor.
+ */
+export function applyComposeMentionPersonaToEditor(
+  editor: Editor,
+  bots: readonly BotMentionPick[],
+  highlightedIndex: number
+): MentionPersonaEditorAction {
+  const token = getAtMentionFromEditor(editor);
+  if (!token) return { kind: "none" };
+
+  const filtered = filterBotsForMentionQuery(bots, token.query);
+  if (filtered.length === 0) return { kind: "none" };
+
+  const hi = ((highlightedIndex % filtered.length) + filtered.length) % filtered.length;
+  const bot = filtered[hi]!;
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: token.from, to: token.to })
+    .setTextSelection(token.from)
+    .run();
+  return { kind: "select-persona", bot };
+}

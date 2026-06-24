@@ -5,9 +5,10 @@ export const COMPOSE_MENTION_MENU_VIEWPORT_PAD_PX = 12;
 export const COMPOSE_MENTION_MENU_MAX_WIDTH_PX = 360;
 export const COMPOSE_MENTION_MENU_MIN_WIDTH_PX = 260;
 export const COMPOSE_MENTION_MENU_PORTAL_Z_INDEX = 2500;
+export const COMPOSE_MENTION_MENU_CARET_GAP_PX = 12;
 
-/** Matches `.composeBotMenu { max-height: min(420px, …) }` for layout math. */
-const MENTION_MENU_MAX_HEIGHT_CAP_PX = 420;
+/** Mention trays stay shorter than the full bot picker dropdown. */
+const MENTION_MENU_MAX_HEIGHT_CAP_PX = 320;
 /** Minimum space (px) we want below the caret before preferring open-upward. */
 const MENTION_MENU_MIN_OPEN_BELOW_PX = 160;
 
@@ -43,7 +44,7 @@ export function computeMentionMenuFixedStyle(
   const vw = globalThis.window.innerWidth;
   const vh = globalThis.window.innerHeight;
   const pad = COMPOSE_MENTION_MENU_VIEWPORT_PAD_PX;
-  const gap = 6;
+  const gap = COMPOSE_MENTION_MENU_CARET_GAP_PX;
   const maxW = Math.min(COMPOSE_MENTION_MENU_MAX_WIDTH_PX, vw - pad * 2);
   const minWidth = Math.min(Math.max(caretRect.width || 0, floorMinWidth), maxW);
   // Clamp `left` using max width so the menu cannot extend past the
@@ -58,12 +59,12 @@ export function computeMentionMenuFixedStyle(
   let top: number;
   let maxHeight: number;
 
-  if (spaceBelow >= MENTION_MENU_MIN_OPEN_BELOW_PX || spaceBelow >= spaceAbove) {
-    top = topIfBelow;
-    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceBelow));
-  } else {
+  if (spaceAbove >= MENTION_MENU_MIN_OPEN_BELOW_PX || spaceAbove >= spaceBelow) {
     maxHeight = Math.min(maxHeightCap, Math.max(80, spaceAbove));
     top = Math.max(pad, caretRect.top - gap - maxHeight);
+  } else {
+    top = topIfBelow;
+    maxHeight = Math.min(maxHeightCap, Math.max(80, spaceBelow));
   }
 
   if (top + maxHeight + pad > vh) {

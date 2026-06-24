@@ -1,7 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
+  DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
+  DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
+  DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
 } from "./settings.ts";
 
@@ -13,6 +18,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "coffee_group_seats",
   "coffee_presets",
   "coffee_bot_social_state",
+  "prism_mood_events",
   "prism_mood_state",
   "session_opinions",
   "bot_opinions",
@@ -59,6 +65,8 @@ export function restoreFactoryDefaultsInDatabase(
           lenient_local_image_fallback_model = NULL,
           secondary_ollama_host = NULL,
           experimental_dual_ollama_enabled = 0,
+          experimental_all_model_effort_enabled = 0,
+          psychic_mode_enabled = 0,
           comfyui_host = NULL,
           comfyui_workflows = '[]',
           preferred_local_image_model = NULL,
@@ -67,7 +75,13 @@ export function restoreFactoryDefaultsInDatabase(
           preferred_zen_wallpaper_openai_image_model = NULL,
           zen_wallpaper_opacity = ?,
           zen_wallpaper_text_mask_enabled = ?,
+          zen_wallpaper_grayscale_enabled = ?,
+          zen_wallpaper_blurred_edges_enabled = ?,
+          zen_wallpaper_style_notes = ?,
           zen_mood_sensitivity = ?,
+          zen_ask_question_patience_enabled = ?,
+          zen_ask_question_patience_ms = ?,
+          zen_autonomy_enabled = 0,
           composer_writing_assist = 1,
           fallback_model_message_stripe = 1,
           prism_default_llm_model = NULL,
@@ -90,7 +104,12 @@ export function restoreFactoryDefaultsInDatabase(
       .run(
         DEFAULT_ZEN_WALLPAPER_OPACITY,
         DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+        DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
+        DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED ? 1 : 0,
+        DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
         DEFAULT_ZEN_MOOD_SENSITIVITY,
+        DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
+        DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
         nowIso,
         userId
       ) as {

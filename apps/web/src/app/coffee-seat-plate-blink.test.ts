@@ -9,16 +9,16 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(";(", true), ";(");
   });
 
-  it("replaces leading colon with space when eyes closed", () => {
-    assert.equal(applyCoffeeSeatBlink(":|", false), " |");
-    assert.equal(applyCoffeeSeatBlink(":D", false), " D");
-    assert.equal(applyCoffeeSeatBlink(":[", false), " [");
-    assert.equal(applyCoffeeSeatBlink(":V", false), " V");
+  it("replaces leading colon with non-collapsing whitespace when eyes closed", () => {
+    assert.equal(applyCoffeeSeatBlink(":|", false), "\u00a0|");
+    assert.equal(applyCoffeeSeatBlink(":D", false), "\u00a0D");
+    assert.equal(applyCoffeeSeatBlink(":[", false), "\u00a0[");
+    assert.equal(applyCoffeeSeatBlink(":V", false), "\u00a0V");
   });
 
-  it("replaces leading semicolon (sad eyes) when eyes closed", () => {
-    assert.equal(applyCoffeeSeatBlink(";(", false), " (");
-    assert.equal(applyCoffeeSeatBlink(";0", false), " 0");
+  it("replaces leading semicolon (sad eyes) with non-collapsing whitespace", () => {
+    assert.equal(applyCoffeeSeatBlink(";(", false), "\u00a0(");
+    assert.equal(applyCoffeeSeatBlink(";0", false), "\u00a00");
   });
 
   it("no-ops on empty or unknown first character", () => {

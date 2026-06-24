@@ -3,10 +3,11 @@ import { describe, it } from "node:test";
 import {
   composeZenWallpaperPrompt,
   extractZenWallpaperVisualCues,
+  normalizeZenWallpaperPromptOverride,
 } from "../zen-wallpaper-prompt.ts";
 
 describe("composeZenWallpaperPrompt", () => {
-  it("distills transcript debris into compact abstract visual cues", () => {
+  it("distills transcript debris into compact soft symbolic motifs", () => {
     const prompt = composeZenWallpaperPrompt({
       initialUserPrompt: "/funny-story",
       recentContext: [
@@ -22,10 +23,13 @@ describe("composeZenWallpaperPrompt", () => {
       botSystemPrompt: "assistant",
     });
 
-    assert.match(prompt, /^Abstract ambient wallpaper for a calm Zen chat canvas\./);
     assert.match(
       prompt,
-      /Subtle abstract cues from moonlight, old city stone, fiddle-string lines, capering motion, dawn mist, woven thread texture, fleeting storybook magic, and melancholy humor\./
+      /^Ambient art wallpaper for a calm Zen chat canvas, abstract first with soft symbolic motifs\./
+    );
+    assert.match(
+      prompt,
+      /Use soft symbolic motifs suggested by family keepsake warmth, moonlight, old city stone, and fiddle-string lines;/
     );
     assert.doesNotMatch(prompt, /\bConversation seed\b/i);
     assert.doesNotMatch(prompt, /\bCompanion context\b/i);
@@ -39,7 +43,29 @@ describe("composeZenWallpaperPrompt", () => {
     assert.doesNotMatch(prompt, /\bLuna\b/i);
     assert.doesNotMatch(prompt, /\bSarah\b/i);
     assert.doesNotMatch(prompt, /\bEestiotamm\b/i);
-    assert.match(prompt, /No text, letters, numbers, people, faces, bodies/);
+    assert.match(prompt, /no borders, frames, mats, letterboxing, pillarboxing, side gutters, or empty bars/i);
+    assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies/);
+  });
+
+  it("uses concrete conversation motifs for baking and family-memory texture", () => {
+    const prompt = composeZenWallpaperPrompt({
+      initialUserPrompt:
+        "I keep thinking about my grandmother's handwritten recipe card.",
+      recentContext: [
+        "user: The kitchen smelled like cinnamon cookies cooling on the tray.",
+        "assistant: That sounds like a small family keepsake made of warm light, flour, and memory.",
+      ].join("\n"),
+      botName: "Prism",
+      botSystemPrompt: "assistant",
+    });
+
+    assert.match(
+      prompt,
+      /Use soft symbolic motifs suggested by warm kitchen light, flour-dust texture, cooling tray geometry, and folded stationery;/
+    );
+    assert.doesNotMatch(prompt, /Subtle abstract cues from reflective quiet/i);
+    assert.match(prompt, /quiet still-life traces rather than a literal scene/);
+    assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies/);
   });
 
   it("falls back to a quiet abstract brief when the conversation has no visual hooks", () => {
@@ -57,9 +83,58 @@ describe("composeZenWallpaperPrompt", () => {
     assert.doesNotMatch(prompt, /\buser:/i);
     assert.doesNotMatch(prompt, /\bassistant:/i);
   });
+
+  it("keeps blank style notes equivalent to the default prompt", () => {
+    const args = {
+      initialUserPrompt: "quiet evening",
+      recentContext: "user: quiet evening\nassistant: of course",
+      botName: null,
+      botSystemPrompt: null,
+    };
+
+    assert.equal(
+      composeZenWallpaperPrompt(args),
+      composeZenWallpaperPrompt({ ...args, styleNotes: "   " })
+    );
+  });
+
+  it("includes style notes before PRISM brand and safety constraints", () => {
+    const prompt = composeZenWallpaperPrompt({
+      initialUserPrompt: "let's sit by the ocean",
+      recentContext: "user: ocean light\nassistant: slowly",
+      botName: null,
+      botSystemPrompt: null,
+      styleNotes: "  slow ocean light, paper\n grain  ",
+    });
+
+    assert.match(
+      prompt,
+      /User atmosphere style notes: slow ocean light, paper grain\./
+    );
+    assert.ok(
+      prompt.indexOf("User atmosphere style notes") <
+        prompt.indexOf("Add faint prismatic rainbow accents")
+    );
+    assert.match(prompt, /Mostly charcoal, pearl, and mist-gray/);
+    assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies/);
+  });
 });
 
 describe("extractZenWallpaperVisualCues", () => {
+  it("maps baking memory language to soft motif labels", () => {
+    assert.deepEqual(
+      extractZenWallpaperVisualCues(
+        "user: grandma's handwritten recipe card, flour on the kitchen table, cookies cooling on a tray"
+      ),
+      [
+        "warm kitchen light",
+        "flour-dust texture",
+        "cooling tray geometry",
+        "folded stationery",
+      ]
+    );
+  });
+
   it("maps software conversation language to abstract geometry instead of raw terms", () => {
     assert.deepEqual(
       extractZenWallpaperVisualCues(
@@ -67,5 +142,18 @@ describe("extractZenWallpaperVisualCues", () => {
       ),
       ["soft signal geometry"]
     );
+  });
+});
+
+describe("normalizeZenWallpaperPromptOverride", () => {
+  it("preserves custom Atmosphere prompt whitespace while rejecting blank input", () => {
+    const prompt = "Line one\n\n  Line two with spacing  ";
+
+    assert.equal(normalizeZenWallpaperPromptOverride(prompt), prompt);
+    assert.equal(normalizeZenWallpaperPromptOverride("   \n  "), "");
+  });
+
+  it("hard-clamps custom Atmosphere prompts without adding style notes or ellipses", () => {
+    assert.equal(normalizeZenWallpaperPromptOverride("abcdef", 4), "abcd");
   });
 });

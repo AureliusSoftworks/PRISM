@@ -1,5 +1,6 @@
 import {
-  getBuiltInPromptWildcardSlot,
+  isDisabledPromptWildcardToken,
+  parseBuiltInPromptWildcardReference,
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 
@@ -12,6 +13,33 @@ export interface PromptRandomizationDeck {
   name: string;
   values: readonly string[];
   aliases?: readonly string[];
+}
+
+export function pendingCleanupOptimisticMessageContent(options: {
+  rawDraft: string;
+  resolvedDisplayContent: string;
+  pendingCleanup: boolean;
+}): string {
+  const rawDraft = options.rawDraft.trim();
+  const resolvedDisplayContent = options.resolvedDisplayContent.trim();
+  if (options.pendingCleanup) {
+    return rawDraft || resolvedDisplayContent;
+  }
+  return resolvedDisplayContent || rawDraft;
+}
+
+export function resendDraftTextForMessage(options: {
+  content: string;
+  commandAliasOriginalText?: string | null;
+  promptShortcutTemplate?: string | null;
+  promptWildcardTemplate?: string | null;
+}): string {
+  return (
+    options.promptWildcardTemplate?.trim() ||
+    options.promptShortcutTemplate?.trim() ||
+    options.commandAliasOriginalText?.trim() ||
+    options.content.trim()
+  );
 }
 
 export function promptInsertionStartsSentence(before: string): boolean {
@@ -36,6 +64,43 @@ export function withSentenceCasedPromptInsertion(value: string, before: string):
     return chars.join("");
   }
   return value;
+}
+
+function promptShortcutFollowingPunctuation(after: string): string {
+  const match = /\S/u.exec(after);
+  return match?.[0] ?? "";
+}
+
+function withInlinePromptShortcutCasing(value: string, before: string): string {
+  if (promptInsertionStartsSentence(before)) {
+    return withSentenceCasedPromptInsertion(value, before);
+  }
+  const chars = Array.from(value);
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index]!;
+    if (!/[A-Za-z]/u.test(char)) continue;
+    const nextChar = chars[index + 1] ?? "";
+    if (char === "I" && !/[A-Za-z]/u.test(nextChar)) return value;
+    if (char === char.toLocaleUpperCase() && nextChar === nextChar.toLocaleUpperCase()) {
+      return value;
+    }
+    const lowered = char.toLocaleLowerCase();
+    if (lowered === char) return value;
+    chars[index] = lowered;
+    return chars.join("");
+  }
+  return value;
+}
+
+export function formatPromptShortcutInsertion(
+  value: string,
+  before: string,
+  after: string
+): string {
+  const cased = withInlinePromptShortcutCasing(value, before).trimEnd();
+  const following = promptShortcutFollowingPunctuation(after);
+  if (!/^[,.;:!?]$/u.test(following)) return cased;
+  return cased.replace(/[.!?,;:]+$/u, "").trimEnd();
 }
 
 export function splitPromptRandomizationOptions(source: string): string[] {
@@ -75,13 +140,19 @@ function deckReplacementKey(name: string): string {
     .toUpperCase() || "DECK";
 }
 
-const BUILT_IN_WILDCARD_INVOCATION_RE =
-  /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+const MODEL_FILLED_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+const NOUN_PLURAL_SHORTHAND_RE = /\{NOUN(\d*)\}s\b/g;
+
+function isModelFilledWildcardName(name: string): boolean {
+  if (isDisabledPromptWildcardToken(name)) return false;
+  if (parseBuiltInPromptWildcardReference(name)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(name.trim());
+}
 
 export function promptContainsBuiltInWildcardSlots(source: string): boolean {
   for (const match of source.matchAll(BUILT_IN_WILDCARD_BRACE_RE)) {
-    if (getBuiltInPromptWildcardSlot(match[1] ?? "")) return true;
+    if (parseBuiltInPromptWildcardReference(match[1] ?? "")) return true;
   }
   return false;
 }
@@ -92,8 +163,94 @@ export function maskBuiltInWildcardSlotsForPending(
 ): string {
   if (!source || !pendingText) return source;
   return source.replace(BUILT_IN_WILDCARD_BRACE_RE, (token, name: string) =>
-    getBuiltInPromptWildcardSlot(name) ? pendingText : token
+    parseBuiltInPromptWildcardReference(name) ? pendingText : token
   );
+}
+
+export function promptContainsModelFilledWildcardSlots(source: string): boolean {
+  MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
+  for (const match of source.matchAll(MODEL_FILLED_WILDCARD_BRACE_RE)) {
+    if (isModelFilledWildcardName(match[1] ?? "")) return true;
+  }
+  return false;
+}
+
+export function maskModelFilledWildcardSlotsForPending(
+  source: string,
+  pendingText: string
+): string {
+  if (!source || !pendingText) return source;
+  MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
+  return source.replace(MODEL_FILLED_WILDCARD_BRACE_RE, (token, name: string) =>
+    isModelFilledWildcardName(name) ? pendingText : token
+  );
+}
+
+export function isStandaloneWildcardComposerDraft(source: string): boolean {
+  const trimmed = source.trim();
+  if (!trimmed) return false;
+  if (/^![a-z0-9][a-z0-9_-]*[.!?]?$/iu.test(trimmed)) return true;
+  if (/^\{[^{}\r\n]*\|[^{}\r\n]*\}[.!?]?$/u.test(trimmed)) return true;
+  const braceWildcard = trimmed.match(/^\{([^{}\r\n]{1,80})\}[.!?]?$/u);
+  return Boolean(braceWildcard && isModelFilledWildcardName(braceWildcard[1] ?? ""));
+}
+
+function normalizeNounPluralShorthand(
+  source: string,
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
+): PromptRandomizationResolution {
+  NOUN_PLURAL_SHORTHAND_RE.lastIndex = 0;
+  let output = "";
+  let cursor = 0;
+  const adjustments: Array<{ start: number; end: number; delta: number }> = [];
+  for (const match of source.matchAll(NOUN_PLURAL_SHORTHAND_RE)) {
+    const token = match[0] ?? "";
+    const reference = match[1] ?? "";
+    const start = match.index ?? -1;
+    if (start < 0 || !token) continue;
+    const end = start + token.length;
+    const replacement = `{PLURAL_NOUN${reference}}`;
+    output += source.slice(cursor, start);
+    output += replacement;
+    adjustments.push({ start, end, delta: replacement.length - token.length });
+    cursor = end;
+  }
+  if (adjustments.length === 0) {
+    return {
+      prompt: source,
+      replacements: normalizedPromptRandomizationReplacementsForPrompt(
+        source,
+        existingReplacements
+      ),
+    };
+  }
+  output += source.slice(cursor);
+  const shiftedReplacements = existingReplacements
+    ?.map((replacement): PromptShortcutWildcardReplacement | null => {
+      let start = replacement.start;
+      let end = replacement.end;
+      if (typeof start !== "number" || typeof end !== "number") return replacement;
+      for (const adjustment of adjustments) {
+        if (end <= adjustment.start) continue;
+        if (start >= adjustment.end) {
+          start += adjustment.delta;
+          end += adjustment.delta;
+          continue;
+        }
+        return null;
+      }
+      return { ...replacement, start, end };
+    })
+    .filter((replacement): replacement is PromptShortcutWildcardReplacement =>
+      Boolean(replacement)
+    );
+  return {
+    prompt: output,
+    replacements: normalizedPromptRandomizationReplacementsForPrompt(
+      output,
+      shiftedReplacements
+    ),
+  };
 }
 
 function normalizedPromptRandomizationReplacementsForPrompt(
@@ -126,6 +283,7 @@ function normalizedPromptRandomizationReplacementsForPrompt(
       const value = prompt.slice(normalizedStart, normalizedEnd);
       if (!value) return null;
       return {
+        ...replacement,
         key: replacement.key,
         value,
         start: normalizedStart,
@@ -149,56 +307,7 @@ export function resolveBuiltInPromptWildcardInvocations(
   source: string,
   existingReplacements?: readonly PromptShortcutWildcardReplacement[]
 ): PromptRandomizationResolution {
-  const preservedReplacements = normalizedPromptRandomizationReplacementsForPrompt(
-    source,
-    existingReplacements
-  );
-  let prompt = "";
-  let cursor = 0;
-  let changed = false;
-  const replacements: PromptShortcutWildcardReplacement[] = [];
-  const preserveSegmentReplacements = (
-    segmentStart: number,
-    segmentEnd: number,
-    resolvedSegmentStart: number
-  ) => {
-    for (const replacement of preservedReplacements) {
-      const start = replacement.start ?? -1;
-      const end = replacement.end ?? -1;
-      if (start < segmentStart || end > segmentEnd) continue;
-      replacements.push({
-        ...replacement,
-        start: resolvedSegmentStart + (start - segmentStart),
-        end: resolvedSegmentStart + (end - segmentStart),
-      });
-    }
-  };
-
-  for (const match of source.matchAll(BUILT_IN_WILDCARD_INVOCATION_RE)) {
-    const raw = match[0] ?? "";
-    const name = match[2] ?? "";
-    const matchIndex = match.index ?? -1;
-    const slot = getBuiltInPromptWildcardSlot(name);
-    if (matchIndex < 0 || !raw || !name || !slot) continue;
-    const delimiterLength = raw.startsWith("!") ? 0 : 1;
-    const start = matchIndex + delimiterLength;
-    const end = start + 1 + name.length;
-    const resolvedSegmentStart = prompt.length;
-    prompt += source.slice(cursor, start);
-    preserveSegmentReplacements(cursor, start, resolvedSegmentStart);
-    prompt += `{${slot.label}}`;
-    cursor = end;
-    changed = true;
-  }
-
-  if (!changed) {
-    return { prompt: source, replacements: preservedReplacements };
-  }
-
-  const finalResolvedSegmentStart = prompt.length;
-  prompt += source.slice(cursor);
-  preserveSegmentReplacements(cursor, source.length, finalResolvedSegmentStart);
-  return { prompt, replacements };
+  return normalizeNounPluralShorthand(source, existingReplacements);
 }
 
 function buildPromptRandomizationDeckLookup(
@@ -320,6 +429,7 @@ export function resolvePromptRandomizationGroups(
         value: casedValue,
         start: replacementStart,
         end: replacementStart + casedValue.length,
+        source: "deck",
       });
       cursor = deckToken.end;
       continue;
@@ -346,6 +456,7 @@ export function resolvePromptRandomizationGroups(
         value: casedValue,
         start: replacementStart,
         end: replacementStart + casedValue.length,
+        source: "option",
       });
     } else {
       prompt += source.slice(start, end + 1);

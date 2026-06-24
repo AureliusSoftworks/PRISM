@@ -1,17 +1,30 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 import {
+  DEFAULT_ZEN_CANVAS_TYPING_SPEED,
   DEFAULT_ZEN_FRESH_START_GAP_MS,
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
+  DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
+  DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
+  DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
   DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
+  DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
+  MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
+  MAX_ZEN_CANVAS_TYPING_SPEED,
   MAX_ZEN_WALLPAPER_OPACITY,
+  MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
+  MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
+  MIN_ZEN_CANVAS_TYPING_SPEED,
   MIN_ZEN_WALLPAPER_OPACITY,
+  normalizeZenWallpaperStyleNotes,
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
@@ -39,6 +52,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     autoMemory: 1,
     composerWritingAssist: 1,
     experimentalDualOllamaEnabled: 0,
+    experimentalAllModelEffortEnabled: 0,
+    psychicModeEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
@@ -54,6 +69,10 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredZenWallpaperOpenAiImageModel: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
+    zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
+    zenWallpaperBlurredEdgesEnabled:
+      DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED ? 1 : 0,
+    zenWallpaperStyleNotes: DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
     zenSessionIdleGapMs: DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
@@ -61,6 +80,10 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
     zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
+    zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
+    zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    zenAutonomyEnabled: 0,
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -254,6 +277,68 @@ describe("resolveNextSettings — experimentalDualOllamaEnabled", () => {
   });
 });
 
+describe("resolveNextSettings — experimentalAllModelEffortEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: true },
+        baseline({ experimentalAllModelEffortEnabled: 0 })
+      ).experimentalAllModelEffortEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: false },
+        baseline({ experimentalAllModelEffortEnabled: 1 })
+      ).experimentalAllModelEffortEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ experimentalAllModelEffortEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).experimentalAllModelEffortEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { experimentalAllModelEffortEnabled: "true" as unknown as boolean },
+        current
+      ).experimentalAllModelEffortEnabled,
+      1
+    );
+  });
+});
+
+describe("resolveNextSettings — psychicModeEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: true },
+        baseline({ psychicModeEnabled: 0 })
+      ).psychicModeEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: false },
+        baseline({ psychicModeEnabled: 1 })
+      ).psychicModeEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ psychicModeEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).psychicModeEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { psychicModeEnabled: "true" as unknown as boolean },
+        current
+      ).psychicModeEnabled,
+      1
+    );
+  });
+});
+
 describe("resolveNextSettings — fallbackModelMessageStripe", () => {
   it("persists boolean values", () => {
     assert.equal(
@@ -327,6 +412,14 @@ describe("resolveNextSettings — prismDefaultLlmModel", () => {
     );
     assert.equal(cleared.prismDefaultLlmModel, null);
   });
+
+  it("stores disabled as an explicit internal model choice", () => {
+    const next = resolveNextSettings(
+      { prismDefaultLlmModel: ` ${DISABLED_MODEL_CHOICE} ` },
+      baseline()
+    );
+    assert.equal(next.prismDefaultLlmModel, DISABLED_MODEL_CHOICE);
+  });
 });
 
 describe("resolveNextSettings — prismImageToolLlmModel", () => {
@@ -342,6 +435,14 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
     );
     assert.equal(cleared.prismImageToolLlmModel, null);
   });
+
+  it("stores disabled as an explicit image-request LLM choice", () => {
+    const next = resolveNextSettings(
+      { prismImageToolLlmModel: DISABLED_MODEL_CHOICE },
+      baseline()
+    );
+    assert.equal(next.prismImageToolLlmModel, DISABLED_MODEL_CHOICE);
+  });
 });
 
 describe("resolveNextSettings — preferred auto models", () => {
@@ -352,6 +453,18 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(next.preferredLocalModel, "llama3.2");
     assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+  });
+
+  it("stores disabled as an explicit local + online model hint", () => {
+    const next = resolveNextSettings(
+      {
+        preferredLocalModel: DISABLED_MODEL_CHOICE,
+        preferredOnlineModel: ` ${DISABLED_MODEL_CHOICE} `,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredLocalModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredOnlineModel, DISABLED_MODEL_CHOICE);
   });
 
   it("clears each preference independently with empty string", () => {
@@ -521,6 +634,18 @@ describe("resolveNextSettings — image panel model picks", () => {
     assert.equal(next.preferredOpenAiImageModel, "gpt-image-1-mini");
   });
 
+  it("stores disabled as an explicit image panel lane choice", () => {
+    const next = resolveNextSettings(
+      {
+        preferredLocalImageModel: DISABLED_MODEL_CHOICE,
+        preferredOpenAiImageModel: DISABLED_MODEL_CHOICE,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredLocalImageModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredOpenAiImageModel, DISABLED_MODEL_CHOICE);
+  });
+
   it("clears local image model when given empty string", () => {
     const current = baseline({ preferredLocalImageModel: "old" });
     assert.equal(
@@ -618,6 +743,18 @@ describe("resolveNextSettings — Zen Atmosphere model picks", () => {
     assert.equal(next.preferredZenWallpaperOpenAiImageModel, "gpt-image-2");
   });
 
+  it("stores disabled as an explicit Atmosphere lane choice", () => {
+    const next = resolveNextSettings(
+      {
+        preferredZenWallpaperLocalImageModel: DISABLED_MODEL_CHOICE,
+        preferredZenWallpaperOpenAiImageModel: DISABLED_MODEL_CHOICE,
+      },
+      baseline()
+    );
+    assert.equal(next.preferredZenWallpaperLocalImageModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredZenWallpaperOpenAiImageModel, DISABLED_MODEL_CHOICE);
+  });
+
   it("clears wallpaper image model ids with empty strings", () => {
     const current = baseline({
       preferredZenWallpaperLocalImageModel: "old-local",
@@ -686,11 +823,11 @@ describe("resolveNextSettings — Zen Atmosphere opacity", () => {
 });
 
 describe("resolveNextSettings — Zen Atmosphere text mask", () => {
-  it("stores boolean text-mask values", () => {
+  it("enforces the text-mask compatibility field even when clients send false", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperTextMaskEnabled: false }, baseline())
         .zenWallpaperTextMaskEnabled,
-      false
+      true
     );
     assert.equal(
       resolveNextSettings(
@@ -701,15 +838,124 @@ describe("resolveNextSettings — Zen Atmosphere text mask", () => {
     );
   });
 
-  it("keeps the stored text-mask setting when omitted or invalid", () => {
+  it("ignores stored false and invalid text-mask values", () => {
     const current = baseline({ zenWallpaperTextMaskEnabled: 0 });
-    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, false);
+    assert.equal(resolveNextSettings({}, current).zenWallpaperTextMaskEnabled, true);
     assert.equal(
       resolveNextSettings(
         { zenWallpaperTextMaskEnabled: "sometimes" },
         current
       ).zenWallpaperTextMaskEnabled,
+      true
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
+  it("enforces grayscale even when clients send boolean values", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperGrayscaleEnabled: true }, baseline())
+        .zenWallpaperGrayscaleEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperGrayscaleEnabled: false },
+        baseline({ zenWallpaperGrayscaleEnabled: 1 })
+      ).zenWallpaperGrayscaleEnabled,
+      true
+    );
+  });
+
+  it("normalizes stored false or invalid grayscale values to enabled", () => {
+    const current = baseline({ zenWallpaperGrayscaleEnabled: 0 });
+    assert.equal(resolveNextSettings({}, current).zenWallpaperGrayscaleEnabled, true);
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperGrayscaleEnabled: "sometimes" },
+        current
+      ).zenWallpaperGrayscaleEnabled,
+      true
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere blurred edges", () => {
+  it("stores the edge blur preference", () => {
+    assert.equal(
+      resolveNextSettings({ zenWallpaperBlurredEdgesEnabled: false }, baseline())
+        .zenWallpaperBlurredEdgesEnabled,
       false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperBlurredEdgesEnabled: true },
+        baseline({ zenWallpaperBlurredEdgesEnabled: 0 })
+      ).zenWallpaperBlurredEdgesEnabled,
+      true
+    );
+  });
+
+  it("keeps the stored edge blur value when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperBlurredEdgesEnabled: 0 });
+    assert.equal(
+      resolveNextSettings({}, current).zenWallpaperBlurredEdgesEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenWallpaperBlurredEdgesEnabled: "sometimes" },
+        current
+      ).zenWallpaperBlurredEdgesEnabled,
+      false
+    );
+  });
+});
+
+describe("resolveNextSettings — Zen Atmosphere style notes", () => {
+  it("stores normalized style notes", () => {
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: "  misty\n glass,   paper grain  " },
+      baseline()
+    );
+
+    assert.equal(next.zenWallpaperStyleNotes, "misty glass, paper grain");
+  });
+
+  it("clamps style notes to the configured limit", () => {
+    const longNotes = "a".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 25);
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: longNotes },
+      baseline()
+    );
+
+    assert.equal(
+      next.zenWallpaperStyleNotes.length,
+      MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH
+    );
+    assert.equal(
+      normalizeZenWallpaperStyleNotes(longNotes),
+      "a".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
+    );
+  });
+
+  it("clears style notes with an empty string", () => {
+    const next = resolveNextSettings(
+      { zenWallpaperStyleNotes: "   " },
+      baseline({ zenWallpaperStyleNotes: "misty glass" })
+    );
+
+    assert.equal(next.zenWallpaperStyleNotes, "");
+  });
+
+  it("keeps stored style notes when omitted or invalid", () => {
+    const current = baseline({ zenWallpaperStyleNotes: "woven texture" });
+
+    assert.equal(resolveNextSettings({}, current).zenWallpaperStyleNotes, "woven texture");
+    assert.equal(
+      resolveNextSettings({ zenWallpaperStyleNotes: false }, current)
+        .zenWallpaperStyleNotes,
+      "woven texture"
     );
   });
 });
@@ -806,7 +1052,7 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     );
 
     assert.equal(low.zenRecentContextMessages, 10);
-    assert.equal(low.zenWallpaperRegenMessageInterval, 5);
+    assert.equal(low.zenWallpaperRegenMessageInterval, 3);
     assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
     assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
     assert.equal(high.zenRecentContextMessages, 80);
@@ -823,6 +1069,91 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(
       resolveNextSettings({ zenMoodSensitivity: "nope" }, current).zenMoodSensitivity,
       0.35
+    );
+  });
+
+  it("stores Zen canvas typing speed", () => {
+    const next = resolveNextSettings({ zenCanvasTypingSpeed: 1.6 }, baseline());
+
+    assert.equal(next.zenCanvasTypingSpeed, 1.6);
+  });
+
+  it("clamps Zen canvas typing speed while preserving current value for invalid input", () => {
+    const current = baseline({ zenCanvasTypingSpeed: 1.25 });
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 0.1 }, current).zenCanvasTypingSpeed,
+      MIN_ZEN_CANVAS_TYPING_SPEED
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 5 }, current).zenCanvasTypingSpeed,
+      MAX_ZEN_CANVAS_TYPING_SPEED
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: 1.234 }, current).zenCanvasTypingSpeed,
+      1.23
+    );
+    assert.equal(
+      resolveNextSettings({ zenCanvasTypingSpeed: "nope" }, current).zenCanvasTypingSpeed,
+      1.25
+    );
+  });
+
+  it("stores AskQuestion patience timer settings", () => {
+    const next = resolveNextSettings(
+      {
+        zenAskQuestionPatienceEnabled: true,
+        zenAskQuestionPatienceMs: 40_000,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenAskQuestionPatienceEnabled, true);
+    assert.equal(next.zenAskQuestionPatienceMs, 40_000);
+  });
+
+  it("clamps AskQuestion patience timing while preserving invalid values", () => {
+    const current = baseline({
+      zenAskQuestionPatienceEnabled: 1,
+      zenAskQuestionPatienceMs: 50_000,
+    });
+    const low = resolveNextSettings({ zenAskQuestionPatienceMs: 1_000 }, current);
+    const high = resolveNextSettings({ zenAskQuestionPatienceMs: 999_000 }, current);
+    const stepped = resolveNextSettings({ zenAskQuestionPatienceMs: 45_000 }, current);
+    const invalid = resolveNextSettings(
+      {
+        zenAskQuestionPatienceEnabled: "sometimes",
+        zenAskQuestionPatienceMs: "nope",
+      },
+      current
+    );
+
+    assert.equal(low.zenAskQuestionPatienceMs, MIN_ZEN_ASK_QUESTION_PATIENCE_MS);
+    assert.equal(high.zenAskQuestionPatienceMs, MAX_ZEN_ASK_QUESTION_PATIENCE_MS);
+    assert.equal(stepped.zenAskQuestionPatienceMs, 50_000);
+    assert.equal(invalid.zenAskQuestionPatienceEnabled, true);
+    assert.equal(invalid.zenAskQuestionPatienceMs, 50_000);
+  });
+
+  it("stores Zen Autonomy while preserving current value for invalid input", () => {
+    assert.equal(
+      resolveNextSettings({ zenAutonomyEnabled: true }, baseline()).zenAutonomyEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings({ zenAutonomyEnabled: false }, baseline({ zenAutonomyEnabled: 1 }))
+        .zenAutonomyEnabled,
+      false
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ zenAutonomyEnabled: 1 })).zenAutonomyEnabled,
+      true
+    );
+    assert.equal(
+      resolveNextSettings(
+        { zenAutonomyEnabled: "nope" },
+        baseline({ zenAutonomyEnabled: 1 })
+      ).zenAutonomyEnabled,
+      true
     );
   });
 });

@@ -1299,6 +1299,189 @@
   margin-top: 6px;
 }
 
+.backendUnavailableFull {
+  width: min(560px, 100%);
+  display: grid;
+  place-items: center;
+}
+
+.backendUnavailableCard,
+.backendUnavailableBanner,
+.appErrorCard {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--accent-ink) 28%);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 90%, var(--accent-ink) 10%),
+      color-mix(in srgb, var(--bg) 92%, var(--bg-surface) 8%)
+    );
+  color: var(--fg);
+  box-shadow:
+    0 18px 52px color-mix(in srgb, #000 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+}
+
+.backendUnavailableCard {
+  max-width: 560px;
+  display: grid;
+  gap: 18px;
+}
+
+.backendUnavailableBanner {
+  position: fixed;
+  left: 50%;
+  top: max(18px, env(safe-area-inset-top));
+  z-index: 1800;
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  border-radius: 18px;
+  backdrop-filter: blur(18px) saturate(132%);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
+}
+
+.backendUnavailableSignal {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 28%, var(--line));
+}
+
+.backendUnavailableSignal span {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #f7bd45;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, #f7bd45 18%, transparent),
+    0 0 24px color-mix(in srgb, #f7bd45 48%, transparent);
+  animation: backendUnavailablePulse 1.45s ease-in-out infinite;
+}
+
+.backendUnavailableBody {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.backendUnavailableEyebrow {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.backendUnavailableBody h2,
+.appErrorCard h1 {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1.12;
+}
+
+.backendUnavailableBody p,
+.appErrorCard p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.backendUnavailableActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.backendUnavailableActions button,
+.appErrorCard button {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 36%, var(--line));
+  background: color-mix(in srgb, var(--accent-ink) 13%, var(--bg-surface));
+  color: var(--fg);
+  padding: 7px 13px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.backendUnavailableActions button:hover:not(:disabled),
+.backendUnavailableActions button:focus-visible:not(:disabled),
+.appErrorCard button:hover:not(:disabled),
+.appErrorCard button:focus-visible:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent-ink) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent-ink) 19%, var(--bg-surface));
+}
+
+.backendUnavailableActions button:disabled,
+.appErrorCard button:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.appErrorCard {
+  max-width: 520px;
+  display: grid;
+  gap: 16px;
+}
+
+.appErrorBrand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+@keyframes backendUnavailablePulse {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .backendUnavailableBanner {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .backendUnavailableActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backendUnavailableSignal span {
+    animation: none;
+  }
+}
+
 /* Tiny mono label used for section titles in the shell. */
 .sectionLabel {
   text-transform: uppercase;
@@ -3044,6 +3227,302 @@
   white-space: nowrap;
 }
 
+.settingsTextField {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settingsTextField .settingsTextFieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--settings-section-quiet);
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.settingsTextArea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--settings-section-color) 22%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.settingsTextArea::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
+}
+
+.settingsTextArea:focus {
+  border-color: color-mix(in srgb, var(--settings-section-color) 58%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-section-color) 16%, transparent);
+  outline: none;
+}
+
+.zenWallpaperStyleOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(64px, 1fr));
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.zenWallpaperStyleOptionButton {
+  --zen-wallpaper-style-color: var(--settings-section-color);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 10px 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 7%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg) 90%, var(--bg-surface) 10%)
+    );
+  color: color-mix(in srgb, var(--fg) 88%, var(--zen-wallpaper-style-color));
+  text-align: center;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.zenWallpaperStyleOrb {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, var(--line));
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 38% 28%,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 22%, #ffffff) 0%,
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--zen-wallpaper-style-color) 10%, var(--bg-surface));
+  color: var(--zen-wallpaper-style-color);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent),
+    0 0 18px color-mix(in srgb, var(--zen-wallpaper-style-color) 20%, transparent);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.zenWallpaperStyleOptionButton:hover .zenWallpaperStyleOrb,
+.zenWallpaperStyleOptionButton:focus-visible .zenWallpaperStyleOrb {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 72%, #ffffff);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 30%, transparent),
+    0 0 24px color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, transparent);
+  transform: translateY(-1px);
+}
+
+.zenWallpaperStyleOptionButton:hover,
+.zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg-surface) 84%, var(--bg) 16%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 10px 24px -22px color-mix(in srgb, var(--zen-wallpaper-style-color) 52%, #000);
+  transform: translateY(-1px);
+}
+
+.zenWallpaperStyleOptionButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--zen-wallpaper-style-color) 76%, #ffffff);
+  outline-offset: 3px;
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 54%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--bg-surface)),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--bg) 12%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 10%, transparent);
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 82%, #ffffff);
+  background:
+    radial-gradient(
+      circle at 38% 28%,
+      color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, #ffffff) 0%,
+      transparent 45%
+    ),
+    color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, var(--bg-surface));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 18%, transparent),
+    0 0 30px color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, transparent);
+}
+
+.zenWallpaperStyleOptionButton[data-default="true"] .zenWallpaperStyleOrb {
+  color: #fffdf4;
+  background:
+    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.56), transparent 44%),
+    color-mix(in srgb, #ffffff 12%, var(--bg-surface));
+  border-color: color-mix(in srgb, #ffffff 62%, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.46),
+    0 0 22px rgba(255, 255, 255, 0.24);
+}
+
+.zenWallpaperStyleOptionButton[data-default="true"][data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.56),
+    0 0 0 3px rgba(255, 255, 255, 0.12),
+    0 0 34px rgba(255, 255, 255, 0.4);
+}
+
+.zenWallpaperStyleOptionLabel {
+  max-width: 100%;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.zenWallpaperStyleOptionButton[data-selected="true"] .zenWallpaperStyleOptionLabel {
+  color: var(--fg);
+}
+
+.themeLight .zenWallpaperStyleOptionButton {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 78%, var(--zen-wallpaper-style-color) 5%),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--zen-wallpaper-style-color) 4%)
+    );
+  color: color-mix(in srgb, var(--fg) 92%, var(--zen-wallpaper-style-color));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent),
+    0 10px 22px -24px rgba(22, 21, 20, 0.42);
+}
+
+.themeLight .zenWallpaperStyleOptionButton:hover,
+.themeLight .zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 34%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff,
+      color-mix(in srgb, var(--bg-surface) 82%, var(--zen-wallpaper-style-color) 6%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 88%, transparent),
+    0 12px 26px -24px rgba(22, 21, 20, 0.42);
+}
+
+.themeLight .zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 46%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 76%, var(--zen-wallpaper-style-color) 10%),
+      color-mix(in srgb, var(--bg-surface) 84%, var(--zen-wallpaper-style-color) 8%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 88%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, transparent);
+}
+
+.themeDark .zenWallpaperStyleOptionButton {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 16%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 92%, var(--zen-wallpaper-style-color) 8%),
+      color-mix(in srgb, var(--bg-deep) 94%, var(--zen-wallpaper-style-color) 6%)
+    );
+  color: color-mix(in srgb, var(--fg) 92%, var(--zen-wallpaper-style-color));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 12px 24px -28px color-mix(in srgb, var(--zen-wallpaper-style-color) 42%, #000);
+}
+
+.themeDark .zenWallpaperStyleOptionButton:hover,
+.themeDark .zenWallpaperStyleOptionButton:focus-visible {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 36%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--zen-wallpaper-style-color) 12%),
+      color-mix(in srgb, var(--bg) 92%, var(--zen-wallpaper-style-color) 8%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent),
+    0 14px 28px -26px color-mix(in srgb, var(--zen-wallpaper-style-color) 48%, #000);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--zen-wallpaper-style-color) 48%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 84%, var(--zen-wallpaper-style-color) 16%),
+      color-mix(in srgb, var(--bg) 90%, var(--zen-wallpaper-style-color) 10%)
+    );
+  color: var(--fg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--zen-wallpaper-style-color) 12%, transparent);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-default="true"] .zenWallpaperStyleOrb {
+  color: #fffdf4;
+  background:
+    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.24), transparent 44%),
+    color-mix(in srgb, #ffffff 7%, var(--bg-surface));
+  border-color: color-mix(in srgb, #ffffff 38%, var(--line));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 20px rgba(255, 255, 255, 0.16);
+}
+
+.themeDark .zenWallpaperStyleOptionButton[data-default="true"][data-selected="true"] .zenWallpaperStyleOrb {
+  border-color: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 0 0 3px rgba(255, 255, 255, 0.08),
+    0 0 28px rgba(255, 255, 255, 0.24);
+}
+
 .form input[type="range"] {
   height: 24px;
   padding: 0;
@@ -3163,6 +3642,10 @@
   .settingsFieldGrid,
   .settingsScopeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .zenWallpaperStyleOptionGrid {
+    grid-template-columns: repeat(3, minmax(64px, 1fr));
   }
 
   .settingsStatusPills {
@@ -3637,11 +4120,13 @@
       color-mix(in srgb, var(--header-identity-color) 18%, transparent);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"],
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] {
   color: var(--fg);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph,
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
   color: color-mix(in srgb, var(--header-identity-color) 42%, var(--fg) 58%);
   background:
     radial-gradient(
@@ -3657,7 +4142,8 @@
     inset 0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent);
 }
 
-.themeLight.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
+.themeLight.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph,
+.themeLight.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph {
   background:
     radial-gradient(
       circle at 50% 42%,
@@ -3671,7 +4157,8 @@
     inset 0 0 0 1px color-mix(in srgb, var(--header-identity-color) 10%, transparent);
 }
 
-.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg {
+.appLayout[data-private-active="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .headerIdentity[data-private-bot="true"] .headerIdentityGlyph > svg {
   transform: rotate(180deg);
 }
 
@@ -3709,8 +4196,44 @@
   filter: brightness(0);
 }
 
-.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark {
-  filter: brightness(0) invert(1);
+.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight) .hubHomeWordmark {
+  filter: grayscale(1) brightness(0) invert(1);
+}
+
+.themeLight.appLayout[data-private-active="true"] .hubHomeWordmark,
+.themeLight.appLayout[data-zen-private-tone="true"] .hubHomeWordmark {
+  filter: grayscale(1) brightness(0);
+}
+
+.appLayout[data-private-active="true"]
+  :where(
+    .brandIconShell .brandIcon,
+    .brandIconShell .brandIconLight,
+    .brandWordmark,
+    .chatBotTileBotGlyph,
+    .composeBotTriggerGlyph,
+    .emptyStateBotGlyphLayer,
+    .conversationGroupGlyph,
+    .messageMoodBadge,
+    .providerDot,
+    .imageReadyNoticeChip
+  ),
+.appLayout[data-zen-private-tone="true"]
+  :where(
+    .brandIconShell .brandIcon,
+    .brandIconShell .brandIconLight,
+    .brandWordmark,
+    .chatBotTileBotGlyph,
+    .composeBotTriggerGlyph,
+    .emptyStateBotGlyphLayer,
+    .conversationGroupGlyph,
+    .messageMoodBadge,
+    .providerDot,
+    .imageReadyNoticeChip
+  ),
+.composeBotMenu[data-private-tone="true"] :where(.composeBotOptionGlyph, .composeBotOptionName) {
+  filter: saturate(0.74) contrast(0.98);
 }
 
 /* ── App shell ── */
@@ -4624,7 +5147,8 @@
    keep conversation rows visibly distinct from normal mode with a
    calmer monochrome-tinted treatment, and mirror the private glyph
    language by flipping bot glyphs in grouped conversation chips. */
-.appLayout[data-private-active="true"] .conversationList {
+.appLayout[data-private-active="true"] .conversationList,
+.appLayout[data-zen-private-tone="true"] .conversationList {
   background:
     linear-gradient(
       90deg,
@@ -4645,18 +5169,22 @@
     0 0 0 1px color-mix(in srgb, #000000 32%, transparent);
 }
 
-.appLayout[data-private-active="true"] .conversationGroupGlyph > svg {
+.appLayout[data-private-active="true"] .conversationGroupGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .conversationGroupGlyph > svg {
   transform: rotate(180deg);
 }
 
-.appLayout[data-private-active="true"] .conversationGroupGlyph {
+.appLayout[data-private-active="true"] .conversationGroupGlyph,
+.appLayout[data-zen-private-tone="true"] .conversationGroupGlyph {
   color: var(--row-glyph-color, var(--row-color, var(--fg)));
 }
 
 /* Private mode: make conversation entries read like the bot icon tiles
    (border-forward, tinted body, subtle neon lift). */
 .appLayout[data-private-active="true"] .conversationTitleButton,
-.appLayout[data-private-active="true"] .conversationGroupTile {
+.appLayout[data-private-active="true"] .conversationGroupTile,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton,
+.appLayout[data-zen-private-tone="true"] .conversationGroupTile {
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 52%, var(--line));
   background:
     linear-gradient(
@@ -4692,7 +5220,9 @@
 }
 
 .appLayout[data-private-active="true"] .conversationTitleButton:hover,
-.appLayout[data-private-active="true"] .conversationGroupTile:hover {
+.appLayout[data-private-active="true"] .conversationGroupTile:hover,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton:hover,
+.appLayout[data-zen-private-tone="true"] .conversationGroupTile:hover {
   background:
     linear-gradient(
       132deg,
@@ -4724,7 +5254,8 @@
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 64%, var(--line-strong));
 }
 
-.appLayout[data-private-active="true"] .conversationTitleButton.selected {
+.appLayout[data-private-active="true"] .conversationTitleButton.selected,
+.appLayout[data-zen-private-tone="true"] .conversationTitleButton.selected {
   border-color: color-mix(in srgb, var(--row-color, var(--fg-muted)) 72%, var(--fg));
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
@@ -5519,11 +6050,11 @@
   z-index: 2147483646;
   box-sizing: border-box;
   width: min(980px, calc(100vw - 28px));
-  min-width: min(420px, calc(100vw - 28px));
+  min-width: min(260px, calc(100vw - 28px));
   max-width: calc(
     100vw - var(--dev-tools-panel-left) - var(--dev-tools-panel-viewport-margin)
   );
-  min-height: 360px;
+  min-height: 190px;
   max-height: calc(
     100dvh - var(--dev-tools-panel-top) - var(--dev-tools-panel-viewport-margin)
   );
@@ -5543,6 +6074,72 @@
     0 8px 22px rgba(0, 0, 0, 0.22);
   transform-origin: top right;
   animation: deleteAllPanelIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.devToolsFloatingPanel[data-console-only="true"] {
+  --dev-tools-console-resize-gutter: 14px;
+  min-width: min(280px, calc(100vw - 28px));
+  min-height: 180px;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, #061015 78%, var(--bg) 22%);
+}
+
+.devToolsBubble {
+  appearance: none;
+  position: fixed;
+  top: var(--dev-tools-panel-top, 76px);
+  left: var(--dev-tools-panel-left, 14px);
+  z-index: 2147483646;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, #48d6c8 58%, var(--line-strong) 42%);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #48d6c8 20%, var(--bg-elevated) 80%), var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.26);
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsBubble:active {
+  cursor: grabbing;
+}
+
+.devToolsBubble:hover,
+.devToolsBubble:focus-visible {
+  border-color: color-mix(in srgb, #48d6c8 82%, var(--line-strong) 18%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #48d6c8 30%, var(--bg-elevated) 70%), var(--bg-hover));
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
+    0 18px 34px rgba(0, 0, 0, 0.32);
+}
+
+.devToolsBubbleLabel {
+  line-height: 1;
 }
 
 .devToolsHeader {
@@ -5707,6 +6304,102 @@
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
+}
+
+.devToolsConsoleOnlyContent {
+  display: grid;
+  position: absolute;
+  inset: 0 var(--dev-tools-console-resize-gutter) var(--dev-tools-console-resize-gutter) 0;
+  min-height: 0;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalSection {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 30px 10px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader {
+  gap: 8px;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader h3 {
+  font-size: 12px;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalHeader p {
+  display: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminalActions {
+  padding-right: 32px;
+}
+
+.devToolsConsoleDragGrip {
+  appearance: none;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  width: 24px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, #d8f6ff 16%, transparent);
+  border-radius: 6px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, #d8f6ff 62%, transparent) 0 1px, transparent 1.4px)
+      5px 4px / 6px 5px repeat,
+    color-mix(in srgb, #061015 68%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 4px 12px rgba(0, 0, 0, 0.24);
+  cursor: grab;
+  touch-action: none;
+}
+
+.devToolsConsoleDragGrip:active {
+  cursor: grabbing;
+}
+
+.devToolsConsoleDragGrip:hover,
+.devToolsConsoleDragGrip:focus-visible {
+  border-color: color-mix(in srgb, #d8f6ff 34%, transparent);
+  background:
+    radial-gradient(circle, color-mix(in srgb, #d8f6ff 78%, transparent) 0 1px, transparent 1.4px)
+      5px 4px / 6px 5px repeat,
+    color-mix(in srgb, #0c2027 78%, transparent);
+  outline: none;
+}
+
+.devToolsConsoleMinimizeButton {
+  appearance: none;
+  position: absolute;
+  top: 6px;
+  right: 20px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, #d8f6ff 16%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, #061015 72%, transparent);
+  color: color-mix(in srgb, #d8f6ff 74%, var(--fg) 26%);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 4px 12px rgba(0, 0, 0, 0.24);
+}
+
+.devToolsConsoleMinimizeButton:hover,
+.devToolsConsoleMinimizeButton:focus-visible {
+  border-color: color-mix(in srgb, #d8f6ff 34%, transparent);
+  background: color-mix(in srgb, #0c2027 78%, transparent);
+  outline: none;
 }
 
 .devToolsNav {
@@ -5896,6 +6589,73 @@
   gap: 8px;
 }
 
+.devToolsToggleList {
+  display: grid;
+  gap: 8px;
+}
+
+.devToolsToggleOption {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+}
+
+.devToolsToggleOption input {
+  margin-top: 2px;
+  accent-color: var(--dev-tools-accent);
+}
+
+.devToolsToggleOption span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.devToolsToggleOption strong {
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.devToolsToggleOption small {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.devToolsBackdropPreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.devToolsBackdropSwatch {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 68%, transparent);
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 35% 28%,
+      color-mix(in srgb, #ffffff 34%, var(--dev-tools-backdrop-color, var(--accent)) 66%),
+      var(--dev-tools-backdrop-color, var(--accent))
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 36%, transparent),
+    0 0 18px color-mix(in srgb, var(--dev-tools-backdrop-color, var(--accent)) 26%, transparent);
+}
+
 .devToolsDiagnosticList {
   display: grid;
   gap: 6px;
@@ -5904,34 +6664,14 @@
   padding-right: 4px;
 }
 
-.devToolsFooter {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 2px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-}
-
-.devToolsFooter .deleteAllModalCancel {
-  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--dev-tools-accent) 28%);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-hover) 46%, var(--bg) 54%), var(--bg));
-  color: var(--fg);
-  font-weight: 760;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 14%, transparent),
-    0 8px 18px rgba(0, 0, 0, 0.1);
-}
-
-.devToolsFooter .deleteAllModalCancel:hover:not(:disabled),
-.devToolsFooter .deleteAllModalCancel:focus-visible {
-  border-color: color-mix(in srgb, var(--dev-tools-accent) 60%, var(--line-strong) 40%);
-  background: color-mix(in srgb, var(--bg-hover) 84%, var(--dev-tools-accent) 16%);
-  transform: translateY(-1px);
-}
-
 .devMetricsTerminalSection {
   overflow: hidden;
+}
+
+.devMetricsTerminalSection[data-console-only="true"] {
+  display: grid;
+  min-height: 0;
+  padding: 12px;
 }
 
 .devMetricsTerminalHeader {
@@ -5992,6 +6732,19 @@
   background: color-mix(in srgb, #061015 72%, var(--bg) 28%);
 }
 
+.devMetricsTerminalSection[data-console-only="true"] .devMetricsTerminal {
+  min-height: 0;
+  max-height: none;
+}
+
+.devToolsConsoleOnlyContent .devMetricsTerminal {
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .devMetricsTerminalEmpty {
   align-self: center;
   justify-self: center;
@@ -6001,18 +6754,46 @@
 }
 
 .devMetricsTerminalLine {
+  --dev-metrics-kind-color: #d8f6ff;
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 39px minmax(0, 1fr);
+  gap: 7px;
   align-items: baseline;
   min-width: 0;
-  color: color-mix(in srgb, #d8f6ff 80%, white 20%);
+  padding: 2px 5px 2px 4px;
+  border-left: 2px solid color-mix(in srgb, var(--dev-metrics-kind-color) 72%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--dev-metrics-kind-color) 8%, transparent);
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 82%, white 18%);
   font-size: 11px;
 }
 
-.devMetricsTerminalLine span {
-  color: color-mix(in srgb, #8eb3c0 82%, white 18%);
+.devMetricsTerminalLine[data-kind="backend"] {
+  --dev-metrics-kind-color: #8fd7ff;
+}
+
+.devMetricsTerminalLine[data-kind="tool"] {
+  --dev-metrics-kind-color: #ffd782;
+}
+
+.devMetricsTerminalLine[data-kind="summary"] {
+  --dev-metrics-kind-color: #c9adff;
+}
+
+.devMetricsTerminalLine[data-kind="memory"] {
+  --dev-metrics-kind-color: #9cf0aa;
+}
+
+.devMetricsTerminalLine[data-kind="opinion"] {
+  --dev-metrics-kind-color: #ffa4c8;
+}
+
+.devMetricsTerminalTime {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 62%, #7896a2 38%);
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.55;
 }
 
 .devMetricsTerminalLine code {
@@ -6023,120 +6804,57 @@
   white-space: pre-wrap;
 }
 
-.devMetricsTerminalLine[data-kind="error"] code {
-  color: #ff8ba0;
+.devMetricsTokenPrefix,
+.devMetricsTokenKeyword,
+.devMetricsTokenRoute,
+.devMetricsTokenMetric,
+.devMetricsTokenStatus,
+.devMetricsTokenQuote,
+.devMetricsTokenKeyValue {
+  font-weight: 800;
 }
 
-.devMetricsTerminalLine[data-kind="memory"] code {
-  color: #b8f7c6;
+.devMetricsTokenPrefix {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 48%, white 52%);
 }
 
-.devMetricsTerminalLine[data-kind="model"] code {
-  color: #9ee8ff;
+.devMetricsTokenKeyword {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 88%, white 12%);
 }
 
-.devToolsSection {
-  display: block;
-  padding: 4px 7px;
-  margin-top: 5px;
-  border: 1px dashed color-mix(in srgb, var(--line-strong) 60%, var(--danger) 40%);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, var(--danger) 8%);
+.devMetricsTokenRoute {
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--dev-metrics-kind-color) 38%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--dev-metrics-kind-color) 13%, transparent);
+  color: #f4fdff;
+  white-space: nowrap;
 }
 
-.devToolsSection[open] {
-  display: grid;
-  gap: 8px;
-  padding: 14px 14px 12px;
-  margin-top: 10px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-surface) 88%, var(--danger) 12%);
+.devMetricsTokenKeyValue {
+  white-space: nowrap;
 }
 
-.devToolsSectionSummary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 18px;
-  margin: 0;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
+.devMetricsTokenKey {
+  color: color-mix(in srgb, var(--dev-metrics-kind-color) 56%, #9fb7c0 44%);
 }
 
-.devToolsSectionSummary::-webkit-details-marker {
-  display: none;
+.devMetricsTokenKeyValue strong {
+  color: color-mix(in srgb, white 84%, var(--dev-metrics-kind-color) 16%);
+  font-weight: 850;
 }
 
-.devToolsSectionSummary::after {
-  content: "+";
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--fg-muted);
-  font-size: 10px;
-  line-height: 1;
-  transition:
-    background 120ms ease-out,
-    border-color 120ms ease-out,
-    color 120ms ease-out,
-    transform 120ms ease-out;
+.devMetricsTokenMetric {
+  color: #ffe69a;
 }
 
-.devToolsSection[open] > .devToolsSectionSummary::after {
-  content: "−";
-  transform: rotate(180deg);
+.devMetricsTokenStatus {
+  color: color-mix(in srgb, #ffb7c2 62%, var(--dev-metrics-kind-color) 38%);
 }
 
-.devToolsSectionSummary:hover,
-.devToolsSectionSummary:focus-visible {
-  outline: none;
-}
-
-.devToolsSectionSummary:hover::after,
-.devToolsSectionSummary:focus-visible::after {
-  border-color: var(--line-strong);
-  color: var(--fg);
-}
-
-.devToolsSectionButton {
-  width: 100%;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 120ms ease-out,
-    background 120ms ease-out,
-    transform 90ms ease-out;
-}
-
-.devToolsSectionButton:hover,
-.devToolsSectionButton:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong) 42%);
-  background: color-mix(in srgb, var(--bg-hover) 88%, var(--danger) 12%);
-  outline: none;
-}
-
-.devToolsSectionButton:active {
-  transform: translateY(1px);
-}
-
-.devToolsSectionTitle {
-  margin: 0;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  line-height: 1.1;
-  text-transform: uppercase;
-  color: var(--fg-muted);
+.devMetricsTokenQuote {
+  color: #c8ffef;
+  font-style: italic;
 }
 
 .devToolsSectionHint {
@@ -6148,54 +6866,6 @@
 .devToolsSectionHint strong {
   color: var(--fg);
   font-weight: 600;
-}
-
-.devToolsToggleSummary {
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.1;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.devToolsToggleSummary strong {
-  color: var(--fg);
-  font-weight: 600;
-}
-
-.devTogglesModalOption {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-surface);
-  color: var(--fg);
-}
-
-.devTogglesModalBackdrop {
-  z-index: 2147483647;
-}
-
-.devTogglesModalOption input {
-  margin-top: 3px;
-  accent-color: var(--accent);
-}
-
-.devTogglesModalOption span {
-  display: grid;
-  gap: 4px;
-}
-
-.devTogglesModalOption small {
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 .devToolsViewportStatus {
@@ -6568,6 +7238,7 @@
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
   cursor: grab;
   touch-action: none;
+  user-select: none;
   backdrop-filter: blur(16px);
 }
 
@@ -6617,6 +7288,383 @@
   color: rgba(255, 255, 255, 0.9);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(18px);
+}
+
+.devZenPauseTester {
+  position: fixed;
+  left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
+  top: max(16px, calc(env(safe-area-inset-top, 0px) + 16px));
+  z-index: 92;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  width: min(324px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.devZenPauseTester > * {
+  pointer-events: auto;
+}
+
+.devZenPauseTesterBubble {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.18), transparent 38%),
+    rgba(14, 17, 23, 0.88);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 50px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  backdrop-filter: blur(16px);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.devZenPauseTesterBubble:hover,
+.devZenPauseTesterBubble:focus-visible {
+  border-color: rgba(255, 255, 255, 0.42);
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 22px 58px rgba(0, 0, 0, 0.36);
+}
+
+.devZenPauseTesterBubble:active {
+  cursor: grabbing;
+  transform: translateY(0);
+}
+
+.devZenPauseTesterPanel {
+  order: -1;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(14, 17, 23, 0.93);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.devZenPauseTesterHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.devZenPauseTesterHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.devZenPauseTesterHeader strong {
+  font-size: 0.96rem;
+  letter-spacing: 0;
+}
+
+.devZenPauseTesterStatus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.devZenPauseTesterStatus[data-active="true"] {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 48%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--dev-tools-accent) 13%, rgba(255, 255, 255, 0.045));
+}
+
+.devZenPauseTesterStatus span,
+.devZenPauseTesterStatus small,
+.devZenPauseTesterControl > span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.devZenPauseTesterStatus strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.9rem;
+  letter-spacing: 0;
+}
+
+.devZenPauseTesterStatus small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devZenPauseTesterControls {
+  display: grid;
+  gap: 7px;
+}
+
+.devZenPauseTesterControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 9px;
+  align-items: center;
+}
+
+.devZenPauseTesterControl > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.devZenPauseTesterControl > span strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.76rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.devZenPauseTesterControl input {
+  width: 82px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 7px;
+  outline: none;
+}
+
+.devZenPauseTesterControl input:focus {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 74%, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dev-tools-accent) 18%, transparent);
+}
+
+.devZenPauseTesterReset {
+  width: 100%;
+}
+
+.devZenPauseTesterReset::after {
+  content: "";
+}
+
+.zenToolLabDock {
+  --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
+  position: fixed;
+  left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
+  top: max(16px, calc(env(safe-area-inset-top, 0px) + 16px));
+  z-index: 92;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  width: min(318px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.zenToolLabDock > * {
+  pointer-events: auto;
+}
+
+.zenToolLabBubble {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 52%, rgba(255, 255, 255, 0.2));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--dev-tools-accent) 24%, transparent), transparent 40%),
+    rgba(14, 17, 23, 0.88);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 50px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  backdrop-filter: blur(16px);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.zenToolLabBubble:hover,
+.zenToolLabBubble:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 78%, rgba(255, 255, 255, 0.36));
+  outline: none;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 22px 58px rgba(0, 0, 0, 0.36);
+}
+
+.zenToolLabBubble:active {
+  cursor: grabbing;
+  transform: translateY(0);
+}
+
+.zenToolLabPanel {
+  order: -1;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 36%, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--dev-tools-accent) 14%, transparent), transparent 46%),
+    rgba(14, 17, 23, 0.94);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.zenToolLabHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.zenToolLabHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.zenToolLabHeader strong {
+  font-size: 0.96rem;
+  letter-spacing: 0;
+}
+
+.zenToolLabStatus {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.76rem;
+  line-height: 1.32;
+}
+
+.zenToolLabStatus[data-active="true"] {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 48%, rgba(255, 255, 255, 0.1));
+  background: color-mix(in srgb, var(--dev-tools-accent) 13%, rgba(255, 255, 255, 0.045));
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.zenToolLabGrid {
+  display: grid;
+  gap: 7px;
+}
+
+.zenToolLabToolButton {
+  appearance: none;
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.04));
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.zenToolLabToolButton:hover:not(:disabled),
+.zenToolLabToolButton:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 58%, rgba(255, 255, 255, 0.18));
+  background:
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--dev-tools-accent) 18%, transparent), transparent 58%),
+    rgba(255, 255, 255, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.zenToolLabToolButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.zenToolLabToolButton:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.zenToolLabToolButton > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.zenToolLabToolButton strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.84rem;
+  font-weight: 760;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zenToolLabToolButton small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zenToolLabToolIcon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--dev-tools-accent) 42%, rgba(255, 255, 255, 0.14));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dev-tools-accent) 14%, rgba(255, 255, 255, 0.055));
+  color: color-mix(in srgb, var(--dev-tools-accent) 72%, rgba(255, 255, 255, 0.9));
+}
+
+@media (max-width: 620px) {
+  .zenToolLabDock {
+    width: min(318px, calc(100vw - 28px));
+  }
+
+  .zenToolLabPanel {
+    max-height: min(52dvh, 420px);
+    overflow-y: auto;
+  }
 }
 
 .devMoodPanelHeader {
@@ -7052,10 +8100,129 @@
   max-width: min(11ch, 20vw);
 }
 
+.zenPrivateModeToggle {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--fg) 34%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--fg) 6%),
+      color-mix(in srgb, var(--bg) 90%, var(--fg) 7%)
+    );
+  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted) 28%);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 8px 18px rgba(0, 0, 0, 0.12);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.08s ease;
+}
+
+.zenPrivateModeToggle:hover:not(:disabled),
+.zenPrivateModeToggle:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fg) 58%, var(--line));
+  color: var(--fg);
+  outline: none;
+}
+
+.zenPrivateModeToggle:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.zenPrivateModeToggle[data-active="true"] {
+  border-color: color-mix(in srgb, var(--fg) 62%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 18%),
+      color-mix(in srgb, var(--bg-surface) 74%, var(--fg) 16%)
+    );
+  color: var(--fg);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 20%, transparent),
+    0 8px 22px color-mix(in srgb, #000 20%, transparent);
+}
+
+.zenPrivateModeToggle:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.zenPrivateModeToggleGlyph {
+  grid-area: 1 / 1;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  transform-origin: 50% 50%;
+  transition:
+    filter 0.18s ease,
+    opacity 0.16s ease,
+    transform 0.24s cubic-bezier(0.18, 0.9, 0.26, 1.18);
+}
+
+.zenPrivateModeToggleGlyph :where(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.zenPrivateModeToggleLock {
+  opacity: 0;
+  transform: rotate(-210deg) scale(0.48);
+}
+
+.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleKey {
+  opacity: 0;
+  transform: rotate(520deg) scale(0.42);
+}
+
+.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+  filter:
+    drop-shadow(0 0 7px rgba(255, 255, 255, 0.74))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.34));
+}
+
+.themeLight .zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
+  filter:
+    drop-shadow(0 0 7px rgba(0, 0, 0, 0.36))
+    drop-shadow(0 1px 1px rgba(255, 255, 255, 0.38));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chatHeaderTitle,
   .chatHeaderTitlePlaceholder,
-  .chatHeaderModelPicker {
+  .chatHeaderModelPicker,
+  .zenPrivateModeToggle {
+    transition: none;
+  }
+
+  .zenPrivateModeToggleGlyph {
+    transition: none;
+  }
+
+  .chatBotTileBotGlyph > svg,
+  .composeBotTriggerGlyph > svg,
+  .composeBotOptionGlyph > svg,
+  .emptyStateBotGlyph > svg,
+  .emptyStateBotGlyphLayer,
+  .headerIdentityGlyph > svg,
+  .conversationGroupGlyph > svg {
     transition: none;
   }
 }
@@ -7401,6 +8568,9 @@
 }
 
 .zenAtmosphereBackdrop {
+  --zen-atmosphere-color-amount: 0;
+  --zen-atmosphere-grayscale-amount: calc(1 - var(--zen-atmosphere-color-amount, 0));
+  --zen-atmosphere-color-transition-duration: 720ms;
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -7417,20 +8587,39 @@
 
 .zenAtmosphereBackdrop img {
   position: absolute;
-  inset: -2%;
+  /* Image models sometimes bake letterbox/pillarbox gutters into odd aspect
+     outputs. The extra bleed crops those edges while keeping the center calm. */
+  inset: -6%;
   z-index: 0;
-  width: 104%;
-  height: 104%;
+  width: 112%;
+  height: 112%;
   object-fit: cover;
   opacity: calc(var(--zen-atmosphere-opacity, 0.15) * var(--zen-atmosphere-layer-opacity, 1));
-  filter: saturate(0.72) contrast(0.92) brightness(0.78);
-  transform: scale(1.01);
-  transition: opacity 180ms linear;
-  will-change: opacity;
+  filter:
+    saturate(0.72)
+    contrast(0.92)
+    brightness(0.78)
+    grayscale(var(--zen-atmosphere-grayscale-amount));
+  transform: scale(1.02);
+  transition:
+    opacity 180ms linear,
+    filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
+  will-change: opacity, filter;
+}
+
+.zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
+  transform:
+    scale(1.02)
+    scaleX(var(--zen-fallback-wallpaper-scale-x, 1))
+    scaleY(var(--zen-fallback-wallpaper-scale-y, 1));
 }
 
 .themeLight .zenAtmosphereBackdrop img {
-  filter: saturate(0.62) contrast(0.86) brightness(1.16);
+  filter:
+    saturate(0.62)
+    contrast(0.86)
+    brightness(1.16)
+    grayscale(var(--zen-atmosphere-grayscale-amount));
   mix-blend-mode: multiply;
 }
 
@@ -7440,7 +8629,11 @@
   inset: -10%;
   z-index: 1;
   pointer-events: none;
-  opacity: calc(var(--zen-atmosphere-opacity, 0.15) * 0.55);
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.15) *
+      0.55 *
+      var(--zen-atmosphere-color-amount, 0)
+  );
   background:
     radial-gradient(
       ellipse 48% 36% at 18% 28%,
@@ -7467,10 +8660,17 @@
     );
   mix-blend-mode: screen;
   filter: blur(26px) saturate(0.78);
+  transition:
+    opacity var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1),
+    filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
 }
 
 .themeLight .zenAtmosphereBackdrop::before {
-  opacity: calc(var(--zen-atmosphere-opacity, 0.15) * 0.38);
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.15) *
+      0.38 *
+      var(--zen-atmosphere-color-amount, 0)
+  );
   mix-blend-mode: multiply;
   filter: blur(28px) saturate(0.66);
 }
@@ -7503,105 +8703,230 @@
     );
 }
 
-.zenAtmosphereTextCutout {
-  --zen-atmosphere-text-cutout-width: min(calc(100vw - 8px), clamp(560px, 94vw, 1500px));
+.zenPersonaStartupAtmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      ellipse 86% 58% at 50% 30%,
+      color-mix(in srgb, var(--fg) 10%, transparent) 0%,
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse 72% 46% at 22% 74%,
+      color-mix(in srgb, var(--bg-elevated) 54%, transparent) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 70% 48% at 82% 70%,
+      color-mix(in srgb, var(--fg-muted) 20%, transparent) 0%,
+      transparent 64%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg) 86%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 58%, transparent) 44%,
+      color-mix(in srgb, var(--bg) 92%, transparent) 100%
+    );
+  filter: grayscale(1) saturate(0.34) contrast(0.96);
+  opacity: 0.94;
+}
+
+.zenPersonaStartupAtmosphere::before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: -2;
+  background:
+    radial-gradient(
+      ellipse 74% 54% at 46% 28%,
+      color-mix(in srgb, var(--fg) 13%, transparent) 0%,
+      transparent 68%
+    ),
+    radial-gradient(
+      ellipse 64% 50% at 18% 82%,
+      color-mix(in srgb, var(--bg-elevated) 72%, transparent) 0%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 86% 78%,
+      color-mix(in srgb, var(--fg-muted) 24%, transparent) 0%,
+      transparent 68%
+    );
+  filter: blur(36px);
+  opacity: 0.78;
+  transform: translate3d(0, 0, 0);
+  animation: zenPersonaStartupAtmosphereDrift 16s ease-in-out infinite alternate;
+}
+
+.zenPersonaStartupAtmosphere::after {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  z-index: -1;
+  background:
+    radial-gradient(
+      ellipse 118% 84% at 50% 62%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 62%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 34%, transparent) 54%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 14%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 38%, transparent) 72%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 100%
+    );
+  filter: blur(44px) saturate(1.25);
+  mix-blend-mode: multiply;
+  opacity: 0.7;
+}
+
+.themeLight .zenPersonaStartupAtmosphere::after {
+  mix-blend-mode: screen;
+  opacity: 0.62;
+}
+
+@keyframes zenPersonaStartupAtmosphereDrift {
+  0% {
+    transform: translate3d(-1.5%, -0.8%, 0) scale(1.02);
+  }
+  100% {
+    transform: translate3d(1.5%, 0.8%, 0) scale(1.04);
+  }
+}
+
+.zenAtmosphereReadabilityOverlay {
+  --zen-atmosphere-readability-width: min(calc(100vw - 12px), clamp(540px, 92vw, 1320px));
   position: absolute;
   top: 0;
   bottom: 0;
   left: 50%;
   z-index: 0;
-  width: var(--zen-atmosphere-text-cutout-width);
+  width: var(--zen-atmosphere-readability-width);
   transform: translateX(-50%);
   pointer-events: none;
+  opacity: var(--zen-atmosphere-overlay-opacity, 0);
   background:
+    linear-gradient(
+      to right,
+      transparent 0%,
+      color-mix(in srgb, var(--bg-deep) 20%, transparent) 12%,
+      color-mix(in srgb, var(--bg-deep) 50%, transparent) 34%,
+      color-mix(in srgb, var(--bg) 62%, transparent) 50%,
+      color-mix(in srgb, var(--bg-deep) 50%, transparent) 66%,
+      color-mix(in srgb, var(--bg-deep) 20%, transparent) 88%,
+      transparent 100%
+    ),
     radial-gradient(
-      ellipse 80% 56% at 14% 12%,
-      color-mix(in srgb, var(--accent) 22%, transparent),
+      ellipse 70% 42% at 18% 16%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 74% 52% at 88% 24%,
-      color-mix(in srgb, var(--accent) 14%, transparent),
+      ellipse 68% 46% at 86% 30%,
+      color-mix(in srgb, var(--fg) 8%, transparent),
       transparent 72%
     ),
     linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--bg-deep) 84%, #000000 16%) 0%,
-      color-mix(in srgb, var(--bg) 94%, #000000 6%) 58%,
-      var(--bg-surface) 100%
+      color-mix(in srgb, var(--bg-deep) 46%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 34%, transparent) 46%,
+      color-mix(in srgb, var(--bg-surface) 54%, transparent) 100%
     );
   background-position: center top;
   background-repeat: no-repeat;
   background-size:
-    100vw 100%,
-    100vw 100%,
-    100vw 100%;
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  backdrop-filter: blur(96px) saturate(0.82) contrast(0.96);
+  -webkit-backdrop-filter: blur(96px) saturate(0.82) contrast(0.96);
   -webkit-mask-image: linear-gradient(
     to right,
-    transparent 0,
-    rgba(0, 0, 0, 0.06) 72px,
-    rgba(0, 0, 0, 0.22) min(168px, 28%),
-    rgba(0, 0, 0, 0.52) min(260px, 39%),
-    rgba(0, 0, 0, 0.84) min(322px, 46%),
-    #000 min(380px, 49%),
-    #000 calc(100% - min(380px, 49%)),
-    rgba(0, 0, 0, 0.84) calc(100% - min(322px, 46%)),
-    rgba(0, 0, 0, 0.52) calc(100% - min(260px, 39%)),
-    rgba(0, 0, 0, 0.22) calc(100% - min(168px, 28%)),
-    rgba(0, 0, 0, 0.06) calc(100% - 72px),
+    transparent 0%,
+    rgba(0, 0, 0, 0.24) 8%,
+    #000 18%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 92%,
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
-    transparent 0,
-    rgba(0, 0, 0, 0.06) 72px,
-    rgba(0, 0, 0, 0.22) min(168px, 28%),
-    rgba(0, 0, 0, 0.52) min(260px, 39%),
-    rgba(0, 0, 0, 0.84) min(322px, 46%),
-    #000 min(380px, 49%),
-    #000 calc(100% - min(380px, 49%)),
-    rgba(0, 0, 0, 0.84) calc(100% - min(322px, 46%)),
-    rgba(0, 0, 0, 0.52) calc(100% - min(260px, 39%)),
-    rgba(0, 0, 0, 0.22) calc(100% - min(168px, 28%)),
-    rgba(0, 0, 0, 0.06) calc(100% - 72px),
+    transparent 0%,
+    rgba(0, 0, 0, 0.24) 8%,
+    #000 18%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 92%,
     transparent 100%
   );
+  transition: opacity 180ms linear;
+  will-change: opacity, backdrop-filter;
 }
 
-.themeLight .zenAtmosphereTextCutout {
+.zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
+  --zen-atmosphere-readability-width: min(calc(100vw - 24px), clamp(360px, 92vw, 920px));
+  backdrop-filter: blur(26px) saturate(0.82) contrast(0.96);
+  -webkit-backdrop-filter: blur(26px) saturate(0.82) contrast(0.96);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.themeLight .zenAtmosphereReadabilityOverlay {
   background:
-    radial-gradient(
-      ellipse 80% 54% at 10% 4%,
-      color-mix(in srgb, #ffffff 78%, transparent),
-      transparent 72%
+    linear-gradient(
+      to right,
+      transparent 0%,
+      color-mix(in srgb, #ffffff 18%, transparent) 12%,
+      color-mix(in srgb, #ffffff 58%, transparent) 34%,
+      color-mix(in srgb, #ffffff 72%, transparent) 50%,
+      color-mix(in srgb, #ffffff 58%, transparent) 66%,
+      color-mix(in srgb, #ffffff 18%, transparent) 88%,
+      transparent 100%
     ),
     radial-gradient(
-      ellipse 68% 46% at 92% 12%,
-      color-mix(in srgb, #2fd3e3 3.5%, transparent),
+      ellipse 72% 42% at 16% 12%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
       transparent 70%
     ),
     radial-gradient(
-      ellipse 66% 44% at 2% 90%,
-      color-mix(in srgb, #ff4d6d 2.5%, transparent),
-      transparent 74%
+      ellipse 68% 44% at 88% 24%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 72%
     ),
     linear-gradient(
       to bottom,
-      #fffefb 0%,
-      var(--bg-surface) 52%,
-      var(--bg) 100%
+      color-mix(in srgb, #fffefb 58%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 46%, transparent) 52%,
+      color-mix(in srgb, var(--bg) 52%, transparent) 100%
     );
   background-position: center top;
   background-repeat: no-repeat;
   background-size:
-    100vw 100%,
-    100vw 100%,
-    100vw 100%,
-    100vw 100%;
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
+  -webkit-backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
+}
+
+.themeLight .zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
+  backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
+  -webkit-backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .zenAtmosphereBackdrop img {
+    transition: none;
+  }
+
+  .zenAtmosphereReadabilityOverlay {
     transition: none;
   }
 }
@@ -7971,6 +9296,16 @@
   );
 }
 
+.messages[data-chat-ephemeral="true"][data-zen-speed-nudge-pulse="true"] {
+  animation: zenCanvasSpeedNudgeCanvasPulse 520ms ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"][data-zen-speed-nudge-holding="true"] {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
 .chatEphemeralLiveEndSpacer {
   flex: 0 0 auto;
   height: 1px;
@@ -8189,7 +9524,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 /* Empty-state icon — Default/private Prism variants.
  *
  * Regular preview/engaged states use the bare Prism triangle. Private
- * chats get their own hub-style black tile below so the user sees the
+ * chats get their own hub-style silver tile below so the user sees the
  * same account/avatar object from the Hub without reintroducing hue. */
 .emptyStateBrand {
   position: relative;
@@ -8246,6 +9581,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .emptyStatePrivateHero::before,
 .themeLight .emptyStatePrivateHero::after {
   display: block;
+  background: #0f0f0f;
+}
+
+.themeLight .emptyStatePrivateHero::before {
+  opacity: 0.12;
+}
+
+.themeLight .emptyStatePrivateHero::after {
+  opacity: 0.08;
 }
 
 .themeLight .emptyStatePrivateHero .brandIcon {
@@ -8262,6 +9606,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .emptyStatePrivateHero .brandIcon {
   transform: scaleY(-1);
+  filter:
+    grayscale(1)
+    contrast(1.15)
+    drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
 }
 
 /* Empty-state icon — Bot variant.
@@ -8316,9 +9664,58 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     box-shadow 0.2s ease;
 }
 
-.emptyStateBotGlyph > svg {
+.emptyStateBotGlyph::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 82% 72% at 50% 52%,
+      color-mix(in srgb, var(--bot-color, var(--fg-muted)) 22%, transparent) 0 40%,
+      transparent 72%
+    );
+  filter: blur(15px);
+  opacity: 0.54;
+  transform: scale(0.96);
+  transition:
+    opacity 0.22s ease,
+    filter 0.22s ease,
+    transform 0.24s ease;
+}
+
+.emptyStateBotGlyph > svg,
+.emptyStateBotGlyphLayer > svg {
   width: 34px;
   height: 34px;
+}
+
+.emptyStateBotGlyphLayer {
+  grid-area: 1 / 1;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  transition:
+    opacity 0.22s ease,
+    filter 0.22s ease,
+    transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.emptyStateBotGlyphLayerPublic {
+  opacity: 1;
+  filter: none;
+  transform: rotate(0deg) scale(1);
+}
+
+.emptyStateBotGlyphLayerPrivate {
+  opacity: 0;
+  filter: blur(0.5px);
+  transform: rotate(0deg) scale(0.92);
 }
 
 .emptyStatePrivateBotGlyph {
@@ -8337,6 +9734,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 18px color-mix(in srgb, #000000 24%, transparent);
 }
 
+.emptyStatePrivateBotGlyph::before {
+  inset: -32px;
+  background:
+    radial-gradient(
+      ellipse 88% 76% at 50% 54%,
+      color-mix(in srgb, var(--fg) 18%, transparent) 0 34%,
+      color-mix(in srgb, var(--bot-color, var(--fg)) 10%, transparent) 44%,
+      transparent 74%
+    );
+  filter: blur(20px);
+  opacity: 0.78;
+  transform: scale(1.04);
+}
+
 .themeLight .emptyStatePrivateBotGlyph {
   background:
     radial-gradient(
@@ -8350,8 +9761,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 16%, transparent);
 }
 
+.themeLight .emptyStatePrivateBotGlyph::before {
+  background:
+    radial-gradient(
+      ellipse 88% 76% at 50% 54%,
+      color-mix(in srgb, var(--fg) 11%, transparent) 0 34%,
+      color-mix(in srgb, var(--bot-color, var(--fg)) 8%, transparent) 44%,
+      transparent 74%
+    );
+  opacity: 0.64;
+}
+
 .emptyStatePrivateBotGlyph > svg {
   transform: rotate(180deg);
+}
+
+.emptyStateBotGlyph[data-private-mode="true"] .emptyStateBotGlyphLayerPublic {
+  opacity: 0;
+  filter: blur(0.5px);
+  transform: rotate(-180deg) scale(0.92);
+}
+
+.emptyStateBotGlyph[data-private-mode="true"] .emptyStateBotGlyphLayerPrivate {
+  opacity: 1;
+  filter: none;
+  transform: rotate(180deg) scale(1);
 }
 
 /* Clickable hero in the COMMITTED state — wraps EmptyStateIcon so the
@@ -9856,7 +11290,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   opacity: 1;
 }
 
-.appLayout[data-private-active="true"] .chatBotTileBotGlyph > svg {
+.chatBotTileBotGlyph > svg,
+.composeBotTriggerGlyph > svg,
+.composeBotOptionGlyph > svg,
+.emptyStateBotGlyph > svg,
+.headerIdentityGlyph > svg,
+.conversationGroupGlyph > svg {
+  transform-origin: 50% 50%;
+  transition: transform 0.18s ease;
+}
+
+.appLayout[data-private-active="true"] .chatBotTileBotGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .chatBotTileBotGlyph > svg,
+.appLayout[data-private-active="true"] .composeBotTriggerGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .composeBotTriggerGlyph > svg,
+.appLayout[data-private-active="true"] .emptyStateBotGlyph > svg,
+.appLayout[data-zen-private-tone="true"] .emptyStateBotGlyph > svg {
+  transform: rotate(180deg);
+}
+
+.composeBotMenu[data-private-tone="true"] .composeBotOptionGlyph > svg {
   transform: rotate(180deg);
 }
 
@@ -9866,7 +11319,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTile,
-.appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTilePlaceholder {
+.appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTilePlaceholder,
+.appLayout[data-zen-private-tone="true"] .chatBotPickerFrame .chatBotTile,
+.appLayout[data-zen-private-tone="true"] .chatBotPickerFrame .chatBotTilePlaceholder {
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
@@ -10594,13 +12049,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin-inline: auto;
   padding-inline: 0;
   transition: opacity 180ms linear;
+  isolation: isolate;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageChatManifesting {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   animation: chatMessageManifest 0.48s ease-out both;
 }
 
 .messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
   opacity: 0;
   animation: chatUserQuestionFadeIn 0.92s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
@@ -10618,7 +12080,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenEraBoundary {
   width: clamp(260px, 56vw, 760px);
-  margin: 18px auto 8px;
+  margin: clamp(56px, 9dvh, 116px) auto clamp(34px, 5dvh, 72px);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -10664,9 +12126,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenSessionBreak {
   width: min(760px, calc(100% - 28px));
-  margin: clamp(44px, 8dvh, 96px) auto clamp(180px, 28dvh, 280px);
+  margin: clamp(56px, 9dvh, 118px) auto clamp(150px, 24dvh, 250px);
   display: grid;
-  gap: clamp(230px, 34dvh, 390px);
+  gap: clamp(170px, 28dvh, 320px);
   color: var(--fg);
   scroll-margin-block: clamp(56px, 10dvh, 92px);
 }
@@ -10821,12 +12283,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-@keyframes chatEphemeralWordEmphasis {
+@keyframes chatEphemeralWordImpact {
   0% {
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
-  42% {
-    transform: scale(1.16);
+  38% {
+    transform: translateY(-0.025em) scale(1.055);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatEphemeralWordQuestion {
+  0% {
+    transform: scale(0.985);
+  }
+  54% {
+    transform: scale(1.035);
   }
   100% {
     transform: scale(1);
@@ -10839,10 +12313,44 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transform: translateY(0);
   }
   34% {
-    transform: translateY(-0.14em);
+    transform: translateY(-0.08em);
   }
   68% {
-    transform: translateY(0.04em);
+    transform: translateY(0.025em);
+  }
+}
+
+@keyframes chatEphemeralWordNegative {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  28% {
+    transform: translateX(-0.055em);
+  }
+  58% {
+    transform: translateX(0.055em);
+  }
+}
+
+@keyframes chatEphemeralWordWhisper {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(0.94);
+  }
+}
+
+@keyframes chatEphemeralWordAction {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  42% {
+    transform: translateY(-0.045em) rotate(-0.45deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
   }
 }
 
@@ -10851,11 +12359,135 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   to { background-position: 100% 50%; }
 }
 
+@keyframes zenCanvasSpeedNudgeCanvasPulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  38% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
+      inset 0 -24px 78px color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+}
+
+@keyframes zenPendingReplyDotPulse {
+  0%,
+  72%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0.04em);
+  }
+  34% {
+    opacity: 0.9;
+    transform: translateY(-0.04em);
+  }
+}
+
+@keyframes zenActionCueIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(0.36em) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zenActionCueGlanceIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateX(-0.34em) translateY(0.12em) rotate(-0.4deg);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0) translateY(0) rotate(0deg);
+  }
+}
+
+@keyframes zenActionCueNodIn {
+  0% {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(-0.2em);
+  }
+  58% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0.08em);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes zenActionCueBreathIn {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes zenActionCueTapIn {
+  0% {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(0.22em) scale(0.98);
+  }
+  48% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(-0.05em) scale(1.012);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zenActionCueSettleIn {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-0.28em) scale(1.01);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .messages[data-chat-ephemeral="true"] .message.messageChatManifesting,
   .messages[data-chat-ephemeral="true"] .message.messageChatDissolving,
   .messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
     animation-duration: 0.18s;
+  }
+
+  .messages[data-chat-ephemeral="true"][data-zen-speed-nudge-pulse="true"] {
+    animation: none;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .zenPendingReplyDots span {
+    animation: none;
+    opacity: 0.62;
+    transform: none;
   }
 
   .chatEphemeralTypedLetter {
@@ -10879,10 +12511,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 50% 50%;
   }
 
-  .chatEphemeralTypedWordEmphasis,
-  .chatEphemeralTypedWordAffirm {
+  .chatEphemeralTypedWordImpact,
+  .chatEphemeralTypedWordQuestion,
+  .chatEphemeralTypedWordAffirm,
+  .chatEphemeralTypedWordNegative,
+  .chatEphemeralTypedWordWhisper,
+  .chatEphemeralTypedWordAction,
+  .zenActionCue,
+  .zenActionComposerPreview {
     animation: none;
     transform: none;
+    filter: none;
   }
 
   @keyframes chatMessageManifest {
@@ -10951,6 +12590,336 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: none;
   border-radius: 0;
   padding: 0;
+  overflow: visible;
+}
+
+.messages[data-chat-ephemeral="true"] .zenPendingReplyPlaceholder {
+  min-height: clamp(72px, 12dvh, 136px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--zen-assistant-prose, var(--fg)) 76%, transparent);
+}
+
+.zenPendingReplyDots {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 650;
+  --typing-dot-gap: 0.18em;
+  --typing-dot-duration: 1.16s;
+  --typing-dot-stagger: 0.16s;
+  --typing-dot-rise: -0.06em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.28;
+  --typing-dot-active-opacity: 0.9;
+  --typing-dot-ease: ease-in-out;
+  display: inline-flex;
+  gap: var(--typing-dot-gap);
+  align-items: baseline;
+  font-family: var(--typing-dot-font);
+  font-size: clamp(2.7rem, 7vw, 5.8rem);
+  font-weight: var(--typing-dot-weight);
+  line-height: 1;
+  letter-spacing: 0;
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 0 24px color-mix(in srgb, var(--typing-accent, var(--accent)) 12%, transparent);
+}
+
+.zenPendingReplyDots span {
+  display: inline-block;
+  min-width: 0.18em;
+  opacity: var(--typing-dot-rest-opacity);
+  transform: translateY(0);
+  transform-origin: center 72%;
+  animation: typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+}
+
+.zenPendingReplyDots span:nth-child(2) {
+  --typing-dot-index: 1;
+}
+
+.zenPendingReplyDots span:nth-child(3) {
+  --typing-dot-index: 2;
+}
+
+.zenPersonaInkWash {
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: calc(0px - var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px)));
+  width: 172vw;
+  height: calc(
+    100% +
+      var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px)) +
+      var(--zen-persona-ink-overlap, clamp(96px, 12dvh, 184px))
+  );
+  transform: translateX(-50%) scaleX(0.985);
+  pointer-events: none;
+  z-index: -1;
+  border-radius: 42vw / 260px;
+  background:
+    radial-gradient(
+      ellipse 84% 78% at 50% 50%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 56%,
+      transparent 86%
+    ),
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 16%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 50%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 84%,
+      transparent
+    );
+  filter: blur(56px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  opacity: var(--zen-persona-ink-opacity);
+  animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.themeLight .zenPersonaInkWash {
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+}
+
+.zenPersonaContinuityWash {
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-edge: 34%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  position: fixed;
+  inset: clamp(64px, 10dvh, 124px) -28vw calc(-1 * clamp(132px, 20dvh, 280px));
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 34vw / 32dvh;
+  background:
+    radial-gradient(
+      ellipse 132% 112% at 50% 62%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 58%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 86%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 20%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 64%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 100%
+    );
+  filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  opacity: var(--zen-persona-ink-opacity);
+  transform: translateZ(0);
+  transition:
+    filter var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1),
+    opacity var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1);
+}
+
+.appLayout[data-zen-surface="true"] .zenPersonaContinuityWash {
+  z-index: 4;
+}
+
+.zenPersonaComposerBrushWash {
+  --zen-persona-ink-opacity: 0.6;
+  --zen-persona-ink-saturation: 1.6;
+  --zen-persona-ink-blend-strong: 100%;
+  --zen-persona-ink-blend-mid: 68%;
+  --zen-persona-ink-blend-soft: 50%;
+  --zen-persona-ink-blend-edge: 34%;
+  --zen-persona-ink-blend-mode-dark: multiply;
+  --zen-persona-ink-blend-mode-light: screen;
+  display: none;
+  position: fixed;
+  left: -22vw;
+  right: -22vw;
+  bottom: calc(-1 * clamp(64px, 10dvh, 144px));
+  height: clamp(260px, 44dvh, 560px);
+  z-index: 4;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 84% 72% at 50% 74%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-mid),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 62%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-edge),
+        transparent
+      ) 20%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-soft),
+        transparent
+      ) 58%,
+      color-mix(
+        in srgb,
+        var(--zen-persona-ink-color, transparent) var(--zen-persona-ink-blend-strong),
+        transparent
+      ) 100%
+    );
+  filter: blur(50px) saturate(var(--zen-persona-ink-saturation));
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  opacity: var(--zen-persona-ink-opacity);
+  transform: translateZ(0);
+  transition:
+    filter var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1),
+    opacity var(--zen-atmosphere-color-transition-duration, 720ms) cubic-bezier(0.18, 0.72, 0.22, 1);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 26%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 26%, #000 100%);
+}
+
+.zenPersonaContinuityWash[data-exiting="true"] {
+  animation: zenPersonaContinuityWashOut var(--zen-atmosphere-color-transition-duration, 720ms)
+    cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.zenPersonaComposerBrushWash[data-exiting="true"] {
+  animation: zenPersonaContinuityWashOut var(--zen-atmosphere-color-transition-duration, 720ms)
+    cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.themeLight .zenPersonaContinuityWash,
+.themeLight .zenPersonaComposerBrushWash {
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+}
+
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaInkWash {
+  --zen-persona-ink-opacity: 0.32;
+}
+
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenAtmosphereReadabilityOverlay {
+  --zen-atmosphere-readability-width: 100%;
+  left: 0;
+  right: 0;
+  width: auto;
+  transform: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaContinuityWash,
+.appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaComposerBrushWash {
+  --zen-persona-ink-opacity: 0.24;
+}
+
+@keyframes zenPersonaContinuityWashOut {
+  from {
+    opacity: var(--zen-persona-ink-opacity);
+    filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  }
+  to {
+    opacity: 0;
+    filter: blur(64px) saturate(0.28);
+  }
+}
+
+@keyframes zenPersonaInkWashIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scaleX(0.92);
+    filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  }
+  to {
+    opacity: var(--zen-persona-ink-opacity);
+    transform: translateX(-50%) scaleX(0.985);
+    filter: blur(56px) saturate(var(--zen-persona-ink-saturation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenPersonaInkWash {
+    animation: none;
+    transform: translateX(-50%);
+  }
+
+  .zenPersonaContinuityWash {
+    transition: none;
+  }
+
+  .zenPersonaComposerBrushWash {
+    transition: none;
+  }
+
+  .zenPersonaContinuityWash[data-exiting="true"],
+  .zenPersonaComposerBrushWash[data-exiting="true"] {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 /* Keep an intentional scene break between the new prompt and any prior
@@ -11141,6 +13110,83 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 58%, transparent);
 }
 
+.zenActionCue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.42em;
+  width: fit-content;
+  max-width: min(100%, 760px);
+  margin: 0 0 0.32em;
+  color: color-mix(in srgb, var(--zen-assistant-prose, var(--fg)) 76%, transparent);
+  font-size: clamp(0.82rem, 0.78rem + 0.18vw, 0.96rem);
+  font-weight: 500;
+  line-height: 1.35;
+  text-wrap: balance;
+  transform-origin: left center;
+  animation: zenActionCueIn 0.42s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.messageUser .zenActionCue {
+  justify-self: end;
+  margin-left: auto;
+  color: color-mix(
+    in srgb,
+    var(--zen-user-message-color, var(--zen-user-prose, var(--fg))) 84%,
+    transparent
+  );
+  text-align: right;
+  transform-origin: right center;
+}
+
+.zenActionCue[data-motion="glance"] {
+  animation-name: zenActionCueGlanceIn;
+}
+
+.zenActionCue[data-motion="nod"] {
+  animation-name: zenActionCueNodIn;
+}
+
+.zenActionCue[data-motion="breath"] {
+  animation-name: zenActionCueBreathIn;
+  animation-duration: 0.58s;
+}
+
+.zenActionCue[data-motion="tap"] {
+  animation-name: zenActionCueTapIn;
+}
+
+.zenActionCue[data-motion="settle"] {
+  animation-name: zenActionCueSettleIn;
+  animation-duration: 0.5s;
+}
+
+.zenActionCue[data-action-only="true"] {
+  margin-block: 0.08em;
+  font-size: clamp(0.96rem, 0.88rem + 0.28vw, 1.12rem);
+}
+
+.zenActionCueActor,
+.zenActionComposerPreviewActor {
+  flex: 0 0 auto;
+  font-size: 0.74em;
+  font-weight: 720;
+  line-height: 1;
+  opacity: 0.58;
+  text-transform: uppercase;
+}
+
+.zenActionCueActor::after,
+.zenActionComposerPreviewActor::after {
+  content: "...";
+}
+
+.zenActionCueText,
+.zenActionComposerPreviewText {
+  min-width: 0;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 .chatEphemeralMarkdownBody {
   display: grid;
   gap: 0.16em;
@@ -11310,19 +13356,42 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
-.chatEphemeralTypedWordEmphasis,
-.chatEphemeralTypedWordAffirm {
+.chatEphemeralTypedWordImpact,
+.chatEphemeralTypedWordQuestion,
+.chatEphemeralTypedWordAffirm,
+.chatEphemeralTypedWordNegative,
+.chatEphemeralTypedWordWhisper,
+.chatEphemeralTypedWordAction {
   display: inline-block;
-  transform-origin: center;
+  transform-origin: center 72%;
   will-change: transform;
 }
 
-.chatEphemeralTypedWordEmphasis {
-  animation: chatEphemeralWordEmphasis 0.42s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+.chatEphemeralTypedWordImpact {
+  animation: chatEphemeralWordImpact 0.38s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordQuestion {
+  animation: chatEphemeralWordQuestion 0.52s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .chatEphemeralTypedWordAffirm {
-  animation: chatEphemeralWordAffirm 0.62s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+  animation: chatEphemeralWordAffirm 0.54s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordNegative {
+  animation: chatEphemeralWordNegative 0.56s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordWhisper {
+  opacity: 0.78;
+  animation: chatEphemeralWordWhisper 0.28s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordAction {
+  font-style: italic;
+  opacity: 0.9;
+  animation: chatEphemeralWordAction 0.68s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .chatEphemeralTypedWordNoFade {
@@ -11343,6 +13412,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: inherit;
 }
 
+.chatEphemeralTypedWordEllipsis {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 700;
+  --typing-dot-duration: 1.18s;
+  --typing-dot-stagger: 0.15s;
+  --typing-dot-rise: -0.12em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.5;
+  --typing-dot-active-opacity: 1;
+  --typing-dot-ease: ease-in-out;
+}
+
+.chatEphemeralTypedWordEllipsis .chatEphemeralTypedLetter[data-ellipsis-dot="true"] {
+  display: inline-block;
+  min-width: 0.18em;
+  font-family: var(--typing-dot-font);
+  font-weight: var(--typing-dot-weight);
+  transform-origin: center 72%;
+  animation:
+    chatEphemeralLetterIn var(--chat-letter-fade-duration, 340ms) ease-out both,
+    typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+  animation-delay:
+    calc(var(--char-index, 0) * var(--char-step-ms, 42ms)),
+    calc(var(--char-index, 0) * var(--typing-dot-stagger));
+}
+
 .chatEphemeralTypedWordQuote {
   /* Make quoted passages feel citation-like without affecting layout. */
   font-style: italic;
@@ -11353,7 +13449,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline;
   opacity: 0;
   --char-step-ms: 42ms;
-  animation: chatEphemeralLetterIn 0.34s ease-out both;
+  --chat-letter-fade-duration: 340ms;
+  animation: chatEphemeralLetterIn var(--chat-letter-fade-duration, 340ms) ease-out both;
   animation-delay: calc(var(--char-index, 0) * var(--char-step-ms, 42ms));
 }
 
@@ -11430,14 +13527,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--bg-surface) 84%, var(--fg) 16%),
-      color-mix(in srgb, var(--bg-deep) 84%, var(--fg) 16%)
+      color-mix(in srgb, var(--bg-surface) 82%, var(--accent) 18%),
+      color-mix(in srgb, var(--bg-deep) 84%, var(--accent) 16%)
     );
-  border: 1px solid color-mix(in srgb, var(--fg) 18%, var(--line));
-  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  color: color-mix(in srgb, var(--accent) 48%, var(--fg) 52%);
   box-shadow:
     var(--shadow-sm),
-    inset -3px 0 0 color-mix(in srgb, var(--accent) 26%, var(--fg) 74%);
+    inset -3px 0 0 color-mix(in srgb, var(--accent) 46%, var(--fg) 54%);
 }
 
 .message h4 {
@@ -11725,6 +13822,190 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   word-spacing: 0.06em;
   line-height: 1.55;
   font-size: var(--message-dynamic-font-size, var(--font-size-message));
+}
+
+.psychicThoughtBlock {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  color: color-mix(in srgb, currentColor 86%, transparent);
+  font-size: 12px;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"] {
+  color: color-mix(in srgb, currentColor 88%, transparent);
+}
+
+.psychicThoughtLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.psychicThoughtBlock p {
+  margin: 0;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  word-spacing: 0.02em;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"] p {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.psychicThoughtText {
+  position: relative;
+  color: inherit;
+}
+
+.psychicThoughtShimmer {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 18px;
+  vertical-align: middle;
+}
+
+.psychicThoughtShimmer span {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.34;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtText::after {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  height: 1px;
+  content: "";
+  background:
+    linear-gradient(
+      100deg,
+      transparent 0%,
+      color-mix(in srgb, currentColor 28%, transparent) 26%,
+      color-mix(in srgb, currentColor 78%, transparent) 48%,
+      color-mix(in srgb, currentColor 28%, transparent) 70%,
+      transparent 100%
+    );
+  background-size: 240% 100%;
+  opacity: 0.72;
+  animation: psychicThoughtTextShimmer 2.1s ease-in-out infinite;
+}
+
+.psychicScratchpadBlock {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: color-mix(in srgb, currentColor 88%, transparent);
+}
+
+.psychicScratchpadHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.psychicScratchpadLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.psychicScratchpadMeta {
+  min-width: 0;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.psychicScratchpadText {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  color: inherit;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
+  font-size: 11px;
+  line-height: 1.52;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtShimmer span {
+  animation: psychicThoughtPulse 1.45s ease-in-out infinite;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtShimmer span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.psychicThoughtBlock[data-psychic-state="thinking"][data-psychic-animated="true"] .psychicThoughtShimmer span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes psychicThoughtTextShimmer {
+  0%,
+  100% {
+    background-position: 100% 50%;
+  }
+  50% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes psychicThoughtPulse {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0);
+  }
+  45% {
+    opacity: 0.72;
+    transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText::after,
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtShimmer span {
+    animation: none !important;
+  }
+
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtText::after {
+    opacity: 0.35;
+  }
+
+  .psychicThoughtBlock[data-psychic-state="thinking"] .psychicThoughtShimmer span {
+    opacity: 0.42;
+    transform: none;
+  }
 }
 
 .assistantSentImageWrap {
@@ -12041,11 +14322,183 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-underline-offset: 0.18em;
 }
 
+.zenYouTubeMessagePanel {
+  display: grid;
+  justify-items: center;
+  width: min(820px, 100%);
+  max-width: 100%;
+  margin: clamp(22px, 4dvh, 46px) auto;
+}
+
+.zenYouTubeEmbed {
+  --zen-youtube-radius: 18px;
+  display: block;
+  position: relative;
+  isolation: isolate;
+  width: min(760px, 100%);
+  max-width: 100%;
+  margin: 0 auto;
+  color: #ffffff;
+}
+
+.zenYouTubeGlow {
+  position: absolute;
+  inset: -24%;
+  z-index: -1;
+  border-radius: 999px;
+  background-image:
+    radial-gradient(ellipse at 50% 52%, rgba(255, 255, 255, 0.2), transparent 58%),
+    var(--zen-youtube-thumbnail);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.32;
+  filter: blur(36px) saturate(1.3);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 0 45%, transparent 74%);
+  mask-image: radial-gradient(ellipse at center, #000 0 45%, transparent 74%);
+  transform: scale(0.98);
+  animation: zenYouTubeStageGlow 5.6s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.zenYouTubeFrame {
+  display: block;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border-radius: var(--zen-youtube-radius);
+  background: #050505;
+  box-shadow:
+    0 22px 72px rgba(0, 0, 0, 0.32),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.zenYouTubePosterButton {
+  appearance: none;
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: #050505;
+  color: #ffffff;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.zenYouTubePoster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.01);
+}
+
+.zenYouTubePosterScrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, transparent 0 22%, rgba(0, 0, 0, 0.24) 58%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.34));
+  pointer-events: none;
+}
+
+.zenYouTubePlayButton {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(54px, 8vw, 76px);
+  height: clamp(54px, 8vw, 76px);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.34), transparent 34%),
+    rgba(14, 14, 16, 0.72);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.38),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transform: translate(-50%, -50%);
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease;
+}
+
+.zenYouTubePosterButton:hover .zenYouTubePlayButton,
+.zenYouTubePosterButton:focus-visible .zenYouTubePlayButton {
+  border-color: rgba(255, 255, 255, 0.58);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.42), transparent 34%),
+    rgba(8, 8, 10, 0.82);
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.zenYouTubePosterButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, #ffffff);
+  outline-offset: 4px;
+}
+
+.zenYouTubeIframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+@keyframes zenYouTubeStageGlow {
+  from {
+    opacity: 0.28;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 0.36;
+    transform: scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenYouTubeGlow {
+    animation: none;
+    opacity: 0.3;
+    transform: none;
+  }
+
+  .zenYouTubePlayButton {
+    transition: none;
+  }
+
+  .zenYouTubePosterButton:hover .zenYouTubePlayButton,
+  .zenYouTubePosterButton:focus-visible .zenYouTubePlayButton {
+    transform: translate(-50%, -50%);
+  }
+}
+
 .promptShortcutInline {
   display: inline-grid;
   max-width: 100%;
   gap: 8px;
   vertical-align: baseline;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"] {
+  position: relative;
+  z-index: 20;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"][data-expanded="true"] {
+  z-index: 90;
+}
+
+.promptShortcutInline[data-prompt-shortcut-presentation="expandable"][data-expanded="true"] {
+  display: grid;
+  width: min(620px, 100%);
+  vertical-align: top;
 }
 
 .promptShortcutCapsule,
@@ -12084,8 +14537,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
 }
 
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"] {
+  cursor: default;
+}
+
+.promptShortcutCapsule[data-prompt-shortcut-pending="true"],
+.promptShortcutCapsule:disabled {
+  cursor: default;
+  opacity: 0.68;
+  filter: saturate(0.75);
+}
+
 .promptShortcutCapsule:hover,
 .promptShortcutCapsule:focus-visible,
+.promptShortcutInline[data-prompt-shortcut-presentation="popout"][data-expanded="true"]
+  .promptShortcutCapsule,
 .commandMentionChip:hover,
 .commandMentionChip:focus-visible {
   outline: none;
@@ -12099,19 +14565,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--bg-elevated);
 }
 
-.promptWildcardRunInline {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: start;
-  gap: 7px;
-}
-
-.promptWildcardRunInline > div:first-child {
-  min-width: 0;
-}
-
-.promptWildcardRunInline .promptShortcutPreview {
-  grid-column: 1 / -1;
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"]:hover,
+.promptShortcutCapsule[data-prompt-shortcut-locked="true"]:focus-visible,
+.promptShortcutCapsule[data-prompt-shortcut-pending="true"]:hover,
+.promptShortcutCapsule[data-prompt-shortcut-pending="true"]:focus-visible,
+.promptShortcutCapsule:disabled:hover,
+.promptShortcutCapsule:disabled:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-ink) 28%, var(--line));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 10%, transparent),
+      color-mix(in srgb, #2fd3e3 7%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
 }
 
 .promptWildcardCapsule {
@@ -12152,6 +14619,61 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg);
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   white-space: normal;
+}
+
+.promptShortcutPopout {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(520px, calc(100vw - 36px));
+  max-width: min(520px, calc(100vw - 36px));
+  z-index: 95;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #000 28%, transparent),
+    0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent) inset;
+  animation: promptShortcutPopoutIn 130ms ease-out both;
+}
+
+.promptShortcutPopout::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent-ink) 4%);
+  transform: rotate(45deg);
+}
+
+.messageUser .promptShortcutPopout {
+  right: 0;
+  left: auto;
+}
+
+.messageUser .promptShortcutPopout::before {
+  right: 18px;
+  left: auto;
+}
+
+@keyframes promptShortcutPopoutIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptShortcutPopout {
+    animation: none;
+  }
 }
 
 .promptShortcutPreviewHeader,
@@ -12239,59 +14761,91 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: pre-wrap;
 }
 
+.promptShortcutInline[data-prompt-shortcut-presentation="expandable"][data-expanded="true"]
+  .promptShortcutPreviewSection code {
+  max-height: none;
+  overflow: visible;
+}
+
+.promptShortcutPopout .promptShortcutPreviewSection code {
+  max-height: min(260px, 44vh);
+}
+
 .promptShortcutWildcardFill {
   border-radius: 4px;
-  padding: 0 2px;
+  padding: 0.03em 0.24em;
   background: color-mix(
     in srgb,
-    var(--prompt-shortcut-wildcard-color) 16%,
-    transparent
+    var(--prompt-shortcut-wildcard-color) 22%,
+    var(--bg-elevated)
   );
-  color: color-mix(in srgb, var(--prompt-shortcut-wildcard-color) 82%, var(--fg));
+  color: color-mix(in srgb, var(--prompt-shortcut-wildcard-color) 34%, var(--fg) 66%);
   font-weight: 850;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  text-shadow: 0 0 12px
-    color-mix(in srgb, var(--prompt-shortcut-wildcard-color) 28%, transparent);
+  text-shadow: none;
+}
+
+.promptShortcutExpandedProse {
+  display: inline;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: 7px;
+  padding: 0.12em 0.34em;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--fg) 7%);
+  color: var(--fg);
+  font-size: min(0.98em, var(--prompt-shortcut-expanded-font-cap, 999px));
+  font-weight: 650;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent) inset;
 }
 
 .pendingWildcardShimmer {
   display: inline-block;
   position: relative;
-  inline-size: 5.6ch;
+  inline-size: 5.8ch;
   min-inline-size: 3.8ch;
-  block-size: 0.96em;
-  border-radius: 4px;
+  block-size: 0.88em;
+  border-radius: 999px;
   overflow: hidden;
-  vertical-align: -0.12em;
+  vertical-align: -0.08em;
   isolation: isolate;
   background:
     linear-gradient(
-      90deg,
-      color-mix(in srgb, currentColor 11%, transparent),
-      color-mix(in srgb, #2fd3e3 18%, transparent) 46%,
-      color-mix(in srgb, #7b5cff 16%, transparent)
+      105deg,
+      color-mix(in srgb, currentColor 8%, transparent),
+      color-mix(in srgb, #2fd3e3 18%, transparent) 44%,
+      color-mix(in srgb, #b7e63a 13%, transparent) 72%,
+      color-mix(in srgb, #ff4d6d 10%, transparent)
     ),
-    color-mix(in srgb, currentColor 8%, transparent);
+    color-mix(in srgb, currentColor 7%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, currentColor 14%, transparent) inset,
-    0 0 14px color-mix(in srgb, #2fd3e3 16%, transparent);
-  filter: blur(0.18px);
+    0 0 0 1px color-mix(in srgb, currentColor 10%, transparent) inset,
+    0 0 12px color-mix(in srgb, #2fd3e3 14%, transparent),
+    0 0 24px color-mix(in srgb, #b7e63a 7%, transparent);
+  filter: blur(0.32px) saturate(1.08);
+  transform-origin: center;
+  animation: pendingWildcardStripBreathe 1.9s ease-in-out infinite;
 }
 
 .pendingWildcardShimmer::before {
   content: "";
   position: absolute;
-  inset: -35%;
+  inset: -60% -45%;
   z-index: 1;
   background: linear-gradient(
-    90deg,
-    transparent 18%,
-    color-mix(in srgb, #ffffff 52%, transparent) 48%,
-    transparent 74%
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, #ffffff 36%, transparent) 43%,
+    color-mix(in srgb, currentColor 18%, transparent) 50%,
+    transparent 66%
   );
   transform: translateX(-72%);
-  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
+  filter: blur(0.7px);
+  animation: pendingWildcardShimmerSweep 1.44s ease-in-out infinite;
 }
 
 .pendingWildcardShimmer::after {
@@ -12300,18 +14854,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   inset: 0;
   z-index: 0;
   background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 5px,
-      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    radial-gradient(
+      ellipse at 24% 42%,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      transparent 46%
     ),
     radial-gradient(
-      circle at 24% 44%,
-      color-mix(in srgb, #ff4d6d 24%, transparent),
-      transparent 38%
+      ellipse at 72% 58%,
+      color-mix(in srgb, #7b5cff 15%, transparent),
+      transparent 54%
     );
-  opacity: 0.5;
-  filter: blur(2px);
+  opacity: 0.62;
+  filter: blur(3px);
 }
 
 .pendingPromptWildcardMessage {
@@ -12322,9 +14876,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .pendingPromptWildcardShimmer {
-  inline-size: min(22ch, 70vw);
+  inline-size: var(--pending-wildcard-shimmer-size, min(22ch, 70vw));
   max-inline-size: 100%;
-  block-size: 1.05em;
+  block-size: 0.98em;
+}
+
+.cleanupRevealMessage {
+  animation: cleanupMessageRevealClear var(--cleanup-message-reveal-duration, 960ms) ease-out
+    both;
+  will-change: filter, opacity, text-shadow;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cleanupRevealMessage {
+    animation-duration: 1ms;
+    will-change: auto;
+  }
+}
+
+@keyframes cleanupMessageRevealClear {
+  from {
+    opacity: 0.58;
+    filter: blur(7px) saturate(0.82);
+    text-shadow: 0 0 16px color-mix(in srgb, currentColor 48%, transparent);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0) saturate(1);
+    text-shadow: none;
+  }
 }
 
 @keyframes pendingWildcardShimmerSweep {
@@ -12336,17 +14916,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-.promptShortcutUnfoldedText {
-  margin: 0;
-  color: currentColor;
-  white-space: pre-wrap;
-}
-
-.promptShortcutUnfoldedInsertion {
-  color: color-mix(in srgb, currentColor 76%, var(--fg) 24%);
-  font-weight: inherit;
-  text-shadow: 0 0 12px
-    color-mix(in srgb, currentColor 18%, transparent);
+@keyframes pendingWildcardStripBreathe {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scaleX(0.985);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scaleX(1.012);
+  }
 }
 
 .botMentionChip {
@@ -12884,8 +15463,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   opacity: 0.95;
 }
 
-.typingIndicatorReplyingLive .typingDots span {
-  animation-duration: 0.95s;
+.typingIndicatorChatCenter.typingIndicatorReplyingLive.typingIndicatorSpeedNudged {
+  outline: 1px solid color-mix(in srgb, var(--typing-accent, var(--accent)) 42%, transparent);
+  outline-offset: 4px;
+}
+
+.typingIndicatorReplyingLive .typingDots {
+  --typing-dot-duration: 0.95s;
+}
+
+.typingIndicatorPaused {
+  border-color: color-mix(in srgb, var(--typing-accent, var(--accent)) 28%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--typing-accent, var(--accent)) 7%, transparent),
+      color-mix(in srgb, var(--bg-surface) 90%, transparent)
+    );
+  box-shadow:
+    0 10px 24px color-mix(in srgb, #000000 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+.typingIndicatorPaused .typingDots span {
+  animation-play-state: paused;
+  opacity: 0.62;
+  transform: translateY(0);
 }
 
 .appLayout[data-zen-initial-thinking="true"] .chatHeader,
@@ -12940,6 +15543,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     radial-gradient(
       circle at 62% 60%,
       color-mix(in srgb, #d9a800 8%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, #fffaf2 78%, transparent);
+}
+
+.zenInitialThinkingOverlay[data-persona="bot"] {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 20%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 10%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 7%, transparent) 0 20%,
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg-deep) 76%, transparent);
+}
+
+.themeLight .zenInitialThinkingOverlay[data-persona="bot"] {
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 0 18%,
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 38% 58%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 8%, transparent) 0 22%,
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 62% 60%,
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 6%, transparent) 0 20%,
       transparent 46%
     ),
     color-mix(in srgb, #fffaf2 78%, transparent);
@@ -13044,6 +15687,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingGlyphDrift 2.6s ease-in-out infinite;
 }
 
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo {
+  color: var(--bot-ink, var(--bot-color, var(--fg)));
+  box-shadow:
+    0 24px 76px rgba(0, 0, 0, 0.34),
+    0 0 60px color-mix(in srgb, var(--bot-color, var(--accent)) 28%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 18%, transparent);
+}
+
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo {
   width: 42px;
   height: 42px;
@@ -13093,6 +15744,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenInitialThinkingRingSpin 4.8s linear infinite;
 }
 
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo::before {
+  background:
+    conic-gradient(
+      from 18deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 90%, #ffffff 10%),
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 56%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 72%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 90%, #ffffff 10%)
+    );
+}
+
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::before {
   inset: -6px;
   padding: 1.5px;
@@ -13114,6 +15776,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: blur(28px);
   opacity: 0.42;
   animation: zenInitialThinkingAuraPulse 2.8s ease-in-out infinite;
+}
+
+.zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo::after {
+  background:
+    conic-gradient(
+      from 120deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 42%, transparent),
+      color-mix(in srgb, var(--bot-ink, var(--fg)) 18%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 30%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 42%, transparent)
+    );
 }
 
 .zenInitialThinkingOverlay[data-phase="compact"] .zenInitialThinkingGlyphHalo::after {
@@ -13302,7 +15975,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenInitialThinkingGlyphHalo,
   .zenInitialThinkingGlyphHalo::before,
   .zenInitialThinkingGlyphHalo::after,
-  .zenInitialThinkingGlyph {
+  .zenInitialThinkingGlyph,
+  .zenPersonaStartupAtmosphere::before,
+  .zenPersonaStartupAtmosphere::after {
     animation: none;
   }
 }
@@ -13351,28 +16026,117 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .typingDots {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 750;
+  --typing-dot-gap: 0.2em;
+  --typing-dot-duration: 1.2s;
+  --typing-dot-stagger: 0.15s;
+  --typing-dot-rise: -0.18em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.32;
+  --typing-dot-active-opacity: 1;
+  --typing-dot-ease: ease-in-out;
   display: inline-flex;
-  gap: 4px;
+  align-items: baseline;
+  gap: var(--typing-dot-gap);
+  font-family: var(--typing-dot-font);
+  font-size: 1.35em;
+  font-weight: var(--typing-dot-weight);
+  line-height: 0.7;
+  letter-spacing: 0;
 }
 
 .typingDots span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(
+  --typing-dot-index: 0;
+  display: inline-block;
+  min-width: 0.18em;
+  color: color-mix(
     in srgb,
     var(--typing-accent, var(--fg-muted)) 78%,
     var(--fg-muted)
   );
-  animation: typingPulse 1.2s infinite;
+  opacity: var(--typing-dot-rest-opacity);
+  transform: translateY(0);
+  transform-origin: center 72%;
+  animation: typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+  animation-delay: calc(var(--typing-dot-index, 0) * var(--typing-dot-stagger));
 }
 
 .typingDots span:nth-child(2) {
-  animation-delay: 0.15s;
+  --typing-dot-index: 1;
 }
 
 .typingDots span:nth-child(3) {
-  animation-delay: 0.3s;
+  --typing-dot-index: 2;
+}
+
+.zenPendingReplyDots span {
+  --typing-dot-index: 0;
+  animation-delay: calc(var(--typing-dot-index, 0) * var(--typing-dot-stagger));
+}
+
+.typingDots[data-voice-preset="warm"],
+.zenPendingReplyDots[data-voice-preset="warm"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="warm"] {
+  --typing-dot-font: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 650;
+  --typing-dot-duration: 1.28s;
+  --typing-dot-rise: -0.12em;
+  --typing-dot-scale-active: 1.16;
+  --typing-dot-ease: cubic-bezier(0.34, 0.86, 0.38, 1);
+}
+
+.typingDots[data-voice-preset="concise"],
+.zenPendingReplyDots[data-voice-preset="concise"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="concise"] {
+  --typing-dot-font: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --typing-dot-weight: 650;
+  --typing-dot-gap: 0.14em;
+  --typing-dot-duration: 0.86s;
+  --typing-dot-stagger: 0.1s;
+  --typing-dot-rise: -0.08em;
+  --typing-dot-scale-active: 1.02;
+  --typing-dot-ease: steps(2, end);
+}
+
+.typingDots[data-voice-preset="playful"],
+.zenPendingReplyDots[data-voice-preset="playful"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="playful"] {
+  --typing-dot-font: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 400;
+  --typing-dot-gap: 0.2em;
+  --typing-dot-duration: 1.02s;
+  --typing-dot-stagger: 0.12s;
+  --typing-dot-rise: -0.2em;
+  --typing-dot-rotate: -8deg;
+  --typing-dot-scale-active: 1.2;
+  --typing-dot-ease: cubic-bezier(0.18, 0.92, 0.22, 1.28);
+}
+
+.typingDots[data-voice-preset="formal"],
+.zenPendingReplyDots[data-voice-preset="formal"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="formal"] {
+  --typing-dot-font: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  --typing-dot-weight: 600;
+  --typing-dot-gap: 0.24em;
+  --typing-dot-duration: 1.54s;
+  --typing-dot-stagger: 0.22s;
+  --typing-dot-rise: -0.05em;
+  --typing-dot-scale-active: 1.04;
+  --typing-dot-rest-opacity: 0.24;
+  --typing-dot-active-opacity: 0.86;
+  --typing-dot-ease: cubic-bezier(0.38, 0, 0.24, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typingDots span,
+  .zenPendingReplyDots span,
+  .chatEphemeralTypedWordEllipsis .chatEphemeralTypedLetter[data-ellipsis-dot="true"] {
+    animation: none;
+    opacity: 0.68;
+    transform: none;
+  }
 }
 
 .srOnly {
@@ -13785,14 +16549,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
 }
 
-@keyframes typingPulse {
-  0%, 60%, 100% {
-    opacity: 0.3;
-    transform: translateY(0);
+@keyframes typingDotPulse {
+  0%,
+  62%,
+  100% {
+    opacity: var(--typing-dot-rest-opacity, 0.32);
+    transform: translateY(0) scale(1) rotate(0deg);
   }
-  30% {
-    opacity: 1;
-    transform: translateY(-2px);
+  32% {
+    opacity: var(--typing-dot-active-opacity, 1);
+    transform:
+      translateY(var(--typing-dot-rise, -0.18em))
+      scale(var(--typing-dot-scale-active, 1.08))
+      rotate(var(--typing-dot-rotate, 0deg));
   }
 }
 
@@ -13890,12 +16659,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 18%,
+    var(--compose-bot-color, var(--accent)) 62%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 14%,
+    var(--compose-bot-color, var(--accent)) 38%,
     transparent
   );
 }
@@ -14280,6 +17049,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-tone-gap-extra: 0px;
   --zen-tone-runway-extra: 0px;
   --zen-tone-scroll-margin-extra: 0px;
+  --zen-persona-ink-overlap: clamp(112px, calc(12dvh + var(--zen-tone-gap-extra)), 228px);
   --zen-prose-runway-top: clamp(240px, calc(38dvh + var(--zen-tone-runway-extra)), 672px);
   --zen-prose-runway-bottom: clamp(300px, calc(54dvh + var(--zen-tone-runway-extra)), 632px);
   --zen-text-top-fade-start: clamp(28px, 5dvh, 68px);
@@ -14288,11 +17058,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-text-bottom-fade-start: clamp(36px, 6dvh, 84px);
   --zen-text-bottom-fade-mid: clamp(132px, 20dvh, 236px);
   --zen-text-bottom-fade-end: clamp(224px, 31dvh, 372px);
-  --zen-assistant-prose: color-mix(in srgb, #fffaf2 92%, var(--fg) 8%);
+  --zen-assistant-prose: #ffffff;
   --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 64%, var(--fg-muted));
   --zen-user-prism-color-bright: #44d7e6;
   --zen-user-prism-color-dark: #006f7a;
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
+  z-index: 5;
   padding-top: max(76px, var(--zen-prose-runway-top));
   padding-bottom: max(104px, var(--zen-prose-runway-bottom));
   scroll-padding-top: var(--zen-prose-runway-top);
@@ -14326,15 +17097,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
-.appLayout[data-zen-surface="true"]
-  .messages[data-chat-ephemeral="true"]:not([data-replying-live="true"]) {
-  scroll-snap-type: y proximity;
-  scroll-padding-top: 50dvh;
-  scroll-padding-bottom: 50dvh;
-}
-
 .appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] {
-  --zen-assistant-prose: color-mix(in srgb, #15120f 90%, var(--fg) 10%);
+  --zen-assistant-prose: #000000;
   --zen-assistant-heading: color-mix(in srgb, var(--zen-assistant-prose) 62%, var(--fg-muted));
   --zen-user-prism-color: var(--zen-user-prism-color-dark);
 }
@@ -14342,7 +17106,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .message,
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .zenEraBoundary {
   scroll-margin-block: clamp(56px, calc(14dvh + var(--zen-tone-scroll-margin-extra)), 280px);
-  scroll-snap-align: center;
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageAssistant,
@@ -14372,18 +17135,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser {
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
-  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-prose: var(--zen-user-message-color, var(--zen-user-prism-color));
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 74%, var(--fg-muted));
   --zen-user-prose-shadow:
     0 1px 1px rgba(0, 0, 0, 0.36),
     0 0 18px color-mix(in srgb, var(--zen-user-prose) 14%, transparent);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .appLayout[data-zen-surface="true"].themeLight .messages[data-chat-ephemeral="true"] .messageUser {
   --zen-user-prism-color: var(--zen-user-prism-color-dark);
-  --zen-user-prose: var(--zen-user-prism-color);
+  --zen-user-prose: var(--zen-user-message-color, var(--zen-user-prism-color));
   --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 78%, var(--fg-muted));
   --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.46);
+}
+
+.appLayout[data-zen-surface="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-zen-persona-ink="persona"] {
+  --zen-user-prose: var(
+    --zen-user-message-color,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color))
+  );
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 76%, var(--fg-muted));
+  --zen-user-prose-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.58),
+    0 0 22px rgba(0, 0, 0, 0.28);
+}
+
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-zen-persona-ink="persona"] {
+  --zen-user-prose: var(
+    --zen-user-message-color,
+    var(--zen-persona-ink-color, var(--zen-user-prism-color))
+  );
+  --zen-user-heading: color-mix(in srgb, var(--zen-user-prose) 80%, var(--fg-muted));
+  --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser,
@@ -14393,6 +17183,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser .chatEphemeralLine {
   color: var(--zen-user-prose);
   text-shadow: var(--zen-user-prose-shadow);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] p,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages[data-chat-ephemeral="true"]
+  .messageUser[data-command-display="prompt"] .markdownBody {
+  color: var(--zen-user-prose);
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] .messageUser h4 {
@@ -14417,11 +17216,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 18px 42px rgba(0, 0, 0, 0.34));
 }
 
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateIconButton:has(.emptyStatePrivateBotGlyph) {
+  filter: none;
+}
+
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleBlock {
   width: min(680px, calc(100vw - 36px));
   justify-items: center;
   gap: clamp(10px, 1.7vh, 16px);
-  margin-top: 6px;
+  margin-top: clamp(-173px, -18dvh, -96px);
   padding:
     clamp(20px, 3.2vw, 30px)
     clamp(18px, 4vw, 36px)
@@ -14457,6 +17260,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-shadow:
     0 0 28px color-mix(in srgb, var(--accent) 22%, transparent),
     0 1px 1px rgba(0, 0, 0, 0.26);
+}
+
+.appLayout[data-zen-surface="true"]
+  .messagesEmptyState
+  .emptyStateTitle[data-zen-title-with-hero="true"] {
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-width: 100%;
+  justify-items: center;
+  gap: clamp(5px, 0.9dvh, 10px);
+  line-height: 0.95;
+  letter-spacing: 0.04em;
+  white-space: normal;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitlePhrase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(7px, 0.9vw, 12px);
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleLead {
+  display: inline;
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleSubject {
+  display: block;
+  max-width: min(100%, 9.2em);
+  overflow: hidden;
+  font-size: min(1em, var(--zen-title-subject-font-cap, 1em));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appLayout[data-zen-surface="true"] .messagesEmptyState .zenInlineHeroGlyph {
+  position: relative;
+  inset-block-start: auto;
+  left: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  transform: scale(0.88);
+  transform-origin: 50% 50%;
+  z-index: 1;
 }
 
 .appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateHint {
@@ -14503,6 +17353,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
   transform: translate3d(20px, 0, 0);
+}
+
+.appLayout[data-zen-surface="true"] .zenSplashModelPicker .zenPrivateModeToggle {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 999px;
 }
 
 .appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
@@ -14554,7 +17411,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeBotMenu.zenSplashModelMenu {
   min-width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(260px, calc(100vw - 24px));
-  max-height: min(228px, calc(100vh - 340px));
+  max-height: min(280px, var(--compose-menu-available-height, calc(100dvh - 180px)));
   border-radius: 9px;
   box-shadow:
     0 16px 34px rgba(0, 0, 0, 0.26),
@@ -14562,7 +17419,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenSplashModelMenu .composeBotListbox {
-  max-height: min(222px, calc(100vh - 346px));
+  max-height: min(
+    166px,
+    max(96px, calc(var(--compose-menu-available-height, 280px) - 114px))
+  );
+  padding: 4px;
+  gap: 1px;
+  border-radius: 7px;
+}
+
+.composeBotMenu.zenSplashBotMenu {
+  min-width: min(240px, calc(100vw - 24px)) !important;
+  max-width: min(300px, calc(100vw - 24px));
+  max-height: min(380px, var(--compose-menu-available-height, calc(100dvh - 96px)));
+  margin-top: clamp(0px, 0.18dvh, 2px);
+  border-radius: 9px;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+}
+
+.zenSplashBotMenu .composeBotListbox {
+  flex: 1 1 auto;
+  max-height: min(
+    260px,
+    max(96px, calc(var(--compose-menu-available-height, 380px) - 118px))
+  );
   padding: 4px;
   gap: 1px;
   border-radius: 7px;
@@ -14772,56 +17654,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, var(--bg));
 }
 
-.composeWritingAssistRow {
-  max-width: min(1240px, 100%);
-  width: 100%;
-  margin: 0 auto 8px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.composeWritingAssistButton {
-  border: 1px solid color-mix(in srgb, var(--compose-bot-color, var(--accent)) 32%, var(--line));
-  border-radius: 999px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-surface) 88%, var(--compose-bot-color, var(--accent)) 12%),
-      color-mix(in srgb, var(--bg) 92%, var(--compose-bot-color, var(--accent)) 8%)
-    );
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  padding: 6px 11px;
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.composeWritingAssistButton:hover:not(:disabled),
-.composeWritingAssistButton:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 54%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-surface) 80%, var(--compose-bot-color, var(--accent)) 20%),
-      color-mix(in srgb, var(--bg) 86%, var(--compose-bot-color, var(--accent)) 14%)
-    );
-  transform: translateY(-1px);
-}
-
-.composeWritingAssistButton:disabled {
-  cursor: wait;
-  opacity: 0.58;
-  transform: none;
-}
-
 /* Thin utility row above the textarea for the LOCAL/ONLINE mode toggle and
    any future compose-adjacent controls. Width matches `.composeEditorShell`
    so the row's left edge lines up with the textarea below it. */
@@ -14890,6 +17722,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   display: grid;
   gap: 8px;
+}
+
+.zenActionComposerPreview {
+  width: 100%;
+  max-width: min(1240px, 100%);
+  margin: 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.42em;
+  color: color-mix(in srgb, var(--zen-user-message-color, var(--fg)) 70%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  pointer-events: none;
+  animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .queuedPromptRailDock {
@@ -15033,13 +17881,76 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 8px 10px;
 }
 
+.debugComposerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
 .debugComposerLabel {
+  min-width: 0;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--danger) 76%, var(--fg));
-  margin-bottom: 7px;
+  margin: 0;
+}
+
+.debugComposerMinimizeButton,
+.debugComposerRestoreButton {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 24%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 12%, var(--bg))
+    );
+  color: color-mix(in srgb, var(--danger) 78%, var(--fg));
+  font: inherit;
+  cursor: pointer;
+}
+
+.debugComposerMinimizeButton {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.debugComposerRestoreButton {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.debugComposerMinimizeButton:hover,
+.debugComposerMinimizeButton:focus-visible,
+.debugComposerRestoreButton:hover,
+.debugComposerRestoreButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--danger) 66%, var(--line-strong));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger-soft) 38%, var(--bg-elevated)),
+      color-mix(in srgb, var(--danger-soft) 20%, var(--bg))
+    );
 }
 
 .debugComposerRow {
@@ -15383,8 +18294,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   bottom: 0;
   z-index: 4;
   display: flex;
+  flex-direction: column;
   justify-content: center;
-  align-items: flex-end;
+  align-items: center;
+  gap: 8px;
   pointer-events: none;
   padding: 0 clamp(16px, 4vw, 28px);
   animation: askQuestionPromptDockIn 0.16s ease-out both;
@@ -15412,6 +18325,64 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, var(--askq-chip-inset) 78%, transparent);
   backdrop-filter: blur(10px) saturate(120%);
   -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+
+.askQuestionPatienceMeter {
+  --ask-question-patience-progress: 1;
+  --ask-question-patience-progress-width: 100%;
+  grid-column: 1 / -1;
+  position: relative;
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--askq-chip-border) 12%, transparent),
+      color-mix(in srgb, var(--askq-chip-border) 28%, transparent),
+      color-mix(in srgb, var(--askq-chip-border) 12%, transparent)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--askq-chip-border) 16%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 10%, transparent);
+  pointer-events: none;
+}
+
+.askQuestionPatienceMeter span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--ask-question-patience-progress-width);
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 30%, transparent),
+      color-mix(in srgb, var(--accent) 58%, #ffffff 8%),
+      color-mix(in srgb, var(--accent) 30%, transparent)
+    );
+  opacity: 0.78;
+  transform: translateX(-50%);
+}
+
+.askQuestionPatienceMeter[data-placement="rail"] {
+  margin: -2px 0 2px;
+}
+
+.askQuestionPatienceMeter[data-placement="dock"] {
+  width: min(640px, 100%);
+  height: 4px;
+}
+
+.askQuestionPatienceMeter[data-placement="inline"] {
+  height: 4px;
+  margin-top: -2px;
+}
+
+.askQuestionPatienceMeter[data-expired="true"] span {
+  opacity: 0.42;
 }
 
 @keyframes askQuestionPromptDockIn {
@@ -16106,6 +19077,117 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(10px);
 }
 
+.psychicModeToast {
+  position: fixed;
+  left: 50%;
+  bottom: max(92px, calc(env(safe-area-inset-bottom) + 22px));
+  z-index: 874;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 8%),
+      color-mix(in srgb, var(--bg-deep) 88%, transparent)
+    );
+  color: var(--fg);
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.25),
+    0 0 32px color-mix(in srgb, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  animation: psychicModeToastIn 3.6s ease both;
+}
+
+.psychicModeToast[data-psychic-active="false"] {
+  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 90%, var(--fg-muted) 5%),
+      color-mix(in srgb, var(--bg-deep) 88%, transparent)
+    );
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.2),
+    0 0 20px color-mix(in srgb, var(--fg-muted) 9%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+}
+
+.localCommandToast {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 90%, var(--accent) 5%),
+      color-mix(in srgb, var(--bg-deep) 90%, var(--fg-muted) 4%)
+    );
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.2),
+    0 0 22px color-mix(in srgb, var(--accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+}
+
+.psychicModeToastDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.psychicModeToast[data-psychic-active="false"] .psychicModeToastDot {
+  background: color-mix(in srgb, var(--fg-muted) 78%, var(--line));
+  box-shadow: none;
+}
+
+.psychicModeToastCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.psychicModeToastCopy strong {
+  font-size: 12px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.psychicModeToastCopy small {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes psychicModeToastIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.97);
+  }
+  12%,
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 6px) scale(0.985);
+  }
+}
+
 @keyframes zenMemoryLearnedIn {
   0% {
     opacity: 0;
@@ -16252,6 +19334,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
 .composeEditorShell[data-random-prompt-busy="true"] .composeInner textarea {
+  --composer-random-rainbow-period: 52rem;
   border-color: transparent;
   background:
     linear-gradient(
@@ -16275,7 +19358,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       #ff4dcb,
       #ff4d6d
     ) border-box;
-  background-size: 260% 100%, 260% 100%;
+  background-repeat: repeat-x;
+  background-size:
+    var(--composer-random-rainbow-period) 100%,
+    var(--composer-random-rainbow-period) 100%;
   box-shadow:
     0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
     0 0 26px -14px color-mix(in srgb, #2fd3e3 70%, transparent),
@@ -16493,6 +19579,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .markdownRichEditorHost :global(.tiptapPrismWildcardSlotToken) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32em;
   border: 1px solid transparent;
   border-radius: 7px;
   padding: 1px 7px;
@@ -16517,11 +19606,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 7px 18px -16px color-mix(in srgb, #7b5cff 72%, transparent);
 }
 
+.markdownRichEditorHost
+  :global(.tiptapPrismWildcardSlotToken[data-prism-wildcard-badge]) {
+  padding-inline-end: 3px;
+}
+
+.markdownRichEditorHost
+  :global(.tiptapPrismWildcardSlotToken[data-prism-wildcard-badge])::after {
+  content: attr(data-prism-wildcard-badge);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.12em;
+  block-size: 1.12em;
+  border: 1px solid color-mix(in srgb, #2fd3e3 64%, #ffffff 18%);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 28%, color-mix(in srgb, #ffffff 72%, transparent), transparent 38%),
+    color-mix(in srgb, #0a1517 82%, #2fd3e3);
+  color: #bcfff5;
+  -webkit-text-fill-color: #bcfff5;
+  font-size: 0.72em;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #05070b 72%, transparent) inset,
+    0 0 8px color-mix(in srgb, #2fd3e3 34%, transparent);
+}
+
 .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken) {
   display: inline-block;
   position: relative;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 999px;
   padding: 1px 0.45em;
   overflow: hidden;
   isolation: isolate;
@@ -16556,31 +19674,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   inset: 0;
   z-index: 0;
   background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 5px,
-      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    radial-gradient(
+      ellipse at 28% 46%,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      transparent 46%
     ),
     radial-gradient(
-      circle at 28% 46%,
-      color-mix(in srgb, #ff4d6d 24%, transparent),
-      transparent 42%
+      ellipse at 70% 58%,
+      color-mix(in srgb, #7b5cff 15%, transparent),
+      transparent 54%
     );
-  opacity: 0.54;
-  filter: blur(2px);
+  opacity: 0.62;
+  filter: blur(3px);
 }
 
 .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
-  inset: -35%;
+  inset: -60% -45%;
   z-index: 1;
   background: linear-gradient(
-    90deg,
-    transparent 18%,
-    color-mix(in srgb, #ffffff 52%, transparent) 48%,
-    transparent 74%
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, #ffffff 36%, transparent) 43%,
+    color-mix(in srgb, currentColor 18%, transparent) 50%,
+    transparent 66%
   );
   transform: translateX(-72%);
-  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
+  filter: blur(0.7px);
+  animation: pendingWildcardShimmerSweep 1.44s ease-in-out infinite;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
@@ -16621,7 +19741,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 0 0, 0 0;
   }
   to {
-    background-position: 260% 0, 260% 0;
+    background-position:
+      var(--composer-random-rainbow-period) 0,
+      var(--composer-random-rainbow-period) 0;
   }
 }
 
@@ -16630,11 +19752,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 0 0;
   }
   to {
-    background-position: 260% 0;
+    background-position: var(--composer-random-rainbow-period) 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pendingWildcardShimmer,
   .pendingWildcardShimmer::before,
   .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
@@ -16674,12 +19797,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .markdownComposerSurface {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 72%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 58%,
     transparent
   );
 }
@@ -16713,16 +19836,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-private-active="true"]
   .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
   .markdownComposerSurface:focus-within {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 74%, var(--fg));
   box-shadow:
     0 0 0 3px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 14%,
+      var(--compose-bot-color, var(--accent)) 26%,
       transparent
     ),
     inset -18px 0 24px -24px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 24%,
+      var(--compose-bot-color, var(--accent)) 58%,
       transparent
     );
 }
@@ -16743,8 +19866,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   :global(.tiptap p.is-editor-empty.is-empty::before) {
   color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
-    var(--fg-muted) 76%
+    var(--compose-bot-color, var(--accent)) 76%,
+    var(--fg-muted) 24%
   );
 }
 
@@ -16862,12 +19985,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--accent-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 88px;
   padding: 14px 18px;
   cursor: pointer;
   font: inherit;
   font-size: var(--font-size-compose);
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   opacity: 0.52;
   filter: saturate(0.72);
   transition:
@@ -16925,17 +20053,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .compose[data-compose-bot-selected="true"]
   .markdownComposerInputRow
   > button:not(:disabled) {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
-      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
-    );
-  color: var(--fg);
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 72%, var(--line));
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 84%, var(--fg) 16%);
+  color: var(--accent-text);
   box-shadow:
     var(--shadow-sm),
-    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, transparent);
 }
 
 .compose[data-compose-bot-selected="true"] .markdownComposerInputRow > button:hover:not(:disabled) {
@@ -16950,12 +20073,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .compose[data-compose-bot-selected="true"]
   .markdownComposerInputRow
   > button:hover:not(:disabled) {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
-      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
-    );
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 76%, var(--fg) 24%);
 }
 
 .markdownComposerInputRow > button:active:not(:disabled) {
@@ -16973,6 +20091,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerInputRow > button:disabled,
 .composeEditorShell[data-random-prompt-busy="true"] .composeInner button:disabled {
+  --composer-random-rainbow-period: 18rem;
   border-color: transparent;
   background:
     linear-gradient(
@@ -16986,7 +20105,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       #ff4dcb,
       #ff4d6d
     );
-  background-size: 260% 100%;
+  background-repeat: repeat-x;
+  background-size: var(--composer-random-rainbow-period) 100%;
   color: #111111;
   filter: none;
   opacity: 0.92;
@@ -17126,6 +20246,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: max(100%, 300px);
 }
 
+.composeModelMenu > .composeBotListbox {
+  flex: 1 1 auto;
+}
+
+.composeModelMenuFooter {
+  flex: 0 0 auto;
+  padding: 6px 7px 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+}
+
+.composeModelMenuFooter .composeModelEffortControl {
+  margin: 0;
+}
+
 .composeModelOption {
   justify-content: space-between;
   gap: 14px;
@@ -17185,6 +20320,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+}
+
+.composeModelEffortControl[data-disabled="true"] {
+  border-color: color-mix(in srgb, var(--line) 86%, var(--fg-muted) 14%);
 }
 
 .composeModelEffortHeader {
@@ -17273,6 +20412,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateY(-1px);
 }
 
+.composeModelEffortControl[data-disabled="true"] .composeModelEffortSliderShell {
+  filter: saturate(0.2);
+  opacity: 0.28;
+}
+
 .composeModelEffortControl input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
@@ -17291,6 +20435,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.composeModelEffortHint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
   color: var(--fg-subtle);
 }
 
@@ -17610,6 +20761,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .composeBotControl[data-open="true"] .composeBotTriggerChevron {
   transform: rotate(180deg);
+}
+
+.composeBotControl[data-open="true"][data-menu-placement="right"] .composeBotTriggerChevron {
+  transform: rotate(-90deg);
 }
 
 /* Popover menu. Opens UPWARD from the trigger because the composer
@@ -18161,6 +21316,174 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
 }
 
+.composeCommandOption[data-command-kind="mention"] {
+  position: relative;
+  align-items: center;
+  min-height: 38px;
+  padding-left: 14px;
+  border: 1px solid color-mix(in srgb, var(--bot-menu-color, var(--accent)) 30%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 11%, var(--bg-surface)),
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 6%, transparent) 62%,
+      color-mix(in srgb, var(--bg-surface) 92%, transparent)
+    );
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 10%, transparent) inset,
+    0 8px 18px -18px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 64%, transparent);
+}
+
+.composeCommandOption[data-command-kind="mention"]::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-menu-color, var(--accent)) 82%, #ffffff),
+    var(--bot-menu-color, var(--accent))
+  );
+  opacity: 0.82;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 28%, transparent);
+}
+
+.composeCommandOption[data-command-kind="mention"] .composeBotOptionGlyph {
+  width: 22px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--bot-menu-color, var(--accent)) 36%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bot-menu-color, var(--accent)) 12%, transparent);
+  color: var(--bot-menu-color, var(--accent-text));
+}
+
+.composeCommandOption[data-command-kind="mention"] .composeBotOptionName {
+  color: color-mix(in srgb, var(--bot-menu-color, var(--fg)) 82%, var(--fg));
+  font-weight: 760;
+}
+
+.composeCommandOption[data-command-kind="mention"]:hover,
+.composeCommandOption[data-command-kind="mention"]:focus-visible {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 15%, var(--bg-hover)),
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 8%, var(--bg-hover)) 62%,
+      var(--bg-hover)
+    );
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 14%, transparent) inset,
+    0 10px 22px -18px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 72%, transparent);
+}
+
+.composeCommandOption[data-command-kind="mention"][aria-selected="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 19%, var(--bg-active)),
+      color-mix(in srgb, var(--bot-menu-color, var(--accent)) 11%, var(--bg-active)) 62%,
+      var(--bg-active)
+    );
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 16%, transparent) inset,
+    0 0 0 1px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 18%, transparent),
+    0 12px 24px -18px color-mix(in srgb, var(--bot-menu-color, var(--accent)) 80%, transparent);
+}
+
+.composeBotMenuFooter {
+  flex: 0 0 auto;
+  padding: 6px 7px 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+}
+
+.zenPersonaTransitionControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.zenPersonaTransitionControl[data-compact="true"] {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.zenPersonaTransitionLabelWithInfo {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  min-width: 0;
+}
+
+.zenPersonaTransitionControl[data-compact="true"] .zenPersonaTransitionLabelWithInfo {
+  align-self: flex-start;
+}
+
+.zenPersonaTransitionControlLabel {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.zenPersonaTransitionSegments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
+}
+
+.zenPersonaTransitionSegmentButton {
+  min-width: 0;
+  height: 25px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zenPersonaTransitionSegmentButton[data-active="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #ff4d6d 13%, var(--bg-active)),
+      color-mix(in srgb, #2fd3e3 11%, var(--bg-active))
+    );
+  color: var(--fg);
+  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 14%, transparent) inset;
+}
+
+.zenPersonaTransitionSegmentButton:hover,
+.zenPersonaTransitionSegmentButton:focus-visible {
+  color: var(--fg);
+  background: var(--bg-hover);
+  outline: none;
+}
+
 .composeCommandOption[data-command-kind="wildcard-slot"] {
   position: relative;
   padding-left: 14px;
@@ -18582,10 +21905,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-height: 60px;
   max-height: 220px;
   resize: none;
-  padding: 17px 18px;
+  padding: var(--compose-textarea-padding, 17px 18px);
   font: inherit;
-  font-size: var(--font-size-compose);
-  line-height: 1.42;
+  font-size: var(--compose-textarea-font-size, var(--font-size-compose));
+  line-height: var(--compose-textarea-line-height, 1.42);
   min-width: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
   /* Hide internal scrollbar — only the conversation pane should scroll. */
@@ -18598,12 +21921,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .composeTextareaVisualWrap {
-  --compose-textarea-overlay-padding: 17px 18px;
-  --compose-textarea-overlay-font-size: var(--font-size-compose);
-  --compose-textarea-overlay-line-height: 1.42;
   position: relative;
   width: 100%;
   min-width: 0;
+}
+
+.compose .composeTextareaVisualWrap {
+  --compose-textarea-padding: 17px 18px;
+  --compose-textarea-font-size: var(--font-size-compose);
+  --compose-textarea-line-height: 1.42;
+  --compose-textarea-overlay-padding: var(--compose-textarea-padding);
+  --compose-textarea-overlay-font-size: var(--compose-textarea-font-size);
+  --compose-textarea-overlay-line-height: var(--compose-textarea-line-height);
+}
+
+.compose .composeTextareaVisualWrap[data-compose-single-line="true"] {
+  --compose-textarea-padding: 17.5px 18px;
+  --compose-textarea-font-size: calc(var(--font-size-compose) + 1px);
+  --compose-textarea-line-height: 1.34;
 }
 
 .composeTextareaVisualOverlay {
@@ -18749,8 +22084,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .composeTextareaToken[data-kind="wildcard-slot"] {
+  justify-content: flex-start;
+  gap: 0.32em;
   border-color: transparent;
   border-radius: 7px;
+  padding-inline: 7px;
   background:
     linear-gradient(
         90deg,
@@ -18767,6 +22105,34 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 7px 18px -16px color-mix(in srgb, #7b5cff 72%, transparent);
 }
 
+.composeTextareaToken[data-kind="wildcard-slot"][data-wildcard-badge] {
+  padding-inline-end: 3px;
+}
+
+.composeTextareaToken[data-kind="wildcard-slot"][data-wildcard-badge]::after {
+  content: attr(data-wildcard-badge);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.12em;
+  block-size: 1.12em;
+  border: 1px solid color-mix(in srgb, #2fd3e3 64%, #ffffff 18%);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 28%, color-mix(in srgb, #ffffff 72%, transparent), transparent 38%),
+    color-mix(in srgb, #0a1517 82%, #2fd3e3);
+  color: #bcfff5;
+  -webkit-text-fill-color: #bcfff5;
+  font-size: 0.72em;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #05070b 72%, transparent) inset,
+    0 0 8px color-mix(in srgb, #2fd3e3 34%, transparent);
+}
+
 .composeTextareaToken[data-kind="wildcard-slot"][data-pending="true"] {
   border-color: transparent;
   padding: 0;
@@ -18781,7 +22147,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inline-size: calc(100% - 2px);
   min-inline-size: calc(100% - 2px);
   block-size: 1.06em;
-  border-radius: 3px;
+  border-radius: 999px;
 }
 
 .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
@@ -18830,12 +22196,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   textarea {
   border-color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 72%,
     var(--line)
   );
   box-shadow: inset -18px 0 24px -24px color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
+    var(--compose-bot-color, var(--accent)) 58%,
     transparent
   );
 }
@@ -18877,16 +22243,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .appLayout[data-private-active="true"]
   .compose[data-compose-ready="true"][data-compose-bot-selected="true"]
   textarea:focus {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--fg));
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 74%, var(--fg));
   box-shadow:
     0 0 0 3px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 14%,
+      var(--compose-bot-color, var(--accent)) 26%,
       transparent
     ),
     inset -18px 0 24px -24px color-mix(
       in srgb,
-      var(--compose-bot-color, var(--accent)) 24%,
+      var(--compose-bot-color, var(--accent)) 58%,
       transparent
     );
 }
@@ -18903,8 +22269,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .appLayout[data-private-active="true"] .compose[data-compose-bot-selected="true"] textarea::placeholder {
   color: color-mix(
     in srgb,
-    var(--compose-bot-color, var(--accent)) 24%,
-    var(--fg-muted) 76%
+    var(--compose-bot-color, var(--accent)) 76%,
+    var(--fg-muted) 24%
   );
 }
 
@@ -18918,6 +22284,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--accent);
   color: var(--accent-text);
   align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 96px;
   min-height: 60px;
   padding: 0 20px;
@@ -18925,6 +22294,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font: inherit;
   font-size: var(--font-size-compose);
   font-weight: 600;
+  line-height: 1;
+  text-align: center;
   opacity: 0.52;
   filter: saturate(0.72);
   transform: translateX(0);
@@ -19039,17 +22410,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose[data-compose-bot-selected="true"]
   .composeInner
   button:not(:disabled) {
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 34%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 78%, var(--fg) 22%),
-      color-mix(in srgb, var(--bg-surface) 82%, var(--fg) 18%)
-    );
-  color: var(--fg);
+  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 72%, var(--line));
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 84%, var(--fg) 16%);
+  color: var(--accent-text);
   box-shadow:
     var(--shadow-sm),
-    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, transparent);
 }
 
 .compose[data-compose-bot-selected="true"] .composeInner button:hover:not(:disabled) {
@@ -19064,12 +22430,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose[data-compose-bot-selected="true"]
   .composeInner
   button:hover:not(:disabled) {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 28%),
-      color-mix(in srgb, var(--bg-surface) 76%, var(--fg) 24%)
-    );
+  background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 76%, var(--fg) 24%);
 }
 
 .composeInner button:active:not(:disabled) {
@@ -19198,6 +22559,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 18px;
 }
 
+.promptCenterPanelTop {
+  display: grid;
+  gap: 8px;
+}
+
+.promptCenterPanelMessages {
+  display: grid;
+  gap: 6px;
+}
+
+.promptCenterPanelMessages .panelNotice,
+.promptCenterPanelMessages .error {
+  margin-top: 0;
+}
+
 .promptCenterWorkspace {
   min-height: 0;
   display: grid;
@@ -19257,6 +22633,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterModelCard label span,
 .promptCenterModelField > span,
 .promptCenterField > span,
+.promptCenterWildcardValuesHeader span,
 .promptCenterFlagsHeader span,
 .promptCenterReadonlyBlock > span {
   color: var(--fg-muted);
@@ -19373,6 +22750,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: text;
 }
 
+.promptCenterWildcardValueBox[data-selecting="true"] {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.promptCenterWildcardValueBox[data-selecting="true"] .promptCenterWildcardValueChip {
+  user-select: none;
+}
+
 .promptCenterWildcardValueBox::-webkit-scrollbar {
   width: 8px;
 }
@@ -19440,6 +22826,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: color-mix(in srgb, #ff9f1c 78%, var(--fg));
 }
 
+.promptCenterWildcardValuesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.promptCenterWildcardValuesHeader button {
+  flex: 0 0 auto;
+}
+
 .promptCenterWildcardValueChip {
   max-width: 100%;
   min-width: 0;
@@ -19498,6 +22895,38 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     var(--bg-elevated);
 }
 
+.promptCenterWildcardValueChip[data-selected="true"] {
+  border-color: color-mix(in srgb, #2fd3e3 72%, var(--accent-ink));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 26%, transparent),
+      color-mix(in srgb, #2fd3e3 22%, transparent)
+    ),
+    color-mix(in srgb, var(--accent-ink) 14%, var(--bg-elevated));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #2fd3e3 18%, transparent),
+    0 1px 0 color-mix(in srgb, #ffffff 18%, transparent) inset,
+    0 8px 16px color-mix(in srgb, #000 10%, transparent);
+}
+
+.promptCenterWildcardSelectionMarquee {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, #2fd3e3 76%, var(--accent-ink));
+  border-radius: 6px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #b7e63a 12%, transparent),
+      color-mix(in srgb, #2fd3e3 14%, transparent)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 10%, transparent) inset,
+    0 8px 24px color-mix(in srgb, #000 12%, transparent);
+}
+
 .promptCenterListSection {
   min-height: 0;
   display: grid;
@@ -19506,6 +22935,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader,
+.promptCenterWildcardValuesHeader,
 .promptCenterFlagsHeader,
 .promptCenterDangerRow {
   display: flex;
@@ -19521,6 +22951,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader button,
+.promptCenterWildcardValuesHeader button,
 .promptCenterFlagsHeader button,
 .promptCenterDangerRow button,
 .promptCenterMobileBack,
@@ -19537,6 +22968,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterListHeader button:hover,
 .promptCenterListHeader button:focus-visible,
+.promptCenterWildcardValuesHeader button:hover,
+.promptCenterWildcardValuesHeader button:focus-visible,
 .promptCenterFlagsHeader button:hover,
 .promptCenterFlagsHeader button:focus-visible,
 .promptCenterDangerRow button:hover,
@@ -19551,6 +22984,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterListHeader button:disabled,
+.promptCenterWildcardValuesHeader button:disabled,
 .promptCenterFlagsHeader button:disabled,
 .promptCenterDangerRow button:disabled {
   opacity: 0.46;
@@ -19621,6 +23055,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterPromptRowFrame {
   min-width: 0;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
@@ -19629,6 +23064,48 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterPromptRowFrame[data-deletable="true"] {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.promptCenterPromptRowActions {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.promptCenterPromptRowFrame[data-draggable="true"] .promptCenterPromptRow {
+  cursor: grab;
+}
+
+.promptCenterPromptRowFrame[data-dragging="true"] {
+  opacity: 0.48;
+}
+
+.promptCenterPromptRowFrame[data-dragging="true"] .promptCenterPromptRow {
+  cursor: grabbing;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement]::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent-ink) 34%, transparent);
+  pointer-events: none;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement="before"]::before {
+  top: -5px;
+}
+
+.promptCenterPromptRowFrame[data-drop-placement="after"]::before {
+  bottom: -5px;
 }
 
 .promptCenterPromptRow {
@@ -19794,6 +23271,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   word-break: break-word;
 }
 
+.promptCenterEditorTitleBlock {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
 .promptCenterEditorHeaderActions {
   flex: 0 0 auto;
   display: flex;
@@ -19805,24 +23290,68 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .promptCenterStatusBadge {
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, var(--line));
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: color-mix(in srgb, var(--accent-ink) 8%, transparent);
-  color: color-mix(in srgb, var(--accent-ink) 78%, var(--fg));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
   font-size: 11px;
   font-weight: 800;
 }
 
-.promptCenterStatusBadge[data-read-only="true"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
-  background: color-mix(in srgb, var(--bg-hover) 82%, transparent);
+.promptCenterStatusBadge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-muted) 66%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg-muted) 11%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="dirty"] {
+  color: color-mix(in srgb, #ff9f1c 72%, var(--fg));
+}
+
+.promptCenterStatusBadge[data-state="dirty"]::before {
+  background: #ff9f1c;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff9f1c 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="invalid"] {
+  color: color-mix(in srgb, #ff4d6d 74%, var(--fg));
+}
+
+.promptCenterStatusBadge[data-state="invalid"]::before {
+  background: #ff4d6d;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff4d6d 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="saved"]::before {
+  background: #b7e63a;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #b7e63a 13%, transparent);
+}
+
+.promptCenterStatusBadge[data-state="readonly"] {
   color: var(--fg-muted);
 }
 
 .promptCenterSaveButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.promptCenterCloneButton {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.promptCenterCloneButton :where(svg) {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
 }
 
 .promptCenterReadonlyBody,
@@ -20014,6 +23543,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: color-mix(in srgb, #ff4d6d 72%, var(--fg));
 }
 
+.promptCenterDangerRow .promptCenterClearDeckButton {
+  border-color: color-mix(in srgb, #ff9f1c 34%, var(--line));
+  color: color-mix(in srgb, #ffbe55 74%, var(--fg));
+}
+
 .promptCenterPromptWildcardDock {
   position: sticky;
   bottom: 0;
@@ -20063,6 +23597,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   gap: 6px;
+  max-height: min(176px, 26vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 
 .promptCenterPromptWildcardButton {
@@ -22893,6 +26431,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--bg-hover);
 }
 
+.commandHelpNames {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
 .commandHelpSlash {
   min-width: 0;
   overflow: hidden;
@@ -22900,6 +26444,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
   color: color-mix(in srgb, var(--command-color, var(--accent-ink)) 78%, var(--fg));
   font: 800 13px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.commandHelpAliases {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font: 750 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .commandHelpDescription {
@@ -25776,7 +29329,46 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.35;
 }
 
+.memoryDossierStats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.memoryDossierStats span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 7px 4px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 20%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--memory-panel-color) 8%, transparent);
+}
+
+.memoryDossierStats strong,
+.memoryDossierStats small {
+  display: block;
+  max-width: 100%;
+}
+
+.memoryDossierStats strong {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.memoryDossierStats small {
+  color: var(--fg-muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
 .memoryFactsSection {
+  display: grid;
+  gap: 8px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--memory-panel-color) 22%, var(--line));
   border-radius: 14px;
@@ -25859,6 +29451,92 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 13px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.memoryFactsEmpty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.memoryRelationshipSection,
+.protectedAboutYouSection {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 24%, var(--line));
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 88% 12%,
+      color-mix(in srgb, var(--memory-panel-color) 14%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.memoryRelationshipHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memoryRelationshipHeader strong,
+.memoryRelationshipHeader span {
+  display: block;
+}
+
+.memoryRelationshipHeader strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.memoryRelationshipHeader span {
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.memoryRelationshipGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memoryRelationshipCard {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 18%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+
+.memoryRelationshipCard strong,
+.memoryRelationshipCard span,
+.memoryRelationshipCard small {
+  display: block;
+}
+
+.memoryRelationshipCard strong {
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.memoryRelationshipCard p {
+  margin: 5px 0 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.memoryRelationshipCard small {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 .panelMemories[data-memory-scope="all"] .memoryPanelHint,
@@ -26639,6 +30317,60 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   filter: saturate(0.8) brightness(0.62);
 }
 
+.memoryBubble[data-memory-recent="true"]:not([data-memory-selected="true"]):not([data-memory-delete-state]):not([data-memory-dimmed="true"]) {
+  z-index: 74;
+  border-color: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 82%, var(--memory-bubble-ink, #ffffff));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 24%, transparent),
+    inset 0 -18px 30px color-mix(in srgb, #000000 12%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent),
+    0 16px 34px color-mix(in srgb, #000000 24%, transparent),
+    0 0 44px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 30%, transparent),
+    0 0 108px color-mix(in srgb, var(--memory-bubble-glow, var(--memory-bubble-source-color, var(--memory-panel-color))) 14%, transparent);
+}
+
+.memoryRecentBeacon {
+  position: absolute;
+  inset: clamp(7px, 11%, 16px);
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--memory-bubble-ink, #ffffff) 40%, transparent);
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 24%, transparent),
+      transparent 34%
+    );
+  box-shadow:
+    inset 0 0 18px color-mix(in srgb, var(--memory-bubble-ink, #ffffff) 10%, transparent),
+    0 0 18px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 26%, transparent);
+  opacity: 0.62;
+  transform: scale(0.84);
+  animation: memoryRecentBeaconPulse 1.65s ease-in-out infinite;
+}
+
+.memoryRecentBeacon::after {
+  content: "";
+  position: absolute;
+  inset: 29%;
+  border-radius: inherit;
+  border: 1px dashed color-mix(in srgb, var(--memory-bubble-ink, #ffffff) 48%, transparent);
+  background: color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 12%, transparent);
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 24%, transparent),
+    inset 0 0 10px color-mix(in srgb, #ffffff 10%, transparent);
+  opacity: 0.56;
+  transform: scale(0.8);
+  animation: memoryRecentBeaconCore 1.65s ease-in-out infinite;
+}
+
+.memoryBubble[data-memory-dimmed="true"] .memoryRecentBeacon,
+.memoryBubble[data-memory-selected="true"] .memoryRecentBeacon,
+.memoryBubble[data-memory-delete-state] .memoryRecentBeacon {
+  display: none;
+}
+
 .memoryUncertainCore {
   width: 34%;
   height: 34%;
@@ -26704,6 +30436,28 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 620;
   line-height: 1.32;
   color: var(--fg);
+}
+
+.memoryFullProseMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.memoryFullProseMeta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 20%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--memory-panel-color) 10%, transparent);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .memoryFullProseDeleteButton {
@@ -27348,6 +31102,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
   50% {
     opacity: 0.88;
+  }
+}
+
+@keyframes memoryRecentBeaconPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.82);
+    box-shadow:
+      inset 0 0 18px color-mix(in srgb, var(--memory-bubble-ink, #ffffff) 10%, transparent),
+      0 0 12px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 22%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 24%, transparent);
+  }
+  52% {
+    opacity: 0.96;
+    transform: scale(1.05);
+    box-shadow:
+      inset 0 0 20px color-mix(in srgb, var(--memory-bubble-ink, #ffffff) 12%, transparent),
+      0 0 24px color-mix(in srgb, var(--memory-bubble-source-color, var(--memory-panel-color)) 34%, transparent),
+      0 0 0 8px transparent;
+  }
+}
+
+@keyframes memoryRecentBeaconCore {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(0.76);
+  }
+  52% {
+    opacity: 0.88;
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memoryRecentBeacon,
+  .memoryRecentBeacon::after {
+    animation: none;
+  }
+
+  .memoryRecentBeacon {
+    opacity: 0.82;
+    transform: none;
+  }
+
+  .memoryRecentBeacon::after {
+    opacity: 0.72;
+    transform: none;
   }
 }
 
@@ -29854,6 +33657,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: none;
 }
 
+.menuToggleGlyph {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+
 .sidebarHandle {
   display: none;
 }
@@ -30572,7 +34381,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight .composeEditNotice,
-.themeLight .composeWritingAssistButton,
 .themeLight .queuedPromptChip {
   border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, var(--line));
   background:
@@ -31230,45 +35038,56 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   @media (max-width: 560px) {
-  /* On phone widths (≤560px): ☰ + fixed wrench live outside the chat header.
+  /* On phone widths (≤560px): top-right navigation + fixed wrench live outside the chat header.
      561–720px uses the › sidebar handle + desktop-style header (see nested
      gutter rule below). */
   .menuToggle {
     display: inline-flex;
     position: fixed;
     top: calc(env(safe-area-inset-top) + 12px);
-    left: max(12px, calc(env(safe-area-inset-left) + 12px));
+    right: max(12px, calc(env(safe-area-inset-right) + 12px));
+    left: auto;
     z-index: 201;
-    border: 0;
-    background: transparent;
+    width: 34px;
+    height: 34px;
+    border: 1px solid color-mix(in srgb, var(--accent-ink) 22%, var(--line));
+    background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
     color: var(--accent-ink);
     border-radius: 10px;
-    padding: 8px 12px;
+    padding: 0;
     cursor: pointer;
     font: inherit;
-    font-size: 16px;
-    box-shadow: none;
+    box-shadow:
+      0 8px 22px -18px color-mix(in srgb, var(--accent-ink) 44%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent);
+    backdrop-filter: blur(8px);
     align-items: center;
     justify-content: center;
-    transition: color 0.18s ease, opacity 0.2s ease, background 0.18s ease;
+    transition:
+      color 0.18s ease,
+      opacity 0.2s ease,
+      background 0.18s ease,
+      border-color 0.18s ease;
   }
 
   .menuToggle:focus-visible {
-    background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+    background: color-mix(in srgb, var(--accent-ink) 14%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line));
     outline: none;
   }
 
   @media (hover: hover) and (pointer: fine) {
     .menuToggle:hover:not(:focus-visible) {
-      background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+      background: color-mix(in srgb, var(--accent-ink) 12%, var(--bg-surface));
+      border-color: color-mix(in srgb, var(--accent-ink) 36%, var(--line));
     }
   }
 
-  /* Mirror ☰ — fixed top-right overflow gear + shared hide-with-drawers behavior. */
+  /* Fixed overflow gear sits beside the top-right navigation button. */
   .chatGearAnchor {
     position: fixed;
     top: calc(env(safe-area-inset-top) + 12px);
-    right: max(12px, calc(env(safe-area-inset-right) + 12px));
+    right: max(54px, calc(env(safe-area-inset-right) + 54px));
     left: auto;
     margin-left: 0;
     z-index: 860;
@@ -31485,11 +35304,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .compose textarea {
     border-radius: 14px;
     min-height: 52px;
-    padding: 12px 14px;
   }
 
-  .composeTextareaVisualWrap {
-    --compose-textarea-overlay-padding: 12px 14px;
+  .compose .composeTextareaVisualWrap {
+    --compose-textarea-padding: 12px 14px;
+  }
+
+  .compose .composeTextareaVisualWrap[data-compose-single-line="true"] {
+    --compose-textarea-padding: 13.75px 14px;
+    --compose-textarea-font-size: calc(var(--font-size-compose) + 1px);
+    --compose-textarea-line-height: 1.32;
   }
 
   .composeInner {
@@ -31691,6 +35515,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     border-left: 0;
     padding-left: max(16px, calc(env(safe-area-inset-left) + 16px));
     padding-right: max(16px, calc(env(safe-area-inset-right) + 16px));
+  }
+
+  .memoryDossierStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .memoryRelationshipGrid {
+    grid-template-columns: 1fr;
   }
 
   /* Match Bots / Memories: edge-to-edge drawer on phone. */
@@ -32501,6 +36333,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
+    --zen-persona-ink-overlap: clamp(88px, calc(10dvh + var(--zen-tone-gap-extra)), 184px);
     --zen-prose-runway-top: clamp(148px, calc(34dvh + var(--zen-tone-runway-extra)), 412px);
     --zen-prose-runway-bottom: clamp(220px, calc(46dvh + var(--zen-tone-runway-extra)), 492px);
     padding-top: var(--zen-prose-runway-top);
@@ -34676,12 +38509,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTableTypingLine .typingDots {
-  gap: 6px;
+  --typing-dot-gap: 0.24em;
+  font-size: 1.22em;
 }
 
 .coffeeTableTypingLine .typingDots span {
-  width: 8px;
-  height: 8px;
+  min-width: 0.2em;
 }
 
 .coffeeCenterIcon {
@@ -35197,12 +39030,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatThinkingIndicator .typingDots {
   --typing-accent: rgba(255, 255, 255, 0.95);
-  gap: 3px;
+  --typing-dot-gap: 0.14em;
+  font-size: 0.92rem;
 }
 
 .coffeeSeatThinkingIndicator .typingDots span {
-  width: 4px;
-  height: 4px;
+  min-width: 0.16em;
 }
 
 .coffeeSeatActionBadge {

@@ -1,0 +1,120 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-06-22T05:20:16.354Z",
+  "prompt": "You are advising a two-person local-first app team.\nThey have one weekend to ship a feature that lets non-reasoning local models behave more like thinking models.\nConstraints:\n- No cloud calls may happen in LOCAL mode.\n- Users should never see raw chain-of-thought.\n- Developer diagnostics should be useful but not persisted as private scratchpads.\n- The UI must stay calm and not turn this into a wall of controls.\n\nPropose an implementation plan, the key tests, and the main failure modes.\nBe concrete enough that an engineer could start coding from your answer.",
+  "options": {
+    "localModel": "llama3.2",
+    "thinkingModel": "claude-opus-4-8",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": false
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 5706,
+      "assistant": "**Implementation Plan**\n\nTo address the constraints and requirements, I propose the following implementation plan:\n\n\t* Introduce a new `thinking_model` flag in the local model configuration. This flag will enable or disable the thinking model behavior.\n\t* Modify the local model's inference loop to use a simplified, more interpretable decision-making process. This can be achieved by:\n\t\t+ Using a simpler neural network architecture (e.g., a small feedforward network) instead of the current complex recurrent network.\n\t\t+ Implementing a rule-based system that uses pre-defined rules and heuristics to make decisions.\n\t* Ensure that the modified local model still produces accurate results for simple, well-defined tasks.\n\t* Introduce a new `chain_of_thought` flag in the local model configuration. This flag will enable or disable the display of chain-of-thought explanations.\n\t* Modify the UI to only show the final output and not the intermediate steps.\n\t* Implement a mechanism to generate a simplified, human-readable explanation for the user's input (e.g., using natural language processing techniques).\n\t* Introduce a new `diagnostic_mode` flag in the local model configuration. This flag will enable or disable developer diagnostics.\n\t* Modify the UI to display a toggle button that allows developers to switch between normal and diagnostic modes.\n\t* Implement a mechanism to collect and store diagnostic data (e.g., using a simple logging system).\n\t* Remove any unnecessary controls or features from the UI.\n\t* Use a clean, minimalistic design to reduce visual clutter.\n\t* Implement a loading animation that indicates progress without overwhelming the user.\n\n**Key Tests**\n\nTo ensure the feature works as expected, I recommend the following key tests:\n\n\t* Test the local model's accuracy for simple tasks (e.g., classification, regression).\n\t* Verify that the thinking model behavior is enabled and disabled correctly.\n\t* Test that the UI only shows the final output and not intermediate steps.\n\t* Verify that the simplified explanation mechanism works correctly.\n\t* Test that developer diagnostics are enabled and disabled correctly.\n\t* Verify that diagnostic data is collected and stored correctly.\n\t* Test that the UI remains calm and minimalistic even when loading animations or other visual effects are applied.\n\n**Main Failure Modes**\n\nTo anticipate potential issues, I recommend considering the following main failure modes:\n\n1. **Local Model Instability**\n\t* If the local model becomes unstable or produces incorrect results due to the thinking model behavior.\n2. **Chain-of-Thought Exposure**\n\t* If the simplified explanation mechanism fails to generate a coherent and useful explanation for the user's input.\n3. **Developer Diagnostic Overload**\n\t* If developer diagnostics become too verbose or overwhelming, causing performance issues or user frustration.\n\n**Example Code**\n\nHere is an example of how the implementation plan could be implemented in code:\n```python\nimport torch\n\nclass ThinkingModel(torch.nn.Module):\n    def __init__(self):\n        super(ThinkingModel, self).__init__()\n        # Simplified neural network architecture\n        self.fc1 = torch.nn.Linear(128, 64)\n        self.fc2 = torch.nn.Linear(64, 32)\n\n    def forward(self, x):\n        x = torch.relu(self.fc1(x))\n        x = torch.relu(self.fc2(x))\n        return x\n\nclass LocalModel:\n    def __init__(self):\n        self.thinking_model = ThinkingModel()\n        # Other local model configuration and initialization...\n\n    def inference(self, input_data):\n        output = self.thinking_model(input_data)\n        # Simplified explanation mechanism\n        explanation = generate_simplified_explanation(output)\n        return output, explanation\n\ndef generate_simplified_explanation(output):\n    # Natural language processing techniques to generate a simplified explanation\n    pass\n```\nNote that this is just an example and the actual implementation will depend on the specific requirements and constraints of the project.",
+      "assistantChars": 4018
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "anthropic",
+      "status": "ok",
+      "durationMs": 30691,
+      "assistant": "Here's a plan tight enough to start coding Saturday morning.\n\n## Core idea\n\nYou don't make the model \"think\" — you wrap a **structured multi-pass loop** around a non-reasoning model and only show the user the final synthesis. The \"thinking\" lives in an internal scratch buffer that never leaves the process and is never persisted.\n\n## Architecture\n\n**A `ReasoningOrchestrator` that runs N internal passes:**\n\n1. **Plan pass** — prompt the model: \"List the sub-steps needed to answer. Output a short JSON array of step labels.\" Keep it terse.\n2. **Work passes** — for each step, run a focused completion. Accumulate into an in-memory `ScratchBuffer` (a plain struct in RAM, not a file, not the DB).\n3. **Synthesis pass** — feed the accumulated work back: \"Using the notes below, write the final answer for the user. Do not reveal the notes.\" Emit *only* this.\n\nKeep it to 2–3 passes by default. More passes = better reasoning illusion but worse latency; one weekend means you cap it.\n\n```\nLocalReasoner\n ├─ planner(prompt) -> [step]\n ├─ worker(step, context) -> note     // appends to ScratchBuffer (RAM only)\n ├─ synthesizer(notes) -> finalText   // the ONLY user-visible output\n └─ diagnostics(): redacted summary, computed live, never stored\n```\n\n## Honoring each constraint\n\n- **No cloud in LOCAL mode:** route everything through one `ModelClient` interface with a hard `assert(mode == LOCAL ⇒ transport == in-process)`. Put a single network guard at the transport layer that throws if any socket call is attempted while `LOCAL`. One choke point, not scattered checks.\n- **No raw chain-of-thought to users:** the synthesis pass is the *only* thing that reaches the render layer. The `ScratchBuffer` is never a field on any message object the UI can read. Type-enforce this — different types for `InternalNote` vs `UserMessage`.\n- **Diagnostics useful but not private scratchpads:** diagnostics show **structural metadata** — pass count, step labels, token/time per pass, retry counts — *not* the raw note text. Computed on demand, held only for the lifetime of the request, dropped after. If a dev wants depth, show *redacted* notes (e.g. first line of each step) behind an explicit, ephemeral toggle that resets on reload.\n- **Calm UI:** ship exactly one user-facing control — a \"Think harder\" toggle (off = single pass, on = multi-pass). Everything else (pass count, temps) lives in a config file or a hidden dev panel, not the main surface. While running, show one quiet status line (\"Working through 3 steps…\"), then replace it with the answer.\n\n## Key tests\n\n1. **Network isolation test:** run in LOCAL mode with a transport mock that fails on any egress; assert a full reasoning loop completes with zero attempted connections.\n2. **CoT leakage test:** assert the user-visible payload never contains scratch content — feed a planted sentinel string into a note and assert it's absent from final output and from any persisted record.\n3. **Persistence test:** complete a request, then inspect the DB/disk — assert no `InternalNote` rows or scratch files exist.\n\n## Main failure modes\n\n- **Latency blowup** — N sequential local passes can 3–4× response time. Mitigation: cap passes, stream the status line, default \"Think harder\" to off.\n- **Scratch leakage via logs** — the sneaky one. Your debug logger or crash reporter dumps the buffer. Mitigation: mark `ScratchBuffer` non-loggable; scrub it in any panic/error path.\n- **Planner garbage** — small models emit broken plans. Mitigation: validate, retry once, then fall back to single pass.\n- **Diagnostics drifting into a scratchpad** — devs ask for \"just a bit more detail\" until it's a persisted CoT store. Mitigation: hard rule — diagnostics are ephemeral and redacted by type, enforced in code, not discipline.\n- **Quality illusion gap** — multi-pass *looks* smarter but can launder hallucinations through confident synthesis. Mitigation: keep the synthesis prompt conservative; don't let it invent beyond the notes.\n\nA realistic weekend cut: Saturday = orchestrator + network guard + types. Sunday = the toggle, status line, diagnostics panel, and tests 1–4 (those are the ones that protect your constraints).\n\nWant me to sketch the actual `ScratchBuffer` / `ModelClient` interfaces in a specific language?",
+      "assistantChars": 4269
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": true,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 7037,
+      "assistant": "assistant\n\n**Implementation Plan**\n\nTo enable non-reasoning local models to behave more like thinking models, we'll introduce a hybrid approach that stores intermediate results in memory instead of disk. This will allow us to simulate chain-of-thought without exposing raw calculations to the user.\n\n**Key Tests**\n\n1. **Cache hit/miss ratio**: Verify that the hybrid inference engine is able to correctly retrieve cached results and reduce computational load.\n2. **Chain-of-thought simulation**: Test that the simulation layer generates accurate and coherent summaries of the chain-of-thought, without exposing raw calculations.\n3. **Local model performance**: Evaluate the performance of the local model with the hybrid inference engine and compare it to the original implementation.\n\n**Main Failure Modes**\n\n1. **Cache thrashing**: If the cache is not properly managed, it may lead to performance issues and increased computational load.\n2. **Chain-of-thought simulation errors**: If the simulation layer fails to generate accurate summaries, it may lead to incorrect user experience and mistrust in the app's reasoning capabilities.\n3. **Local model instability**: If the hybrid inference engine is not properly integrated with the local model, it may lead to stability issues and crashes.\n\n**Developer Diagnostics**\n\nTo provide useful diagnostics without persisting private scratchpads, we can implement the following:\n\n1. **In-app debugging tools**: Provide a set of in-app debugging tools that allow developers to inspect cache contents, simulation results, and other relevant data.\n2. **Log analysis**: Implement log analysis capabilities that allow developers to analyze and debug issues related to the hybrid inference engine and chain-of-thought simulation.\n\n**Code Structure**\n\nTo facilitate easy maintenance and updates, we can structure the code as follows:\n\n1. **`model.py`**: Define the local model's inference engine and caching mechanism.\n2. **`hybrid_inference_engine.py`**: Implement the hybrid inference engine that uses cached results.\n3. **`chain_of_thought_simulation.py`**: Develop the simulation layer that generates simplified summaries of the chain-of-thought.\n\n**Example Code**\n\nHere's an example code snippet for the hybrid inference engine:\n```python\nimport torch\n\nclass HybridInferenceEngine:\n    def __init__(self, model, cache_size=100):\n        self.model = model\n        self.cache = {}\n        self.cache_size = cache_size\n\n    def forward(self, input_data):\n        # Check if result is cached\n        if input_data in self.cache:\n            return self.cache[input_data]\n\n        # Compute result using original inference engine\n        result = self.model(input_data)\n\n        # Cache result for future use\n        self.cache[input_data] = result\n\n        # Return result\n        return result\n```\nThis code snippet demonstrates the basic idea of caching intermediate results and reusing them to reduce computational load. The `HybridInferenceEngine` class takes a local model as input and provides a hybrid inference engine that uses cached results.",
+      "assistantChars": 3090,
+      "psychicThought": {
+        "v": 1,
+        "summary": "Implement local model thinking behavior with minimal UI impact and developer diagnostics.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "createdAt": "2026-06-22T05:20:54.634Z"
+      },
+      "psychicDebug": {
+        "summary": "Implement local model thinking behavior with minimal UI impact and developer diagnostics.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "scratchpadChars": 148
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 3,
+          "reasoning": 2,
+          "actionability": 3,
+          "constraints": 3,
+          "total": 3,
+          "notes": "Misunderstands the likely implementation: replacing the model architecture or adding a new neural net is not feasible for a weekend and not how to make local models behave more like reasoning models. It proposes a chain_of_thought display flag despite the requirement that users never see raw chain-of-thought. Diagnostics are explicitly stored, conflicting with the private scratchpad constraint. Tests are generic and miss key constraints like network isolation, persistence, log leakage, and scratch visibility. Some UI minimalism points are relevant but shallow."
+        },
+        "B": {
+          "correctness": 9,
+          "reasoning": 9,
+          "actionability": 9,
+          "constraints": 9,
+          "total": 9,
+          "notes": "Directly addresses the task with a feasible weekend-scoped multi-pass local orchestration approach. It covers local-only execution via a single ModelClient/transport guard, prevents raw chain-of-thought from reaching the UI, keeps scratch in RAM only, and provides ephemeral redacted diagnostics. The UI plan is appropriately calm with one user-facing toggle. Tests target the critical constraints, including network isolation, CoT leakage, persistence, and planner failure. Main failure modes and mitigations are concrete. Minor issue: even redacted note previews in diagnostics could be risky, but it frames them as ephemeral and behind a dev toggle."
+        },
+        "C": {
+          "correctness": 2,
+          "reasoning": 2,
+          "actionability": 3,
+          "constraints": 2,
+          "total": 2,
+          "notes": "Very incomplete and mostly centered on caching, which does not make non-reasoning local models behave more like thinking models. It does not provide a concrete reasoning orchestration loop. Diagnostics suggest inspecting cache contents and log analysis, which risks exposing or persisting private scratchpads. It misses explicit no-cloud enforcement, user-visible CoT prevention, persistence tests, and calm UI design. The code is only a basic cache wrapper and not relevant to the core feature."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "Response B is clearly the strongest: it proposes a feasible local multi-pass reasoning wrapper with concrete architecture, tests, UI scope, and failure-mode mitigations aligned with all constraints. Response A is generic, impractical, and violates diagnostics/privacy constraints. Response C is largely off-target, focusing on caching rather than reasoning behavior and missing most constraints."
+    }
+  }
+}

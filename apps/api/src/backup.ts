@@ -3,7 +3,13 @@ import { decryptJson, decryptText, encryptJson, encryptText } from "./security.t
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
+  normalizeZenAskQuestionPatienceEnabled,
+  normalizeZenAskQuestionPatienceMs,
+  normalizeZenAutonomyEnabled,
+  normalizeZenWallpaperBlurredEdgesEnabled,
+  normalizeZenWallpaperGrayscaleEnabled,
   normalizeZenWallpaperOpacity,
+  normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
 } from "./settings.ts";
 
@@ -14,6 +20,8 @@ export interface BackupUserSettings {
   autoMemory: boolean;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
+  experimentalAllModelEffortEnabled?: boolean;
+  psychicModeEnabled?: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -30,6 +38,12 @@ export interface BackupUserSettings {
   preferredZenWallpaperOpenAiImageModel: string;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
+  zenWallpaperGrayscaleEnabled: boolean;
+  zenWallpaperBlurredEdgesEnabled: boolean;
+  zenWallpaperStyleNotes: string;
+  zenAskQuestionPatienceEnabled: boolean;
+  zenAskQuestionPatienceMs: number;
+  zenAutonomyEnabled: boolean;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
@@ -137,6 +151,8 @@ export function exportUserSnapshot(
          auto_memory,
          composer_writing_assist,
          experimental_dual_ollama_enabled,
+         experimental_all_model_effort_enabled,
+         psychic_mode_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_comfyui_workflow_ids,
@@ -153,6 +169,12 @@ export function exportUserSnapshot(
          preferred_zen_wallpaper_openai_image_model,
          zen_wallpaper_opacity,
          zen_wallpaper_text_mask_enabled,
+         zen_wallpaper_grayscale_enabled,
+         zen_wallpaper_blurred_edges_enabled,
+         zen_wallpaper_style_notes,
+         zen_ask_question_patience_enabled,
+         zen_ask_question_patience_ms,
+         zen_autonomy_enabled,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -177,6 +199,8 @@ export function exportUserSnapshot(
         auto_memory: number;
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
+        experimental_all_model_effort_enabled: number;
+        psychic_mode_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
@@ -193,6 +217,12 @@ export function exportUserSnapshot(
         preferred_zen_wallpaper_openai_image_model: string | null;
         zen_wallpaper_opacity: number | null;
         zen_wallpaper_text_mask_enabled: number | null;
+        zen_wallpaper_grayscale_enabled: number | null;
+        zen_wallpaper_blurred_edges_enabled: number | null;
+        zen_wallpaper_style_notes: string | null;
+        zen_ask_question_patience_enabled: number | null;
+        zen_ask_question_patience_ms: number | null;
+        zen_autonomy_enabled: number | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -216,6 +246,9 @@ export function exportUserSnapshot(
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        experimentalAllModelEffortEnabled:
+          user.experimental_all_model_effort_enabled === 1,
+        psychicModeEnabled: user.psychic_mode_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
@@ -237,6 +270,24 @@ export function exportUserSnapshot(
         ),
         zenWallpaperTextMaskEnabled: normalizeZenWallpaperTextMaskEnabled(
           user.zen_wallpaper_text_mask_enabled
+        ),
+        zenWallpaperGrayscaleEnabled: normalizeZenWallpaperGrayscaleEnabled(
+          user.zen_wallpaper_grayscale_enabled
+        ),
+        zenWallpaperBlurredEdgesEnabled: normalizeZenWallpaperBlurredEdgesEnabled(
+          user.zen_wallpaper_blurred_edges_enabled
+        ),
+        zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+          user.zen_wallpaper_style_notes
+        ),
+        zenAskQuestionPatienceEnabled: normalizeZenAskQuestionPatienceEnabled(
+          user.zen_ask_question_patience_enabled
+        ),
+        zenAskQuestionPatienceMs: normalizeZenAskQuestionPatienceMs(
+          user.zen_ask_question_patience_ms
+        ),
+        zenAutonomyEnabled: normalizeZenAutonomyEnabled(
+          user.zen_autonomy_enabled
         ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
@@ -494,6 +545,8 @@ export function importUserSnapshot(
         auto_memory = ?,
         composer_writing_assist = ?,
         experimental_dual_ollama_enabled = ?,
+        experimental_all_model_effort_enabled = ?,
+        psychic_mode_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
@@ -510,6 +563,12 @@ export function importUserSnapshot(
         preferred_zen_wallpaper_openai_image_model = ?,
         zen_wallpaper_opacity = ?,
         zen_wallpaper_text_mask_enabled = ?,
+        zen_wallpaper_grayscale_enabled = ?,
+        zen_wallpaper_blurred_edges_enabled = ?,
+        zen_wallpaper_style_notes = ?,
+        zen_ask_question_patience_enabled = ?,
+        zen_ask_question_patience_ms = ?,
+        zen_autonomy_enabled = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -533,6 +592,8 @@ export function importUserSnapshot(
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
       settings.experimentalDualOllamaEnabled ? 1 : 0,
+      settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
+      settings.psychicModeEnabled === true ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
@@ -561,6 +622,14 @@ export function importUserSnapshot(
       settings.preferredZenWallpaperOpenAiImageModel?.trim() ?? "",
       normalizeZenWallpaperOpacity(settings.zenWallpaperOpacity),
       normalizeZenWallpaperTextMaskEnabled(settings.zenWallpaperTextMaskEnabled) ? 1 : 0,
+      normalizeZenWallpaperGrayscaleEnabled(settings.zenWallpaperGrayscaleEnabled) ? 1 : 0,
+      normalizeZenWallpaperBlurredEdgesEnabled(settings.zenWallpaperBlurredEdgesEnabled)
+        ? 1
+        : 0,
+      normalizeZenWallpaperStyleNotes(settings.zenWallpaperStyleNotes),
+      normalizeZenAskQuestionPatienceEnabled(settings.zenAskQuestionPatienceEnabled) ? 1 : 0,
+      normalizeZenAskQuestionPatienceMs(settings.zenAskQuestionPatienceMs),
+      normalizeZenAutonomyEnabled(settings.zenAutonomyEnabled) ? 1 : 0,
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,

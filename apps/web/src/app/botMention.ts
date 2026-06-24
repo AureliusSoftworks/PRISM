@@ -553,6 +553,20 @@ export function tokenizeBotMentionSource(text: string): BotMentionSourceSegment[
   return segments;
 }
 
+export function findFirstBotMentionId(
+  text: string,
+  bots: readonly BotMentionPick[]
+): string | null {
+  if (!text || bots.length === 0) return null;
+  const validBotIds = new Set(bots.map((bot) => bot.id));
+  for (const segment of tokenizeBotMentionSource(text)) {
+    if (segment.kind === "mention" && validBotIds.has(segment.botId)) {
+      return segment.botId;
+    }
+  }
+  return null;
+}
+
 export interface AtMentionToken {
   /** Absolute index of `@` in full string. */
   atIndex: number;
@@ -601,6 +615,15 @@ export function uniqueBotMatchingName(
 export type MentionTabAction =
   | { kind: "none" }
   | { kind: "stage2"; replacement: string; caret: number };
+
+export type MentionPersonaSelectAction =
+  | { kind: "none" }
+  | {
+      kind: "select-persona";
+      bot: BotMentionPick;
+      replacement: string;
+      caret: number;
+    };
 
 /**
  * Plain-text Tab handler: when exactly one bot matches the `@` query, inserts
@@ -657,5 +680,32 @@ export function composeMentionTabPlainTextAction(
     kind: "stage2",
     replacement,
     caret: token.atIndex + md.length,
+  };
+}
+
+/**
+ * Zen Persona picker action: commits the highlighted bot as UI state and removes
+ * only the active `@...` token from the composer.
+ */
+export function composeMentionPersonaPlainTextAction(
+  text: string,
+  caret: number,
+  bots: readonly BotMentionPick[],
+  highlightedIndex: number
+): MentionPersonaSelectAction {
+  const token = findAtMentionTokenPlain(text, caret);
+  if (!token) return { kind: "none" };
+
+  const filtered = filterBotsForMentionQuery(bots, token.query);
+  if (filtered.length === 0) return { kind: "none" };
+
+  const hi = ((highlightedIndex % filtered.length) + filtered.length) % filtered.length;
+  const bot = filtered[hi]!;
+  const replacement = text.slice(0, token.atIndex) + text.slice(token.endIndex);
+  return {
+    kind: "select-persona",
+    bot,
+    replacement,
+    caret: token.atIndex,
   };
 }
