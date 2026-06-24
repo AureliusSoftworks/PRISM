@@ -15,14 +15,14 @@ export interface PromptRandomizationDeck {
   aliases?: readonly string[];
 }
 
-export function pendingWildcardOptimisticMessageContent(options: {
+export function pendingCleanupOptimisticMessageContent(options: {
   rawDraft: string;
   resolvedDisplayContent: string;
-  pendingWildcardResolution: boolean;
+  pendingCleanup: boolean;
 }): string {
   const rawDraft = options.rawDraft.trim();
   const resolvedDisplayContent = options.resolvedDisplayContent.trim();
-  if (options.pendingWildcardResolution) {
+  if (options.pendingCleanup) {
     return rawDraft || resolvedDisplayContent;
   }
   return resolvedDisplayContent || rawDraft;

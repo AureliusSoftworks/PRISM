@@ -16,6 +16,7 @@ export interface ZenFallbackWallpaperEligibilityArgs {
   chatSurface: boolean;
   hasRememberedWallpaper: boolean;
   atmosphereTimelineLength: number;
+  hasConversationMessages: boolean;
 }
 
 function normalizeSeed(seed: string | null | undefined): string {
@@ -53,9 +54,11 @@ export function shouldShowZenFallbackWallpaper({
   chatSurface,
   hasRememberedWallpaper,
   atmosphereTimelineLength,
+  hasConversationMessages,
 }: ZenFallbackWallpaperEligibilityArgs): boolean {
   return (
     chatSurface &&
+    hasConversationMessages &&
     !hasRememberedWallpaper &&
     atmosphereTimelineLength === 0
   );

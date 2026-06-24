@@ -34,10 +34,21 @@ describe("shouldShowZenFallbackWallpaper", () => {
     chatSurface: true,
     hasRememberedWallpaper: false,
     atmosphereTimelineLength: 0,
+    hasConversationMessages: true,
   };
 
-  it("shows the fallback whenever Zen has no remembered or generated Atmosphere", () => {
+  it("shows the fallback after Zen has messages but no remembered or generated Atmosphere", () => {
     assert.equal(shouldShowZenFallbackWallpaper(baseline), true);
+  });
+
+  it("does not show fallback wallpaper on the fresh Zen start surface", () => {
+    assert.equal(
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        hasConversationMessages: false,
+      }),
+      false
+    );
   });
 
   it("does not wait for remembered Atmosphere lookup state", () => {

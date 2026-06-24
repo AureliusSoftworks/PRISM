@@ -9296,6 +9296,16 @@
   );
 }
 
+.messages[data-chat-ephemeral="true"][data-zen-speed-nudge-pulse="true"] {
+  animation: zenCanvasSpeedNudgeCanvasPulse 520ms ease-out both;
+}
+
+.messages[data-chat-ephemeral="true"][data-zen-speed-nudge-holding="true"] {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
 .chatEphemeralLiveEndSpacer {
   flex: 0 0 auto;
   height: 1px;
@@ -12273,12 +12283,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-@keyframes chatEphemeralWordEmphasis {
+@keyframes chatEphemeralWordImpact {
   0% {
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
-  42% {
-    transform: scale(1.16);
+  38% {
+    transform: translateY(-0.025em) scale(1.055);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatEphemeralWordQuestion {
+  0% {
+    transform: scale(0.985);
+  }
+  54% {
+    transform: scale(1.035);
   }
   100% {
     transform: scale(1);
@@ -12291,10 +12313,44 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transform: translateY(0);
   }
   34% {
-    transform: translateY(-0.14em);
+    transform: translateY(-0.08em);
   }
   68% {
-    transform: translateY(0.04em);
+    transform: translateY(0.025em);
+  }
+}
+
+@keyframes chatEphemeralWordNegative {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  28% {
+    transform: translateX(-0.055em);
+  }
+  58% {
+    transform: translateX(0.055em);
+  }
+}
+
+@keyframes chatEphemeralWordWhisper {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(0.94);
+  }
+}
+
+@keyframes chatEphemeralWordAction {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  42% {
+    transform: translateY(-0.045em) rotate(-0.45deg);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg);
   }
 }
 
@@ -12303,11 +12359,135 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   to { background-position: 100% 50%; }
 }
 
+@keyframes zenCanvasSpeedNudgeCanvasPulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  38% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
+      inset 0 -24px 78px color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+}
+
+@keyframes zenPendingReplyDotPulse {
+  0%,
+  72%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0.04em);
+  }
+  34% {
+    opacity: 0.9;
+    transform: translateY(-0.04em);
+  }
+}
+
+@keyframes zenActionCueIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(0.36em) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zenActionCueGlanceIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateX(-0.34em) translateY(0.12em) rotate(-0.4deg);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0) translateY(0) rotate(0deg);
+  }
+}
+
+@keyframes zenActionCueNodIn {
+  0% {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(-0.2em);
+  }
+  58% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0.08em);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes zenActionCueBreathIn {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes zenActionCueTapIn {
+  0% {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(0.22em) scale(0.98);
+  }
+  48% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(-0.05em) scale(1.012);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zenActionCueSettleIn {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-0.28em) scale(1.01);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .messages[data-chat-ephemeral="true"] .message.messageChatManifesting,
   .messages[data-chat-ephemeral="true"] .message.messageChatDissolving,
   .messages[data-chat-ephemeral="true"] .message.messageUserQuestionFadeIn {
     animation-duration: 0.18s;
+  }
+
+  .messages[data-chat-ephemeral="true"][data-zen-speed-nudge-pulse="true"] {
+    animation: none;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .zenPendingReplyDots span {
+    animation: none;
+    opacity: 0.62;
+    transform: none;
   }
 
   .chatEphemeralTypedLetter {
@@ -12331,10 +12511,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background-position: 50% 50%;
   }
 
-  .chatEphemeralTypedWordEmphasis,
-  .chatEphemeralTypedWordAffirm {
+  .chatEphemeralTypedWordImpact,
+  .chatEphemeralTypedWordQuestion,
+  .chatEphemeralTypedWordAffirm,
+  .chatEphemeralTypedWordNegative,
+  .chatEphemeralTypedWordWhisper,
+  .chatEphemeralTypedWordAction,
+  .zenActionCue,
+  .zenActionComposerPreview {
     animation: none;
     transform: none;
+    filter: none;
   }
 
   @keyframes chatMessageManifest {
@@ -12404,6 +12591,57 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 0;
   padding: 0;
   overflow: visible;
+}
+
+.messages[data-chat-ephemeral="true"] .zenPendingReplyPlaceholder {
+  min-height: clamp(72px, 12dvh, 136px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--zen-assistant-prose, var(--fg)) 76%, transparent);
+}
+
+.zenPendingReplyDots {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 650;
+  --typing-dot-gap: 0.18em;
+  --typing-dot-duration: 1.16s;
+  --typing-dot-stagger: 0.16s;
+  --typing-dot-rise: -0.06em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.28;
+  --typing-dot-active-opacity: 0.9;
+  --typing-dot-ease: ease-in-out;
+  display: inline-flex;
+  gap: var(--typing-dot-gap);
+  align-items: baseline;
+  font-family: var(--typing-dot-font);
+  font-size: clamp(2.7rem, 7vw, 5.8rem);
+  font-weight: var(--typing-dot-weight);
+  line-height: 1;
+  letter-spacing: 0;
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.3),
+    0 0 24px color-mix(in srgb, var(--typing-accent, var(--accent)) 12%, transparent);
+}
+
+.zenPendingReplyDots span {
+  display: inline-block;
+  min-width: 0.18em;
+  opacity: var(--typing-dot-rest-opacity);
+  transform: translateY(0);
+  transform-origin: center 72%;
+  animation: typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+}
+
+.zenPendingReplyDots span:nth-child(2) {
+  --typing-dot-index: 1;
+}
+
+.zenPendingReplyDots span:nth-child(3) {
+  --typing-dot-index: 2;
 }
 
 .zenPersonaInkWash {
@@ -12872,6 +13110,83 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 58%, transparent);
 }
 
+.zenActionCue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.42em;
+  width: fit-content;
+  max-width: min(100%, 760px);
+  margin: 0 0 0.32em;
+  color: color-mix(in srgb, var(--zen-assistant-prose, var(--fg)) 76%, transparent);
+  font-size: clamp(0.82rem, 0.78rem + 0.18vw, 0.96rem);
+  font-weight: 500;
+  line-height: 1.35;
+  text-wrap: balance;
+  transform-origin: left center;
+  animation: zenActionCueIn 0.42s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.messageUser .zenActionCue {
+  justify-self: end;
+  margin-left: auto;
+  color: color-mix(
+    in srgb,
+    var(--zen-user-message-color, var(--zen-user-prose, var(--fg))) 84%,
+    transparent
+  );
+  text-align: right;
+  transform-origin: right center;
+}
+
+.zenActionCue[data-motion="glance"] {
+  animation-name: zenActionCueGlanceIn;
+}
+
+.zenActionCue[data-motion="nod"] {
+  animation-name: zenActionCueNodIn;
+}
+
+.zenActionCue[data-motion="breath"] {
+  animation-name: zenActionCueBreathIn;
+  animation-duration: 0.58s;
+}
+
+.zenActionCue[data-motion="tap"] {
+  animation-name: zenActionCueTapIn;
+}
+
+.zenActionCue[data-motion="settle"] {
+  animation-name: zenActionCueSettleIn;
+  animation-duration: 0.5s;
+}
+
+.zenActionCue[data-action-only="true"] {
+  margin-block: 0.08em;
+  font-size: clamp(0.96rem, 0.88rem + 0.28vw, 1.12rem);
+}
+
+.zenActionCueActor,
+.zenActionComposerPreviewActor {
+  flex: 0 0 auto;
+  font-size: 0.74em;
+  font-weight: 720;
+  line-height: 1;
+  opacity: 0.58;
+  text-transform: uppercase;
+}
+
+.zenActionCueActor::after,
+.zenActionComposerPreviewActor::after {
+  content: "...";
+}
+
+.zenActionCueText,
+.zenActionComposerPreviewText {
+  min-width: 0;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 .chatEphemeralMarkdownBody {
   display: grid;
   gap: 0.16em;
@@ -13041,19 +13356,42 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
-.chatEphemeralTypedWordEmphasis,
-.chatEphemeralTypedWordAffirm {
+.chatEphemeralTypedWordImpact,
+.chatEphemeralTypedWordQuestion,
+.chatEphemeralTypedWordAffirm,
+.chatEphemeralTypedWordNegative,
+.chatEphemeralTypedWordWhisper,
+.chatEphemeralTypedWordAction {
   display: inline-block;
-  transform-origin: center;
+  transform-origin: center 72%;
   will-change: transform;
 }
 
-.chatEphemeralTypedWordEmphasis {
-  animation: chatEphemeralWordEmphasis 0.42s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+.chatEphemeralTypedWordImpact {
+  animation: chatEphemeralWordImpact 0.38s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordQuestion {
+  animation: chatEphemeralWordQuestion 0.52s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .chatEphemeralTypedWordAffirm {
-  animation: chatEphemeralWordAffirm 0.62s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+  animation: chatEphemeralWordAffirm 0.54s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordNegative {
+  animation: chatEphemeralWordNegative 0.56s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordWhisper {
+  opacity: 0.78;
+  animation: chatEphemeralWordWhisper 0.28s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.chatEphemeralTypedWordAction {
+  font-style: italic;
+  opacity: 0.9;
+  animation: chatEphemeralWordAction 0.68s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .chatEphemeralTypedWordNoFade {
@@ -13072,6 +13410,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .chatEphemeralTypedWordRainbow {
   /* Per-letter PRISM hues are applied inline from the renderer. */
   color: inherit;
+}
+
+.chatEphemeralTypedWordEllipsis {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 700;
+  --typing-dot-duration: 1.18s;
+  --typing-dot-stagger: 0.15s;
+  --typing-dot-rise: -0.12em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.5;
+  --typing-dot-active-opacity: 1;
+  --typing-dot-ease: ease-in-out;
+}
+
+.chatEphemeralTypedWordEllipsis .chatEphemeralTypedLetter[data-ellipsis-dot="true"] {
+  display: inline-block;
+  min-width: 0.18em;
+  font-family: var(--typing-dot-font);
+  font-weight: var(--typing-dot-weight);
+  transform-origin: center 72%;
+  animation:
+    chatEphemeralLetterIn var(--chat-letter-fade-duration, 340ms) ease-out both,
+    typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+  animation-delay:
+    calc(var(--char-index, 0) * var(--char-step-ms, 42ms)),
+    calc(var(--char-index, 0) * var(--typing-dot-stagger));
 }
 
 .chatEphemeralTypedWordQuote {
@@ -13957,6 +14322,163 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-underline-offset: 0.18em;
 }
 
+.zenYouTubeMessagePanel {
+  display: grid;
+  justify-items: center;
+  width: min(820px, 100%);
+  max-width: 100%;
+  margin: clamp(22px, 4dvh, 46px) auto;
+}
+
+.zenYouTubeEmbed {
+  --zen-youtube-radius: 18px;
+  display: block;
+  position: relative;
+  isolation: isolate;
+  width: min(760px, 100%);
+  max-width: 100%;
+  margin: 0 auto;
+  color: #ffffff;
+}
+
+.zenYouTubeGlow {
+  position: absolute;
+  inset: -24%;
+  z-index: -1;
+  border-radius: 999px;
+  background-image:
+    radial-gradient(ellipse at 50% 52%, rgba(255, 255, 255, 0.2), transparent 58%),
+    var(--zen-youtube-thumbnail);
+  background-size: cover;
+  background-position: center;
+  opacity: 0.32;
+  filter: blur(36px) saturate(1.3);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 0 45%, transparent 74%);
+  mask-image: radial-gradient(ellipse at center, #000 0 45%, transparent 74%);
+  transform: scale(0.98);
+  animation: zenYouTubeStageGlow 5.6s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.zenYouTubeFrame {
+  display: block;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #ffffff 16%, transparent);
+  border-radius: var(--zen-youtube-radius);
+  background: #050505;
+  box-shadow:
+    0 22px 72px rgba(0, 0, 0, 0.32),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.zenYouTubePosterButton {
+  appearance: none;
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: #050505;
+  color: #ffffff;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.zenYouTubePoster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.01);
+}
+
+.zenYouTubePosterScrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, transparent 0 22%, rgba(0, 0, 0, 0.24) 58%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.34));
+  pointer-events: none;
+}
+
+.zenYouTubePlayButton {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(54px, 8vw, 76px);
+  height: clamp(54px, 8vw, 76px);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.34), transparent 34%),
+    rgba(14, 14, 16, 0.72);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.38),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transform: translate(-50%, -50%);
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease;
+}
+
+.zenYouTubePosterButton:hover .zenYouTubePlayButton,
+.zenYouTubePosterButton:focus-visible .zenYouTubePlayButton {
+  border-color: rgba(255, 255, 255, 0.58);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.42), transparent 34%),
+    rgba(8, 8, 10, 0.82);
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.zenYouTubePosterButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, #ffffff);
+  outline-offset: 4px;
+}
+
+.zenYouTubeIframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+@keyframes zenYouTubeStageGlow {
+  from {
+    opacity: 0.28;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 0.36;
+    transform: scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenYouTubeGlow {
+    animation: none;
+    opacity: 0.3;
+    transform: none;
+  }
+
+  .zenYouTubePlayButton {
+    transition: none;
+  }
+
+  .zenYouTubePosterButton:hover .zenYouTubePlayButton,
+  .zenYouTubePosterButton:focus-visible .zenYouTubePlayButton {
+    transform: translate(-50%, -50%);
+  }
+}
+
 .promptShortcutInline {
   display: inline-grid;
   max-width: 100%;
@@ -14271,7 +14793,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 0.12em 0.34em;
   background: color-mix(in srgb, var(--bg-elevated) 88%, var(--fg) 7%);
   color: var(--fg);
-  font-size: 0.98em;
+  font-size: min(0.98em, var(--prompt-shortcut-expanded-font-cap, 999px));
   font-weight: 650;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -14284,40 +14806,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .pendingWildcardShimmer {
   display: inline-block;
   position: relative;
-  inline-size: 5.6ch;
+  inline-size: 5.8ch;
   min-inline-size: 3.8ch;
-  block-size: 0.96em;
-  border-radius: 4px;
+  block-size: 0.88em;
+  border-radius: 999px;
   overflow: hidden;
-  vertical-align: -0.12em;
+  vertical-align: -0.08em;
   isolation: isolate;
   background:
     linear-gradient(
-      90deg,
-      color-mix(in srgb, currentColor 11%, transparent),
-      color-mix(in srgb, #2fd3e3 18%, transparent) 46%,
-      color-mix(in srgb, #7b5cff 16%, transparent)
+      105deg,
+      color-mix(in srgb, currentColor 8%, transparent),
+      color-mix(in srgb, #2fd3e3 18%, transparent) 44%,
+      color-mix(in srgb, #b7e63a 13%, transparent) 72%,
+      color-mix(in srgb, #ff4d6d 10%, transparent)
     ),
-    color-mix(in srgb, currentColor 8%, transparent);
+    color-mix(in srgb, currentColor 7%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, currentColor 14%, transparent) inset,
-    0 0 14px color-mix(in srgb, #2fd3e3 16%, transparent);
-  filter: blur(0.18px);
+    0 0 0 1px color-mix(in srgb, currentColor 10%, transparent) inset,
+    0 0 12px color-mix(in srgb, #2fd3e3 14%, transparent),
+    0 0 24px color-mix(in srgb, #b7e63a 7%, transparent);
+  filter: blur(0.32px) saturate(1.08);
+  transform-origin: center;
+  animation: pendingWildcardStripBreathe 1.9s ease-in-out infinite;
 }
 
 .pendingWildcardShimmer::before {
   content: "";
   position: absolute;
-  inset: -35%;
+  inset: -60% -45%;
   z-index: 1;
   background: linear-gradient(
-    90deg,
-    transparent 18%,
-    color-mix(in srgb, #ffffff 52%, transparent) 48%,
-    transparent 74%
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, #ffffff 36%, transparent) 43%,
+    color-mix(in srgb, currentColor 18%, transparent) 50%,
+    transparent 66%
   );
   transform: translateX(-72%);
-  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
+  filter: blur(0.7px);
+  animation: pendingWildcardShimmerSweep 1.44s ease-in-out infinite;
 }
 
 .pendingWildcardShimmer::after {
@@ -14326,18 +14854,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   inset: 0;
   z-index: 0;
   background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 5px,
-      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    radial-gradient(
+      ellipse at 24% 42%,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      transparent 46%
     ),
     radial-gradient(
-      circle at 24% 44%,
-      color-mix(in srgb, #ff4d6d 24%, transparent),
-      transparent 38%
+      ellipse at 72% 58%,
+      color-mix(in srgb, #7b5cff 15%, transparent),
+      transparent 54%
     );
-  opacity: 0.5;
-  filter: blur(2px);
+  opacity: 0.62;
+  filter: blur(3px);
 }
 
 .pendingPromptWildcardMessage {
@@ -14350,63 +14878,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .pendingPromptWildcardShimmer {
   inline-size: var(--pending-wildcard-shimmer-size, min(22ch, 70vw));
   max-inline-size: 100%;
-  block-size: 1.05em;
+  block-size: 0.98em;
 }
 
-.pendingPromptWildcardBubble {
-  position: relative;
-  display: grid;
-  min-inline-size: min(32ch, 72vw);
-  isolation: isolate;
+.cleanupRevealMessage {
+  animation: cleanupMessageRevealClear var(--cleanup-message-reveal-duration, 960ms) ease-out
+    both;
+  will-change: filter, opacity, text-shadow;
 }
 
-.pendingPromptWildcardBubbleContent {
-  pointer-events: none;
-  user-select: none;
-  opacity: 0.62;
-  filter: blur(7px) saturate(0.82);
+@media (prefers-reduced-motion: reduce) {
+  .cleanupRevealMessage {
+    animation-duration: 1ms;
+    will-change: auto;
+  }
 }
 
-.pendingPromptWildcardBubbleContent :where(button, a) {
-  pointer-events: none;
-}
-
-.pendingPromptWildcardBubbleStatus {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 50%;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  max-inline-size: calc(100% - 18px);
-  padding: 6px 9px;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  border-radius: 999px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-elevated) 88%, transparent),
-      color-mix(in srgb, var(--bg-surface) 82%, transparent)
-    );
-  color: currentColor;
-  font-size: 0.78rem;
-  font-weight: 760;
-  line-height: 1;
-  white-space: nowrap;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, #ffffff 8%, transparent) inset,
-    0 8px 22px color-mix(in srgb, #000000 18%, transparent);
-  transform: translate(-50%, -50%);
-}
-
-.pendingPromptWildcardSpinner {
-  inline-size: 0.78em;
-  block-size: 0.78em;
-  border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
-  border-block-start-color: currentColor;
-  border-radius: 999px;
-  animation: wildcardPendingSpin 0.84s linear infinite;
+@keyframes cleanupMessageRevealClear {
+  from {
+    opacity: 0.58;
+    filter: blur(7px) saturate(0.82);
+    text-shadow: 0 0 16px color-mix(in srgb, currentColor 48%, transparent);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0) saturate(1);
+    text-shadow: none;
+  }
 }
 
 @keyframes pendingWildcardShimmerSweep {
@@ -14415,6 +14913,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
   to {
     transform: translateX(72%);
+  }
+}
+
+@keyframes pendingWildcardStripBreathe {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scaleX(0.985);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scaleX(1.012);
   }
 }
 
@@ -14953,8 +15463,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   opacity: 0.95;
 }
 
-.typingIndicatorReplyingLive .typingDots span {
-  animation-duration: 0.95s;
+.typingIndicatorChatCenter.typingIndicatorReplyingLive.typingIndicatorSpeedNudged {
+  outline: 1px solid color-mix(in srgb, var(--typing-accent, var(--accent)) 42%, transparent);
+  outline-offset: 4px;
+}
+
+.typingIndicatorReplyingLive .typingDots {
+  --typing-dot-duration: 0.95s;
 }
 
 .typingIndicatorPaused {
@@ -15511,28 +16026,117 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .typingDots {
+  --typing-dot-font: var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 750;
+  --typing-dot-gap: 0.2em;
+  --typing-dot-duration: 1.2s;
+  --typing-dot-stagger: 0.15s;
+  --typing-dot-rise: -0.18em;
+  --typing-dot-rotate: 0deg;
+  --typing-dot-scale-active: 1.08;
+  --typing-dot-rest-opacity: 0.32;
+  --typing-dot-active-opacity: 1;
+  --typing-dot-ease: ease-in-out;
   display: inline-flex;
-  gap: 4px;
+  align-items: baseline;
+  gap: var(--typing-dot-gap);
+  font-family: var(--typing-dot-font);
+  font-size: 1.35em;
+  font-weight: var(--typing-dot-weight);
+  line-height: 0.7;
+  letter-spacing: 0;
 }
 
 .typingDots span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(
+  --typing-dot-index: 0;
+  display: inline-block;
+  min-width: 0.18em;
+  color: color-mix(
     in srgb,
     var(--typing-accent, var(--fg-muted)) 78%,
     var(--fg-muted)
   );
-  animation: typingPulse 1.2s infinite;
+  opacity: var(--typing-dot-rest-opacity);
+  transform: translateY(0);
+  transform-origin: center 72%;
+  animation: typingDotPulse var(--typing-dot-duration) var(--typing-dot-ease) infinite;
+  animation-delay: calc(var(--typing-dot-index, 0) * var(--typing-dot-stagger));
 }
 
 .typingDots span:nth-child(2) {
-  animation-delay: 0.15s;
+  --typing-dot-index: 1;
 }
 
 .typingDots span:nth-child(3) {
-  animation-delay: 0.3s;
+  --typing-dot-index: 2;
+}
+
+.zenPendingReplyDots span {
+  --typing-dot-index: 0;
+  animation-delay: calc(var(--typing-dot-index, 0) * var(--typing-dot-stagger));
+}
+
+.typingDots[data-voice-preset="warm"],
+.zenPendingReplyDots[data-voice-preset="warm"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="warm"] {
+  --typing-dot-font: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 650;
+  --typing-dot-duration: 1.28s;
+  --typing-dot-rise: -0.12em;
+  --typing-dot-scale-active: 1.16;
+  --typing-dot-ease: cubic-bezier(0.34, 0.86, 0.38, 1);
+}
+
+.typingDots[data-voice-preset="concise"],
+.zenPendingReplyDots[data-voice-preset="concise"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="concise"] {
+  --typing-dot-font: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --typing-dot-weight: 650;
+  --typing-dot-gap: 0.14em;
+  --typing-dot-duration: 0.86s;
+  --typing-dot-stagger: 0.1s;
+  --typing-dot-rise: -0.08em;
+  --typing-dot-scale-active: 1.02;
+  --typing-dot-ease: steps(2, end);
+}
+
+.typingDots[data-voice-preset="playful"],
+.zenPendingReplyDots[data-voice-preset="playful"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="playful"] {
+  --typing-dot-font: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  --typing-dot-weight: 400;
+  --typing-dot-gap: 0.2em;
+  --typing-dot-duration: 1.02s;
+  --typing-dot-stagger: 0.12s;
+  --typing-dot-rise: -0.2em;
+  --typing-dot-rotate: -8deg;
+  --typing-dot-scale-active: 1.2;
+  --typing-dot-ease: cubic-bezier(0.18, 0.92, 0.22, 1.28);
+}
+
+.typingDots[data-voice-preset="formal"],
+.zenPendingReplyDots[data-voice-preset="formal"],
+.chatEphemeralTypedWordEllipsis[data-voice-preset="formal"] {
+  --typing-dot-font: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  --typing-dot-weight: 600;
+  --typing-dot-gap: 0.24em;
+  --typing-dot-duration: 1.54s;
+  --typing-dot-stagger: 0.22s;
+  --typing-dot-rise: -0.05em;
+  --typing-dot-scale-active: 1.04;
+  --typing-dot-rest-opacity: 0.24;
+  --typing-dot-active-opacity: 0.86;
+  --typing-dot-ease: cubic-bezier(0.38, 0, 0.24, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typingDots span,
+  .zenPendingReplyDots span,
+  .chatEphemeralTypedWordEllipsis .chatEphemeralTypedLetter[data-ellipsis-dot="true"] {
+    animation: none;
+    opacity: 0.68;
+    transform: none;
+  }
 }
 
 .srOnly {
@@ -15945,14 +16549,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg-muted) 72%, transparent);
 }
 
-@keyframes typingPulse {
-  0%, 60%, 100% {
-    opacity: 0.3;
-    transform: translateY(0);
+@keyframes typingDotPulse {
+  0%,
+  62%,
+  100% {
+    opacity: var(--typing-dot-rest-opacity, 0.32);
+    transform: translateY(0) scale(1) rotate(0deg);
   }
-  30% {
-    opacity: 1;
-    transform: translateY(-2px);
+  32% {
+    opacity: var(--typing-dot-active-opacity, 1);
+    transform:
+      translateY(var(--typing-dot-rise, -0.18em))
+      scale(var(--typing-dot-scale-active, 1.08))
+      rotate(var(--typing-dot-rotate, 0deg));
   }
 }
 
@@ -17045,56 +17654,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 12%, var(--bg));
 }
 
-.composeWritingAssistRow {
-  max-width: min(1240px, 100%);
-  width: 100%;
-  margin: 0 auto 8px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.composeWritingAssistButton {
-  border: 1px solid color-mix(in srgb, var(--compose-bot-color, var(--accent)) 32%, var(--line));
-  border-radius: 999px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-surface) 88%, var(--compose-bot-color, var(--accent)) 12%),
-      color-mix(in srgb, var(--bg) 92%, var(--compose-bot-color, var(--accent)) 8%)
-    );
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  padding: 6px 11px;
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.composeWritingAssistButton:hover:not(:disabled),
-.composeWritingAssistButton:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 54%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-surface) 80%, var(--compose-bot-color, var(--accent)) 20%),
-      color-mix(in srgb, var(--bg) 86%, var(--compose-bot-color, var(--accent)) 14%)
-    );
-  transform: translateY(-1px);
-}
-
-.composeWritingAssistButton:disabled {
-  cursor: wait;
-  opacity: 0.58;
-  transform: none;
-}
-
 /* Thin utility row above the textarea for the LOCAL/ONLINE mode toggle and
    any future compose-adjacent controls. Width matches `.composeEditorShell`
    so the row's left edge lines up with the textarea below it. */
@@ -17163,6 +17722,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   display: grid;
   gap: 8px;
+}
+
+.zenActionComposerPreview {
+  width: 100%;
+  max-width: min(1240px, 100%);
+  margin: 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.42em;
+  color: color-mix(in srgb, var(--zen-user-message-color, var(--fg)) 70%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  pointer-events: none;
+  animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .queuedPromptRailDock {
@@ -18547,6 +19122,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
 }
 
+.localCommandToast {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 90%, var(--accent) 5%),
+      color-mix(in srgb, var(--bg-deep) 90%, var(--fg-muted) 4%)
+    );
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.2),
+    0 0 22px color-mix(in srgb, var(--accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+}
+
 .psychicModeToastDot {
   width: 10px;
   height: 10px;
@@ -19050,7 +19639,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline-block;
   position: relative;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 999px;
   padding: 1px 0.45em;
   overflow: hidden;
   isolation: isolate;
@@ -19085,31 +19674,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   inset: 0;
   z-index: 0;
   background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 5px,
-      color-mix(in srgb, #ffffff 20%, transparent) 5px 7px
+    radial-gradient(
+      ellipse at 28% 46%,
+      color-mix(in srgb, #ff4d6d 18%, transparent),
+      transparent 46%
     ),
     radial-gradient(
-      circle at 28% 46%,
-      color-mix(in srgb, #ff4d6d 24%, transparent),
-      transparent 42%
+      ellipse at 70% 58%,
+      color-mix(in srgb, #7b5cff 15%, transparent),
+      transparent 54%
     );
-  opacity: 0.54;
-  filter: blur(2px);
+  opacity: 0.62;
+  filter: blur(3px);
 }
 
 .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after {
-  inset: -35%;
+  inset: -60% -45%;
   z-index: 1;
   background: linear-gradient(
-    90deg,
-    transparent 18%,
-    color-mix(in srgb, #ffffff 52%, transparent) 48%,
-    transparent 74%
+    105deg,
+    transparent 30%,
+    color-mix(in srgb, #ffffff 36%, transparent) 43%,
+    color-mix(in srgb, currentColor 18%, transparent) 50%,
+    transparent 66%
   );
   transform: translateX(-72%);
-  animation: pendingWildcardShimmerSweep 1.24s ease-in-out infinite;
+  filter: blur(0.7px);
+  animation: pendingWildcardShimmerSweep 1.44s ease-in-out infinite;
 }
 
 .markdownRichEditorHost :global(.tiptapPrismDevCommandQuotedToken) {
@@ -19166,6 +19757,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pendingWildcardShimmer,
   .pendingWildcardShimmer::before,
   .markdownRichEditorHost :global(.tiptapPrismPendingWildcardSlotToken)::after,
   .composeEditorShell[data-random-prompt-busy="true"] .markdownComposerSurface,
@@ -21555,7 +22147,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inline-size: calc(100% - 2px);
   min-inline-size: calc(100% - 2px);
   block-size: 1.06em;
-  border-radius: 3px;
+  border-radius: 999px;
 }
 
 .composeTextareaVisualWrap textarea[data-rich-overlay="true"] {
@@ -28737,7 +29329,46 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.35;
 }
 
+.memoryDossierStats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.memoryDossierStats span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 7px 4px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 20%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--memory-panel-color) 8%, transparent);
+}
+
+.memoryDossierStats strong,
+.memoryDossierStats small {
+  display: block;
+  max-width: 100%;
+}
+
+.memoryDossierStats strong {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.memoryDossierStats small {
+  color: var(--fg-muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
 .memoryFactsSection {
+  display: grid;
+  gap: 8px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--memory-panel-color) 22%, var(--line));
   border-radius: 14px;
@@ -28820,6 +29451,92 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 13px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.memoryFactsEmpty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.memoryRelationshipSection,
+.protectedAboutYouSection {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 24%, var(--line));
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 88% 12%,
+      color-mix(in srgb, var(--memory-panel-color) 14%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.memoryRelationshipHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memoryRelationshipHeader strong,
+.memoryRelationshipHeader span {
+  display: block;
+}
+
+.memoryRelationshipHeader strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.memoryRelationshipHeader span {
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.memoryRelationshipGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memoryRelationshipCard {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 18%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+
+.memoryRelationshipCard strong,
+.memoryRelationshipCard span,
+.memoryRelationshipCard small {
+  display: block;
+}
+
+.memoryRelationshipCard strong {
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.memoryRelationshipCard p {
+  margin: 5px 0 0;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.memoryRelationshipCard small {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 .panelMemories[data-memory-scope="all"] .memoryPanelHint,
@@ -29719,6 +30436,28 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 620;
   line-height: 1.32;
   color: var(--fg);
+}
+
+.memoryFullProseMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.memoryFullProseMeta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--memory-panel-color) 20%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--memory-panel-color) 10%, transparent);
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .memoryFullProseDeleteButton {
@@ -33642,7 +34381,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight .composeEditNotice,
-.themeLight .composeWritingAssistButton,
 .themeLight .queuedPromptChip {
   border-color: color-mix(in srgb, var(--compose-bot-color, var(--accent)) 24%, var(--line));
   background:
@@ -34777,6 +35515,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     border-left: 0;
     padding-left: max(16px, calc(env(safe-area-inset-left) + 16px));
     padding-right: max(16px, calc(env(safe-area-inset-right) + 16px));
+  }
+
+  .memoryDossierStats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .memoryRelationshipGrid {
+    grid-template-columns: 1fr;
   }
 
   /* Match Bots / Memories: edge-to-edge drawer on phone. */
@@ -37763,12 +38509,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTableTypingLine .typingDots {
-  gap: 6px;
+  --typing-dot-gap: 0.24em;
+  font-size: 1.22em;
 }
 
 .coffeeTableTypingLine .typingDots span {
-  width: 8px;
-  height: 8px;
+  min-width: 0.2em;
 }
 
 .coffeeCenterIcon {
@@ -38284,12 +39030,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatThinkingIndicator .typingDots {
   --typing-accent: rgba(255, 255, 255, 0.95);
-  gap: 3px;
+  --typing-dot-gap: 0.14em;
+  font-size: 0.92rem;
 }
 
 .coffeeSeatThinkingIndicator .typingDots span {
-  width: 4px;
-  height: 4px;
+  min-width: 0.16em;
 }
 
 .coffeeSeatActionBadge {

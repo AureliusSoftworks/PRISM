@@ -5,6 +5,12 @@ import {
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing.ts";
+import {
+  CLEANUP_MESSAGE_REVEAL_DURATION_MS,
+  CLEANUP_MESSAGE_REVEAL_SETTLE_MS,
+  cleanupMessageRevealKey,
+  mapPendingCleanupMessagesToFinalRevealKeys,
+} from "./messageCleanupReveal.ts";
 
 describe("resolveChatRevealDelayMultiplierForTyping", () => {
   const base = {
@@ -141,6 +147,26 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
     );
   });
 
+  it("speeds the pending step when the delay multiplier decreases", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const base = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...base, nowMs: 0 }), 1);
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({
+        ...base,
+        nowMs: 60,
+        delayMultiplier: 0.5,
+      }),
+      2
+    );
+  });
+
   it("resets pacing when the token signature changes", () => {
     const state = new Map<string, ChatRevealPaceState>();
     const base = {
@@ -172,6 +198,39 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
         nowMs: 400,
       }),
       1
+    );
+  });
+});
+
+describe("message cleanup reveal helpers", () => {
+  it("keeps a settle window longer than the whole-message reveal animation", () => {
+    assert.ok(CLEANUP_MESSAGE_REVEAL_DURATION_MS > 0);
+    assert.ok(CLEANUP_MESSAGE_REVEAL_SETTLE_MS > CLEANUP_MESSAGE_REVEAL_DURATION_MS);
+  });
+
+  it("maps pending optimistic cleanup messages to final user messages by send order", () => {
+    assert.deepEqual(
+      mapPendingCleanupMessagesToFinalRevealKeys({
+        conversationId: "conversation",
+        pendingMessageIds: ["pending-a", "pending-b"],
+        previousMessages: [
+          { id: "old-user", role: "user" },
+          { id: "old-assistant", role: "assistant" },
+          { id: "pending-a", role: "user" },
+          { id: "pending-b", role: "user" },
+        ],
+        finalMessages: [
+          { id: "old-user", role: "user" },
+          { id: "old-assistant", role: "assistant" },
+          { id: "final-a", role: "user" },
+          { id: "final-b", role: "user" },
+          { id: "final-assistant", role: "assistant" },
+        ],
+      }),
+      [
+        cleanupMessageRevealKey("conversation", "final-a"),
+        cleanupMessageRevealKey("conversation", "final-b"),
+      ]
     );
   });
 });
