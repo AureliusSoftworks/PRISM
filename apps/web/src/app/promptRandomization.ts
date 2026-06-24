@@ -141,7 +141,14 @@ function deckReplacementKey(name: string): string {
 }
 
 const BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
-const MODEL_FILLED_WILDCARD_BRACE_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/gu;
+const MODEL_FILLED_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+const NOUN_PLURAL_SHORTHAND_RE = /\{NOUN(\d*)\}s\b/g;
+
+function isModelFilledWildcardName(name: string): boolean {
+  if (isDisabledPromptWildcardToken(name)) return false;
+  if (parseBuiltInPromptWildcardReference(name)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(name.trim());
+}
 
 export function promptContainsBuiltInWildcardSlots(source: string): boolean {
   for (const match of source.matchAll(BUILT_IN_WILDCARD_BRACE_RE)) {
@@ -163,7 +170,7 @@ export function maskBuiltInWildcardSlotsForPending(
 export function promptContainsModelFilledWildcardSlots(source: string): boolean {
   MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
   for (const match of source.matchAll(MODEL_FILLED_WILDCARD_BRACE_RE)) {
-    if (!isDisabledPromptWildcardToken(match[1] ?? "")) return true;
+    if (isModelFilledWildcardName(match[1] ?? "")) return true;
   }
   return false;
 }
@@ -175,7 +182,7 @@ export function maskModelFilledWildcardSlotsForPending(
   if (!source || !pendingText) return source;
   MODEL_FILLED_WILDCARD_BRACE_RE.lastIndex = 0;
   return source.replace(MODEL_FILLED_WILDCARD_BRACE_RE, (token, name: string) =>
-    isDisabledPromptWildcardToken(name) ? token : pendingText
+    isModelFilledWildcardName(name) ? pendingText : token
   );
 }
 
@@ -184,10 +191,66 @@ export function isStandaloneWildcardComposerDraft(source: string): boolean {
   if (!trimmed) return false;
   if (/^![a-z0-9][a-z0-9_-]*[.!?]?$/iu.test(trimmed)) return true;
   if (/^\{[^{}\r\n]*\|[^{}\r\n]*\}[.!?]?$/u.test(trimmed)) return true;
-  const braceWildcard = trimmed.match(/^\{([A-Z][A-Z0-9_ ]{1,63})\}[.!?]?$/u);
-  return Boolean(
-    braceWildcard && !isDisabledPromptWildcardToken(braceWildcard[1] ?? "")
-  );
+  const braceWildcard = trimmed.match(/^\{([^{}\r\n]{1,80})\}[.!?]?$/u);
+  return Boolean(braceWildcard && isModelFilledWildcardName(braceWildcard[1] ?? ""));
+}
+
+function normalizeNounPluralShorthand(
+  source: string,
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
+): PromptRandomizationResolution {
+  NOUN_PLURAL_SHORTHAND_RE.lastIndex = 0;
+  let output = "";
+  let cursor = 0;
+  const adjustments: Array<{ start: number; end: number; delta: number }> = [];
+  for (const match of source.matchAll(NOUN_PLURAL_SHORTHAND_RE)) {
+    const token = match[0] ?? "";
+    const reference = match[1] ?? "";
+    const start = match.index ?? -1;
+    if (start < 0 || !token) continue;
+    const end = start + token.length;
+    const replacement = `{PLURAL_NOUN${reference}}`;
+    output += source.slice(cursor, start);
+    output += replacement;
+    adjustments.push({ start, end, delta: replacement.length - token.length });
+    cursor = end;
+  }
+  if (adjustments.length === 0) {
+    return {
+      prompt: source,
+      replacements: normalizedPromptRandomizationReplacementsForPrompt(
+        source,
+        existingReplacements
+      ),
+    };
+  }
+  output += source.slice(cursor);
+  const shiftedReplacements = existingReplacements
+    ?.map((replacement): PromptShortcutWildcardReplacement | null => {
+      let start = replacement.start;
+      let end = replacement.end;
+      if (typeof start !== "number" || typeof end !== "number") return replacement;
+      for (const adjustment of adjustments) {
+        if (end <= adjustment.start) continue;
+        if (start >= adjustment.end) {
+          start += adjustment.delta;
+          end += adjustment.delta;
+          continue;
+        }
+        return null;
+      }
+      return { ...replacement, start, end };
+    })
+    .filter((replacement): replacement is PromptShortcutWildcardReplacement =>
+      Boolean(replacement)
+    );
+  return {
+    prompt: output,
+    replacements: normalizedPromptRandomizationReplacementsForPrompt(
+      output,
+      shiftedReplacements
+    ),
+  };
 }
 
 function normalizedPromptRandomizationReplacementsForPrompt(
@@ -244,13 +307,7 @@ export function resolveBuiltInPromptWildcardInvocations(
   source: string,
   existingReplacements?: readonly PromptShortcutWildcardReplacement[]
 ): PromptRandomizationResolution {
-  return {
-    prompt: source,
-    replacements: normalizedPromptRandomizationReplacementsForPrompt(
-      source,
-      existingReplacements
-    ),
-  };
+  return normalizeNounPluralShorthand(source, existingReplacements);
 }
 
 function buildPromptRandomizationDeckLookup(

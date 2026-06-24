@@ -21,7 +21,11 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("adj"), "ADJECTIVE");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{PLURAL NOUN}"), "PLURAL_NOUN");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("plural-noun"), "PLURAL_NOUN");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("hidden-truth"), "SECRET");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{#}"), "NUM");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("#"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{NUM}"), "NUM");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{number}"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("number"), "NUM");
   });
 
@@ -45,6 +49,16 @@ describe("built-in prompt wildcard slots", () => {
       key: "ADJECTIVE",
       reference: "2",
     });
+    assert.deepEqual(parseBuiltInPromptWildcardReference("{#1}"), {
+      slot: getBuiltInPromptWildcardSlot("NUM"),
+      key: "NUM",
+      reference: "1",
+    });
+    assert.deepEqual(parseBuiltInPromptWildcardReference("{number1}"), {
+      slot: getBuiltInPromptWildcardSlot("NUM"),
+      key: "NUM",
+      reference: "1",
+    });
     assert.deepEqual(parseBuiltInPromptWildcardReference("plural-noun02"), {
       slot: getBuiltInPromptWildcardSlot("PLURAL_NOUN"),
       key: "PLURAL_NOUN",
@@ -56,6 +70,30 @@ describe("built-in prompt wildcard slots", () => {
   it("keeps built-in wildcard keys unique", () => {
     const keys = new Set(BUILT_IN_PROMPT_WILDCARD_SLOTS.map((slot) => slot.key));
     assert.equal(keys.size, BUILT_IN_PROMPT_WILDCARD_SLOTS.length);
+  });
+
+  it("marks only the starter built-ins as primary picker entries", () => {
+    const primaryKeys = BUILT_IN_PROMPT_WILDCARD_SLOTS
+      .filter((slot) => slot.pickerVisibility === "primary")
+      .map((slot) => slot.key);
+    assert.deepEqual(primaryKeys, [
+      "NUM",
+      "NAME",
+      "PERSON",
+      "PLACE",
+      "OBJECT",
+      "NOUN",
+      "ADJECTIVE",
+      "VERB",
+      "ACTION",
+      "STYLE",
+      "GENRE",
+      "COLOR",
+      "TIME",
+      "PROBLEM",
+    ]);
+    assert.equal(getBuiltInPromptWildcardSlot("TREASURE")?.pickerVisibility, "searchable");
+    assert.equal(getBuiltInPromptWildcardSlot("SUFFIX")?.pickerVisibility, "searchable");
   });
 
   it("keeps noun generation rules free of sticky concrete examples", () => {
@@ -71,27 +109,30 @@ describe("built-in prompt wildcard slots", () => {
     }
   });
 
-  it("keeps the PERSON generation rule limited to first names", () => {
-    const slot = getBuiltInPromptWildcardSlot("PERSON");
-    assert.ok(slot);
-    assert.match(slot.title, /first name/iu);
-    assert.match(slot.generationHint, /first name only/iu);
-    assert.match(slot.generationHint, /Do not return a role, title, occupation/iu);
+  it("keeps NAME limited to first names and PERSON available for roles", () => {
+    const name = getBuiltInPromptWildcardSlot("NAME");
+    const person = getBuiltInPromptWildcardSlot("PERSON");
+    assert.ok(name);
+    assert.ok(person);
+    assert.match(name.title, /first name/iu);
+    assert.match(name.generationHint, /first name/iu);
+    assert.match(person.title, /person, role, or character type/iu);
+    assert.match(person.generationHint, /person, role, job, or character type/iu);
   });
 
   it("keeps the STYLE generation rule focused on tone or genre labels", () => {
     const slot = getBuiltInPromptWildcardSlot("STYLE");
     assert.ok(slot);
     assert.match(slot.title, /writing tone or genre/iu);
-    assert.match(slot.generationHint, /tone or genre label only/iu);
-    assert.match(slot.generationHint, /Do not return a full instruction/iu);
+    assert.match(slot.generationHint, /tone or style label/iu);
   });
 
   it("keeps the NUM generation rule limited to a small integer", () => {
     const slot = getBuiltInPromptWildcardSlot("NUM");
     assert.ok(slot);
-    assert.match(slot.title, /integer from 1 to 100/iu);
-    assert.match(slot.generationHint, /integer from 1 to 100/iu);
+    assert.equal(slot.label, "#");
+    assert.match(slot.title, /digit from 1 to 10/iu);
+    assert.match(slot.generationHint, /integer from 1 to 10/iu);
     assert.match(slot.generationHint, /digits only/iu);
   });
 });

@@ -338,6 +338,39 @@ describe("resolvePendingWildcardSlotTextRanges", () => {
     );
   });
 
+  it("normalizes pending number wildcard tokens", () => {
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("roll {#1}", {
+        pendingWildcardSlotNames: ["NUM"],
+      }),
+      [
+        {
+          start: 5,
+          end: 9,
+          name: "NUM",
+          reference: "1",
+          labelEnd: 7,
+          badge: "A",
+        },
+      ]
+    );
+    assert.deepEqual(
+      resolvePendingWildcardSlotTextRanges("roll {number1}", {
+        pendingWildcardSlotNames: ["NUM"],
+      }),
+      [
+        {
+          start: 5,
+          end: 14,
+          name: "NUM",
+          reference: "1",
+          labelEnd: 12,
+          badge: "A",
+        },
+      ]
+    );
+  });
+
   it("ignores unsupported pending wildcard slots", () => {
     assert.deepEqual(
       resolvePendingWildcardSlotTextRanges("{NOUN} {PLACE}", {
@@ -398,6 +431,25 @@ describe("resolveWildcardSlotTextRanges", () => {
           name: "ADJECTIVE",
           reference: "26",
           labelEnd: 18,
+          badge: "Z",
+          syntax: "brace",
+        },
+      ]
+    );
+  });
+
+  it("recognizes numbered number wildcard brace slots as composer chips", () => {
+    assert.deepEqual(
+      resolveWildcardSlotTextRanges("roll {#26} now", {
+        wildcardSlotNames: ["NUM"],
+      }),
+      [
+        {
+          start: 5,
+          end: 10,
+          name: "NUM",
+          reference: "26",
+          labelEnd: 7,
           badge: "Z",
           syntax: "brace",
         },

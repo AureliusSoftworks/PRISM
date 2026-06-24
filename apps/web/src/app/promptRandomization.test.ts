@@ -376,12 +376,42 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
       replacements: [],
     });
   });
+
+  it("normalizes quick plural noun shorthand and shifts later ranges", () => {
+    const source = "Ask {NOUN1}s about lemon.";
+    const existing = [
+      {
+        key: "FOOD",
+        value: "lemon",
+        start: source.indexOf("lemon"),
+        end: source.indexOf("lemon") + "lemon".length,
+        source: "deck" as const,
+      },
+    ];
+    const result = resolveBuiltInPromptWildcardInvocations(source, existing);
+
+    assert.equal(result.prompt, "Ask {PLURAL_NOUN1} about lemon.");
+    assert.deepEqual(result.replacements, [
+      {
+        key: "FOOD",
+        value: "lemon",
+        start: result.prompt.indexOf("lemon"),
+        end: result.prompt.indexOf("lemon") + "lemon".length,
+        source: "deck",
+      },
+    ]);
+  });
 });
 
 describe("pending built-in wildcard slot masking", () => {
   it("detects known brace slots without treating option groups as true wildcards", () => {
     assert.equal(promptContainsBuiltInWildcardSlots("Make it {ADJECTIVE}."), true);
     assert.equal(promptContainsBuiltInWildcardSlots("Make it {ADJECTIVE1}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {#}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {#1}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {number}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {number1}."), true);
+    assert.equal(promptContainsBuiltInWildcardSlots("Make it {TREASURE}."), true);
     assert.equal(promptContainsBuiltInWildcardSlots("Make it {CHARACTER}."), false);
     assert.equal(promptContainsBuiltInWildcardSlots("Pick {red|green}."), false);
     assert.equal(promptContainsBuiltInWildcardSlots("Keep {MOOD RING} unknown."), false);
@@ -402,11 +432,22 @@ describe("pending built-in wildcard slot masking", () => {
       ),
       "A {LOADING} with {red|green} {LOADING}."
     );
+    assert.equal(
+      maskBuiltInWildcardSlotsForPending(
+        "Roll {#1} beside a {TREASURE}.",
+        "{LOADING}"
+      ),
+      "Roll {LOADING} beside a {LOADING}."
+    );
   });
 
   it("detects model-filled uppercase brace slots beyond the built-in list", () => {
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {WORD}."), true);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {MOOD RING}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {#}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {#1}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {number}."), true);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {number1}."), true);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER1}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Pick {red|green}."), false);
@@ -433,7 +474,12 @@ describe("isStandaloneWildcardComposerDraft", () => {
   it("recognizes one-off uppercase brace wildcard calls", () => {
     assert.equal(isStandaloneWildcardComposerDraft("{WORD}"), true);
     assert.equal(isStandaloneWildcardComposerDraft("{MOOD RING}!"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{#}"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{#1}"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{number}"), true);
+    assert.equal(isStandaloneWildcardComposerDraft("{number1}"), true);
     assert.equal(isStandaloneWildcardComposerDraft("{CHARACTER}"), false);
+    assert.equal(isStandaloneWildcardComposerDraft("{word}"), false);
   });
 
   it("recognizes one-off hardcoded option groups", () => {

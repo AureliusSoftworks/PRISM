@@ -30,6 +30,19 @@ import { Markdown } from "@tiptap/markdown";
 import Placeholder from "@tiptap/extension-placeholder";
 import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
+import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
+import {
+  BACKEND_AVAILABLE_EVENT,
+  BACKEND_UNAVAILABLE_CODE,
+  BACKEND_UNAVAILABLE_EVENT,
+  createBackendUnavailableError,
+  createBackendUnavailableErrorFromPayload,
+  dispatchBackendAvailableEvent,
+  dispatchBackendUnavailableEvent,
+  isBackendUnavailablePayload,
+  isPrismBackendUnavailableError,
+  type BackendUnavailableEventDetail,
+} from "./backendUnavailable";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
   coffeeHeadGazeHorizontalSign,
@@ -79,6 +92,7 @@ import {
   parsePsychicSlashCommand,
 } from "./psychicCommand";
 import { shouldResetPreviousSessionContext } from "./naturalContextReset";
+import { parseUndoSlashCommand } from "./undoSlashCommand";
 import {
   psychicThoughtDisplayLineForMessage,
   type PsychicCanvasScratchpadPayload,
@@ -255,7 +269,15 @@ import {
   resendDraftTextForMessage,
   resolveBuiltInPromptWildcardInvocations,
   resolvePromptRandomizationGroups,
+  withSentenceCasedPromptInsertion,
 } from "./promptRandomization";
+import {
+  armComposerChipActivation,
+  replaceComposerChipText,
+  shouldResolveComposerChipActivation,
+  type ComposerChipActivationTarget,
+  type PendingComposerChipActivation,
+} from "./composerChipActivation";
 import {
   moveCommandCenterItemToTarget,
   type CommandCenterDropPlacement,
@@ -1429,6 +1451,22 @@ function collectDevPanelSafeAreaInsets(
     viewportWidth,
     viewportHeight,
   });
+}
+
+function stableMeasuredDevPanelSafeAreaInset(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.ceil(value);
+}
+
+function stableMeasuredDevPanelSafeAreaInsets(
+  insets: DevPanelSafeAreaInsets
+): DevPanelSafeAreaInsets {
+  return {
+    top: stableMeasuredDevPanelSafeAreaInset(insets.top),
+    right: stableMeasuredDevPanelSafeAreaInset(insets.right),
+    bottom: stableMeasuredDevPanelSafeAreaInset(insets.bottom),
+    left: stableMeasuredDevPanelSafeAreaInset(insets.left),
+  };
 }
 
 function normalizeStoredDevToolsPosition(
@@ -4322,8 +4360,8 @@ const CHAT_MODE_NEW_TURN_START_RATIO = 0.48;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.52;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 22;
-const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.75;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
+const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.35;
 const CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS = 520;
 const CHAT_MODE_ASSISTANT_ANCHOR_SMOOTH_SCROLL_MS = 420;
 const CHAT_MODE_SCROLL_ELASTIC_MAX_OFFSET_PX = 36;
@@ -6382,6 +6420,7 @@ interface CommandCenterCommand {
   colorTag?: CommandCenterColorTag;
   aliases: string[];
   arguments: CommandCenterArgument[];
+  wildcardValues?: readonly string[];
   builtIn: boolean;
   readOnly: boolean;
   createdAt: string;
@@ -6441,10 +6480,12 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "restart",
   "new-session",
   "forgive-me",
+  "undo",
   PSYCHIC_COMMAND_NAME,
 ]);
 const BUILT_IN_HELP_COMMAND_ALIASES = ["?"];
 const BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = ["wallpaper", "wall", "background"];
+const BUILT_IN_UNDO_COMMAND_ALIASES = ["undo-turn"];
 const BUILT_IN_HELP_SLASH_COMMANDS = new Set([
   "/help",
   ...BUILT_IN_HELP_COMMAND_ALIASES.map((alias) => `/${alias}`),
@@ -6466,6 +6507,8 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "restart",
   "new-session",
   "forgive-me",
+  "undo",
+  ...BUILT_IN_UNDO_COMMAND_ALIASES,
   PSYCHIC_COMMAND_NAME,
   "dev",
   "forget",
@@ -6731,6 +6774,22 @@ function createBuiltInForgiveMeCommand(): CommandCenterCommand {
   };
 }
 
+function createBuiltInUndoCommand(): CommandCenterCommand {
+  const now = new Date().toISOString();
+  return {
+    id: "builtin:/undo",
+    name: "undo",
+    title: "undo",
+    command: "Rewinds the latest message. Use /undo 2 or /undo-turn to rewind two messages.",
+    aliases: [...BUILT_IN_UNDO_COMMAND_ALIASES],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function createBuiltInPsychicCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
@@ -6817,6 +6876,23 @@ function composerTrueWildcardSlotFallback(command: CommandCenterCommand): string
   return command.command.trim() || `{${command.name}}`;
 }
 
+function composerTrueWildcardSlotDisplayTokens(command: CommandCenterCommand): string {
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  const addToken = (value: string): void => {
+    const token = value.trim();
+    const key = token.toLowerCase();
+    if (!token || seen.has(key)) return;
+    seen.add(key);
+    tokens.push(token);
+  };
+  addToken(composerTrueWildcardSlotFallback(command));
+  for (const alias of command.aliases) {
+    addToken(`{${alias}}`);
+  }
+  return tokens.join(", ");
+}
+
 function composerCommandDisplayName(command: CommandCenterCommand): string {
   return command.name;
 }
@@ -6857,6 +6933,15 @@ const BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
     updatedAt: "built-in",
   }));
 
+const PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS: CommandCenterCommand[] =
+  BUILT_IN_WILDCARD_SLOT_PICKS.filter((command) => {
+    const key = composerTrueWildcardSlotKey(command);
+    const slot = key
+      ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
+      : null;
+    return slot?.pickerVisibility === "primary";
+  });
+
 function commandCenterWildcardDeckPick(deck: CommandCenterWildcardDeck): CommandCenterCommand {
   const now = deck.updatedAt || deck.createdAt || new Date().toISOString();
   const sampleValues = deck.values.slice(0, 4).join(", ");
@@ -6871,6 +6956,7 @@ function commandCenterWildcardDeckPick(deck: CommandCenterWildcardDeck): Command
         ? `${itemCountLabel}: ${sampleValues}`
         : itemCountLabel,
     command: sampleValues,
+    wildcardValues: deck.values,
     ...(deck.colorTag ? { colorTag: deck.colorTag } : {}),
     aliases: deck.aliases,
     arguments: [],
@@ -6911,6 +6997,38 @@ function commandMatchesInvocationName(
   return commandInvocationNames(command).some(
     (name) => name.toLowerCase() === normalizedInvocationName.toLowerCase()
   );
+}
+
+function commandCenterCommandForChipText(
+  commands: readonly CommandCenterCommand[],
+  chipText: string,
+  prefix: "/" | "!"
+): CommandCenterCommand | null {
+  const trimmed = chipText.trim();
+  if (!trimmed.startsWith(prefix)) return null;
+  const invocation = trimmed.slice(prefix.length).trim();
+  if (!invocation) return null;
+  return (
+    commands.find((command) => commandMatchesInvocationName(command, invocation)) ?? null
+  );
+}
+
+function builtInWildcardSlotKeyFromChipText(
+  chipText: string
+): BuiltInPromptWildcardSlotKey | null {
+  return parseBuiltInPromptWildcardReference(chipText)?.key ?? null;
+}
+
+function randomComposerWildcardDeckReplacement(
+  command: CommandCenterCommand,
+  beforeText: string
+): string | null {
+  const values = (command.wildcardValues ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (values.length === 0) return null;
+  const value = values[Math.floor(Math.random() * values.length)] ?? "";
+  return withSentenceCasedPromptInsertion(value, beforeText);
 }
 
 interface LeadingCommandChipMatch {
@@ -6965,6 +7083,7 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
     createBuiltInForgiveMeCommand(),
+    createBuiltInUndoCommand(),
     createBuiltInPsychicCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
@@ -10837,11 +10956,10 @@ function looksLikeDisconnectedFetchFailure(err: unknown, path: string): boolean 
 }
 
 function prismApiTransportHint(path: string, rawMsg: string): Error {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "the Prism web app";
-  return new Error(
-    `Lost connection loading ${path} from ${origin}. Start the Prism API (default http://127.0.0.1:18787) or fix LOCALAI_API_ORIGIN where you run Next. (${rawMsg})`
-  );
+  return createBackendUnavailableError("Prism is waiting for its local API.", {
+    path,
+    detail: rawMsg,
+  });
 }
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
@@ -10869,7 +10987,11 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     const rawMsg =
       err instanceof Error ? `${err.message || err.name}`.trim() : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
-      throw prismApiTransportHint(path, rawMsg || "network");
+      const backendError = prismApiTransportHint(path, rawMsg || "network");
+      if (isPrismBackendUnavailableError(backendError)) {
+        dispatchBackendUnavailableEvent(backendError);
+      }
+      throw backendError;
     }
     throw err instanceof Error ? err : new Error(rawMsg);
   }
@@ -10883,7 +11005,11 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     const rawMsg =
       err instanceof Error ? `${err.message || err.name}`.trim() : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
-      throw prismApiTransportHint(path, rawMsg || "response body interrupted");
+      const backendError = prismApiTransportHint(path, rawMsg || "response body interrupted");
+      if (isPrismBackendUnavailableError(backendError)) {
+        dispatchBackendUnavailableEvent(backendError);
+      }
+      throw backendError;
     }
     throw err instanceof Error ? err : new Error(rawMsg);
   }
@@ -10896,8 +11022,19 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
   if (!res.ok || payload?.ok === false) {
+    if (isBackendUnavailablePayload(payload)) {
+      const backendError = createBackendUnavailableErrorFromPayload(payload, {
+        path,
+        status: res.status,
+      });
+      dispatchBackendUnavailableEvent(backendError);
+      throw backendError;
+    }
     const fallbackMessage = raw.trim() || `Request failed (${res.status})`;
     throw new Error(payload?.error ?? fallbackMessage);
+  }
+  if (typeof path === "string" && path.startsWith("/api") && path !== "/api/dev/restart") {
+    dispatchBackendAvailableEvent();
   }
   return (payload ?? {}) as T;
 }
@@ -15673,8 +15810,14 @@ interface PromptShortcutToggleTarget {
 
 const PROMPT_SHORTCUT_DEFAULT_TARGET_KEY = "__prompt__";
 type PendingPromptWildcardCensorMode = "strip" | "bubble";
-const PENDING_PROMPT_WILDCARD_BRACE_RE = /\{[A-Z][A-Z0-9_ ]{1,63}\}/gu;
+const PENDING_PROMPT_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
 const PENDING_PROMPT_WILDCARD_OPTION_RE = /\{[^{}\r\n]*\|[^{}\r\n]*\}/gu;
+
+function isPromptWildcardBraceTokenName(value: string): boolean {
+  if (isDisabledPromptWildcardToken(value)) return false;
+  if (parseBuiltInPromptWildcardReference(value)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(value.trim());
+}
 
 function promptShortcutToggleTargetKey(target?: PromptShortcutToggleTarget): string {
   return target?.targetKey ?? target?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY;
@@ -15721,8 +15864,10 @@ interface MessageBodyProps {
   promptShortcutExpanded?: boolean;
   expandedPromptShortcutTargetKeys?: ReadonlySet<string>;
   promptShortcutPresentation?: PromptShortcutPresentation;
+  promptShortcutUnfolded?: boolean;
   renderPromptMetadataAsProse?: boolean;
   onTogglePromptShortcut?: (target?: PromptShortcutToggleTarget) => void;
+  onUnfoldPromptShortcut?: () => void;
   onCollapsePromptShortcut?: () => void;
 }
 
@@ -15921,8 +16066,9 @@ function pendingPromptWildcardCensorRanges(
   PENDING_PROMPT_WILDCARD_BRACE_RE.lastIndex = 0;
   for (const match of source.matchAll(PENDING_PROMPT_WILDCARD_BRACE_RE)) {
     const raw = match[0] ?? "";
+    const name = match[1] ?? "";
     const start = match.index ?? -1;
-    if (isDisabledPromptWildcardToken(raw.slice(1, -1))) continue;
+    if (!raw || start < 0 || !isPromptWildcardBraceTokenName(name)) continue;
     addRange(start, start + raw.length, Math.max(5, raw.length - 2));
   }
 
@@ -16100,7 +16246,7 @@ function renderPromptShortcutPromptSent(
   return nodes;
 }
 
-const PROMPT_CANVAS_UNRESOLVED_WILDCARD_RE = /\{[A-Z][A-Z0-9_ ]{1,63}\}/gu;
+const PROMPT_CANVAS_UNRESOLVED_WILDCARD_RE = /\{([^{}\r\n]{1,80})\}/gu;
 
 function promptShortcutWildcardReplacementsForPromptText(
   promptSent: string,
@@ -16141,6 +16287,8 @@ function promptShortcutWildcardReplacementsForPromptText(
 }
 
 function promptWildcardReplacementKey(value: string): string {
+  const builtInReference = parseBuiltInPromptWildcardReference(value);
+  if (builtInReference) return builtInReference.key;
   return value
     .trim()
     .replace(/[{}]/g, "")
@@ -16186,9 +16334,10 @@ function promptWildcardTemplateAutoRevealRanges(
   }
   for (const match of source.matchAll(PROMPT_CANVAS_UNRESOLVED_WILDCARD_RE)) {
     const raw = match[0] ?? "";
+    const name = match[1] ?? "";
     const start = match.index ?? -1;
     if (!raw || start < 0) continue;
-    if (isDisabledPromptWildcardToken(raw.slice(1, -1))) continue;
+    if (!isPromptWildcardBraceTokenName(name)) continue;
     ranges.push({
       start,
       end: start + raw.length,
@@ -16387,6 +16536,7 @@ function PromptShortcutMessage({
   expanded,
   disabled,
   onToggle,
+  onUnfold,
 }: {
   promptShortcut: PromptShortcutMetadata;
   fullPrompt: string;
@@ -16395,6 +16545,7 @@ function PromptShortcutMessage({
   expanded: boolean;
   disabled?: boolean;
   onToggle?: () => void;
+  onUnfold?: () => void;
 }) {
   const label = promptShortcutChipLabel(promptShortcut);
   const expandable = presentation === "expandable";
@@ -16417,7 +16568,14 @@ function PromptShortcutMessage({
           onClick={(event) => {
             event.stopPropagation();
             if (disabled) return;
+            if (event.detail >= 2) return;
             onToggle?.();
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (disabled) return;
+            onUnfold?.();
           }}
           onContextMenu={(event) => {
             event.preventDefault();
@@ -17671,6 +17829,7 @@ interface ComposerInputHandle {
 }
 
 type ComposerMentionCommitMode = "insert-mention" | "select-persona";
+type ComposerChipPointerBehavior = "resolve" | "delete";
 
 interface ComposerInputProps {
   enabled: boolean;
@@ -17685,6 +17844,7 @@ interface ComposerInputProps {
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
+  chipPointerBehavior?: ComposerChipPointerBehavior;
   onFocus: () => void;
   hideSubmitButton?: boolean;
   resolvedTheme: "light" | "dark";
@@ -17710,7 +17870,8 @@ interface ComposerShortcutToken {
 
 function filterCommandPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
-  query: string
+  query: string,
+  limit = 10
 ): CommandCenterCommand[] {
   const normalizedQuery = normalizeComposerShortcutQuery(query);
   const seen = new Set<string>();
@@ -17755,7 +17916,7 @@ function filterCommandPicksForShortcutQuery(
       if (aBest !== bBest) return aBest - bBest;
       return aName.localeCompare(bName);
     })
-    .slice(0, 10);
+    .slice(0, limit);
 }
 
 function filterWildcardDeckPicksForShortcutQuery(
@@ -17772,9 +17933,20 @@ function filterWildcardSlotPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
   query: string
 ): CommandCenterCommand[] {
+  const normalizedQuery = normalizeComposerShortcutQuery(query);
+  const visibleCommands = normalizedQuery
+    ? commands
+    : commands.filter((command) => {
+        const key = composerTrueWildcardSlotKey(command);
+        const slot = key
+          ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
+          : null;
+        return slot?.pickerVisibility === "primary";
+      });
   return filterCommandPicksForShortcutQuery(
-    commands.filter(isComposerTrueWildcardSlotPick),
-    query
+    visibleCommands.filter(isComposerTrueWildcardSlotPick),
+    query,
+    normalizedQuery ? 10 : Number.MAX_SAFE_INTEGER
   );
 }
 
@@ -17915,7 +18087,7 @@ function wildcardSlotTokenFromTextToCaret(
 ): ComposerShortcutToken | null {
   const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
   const lineToCaret = textToCaret.slice(lineStartInText);
-  const match = /(^|[\s([{])\{([a-z0-9_ -]*)$/iu.exec(lineToCaret);
+  const match = /(^|[\s([{])\{([#a-z0-9_ -]*)$/iu.exec(lineToCaret);
   if (!match) return null;
   const delimiterLength = match[1]?.length ?? 0;
   const matchIndex = match.index ?? 0;
@@ -18123,6 +18295,9 @@ function renderComposerTextareaOverlayContent(
       <span
         key={`chip-slot-${range.kind}-${range.start}-${range.end}-${index}`}
         className={styles.composeTextareaTokenSlot}
+        data-composer-chip-slot="true"
+        data-chip-start={range.start}
+        data-chip-end={range.end}
         data-kind={range.kind}
         data-pending={pending ? "true" : undefined}
         data-wildcard-badge={badge ?? undefined}
@@ -18763,7 +18938,7 @@ function composerShortcutChipKindFromClick(
   return "prompt";
 }
 
-function applyComposerShortcutChipClickDelete(
+function findEditorComposerShortcutChipRangeAt(
   editor: Editor,
   pos: number,
   kind: ComposerShortcutChipKind,
@@ -18771,23 +18946,160 @@ function applyComposerShortcutChipClickDelete(
   promptNames: readonly string[],
   wildcardNames: readonly string[],
   wildcardSlotNames: readonly string[]
+): EditorComposerShortcutChipRange | null {
+  return (
+    findEditorComposerShortcutChipRanges(
+      editor,
+      commandNames,
+      promptNames,
+      wildcardNames,
+      wildcardSlotNames
+    ).find((candidate) => {
+      return candidate.kind === kind && pos >= candidate.from && pos <= candidate.to;
+    }) ?? null
+  );
+}
+
+function editorComposerChipActivationTarget(
+  editor: Editor,
+  range: EditorComposerShortcutChipRange
+): ComposerChipActivationTarget | null {
+  const text = editor.state.doc.textBetween(range.from, range.to, "\n", "\n");
+  if (!text) return null;
+  return {
+    surface: "editor",
+    kind: range.kind,
+    start: range.from,
+    end: range.to,
+    text,
+  };
+}
+
+function replaceComposerChipRangeInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget,
+  replacement: string
 ): boolean {
-  const range = findEditorComposerShortcutChipRanges(
-    editor,
-    commandNames,
-    promptNames,
-    wildcardNames,
-    wildcardSlotNames
-  ).find((candidate) => {
-    return (
-      candidate.kind === kind &&
-      pos >= candidate.from &&
-      pos <= candidate.to
-    );
-  });
-  if (!range) return false;
-  editor.chain().focus().deleteRange({ from: range.from, to: range.to }).run();
+  if (target.surface !== "editor") return false;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return false;
+  }
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: target.start, to: target.end })
+    .insertContentAt(target.start, replacement)
+    .run();
   return true;
+}
+
+function deleteComposerChipRangeInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget
+): boolean {
+  if (target.surface !== "editor") return false;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return false;
+  }
+  editor.chain().focus().deleteRange({ from: target.start, to: target.end }).run();
+  return true;
+}
+
+function insertPendingWildcardSlotChipInEditor(
+  editor: Editor,
+  target: ComposerChipActivationTarget,
+  key: BuiltInPromptWildcardSlotKey,
+  fallback: string,
+  id: string
+): PendingComposerWildcardSlot | null {
+  if (target.surface !== "editor" || target.kind !== "wildcard-slot") return null;
+  if (
+    editor.state.doc.textBetween(target.start, target.end, "\n", "\n") !==
+    target.text
+  ) {
+    return null;
+  }
+  const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
+  editor
+    .chain()
+    .focus()
+    .deleteRange({ from: target.start, to: target.end })
+    .insertContentAt(target.start, pendingText)
+    .run();
+  return {
+    id,
+    key,
+    fallback,
+    pendingText,
+    from: target.start,
+    to: target.start + pendingText.length,
+  };
+}
+
+function findComposerTextareaChipRangeAt(
+  ranges: readonly ComposerTextareaChipRange[],
+  caret: number
+): ComposerTextareaChipRange | null {
+  return (
+    ranges.find((range) => !range.pending && caret >= range.start && caret <= range.end) ??
+    null
+  );
+}
+
+function findComposerTextareaChipRangeAtPoint(
+  ranges: readonly ComposerTextareaChipRange[],
+  overlay: HTMLElement | null,
+  clientX: number,
+  clientY: number
+): ComposerTextareaChipRange | null {
+  if (!overlay) return null;
+  const slots = overlay.querySelectorAll<HTMLElement>("[data-composer-chip-slot='true']");
+  for (const slot of slots) {
+    const rect = slot.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      continue;
+    }
+    const start = Number(slot.dataset.chipStart);
+    const end = Number(slot.dataset.chipEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    const kind = slot.dataset.kind as ComposerTextareaChipRange["kind"] | undefined;
+    return (
+      ranges.find(
+        (range) =>
+          !range.pending &&
+          range.start === start &&
+          range.end === end &&
+          (!kind || range.kind === kind)
+      ) ?? null
+    );
+  }
+  return null;
+}
+
+function textareaComposerChipActivationTarget(
+  value: string,
+  range: ComposerTextareaChipRange
+): ComposerChipActivationTarget | null {
+  const text = value.slice(range.start, range.end);
+  if (!text) return null;
+  return {
+    surface: "textarea",
+    kind: range.kind,
+    start: range.start,
+    end: range.end,
+    text,
+  };
 }
 
 function applyComposerShortcutChipArrowKey(
@@ -19313,6 +19625,24 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
     return <MarkdownMessageBody {...markdownProps} />;
   }
   if (props.messageRole === "user" && props.promptShortcut) {
+    if (props.promptShortcutUnfolded === true) {
+      const unfoldedContent =
+        props.promptWildcards?.resolvedPrompt?.trim() ||
+        promptShortcutResolvedPromptText(props.promptShortcut, fullSource);
+      return (
+        <MarkdownMessageBody
+          {...props}
+          content={unfoldedContent}
+          promptShortcut={undefined}
+          promptWildcards={undefined}
+          promptShortcutExpanded={false}
+          expandedPromptShortcutTargetKeys={undefined}
+          onTogglePromptShortcut={undefined}
+          onUnfoldPromptShortcut={undefined}
+          onCollapsePromptShortcut={undefined}
+        />
+      );
+    }
     if (
       promptShortcutShouldRenderAsComposerText(
         fullSource,
@@ -19356,6 +19686,7 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
             commandId: props.promptShortcut?.commandId,
           })
         }
+        onUnfold={props.onUnfoldPromptShortcut}
       />
     );
   }
@@ -19397,6 +19728,7 @@ function MarkdownMessageBody({
   promptShortcutPresentation,
   promptShortcutColorIndex,
   onTogglePromptShortcut,
+  onUnfoldPromptShortcut,
 }: MessageBodyProps): React.JSX.Element {
   const fullSource =
     assistantStripPrismToolTail === true
@@ -19806,6 +20138,7 @@ function MarkdownMessageBody({
               onClick={(event) => {
                 event.stopPropagation();
                 if (promptInteractionDisabled) return;
+                if (event.detail >= 2) return;
                 if (promptPreviewActive) {
                   onTogglePromptShortcut?.({
                     commandId,
@@ -19814,6 +20147,12 @@ function MarkdownMessageBody({
                   return;
                 }
                 onOpenCommandMention?.(commandId);
+              }}
+              onDoubleClick={(event) => {
+                if (!promptPreviewActive || promptInteractionDisabled) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onUnfoldPromptShortcut?.();
               }}
               onContextMenu={(event) => {
                 if (!promptPreviewActive || promptInteractionDisabled) return;
@@ -19989,6 +20328,7 @@ function MarkdownMessageBody({
       messageRole,
       onOpenCommandMention,
       onTogglePromptShortcut,
+      onUnfoldPromptShortcut,
       pendingWildcardVisualActive,
       preferLocalProgressiveReveal,
       promptShortcut,
@@ -20036,6 +20376,7 @@ interface DesktopMarkdownComposerProps {
   onValueChange: (value: string) => void;
   onFocus: () => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
+  chipPointerBehavior?: ComposerChipPointerBehavior;
   submitDisabled: boolean;
   submitLabel: React.ReactNode;
   submitAriaLabel: string;
@@ -20089,6 +20430,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       promptPicks = [],
       wildcardPicks = [],
       onGenerateWildcardSlotValue,
+      chipPointerBehavior = "resolve",
       generatingRandomPrompt = false,
       disabled = false,
       dismissPopoversSignal,
@@ -20128,6 +20470,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const pendingWildcardSlotIdRef = useRef(0);
     const pendingWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
     const pendingWildcardDecorationsRef = useRef<PendingWildcardSlotDecoration[]>([]);
+    const chipActivationRef = useRef<PendingComposerChipActivation | null>(null);
     useLayoutEffect(() => {
       mentionBotsRef.current = mentionBots;
     }, [mentionBots]);
@@ -20474,6 +20817,50 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
     );
 
+    const resolveEditorComposerChipActivation = useCallback(
+      (ed: Editor, target: ComposerChipActivationTarget): boolean => {
+        if (target.kind === "command") return false;
+
+        if (target.kind === "prompt") {
+          const command = commandCenterCommandForChipText(
+            promptPicksRef.current,
+            target.text,
+            "/"
+          );
+          if (!command) return false;
+          return replaceComposerChipRangeInEditor(ed, target, command.command);
+        }
+
+        if (target.kind === "wildcard") {
+          const command = commandCenterCommandForChipText(
+            wildcardPicksRef.current.filter(isComposerWildcardDeckPick),
+            target.text,
+            "!"
+          );
+          if (!command) return false;
+          const beforeText = ed.state.doc.textBetween(0, target.start, "\n", "\n");
+          const replacement = randomComposerWildcardDeckReplacement(command, beforeText);
+          if (replacement === null) return false;
+          return replaceComposerChipRangeInEditor(ed, target, replacement);
+        }
+
+        const key = builtInWildcardSlotKeyFromChipText(target.text);
+        if (!key || !onGenerateWildcardSlotValue) return false;
+        const pending = insertPendingWildcardSlotChipInEditor(
+          ed,
+          target,
+          key,
+          target.text.trim(),
+          `wildcard-slot-${++pendingWildcardSlotIdRef.current}`
+        );
+        if (!pending) return false;
+        setPendingWildcardSlots((current) => [...current, pending]);
+        generatePendingWildcardSlot(pending);
+        return true;
+      },
+      [generatePendingWildcardSlot, onGenerateWildcardSlotValue, setPendingWildcardSlots]
+    );
+
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
       onFocusRef.current = onFocus;
@@ -20552,6 +20939,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             },
           },
           handlePaste: (view, event) => {
+            chipActivationRef.current = null;
             const sel = view.state.selection;
             const activeEditor = editorRef.current;
             if (isCollapsedCaretInsidePrismBotLink(view.state, sel.from)) {
@@ -20573,6 +20961,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             return false;
           },
           handleTextInput: (view, from, to, text) => {
+            chipActivationRef.current = null;
             const activeEditor = editorRef.current;
             if (
               activeEditor &&
@@ -20590,26 +20979,66 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           handleClick: (_view, pos, event) => {
             const activeEditor = editorRef.current;
             const chipKind = composerShortcutChipKindFromClick(event);
-            if (!activeEditor || !chipKind) return false;
-            if (
-              !applyComposerShortcutChipClickDelete(
-                activeEditor,
-                pos,
-                chipKind,
-                commandNamesForHighlight,
-                promptNamesForHighlight,
-                wildcardNamesForHighlight,
-                wildcardSlotNamesForHighlight
-              )
-            ) {
+            if (!activeEditor || !chipKind) {
+              chipActivationRef.current = null;
               return false;
             }
+            const range = findEditorComposerShortcutChipRangeAt(
+              activeEditor,
+              pos,
+              chipKind,
+              commandNamesForHighlight,
+              promptNamesForHighlight,
+              wildcardNamesForHighlight,
+              wildcardSlotNamesForHighlight
+            );
+            const target = range
+              ? editorComposerChipActivationTarget(activeEditor, range)
+              : null;
+            if (!target) {
+              chipActivationRef.current = null;
+              return false;
+            }
+            if (chipPointerBehavior === "delete") {
+              chipActivationRef.current = null;
+              event.preventDefault();
+              const applied = deleteComposerChipRangeInEditor(activeEditor, target);
+              if (applied) {
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+              }
+              return applied;
+            }
+            const nowMs = performance.now();
+            if (!shouldResolveComposerChipActivation(chipActivationRef.current, target, nowMs)) {
+              chipActivationRef.current = armComposerChipActivation(target, nowMs);
+              return false;
+            }
+            chipActivationRef.current = null;
+            if (target.kind === "command") return false;
             event.preventDefault();
-            queueMicrotask(() => syncComposerPopovers(activeEditor));
-            return true;
+            const applied = resolveEditorComposerChipActivation(activeEditor, target);
+            if (applied) {
+              queueMicrotask(() => syncComposerPopovers(activeEditor));
+            }
+            return applied;
           },
           handleKeyDown: (view, event) => {
             const activeEditor = editorRef.current;
+            if (
+              event.key === "Escape" ||
+              event.key === "Backspace" ||
+              event.key === "Delete" ||
+              event.key.startsWith("Arrow") ||
+              isPlainTextInsertionKey({
+                key: event.key,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                nativeEvent: event as globalThis.KeyboardEvent,
+              })
+            ) {
+              chipActivationRef.current = null;
+            }
             if (
               activeEditor &&
               event.key === "Backspace" &&
@@ -20990,6 +21419,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           },
         },
         onUpdate: ({ editor: ed }) => {
+          chipActivationRef.current = null;
           prunePendingWildcardSlots(ed);
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
@@ -21013,6 +21443,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         placeholder,
         syncComposerPopovers,
         applyComposerCommandPickInEditor,
+        resolveEditorComposerChipActivation,
         pendingWildcardSlotsForDecoration,
         prunePendingWildcardSlots,
         rememberLocallyEmittedValue,
@@ -21020,6 +21451,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         promptNamesForHighlight,
         wildcardNamesForHighlight,
         wildcardSlotNamesForHighlight,
+        chipPointerBehavior,
         submitOnEnter,
       ]
     );
@@ -21038,6 +21470,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }, [mentionBots]);
 
     useEffect(() => {
+      chipActivationRef.current = null;
       if (!editor || editor.isDestroyed) return;
       const dom = getMountedEditorDom(editor);
       if (!dom) return;
@@ -21090,6 +21523,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     }, [editor]);
 
     useEffect(() => {
+      chipActivationRef.current = null;
       if (!editor || editor.isDestroyed) return;
       // Most value updates come directly from this editor's own onUpdate path.
       // In that common case, skip re-serializing markdown back out of ProseMirror.
@@ -21150,6 +21584,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         insertTextAtCursor: (text: string) => {
           const activeEditor = editorRef.current;
           if (!activeEditor || activeEditor.isDestroyed || text.length === 0) return;
+          chipActivationRef.current = null;
           activeEditor.chain().focus().insertContent(text).run();
         },
       }),
@@ -21340,6 +21775,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     onChange,
     onValueChange,
     onGenerateWildcardSlotValue,
+    chipPointerBehavior = "resolve",
     onFocus,
     hideSubmitButton,
     resolvedTheme,
@@ -21370,6 +21806,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const pendingTextareaCaretRef = useRef<number | null>(null);
   const pendingTextareaWildcardIdRef = useRef(0);
   const pendingTextareaWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
+  const textareaChipActivationRef = useRef<PendingComposerChipActivation | null>(null);
+  const textareaLastChipPointerEventMsRef = useRef(0);
   const [taMention, setTaMention] = useState<{
     open: boolean;
     caretRect: DOMRect | null;
@@ -21498,6 +21936,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     wildcardPicksRef.current = wildcardPicks;
   }, [wildcardPicks]);
   useLayoutEffect(() => {
+    textareaChipActivationRef.current = null;
     textareaValueRef.current = value;
   }, [value]);
   useLayoutEffect(() => {
@@ -21622,6 +22061,178 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       return true;
     },
     [generatePendingTextareaWildcardSlot, onGenerateWildcardSlotValue, onValueChange]
+  );
+
+  const replaceTextareaChipActivationTarget = useCallback(
+    (target: ComposerChipActivationTarget, replacement: string): boolean => {
+      const current = textareaValueRef.current;
+      const next = replaceComposerChipText(current, target, replacement);
+      if (!next) return false;
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      return true;
+    },
+    [onValueChange]
+  );
+
+  const deleteTextareaChipActivationTarget = useCallback(
+    (target: ComposerChipActivationTarget): boolean => {
+      const current = textareaValueRef.current;
+      const next = replaceComposerChipText(current, target, "");
+      if (!next) return false;
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      return true;
+    },
+    [onValueChange]
+  );
+
+  const resolveTextareaComposerChipActivation = useCallback(
+    (target: ComposerChipActivationTarget): boolean => {
+      if (target.kind === "command") return false;
+
+      if (target.kind === "prompt") {
+        const command = commandCenterCommandForChipText(
+          promptPicksRef.current,
+          target.text,
+          "/"
+        );
+        if (!command) return false;
+        return replaceTextareaChipActivationTarget(target, command.command);
+      }
+
+      if (target.kind === "wildcard") {
+        const command = commandCenterCommandForChipText(
+          wildcardPicksRef.current.filter(isComposerWildcardDeckPick),
+          target.text,
+          "!"
+        );
+        if (!command) return false;
+        const beforeText = textareaValueRef.current.slice(0, target.start);
+        const replacement = randomComposerWildcardDeckReplacement(command, beforeText);
+        if (replacement === null) return false;
+        return replaceTextareaChipActivationTarget(target, replacement);
+      }
+
+      const key = builtInWildcardSlotKeyFromChipText(target.text);
+      if (!key || !onGenerateWildcardSlotValue) return false;
+      const pendingText = PENDING_COMPOSER_WILDCARD_SLOT_TEXT;
+      const current = textareaValueRef.current;
+      const next = replaceComposerChipText(current, target, pendingText);
+      if (!next) return false;
+      const pending: PendingComposerWildcardSlot = {
+        id: `textarea-wildcard-slot-${++pendingTextareaWildcardIdRef.current}`,
+        key,
+        fallback: target.text.trim(),
+        pendingText,
+        from: target.start,
+        to: target.start + pendingText.length,
+      };
+      pendingTextareaWildcardSlotsRef.current = [
+        ...pendingTextareaWildcardSlotsRef.current,
+        pending,
+      ];
+      textareaValueRef.current = next.value;
+      pendingTextareaCaretRef.current = next.caret;
+      onValueChange(next.value);
+      generatePendingTextareaWildcardSlot(pending);
+      return true;
+    },
+    [
+      generatePendingTextareaWildcardSlot,
+      onGenerateWildcardSlotValue,
+      onValueChange,
+      replaceTextareaChipActivationTarget,
+    ]
+  );
+
+  const findTextareaComposerChipActivationTarget = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event?: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): ComposerChipActivationTarget | null => {
+      const ranges = resolveComposerTextareaChipRanges({
+        value: el.value,
+        commandPicks: commandPicksRef.current,
+        promptPicks: promptPicksRef.current,
+        wildcardPicks: wildcardPicksRef.current,
+      });
+      const range =
+        event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+          ? findComposerTextareaChipRangeAtPoint(
+              ranges,
+              textareaOverlayRef.current,
+              event.clientX,
+              event.clientY
+            ) ?? findComposerTextareaChipRangeAt(ranges, el.selectionStart ?? 0)
+          : findComposerTextareaChipRangeAt(ranges, el.selectionStart ?? 0);
+      return range ? textareaComposerChipActivationTarget(el.value, range) : null;
+    },
+    []
+  );
+
+  const handleTextareaChipPointerActivation = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event?: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): boolean => {
+      const eventMs = performance.now();
+      if (eventMs - textareaLastChipPointerEventMsRef.current < 80) {
+        return false;
+      }
+      textareaLastChipPointerEventMsRef.current = eventMs;
+      const target = findTextareaComposerChipActivationTarget(el, event);
+      if (!target) {
+        textareaChipActivationRef.current = null;
+        return false;
+      }
+      if (chipPointerBehavior === "delete") {
+        textareaChipActivationRef.current = null;
+        return deleteTextareaChipActivationTarget(target);
+      }
+      if (
+        !shouldResolveComposerChipActivation(
+          textareaChipActivationRef.current,
+          target,
+          eventMs
+        )
+      ) {
+        textareaChipActivationRef.current = armComposerChipActivation(target, eventMs);
+        return false;
+      }
+      textareaChipActivationRef.current = null;
+      if (target.kind === "command") return false;
+      return resolveTextareaComposerChipActivation(target);
+    },
+    [
+      chipPointerBehavior,
+      deleteTextareaChipActivationTarget,
+      findTextareaComposerChipActivationTarget,
+      resolveTextareaComposerChipActivation,
+    ]
+  );
+
+  const resolveTextareaComposerChipDoubleClick = useCallback(
+    (
+      el: HTMLTextAreaElement,
+      event: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
+    ): boolean => {
+      const target = findTextareaComposerChipActivationTarget(el, event);
+      textareaChipActivationRef.current = null;
+      if (!target || target.kind === "command") return false;
+      if (chipPointerBehavior === "delete") {
+        return deleteTextareaChipActivationTarget(target);
+      }
+      return resolveTextareaComposerChipActivation(target);
+    },
+    [
+      chipPointerBehavior,
+      deleteTextareaChipActivationTarget,
+      findTextareaComposerChipActivationTarget,
+      resolveTextareaComposerChipActivation,
+    ]
   );
 
   useEffect(() => {
@@ -21822,6 +22433,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       },
       insertTextAtCursor: (text: string) => {
         if (text.length === 0) return;
+        textareaChipActivationRef.current = null;
         if (enabled) {
           wysiwygRef.current?.insertTextAtCursor(text);
           return;
@@ -21864,6 +22476,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
           onGenerateWildcardSlotValue={onGenerateWildcardSlotValue}
+          chipPointerBehavior={chipPointerBehavior}
           onFocus={onFocus}
           submitDisabled={submitDisabled}
           submitLabel={submitLabel}
@@ -21912,6 +22525,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 data-rich-overlay="true"
                 onScroll={(event) => syncTextareaOverlayScroll(event.currentTarget)}
                 onChange={(event) => {
+                  textareaChipActivationRef.current = null;
                   onChange(event);
                   resizeTextareaToContent(event.currentTarget);
                   syncTextareaOverlayScroll(event.currentTarget);
@@ -21922,10 +22536,61 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
                 }}
+                onPointerUp={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
+                }}
+                onMouseUp={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
+                }}
                 onClick={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
+                  if (handleTextareaChipPointerActivation(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
+                }}
+                onDoubleClick={(event) => {
+                  const el = event.currentTarget;
+                  syncTextareaOverlayScroll(el);
+                  scheduleTextareaMentionSync();
+                  if (resolveTextareaComposerChipDoubleClick(el, event)) {
+                    event.preventDefault();
+                    queueMicrotask(() => {
+                      const active = textareaRef.current;
+                      if (!active) return;
+                      syncTextareaOverlayScroll(active);
+                      syncTextareaMention(active);
+                    });
+                  }
                 }}
                 onKeyUp={(event) => {
                   const el = event.currentTarget;
@@ -21933,6 +22598,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   scheduleTextareaMentionSync();
                 }}
                 onPaste={(event) => {
+                  textareaChipActivationRef.current = null;
                   const el = textareaRef.current;
                   if (!el) return;
                   const start = el.selectionStart ?? 0;
@@ -21952,6 +22618,21 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 onKeyDown={(event) => {
                   const el = textareaRef.current;
                   if (!el) return;
+                  if (
+                    event.key === "Escape" ||
+                    event.key === "Backspace" ||
+                    event.key === "Delete" ||
+                    event.key.startsWith("Arrow") ||
+                    isPlainTextInsertionKey({
+                      key: event.key,
+                      altKey: event.altKey,
+                      ctrlKey: event.ctrlKey,
+                      metaKey: event.metaKey,
+                      nativeEvent: event.nativeEvent,
+                    })
+                  ) {
+                    textareaChipActivationRef.current = null;
+                  }
                   if (
                     !event.altKey &&
                     !event.ctrlKey &&
@@ -23492,6 +24173,10 @@ function HomeContent(): React.JSX.Element {
   // save/deleteBot, generateImg, deleteAccount) route to `panelError`;
   // everything else stays on `error`.
   const [error, setError] = useState<string | null>(null);
+  const [backendUnavailable, setBackendUnavailable] =
+    useState<BackendUnavailableEventDetail | null>(null);
+  const [backendReconnectBusy, setBackendReconnectBusy] = useState(false);
+  const [backendRestartBusy, setBackendRestartBusy] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelNotice, setPanelNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23738,6 +24423,7 @@ function HomeContent(): React.JSX.Element {
   const [zenFollowupBuffer, setZenFollowupBuffer] = useState<{
     conversationId: string | null;
     messages: string[];
+    pendingPromptCleanupMessageIds: string[];
     startedAtMs: number;
     lastActivityAtMs: number;
     generation: number;
@@ -24228,6 +24914,8 @@ function HomeContent(): React.JSX.Element {
     useState<PromptCenterDragState | null>(null);
   const [expandedPromptShortcutTargetsByMessageId, setExpandedPromptShortcutTargetsByMessageId] =
     useState<Record<string, string[]>>(() => ({}));
+  const [unfoldedPromptShortcutMessageIds, setUnfoldedPromptShortcutMessageIds] =
+    useState<Record<string, true>>(() => ({}));
   const toggleExpandedPromptShortcutTarget = useCallback(
     (messageId: string, target?: PromptShortcutToggleTarget) => {
       const targetKey = promptShortcutToggleTargetKey(target);
@@ -24249,6 +24937,17 @@ function HomeContent(): React.JSX.Element {
     },
     []
   );
+  const unfoldPromptShortcutMessage = useCallback((messageId: string) => {
+    setUnfoldedPromptShortcutMessageIds((current) => (
+      current[messageId] ? current : { ...current, [messageId]: true }
+    ));
+    setExpandedPromptShortcutTargetsByMessageId((current) => {
+      if (!current[messageId]) return current;
+      const next = { ...current };
+      delete next[messageId];
+      return next;
+    });
+  }, []);
   const collapseExpandedPromptShortcutsForMessage = useCallback((messageId: string) => {
     setExpandedPromptShortcutTargetsByMessageId((current) => {
       if (!current[messageId]) return current;
@@ -24259,6 +24958,30 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const [pendingPromptWildcardCleanupMessageIds, setPendingPromptWildcardCleanupMessageIds] =
     useState<Set<string>>(() => new Set());
+  const clearPendingPromptWildcardCleanupIds = useCallback((ids: readonly string[]): void => {
+    if (ids.length === 0) return;
+    const idsToClear = new Set(ids);
+    setPendingPromptWildcardCleanupMessageIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const id of idsToClear) {
+        if (next.delete(id)) changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, []);
+  useEffect(() => {
+    if (pendingPromptWildcardCleanupMessageIds.size === 0) return;
+    const visibleMessageIds = new Set((detail?.messages ?? []).map((message) => message.id));
+    const staleIds = [...pendingPromptWildcardCleanupMessageIds].filter(
+      (id) => !visibleMessageIds.has(id)
+    );
+    clearPendingPromptWildcardCleanupIds(staleIds);
+  }, [
+    clearPendingPromptWildcardCleanupIds,
+    detail?.messages,
+    pendingPromptWildcardCleanupMessageIds,
+  ]);
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const pendingImportedChatBotSelectionRef = useRef<string | null>(null);
   // Visual bot focus in the Sandbox canvas should only come from explicit
@@ -24998,6 +25721,9 @@ function HomeContent(): React.JSX.Element {
   const viewportHeight = useViewportHeight();
   const [devPanelSafeAreaInsets, setDevPanelSafeAreaInsets] =
     useState<DevPanelSafeAreaInsets>(DEV_PANEL_SAFE_AREA_DEFAULT_INSETS);
+  const devPanelSafeAreaInsetsRef = useRef<DevPanelSafeAreaInsets>(
+    DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+  );
   const sidebarDrawerMode = viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT;
   const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
   const comfyUiDraftHost = settings?.comfyUiHost?.trim() ?? "";
@@ -25006,7 +25732,14 @@ function HomeContent(): React.JSX.Element {
     composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
   );
   useLayoutEffect(() => {
-    if (!DEV_TOOLS_ENABLED || typeof document === "undefined") return;
+    if (!DEV_TOOLS_ENABLED || !devToolsRuntimeActive || typeof document === "undefined") {
+      const defaultInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
+      if (!devPanelSafeAreaInsetsEqual(devPanelSafeAreaInsetsRef.current, defaultInsets)) {
+        devPanelSafeAreaInsetsRef.current = defaultInsets;
+        setDevPanelSafeAreaInsets(defaultInsets);
+      }
+      return;
+    }
 
     let frame: number | null = null;
     const resizeObserver =
@@ -25023,11 +25756,12 @@ function HomeContent(): React.JSX.Element {
 
     function measure() {
       frame = null;
-      observeSafeAreaNodes();
-      const next = collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight);
-      setDevPanelSafeAreaInsets((current) =>
-        devPanelSafeAreaInsetsEqual(current, next) ? current : next
+      const next = stableMeasuredDevPanelSafeAreaInsets(
+        collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight)
       );
+      if (devPanelSafeAreaInsetsEqual(devPanelSafeAreaInsetsRef.current, next)) return;
+      devPanelSafeAreaInsetsRef.current = next;
+      setDevPanelSafeAreaInsets(next);
     }
 
     function scheduleMeasure() {
@@ -25041,7 +25775,10 @@ function HomeContent(): React.JSX.Element {
     const mutationObserver =
       typeof MutationObserver === "undefined"
         ? null
-        : new MutationObserver(() => scheduleMeasure());
+        : new MutationObserver(() => {
+            observeSafeAreaNodes();
+            scheduleMeasure();
+          });
     mutationObserver?.observe(document.body, {
       attributes: true,
       childList: true,
@@ -25067,7 +25804,7 @@ function HomeContent(): React.JSX.Element {
       window.removeEventListener("resize", scheduleMeasure);
       window.removeEventListener("transitionend", scheduleMeasure, true);
     };
-  }, [viewportHeight, viewportWidth]);
+  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
@@ -25938,9 +26675,14 @@ function HomeContent(): React.JSX.Element {
   }
 
   const apiProxyLooksDown = useCallback((error: unknown): boolean => {
+    if (isPrismBackendUnavailableError(error)) return true;
     const text = error instanceof Error ? error.message : String(error ?? "");
     const lowered = text.toLowerCase();
-    return lowered.includes("prism api unreachable") || lowered.includes("lost connection loading /api");
+    return (
+      lowered.includes("backend_unavailable") ||
+      lowered.includes("prism api unreachable") ||
+      lowered.includes("lost connection loading /api")
+    );
   }, []);
 
   const requestApiWithLoopbackFallback = useCallback(
@@ -25983,6 +26725,7 @@ function HomeContent(): React.JSX.Element {
             if (!response.ok || payload?.ok === false) {
               continue;
             }
+            dispatchBackendAvailableEvent();
             return payload as T;
           } catch {
             // Try next loopback candidate.
@@ -25993,6 +26736,28 @@ function HomeContent(): React.JSX.Element {
     },
     [apiProxyLooksDown]
   );
+
+  useEffect(() => {
+    const handleBackendUnavailable = (event: Event): void => {
+      const detail =
+        event instanceof CustomEvent && event.detail
+          ? (event.detail as BackendUnavailableEventDetail)
+          : {
+              code: BACKEND_UNAVAILABLE_CODE,
+              message: "Prism is waiting for its local API.",
+            };
+      setBackendUnavailable(detail);
+    };
+    const handleBackendAvailable = (): void => {
+      setBackendUnavailable(null);
+    };
+    window.addEventListener(BACKEND_UNAVAILABLE_EVENT, handleBackendUnavailable);
+    window.addEventListener(BACKEND_AVAILABLE_EVENT, handleBackendAvailable);
+    return () => {
+      window.removeEventListener(BACKEND_UNAVAILABLE_EVENT, handleBackendUnavailable);
+      window.removeEventListener(BACKEND_AVAILABLE_EVENT, handleBackendAvailable);
+    };
+  }, []);
 
   const refreshDesktopFirstRunHealth = useCallback(async () => {
     setDesktopFirstRunChecklistBusy(true);
@@ -28789,6 +29554,8 @@ function HomeContent(): React.JSX.Element {
         const next = {
           conversationId: current?.conversationId ?? conversationId,
           messages: current?.messages ?? [],
+          pendingPromptCleanupMessageIds:
+            current?.pendingPromptCleanupMessageIds ?? [],
           startedAtMs: current?.startedAtMs ?? now,
           lastActivityAtMs: now,
           generation: (current?.generation ?? 0) + 1,
@@ -31176,6 +31943,7 @@ function HomeContent(): React.JSX.Element {
     setTouchPreview(null);
     touchPreviewPointerIdRef.current = null;
     setExpandedPromptShortcutTargetsByMessageId({});
+    setUnfoldedPromptShortcutMessageIds({});
     setCoffeeOpeningPollModalOpen(false);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
@@ -33316,7 +34084,7 @@ function HomeContent(): React.JSX.Element {
     // disarm signals (user scroll-up, interruption) will turn this off.
     chatAutoscrollArmedByConversationRef.current.set(conversationId, true);
 
-    const EASE_FACTOR = 0.22;
+    const EASE_FACTOR = 0.14;
     const MIN_STEP_PX = CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX;
     const REST_THRESHOLD_PX = 0.5;
 
@@ -34296,6 +35064,68 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }
+
+  async function retryBackendConnection(): Promise<void> {
+    setBackendReconnectBusy(true);
+    try {
+      await requestApiWithLoopbackFallback("/api/health");
+      setBackendUnavailable(null);
+      setError(null);
+      await bootstrap();
+      if (user) {
+        await refreshAll();
+      }
+    } catch (err) {
+      if (isPrismBackendUnavailableError(err)) {
+        setBackendUnavailable({
+          code: err.code,
+          message: err.message,
+          path: err.path,
+          status: err.status,
+          detail: err.detail,
+        });
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Connection check failed.");
+    } finally {
+      setBackendReconnectBusy(false);
+    }
+  }
+
+  async function restartBackendFromConnectionNotice(): Promise<void> {
+    setBackendRestartBusy(true);
+    try {
+      await api<{ restarting?: boolean; mode?: string }>("/api/dev/restart", {
+        method: "POST",
+      });
+      window.setTimeout(() => {
+        void retryBackendConnection();
+      }, 900);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Server restart failed.");
+    } finally {
+      setBackendRestartBusy(false);
+    }
+  }
+
+  function renderBackendUnavailableNotice(
+    variant: "full" | "banner"
+  ): React.JSX.Element | null {
+    if (!backendUnavailable) return null;
+    const showRestart = variant === "banner" && Boolean(user);
+    return (
+      <BackendUnavailableNotice
+        variant={variant}
+        message={backendUnavailable.message}
+        retryBusy={backendReconnectBusy}
+        restartBusy={backendRestartBusy}
+        showRestart={showRestart}
+        onRetry={() => void retryBackendConnection()}
+        onRestart={showRestart ? () => void restartBackendFromConnectionNotice() : undefined}
+      />
+    );
+  }
+
   async function refreshConversations(): Promise<ConversationSummary[]> {
     const d = await api<{ conversations: ConversationSummary[] }>("/api/conversations");
     const next = d.conversations.filter(c => !c.incognito);
@@ -35481,6 +36311,7 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterSpecsCommandId(null);
     setCommandCenterHelpModalOpen(false);
     setExpandedPromptShortcutTargetsByMessageId({});
+    setUnfoldedPromptShortcutMessageIds({});
     setConversationGroupOrder([]);
     setBotLibraryGroups([createFavoritesBotGroup()]);
     setConversations([]);
@@ -36702,6 +37533,177 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  function clearPendingReplyForUndo(): void {
+    const starterRequest = zenInitialStarterRequestRef.current;
+    if (starterRequest) {
+      starterRequest.cancelled = true;
+      starterRequest.replayWhenReady = false;
+    }
+    queuedPromptDrainGenerationRef.current += 1;
+    setQueuedChatPrompts([]);
+    setDispatchingQueuedPrompt(null);
+    const activeController = pendingReplyAbortControllerRef.current;
+    if (activeController) {
+      activeController.abort();
+      pendingReplyAbortControllerRef.current = null;
+    }
+    setPendingReply(false);
+    setPendingReplyStartedAtMs(null);
+    setPendingReplyDenialRisk(false);
+    setPendingReplyConversationId(null);
+    setPendingReplyIsNewConversation(false);
+    zenInitialThinkingCancelControllerRef.current = null;
+  }
+
+  function clearRevealStateForUndo(conversationId: string, messageIds: readonly string[]): void {
+    for (const messageId of messageIds) {
+      const revealKey = `${conversationId}:${messageId}`;
+      chatCommittedFontLineCountByKeyRef.current.delete(revealKey);
+      chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
+      chatCompletedRevealKeysRef.current.add(revealKey);
+      chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
+      chatRevealPaceByKeyRef.current.delete(revealKey);
+      chatMessageFirstSeenAtRef.current.delete(revealKey);
+    }
+    setChatEphemeralNowMs(Date.now());
+  }
+
+  function removeTailMessagesFromConversationDetail(
+    conversation: ConversationDetail,
+    count: 1 | 2
+  ): ConversationDetail {
+    const removeCount = Math.min(count, conversation.messages.length);
+    if (removeCount <= 0) return conversation;
+    const nextMessages = conversation.messages.slice(0, -removeCount);
+    const removedIds = conversation.messages.slice(-removeCount).map((message) => message.id);
+    clearPendingPromptWildcardCleanupIds(removedIds);
+    if (conversation.id) {
+      clearRevealStateForUndo(conversation.id, removedIds);
+    }
+    const lastAssistant = [...nextMessages]
+      .reverse()
+      .find((message): message is Message => message.role === "assistant");
+    if (!lastAssistant) {
+      return {
+        ...conversation,
+        messages: nextMessages,
+        hasAssistantReply: false,
+        lastBotId: null,
+        lastBotColor: null,
+      };
+    }
+    const normalizedBotName = lastAssistant.botName?.trim() ?? "";
+    const matchingBots =
+      normalizedBotName.length > 0
+        ? bots.filter((candidate) => candidate.name.trim() === normalizedBotName)
+        : [];
+    const inferredLastBotId =
+      normalizedBotName.length === 0 ||
+      normalizedBotName.toLowerCase() === DEFAULT_ASSISTANT_NAME.toLowerCase()
+        ? null
+        : matchingBots.length === 1
+          ? matchingBots[0]?.id ?? null
+          : lastAssistant.botId ?? null;
+    return {
+      ...conversation,
+      messages: nextMessages,
+      hasAssistantReply: true,
+      lastBotId: inferredLastBotId,
+      lastBotColor: lastAssistant.botColor ?? null,
+    };
+  }
+
+  async function undoLatestMessageFromSlashCommand(count: 1 | 2): Promise<void> {
+    closeMessageContextOverlay();
+    const activeConversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    const latestMessage = detail?.messages.at(-1) ?? null;
+    const localOnly =
+      detail?.incognito === true ||
+      !activeConversationId ||
+      activeConversationId === "pending" ||
+      (latestMessage !== null && String(latestMessage.id).startsWith("pending-"));
+
+    setError(null);
+    setConversationStarterPrompts(null);
+    setDraft("");
+    setComposerSendTintActive(false);
+    if (editingMessageId !== null) {
+      setEditingMessageId(null);
+      setEditingOriginalText("");
+    }
+    if (pendingReplyVisible) {
+      clearPendingReplyForUndo();
+    }
+
+    if (!detail || detail.messages.length === 0) {
+      setError("Nothing to undo.");
+      return;
+    }
+
+    if (localOnly) {
+      setDetail((current) => current ? removeTailMessagesFromConversationDetail(current, count) : current);
+      setPanelNotice(count === 2 ? "Undid latest messages." : "Undid latest message.");
+      return;
+    }
+    if (!activeConversationId) {
+      setError("Open a saved conversation before using /undo.");
+      return;
+    }
+
+    const previousDetail = detail;
+    const removedIds = previousDetail.messages.slice(-count).map((message) => message.id);
+    setDetail((current) => current ? removeTailMessagesFromConversationDetail(current, count) : current);
+    clearRevealStateForUndo(activeConversationId, removedIds);
+    try {
+      const result = await api<{
+        ok: true;
+        conversation: ConversationDetail;
+        prismMood?: PrismMoodSnapshot;
+        undone?: {
+          count?: number;
+          messageIds?: string[];
+          deletedMemories?: number;
+          updatedMemories?: number;
+          deletedSummaries?: number;
+          deletedZenSessionMemories?: number;
+          deletedMoodEvents?: number;
+          deletedImages?: number;
+          cancelledImageJobId?: string;
+        };
+      }>(`/api/conversations/${encodeURIComponent(activeConversationId)}/undo`, {
+        method: "POST",
+        body: JSON.stringify({ count }),
+      });
+      const patchedConversation = attachLivePsychicScratchpadToConversation(
+        applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
+        undefined,
+        settings?.psychicModeEnabled === true
+      );
+      setDetail(patchedConversation);
+      setSelectedId(patchedConversation.id);
+      if (result.prismMood) {
+        setDevMoodDebugSnapshot({ conversationId: patchedConversation.id, mood: result.prismMood });
+      }
+      setSessionOpinion(null);
+      setBotOpinion(null);
+      hardResetChatArchiveStateForConversation(patchedConversation.id);
+      await refreshConversations();
+      await refreshOpenMemoryViews();
+      if (view === "chat") {
+        void refreshSummaryDebug("zen");
+      }
+      setPanelNotice(
+        (result.undone?.count ?? count) === 1
+          ? "Undid latest message."
+          : "Undid latest messages."
+      );
+    } catch (err) {
+      setDetail(previousDetail);
+      setError(err instanceof Error ? err.message : "Undo failed.");
+    }
+  }
+
   // Wipes every per-user memory artifact (extracted facts, SQLite summary
   // rows, Qdrant vectors) so the next chat starts with no recall surface.
   // Mirrors the server-side `/api/dev/clear-session-memory` contract.
@@ -36895,6 +37897,8 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand === "/restart" ||
       normalizedCommand === "/new-session" ||
       normalizedCommand === "/forgive-me" ||
+      normalizedCommand === "/undo" ||
+      normalizedCommand === "/undo-turn" ||
       normalizedCommand === PSYCHIC_SLASH_COMMAND ||
       BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)
     );
@@ -36922,6 +37926,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function ignoreLocalOnlyComposerCommandWhileReplying(trimmedLine: string): boolean {
+    if (parseUndoSlashCommand(trimmedLine).kind !== "none") return false;
     const replyBusy =
       (pendingReply && !canSendTextWhileReplyPending()) ||
       chatAssistantRevealInProgress;
@@ -36950,6 +37955,15 @@ function HomeContent(): React.JSX.Element {
       setComposerSendTintActive(false);
       setConversationStarterPrompts(null);
       openCommandCenterHelpModal();
+      return true;
+    }
+    const undoCommand = parseUndoSlashCommand(trimmedLine);
+    if (undoCommand.kind === "error") {
+      setError(undoCommand.error);
+      return true;
+    }
+    if (undoCommand.kind === "ok") {
+      await undoLatestMessageFromSlashCommand(undoCommand.count);
       return true;
     }
     if (tokens.length > 1) {
@@ -37211,6 +38225,19 @@ function HomeContent(): React.JSX.Element {
           }
         : null,
     };
+  }
+
+  async function generateComposerWildcardSlotValue(
+    key: BuiltInPromptWildcardSlotKey
+  ): Promise<string> {
+    const result = await api<{ ok: true; key: BuiltInPromptWildcardSlotKey; value: string }>(
+      "/api/composer/wildcard-value",
+      {
+        method: "POST",
+        body: JSON.stringify({ key }),
+      }
+    );
+    return result.value;
   }
 
   function clearPendingImageJobPoll(jobId: string) {
@@ -37558,24 +38585,38 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  function appendOptimisticZenFollowupMessage(text: string): void {
+  function appendOptimisticZenFollowupMessage(input: {
+    content: string;
+    pendingPromptWildcardCleanup?: boolean;
+    promptWildcards?: PromptWildcardRunMetadata | null;
+  }): string {
     const optimisticZenPersonaBot =
       zenPersonaBotIdRef.current
         ? bots.find((bot) => bot.id === zenPersonaBotIdRef.current) ?? null
         : null;
+    const optimisticMessageId = `pending-zen-followup-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
     const optimisticMessage: Message = {
-      id: `pending-zen-followup-${Date.now().toString(36)}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`,
+      id: optimisticMessageId,
       role: "user",
-      content: text,
+      content: input.content,
       createdAt: new Date().toISOString(),
       ...(zenPersonaBotIdRef.current ? { botId: zenPersonaBotIdRef.current } : {}),
       ...(optimisticZenPersonaBot?.color ? { botColor: optimisticZenPersonaBot.color } : {}),
+      ...(input.promptWildcards ? { promptWildcards: input.promptWildcards } : {}),
     };
+    if (input.pendingPromptWildcardCleanup === true) {
+      setPendingPromptWildcardCleanupMessageIds((current) => {
+        const next = new Set(current);
+        next.add(optimisticMessageId);
+        return next;
+      });
+    }
     setDetail((current) =>
       current ? { ...current, messages: [...current.messages, optimisticMessage] } : current
     );
+    return optimisticMessageId;
   }
 
   function scheduleZenFollowupMergedSend(): void {
@@ -37585,8 +38626,11 @@ function HomeContent(): React.JSX.Element {
       if (zenFollowupDispatchingRef.current) return;
       const snapshot = zenFollowupBufferRef.current;
       const messages = snapshot?.messages.slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT) ?? [];
+      const pendingPromptCleanupMessageIds =
+        snapshot?.pendingPromptCleanupMessageIds ?? [];
       const latest = messages[messages.length - 1]?.replace(/\s+/g, " ").trim() ?? "";
       if (!snapshot || !latest) {
+        clearPendingPromptWildcardCleanupIds(pendingPromptCleanupMessageIds);
         setZenFollowupBuffer(null);
         return;
       }
@@ -37614,6 +38658,7 @@ function HomeContent(): React.JSX.Element {
             queuedConversationId: conversationId,
             skipComposerHistory: true,
             zenFollowupDispatch: true,
+            zenFollowupCleanupMessageIds: pendingPromptCleanupMessageIds,
           }
         );
       };
@@ -37669,6 +38714,7 @@ function HomeContent(): React.JSX.Element {
       zenAutonomy?: ZenAutonomyInput;
       zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
       zenFollowupDispatch?: boolean;
+      zenFollowupCleanupMessageIds?: string[];
       onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
     } = {}
   ) {
@@ -37854,15 +38900,34 @@ function HomeContent(): React.JSX.Element {
         }
       }
       beginOrRefreshZenFollowupBuffer(activeConversationId);
+      const followupPendingWildcardCleanup =
+        promptWildcardFillAwaitsServerCleanup || composerPromptWildcards !== null;
+      const optimisticFollowupContent = pendingWildcardOptimisticMessageContent({
+        rawDraft: rawTrimmed,
+        resolvedDisplayContent: displayTrimmed,
+        pendingWildcardResolution: followupPendingWildcardCleanup,
+      });
+      const optimisticFollowupMessageId = appendOptimisticZenFollowupMessage({
+        content: optimisticFollowupContent,
+        pendingPromptWildcardCleanup: followupPendingWildcardCleanup,
+        promptWildcards: followupPendingWildcardCleanup
+          ? composerPromptWildcardsForSend
+          : null,
+      });
       setZenFollowupBuffer((current) => {
         const now = Date.now();
         const messages = [
           ...(current?.messages ?? []),
           displayTrimmed,
         ].slice(-ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT);
+        const pendingPromptCleanupMessageIds = [
+          ...(current?.pendingPromptCleanupMessageIds ?? []),
+          ...(followupPendingWildcardCleanup ? [optimisticFollowupMessageId] : []),
+        ];
         const next = {
           conversationId: current?.conversationId ?? activeConversationId,
           messages,
+          pendingPromptCleanupMessageIds,
           startedAtMs: current?.startedAtMs ?? now,
           lastActivityAtMs: now,
           generation: (current?.generation ?? 0) + 1,
@@ -37870,7 +38935,6 @@ function HomeContent(): React.JSX.Element {
         zenFollowupBufferRef.current = next;
         return next;
       });
-      appendOptimisticZenFollowupMessage(displayTrimmed);
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
@@ -38689,6 +39753,7 @@ function HomeContent(): React.JSX.Element {
         });
       }
       if (successfulConversationId) {
+        clearPendingPromptWildcardCleanupIds(options.zenFollowupCleanupMessageIds ?? []);
         scheduleNextQueuedPrompt(successfulConversationId);
       }
     }
@@ -48611,6 +49676,15 @@ function HomeContent(): React.JSX.Element {
   const shouldShowPreAuthChecklist = !user && !hasAnyAccounts && !preAuthChecklistComplete;
   const shouldShowAuthForm = !user && (hasAnyAccounts || preAuthChecklistComplete);
 
+  if (!user && backendUnavailable) {
+    return (
+      <main className={`${styles.authLayout} ${themeClass}`}>
+        {renderBackendUnavailableNotice("full")}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  }
+
   if (clientAccessState !== "allowed") {
     const isChecking = clientAccessState === "checking";
     return (
@@ -54744,7 +55818,8 @@ function HomeContent(): React.JSX.Element {
             const userPromptCenterCommands = commandCenterCommands.filter(
               (command) => !command.builtIn && !command.readOnly
             );
-            const promptCenterWildcardDockItemCount = BUILT_IN_WILDCARD_SLOT_PICKS.length;
+            const promptCenterWildcardDockItemCount =
+              PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS.length;
             const incompletePromptForCreation =
               userPromptCenterCommands.find(
                 (command) => !commandCenterPromptHasRequiredDetails(command)
@@ -55582,6 +56657,8 @@ function HomeContent(): React.JSX.Element {
                                 commandPicks={[]}
                                 promptPicks={[]}
                                 wildcardPicks={composerWildcardDeckPicks}
+                                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
+                                chipPointerBehavior="delete"
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                                 onChange={(event) => {
                                   const nextCommandText = event.currentTarget.value;
@@ -55707,12 +56784,9 @@ function HomeContent(): React.JSX.Element {
                             </div>
                             {promptCenterWildcardDockItemCount > 0 ? (
                               <div className={styles.promptCenterPromptWildcardGrid}>
-                                {BUILT_IN_WILDCARD_SLOT_PICKS.map((command) => {
+                                {PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS.map((command) => {
                                   const token = composerTrueWildcardSlotFallback(command);
-                                  const aliases =
-                                    command.aliases.length > 0
-                                      ? command.aliases.map((alias) => `!${alias}`).join(", ")
-                                      : `!${command.name}`;
+                                  const aliases = composerTrueWildcardSlotDisplayTokens(command);
                                   return (
                                     <button
                                       key={command.id}
@@ -64870,6 +65944,7 @@ function HomeContent(): React.JSX.Element {
         {renderSharedPanels()}
         {renderPsychicModeToast()}
         {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
       {renderImagesDeleteAllModal()}
@@ -65619,6 +66694,7 @@ function HomeContent(): React.JSX.Element {
         </section>
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
@@ -65900,6 +66976,7 @@ function HomeContent(): React.JSX.Element {
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
       {renderViewSwitchOverlay()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
   );
@@ -66758,6 +67835,7 @@ function HomeContent(): React.JSX.Element {
             const expandedPromptShortcutTargetKeys = new Set(
               expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
             );
+            const promptShortcutUnfolded = unfoldedPromptShortcutMessageIds[msg.id] === true;
             return (
               <Fragment key={msg.id}>
               {zenEraBoundaryLabel ? (
@@ -66934,10 +68012,12 @@ function HomeContent(): React.JSX.Element {
                   )}
                   expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
                   promptShortcutPresentation="expandable"
+                  promptShortcutUnfolded={promptShortcutUnfolded}
                   renderPromptMetadataAsProse={false}
                   onTogglePromptShortcut={(target) =>
                     toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
+                  onUnfoldPromptShortcut={() => unfoldPromptShortcutMessage(msg.id)}
                   onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
                 {renderPsychicThoughtLine(msg)}
@@ -67106,6 +68186,7 @@ function HomeContent(): React.JSX.Element {
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
+                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -67131,6 +68212,7 @@ function HomeContent(): React.JSX.Element {
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
+                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
@@ -67167,6 +68249,7 @@ function HomeContent(): React.JSX.Element {
         />
       )}
       {renderViewSwitchOverlay()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
     );
@@ -68265,6 +69348,7 @@ function HomeContent(): React.JSX.Element {
             const expandedPromptShortcutTargetKeys = new Set(
               expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
             );
+            const promptShortcutUnfolded = unfoldedPromptShortcutMessageIds[msg.id] === true;
             const zenPersonaInkSegment =
               chatLikeSurface
                 ? zenPersonaInkSegmentByMessageId.get(msg.id) ?? null
@@ -68459,10 +69543,12 @@ function HomeContent(): React.JSX.Element {
                   )}
                   expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
                   promptShortcutPresentation="expandable"
+                  promptShortcutUnfolded={promptShortcutUnfolded}
                   renderPromptMetadataAsProse={false}
                   onTogglePromptShortcut={(target) =>
                     toggleExpandedPromptShortcutTarget(msg.id, target)
                   }
+                  onUnfoldPromptShortcut={() => unfoldPromptShortcutMessage(msg.id)}
                   onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
                 />
                 {renderPsychicThoughtLine(msg)}
@@ -68622,6 +69708,7 @@ function HomeContent(): React.JSX.Element {
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
+                    onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </div>
@@ -68647,6 +69734,7 @@ function HomeContent(): React.JSX.Element {
                 commandPicks={composerCommandPicks}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
+                onGenerateWildcardSlotValue={generateComposerWildcardSlotValue}
                 dismissPopoversSignal={composerPopoverDismissSignal}
               />
             )
@@ -68683,6 +69771,7 @@ function HomeContent(): React.JSX.Element {
       {renderViewSwitchOverlay()}
       {renderModeTutorialOverlay()}
       {renderDesktopFirstRunChecklist()}
+      {renderBackendUnavailableNotice("banner")}
       <GlyphTooltipLayer />
     </main>
   );

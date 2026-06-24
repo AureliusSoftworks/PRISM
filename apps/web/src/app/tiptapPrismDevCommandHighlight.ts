@@ -7,7 +7,7 @@ import { parseBuiltInPromptWildcardReference } from "@localai/shared";
 const DEV_COMMAND_RE = /^\/(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
-const TRUE_WILDCARD_SLOT_RE = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
+const TRUE_WILDCARD_SLOT_RE = /\{([^{}\r\n]{1,80})\}/g;
 
 export interface PendingWildcardSlotDecoration {
   from: number;
@@ -165,9 +165,9 @@ function normalizeTrueWildcardSlotName(value: unknown): string {
   if (typeof value !== "string") return "";
   const reference = parseBuiltInPromptWildcardReference(value);
   if (reference) return reference.key;
-  return value
-    .trim()
-    .replace(/[{}]/g, "")
+  const normalized = value.trim().replace(/[{}]/g, "");
+  if (!/^[A-Z][A-Z0-9_ ]{1,63}$/u.test(normalized)) return "";
+  return normalized
     .replace(/[-_\s]+/g, "_")
     .toUpperCase();
 }
