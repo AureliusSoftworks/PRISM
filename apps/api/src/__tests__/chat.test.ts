@@ -2939,6 +2939,108 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.doesNotMatch(promptText, /As I was saying/i);
   });
 
+  it("uses the explicit frozen interrupted fragment when supplied", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-interrupted-explicit-fragment";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Interrupted Reply",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (
+        id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertMessage.run(
+      "prior-user",
+      conversationId,
+      userId,
+      "user",
+      "What were you about to say?",
+      null,
+      null,
+      null,
+      null,
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "prior-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "I was s—",
+      "local",
+      "test-model",
+      null,
+      null,
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    type ChatPayload = {
+      messages?: Array<{ role: string; content: string }>;
+      prompt?: string;
+    };
+    const chatPayloads: ChatPayload[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ChatPayload;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/chat")) {
+        chatPayloads.push(body);
+        return new Response(
+          JSON.stringify({ message: { content: "Right, continuing from there." } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      userId,
+      "sorry, continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        prismInterruption: {
+          kind: "assistant_reveal",
+          assistantMessageId: "prior-assistant",
+          visibleTokenCount: 4,
+          totalTokenCount: 20,
+          interruptedContent: "I was sayi—",
+        },
+      },
+      conversationId
+    );
+
+    assert.equal(chatPayloads.length, 1);
+    const promptText = (chatPayloads[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    const fragmentMatch = promptText.match(/Visible interrupted fragment: "([^"]+)"/);
+    assert.equal(fragmentMatch?.[1], "I was sayi");
+  });
+
   it("tells the model not to repeat interrupted text the user completed", async () => {
     const db = createChatTestDb();
     const userId = "user-1";

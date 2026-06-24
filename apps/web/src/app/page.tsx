@@ -5146,7 +5146,7 @@ const ZEN_INITIAL_STATUS_LABELS = [
   "Mulling...",
   "Noticing...",
   "Sensing...",
-  "Searching...",
+  "Attending...",
   "Finding...",
   "Surfacing...",
   "Reaching...",
@@ -13836,7 +13836,7 @@ function ComposerBotPicker({
         className={styles.composeBotTrigger}
         onClick={toggleMenu}
         disabled={disabled}
-        data-glyph-tooltip={title}
+        data-glyph-tooltip={menuOpen ? undefined : title}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
         aria-label={ariaLabel}
@@ -24261,6 +24261,7 @@ function HomeContent(): React.JSX.Element {
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
   const zenHeaderAutoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zenHeaderAutoHideArmedRef = useRef(false);
+  const zenHeaderPinnedRef = useRef(false);
   const pendingPrivateExitOnHubRef = useRef(false);
   const clearZenHeaderAutoHideTimer = useCallback(() => {
     if (zenHeaderAutoHideTimerRef.current) {
@@ -24273,6 +24274,11 @@ function HomeContent(): React.JSX.Element {
     if (!zenHeaderAutoHideArmedRef.current) return;
     clearZenHeaderAutoHideTimer();
     zenHeaderAutoHideTimerRef.current = setTimeout(() => {
+      if (zenHeaderPinnedRef.current) {
+        setZenHeaderVisible(true);
+        zenHeaderAutoHideTimerRef.current = null;
+        return;
+      }
       setZenHeaderVisible(false);
       zenHeaderAutoHideTimerRef.current = null;
     }, ZEN_HEADER_REVEAL_HOLD_MS);
@@ -24297,6 +24303,10 @@ function HomeContent(): React.JSX.Element {
     if (view !== "chat") return;
     zenHeaderAutoHideArmedRef.current = true;
     clearZenHeaderAutoHideTimer();
+    if (zenHeaderPinnedRef.current) {
+      setZenHeaderVisible(true);
+      return;
+    }
     setZenHeaderVisible(false);
   }, [clearZenHeaderAutoHideTimer, view]);
   const handleZenSurfacePointerMove = useCallback(
@@ -25470,9 +25480,13 @@ function HomeContent(): React.JSX.Element {
   const zenRememberedWallpaperRequestRef = useRef(0);
   const zenWallpaperGenerationInFlightRef = useRef<Set<string>>(new Set());
   const zenWallpaperToggleAutoGenerationSuppressedRef = useRef<Map<string, number>>(new Map());
+  const zenConversationAtmosphereEnabled = detail?.zenWallpaper?.enabled === true;
   const zenAtmosphereTimeline = useMemo(
-    () => normalizeZenAtmosphereHistory(detail?.zenWallpaper),
-    [detail?.zenWallpaper]
+    () =>
+      zenConversationAtmosphereEnabled
+        ? normalizeZenAtmosphereHistory(detail?.zenWallpaper)
+        : [],
+    [detail?.zenWallpaper, zenConversationAtmosphereEnabled]
   );
   const zenAtmosphereTimelineKey = useMemo(
     () =>
@@ -26124,6 +26138,7 @@ function HomeContent(): React.JSX.Element {
         "style",
         DEV_PANEL_SAFE_AREA_ATTRIBUTE,
         "data-chat-sidebar-hidden",
+        "data-chat-overflow-menu-open",
         "data-choice-composer-hidden",
         "data-session-active",
         "data-transcript-open",
@@ -29917,6 +29932,16 @@ function HomeContent(): React.JSX.Element {
     editingMessageId !== null ||
     mobileKeyboardInset > 0;
   const chatHeaderChromePinned = chatOverflowMenuOpen;
+  const zenHeaderPinned =
+    view === "chat" && (chatHeaderChromePinned || chatComposerChromePinned);
+  zenHeaderPinnedRef.current = zenHeaderPinned;
+
+  useEffect(() => {
+    zenHeaderPinnedRef.current = zenHeaderPinned;
+    if (!zenHeaderPinned) return;
+    clearZenHeaderAutoHideTimer();
+    setZenHeaderVisible(true);
+  }, [clearZenHeaderAutoHideTimer, zenHeaderPinned]);
 
   const setChatHeaderChromeVisibleState = useCallback((visible: boolean) => {
     if (chatHeaderChromeVisibleRef.current === visible) return;
@@ -31162,6 +31187,7 @@ function HomeContent(): React.JSX.Element {
             assistantMessageId: interruption.assistantMessageId,
             visibleTokenCount: interruption.visibleTokenCount,
             totalTokenCount: interruption.totalTokenCount,
+            interruptedContent: interruption.interruptionContent,
           } satisfies PrismMoodInterruptionInput,
         }),
       }
@@ -39457,6 +39483,7 @@ function HomeContent(): React.JSX.Element {
       messageCleanupAwaitsServer ||
       commandCenterPromptHasTrueWildcardSlots ||
       composerPromptHasTrueWildcardSlots;
+    let interruptedAssistantPersistPromise: Promise<unknown> | null = null;
     const zenFollowupBufferingSend =
       view === "chat" &&
       !options.zenFollowupDispatch &&
@@ -39479,17 +39506,21 @@ function HomeContent(): React.JSX.Element {
           ? applyActiveAssistantRevealInterruption(interruption)
           : discardActiveAssistantRevealForGrace(interruption);
         if (persistPromise) {
-          try {
-            await persistPromise;
-          } catch (err) {
-            setError(
-              err instanceof Error
-                ? err.message
-                : "Prism was interrupted, but the saved thread could not be updated."
-            );
-            setDraft(rawDraft);
-            setComposerSendTintActive(rawDraft.trim().length > 0);
-            return;
+          if (sentenceComplete) {
+            interruptedAssistantPersistPromise = persistPromise;
+          } else {
+            try {
+              await persistPromise;
+            } catch (err) {
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : "Prism was interrupted, but the saved thread could not be updated."
+              );
+              setDraft(rawDraft);
+              setComposerSendTintActive(rawDraft.trim().length > 0);
+              return;
+            }
           }
         }
       }
@@ -39535,6 +39566,20 @@ function HomeContent(): React.JSX.Element {
       setDraft("");
       setComposerSendTintActive(false);
       setError(null);
+      if (interruptedAssistantPersistPromise) {
+        try {
+          await interruptedAssistantPersistPromise;
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Prism was interrupted, but the saved thread could not be updated."
+          );
+          setDraft(rawDraft);
+          setComposerSendTintActive(rawDraft.trim().length > 0);
+          return;
+        }
+      }
       scheduleZenFollowupMergedSend();
       return;
     }
@@ -39583,24 +39628,14 @@ function HomeContent(): React.JSX.Element {
         detailForSend = interruption.patchedDetail;
         baselineMessageCount = detailForSend.messages.length;
         if (persistPromise) {
-          try {
-            await persistPromise;
-          } catch (err) {
-            setError(
-              err instanceof Error
-                ? err.message
-                : "Prism was interrupted, but the saved thread could not be updated."
-            );
-            setDraft(rawDraft);
-            setComposerSendTintActive(rawDraft.trim().length > 0);
-            return;
-          }
+          interruptedAssistantPersistPromise = persistPromise;
         } else {
           prismInterruptionForSend = {
             kind: "assistant_reveal",
             assistantMessageId: interruption.assistantMessageId,
             visibleTokenCount: interruption.visibleTokenCount,
             totalTokenCount: interruption.totalTokenCount,
+            interruptedContent: interruption.interruptionContent,
           };
         }
       }
@@ -39983,6 +40018,17 @@ function HomeContent(): React.JSX.Element {
       pendingNvmTopicResetRef.current;
 
     try {
+      if (interruptedAssistantPersistPromise) {
+        try {
+          await interruptedAssistantPersistPromise;
+        } catch (err) {
+          throw new Error(
+            err instanceof Error
+              ? err.message
+              : "Prism was interrupted, but the saved thread could not be updated."
+          );
+        }
+      }
       const chatBody = buildChatRequestBody(
         isStarterPrompt || isZenAutonomy || isAskQuestionPatienceTurn
           ? ""
@@ -40008,6 +40054,9 @@ function HomeContent(): React.JSX.Element {
             : {}),
           ...(sessionResumeContextForSend
             ? { sessionResumeContext: sessionResumeContextForSend }
+            : {}),
+          ...(view === "chat" && detailForSend?.incognito === true
+            ? { ephemeralMessages: detailForSend.messages }
             : {}),
           ...(topicResetForSend ? { topicReset: true } : {}),
           ...(prismInterruptionForSend
@@ -48037,6 +48086,17 @@ function HomeContent(): React.JSX.Element {
     setConversationStarterPrompts(null);
     if (view === "chat") {
       setChatAutoRestoreSuppressed(true);
+      setForceNewConversationOnNextSend(true);
+      setPendingZenSessionBreak(null);
+      setPendingZenSessionResumeContext(null);
+      persistZenSessionBreak(null);
+      setZenSessionBreak(null);
+      setSummaryDebug(null);
+      setManualCompactionStatus(null);
+      setZenWallpaperBusyConversationId(null);
+      setZenWallpaperError(null);
+      setZenAtmosphereLayerOpacities({});
+      setZenAtmosphereScrollBlendReadyKey(null);
     }
     setSelectedId(null);
     setDetail(null);
@@ -58147,27 +58207,38 @@ function HomeContent(): React.JSX.Element {
                   <IconUpload />
                 </span>
               </button>
-              <button
-                type="button"
-                className={settingsScope === "chooser" ? styles.panelClose : styles.panelBack}
-                onClick={
-                  settingsScope === "chooser"
-                    ? closePanel
-                    : () => setSettingsScope("chooser")
-                }
-                aria-label={
-                  settingsScope === "chooser"
-                    ? "Close panel"
-                    : "Back to settings menu"
-                }
-                data-glyph-tooltip={
-                  settingsScope === "chooser"
-                    ? "Close panel"
-                    : "Back to settings menu"
-                }
-              >
-                {settingsScope === "chooser" ? "×" : "←"}
-              </button>
+              {settingsScope === "chooser" ? (
+                <button
+                  type="button"
+                  className={styles.panelClose}
+                  onClick={closePanel}
+                  aria-label="Close panel"
+                  data-glyph-tooltip="Close panel"
+                >
+                  ×
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={styles.panelBack}
+                    onClick={() => setSettingsScope("chooser")}
+                    aria-label="Back to settings menu"
+                    data-glyph-tooltip="Back to settings menu"
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.panelClose}
+                    onClick={closePanel}
+                    aria-label="Close panel"
+                    data-glyph-tooltip="Close panel"
+                  >
+                    ×
+                  </button>
+                </>
+              )}
             </div>
           </div>
           {settings && settingsScope === "chooser" && (
@@ -58375,32 +58446,6 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
-                    </label>
-                    <label
-                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={effectiveZenModeSettings.zenWallpaperBlurredEdgesEnabled}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperBlurredEdgesEnabled: next }
-                              : previous
-                          );
-                        }}
-                      />
-                      <span className={styles.controlLabelWithInfo}>
-                        <span>Blurred edges</span>
-                        <PanelSectionInfo
-                          id="settings-control-info-zen-wallpaper-blurred-edges"
-                          label="About blurred edges"
-                          variant="control"
-                        >
-                          Softens the sides of the Zen Atmosphere readability layer.
-                        </PanelSectionInfo>
-                      </span>
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
@@ -58735,6 +58780,32 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
+                    </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={effectiveZenModeSettings.zenWallpaperBlurredEdgesEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperBlurredEdgesEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Blurred edges</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-wallpaper-blurred-edges"
+                          label="About blurred edges"
+                          variant="control"
+                        >
+                          Softens the sides of the Zen Atmosphere readability layer.
+                        </PanelSectionInfo>
+                      </span>
                     </label>
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
@@ -67910,6 +67981,7 @@ function HomeContent(): React.JSX.Element {
       : zenFallbackWallpaperNewConversationSeed;
     const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
       chatSurface: chatLikeSurface,
+      atmosphereEnabled: zenConversationAtmosphereEnabled,
       hasRememberedWallpaper: zenRememberedWallpaperVisible,
       atmosphereTimelineLength: zenAtmosphereTimeline.length,
       hasConversationMessages:
@@ -67994,7 +68066,8 @@ function HomeContent(): React.JSX.Element {
       data-zen-surface="true"
       data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
       data-zen-fallback-wallpaper-active={zenFallbackWallpaperVisible ? "true" : undefined}
-      data-zen-header-hidden={zenHeaderVisible ? undefined : "true"}
+      data-chat-overflow-menu-open={chatOverflowMenuOpen ? "true" : undefined}
+      data-zen-header-hidden={zenHeaderVisible || zenHeaderPinned ? undefined : "true"}
       data-zen-initial-thinking={zenInitialThinkingActive ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}

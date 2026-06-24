@@ -166,6 +166,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
 
     document.addEventListener("pointerover", handlePointerOver, true);
     document.addEventListener("pointerout", handlePointerOut, true);
+    document.addEventListener("pointerdown", hideTooltip, true);
     document.addEventListener("focusin", handleFocusIn, true);
     document.addEventListener("focusout", handleFocusOut, true);
     document.addEventListener("keydown", handleKeyDown, true);
@@ -173,6 +174,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     return () => {
       document.removeEventListener("pointerover", handlePointerOver, true);
       document.removeEventListener("pointerout", handlePointerOut, true);
+      document.removeEventListener("pointerdown", hideTooltip, true);
       document.removeEventListener("focusin", handleFocusIn, true);
       document.removeEventListener("focusout", handleFocusOut, true);
       document.removeEventListener("keydown", handleKeyDown, true);
