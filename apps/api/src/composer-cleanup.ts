@@ -6,6 +6,9 @@ export const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
 export const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 
+export const COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT =
+  "You are Prism's send-time proofreader. Correct only tiny grammar, a/an article choice, plurality, pronoun, capitalization, punctuation, and spacing issues. Always fix obvious a/an agreement, such as a before consonant sounds and an before vowel sounds. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, URLs, and every wildcard-selected concept. Return JSON only: {\"prompt\":\"corrected user-visible prompt only\",\"replacements\":[{\"index\":0,\"value\":\"corrected wildcard value\"}]}. The prompt value must contain only the final message the user meant to send. Never include labels, delimiters, JSON wrappers, wildcard metadata, replacement lists, or explanations inside prompt. The replacements array must contain one entry for each provided replacement index, using the exact value text as it appears in the corrected prompt.";
+
 export function readComposerCleanupText(value: unknown): string {
   if (typeof value !== "string") {
     throw new Error("Composer text is required.");
@@ -33,6 +36,47 @@ export function normalizeComposerCleanupResponse(raw: string, original: string):
   return unwrapped.length > COMPOSER_CLEANUP_MAX_INPUT_CHARS
     ? original
     : unwrapped;
+}
+
+function parseComposerCleanupJson(raw: string): unknown {
+  const cleaned = raw.trim();
+  const fenced = cleaned.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/);
+  const unwrapped = fenced?.[1]?.trim() ?? cleaned;
+  try {
+    return JSON.parse(unwrapped) as unknown;
+  } catch {
+    const start = unwrapped.indexOf("{");
+    const end = unwrapped.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(unwrapped.slice(start, end + 1)) as unknown;
+    }
+    throw new Error("Writing cleanup response was not JSON.");
+  }
+}
+
+function cleanupLeakDetectionText(value: string): string {
+  return value.replace(/\\r\\n|\\n|\\r/gu, "\n");
+}
+
+function hasGeneratedCleanupMetadataLeak(value: string): boolean {
+  const normalized = cleanupLeakDetectionText(value);
+  return (
+    /^\s*\{\s*"prompt"\s*:/iu.test(normalized) ||
+    /(^|\n)\s*(?:Wildcard replacements|Prompt)\s*:/iu.test(normalized) ||
+    /(^|\n)\s*\d+\s*:\s*[A-Z][A-Z0-9_ ]{1,63}\s*=/u.test(normalized) ||
+    /<\/?(?:resolved_prompt|wildcard_replacements_json)>/iu.test(normalized)
+  );
+}
+
+function normalizeSendCleanupPrompt(rawPrompt: string, original: string): string {
+  const prompt = normalizeComposerCleanupResponse(rawPrompt, original);
+  if (
+    hasGeneratedCleanupMetadataLeak(prompt) &&
+    !hasGeneratedCleanupMetadataLeak(original)
+  ) {
+    throw new Error("Writing cleanup leaked prompt metadata.");
+  }
+  return prompt;
 }
 
 export async function cleanupComposerTextWithModel(args: {
@@ -83,13 +127,16 @@ function findReplacementValueRange(
 
 export function realignPromptWildcardReplacements(
   prompt: string,
-  replacements: readonly PromptShortcutWildcardReplacement[] | undefined
+  replacements: readonly PromptShortcutWildcardReplacement[] | undefined,
+  replacementValues?: ReadonlyMap<number, string>
 ): PromptShortcutWildcardReplacement[] {
   if (!prompt || !Array.isArray(replacements) || replacements.length === 0) return [];
   let cursor = 0;
   const aligned: PromptShortcutWildcardReplacement[] = [];
-  for (const replacement of replacements) {
-    const range = findReplacementValueRange(prompt, replacement.value, cursor);
+  for (const [index, replacement] of replacements.entries()) {
+    const preferredValue = replacementValues?.get(index)?.trim();
+    const lookupValue = preferredValue || replacement.value;
+    const range = findReplacementValueRange(prompt, lookupValue, cursor);
     if (!range) continue;
     const value = prompt.slice(range.start, range.end);
     aligned.push({
@@ -103,6 +150,64 @@ export function realignPromptWildcardReplacements(
   return aligned;
 }
 
+function normalizeSendCleanupReplacementValues(
+  value: unknown,
+  replacements: readonly PromptShortcutWildcardReplacement[]
+): Map<number, string> {
+  const values = new Map<number, string>();
+  if (!Array.isArray(value)) return values;
+  for (let fallbackIndex = 0; fallbackIndex < value.length; fallbackIndex += 1) {
+    const row = value[fallbackIndex];
+    const record =
+      row && typeof row === "object" && !Array.isArray(row)
+        ? row as Record<string, unknown>
+        : null;
+    const indexValue = record?.index;
+    const index =
+      typeof indexValue === "number" && Number.isInteger(indexValue)
+        ? indexValue
+        : fallbackIndex;
+    if (index < 0 || index >= replacements.length) continue;
+    const rawValue = record?.value;
+    if (typeof rawValue !== "string") continue;
+    const normalized = rawValue.replace(/\s+/g, " ").trim();
+    if (!normalized) continue;
+    values.set(index, normalized.slice(0, 96).trim());
+  }
+  return values;
+}
+
+function normalizeSendCleanupResponse(
+  raw: string,
+  original: string,
+  replacements: readonly PromptShortcutWildcardReplacement[]
+): {
+  prompt: string;
+  replacementValues: Map<number, string>;
+} {
+  try {
+    const parsed = parseComposerCleanupJson(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.prompt === "string") {
+        return {
+          prompt: normalizeSendCleanupPrompt(record.prompt, original),
+          replacementValues: normalizeSendCleanupReplacementValues(
+            record.replacements,
+            replacements
+          ),
+        };
+      }
+    }
+  } catch {
+    // Older/manual-style providers may still return plain corrected text.
+  }
+  return {
+    prompt: normalizeSendCleanupPrompt(raw, original),
+    replacementValues: new Map(),
+  };
+}
+
 export async function cleanupResolvedPromptWithModel(args: {
   prompt: string;
   replacements?: readonly PromptShortcutWildcardReplacement[];
@@ -114,15 +219,58 @@ export async function cleanupResolvedPromptWithModel(args: {
   replacements: PromptShortcutWildcardReplacement[];
   changed: boolean;
 }> {
-  const cleanedPrompt = await cleanupComposerTextWithModel({
-    text: args.prompt,
-    provider: args.provider,
-    model: args.model,
-    signal: args.signal,
-  });
+  const prompt = readComposerCleanupText(args.prompt);
+  const replacements = args.replacements ?? [];
+  if (replacements.length === 0) {
+    return {
+      prompt,
+      replacements: [],
+      changed: false,
+    };
+  }
+  const maxTokens = Math.min(1800, Math.max(180, Math.ceil(prompt.length / 2)));
+  const raw = await args.provider.generateResponse(
+    [
+      { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          "<resolved_prompt>",
+          prompt,
+          "</resolved_prompt>",
+          "",
+          "<wildcard_replacements_json>",
+          JSON.stringify(
+            replacements.map((replacement, index) => ({
+              index,
+              key: replacement.key,
+              value: replacement.value,
+            }))
+          ),
+          "</wildcard_replacements_json>",
+        ].join("\n"),
+      },
+    ],
+    {
+      model: args.model,
+      temperature: 0.05,
+      maxTokens,
+      jsonMode: true,
+      signal: args.signal,
+    }
+  );
+  const cleanup = normalizeSendCleanupResponse(raw, prompt, replacements);
+  const alignedReplacements = realignPromptWildcardReplacements(
+    cleanup.prompt,
+    replacements,
+    cleanup.replacementValues
+  );
+  if (replacements.length > 0 && alignedReplacements.length !== replacements.length) {
+    throw new Error("Writing cleanup could not realign wildcard replacements.");
+  }
   return {
-    prompt: cleanedPrompt,
-    replacements: realignPromptWildcardReplacements(cleanedPrompt, args.replacements),
-    changed: cleanedPrompt !== args.prompt,
+    prompt: cleanup.prompt,
+    replacements: alignedReplacements,
+    changed: cleanup.prompt !== prompt,
   };
 }

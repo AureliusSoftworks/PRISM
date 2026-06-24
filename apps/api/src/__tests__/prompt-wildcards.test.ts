@@ -180,7 +180,7 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "A {TREASURE} in {LIGHTING} beside {SECRET}.",
+      prompt: "A {TREASURE} in {LIGHTING} beside {SECRET} inside a {CONTAINER}.",
       provider,
       generationOverrides: {},
     });
@@ -193,6 +193,7 @@ describe("prompt wildcard resolution", () => {
         { key: "TREASURE", source: "wildcard" },
         { key: "LIGHTING", source: "wildcard" },
         { key: "SECRET", source: "wildcard" },
+        { key: "CONTAINER", source: "wildcard" },
       ]
     );
   });

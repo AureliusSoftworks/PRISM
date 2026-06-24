@@ -825,6 +825,8 @@ export interface ChatRequestPayload {
   ephemeralMessages?: ChatMessage[];
   /** Optional signal to trigger end-of-session rolling compaction. */
   sessionEnding?: boolean;
+  /** Zen-only one-turn cue that the next user message should pivot away from the prior topic. */
+  topicReset?: boolean;
   /** Optional metadata when the latest Zen send interrupted Prism. */
   prismInterruption?: PrismMoodInterruptionInput;
 }

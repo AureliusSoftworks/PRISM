@@ -173,11 +173,7 @@ import {
   selectProvider,
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
-import {
-  cleanupComposerTextWithModel,
-  cleanupResolvedPromptWithModel,
-  readComposerCleanupText,
-} from "./composer-cleanup.ts";
+import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
@@ -266,6 +262,7 @@ import {
   summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "./memory-summarizer.ts";
+import { loadBotMemoryPanelPayload } from "./bot-memory-panel.ts";
 import {
   INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS,
   getInactiveAccountCutoff
@@ -636,6 +633,51 @@ function dualOllamaWorkloadOptions(user: UserDbRow): {
     secondaryOllamaHost: user.secondary_ollama_host,
     experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
   };
+}
+
+async function inferBotMemoriesIfNeeded(
+  userId: string,
+  botId: string,
+  userKey: Buffer
+): Promise<void> {
+  const inferenceState = db.prepare(`
+    SELECT
+      MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
+      MAX(CASE WHEN source = 'inferred' THEN created_at END) AS latest_inferred_at
+    FROM memories
+    WHERE user_id = ?
+      AND bot_id = ?
+      AND source IN ('direct', 'inferred')
+  `).get(userId, botId) as {
+    latest_direct_at?: string | null;
+    latest_inferred_at?: string | null;
+  } | undefined;
+  const latestDirectAt = inferenceState?.latest_direct_at ?? null;
+  const latestInferredAt = inferenceState?.latest_inferred_at ?? null;
+  const inferenceScopeKey = `${userId}:${botId}`;
+  const shouldInfer =
+    latestDirectAt !== null &&
+    latestDirectAt > (latestInferredAt ?? "1970-01-01") &&
+    memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
+  if (!shouldInfer) return;
+
+  try {
+    const prismModel = (
+      db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
+        | { m: string | null }
+        | undefined
+    )?.m;
+    const memoryUser = getUserRow(userId);
+    const auxiliaryProvider = getAuxiliaryProvider(
+      prismModel,
+      dualOllamaWorkloadOptions(memoryUser)
+    );
+    await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
+  } catch (error) {
+    console.warn("Memory inference skipped:", error);
+  } finally {
+    memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
+  }
 }
 
 function seedModelVisibilityDefaultsIfNeeded(
@@ -2127,7 +2169,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/conversations/:id/messages/user", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const content = readString(body.content, "message").trim();
+      let content = readString(body.content, "message").trim();
       if (!content) {
         throw new Error("Message cannot be empty.");
       }
@@ -2496,6 +2538,9 @@ function buildRoutes(): RouteDefinition[] {
         normalizeZenWallpaperRevealSpanMessageCount(
           user.zen_wallpaper_reveal_span_message_count
         );
+      const generatedWallpaperRevealDelayMessageCount = existingWallpaper.imageId
+        ? zenWallpaperRevealDelayMessageCount
+        : 0;
       const nextWallpaperHistoryJson = (imageId: string, createdAt: string): string =>
         serializeZenWallpaperHistory(
           buildZenWallpaperHistoryForGeneratedImage(
@@ -2505,10 +2550,10 @@ function buildRoutes(): RouteDefinition[] {
               promptSeed: prompt,
               generationMessageCount: messageCount,
               revealStartMessageCount:
-                messageCount + zenWallpaperRevealDelayMessageCount,
+                messageCount + generatedWallpaperRevealDelayMessageCount,
               revealFullMessageCount:
                 messageCount +
-                zenWallpaperRevealDelayMessageCount +
+                generatedWallpaperRevealDelayMessageCount +
                 zenWallpaperRevealSpanMessageCount,
               createdAt,
             },
@@ -2810,6 +2855,30 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         wallpaper: getLatestRememberedZenWallpaperForBot(db, userId, botId),
+      });
+    }),
+    route("GET", "/api/bots/:id/memory-panel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      if (!botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      deleteOrphanedBotMemories(db, userId);
+      await inferBotMemoriesIfNeeded(userId, botId, userKey);
+      const panel = loadBotMemoryPanelPayload({
+        db,
+        userId,
+        userKey,
+        botId,
+        conversationId: ctx.query.get("conversationId"),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        ...panel,
       });
     }),
     route("GET", "/api/bots/:id/summary", async (ctx) => {
@@ -3304,67 +3373,6 @@ function buildRoutes(): RouteDefinition[] {
         prismMood: persistedMood,
       });
     }),
-    route("POST", "/api/composer/cleanup", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const text = readComposerCleanupText(body.text);
-      const user = getUserRow(userId);
-      if (user.composer_writing_assist === 0) {
-        throw new Error("Composer writing assistance is disabled in Settings.");
-      }
-
-      const forceLocal = body.forceLocal === true;
-      const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      let effectiveProvider = forceLocal ? "local" : user.preferred_provider;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride: null,
-        botPreferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
-      });
-      effectiveProvider = resolvedAuto.provider;
-
-      const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey
-      );
-      try {
-        const cleanedText = await cleanupComposerTextWithModel({
-          text,
-          provider,
-          model: resolvedAuto.model,
-        });
-        json(ctx.res, 200, {
-          ok: true,
-          text: cleanedText,
-          changed: cleanedText !== text,
-          provider: effectiveProvider,
-          model: resolvedAuto.model,
-        });
-      } catch (error) {
-        if (resolvedAuto.usedRequiredLocalFallback) {
-          throw new Error(
-            `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
-          );
-        }
-        throw error;
-      }
-    }),
     route("POST", "/api/composer/wildcard-value", async (ctx) => {
       requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -3651,6 +3659,7 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen"
           ? normalizeSessionResumeContext(body.sessionResumeContext)
           : null;
+      const topicReset = mode === "zen" && body.topicReset === true;
       const prismInterruption =
         mode === "zen" ? readPrismInterruption(body.prismInterruption) : undefined;
       const personaTransition =
@@ -3833,23 +3842,19 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (
         !starterPrompt &&
-        (commandCenterPrompt || promptWildcards) &&
         user.composer_writing_assist !== 0 &&
         resolvedWildcardReplacements.length > 0 &&
         messageForChat.trim().length > 0
       ) {
-        const cleanupProvider = selectProvider(
-          effectiveProvider,
-          openAiApiKey,
-          user.secondary_ollama_host,
-          anthropicApiKey
+        const cleanupProvider = getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
         );
         try {
           const cleanup = await cleanupResolvedPromptWithModel({
             prompt: messageForChat,
             replacements: resolvedWildcardReplacements,
             provider: cleanupProvider,
-            model: resolvedAuto.model,
             signal: chatAbort.signal,
           });
           messageForChat = cleanup.prompt;
@@ -3939,6 +3944,7 @@ function buildRoutes(): RouteDefinition[] {
             sessionEnding,
             sessionResumeContext,
             forceNewConversation,
+            topicReset,
             prismInterruption,
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
@@ -4494,44 +4500,7 @@ function buildRoutes(): RouteDefinition[] {
         parseMemoryListQueryOptions(ctx.query);
       deleteOrphanedBotMemories(db, userId);
       if (botId && inferBotMemories) {
-        const inferenceState = db.prepare(`
-          SELECT
-            MAX(CASE WHEN source = 'direct' THEN created_at END) AS latest_direct_at,
-            MAX(CASE WHEN source = 'inferred' THEN created_at END) AS latest_inferred_at
-          FROM memories
-          WHERE user_id = ?
-            AND bot_id = ?
-            AND source IN ('direct', 'inferred')
-        `).get(userId, botId) as {
-          latest_direct_at?: string | null;
-          latest_inferred_at?: string | null;
-        } | undefined;
-        const latestDirectAt = inferenceState?.latest_direct_at ?? null;
-        const latestInferredAt = inferenceState?.latest_inferred_at ?? null;
-        const inferenceScopeKey = `${userId}:${botId}`;
-        const shouldInfer =
-          latestDirectAt !== null &&
-          latestDirectAt > (latestInferredAt ?? "1970-01-01") &&
-          memoryInferenceCheckedAtByScope.get(inferenceScopeKey) !== latestDirectAt;
-        if (shouldInfer) {
-          try {
-            const prismModel = (
-              db.prepare("SELECT prism_default_llm_model AS m FROM users WHERE id = ?").get(userId) as
-                | { m: string | null }
-                | undefined
-            )?.m;
-            const memoryUser = getUserRow(userId);
-            const auxiliaryProvider = getAuxiliaryProvider(
-              prismModel,
-              dualOllamaWorkloadOptions(memoryUser)
-            );
-            await inferAndStoreBotMemories(db, auxiliaryProvider, userId, botId, userKey);
-          } catch (error) {
-            console.warn("Memory inference skipped:", error);
-          } finally {
-            memoryInferenceCheckedAtByScope.set(inferenceScopeKey, latestDirectAt);
-          }
-        }
+        await inferBotMemoriesIfNeeded(userId, botId, userKey);
       }
       type MemoryRow = {
         id: string;

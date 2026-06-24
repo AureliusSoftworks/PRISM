@@ -72,6 +72,14 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     pickerVisibility: "primary",
   },
   {
+    key: "CONTAINER",
+    label: "CONTAINER",
+    aliases: ["container", "vessel", "receptacle"],
+    title: "Generate a random container or vessel.",
+    generationHint: "Return one physical container, vessel, holder, storage object, or compartment.",
+    pickerVisibility: "searchable",
+  },
+  {
     key: "NOUN",
     label: "NOUN",
     aliases: ["noun", "thing"],
