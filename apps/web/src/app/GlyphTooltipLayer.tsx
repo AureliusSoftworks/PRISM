@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./glyph-tooltip.module.css";
 
@@ -21,6 +21,18 @@ interface TooltipPosition {
   top: number;
   left: number;
   side: "top" | "bottom";
+}
+
+function tooltipPositionsEqual(
+  first: TooltipPosition | null,
+  second: TooltipPosition
+): boolean {
+  return (
+    first !== null &&
+    first.side === second.side &&
+    Math.abs(first.top - second.top) < 0.5 &&
+    Math.abs(first.left - second.left) < 0.5
+  );
 }
 
 function findTooltipAnchor(target: EventTarget | null): HTMLElement | null {
@@ -51,14 +63,14 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
   const [position, setPosition] = useState<TooltipPosition | null>(null);
   const [canHover, setCanHover] = useState<boolean>(() => supportsFineHover());
 
-  const clearShowTimer = (): void => {
+  const clearShowTimer = useCallback((): void => {
     if (showTimerRef.current !== null) {
       window.clearTimeout(showTimerRef.current);
       showTimerRef.current = null;
     }
-  };
+  }, []);
 
-  const detachDescription = (): void => {
+  const detachDescription = useCallback((): void => {
     const anchor = activeSnapshotRef.current?.anchor;
     if (!anchor) return;
     const describedBy = anchor.getAttribute("aria-describedby");
@@ -72,17 +84,20 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     } else {
       anchor.removeAttribute("aria-describedby");
     }
-  };
+  }, [tooltipId]);
 
-  const hideTooltip = (): void => {
+  const hideTooltip = useCallback((): void => {
+    const hadActiveTooltip =
+      activeSnapshotRef.current !== null || showTimerRef.current !== null;
     clearShowTimer();
     detachDescription();
     activeSnapshotRef.current = null;
-    setTooltip(null);
-    setPosition(null);
-  };
+    if (!hadActiveTooltip) return;
+    setTooltip((current) => (current === null ? current : null));
+    setPosition((current) => (current === null ? current : null));
+  }, [clearShowTimer, detachDescription]);
 
-  const showTooltip = (snapshot: TooltipSnapshot): void => {
+  const showTooltip = useCallback((snapshot: TooltipSnapshot): void => {
     activeSnapshotRef.current = snapshot;
     const describedBy = snapshot.anchor.getAttribute("aria-describedby");
     if (!describedBy) {
@@ -91,9 +106,9 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       snapshot.anchor.setAttribute("aria-describedby", `${describedBy} ${tooltipId}`);
     }
     setTooltip(snapshot);
-  };
+  }, [tooltipId]);
 
-  const scheduleTooltip = (anchor: HTMLElement, source: TooltipSource): void => {
+  const scheduleTooltip = useCallback((anchor: HTMLElement, source: TooltipSource): void => {
     const label = extractTooltipLabel(anchor);
     if (!label) {
       hideTooltip();
@@ -102,9 +117,15 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     clearShowTimer();
     const snapshot: TooltipSnapshot = { anchor, label, source };
     showTimerRef.current = window.setTimeout(() => {
+      const currentLabel = extractTooltipLabel(anchor);
+      if (!anchor.isConnected || currentLabel !== label) {
+        showTimerRef.current = null;
+        return;
+      }
       showTooltip(snapshot);
+      showTimerRef.current = null;
     }, TOOLTIP_SHOW_DELAY_MS);
-  };
+  }, [clearShowTimer, hideTooltip, showTooltip]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -179,14 +200,36 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       document.removeEventListener("focusout", handleFocusOut, true);
       document.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [canHover, tooltipId]);
+  }, [canHover, clearShowTimer, hideTooltip, scheduleTooltip]);
 
   useEffect(() => {
     return () => {
       clearShowTimer();
       detachDescription();
     };
-  }, []);
+  }, [clearShowTimer, detachDescription]);
+
+  useEffect(() => {
+    if (!tooltip || typeof MutationObserver === "undefined") return;
+
+    const anchor = tooltip.anchor;
+    const hideIfAnchorIsStale = (): void => {
+      const currentLabel = extractTooltipLabel(anchor);
+      if (!anchor.isConnected || currentLabel !== tooltip.label) {
+        hideTooltip();
+      }
+    };
+
+    hideIfAnchorIsStale();
+
+    const observer = new MutationObserver(hideIfAnchorIsStale);
+    observer.observe(anchor, {
+      attributes: true,
+      attributeFilter: ["data-glyph-tooltip"],
+    });
+
+    return () => observer.disconnect();
+  }, [hideTooltip, tooltip]);
 
   useLayoutEffect(() => {
     if (!tooltip || !tooltipRef.current) return;
@@ -204,7 +247,10 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     const maxLeft = window.innerWidth - tooltipRect.width - TOOLTIP_VIEWPORT_MARGIN_PX;
     const left = Math.min(Math.max(unclampedLeft, TOOLTIP_VIEWPORT_MARGIN_PX), maxLeft);
 
-    setPosition({ top, left, side });
+    const nextPosition = { top, left, side };
+    setPosition((current) =>
+      tooltipPositionsEqual(current, nextPosition) ? current : nextPosition
+    );
   }, [tooltip]);
 
   useEffect(() => {
@@ -223,7 +269,10 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       const unclampedLeft = anchorRect.left + anchorRect.width / 2 - tooltipRect.width / 2;
       const maxLeft = window.innerWidth - tooltipRect.width - TOOLTIP_VIEWPORT_MARGIN_PX;
       const left = Math.min(Math.max(unclampedLeft, TOOLTIP_VIEWPORT_MARGIN_PX), maxLeft);
-      setPosition({ top, left, side });
+      const nextPosition = { top, left, side };
+      setPosition((current) =>
+        tooltipPositionsEqual(current, nextPosition) ? current : nextPosition
+      );
     };
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
