@@ -7,6 +7,7 @@ import {
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
 } from "../prompt-wildcards.ts";
+import { SCRIPTED_PROMPT_NOUN_PAIRS } from "../prompt-wildcard-seeds.ts";
 
 describe("prompt wildcard resolution", () => {
   it("scripted built-in wildcard generation avoids used values when possible", () => {
@@ -16,7 +17,8 @@ describe("prompt wildcard resolution", () => {
     assert.ok(first);
     assert.ok(second);
     assert.notEqual(first, second);
-    assert.match(generateScriptedPromptWildcardValue("NUM") ?? "", /^\d+$/u);
+    const num = Number(generateScriptedPromptWildcardValue("NUM"));
+    assert.equal(Number.isInteger(num) && num >= 1 && num <= 10, true);
   });
 
   it("resolves built-in wildcard slots without calling the provider", async () => {
@@ -33,13 +35,13 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Would you rather fight {NUM} {ADJECTIVE} nuns, or {NUM} {ADJECTIVE} undertakers?",
+      prompt: "Would you rather fight {#} {ADJECTIVE} nuns, or {NUM} {ADJECTIVE} undertakers?",
       provider,
       generationOverrides: {},
     });
 
     assert.equal(providerCalls, 0);
-    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
     assert.deepEqual(
       result.replacements.map(({ key, source }) => ({ key, source })),
       [
@@ -52,8 +54,40 @@ describe("prompt wildcard resolution", () => {
     for (const replacement of result.replacements.filter(({ key }) => key === "NUM")) {
       assert.match(replacement.value, /^\d+$/u);
       const value = Number(replacement.value);
-      assert.equal(Number.isInteger(value) && value >= 1 && value <= 100, true);
+      assert.equal(Number.isInteger(value) && value >= 1 && value <= 10, true);
     }
+  });
+
+  it("accepts the visible number wildcard and NUM alias with the same range", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        throw new Error("provider should not be called for built-in wildcards");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "{#}{#}.{#} and {NUM} and {number}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.match(result.prompt, /^\d+\.\d+ and \d+ and \d+\.$/u);
+    assert.deepEqual(
+      result.replacements.map(({ key }) => key),
+      ["NUM", "NUM", "NUM", "NUM", "NUM"]
+    );
+    for (const replacement of result.replacements) {
+      const value = Number(replacement.value);
+      assert.equal(Number.isInteger(value) && value >= 1 && value <= 10, true);
+    }
+  });
+
+  it("does not treat lowercase custom brace text as a model-filled wildcard", () => {
+    assert.deepEqual(promptWildcardNames("{number} {word} {MOOD}"), ["NUM", "MOOD"]);
   });
 
   it("reuses numbered wildcard references within one prompt run", async () => {
@@ -109,7 +143,7 @@ describe("prompt wildcard resolution", () => {
     );
   });
 
-  it("generates PERSON with scripted first names only", async () => {
+  it("generates NAME with scripted first names only", async () => {
     const provider: LlmProvider = {
       name: "local",
       async generateResponse() {
@@ -121,15 +155,46 @@ describe("prompt wildcard resolution", () => {
     };
 
     const result = await resolvePromptWildcardsWithModel({
-      prompt: "Write about a {ADJECTIVE} person named {PERSON}.",
+      prompt: "Write about a {ADJECTIVE} person named {NAME}.",
       provider,
       generationOverrides: {},
     });
 
-    const person = result.replacements.find(({ key }) => key === "PERSON");
-    assert.ok(person);
-    assert.match(person.value, /^[A-Z][a-z]+$/u);
-    assert.doesNotMatch(person.value, /\s/u);
+    const name = result.replacements.find(({ key }) => key === "NAME");
+    assert.ok(name);
+    assert.match(name.value, /^[A-Z][A-Za-z]+$/u);
+    assert.doesNotMatch(name.value, /\s/u);
+  });
+
+  it("resolves searchable-only built-ins without calling the provider", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for built-in wildcards");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "A {TREASURE} in {LIGHTING} beside {SECRET}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    assert.deepEqual(
+      result.replacements.map(({ key, source }) => ({ key, source })),
+      [
+        { key: "TREASURE", source: "wildcard" },
+        { key: "LIGHTING", source: "wildcard" },
+        { key: "SECRET", source: "wildcard" },
+      ]
+    );
   });
 
   it("generates nouns with script values instead of sticky model examples", async () => {
@@ -179,6 +244,63 @@ describe("prompt wildcard resolution", () => {
     const values = result.replacements.map(({ value }) => value.toLowerCase());
     assert.equal(values.length, 8);
     assert.equal(new Set(values).size, values.length);
+  });
+
+  it("uses the same source row for linked singular and plural nouns", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        throw new Error("provider should not be called for built-in wildcards");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "One {NOUN1}; many {PLURAL_NOUN1}.",
+      provider,
+      generationOverrides: {},
+    });
+    const singular = result.replacements.find(({ key }) => key === "NOUN");
+    const plural = result.replacements.find(({ key }) => key === "PLURAL_NOUN");
+
+    assert.ok(singular);
+    assert.ok(plural);
+    assert.ok(
+      SCRIPTED_PROMPT_NOUN_PAIRS.some(
+        (pair) => pair.singular === singular.value && pair.plural === plural.value
+      )
+    );
+  });
+
+  it("normalizes quick plural noun typing before resolving wildcards", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        throw new Error("provider should not be called for built-in wildcards");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "One {NOUN4}; many {NOUN4}s.",
+      provider,
+      generationOverrides: {},
+    });
+    const singular = result.replacements.find(({ key }) => key === "NOUN");
+    const plural = result.replacements.find(({ key }) => key === "PLURAL_NOUN");
+
+    assert.ok(singular);
+    assert.ok(plural);
+    assert.doesNotMatch(result.prompt, /\{NOUN4\}s/u);
+    assert.ok(
+      SCRIPTED_PROMPT_NOUN_PAIRS.some(
+        (pair) => pair.singular === singular.value && pair.plural === plural.value
+      )
+    );
   });
 
   it("reuses numbered uppercase brace slots beyond the built-in list", async () => {
@@ -264,7 +386,7 @@ describe("prompt wildcard resolution", () => {
     });
 
     assert.match(result.prompt, /^Make a bright story in a .+ voice\.$/u);
-    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
     assert.equal(result.replacements.length, 2);
     assert.deepEqual(
       result.replacements.map(({ key, source }) => ({ key, source })),
@@ -292,7 +414,7 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
     assert.equal(result.replacements.length, 2);
     assert.deepEqual(
       result.replacements.map(({ key, source }) => ({ key, source })),
@@ -320,7 +442,7 @@ describe("prompt wildcard resolution", () => {
       generationOverrides: {},
     });
 
-    assert.doesNotMatch(result.prompt, /\{[A-Z][A-Z0-9_ ]{1,63}\}/u);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
     assert.equal(result.replacements.length, 1);
     assert.equal(result.replacements[0]?.key, "MOOD");
   });
@@ -372,10 +494,12 @@ describe("prompt wildcard resolution", () => {
   });
 
   it("reports repeated wildcard names so callers still detect a wildcard run", () => {
-    assert.deepEqual(promptWildcardNames("{NUM} {NUM} {ADJECTIVE}"), [
+    assert.deepEqual(promptWildcardNames("{#} {NUM} {number} {ADJECTIVE} {NOUN1}s"), [
+      "NUM",
       "NUM",
       "NUM",
       "ADJECTIVE",
+      "PLURAL_NOUN",
     ]);
   });
 

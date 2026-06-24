@@ -89,6 +89,21 @@ export function peekActiveImageJobForUser(userId: string): RunningImageJob | und
   return runningByUser.get(userId);
 }
 
+export function cancelActiveImageJobForConversation(
+  userId: string,
+  conversationId: string
+): string | null {
+  const job = runningByUser.get(userId);
+  if (!job || job.conversationId !== conversationId || job.source !== "chat_tool") {
+    return null;
+  }
+  job.abortController.abort();
+  runningByUser.delete(userId);
+  runningByJobId.delete(job.id);
+  completedWithOwner.delete(job.id);
+  return job.id;
+}
+
 export async function tryAcquireImageSlot(args: {
   userId: string;
   conversationId: string | null;

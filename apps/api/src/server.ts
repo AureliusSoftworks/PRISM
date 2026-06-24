@@ -43,6 +43,7 @@ import {
   upsertBotOpinion,
 } from "./chat.ts";
 import {
+  cancelActiveImageJobForConversation,
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
@@ -110,6 +111,7 @@ import {
   serializeZenWallpaperHistory,
   setZenStarterConversationSuppression,
   sweepConversations,
+  undoLatestConversationMessages,
   undoLatestConversationSweep,
 } from "./conversations.ts";
 import {
@@ -201,6 +203,7 @@ import {
   normalizePromptShortcutMetadata,
   normalizePromptWildcardRunMetadata,
   reasoningEffortForRequest,
+  parseBuiltInPromptWildcardReference,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
@@ -268,7 +271,7 @@ import {
   getInactiveAccountCutoff
 } from "./account-retention.ts";
 import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
-import { deleteVectorsForUser } from "./qdrant.ts";
+import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
@@ -318,7 +321,13 @@ const IMAGE_GENERATION_VARIANT_TAGS = {
 } as const;
 const COMPOSER_RANDOM_PROMPT_SYSTEM_PROMPT =
   "You write one ready-to-send chat message that sounds like something a real person would naturally say. Use the bot persona, remembered facts, and recent conversation context only to make the message specific and coherent. Do not speak as the bot. Do not mention dice, buttons, randomness, generation, system prompts, hidden context, or memories. Return JSON only in this exact shape: {\"prompt\":\"...\"}.";
-const PROMPT_RUN_WILDCARD_TOKEN_RE = /\{[A-Z][A-Z0-9_ ]{1,63}\}/gu;
+const PROMPT_RUN_WILDCARD_TOKEN_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+function isPromptRunWildcardTokenName(value: string): boolean {
+  if (isDisabledPromptWildcardToken(value)) return false;
+  if (parseBuiltInPromptWildcardReference(value)) return true;
+  return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(value.trim());
+}
 
 function escapePromptRunRegexLiteral(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
@@ -331,9 +340,10 @@ function buildPromptRunResolvedPattern(prompt: string): RegExp | null {
   let cursor = 0;
   for (const match of source.matchAll(PROMPT_RUN_WILDCARD_TOKEN_RE)) {
     const token = match[0] ?? "";
+    const name = match[1] ?? "";
     const start = match.index ?? -1;
     if (!token || start < 0) continue;
-    if (isDisabledPromptWildcardToken(token.slice(1, -1))) continue;
+    if (!isPromptRunWildcardTokenName(name)) continue;
     pattern += escapePromptRunRegexLiteral(source.slice(cursor, start)).replace(/\s+/g, "\\s+");
     pattern += "[\\s\\S]{1,120}?";
     cursor = start + token.length;
@@ -5038,6 +5048,67 @@ function buildRoutes(): RouteDefinition[] {
         prismMood,
       });
       json(ctx.res, 200, { ok: true, conversation, prismMood });
+    }),
+    route("POST", "/api/conversations/:id/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const rawCount = body?.count;
+      if (
+        rawCount !== undefined &&
+        rawCount !== null &&
+        rawCount !== 1 &&
+        rawCount !== 2
+      ) {
+        throw new HttpError(400, "Use /undo, /undo 2, or /undo-turn.");
+      }
+      const result = undoLatestConversationMessages(
+        db,
+        userId,
+        ctx.params.id,
+        rawCount === 2 ? 2 : 1
+      );
+      const cancelledImageJobId = cancelActiveImageJobForConversation(
+        userId,
+        result.conversationId
+      );
+      if (result.deletedSummaryIds.length > 0) {
+        await Promise.allSettled(
+          result.deletedSummaryIds.map((summaryId) => deleteVector(summaryId))
+        );
+      }
+      for (const relPath of result.deletedImageRelPaths) {
+        try {
+          tryUnlinkGeneratedImageFile(relPath);
+        } catch (error) {
+          console.error(
+            `[undo] orphan file after image rollback path=${relPath}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
+      const conversation = loadPersistedConversationForChatResponse({
+        db,
+        userId,
+        activeConversationId: result.conversationId,
+        prismMood: result.prismMood,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+        prismMood: result.prismMood,
+        undone: {
+          count: result.deletedMessages,
+          messageIds: result.messageIds,
+          deletedMemories: result.deletedMemories,
+          updatedMemories: result.updatedMemories,
+          deletedSummaries: result.deletedSummaries,
+          deletedZenSessionMemories: result.deletedZenSessionMemories,
+          deletedMoodEvents: result.deletedMoodEvents,
+          deletedImages: result.deletedImages,
+          ...(cancelledImageJobId ? { cancelledImageJobId } : {}),
+        },
+      });
     }),
     route("DELETE", "/api/messages/:id", async (ctx) => {
       const userId = requireAuth(ctx);

@@ -6,362 +6,16 @@ import {
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "./providers.ts";
+import {
+  SCRIPTED_PROMPT_NOUN_PAIRS,
+  SCRIPTED_PROMPT_WILDCARD_VALUES,
+} from "./prompt-wildcard-seeds.ts";
 
 const PROMPT_WILDCARD_SYSTEM_PROMPT =
   "You fill prompt-template wildcards. Return JSON only. The wildcard key and generation rule are authoritative: never change a PERSON into an adjective, an ADJECTIVE into a person, or any other key into a different kind of value just because nearby grammar suggests it. For each requested wildcard occurrence key, choose one concrete replacement value that satisfies that wildcard type and still fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces. Treat repeated wildcard keys as independent random draws unless the occurrence key explicitly repeats.";
-const PROMPT_WILDCARD_PATTERN = /\{([A-Z][A-Z0-9_ ]{1,63})\}/g;
+const PROMPT_WILDCARD_PATTERN = /\{([^{}\r\n]{1,80})\}/g;
 const PROMPT_WILDCARD_MAX_KEYS = 16;
 const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
-const SCRIPTED_PROMPT_WILDCARD_VALUES: Record<string, readonly string[]> = {
-  ADJECTIVE: [
-    "brisk",
-    "hushed",
-    "jagged",
-    "tender",
-    "peculiar",
-    "crisp",
-    "velvety",
-    "restless",
-    "radiant",
-    "stubborn",
-    "nimble",
-    "dusky",
-    "fragile",
-    "lopsided",
-    "mellow",
-    "wary",
-    "frosted",
-    "buoyant",
-    "earnest",
-    "crooked",
-    "silvery",
-    "drowsy",
-    "clever",
-    "threadbare",
-    "glossy",
-    "solemn",
-    "mischievous",
-    "orderly",
-    "weathered",
-    "electric",
-    "gentle",
-    "rattling",
-    "prickly",
-    "soft-spoken",
-    "muddy",
-    "polished",
-    "glimmering",
-    "uneasy",
-    "breezy",
-    "plainspoken",
-    "fierce",
-    "sleepy",
-    "luminous",
-    "wistful",
-    "sturdy",
-    "wild",
-    "careful",
-    "flinty",
-    "golden",
-    "curious",
-  ],
-  VERB: [
-    "wander",
-    "assemble",
-    "borrow",
-    "scatter",
-    "measure",
-    "unfold",
-    "whisper",
-    "gather",
-    "tilt",
-    "mend",
-    "drift",
-    "balance",
-    "sketch",
-    "polish",
-    "trade",
-    "unlock",
-    "shuffle",
-    "plant",
-    "trace",
-    "weave",
-    "carry",
-    "sort",
-    "climb",
-    "listen",
-    "invent",
-    "fold",
-    "deliver",
-    "notice",
-    "repair",
-    "hide",
-    "count",
-    "rescue",
-    "collect",
-    "follow",
-    "paint",
-    "tumble",
-    "question",
-    "sweep",
-    "discover",
-    "transform",
-  ],
-  NOUN: [
-    "window",
-    "key",
-    "notebook",
-    "chair",
-    "bottle",
-    "camera",
-    "pencil",
-    "clock",
-    "mirror",
-    "ticket",
-    "blanket",
-    "candle",
-    "cup",
-    "door",
-    "map",
-    "button",
-    "basket",
-    "wallet",
-    "ladder",
-    "suitcase",
-    "umbrella",
-    "spoon",
-    "letter",
-    "painting",
-    "radio",
-    "bridge",
-    "cloud",
-    "recipe",
-    "memory",
-    "question",
-    "promise",
-    "pattern",
-    "shadow",
-    "machine",
-    "shelf",
-    "stone",
-    "book",
-    "needle",
-    "carpet",
-    "folder",
-    "coin",
-    "photograph",
-    "kettle",
-    "path",
-    "thread",
-    "screen",
-    "parcel",
-    "pocket",
-    "calendar",
-    "notion",
-    "mistake",
-    "agreement",
-    "harbor",
-    "apartment",
-    "workshop",
-    "bicycle",
-    "teacup",
-    "newspaper",
-    "receipt",
-    "staircase",
-  ],
-  PLURAL_NOUN: [
-    "windows",
-    "keys",
-    "notebooks",
-    "chairs",
-    "bottles",
-    "cameras",
-    "pencils",
-    "clocks",
-    "mirrors",
-    "tickets",
-    "blankets",
-    "candles",
-    "cups",
-    "doors",
-    "maps",
-    "buttons",
-    "baskets",
-    "wallets",
-    "ladders",
-    "suitcases",
-    "umbrellas",
-    "spoons",
-    "letters",
-    "paintings",
-    "radios",
-    "bridges",
-    "clouds",
-    "recipes",
-    "memories",
-    "questions",
-    "promises",
-    "patterns",
-    "shadows",
-    "machines",
-    "shelves",
-    "stones",
-    "books",
-    "needles",
-    "carpets",
-    "folders",
-    "coins",
-    "photographs",
-    "kettles",
-    "paths",
-    "threads",
-    "screens",
-    "parcels",
-    "pockets",
-    "calendars",
-    "notions",
-    "mistakes",
-    "agreements",
-    "harbors",
-    "apartments",
-    "workshops",
-    "bicycles",
-    "teacups",
-    "newspapers",
-    "receipts",
-    "staircases",
-  ],
-  ADVERB: [
-    "quietly",
-    "boldly",
-    "sideways",
-    "gently",
-    "carefully",
-    "briskly",
-    "warmly",
-    "awkwardly",
-    "patiently",
-    "curiously",
-    "solemnly",
-    "brightly",
-    "sharply",
-    "loosely",
-    "eagerly",
-    "warily",
-    "smoothly",
-    "softly",
-    "plainly",
-    "wildly",
-    "neatly",
-    "slowly",
-    "lightly",
-    "roughly",
-    "cheerfully",
-    "secretly",
-    "calmly",
-    "oddly",
-    "firmly",
-  ],
-  PLACE: [
-    "bakery",
-    "museum",
-    "rooftop",
-    "library",
-    "kitchen",
-    "courtyard",
-    "bookstore",
-    "greenhouse",
-    "alley",
-    "pier",
-    "train platform",
-    "laundromat",
-    "attic",
-    "basement",
-    "orchard",
-    "cafeteria",
-    "workshop",
-    "theater",
-    "parking lot",
-    "bus stop",
-    "post office",
-    "classroom",
-    "warehouse",
-    "dock",
-    "farmhouse",
-    "observatory",
-    "playground",
-    "hotel lobby",
-    "barbershop",
-    "clinic",
-    "studio",
-    "market",
-    "harbor",
-    "forest",
-    "canyon",
-    "station",
-    "village",
-  ],
-  PERSON: [
-    "Mira",
-    "Theo",
-    "June",
-    "Elias",
-    "Amara",
-    "Niko",
-    "Iris",
-    "Rowan",
-    "Lena",
-    "Owen",
-    "Maya",
-    "Felix",
-    "Nora",
-    "Jonah",
-    "Sofia",
-    "Caleb",
-    "Ari",
-    "Milo",
-    "Talia",
-    "Ezra",
-    "Naomi",
-    "Rafi",
-    "Clara",
-    "Hugo",
-    "Anya",
-    "Leo",
-    "Selene",
-    "Marin",
-    "Zara",
-    "Noel",
-  ],
-  STYLE: [
-    "noir",
-    "deadpan",
-    "pastoral",
-    "glitchy",
-    "documentary",
-    "whimsical",
-    "satirical",
-    "minimalist",
-    "gothic",
-    "fable-like",
-    "absurdist",
-    "melancholic",
-    "cinematic",
-    "epistolary",
-    "dreamlike",
-    "playful",
-    "mythic",
-    "journalistic",
-    "lyrical",
-    "cozy",
-    "surreal",
-    "picaresque",
-    "hardboiled",
-    "folk-tale",
-    "screwball",
-  ],
-  NUM: [],
-};
 const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
   "vivid",
   "curious",
@@ -385,7 +39,7 @@ export function generateScriptedPromptWildcardValue(
   );
   if (!key) return null;
   if (key === "NUM") {
-    return String(randomInt(1, 101));
+    return String(randomInt(1, 11));
   }
   const values = SCRIPTED_PROMPT_WILDCARD_VALUES[key];
   if (!values || values.length === 0) return null;
@@ -398,6 +52,82 @@ export function generateScriptedPromptWildcardValue(
   );
   if (value && usedValues) usedValues.add(value.toLowerCase());
   return value;
+}
+
+function randomNounPairIndex(usedPairIndexes?: Set<number>): number | null {
+  if (SCRIPTED_PROMPT_NOUN_PAIRS.length === 0) return null;
+  const indexes = SCRIPTED_PROMPT_NOUN_PAIRS.map((_, index) => index);
+  const availableIndexes =
+    usedPairIndexes && usedPairIndexes.size < indexes.length
+      ? indexes.filter((index) => !usedPairIndexes.has(index))
+      : indexes;
+  const index = availableIndexes[randomInt(availableIndexes.length)] ?? null;
+  if (index !== null && usedPairIndexes) usedPairIndexes.add(index);
+  return index;
+}
+
+function promptWildcardValueFromNounPair(key: string, pairIndex: number): string | null {
+  const pair = SCRIPTED_PROMPT_NOUN_PAIRS[pairIndex];
+  if (!pair) return null;
+  if (key === "NOUN") return pair.singular;
+  if (key === "PLURAL_NOUN") return pair.plural;
+  return null;
+}
+
+function isNounPairWildcardKey(key: string): boolean {
+  return key === "NOUN" || key === "PLURAL_NOUN";
+}
+
+function normalizeNounPluralShorthandPrompt(
+  prompt: string,
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
+): {
+  prompt: string;
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+} {
+  const shorthandRe = /\{NOUN(\d*)\}s\b/g;
+  let match: RegExpExecArray | null;
+  let output = "";
+  let cursor = 0;
+  const adjustments: Array<{ start: number; end: number; delta: number }> = [];
+  while ((match = shorthandRe.exec(prompt))) {
+    const token = match[0] ?? "";
+    const reference = match[1] ?? "";
+    const start = match.index;
+    const end = start + token.length;
+    const replacement = `{PLURAL_NOUN${reference}}`;
+    output += prompt.slice(cursor, start);
+    output += replacement;
+    adjustments.push({ start, end, delta: replacement.length - token.length });
+    cursor = end;
+  }
+  if (adjustments.length === 0) {
+    return existingReplacements
+      ? { prompt, existingReplacements }
+      : { prompt };
+  }
+  output += prompt.slice(cursor);
+  if (!existingReplacements) return { prompt: output };
+  const adjustedReplacements = existingReplacements
+    .map((replacement): PromptShortcutWildcardReplacement | null => {
+      let start = replacement.start;
+      let end = replacement.end;
+      if (typeof start !== "number" || typeof end !== "number") return replacement;
+      for (const adjustment of adjustments) {
+        if (end <= adjustment.start) continue;
+        if (start >= adjustment.end) {
+          start += adjustment.delta;
+          end += adjustment.delta;
+          continue;
+        }
+        return null;
+      }
+      return { ...replacement, start, end };
+    })
+    .filter((replacement): replacement is PromptShortcutWildcardReplacement =>
+      Boolean(replacement)
+    );
+  return { prompt: output, existingReplacements: adjustedReplacements };
 }
 
 interface PromptWildcardOccurrence {
@@ -428,6 +158,9 @@ function parsePromptWildcardOccurrenceName(value: unknown): {
   const builtInReference = parseBuiltInPromptWildcardReference(value);
   if (builtInReference) {
     return { key: builtInReference.key, reference: builtInReference.reference };
+  }
+  if (typeof value !== "string" || !/^[A-Z][A-Z0-9_ ]{1,63}$/u.test(value.trim())) {
+    return { key: "", reference: null };
   }
   const key = normalizePromptWildcardKey(value);
   if (isDisabledPromptWildcardToken(key)) return { key: "", reference: null };
@@ -501,7 +234,9 @@ function promptWildcardRequestLines(
 }
 
 export function promptWildcardNames(prompt: string): string[] {
-  return promptWildcardOccurrences(prompt).map((occurrence) => occurrence.key);
+  return promptWildcardOccurrences(normalizeNounPluralShorthandPrompt(prompt).prompt).map(
+    (occurrence) => occurrence.key
+  );
 }
 
 function parsePromptWildcardJson(raw: string): unknown {
@@ -598,9 +333,27 @@ function scriptedPromptWildcardValuesForOccurrences(
 ): Map<string, string> {
   const values = new Map<string, string>();
   const usedValuesByKey = new Map<string, Set<string>>();
+  const nounPairIndexesByReference = new Map<string, number>();
+  const usedNounPairIndexes = new Set<number>();
   for (const occurrence of occurrences) {
     if (values.has(occurrence.requestKey)) continue;
     if (!getBuiltInPromptWildcardSlot(occurrence.key)) continue;
+    if (occurrence.reference && isNounPairWildcardKey(occurrence.key)) {
+      let pairIndex = nounPairIndexesByReference.get(occurrence.reference);
+      if (pairIndex === undefined) {
+        pairIndex = randomNounPairIndex(usedNounPairIndexes) ?? undefined;
+        if (pairIndex !== undefined) {
+          nounPairIndexesByReference.set(occurrence.reference, pairIndex);
+        }
+      }
+      if (pairIndex !== undefined) {
+        const pairValue = promptWildcardValueFromNounPair(occurrence.key, pairIndex);
+        if (pairValue) {
+          values.set(occurrence.requestKey, pairValue);
+          continue;
+        }
+      }
+    }
     const usedValues = usedValuesByKey.get(occurrence.key) ?? new Set<string>();
     const value = generateScriptedPromptWildcardValue(occurrence.key, usedValues);
     if (!value) continue;
@@ -745,6 +498,9 @@ export function applyPromptWildcardValues(
   values: ReadonlyMap<string, string>,
   existingReplacements?: readonly PromptShortcutWildcardReplacement[]
 ): PromptWildcardResolution {
+  const normalized = normalizeNounPluralShorthandPrompt(prompt, existingReplacements);
+  prompt = normalized.prompt;
+  existingReplacements = normalized.existingReplacements;
   const occurrences = promptWildcardOccurrences(prompt);
   const preservedReplacements = normalizePromptShortcutReplacementRangesForPrompt(
     prompt,
@@ -813,13 +569,19 @@ export async function resolvePromptWildcardsWithModel(args: {
   existingReplacements?: readonly PromptShortcutWildcardReplacement[];
   signal?: AbortSignal;
 }): Promise<PromptWildcardResolution> {
-  const occurrences = promptWildcardOccurrences(args.prompt);
+  const normalized = normalizeNounPluralShorthandPrompt(
+    args.prompt,
+    args.existingReplacements
+  );
+  const prompt = normalized.prompt;
+  const existingReplacements = normalized.existingReplacements;
+  const occurrences = promptWildcardOccurrences(prompt);
   if (occurrences.length === 0) {
     return {
-      prompt: args.prompt,
+      prompt,
       replacements: normalizePromptShortcutReplacementRangesForPrompt(
-        args.prompt,
-        args.existingReplacements
+        prompt,
+        existingReplacements
       ),
     };
   }
@@ -829,17 +591,17 @@ export async function resolvePromptWildcardsWithModel(args: {
   );
   if (modelOccurrences.length === 0) {
     return applyPromptWildcardValues(
-      args.prompt,
+      prompt,
       scriptedValues,
-      args.existingReplacements
+      existingReplacements
     );
   }
   try {
     const exampleKey = modelOccurrences[0]?.requestKey ?? "CUSTOM__1";
     const promptForModel =
       scriptedValues.size > 0
-        ? applyPromptWildcardValues(args.prompt, scriptedValues).prompt
-        : args.prompt;
+        ? applyPromptWildcardValues(prompt, scriptedValues).prompt
+        : prompt;
     const promptMessages: ProviderMessage[] = [
       { role: "system", content: PROMPT_WILDCARD_SYSTEM_PROMPT },
       {
@@ -867,9 +629,9 @@ export async function resolvePromptWildcardsWithModel(args: {
     });
     const values = extractPromptWildcardValues(raw, modelOccurrences);
     return applyPromptWildcardValues(
-      args.prompt,
+      prompt,
       new Map([...scriptedValues, ...values]),
-      args.existingReplacements
+      existingReplacements
     );
   } catch (error) {
     console.warn(
@@ -877,9 +639,9 @@ export async function resolvePromptWildcardsWithModel(args: {
       error instanceof Error ? error.message : error
     );
     return applyPromptWildcardValues(
-      args.prompt,
+      prompt,
       fillMissingPromptWildcardValues(scriptedValues, modelOccurrences),
-      args.existingReplacements
+      existingReplacements
     );
   }
 }
