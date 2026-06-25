@@ -41,20 +41,86 @@ describe("composer cleanup", () => {
   });
 
   it("realigns wildcard replacement ranges after punctuation cleanup", async () => {
-    const provider = mockProvider("Tell me about Sarah Inkwell's son.");
+    const provider = mockProvider("Tell me about Sarah Inkwell.");
 
     const cleaned = await cleanupResolvedPromptWithModel({
-      prompt: "Tell me about Sarah inkwellson.",
+      prompt: "Tell me about Sarah inkwell.",
       replacements: [{ key: "NAME", value: "Sarah inkwell", start: 14, end: 27 }],
       provider,
       model: "llama3.2",
     });
 
-    assert.equal(cleaned.prompt, "Tell me about Sarah Inkwell's son.");
+    assert.equal(cleaned.prompt, "Tell me about Sarah Inkwell.");
     assert.deepEqual(cleaned.replacements, [
       { key: "NAME", value: "Sarah Inkwell", start: 14, end: 27 },
     ]);
     assert.equal(cleaned.changed, true);
+  });
+
+  it("keeps unrelated cleanup when a suffix-joined wildcard stays unchanged", async () => {
+    const provider = mockProvider(
+      JSON.stringify({
+        prompt: "Say hello to Joe Lemonson. He won't wait.",
+        replacements: [{ index: 0, value: "Lemonson" }],
+      })
+    );
+
+    const cleaned = await cleanupResolvedPromptWithModel({
+      prompt: "Say hello to Joe Lemonson. He wont wait.",
+      replacements: [{ key: "NAME_PART", value: "Lemon", start: 17, end: 22 }],
+      provider,
+      model: "llama3.2",
+    });
+
+    assert.equal(cleaned.prompt, "Say hello to Joe Lemonson. He won't wait.");
+    assert.deepEqual(cleaned.replacements, [
+      { key: "NAME_PART", value: "Lemon", start: 17, end: 22 },
+    ]);
+    assert.equal(cleaned.changed, true);
+  });
+
+  it("ignores capitalization cleanup inside a prefix-joined wildcard name", async () => {
+    const provider = mockProvider(
+      JSON.stringify({
+        prompt: "Meet McBlue today.",
+        replacements: [{ index: 0, value: "Blue" }],
+      })
+    );
+
+    const cleaned = await cleanupResolvedPromptWithModel({
+      prompt: "Meet Mcblue today.",
+      replacements: [{ key: "COLOR", value: "blue", start: 7, end: 11 }],
+      provider,
+      model: "llama3.2",
+    });
+
+    assert.equal(cleaned.prompt, "Meet Mcblue today.");
+    assert.deepEqual(cleaned.replacements, [
+      { key: "COLOR", value: "blue", start: 7, end: 11 },
+    ]);
+    assert.equal(cleaned.changed, false);
+  });
+
+  it("leaves cleanup unapplied when it splits a suffix-joined wildcard name", async () => {
+    const provider = mockProvider(
+      JSON.stringify({
+        prompt: "Say hello to Joe Lemon's son. He won't wait.",
+        replacements: [{ index: 0, value: "Lemon" }],
+      })
+    );
+
+    const cleaned = await cleanupResolvedPromptWithModel({
+      prompt: "Say hello to Joe Lemonson. He wont wait.",
+      replacements: [{ key: "NAME_PART", value: "Lemon", start: 17, end: 22 }],
+      provider,
+      model: "llama3.2",
+    });
+
+    assert.equal(cleaned.prompt, "Say hello to Joe Lemonson. He wont wait.");
+    assert.deepEqual(cleaned.replacements, [
+      { key: "NAME_PART", value: "Lemon", start: 17, end: 22 },
+    ]);
+    assert.equal(cleaned.changed, false);
   });
 
   it("uses structured send cleanup values when grammar changes a wildcard replacement", async () => {

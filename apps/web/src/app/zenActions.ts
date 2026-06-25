@@ -9,6 +9,7 @@ export type ZenActionMotion = "default" | "glance" | "nod" | "breath" | "tap" | 
 export interface ZenActionCue extends StageDirectionCue {
   action: string;
   revealAtDisplayLength: number;
+  displayAtDisplayLength: number;
   motion: ZenActionMotion;
   key: string;
 }
@@ -21,6 +22,11 @@ export interface ZenActionPresentation {
 }
 
 const MAX_ZEN_ACTION_DISPLAY_LENGTH = 96;
+const ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH = 80;
+const ZEN_ACTION_PRESENTATION_CACHE_LIMIT = 128;
+export const ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH = 48;
+export const ZEN_ACTION_TEXT_LAG_MS = 320;
+const zenActionPresentationCache = new Map<string, ZenActionPresentation>();
 
 export function normalizeZenActionText(action: string): string {
   let normalized = action.replace(/\s+/g, " ").trim();
@@ -64,16 +70,29 @@ function normalizeZenActionCue(cue: StageDirectionCue, index: number): ZenAction
   const action = normalizeZenActionText(cue.action);
   if (!action) return null;
   const revealAtDisplayLength = Math.max(0, Math.floor(cue.revealAtDisplayLength));
+  const displayAtDisplayLength = Math.max(
+    0,
+    revealAtDisplayLength - ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH
+  );
   const key = zenActionKey(action);
   return {
     action,
     revealAtDisplayLength,
+    displayAtDisplayLength,
     motion: classifyZenActionMotion(action),
     key: `${revealAtDisplayLength}:${key || index}`,
   };
 }
 
 export function resolveZenActionPresentation(text: string): ZenActionPresentation {
+  if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
+    const cached = zenActionPresentationCache.get(text);
+    if (cached) {
+      zenActionPresentationCache.delete(text);
+      zenActionPresentationCache.set(text, cached);
+      return cached;
+    }
+  }
   const cues: ZenActionCue[] = [];
   let previousActionKey: string | null = null;
   for (const [index, cue] of extractStageDirectionCues(text).entries()) {
@@ -86,21 +105,39 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
   }
 
   if (cues.length === 0) {
-    return {
+    const presentation = {
       mainText: text,
       cues: [],
       hasActions: false,
       actionOnly: false,
     };
+    if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
+      zenActionPresentationCache.set(text, presentation);
+      while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
+        const oldestKey = zenActionPresentationCache.keys().next().value;
+        if (typeof oldestKey !== "string") break;
+        zenActionPresentationCache.delete(oldestKey);
+      }
+    }
+    return presentation;
   }
 
   const { mainText } = extractStageDirections(text);
-  return {
+  const presentation = {
     mainText,
     cues,
     hasActions: true,
     actionOnly: mainText.trim().length === 0,
   };
+  if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
+    zenActionPresentationCache.set(text, presentation);
+    while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
+      const oldestKey = zenActionPresentationCache.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      zenActionPresentationCache.delete(oldestKey);
+    }
+  }
+  return presentation;
 }
 
 export function resolveCurrentZenActionCue(
@@ -113,7 +150,7 @@ export function resolveCurrentZenActionCue(
     : Number.POSITIVE_INFINITY;
   let current: ZenActionCue | null = null;
   for (const cue of cues) {
-    if (cue.revealAtDisplayLength <= threshold) {
+    if (cue.displayAtDisplayLength <= threshold) {
       current = cue;
       continue;
     }
@@ -127,4 +164,20 @@ export function resolveZenActionPreview(text: string): ZenActionCue | null {
   if (!trimmed || /^[!/]/u.test(trimmed)) return null;
   const presentation = resolveZenActionPresentation(trimmed);
   return presentation.cues[0] ?? null;
+}
+
+export function resolveLatestZenActionPreview(text: string): ZenActionCue | null {
+  const trimmed = text.trim();
+  if (!trimmed || /^[!/]/u.test(trimmed)) return null;
+  const presentation = resolveZenActionPresentation(trimmed);
+  return presentation.cues[presentation.cues.length - 1] ?? null;
+}
+
+export function resolvePersistentZenActionPreview(
+  previousCue: ZenActionCue | null,
+  text: string,
+  options: { reset?: boolean } = {}
+): ZenActionCue | null {
+  if (options.reset === true) return null;
+  return resolveLatestZenActionPreview(text) ?? previousCue;
 }

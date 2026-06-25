@@ -29,7 +29,7 @@ import { sanitizeHiddenModelIds } from "./model-routing.ts";
 export type Theme = "light" | "dark" | "system";
 export type Provider = "local" | "openai" | "anthropic";
 
-export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
+export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
 export const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
@@ -61,6 +61,10 @@ export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
 export const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
 export const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
 export const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
+export const DEFAULT_ZEN_MESSAGE_FONT_MIN_PX = 15.8;
+export const DEFAULT_ZEN_MESSAGE_FONT_MAX_PX = 32.8;
+export const MIN_ZEN_MESSAGE_FONT_SIZE_PX = 12;
+export const MAX_ZEN_MESSAGE_FONT_SIZE_PX = 42;
 export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
 export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
@@ -114,6 +118,8 @@ export interface CurrentSettings {
   zenWallpaperRevealSpanMessageCount: number | null;
   zenMoodSensitivity: number | null;
   zenCanvasTypingSpeed: number | null;
+  zenMessageFontMinPx: number | null;
+  zenMessageFontMaxPx: number | null;
   zenAskQuestionPatienceEnabled: number | null;
   zenAskQuestionPatienceMs: number | null;
   zenAutonomyEnabled: number | null;
@@ -163,6 +169,8 @@ export interface NextSettings {
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
   zenCanvasTypingSpeed: number;
+  zenMessageFontMinPx: number;
+  zenMessageFontMaxPx: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
@@ -446,10 +454,10 @@ export function normalizeZenWallpaperTextMaskEnabled(
 }
 
 export function normalizeZenWallpaperGrayscaleEnabled(
-  _value: unknown,
-  _fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
+  value: unknown,
+  fallback = DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED
 ): boolean {
-  return true;
+  return normalizeBooleanLikeSetting(value, fallback);
 }
 
 export function normalizeZenWallpaperBlurredEdgesEnabled(
@@ -589,6 +597,56 @@ export function normalizeZenCanvasTypingSpeed(
     Math.max(MIN_ZEN_CANVAS_TYPING_SPEED, normalized)
   );
   return Number(clamped.toFixed(2));
+}
+
+function normalizePixelSizeSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const fallbackNumber =
+    typeof fallback === "number" && Number.isFinite(fallback)
+      ? fallback
+      : min;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  const normalized = Number.isFinite(parsed) ? parsed : fallbackNumber;
+  const clamped = Math.min(max, Math.max(min, normalized));
+  return Number(clamped.toFixed(1));
+}
+
+export function normalizeZenMessageFontMinPx(
+  value: unknown,
+  fallback = DEFAULT_ZEN_MESSAGE_FONT_MIN_PX
+): number {
+  return normalizePixelSizeSetting(
+    value,
+    fallback,
+    MIN_ZEN_MESSAGE_FONT_SIZE_PX,
+    MAX_ZEN_MESSAGE_FONT_SIZE_PX
+  );
+}
+
+export function normalizeZenMessageFontMaxPx(
+  value: unknown,
+  fallback = DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+  minimum = MIN_ZEN_MESSAGE_FONT_SIZE_PX
+): number {
+  const normalizedMinimum = normalizeZenMessageFontMinPx(
+    minimum,
+    MIN_ZEN_MESSAGE_FONT_SIZE_PX
+  );
+  return normalizePixelSizeSetting(
+    value,
+    fallback,
+    normalizedMinimum,
+    MAX_ZEN_MESSAGE_FONT_SIZE_PX
+  );
 }
 
 export function normalizeZenAskQuestionPatienceEnabled(
@@ -911,6 +969,29 @@ export function resolveNextSettings(
           body.zenCanvasTypingSpeed,
           currentZenCanvasTypingSpeed
         );
+  const currentZenMessageFontMinPx = normalizeZenMessageFontMinPx(
+    current.zenMessageFontMinPx
+  );
+  const zenMessageFontMinPx =
+    body.zenMessageFontMinPx === undefined
+      ? currentZenMessageFontMinPx
+      : normalizeZenMessageFontMinPx(
+          body.zenMessageFontMinPx,
+          currentZenMessageFontMinPx
+        );
+  const currentZenMessageFontMaxPx = normalizeZenMessageFontMaxPx(
+    current.zenMessageFontMaxPx,
+    DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+    zenMessageFontMinPx
+  );
+  const zenMessageFontMaxPx =
+    body.zenMessageFontMaxPx === undefined
+      ? currentZenMessageFontMaxPx
+      : normalizeZenMessageFontMaxPx(
+          body.zenMessageFontMaxPx,
+          currentZenMessageFontMaxPx,
+          zenMessageFontMinPx
+        );
   const currentZenAskQuestionPatienceEnabled =
     normalizeZenAskQuestionPatienceEnabled(
       current.zenAskQuestionPatienceEnabled
@@ -1028,6 +1109,8 @@ export function resolveNextSettings(
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
     zenCanvasTypingSpeed,
+    zenMessageFontMinPx,
+    zenMessageFontMaxPx,
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,

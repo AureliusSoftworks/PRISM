@@ -77,7 +77,10 @@ export interface StoredAssistantMoodPayload {
   confidence?: number;
 }
 
-export type StoredZenAssistantTurnKind = "persona-transition" | "zen-autonomy";
+export type StoredZenAssistantTurnKind =
+  | "persona-transition"
+  | "zen-autonomy"
+  | "zen-live-action-interrupt";
 
 export interface StoredZenAssistantTurnPayload {
   kind: StoredZenAssistantTurnKind;
@@ -182,8 +185,8 @@ function normalizeAskQuestionEnvelope(parsed: unknown): AskQuestionPayload | und
     })
     .filter((label) => label.length > 0);
 
-  // Keep UX deterministic: PRISM chips expect either a binary yes/no choice or three choices.
-  const optionCount = labels.length === 2 ? 2 : labels.length >= 3 ? 3 : 0;
+  // Keep UX deterministic: PRISM chips expect binary yes/no or up to four real choices.
+  const optionCount = labels.length === 2 ? 2 : labels.length >= 3 ? Math.min(labels.length, 4) : 0;
   if (optionCount === 0) return undefined;
 
   return {
@@ -384,7 +387,9 @@ export function normalizeStoredZenAssistantTurnPayload(
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
   const kind =
-    row.kind === "persona-transition" || row.kind === "zen-autonomy"
+    row.kind === "persona-transition" ||
+    row.kind === "zen-autonomy" ||
+    row.kind === "zen-live-action-interrupt"
       ? row.kind
       : undefined;
   if (!kind) return undefined;

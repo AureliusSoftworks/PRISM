@@ -66,6 +66,8 @@ import type {
   ZenAskQuestionPatienceInput,
   ZenAutonomyDecision,
   ZenAutonomyInput,
+  ZenLiveActionContextInput,
+  ZenLiveActionInterruptInput,
   ZenPersonaTransitionInput,
   ZenPersonaTransitionStyle,
   ZenSessionMemoryOverview,
@@ -2109,7 +2111,7 @@ function parseSuggestedRepliesPayload(raw: string): string[] {
         extractSuggestedReplyValues(parsedUnknown)
       );
       if (candidates.length > best.length) best = candidates;
-      if (best.length >= 3) return best.slice(0, 4);
+      if (best.length >= 4) return best.slice(0, 4);
     } catch {
       // Try the next candidate; starter chips are optional.
     }
@@ -2186,7 +2188,7 @@ function extractStarterQuestionAlternatives(question: string): string[] {
     .split(/\s+(?:or|versus|vs\.?)\s+/i)
     .map(cleanStarterQuestionAlternative)
     .filter((part) => part.length >= 2 && part.length <= 64);
-  return alternatives.length >= 2 ? [...new Set(alternatives)].slice(0, 3) : [];
+  return alternatives.length >= 2 ? [...new Set(alternatives)].slice(0, 4) : [];
 }
 
 function fallbackOpenEndedQuestionStarters(question: string): string[] {
@@ -2291,7 +2293,7 @@ async function inferConversationStarters(
   try {
     const raw = await provider.generateResponse(messages, inferOverrides);
     const candidates = parseSuggestedRepliesPayload(raw);
-    if (candidates.length >= 3) {
+    if (candidates.length >= 4) {
       return candidates.slice(0, 4);
     }
   } catch {
@@ -2302,13 +2304,13 @@ async function inferConversationStarters(
 
 function buildStarterAskQuestion(starters: string[] | undefined): AskQuestionPayload | undefined {
   const options = (starters ?? [])
-    .slice(0, 3)
+    .slice(0, 4)
     .map((starter, index) => ({
       id: String.fromCharCode(97 + index),
       label: starter.trim(),
     }))
     .filter((option) => option.label.length > 0);
-  if (options.length !== 3) return undefined;
+  if (options.length !== 4) return undefined;
   return {
     v: 1,
     name: "AskQuestion",
@@ -2664,6 +2666,10 @@ export interface UserChatSettings {
   zenAutonomy?: ZenAutonomyInput;
   /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
   zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+  /** Zen-only ephemeral stage-direction context collected before the user sends. */
+  zenLiveActionContext?: ZenLiveActionContextInput;
+  /** Zen-only assistant interruption triggered by a high-confidence live action. */
+  zenLiveActionInterrupt?: ZenLiveActionInterruptInput;
   /** True for Command/Prompt Center prompt runs that should not mutate memory or mood. */
   commandCenterPrompt?: boolean;
   /** Optional resolved user prompt sent to the model while preserving display content. */
@@ -3025,7 +3031,7 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   `If you do not need chips this turn, omit the entire block.`,
   "",
   `${PRISM_TOOL_START}`,
-  '{"v":1,"name":"AskQuestion","prompt":"Short chooser line above chips (e.g. Which option do you choose?)","options":[{"id":"a","label":"First choice"},{"id":"b","label":"Second choice"},{"id":"c","label":"Third choice"}]}',
+  '{"v":1,"name":"AskQuestion","prompt":"Short chooser line above chips (e.g. Which option do you choose?)","options":[{"id":"a","label":"First choice"},{"id":"b","label":"Second choice"},{"id":"c","label":"Third choice"},{"id":"d","label":"Fourth choice"}]}',
   `${PRISM_TOOL_END}`,
   "Rules:",
   "- Keep normal conversation in plain prose BEFORE the delimiter block.",
@@ -3037,8 +3043,8 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Do NOT paste the tool JSON alone on its own line; use the Prism block (or a single fenced code block). Bare JSON shows up as junk text in chat.",
   "- Prefer the three-angle-bracket tokens above. Single-angle XML-style `<PRISM_TOOL>` … `</PRISM_TOOL>` is also accepted, but triple brackets are the reliable default.",
   "- AskQuestion represents one question in this turn; never output a quiz or multi-question list.",
-  "- When your visible reply asks the user to choose between two or three concrete next actions or preferences, prefer AskQuestion chips instead of leaving the choice only in prose.",
-  "- Inside JSON only: usually emit exactly three options with ids a, b, c (distinct). When the expected answer is simply yes or no (for example, \"Would you like a copy of that to download?\"), emit exactly two options with ids a and b labeled Yes and No.",
+  "- When your visible reply asks the user to choose between concrete next actions or preferences, prefer AskQuestion chips instead of leaving the choice only in prose.",
+  "- Inside JSON only: usually emit exactly four options with ids a, b, c, d (distinct). When the expected answer is simply yes or no (for example, \"Would you like a copy of that to download?\"), emit exactly two options with ids a and b labeled Yes and No.",
   "- In JSON, `prompt` is ONLY the short chooser line shown above the chip row (never the main quiz question).",
   "- Labels are what the USER sends verbatim when they tap; keep each short (single clause).",
   "",
@@ -3519,26 +3525,46 @@ function cleanAskQuestionAlternativeLabel(raw: string): string | undefined {
   return titleCaseAskQuestionOption(cleaned);
 }
 
-function splitAskQuestionAlternativeList(raw: string): string[] {
+function askQuestionTextHasExplicitAlternativeSeparator(raw: string): boolean {
+  return (
+    /\s+(?:or|versus|vs\.?)\s+/i.test(raw) ||
+    /\S\s*\/\s*\S/u.test(raw)
+  );
+}
+
+function splitAskQuestionAlternativeList(
+  raw: string,
+  options: { allowPlainCommaList?: boolean } = {}
+): string[] {
   const prepared = raw
     .replace(/\s+(?:vs\.?|versus)\s+/gi, " or ")
     .replace(/\s*\/\s*/g, " or ")
     .replace(/[?!.;:]+$/u, "")
     .trim();
   if (!prepared) return [];
+  if (
+    prepared.includes(",") &&
+    !options.allowPlainCommaList &&
+    !askQuestionTextHasExplicitAlternativeSeparator(prepared)
+  ) {
+    return [];
+  }
   let parts = prepared.includes(",")
     ? prepared.split(",")
     : prepared.split(/\s+or\s+/i);
-  if (prepared.includes(",") && parts.length === 2 && /\s+or\s+/i.test(parts[1] ?? "")) {
-    parts = [parts[0]!, ...(parts[1] ?? "").split(/\s+or\s+/i)];
+  if (prepared.includes(",") && /\s+or\s+/i.test(parts[parts.length - 1] ?? "")) {
+    parts = [
+      ...parts.slice(0, -1),
+      ...(parts[parts.length - 1] ?? "").split(/\s+or\s+/i),
+    ];
   }
-  if (parts.length < 2 || parts.length > 3) return [];
-  const options = parts
+  if (parts.length < 2 || parts.length > 4) return [];
+  const cleanedOptions = parts
     .map((part) => cleanAskQuestionAlternativeLabel(part))
     .filter((part): part is string => Boolean(part));
-  const distinct = new Set(options.map((option) => normalizeAskQuestionComparisonText(option)));
-  return options.length >= 2 && options.length <= 3 && distinct.size === options.length
-    ? options
+  const distinct = new Set(cleanedOptions.map((option) => normalizeAskQuestionComparisonText(option)));
+  return cleanedOptions.length >= 2 && cleanedOptions.length <= 4 && distinct.size === cleanedOptions.length
+    ? cleanedOptions
     : [];
 }
 
@@ -3552,12 +3578,16 @@ function stripAskQuestionOpenEndedPreface(question: string): string {
 }
 
 function extractAlternativeAskQuestionOptions(question: string): string[] {
-  const core = stripAskQuestionCandidateLine(question).replace(/[?!.]+$/u, "").trim();
+  const core = stripKnownAskQuestionPrefixes(stripAskQuestionCandidateLine(question))
+    .replace(/[?!.]+$/u, "")
+    .trim();
   if (!core) return [];
 
   const colonIdx = core.lastIndexOf(":");
   if (colonIdx >= 0 && colonIdx < core.length - 1) {
-    const options = splitAskQuestionAlternativeList(core.slice(colonIdx + 1));
+    const options = splitAskQuestionAlternativeList(core.slice(colonIdx + 1), {
+      allowPlainCommaList: true,
+    });
     if (options.length >= 2) return options;
   }
 
@@ -3594,6 +3624,7 @@ function extractAlternativeAskQuestionOptions(question: string): string[] {
       core
     )
   ) {
+    if (!askQuestionTextHasExplicitAlternativeSeparator(core)) return [];
     const options = splitAskQuestionAlternativeList(core);
     if (options.length >= 2) return options;
   }
@@ -3715,7 +3746,7 @@ function extractInlineEnumeratedAskQuestionOptions(content: string): string[] {
   if (markerMatches.length < 3) return [];
 
   const options: string[] = [];
-  for (let i = 0; i < markerMatches.length && options.length < 3; i += 1) {
+  for (let i = 0; i < markerMatches.length && options.length < 4; i += 1) {
     const current = markerMatches[i]!;
     const next = markerMatches[i + 1];
     const rawSegment = content.slice(current.textStart, next?.markerStart ?? content.length);
@@ -3724,7 +3755,7 @@ function extractInlineEnumeratedAskQuestionOptions(content: string): string[] {
     options.push(cleaned);
   }
 
-  return options.length >= 3 ? options.slice(0, 3) : [];
+  return options.length >= 3 ? options.slice(0, 4) : [];
 }
 
 function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload | undefined {
@@ -3768,7 +3799,7 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
     const cleaned = normalizeAskQuestionText(match[1]);
     if (cleaned.length === 0) continue;
     options.push(cleaned);
-    if (options.length === 3) break;
+    if (options.length === 4) break;
   }
   if (options.length < 3) {
     const inlineOptions = extractInlineEnumeratedAskQuestionOptions(displayContent);
@@ -3789,11 +3820,10 @@ function extractDynamicAskQuestion(displayContent: string): AskQuestionPayload |
     v: 1,
     name: "AskQuestion",
     prompt,
-    options: [
-      { id: "a", label: options[0]! },
-      { id: "b", label: options[1]! },
-      { id: "c", label: options[2]! },
-    ],
+    options: options.map((label, index) => ({
+      id: String.fromCharCode(97 + index),
+      label,
+    })),
   };
 }
 
@@ -4026,9 +4056,11 @@ function lineLooksLikeOptionDuplicate(
     "a",
     "b",
     "c",
+    "d",
     "one",
     "two",
     "three",
+    "four",
     "pick",
     "choose",
     "select",
@@ -4224,7 +4256,7 @@ function buildStarterPromptInstruction(forceIntroduction: boolean = false): stri
     "Functionally simple: invite the human in with ONE clear conversational hook—not a roadmap, briefing, or list of topics.",
     "Choose exactly ONE opener shape: ask the user one question, present one AskQuestion chip row, or send one generated image.",
     "Ask exactly ONE direct question to the user if you choose the prose-question shape, and end that question with a question mark.",
-    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly three options after a brief natural lead-in; use two Yes/No options only for a genuinely binary yes-or-no opener.",
+    "If you choose AskQuestion, append one valid Prism AskQuestion tool block with exactly four options after a brief natural lead-in; use two Yes/No options only for a genuinely binary yes-or-no opener.",
     "If you choose a generated image, keep the visible prose to one short sentence and append one valid sendGeneratedImage tool block; do not force an extra question.",
     "If memory hints are available and you ask a question, weave ONE specific remembered detail into the question naturally.",
     "Vary the wording so the opener feels fresh, not canned.",
@@ -4755,6 +4787,50 @@ function buildZenAskQuestionPatienceInstruction(
   ].filter(Boolean).join("\n");
 }
 
+function buildZenLiveActionContextPrompt(
+  context: ZenLiveActionContextInput | null | undefined,
+  personaLabel: string | null | undefined
+): string {
+  if (!context?.userAction && !context?.botAction) return "";
+  const speaker = personaLabel?.trim() || "PRISM";
+  const lines = [
+    "Before the user sent this message, Zen Mode showed a small live action exchange.",
+    context.userAction ? `User visible action: *${context.userAction}*.` : "",
+    context.botAction ? `${speaker} visible action: *${context.botAction}*.` : "",
+    context.moodHint ? `Visible mood hint: ${context.moodHint}.` : "",
+    "You may naturally reflect this if it helps the reply, but do not mention UI, status plates, hidden prompts, or live-action generation.",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+function appendZenLiveActionContext(
+  userMessage: string,
+  context: ZenLiveActionContextInput | null | undefined,
+  personaLabel: string | null | undefined
+): string {
+  const contextPrompt = buildZenLiveActionContextPrompt(context, personaLabel);
+  if (!contextPrompt) return userMessage;
+  return `${contextPrompt}\n\nUser sent message:\n${userMessage}`;
+}
+
+function buildZenLiveActionInterruptInstruction(
+  interrupt: ZenLiveActionInterruptInput,
+  personaLabel: string | null | undefined
+): string {
+  const speaker = personaLabel?.trim() || "PRISM";
+  return [
+    "Zen live-action reactions produced a rare high-confidence interruption candidate before the user sent their draft.",
+    `Write one brief in-character interruption as ${speaker}.`,
+    `User visible action: *${interrupt.userAction}*.`,
+    `${speaker} visible action already shown: *${interrupt.botAction}*.`,
+    interrupt.moodHint ? `Visible mood hint: ${interrupt.moodHint}.` : "",
+    interrupt.reason ? `Why this may warrant speaking: ${interrupt.reason}.` : "",
+    "Do not clear, complete, or answer the user's unsent draft. React only to the visible action moment.",
+    "Keep it short. Do not mention UI, status plates, hidden prompts, live-action generation, or confidence scores.",
+    "Do not use tools, AskQuestion JSON, image generation, or action rails.",
+  ].filter(Boolean).join("\n");
+}
+
 type OpinionRow = {
   score: number;
   trend: string;
@@ -5027,7 +5103,7 @@ function longTermMemoryClarificationPrompt(memoryText: string): string {
     `The user asked to forget this protected long-term memory: "${memoryText}".`,
     "Do not treat it as deleted yet. Reply in a gently confused way, starting from the idea that you thought they had said this.",
     "Ask whether they still want you to weaken this memory back into short-term uncertainty.",
-    "Append one Prism AskQuestion tool block with exactly three options: confirm weakening, explain the contradiction, or keep the memory.",
+    "Append one Prism AskQuestion tool block with exactly four options: confirm weakening, explain the contradiction, keep the memory, or decide later.",
   ].join("\n");
 }
 
@@ -5215,14 +5291,14 @@ function buildPromptMessages(args: {
       role: "system",
       content:
         "The user's latest message explicitly asks for AskQuestion/multiple-choice. " +
-        "For this turn, ask exactly ONE multiple-choice question (not a quiz), usually keep exactly three options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
+        "For this turn, ask exactly ONE multiple-choice question (not a quiz), usually keep exactly four options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
     });
   } else if (args.askQuestionMode === "continuation") {
     promptMessages.push({
       role: "system",
       content:
         "Continue the active AskQuestion flow from the prior turn. " +
-        "For this turn, ask exactly ONE follow-up multiple-choice question, usually keep exactly three options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
+        "For this turn, ask exactly ONE follow-up multiple-choice question, usually keep exactly four options, and append one valid Prism AskQuestion tool block after your prose. Use two Yes/No options only when the question is genuinely binary.",
     });
   }
   if (args.memoryClarification && args.memoryClarification.trim().length > 0) {
@@ -5749,6 +5825,12 @@ export async function processChatMessage(
       ? settings.zenAskQuestionPatience
       : null;
   const zenAskQuestionPatienceTurn = zenAskQuestionPatience !== null;
+  const zenLiveActionInterrupt =
+    isZenMode(mode) &&
+    settings.zenLiveActionInterrupt?.source === "live_action_interrupt"
+      ? settings.zenLiveActionInterrupt
+      : null;
+  const zenLiveActionInterruptTurn = zenLiveActionInterrupt !== null;
   const transitionSpeakerBotId = personaTransitionTurn
     ? resolveZenPersonaTransitionSpeakerBotId(personaTransition)
     : activeMemoryBotId;
@@ -5776,8 +5858,9 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     userExplicitlyRequestedAskQuestion(modelUserMessage);
-  const promptUserMessage = personaTransitionTurn
+  const promptUserMessageBase = personaTransitionTurn
     ? buildZenPersonaTransitionInstruction({
         db,
         userId,
@@ -5791,9 +5874,19 @@ export async function processChatMessage(
     ? buildZenAutonomyInstruction(zenAutonomy, settings.starterPromptLabel)
     : zenAskQuestionPatienceTurn
     ? buildZenAskQuestionPatienceInstruction(zenAskQuestionPatience, settings.starterPromptLabel)
+    : zenLiveActionInterruptTurn
+    ? buildZenLiveActionInterruptInstruction(zenLiveActionInterrupt!, settings.starterPromptLabel)
     : isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : modelUserMessage;
+  const promptUserMessage = !isStarterPrompt && !personaTransitionTurn &&
+    !zenAutonomyTurn && !zenAskQuestionPatienceTurn && !zenLiveActionInterruptTurn
+    ? appendZenLiveActionContext(
+        promptUserMessageBase,
+        settings.zenLiveActionContext,
+        settings.starterPromptLabel
+      )
+    : promptUserMessageBase;
   const effectiveProvider = settings.preferredProvider;
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
@@ -5803,7 +5896,7 @@ export async function processChatMessage(
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
     }; retrieval=${retrievalMode}; memory=${
-      skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn ? "skipped" : "enabled"
+      skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
   const provider = selectProvider(
@@ -6026,7 +6119,7 @@ export async function processChatMessage(
         settings.starterPromptLabel,
         settings.botOverrides
       );
-      if (startersInferred.length >= 3) {
+      if (startersInferred.length >= 4) {
         conversationStartersIncognito = startersInferred;
       }
     }
@@ -6242,7 +6335,7 @@ export async function processChatMessage(
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : personaTransitionTurn
           ? "Zen"
-        : zenAutonomyTurn || zenAskQuestionPatienceTurn
+        : zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
           ? "Zen"
         : generateConversationTitle(modelUserMessage);
     const conversationMode = isZenMode(mode) ? "zen" : mode;
@@ -6391,10 +6484,10 @@ export async function processChatMessage(
     opinionBotIdForTurn
   );
   const existingBotOpinion = readBotOpinion(db, userId, opinionBotIdForTurn);
-  const turnEvaluation = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+  const turnEvaluation = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+  const repairSignal = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   const zenMoodSensitivity = normalizePrismMoodSensitivity(
@@ -6407,7 +6500,7 @@ export async function processChatMessage(
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn) {
+  if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -6494,6 +6587,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn &&
     !skipMemoryForMoodCooldownTurn
       ? analyzeMemoryIntent(message)
@@ -6507,6 +6601,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !skipMemoryForMoodCooldownTurn &&
     !prismMoodIgnoreTurn
   ) {
@@ -6555,7 +6650,7 @@ export async function processChatMessage(
       ...(psychicThought ? { psychicThought } : {}),
     });
   const insertUserMessageForTurn = (): void => {
-    if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || userMessageId !== null) return;
+    if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || userMessageId !== null) return;
     userMessageId = randomId(12);
     const promptShortcutPayload = buildUserMessageToolPayload();
     db.prepare(
@@ -6614,6 +6709,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
@@ -6645,6 +6741,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn &&
     userMessageRequestsZenSessionMemory(message)
       ? loadZenSessionMemoryOverview({
@@ -6837,10 +6934,11 @@ export async function processChatMessage(
   const shouldBackfillAskQuestion =
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     (explicitAskQuestionRequest ||
       assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent));
   const askQuestionRaw =
-    zenAutonomyTurn || zenAskQuestionPatienceTurn
+    zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
       ? undefined
       : parsedAssistant.askQuestion ??
         (shouldBackfillAskQuestion
@@ -6870,7 +6968,7 @@ export async function processChatMessage(
         key: prismMood.moodKey,
         confidence: prismMood.confidence,
       }
-    : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn
+    : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn || zenLiveActionInterruptTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
         assistantContent: assistantDisplay,
@@ -6879,7 +6977,7 @@ export async function processChatMessage(
         botOpinion: existingBotOpinion,
         repairSignal,
       });
-  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn
+  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? undefined
     : parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
@@ -6966,22 +7064,22 @@ export async function processChatMessage(
       settings.starterPromptLabel,
       settings.botOverrides
     );
-    if (startersPersisted.length >= 3) {
+    if (startersPersisted.length >= 4) {
       conversationStartersPersisted = startersPersisted;
     }
   }
   throwIfCancelledBeforeAssistantReply();
-  const assistantAskQuestionForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn
+  const assistantAskQuestionForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? undefined
     : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
-  const tellFictionalStoryForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn
+  const tellFictionalStoryForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? undefined
     : chooseTellFictionalStoryForTurn({
         displayContent: assistantDisplay,
         parsed: parsedAssistant.tellFictionalStory,
         askQuestion: assistantAskQuestionForTurn,
       });
-  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn
+  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? []
     : buildAssistantToolCallEvents({
         rawReply: assistantReplyRaw,
@@ -7011,13 +7109,18 @@ export async function processChatMessage(
           activeBotId: zenAutonomy.activeBotId,
           toBotId: assistantMemoryBotId,
         }
-      : undefined;
+      : zenLiveActionInterruptTurn
+        ? {
+            kind: "zen-live-action-interrupt" as const,
+            activeBotId: zenLiveActionInterrupt!.activeBotId,
+          }
+        : undefined;
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
     tellFictionalStory: tellFictionalStoryForTurn,
     moodKey: assistantMood.key,
     moodConfidence: assistantMood.confidence,
-    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn ? undefined : parsedAssistant.zenDisplay,
+    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
     zenTurn: zenTurnMarker,
   });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
@@ -7093,7 +7196,7 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
-  const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+  const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, opinionBotIdForTurn) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
@@ -7110,7 +7213,7 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || commandCenterPromptTurn
+  const botOpinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
     ? readBotOpinion(db, userId, opinionBotIdForTurn)
     : upsertBotOpinionFromTurn({
         db,
@@ -7125,6 +7228,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn &&
     userMessageId
   ) {
@@ -7240,6 +7344,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
@@ -7445,6 +7550,7 @@ export async function processChatMessage(
     !personaTransitionTurn &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
     !commandCenterPromptTurn
   ) {
     await ensureAboutYouMemory({

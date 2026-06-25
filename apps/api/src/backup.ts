@@ -6,6 +6,8 @@ import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
   normalizeZenAutonomyEnabled,
+  normalizeZenMessageFontMaxPx,
+  normalizeZenMessageFontMinPx,
   normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenWallpaperGrayscaleEnabled,
   normalizeZenWallpaperOpacity,
@@ -41,6 +43,8 @@ export interface BackupUserSettings {
   zenWallpaperGrayscaleEnabled: boolean;
   zenWallpaperBlurredEdgesEnabled: boolean;
   zenWallpaperStyleNotes: string;
+  zenMessageFontMinPx?: number;
+  zenMessageFontMaxPx?: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
@@ -172,6 +176,8 @@ export function exportUserSnapshot(
          zen_wallpaper_grayscale_enabled,
          zen_wallpaper_blurred_edges_enabled,
          zen_wallpaper_style_notes,
+         zen_message_font_min_px,
+         zen_message_font_max_px,
          zen_ask_question_patience_enabled,
          zen_ask_question_patience_ms,
          zen_autonomy_enabled,
@@ -220,6 +226,8 @@ export function exportUserSnapshot(
         zen_wallpaper_grayscale_enabled: number | null;
         zen_wallpaper_blurred_edges_enabled: number | null;
         zen_wallpaper_style_notes: string | null;
+        zen_message_font_min_px: number | null;
+        zen_message_font_max_px: number | null;
         zen_ask_question_patience_enabled: number | null;
         zen_ask_question_patience_ms: number | null;
         zen_autonomy_enabled: number | null;
@@ -279,6 +287,14 @@ export function exportUserSnapshot(
         ),
         zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
           user.zen_wallpaper_style_notes
+        ),
+        zenMessageFontMinPx: normalizeZenMessageFontMinPx(
+          user.zen_message_font_min_px
+        ),
+        zenMessageFontMaxPx: normalizeZenMessageFontMaxPx(
+          user.zen_message_font_max_px,
+          undefined,
+          normalizeZenMessageFontMinPx(user.zen_message_font_min_px)
         ),
         zenAskQuestionPatienceEnabled: normalizeZenAskQuestionPatienceEnabled(
           user.zen_ask_question_patience_enabled
@@ -536,6 +552,14 @@ export function importUserSnapshot(
     const encryptedElevenLabsKey = elevenLabsApiKey
       ? encryptText(elevenLabsApiKey, userKey)
       : null;
+    const zenMessageFontMinPx = normalizeZenMessageFontMinPx(
+      settings.zenMessageFontMinPx
+    );
+    const zenMessageFontMaxPx = normalizeZenMessageFontMaxPx(
+      settings.zenMessageFontMaxPx,
+      undefined,
+      zenMessageFontMinPx
+    );
     db.prepare(`
       UPDATE users
       SET
@@ -566,6 +590,8 @@ export function importUserSnapshot(
         zen_wallpaper_grayscale_enabled = ?,
         zen_wallpaper_blurred_edges_enabled = ?,
         zen_wallpaper_style_notes = ?,
+        zen_message_font_min_px = ?,
+        zen_message_font_max_px = ?,
         zen_ask_question_patience_enabled = ?,
         zen_ask_question_patience_ms = ?,
         zen_autonomy_enabled = ?,
@@ -627,6 +653,8 @@ export function importUserSnapshot(
         ? 1
         : 0,
       normalizeZenWallpaperStyleNotes(settings.zenWallpaperStyleNotes),
+      zenMessageFontMinPx,
+      zenMessageFontMaxPx,
       normalizeZenAskQuestionPatienceEnabled(settings.zenAskQuestionPatienceEnabled) ? 1 : 0,
       normalizeZenAskQuestionPatienceMs(settings.zenAskQuestionPatienceMs),
       normalizeZenAutonomyEnabled(settings.zenAutonomyEnabled) ? 1 : 0,

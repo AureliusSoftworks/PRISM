@@ -67,7 +67,8 @@ export function getPendingAskQuestionState<
     if (
       !askQuestion ||
       askQuestion.name !== "AskQuestion" ||
-      (askQuestion.options.length !== 2 && askQuestion.options.length !== 3) ||
+      askQuestion.options.length < 2 ||
+      askQuestion.options.length > 4 ||
       message.askQuestionTimedOut === true ||
       locallyClosedAssistantMessageIds?.has(message.id)
     ) {

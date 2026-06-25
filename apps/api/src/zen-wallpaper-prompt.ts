@@ -4,6 +4,7 @@ type ZenWallpaperPromptArgs = {
   botName: string | null;
   botSystemPrompt: string | null;
   styleNotes?: string | null;
+  generationIndex?: number | null;
 };
 
 type VisualCueRule = {
@@ -11,7 +12,41 @@ type VisualCueRule = {
   patterns: RegExp[];
 };
 
-const MAX_ZEN_WALLPAPER_CUES = 4;
+const MAX_ZEN_WALLPAPER_CUES = 12;
+export const ZEN_WALLPAPER_THEME_COUNT = 4;
+
+type ZenWallpaperThemeLane = {
+  label: string;
+  instruction: string;
+  fallbackCue: string;
+};
+
+const ZEN_WALLPAPER_THEME_LANES: ZenWallpaperThemeLane[] = [
+  {
+    label: "light signature",
+    instruction:
+      "lead with the chat's key light, value contrast, and color temperature; use one broad luminous beam, glow field, or shadow falloff as the main visual treatment",
+    fallbackCue: "pearl dawn light",
+  },
+  {
+    label: "material memory",
+    instruction:
+      "lead with tactile surfaces, grain, dust, fibers, vapor, or weathering; make texture and touch the main visual treatment, not large flat shapes",
+    fallbackCue: "soft glass and paper grain",
+  },
+  {
+    label: "spatial rhythm",
+    instruction:
+      "lead with calm geometry, repeated silhouettes, horizon lines, or architectural spacing; make the composition read through clear structure and depth",
+    fallbackCue: "slow geometric depth",
+  },
+  {
+    label: "emotional weather",
+    instruction:
+      "lead with motion, haze, atmosphere, and the emotional temperature of the exchange; make drifting air, mist, rain-soft glow, or slow arcs the main visual treatment",
+    fallbackCue: "quiet mist and reflective air",
+  },
+];
 
 const HUMOR_PATTERN = /\b(funny|humou?r|joke|jesters?|laughter|laugh|antics|capering|comedy|comic)\b/i;
 const MELANCHOLY_PATTERN = /\b(melancholy|sad|sorrow|loss(?:es)?|tears?|lament(?:ation)?s?|wistful|lonely|grief|sighs?)\b/i;
@@ -90,6 +125,82 @@ const ZEN_WALLPAPER_CUE_RULES: VisualCueRule[] = [
     ],
   },
   {
+    label: "tidal glass gradients",
+    patterns: [
+      /\bocean\b/i,
+      /\bsea\b/i,
+      /\btide(?:s|al)?\b/i,
+      /\bshore(?:line)?\b/i,
+      /\bcoast(?:al)?\b/i,
+      /\bwave(?:s)?\b/i,
+    ],
+  },
+  {
+    label: "rain-washed light",
+    patterns: [
+      /\brain(?:y|fall)?\b/i,
+      /\bstorm(?:y)?\b/i,
+      /\bthunder\b/i,
+      /\bcloud(?:s|y)?\b/i,
+      /\bweather\b/i,
+      /\bwindowpane\b/i,
+    ],
+  },
+  {
+    label: "leaf-shadow texture",
+    patterns: [
+      /\bforest\b/i,
+      /\bwoods?\b/i,
+      /\bgarden\b/i,
+      /\bleaves?\b/i,
+      /\bbranches?\b/i,
+      /\bmoss\b/i,
+    ],
+  },
+  {
+    label: "starfield hush",
+    patterns: [
+      /\bstars?\b/i,
+      /\bnight\b/i,
+      /\bcosmos\b/i,
+      /\bgalax(?:y|ies)\b/i,
+      /\bconstellation(?:s)?\b/i,
+      /\bsky\b/i,
+    ],
+  },
+  {
+    label: "ember glow",
+    patterns: [
+      /\bfire\b/i,
+      /\bflame(?:s)?\b/i,
+      /\bcandle(?:light|s)?\b/i,
+      /\bember(?:s)?\b/i,
+      /\bhearth\b/i,
+    ],
+  },
+  {
+    label: "quiet desk geometry",
+    patterns: [
+      /\bdesk\b/i,
+      /\bworkspace\b/i,
+      /\bnotebook\b/i,
+      /\bjournal\b/i,
+      /\bpaperwork\b/i,
+      /\bworkflow\b/i,
+    ],
+  },
+  {
+    label: "map-line drift",
+    patterns: [
+      /\bmap(?:s)?\b/i,
+      /\btravel(?:ing|led)?\b/i,
+      /\bjourney\b/i,
+      /\broad(?:s)?\b/i,
+      /\btrain(?:s)?\b/i,
+      /\bpath(?:s)?\b/i,
+    ],
+  },
+  {
     label: "fiddle-string lines",
     patterns: [
       /\bfiddle\b/i,
@@ -156,7 +267,6 @@ const ZEN_WALLPAPER_CUE_RULES: VisualCueRule[] = [
       /\bmodel(?:s)?\b/i,
       /\blocal\b/i,
       /\bprivacy\b/i,
-      /\bmemory\b/i,
       /\bprompt(?:s)?\b/i,
     ],
   },
@@ -199,6 +309,44 @@ function formatCueList(cues: readonly string[]): string {
   return `${cues.slice(0, -1).join(", ")}, and ${cues[cues.length - 1]}`;
 }
 
+function normalizeGenerationIndex(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function selectThemeLane(generationIndex: number): ZenWallpaperThemeLane {
+  return ZEN_WALLPAPER_THEME_LANES[
+    generationIndex % ZEN_WALLPAPER_THEME_LANES.length
+  ]!;
+}
+
+function selectPrimaryCue(
+  cues: readonly string[],
+  generationIndex: number,
+  fallbackCue: string
+): string {
+  if (cues.length === 0) return fallbackCue;
+  const themeOffset = generationIndex % ZEN_WALLPAPER_THEME_COUNT;
+  const cueIndex = Math.min(
+    cues.length - 1,
+    Math.floor((themeOffset * cues.length) / ZEN_WALLPAPER_THEME_COUNT)
+  );
+  return cues[cueIndex] ?? fallbackCue;
+}
+
+function selectSupportingCues(
+  cues: readonly string[],
+  primaryCue: string
+): string {
+  const primaryIndex = Math.max(0, cues.indexOf(primaryCue));
+  const rotatedCues = [
+    ...cues.slice(primaryIndex + 1),
+    ...cues.slice(0, primaryIndex),
+  ];
+  const supporting = rotatedCues.filter((cue) => cue !== primaryCue).slice(0, 3);
+  return formatCueList(supporting);
+}
+
 export function clampZenWallpaperPromptText(
   text: string | null | undefined,
   maxLen: number
@@ -206,6 +354,21 @@ export function clampZenWallpaperPromptText(
   const normalized = (text ?? "").replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLen) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
+}
+
+function isDefaultPrismBotName(name: string): boolean {
+  return name.length === 0 || name.toLowerCase() === "prism";
+}
+
+function composeZenWallpaperPersonaContext(args: ZenWallpaperPromptArgs): string | null {
+  const botName = clampZenWallpaperPromptText(args.botName, 80);
+  if (isDefaultPrismBotName(botName)) return null;
+
+  const personaExcerpt = clampZenWallpaperPromptText(args.botSystemPrompt, 420);
+  const personaCue = personaExcerpt
+    ? ` Persona cue: ${personaExcerpt}`
+    : "";
+  return `Active bot/persona visual context: ${botName}.${personaCue} Use the persona's implied setting, objects, palette, materials, and mood when useful; depict the world or atmosphere rather than the character.`;
 }
 
 export function normalizeZenWallpaperPromptOverride(
@@ -247,24 +410,34 @@ export function composeZenWallpaperPrompt(args: ZenWallpaperPromptArgs): string 
   const cues = extractZenWallpaperVisualCues(
     `${clampZenWallpaperPromptText(args.initialUserPrompt, 700)}\n${clampZenWallpaperPromptText(args.recentContext, 900)}`
   );
-  const cueText =
-    cues.length > 0
-      ? formatCueList(cues)
-      : "reflective quiet, soft glass haze, and slow atmospheric depth";
+  const generationIndex = normalizeGenerationIndex(args.generationIndex);
+  const lane = selectThemeLane(generationIndex);
+  const themeNumber = (generationIndex % ZEN_WALLPAPER_THEME_COUNT) + 1;
+  const primaryCue = selectPrimaryCue(cues, generationIndex, lane.fallbackCue);
+  const supportingCueText = selectSupportingCues(cues, primaryCue);
   const styleNotes = clampZenWallpaperPromptText(args.styleNotes, 320);
+  const personaContext = composeZenWallpaperPersonaContext(args);
+  const styleOrPersonaDriven = Boolean(styleNotes || personaContext);
 
   return [
-    "Ambient art wallpaper for a calm Zen chat canvas, abstract first with soft symbolic motifs.",
-    "Mostly charcoal, pearl, and mist-gray with soft gradients, atmospheric texture, spacious negative space, and gentle depth.",
+    "Widescreen ambient wallpaper for a calm Zen chat canvas; it may be abstract, scenic, symbolic, or representational when the chat or active persona calls for it.",
+    styleOrPersonaDriven
+      ? "Let the active style or persona choose the palette, materials, setting, and vividness; PRISM house colors are optional, not required."
+      : "For default PRISM or fallback atmosphere, favor charcoal, pearl, mist-gray, soft gradients, atmospheric texture, gentle depth, and one restrained prismatic accent.",
+    personaContext,
+    `Wallpaper theme ${themeNumber}/${ZEN_WALLPAPER_THEME_COUNT} - ${lane.label}: ${lane.instruction}.`,
     cues.length > 0
-      ? `Use soft symbolic motifs suggested by ${cueText}; let them appear as peripheral textures, light, silhouettes, materials, or quiet still-life traces rather than a literal scene.`
-      : `Subtle abstract cues from ${cueText}.`,
+      ? `Make ${primaryCue} the clearest chat-derived influence${supportingCueText ? `, supported by ${supportingCueText}` : ""}; show these as recognizable broad light, material, silhouette, setting, spatial, or weather decisions rather than barely-there noise.`
+      : `No strong concrete motif was found in the chat, so make ${primaryCue} the clear influence through recognizable broad light, material, silhouette, setting, spatial, or weather decisions rather than barely-there noise.`,
     styleNotes
-      ? `User atmosphere style notes: ${styleNotes}. Treat these as mood, material, texture, and composition guidance only; do not let them override PRISM's color, safety, or negative-space rules.`
+      ? `User atmosphere style notes: ${styleNotes}. Make this style visibly legible through materials, composition, and surface treatment; these notes may override palette and setting, but not safety, widescreen, or center-readability rules.`
       : null,
-    "Add faint prismatic rainbow accents only as restrained edge-light, refractions, haze, or thin spectral glints.",
+    "Keep the four-theme series cohesive as chat wallpapers: widescreen, full-bleed, readable, and center-safe, while making this specific theme distinct at a glance through dominant treatment, scale, color, and composition.",
+    styleOrPersonaDriven
+      ? "Do not force prismatic rainbow accents unless they naturally fit the chosen style, persona, or scene."
+      : "Add prismatic rainbow accents only as restrained edge-light, refractions, haze, or thin spectral glints.",
     "Full-bleed edge-to-edge composition with atmosphere continuing past all four edges; no borders, frames, mats, letterboxing, pillarboxing, side gutters, or empty bars.",
-    "No dominant focal subject, no busy detail, suitable for desktop and mobile chat backgrounds.",
-    "No readable text, letters, numbers, people, faces, bodies, characters, creatures, logos, icons, UI, or screenshots.",
+    "Use a widescreen composition with the central prose region comparatively empty, low-detail, and softly readable; keep vivid or detailed elements toward the edges or as broad environmental depth.",
+    "No readable text, letters, numbers, people, faces, bodies, characters, creatures, logos, icons, UI, screenshots, standalone symbols, pictograms, or emblems.",
   ].filter((part): part is string => Boolean(part)).join(" ");
 }

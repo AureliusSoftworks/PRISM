@@ -6,6 +6,7 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -228,10 +229,14 @@ import {
   type ZenAskQuestionPatienceInput,
   type ZenAutonomyDecision,
   type ZenAutonomyInput,
+  type ZenLiveActionContextInput,
+  type ZenLiveActionInterruptInput,
+  type ZenLiveActionReactionResponse,
   type ZenPersonaTransitionInput,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
+  normalizeComposerSlashCommandLine,
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
 } from "./prismDevChatCommands";
@@ -322,10 +327,18 @@ import {
 } from "./botMention";
 import {
   resolveCurrentZenActionCue,
+  resolvePersistentZenActionPreview,
   resolveZenActionPresentation,
-  resolveZenActionPreview,
+  ZEN_ACTION_TEXT_LAG_MS,
   type ZenActionCue,
 } from "./zenActions";
+import {
+  normalizeZenLiveBotActionState,
+  responseIsStaleZenLiveAction,
+  zenLiveActionMoodToBotMood,
+  zenLiveActionPlateFace,
+  type ZenLiveBotActionState,
+} from "./zenLiveActions";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -367,7 +380,7 @@ import {
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
 import {
-  resolveChatRevealDelayMultiplierForTyping,
+  resolveChatRevealTypingPacing,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
@@ -3730,7 +3743,7 @@ type ParsedGlobalClearCommand =
   | { kind: "error"; error: string };
 
 function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
-  const trimmed = text.trim();
+  const trimmed = normalizeComposerSlashCommandLine(text).trim();
   const match = /^\/(?:clear|cls)(?:\s|$)/i.exec(trimmed);
   if (!match) return { kind: "none" };
   const rest = trimmed.slice(match[0].length).trim();
@@ -4370,14 +4383,16 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
   if (
     direct?.name === "AskQuestion" &&
     Array.isArray(direct.options) &&
-    (direct.options.length === 2 || direct.options.length === 3)
+    direct.options.length >= 2 &&
+    direct.options.length <= 4
   ) {
     return refineAskQuestionPayloadFromDisplayClient(msg.content, direct);
   }
   const parsed = parseAssistantPrismTools(msg.content);
   if (
     parsed.askQuestion?.name === "AskQuestion" &&
-    (parsed.askQuestion.options.length === 2 || parsed.askQuestion.options.length === 3)
+    parsed.askQuestion.options.length >= 2 &&
+    parsed.askQuestion.options.length <= 4
   ) {
     return refineAskQuestionPayloadFromDisplayClient(msg.content, parsed.askQuestion);
   }
@@ -4410,8 +4425,10 @@ const CHAT_MODE_ASSISTANT_AUTOSCROLL_MIN_CORRECTION_PX = 8;
 const CHAT_MODE_HEADER_REVEAL_RATIO = 0.3;
 const CHAT_MODE_COMPOSER_REVEAL_RATIO = 0.34;
 const CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER = 2;
-const CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS = 1000;
+const CHAT_MODE_COMPOSING_REVEAL_PAUSE_MS = 2400;
 const CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS = 1200;
+const CHAT_MODE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240;
+const CHAT_MODE_COMPOSER_TYPING_PUBLISH_MS = 240;
 const CHAT_MODE_TYPED_LETTER_STEP_MS = 42;
 const CHAT_MODE_TYPED_LETTER_FADE_MS = 340;
 const ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
@@ -4436,6 +4453,12 @@ const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
 const CHAT_MODE_USER_MESSAGE_FADE_MS = 540;
 const CHAT_MODE_EPHEMERAL_TICK_MS = 120;
+const CHAT_MODE_EPHEMERAL_COMPOSING_TICK_MS = 240;
+const ZEN_FOLLOWUP_ACTIVITY_RENDER_THROTTLE_MS = 600;
+const ZEN_LIVE_ACTION_REACTION_DEBOUNCE_MS = 520;
+const ZEN_LIVE_ACTION_IDLE_FIRST_MS = 45_000;
+const ZEN_LIVE_ACTION_IDLE_REPEAT_MS = 150_000;
+const ZEN_LIVE_ACTION_INTERRUPT_COOLDOWN_MS = 120_000;
 const CHAT_MODE_FENCED_CODE_BLOCK_PATTERN = /```[\s\S]*?```/;
 const CHAT_MODE_FENCED_CODE_BLOCK_CAPTURE_PATTERN = /```[^\n\r]*\r?\n([\s\S]*?)```/g;
 const CHAT_MODE_STRONG_MARKER_PATTERN = /\*\*/g;
@@ -4453,6 +4476,14 @@ const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX = 15.8;
 const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX = 27.2;
 const CHAT_MODE_USER_MESSAGE_FONT_MIN_PX = 18.4;
 const CHAT_MODE_USER_MESSAGE_FONT_MAX_PX = 32.8;
+const DEFAULT_ZEN_MESSAGE_FONT_MIN_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
+const DEFAULT_ZEN_MESSAGE_FONT_MAX_PX = CHAT_MODE_USER_MESSAGE_FONT_MAX_PX;
+const MIN_ZEN_MESSAGE_FONT_SIZE_PX = 12;
+const MAX_ZEN_MESSAGE_FONT_SIZE_PX = 42;
+const CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_RATIO =
+  CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX / CHAT_MODE_USER_MESSAGE_FONT_MAX_PX;
+const CHAT_MODE_USER_MESSAGE_FONT_MIN_RATIO =
+  CHAT_MODE_USER_MESSAGE_FONT_MIN_PX / CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
 const CHAT_MODE_MESSAGE_FONT_MIN_LINES = 1;
 const CHAT_MODE_MESSAGE_FONT_MAX_LINES = 18;
 const CHAT_MODE_MESSAGE_FONT_DEFAULT_PX = CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
@@ -4468,6 +4499,11 @@ const DEFAULT_CHAT_STARTUP_SUMMARY = "Type a message below to start the conversa
 const CHAT_MODE_LINE_DISSOLVE_STAGGER_MS = 140;
 
 type ChatModeTypedTokenStyle = "default" | "rainbow";
+
+interface ZenMessageFontBounds {
+  minPx: number;
+  maxPx: number;
+}
 
 interface ChatModeTypedTokenMeta {
   style: ChatModeTypedTokenStyle;
@@ -4914,7 +4950,7 @@ function extractInlineEnumeratedAskQuestionOptions(content: string): string[] {
   if (markerMatches.length < 3) return [];
 
   const options: string[] = [];
-  for (let i = 0; i < markerMatches.length && options.length < 3; i += 1) {
+  for (let i = 0; i < markerMatches.length && options.length < 4; i += 1) {
     const current = markerMatches[i]!;
     const next = markerMatches[i + 1];
     const rawSegment = content.slice(current.textStart, next?.markerStart ?? content.length);
@@ -4923,7 +4959,7 @@ function extractInlineEnumeratedAskQuestionOptions(content: string): string[] {
     options.push(cleaned);
   }
 
-  return options.length >= 3 ? options.slice(0, 3) : [];
+  return options.length >= 3 ? options.slice(0, 4) : [];
 }
 
 function assistantLikelyIntendedAskQuestionClient(content: string): boolean {
@@ -4979,7 +5015,7 @@ function extractDynamicAskQuestion(content: string): NonNullable<Message["askQue
     const cleaned = normalizeAskQuestionText(match[1]);
     if (cleaned.length === 0) continue;
     options.push(cleaned);
-    if (options.length === 3) break;
+    if (options.length === 4) break;
   }
   if (options.length < 3) {
     const inlineOptions = extractInlineEnumeratedAskQuestionOptions(content);
@@ -5000,11 +5036,10 @@ function extractDynamicAskQuestion(content: string): NonNullable<Message["askQue
     v: 1,
     name: "AskQuestion",
     prompt,
-    options: [
-      { id: "a", label: options[0]! },
-      { id: "b", label: options[1]! },
-      { id: "c", label: options[2]! },
-    ],
+    options: options.map((label, index) => ({
+      id: String.fromCharCode(97 + index),
+      label,
+    })),
   };
 }
 
@@ -5994,6 +6029,8 @@ interface UserSettings {
   zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
   zenCanvasTypingSpeed: number;
+  zenMessageFontMinPx: number;
+  zenMessageFontMaxPx: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
@@ -6024,6 +6061,8 @@ type ZenModeSettingsFields = Pick<
   | "zenWallpaperRevealSpanMessageCount"
   | "zenMoodSensitivity"
   | "zenCanvasTypingSpeed"
+  | "zenMessageFontMinPx"
+  | "zenMessageFontMaxPx"
   | "zenAskQuestionPatienceEnabled"
   | "zenAskQuestionPatienceMs"
   | "zenAutonomyEnabled"
@@ -7772,9 +7811,10 @@ const SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD =
 const SETTINGS_LENIENT_LOCAL_FALLBACK_MODEL_FIELD = "lenientLocalFallbackModel";
 const SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD =
   "lenientLocalImageFallbackModel";
-const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.15;
+const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
+const ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH = 0.34;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
 const DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED = true;
@@ -7794,7 +7834,10 @@ const ZEN_WALLPAPER_STYLE_OPTIONS = [
     color: PRISM_COLORS.s,
     glyph: Droplets,
     notes:
+      "style preset: luminous misted glass abstraction; overlapping translucent panes, condensation beads, cool blue-gray refractions, glossy wet edges, layered depth; avoid paper or stationery focal shapes",
+    aliases: [
       "style preset: misted glass abstraction; translucent panes, condensation haze, soft refraction, layered depth, quiet gallery light",
+    ],
     ariaLabel: "Glass atmosphere style",
   },
   {
@@ -7803,7 +7846,10 @@ const ZEN_WALLPAPER_STYLE_OPTIONS = [
     color: PRISM_COLORS.m,
     glyph: Brush,
     notes:
+      "style preset: monochrome ink wash abstraction; sumi-e wash blooms, feathered pigment edges, wet brush gradients, pooled ink, handmade paper fibers; avoid crisp digital geometry",
+    aliases: [
       "style preset: ink wash abstraction; diluted brush washes, feathered edges, handmade paper grain, pooled pigment, open negative space",
+    ],
     ariaLabel: "Ink atmosphere style",
   },
   {
@@ -7812,7 +7858,10 @@ const ZEN_WALLPAPER_STYLE_OPTIONS = [
     color: PRISM_COLORS.r,
     glyph: Building2,
     notes:
+      "style preset: architectural shadow abstraction; large dark planes, doorway thresholds, slatted light bands, corridor depth, long soft shadows, measured spatial rhythm; avoid stationery objects",
+    aliases: [
       "style preset: architectural shadow abstraction; minimal interior planes, slatted light, threshold geometry, long soft shadows, measured spatial rhythm",
+    ],
     ariaLabel: "Shadow atmosphere style",
   },
   {
@@ -7821,7 +7870,10 @@ const ZEN_WALLPAPER_STYLE_OPTIONS = [
     color: PRISM_COLORS.p,
     glyph: ScanLine,
     notes:
+      "style preset: analog film grain abstraction; visible fine grain, halation around highlights, dust speckles, faint scratch marks, soft vignette, muted warm emulsion; avoid clean glass surfaces",
+    aliases: [
       "style preset: analog film grain abstraction; subtle 35mm texture, low contrast halation, soft vignette, gentle bloom, lightly worn emulsion",
+    ],
     ariaLabel: "Grain atmosphere style",
   },
   {
@@ -7830,7 +7882,10 @@ const ZEN_WALLPAPER_STYLE_OPTIONS = [
     color: PRISM_COLORS.i,
     glyph: Waves,
     notes:
+      "style preset: slow ocean light abstraction; horizontal wave bands, liquid reflections, tidal blur, pearly horizon shimmer, blue-green depth, soft waterline glow; avoid desk or stationery shapes",
+    aliases: [
       "style preset: slow ocean light abstraction; horizon shimmer, tidal blur, glassy reflections, calm wave bands, liquid atmospheric depth",
+    ],
     ariaLabel: "Tide atmosphere style",
   },
 ] as const;
@@ -8202,7 +8257,18 @@ function normalizeZenWallpaperTextMaskSetting(_value: unknown): boolean {
   return DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED;
 }
 
-function normalizeZenWallpaperGrayscaleSetting(_value: unknown): boolean {
+function normalizeZenWallpaperGrayscaleSetting(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
+    }
+  }
   return DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED;
 }
 
@@ -8235,8 +8301,18 @@ function normalizeZenWallpaperStyleNotesSetting(value: unknown): string {
 function resolveZenWallpaperStyleOptionNotes(value: unknown): string {
   const normalized = normalizeZenWallpaperStyleNotesSetting(value).toLowerCase();
   const matchedOption = ZEN_WALLPAPER_STYLE_OPTIONS.find(
-    (option) =>
-      normalizeZenWallpaperStyleNotesSetting(option.notes).toLowerCase() === normalized
+    (option) => {
+      if (normalizeZenWallpaperStyleNotesSetting(option.notes).toLowerCase() === normalized) {
+        return true;
+      }
+      const aliases = "aliases" in option ? option.aliases : undefined;
+      return (
+        aliases?.some(
+          (alias) =>
+            normalizeZenWallpaperStyleNotesSetting(alias).toLowerCase() === normalized
+        ) ?? false
+      );
+    }
   );
   return matchedOption?.notes ?? "";
 }
@@ -8450,6 +8526,34 @@ function formatZenCanvasTypingSpeed(value: unknown): string {
     .replace(/\.?0+$/u, "")}x`;
 }
 
+function normalizeZenMessageFontMinPxSetting(value: unknown): number {
+  return normalizeDecimalSetting(
+    value,
+    DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
+    MIN_ZEN_MESSAGE_FONT_SIZE_PX,
+    MAX_ZEN_MESSAGE_FONT_SIZE_PX,
+    1
+  );
+}
+
+function normalizeZenMessageFontMaxPxSetting(
+  value: unknown,
+  minimum = MIN_ZEN_MESSAGE_FONT_SIZE_PX
+): number {
+  const normalizedMinimum = normalizeZenMessageFontMinPxSetting(minimum);
+  return normalizeDecimalSetting(
+    value,
+    DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+    normalizedMinimum,
+    MAX_ZEN_MESSAGE_FONT_SIZE_PX,
+    1
+  );
+}
+
+function formatZenMessageFontSizePx(value: number): string {
+  return `${value.toFixed(1).replace(/\.0$/u, "")}px`;
+}
+
 function normalizeZenAskQuestionPatienceEnabledSetting(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
@@ -8511,6 +8615,8 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
       DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    zenMessageFontMinPx: DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
+    zenMessageFontMaxPx: DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: false,
@@ -8560,6 +8666,9 @@ function normalizeZenModeSettingsFields(
   const zenSessionIdleGapMs = normalizeZenSessionIdleGapSetting(
     settings?.zenSessionIdleGapMs
   );
+  const zenMessageFontMinPx = normalizeZenMessageFontMinPxSetting(
+    settings?.zenMessageFontMinPx
+  );
   return {
     zenWallpaperOpacity: normalizeZenWallpaperOpacitySetting(
       settings?.zenWallpaperOpacity
@@ -8601,6 +8710,11 @@ function normalizeZenModeSettingsFields(
     ),
     zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeedSetting(
       settings?.zenCanvasTypingSpeed
+    ),
+    zenMessageFontMinPx,
+    zenMessageFontMaxPx: normalizeZenMessageFontMaxPxSetting(
+      settings?.zenMessageFontMaxPx,
+      zenMessageFontMinPx
     ),
     zenAskQuestionPatienceEnabled:
       normalizeZenAskQuestionPatienceEnabledSetting(
@@ -16006,6 +16120,8 @@ interface MessageBodyProps {
   chatPhase?: ChatMessageTemporalPhase;
   /** Locks chat line sizing to a previously committed visual height after interruption. */
   chatCommittedLineCount?: number;
+  /** Zen text-size range used by dynamic canvas message sizing. */
+  messageFontBounds?: ZenMessageFontBounds;
   /** Optional externally-driven token count for deterministic word reveal. */
   forcedVisibleTokenCount?: number;
   /** Assistant typing cadence key for mood-based reveal speed. */
@@ -17713,7 +17829,40 @@ function resolveMessageDisplayContent(message: Message): string {
     : message.content;
 }
 
-function resolveMessageVisualSizingContent(message: Message): string {
+function messageCanUseZenActionPresentation(message: Message): boolean {
+  return (
+    (message.role === "assistant" || message.role === "user") &&
+    !message.promptShortcut &&
+    !message.promptWildcards
+  );
+}
+
+function resolveZenActionDisplayContent(content: string, enabled: boolean): string {
+  if (!enabled) return content;
+  const presentation = resolveZenActionPresentation(content);
+  return presentation.hasActions ? presentation.mainText : content;
+}
+
+function resolveMessageZenActionTextLagMs(message: Message, enabled: boolean): number {
+  if (!enabled) return 0;
+  const presentation = resolveZenActionPresentation(resolveMessageDisplayContent(message));
+  return presentation.hasActions && !presentation.actionOnly ? ZEN_ACTION_TEXT_LAG_MS : 0;
+}
+
+function resolveMessageRevealContent(
+  message: Message,
+  options: { zenActionsEnabled?: boolean } = {}
+): string {
+  return resolveZenActionDisplayContent(
+    resolveMessageDisplayContent(message),
+    options.zenActionsEnabled === true
+  );
+}
+
+function resolveMessageVisualSizingContent(
+  message: Message,
+  options: { zenActionsEnabled?: boolean } = {}
+): string {
   if (
     message.role === "user" &&
     message.promptShortcut &&
@@ -17721,7 +17870,7 @@ function resolveMessageVisualSizingContent(message: Message): string {
   ) {
     return promptShortcutVisualSizingText(message.promptShortcut);
   }
-  return resolveMessageDisplayContent(message);
+  return resolveMessageRevealContent(message, options);
 }
 
 function tokenizeMessageReveal(text: string): string[] {
@@ -17769,12 +17918,28 @@ function resolveRevealDurationMsForTokens(
 
 function resolveChatModeMessageFontSizePx(
   lineCount: number,
-  role: "assistant" | "user" = "assistant"
+  role: "assistant" | "user" = "assistant",
+  bounds?: ZenMessageFontBounds
 ): number {
+  const baseMinFontPx = normalizeZenMessageFontMinPxSetting(bounds?.minPx);
+  const baseMaxFontPx = normalizeZenMessageFontMaxPxSetting(
+    bounds?.maxPx,
+    baseMinFontPx
+  );
   const minFontPx =
-    role === "user" ? CHAT_MODE_USER_MESSAGE_FONT_MIN_PX : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MIN_PX;
+    role === "user"
+      ? Math.min(
+          baseMaxFontPx,
+          baseMinFontPx * CHAT_MODE_USER_MESSAGE_FONT_MIN_RATIO
+        )
+      : baseMinFontPx;
   const maxFontPx =
-    role === "user" ? CHAT_MODE_USER_MESSAGE_FONT_MAX_PX : CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_PX;
+    role === "user"
+      ? baseMaxFontPx
+      : Math.max(
+          minFontPx,
+          baseMaxFontPx * CHAT_MODE_ASSISTANT_MESSAGE_FONT_MAX_RATIO
+        );
   if (lineCount <= CHAT_MODE_MESSAGE_FONT_MIN_LINES) return maxFontPx;
   const normalized =
     (Math.min(CHAT_MODE_MESSAGE_FONT_MAX_LINES, Math.max(CHAT_MODE_MESSAGE_FONT_MIN_LINES, lineCount)) -
@@ -17793,7 +17958,19 @@ function countEphemeralLines(text: string): number {
   return splitEphemeralDisplayLines(text).length;
 }
 
+const VISUAL_LINE_COUNT_CACHE_MIN_LENGTH = 80;
+const VISUAL_LINE_COUNT_CACHE_LIMIT = 192;
+const visualLineCountCache = new Map<string, number>();
+
 function estimateVisualLineCount(text: string): number {
+  if (text.length >= VISUAL_LINE_COUNT_CACHE_MIN_LENGTH) {
+    const cached = visualLineCountCache.get(text);
+    if (typeof cached === "number") {
+      visualLineCountCache.delete(text);
+      visualLineCountCache.set(text, cached);
+      return cached;
+    }
+  }
   const hardLines = splitEphemeralDisplayLines(text);
   let total = 0;
   for (const line of hardLines) {
@@ -17803,7 +17980,16 @@ function estimateVisualLineCount(text: string): number {
       Math.ceil(normalizedLength / CHAT_MODE_ESTIMATED_WRAP_CHARS_PER_LINE)
     );
   }
-  return Math.max(1, total);
+  const lineCount = Math.max(1, total);
+  if (text.length >= VISUAL_LINE_COUNT_CACHE_MIN_LENGTH) {
+    visualLineCountCache.set(text, lineCount);
+    while (visualLineCountCache.size > VISUAL_LINE_COUNT_CACHE_LIMIT) {
+      const oldestKey = visualLineCountCache.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      visualLineCountCache.delete(oldestKey);
+    }
+  }
+  return lineCount;
 }
 
 function trimTrailingHorizontalWhitespace(text: string): string {
@@ -17957,6 +18143,7 @@ interface ComposerInputProps {
   submitIconOnly?: boolean;
   onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onValueChange: (value: string) => void;
+  onInputActivity?: () => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
   chipPointerBehavior?: ComposerChipPointerBehavior;
   onFocus: () => void;
@@ -18389,7 +18576,8 @@ function composerTextareaChipLabel(value: string, range: ComposerTextareaChipRan
 
 function renderComposerTextareaOverlayContent(
   value: string,
-  ranges: readonly ComposerTextareaChipRange[]
+  ranges: readonly ComposerTextareaChipRange[],
+  selectedWildcardSlotRange: { start: number; end: number } | null = null
 ): React.ReactNode {
   if (!value) return null;
   if (ranges.length === 0) return value;
@@ -18405,6 +18593,11 @@ function renderComposerTextareaOverlayContent(
     const tokenLabel = composerTextareaChipLabel(value, range);
     const pending = range.kind === "wildcard-slot" && range.pending === true;
     const badge = range.kind === "wildcard-slot" && !pending ? range.badge : null;
+    const selected =
+      range.kind === "wildcard-slot" &&
+      !pending &&
+      selectedWildcardSlotRange?.start === range.start &&
+      selectedWildcardSlotRange.end === range.end;
     nodes.push(
       <span
         key={`chip-slot-${range.kind}-${range.start}-${range.end}-${index}`}
@@ -18414,6 +18607,7 @@ function renderComposerTextareaOverlayContent(
         data-chip-end={range.end}
         data-kind={range.kind}
         data-pending={pending ? "true" : undefined}
+        data-selected={selected ? "true" : undefined}
         data-wildcard-badge={badge ?? undefined}
       >
         <span className={styles.composeTextareaTokenMeasure}>{tokenText}</span>
@@ -18421,6 +18615,7 @@ function renderComposerTextareaOverlayContent(
           className={styles.composeTextareaToken}
           data-kind={range.kind}
           data-pending={pending ? "true" : undefined}
+          data-selected={selected ? "true" : undefined}
           data-wildcard-badge={badge ?? undefined}
           aria-hidden="true"
         >
@@ -18757,27 +18952,44 @@ function applyTextareaWildcardSlotReferenceCycle(
   selectionEnd: number,
   direction: "up" | "down",
   wildcardPicks: readonly CommandCenterCommand[]
-): { value: string; caret: number } | null {
-  if (selectionStart !== selectionEnd) return null;
+): { value: string; selectionStart: number; selectionEnd: number } | null {
   const ranges = resolveBuiltInWildcardSlotTextRanges(text, wildcardPicks).filter(
     (range) => range.pending !== true
   );
-  const caret = selectionStart;
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
   for (const range of ranges) {
-    if (caret < range.start || caret > range.end) continue;
+    if (start !== range.start || end !== range.end) continue;
     const token = text.slice(range.start, range.end);
     const replacement = rewriteWildcardSlotTokenReference(token, direction);
     if (!replacement || replacement === token) return null;
     const value = `${text.slice(0, range.start)}${replacement}${text.slice(range.end)}`;
     return {
       value,
-      caret: range.start + replacement.length,
+      selectionStart: range.start,
+      selectionEnd: range.start + replacement.length,
     };
   }
   return null;
 }
 
-function textareaComposerShortcutChipArrowCaret({
+function findSelectedTextareaWildcardSlotReferenceRange(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  wildcardPicks: readonly CommandCenterCommand[]
+): { start: number; end: number } | null {
+  const start = Math.min(selectionStart, selectionEnd);
+  const end = Math.max(selectionStart, selectionEnd);
+  if (start === end) return null;
+  const ranges = resolveBuiltInWildcardSlotTextRanges(text, wildcardPicks).filter(
+    (range) => range.pending !== true
+  );
+  const range = ranges.find((candidate) => candidate.start === start && candidate.end === end);
+  return range ? { start: range.start, end: range.end } : null;
+}
+
+function textareaComposerShortcutChipArrowSelection({
   text,
   selectionStart,
   selectionEnd,
@@ -18793,7 +19005,7 @@ function textareaComposerShortcutChipArrowCaret({
   commandPicks: readonly CommandCenterCommand[];
   promptPicks: readonly CommandCenterCommand[];
   wildcardPicks: readonly CommandCenterCommand[];
-}): number | null {
+}): { start: number; end: number } | null {
   if (selectionStart !== selectionEnd) return null;
   const caret = selectionStart;
   const ranges = resolveComposerTextareaChipRanges({
@@ -18808,7 +19020,11 @@ function textareaComposerShortcutChipArrowCaret({
         ? caret >= range.start && caret < range.end
         : caret > range.start && caret <= range.end;
     if (!shouldJump) continue;
-    return direction === "right" ? range.end : range.start;
+    if (range.kind === "wildcard-slot" && range.pending !== true) {
+      return { start: range.start, end: range.end };
+    }
+    const next = direction === "right" ? range.end : range.start;
+    return { start: next, end: next };
   }
   return null;
 }
@@ -18949,7 +19165,7 @@ function applyWildcardSlotReferenceCycle(
   excludedBangNames: readonly string[]
 ): boolean {
   const sel = editor.state.selection;
-  if (!sel.empty) return false;
+  if (sel.empty) return false;
   const ranges = findWildcardSlotTokenRanges(
     editor.state.doc,
     wildcardSlotNames,
@@ -18958,7 +19174,7 @@ function applyWildcardSlotReferenceCycle(
   if (ranges.length === 0) return false;
 
   for (const range of ranges) {
-    if (sel.from < range.from || sel.from > range.to) continue;
+    if (sel.from !== range.from || sel.to !== range.to) continue;
     const token = editor.state.doc.textBetween(range.from, range.to, "\n", "\n");
     const replacement = rewriteWildcardSlotTokenReference(token, direction);
     if (!replacement || replacement === token) return false;
@@ -18966,7 +19182,7 @@ function applyWildcardSlotReferenceCycle(
       .chain()
       .focus()
       .insertContentAt({ from: range.from, to: range.to }, replacement)
-      .setTextSelection(range.from + replacement.length)
+      .setTextSelection({ from: range.from, to: range.from + replacement.length })
       .run();
     return true;
   }
@@ -19240,6 +19456,14 @@ function applyComposerShortcutChipArrowKey(
         ? caret >= range.from && caret < range.to
         : caret > range.from && caret <= range.to;
     if (!shouldJump) continue;
+    if (range.kind === "wildcard-slot") {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection({ from: range.from, to: range.to })
+        .run();
+      return true;
+    }
     editor
       .chain()
       .focus()
@@ -19742,6 +19966,62 @@ function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Ele
   );
 }
 
+function ZenLiveBotPresencePlate({
+  bot,
+  actionState,
+  userActionVisible,
+  resolvedTheme,
+}: {
+  bot: Bot | null;
+  actionState: ZenLiveBotActionState | null;
+  userActionVisible: boolean;
+  resolvedTheme: "light" | "dark";
+}): React.JSX.Element | null {
+  if (!bot && !actionState && !userActionVisible) return null;
+  const botName = bot?.name?.trim() || "Prism";
+  const moodHint =
+    actionState?.moodHint ?? (userActionVisible || bot ? "attentive" : "waiting");
+  const plateFace = zenLiveActionPlateFace(moodHint);
+  const actionText =
+    actionState?.action ??
+    (userActionVisible ? "notices" : bot ? "listens" : "waits");
+  const voicePreset = coffeeSeatVoicePreset(bot);
+  return (
+    <div
+      className={styles.zenLiveBotPresencePlate}
+      data-mood={moodHint}
+      data-prism-mood={zenLiveActionMoodToBotMood(moodHint)}
+      data-source={actionState?.source ?? (bot ? "persona" : "user-action")}
+      data-interrupt={actionState?.responseKind === "interrupt_candidate" ? "true" : undefined}
+      role="status"
+      aria-live="polite"
+      aria-label={`${botName}: ${actionText}`}
+      style={botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme)}
+    >
+      <span className={styles.zenLiveBotPresenceFace} aria-hidden="true">
+        <CoffeeSeatPlateEmoji
+          enabled
+          isTalking={actionState?.responseKind === "interrupt_candidate"}
+          scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
+          baseText={plateFace.text}
+          rotateDeg={plateFace.rotateDeg}
+          voicePreset={voicePreset}
+          className={styles.zenLiveBotPresenceFaceGlyph}
+        />
+      </span>
+      <span className={styles.zenLiveBotPresenceCopy}>
+        <span className={styles.zenLiveBotPresenceBotGlyph} aria-hidden="true">
+          <BotGlyph name={bot?.glyph ?? "triangle"} size={26} strokeWidth={1.52} />
+        </span>
+        <span className={styles.zenLiveBotPresenceCopyText}>
+          <span className={styles.zenLiveBotPresenceActor}>{botName}</span>
+          <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function wrapCleanupRevealMessageBody(
   node: React.JSX.Element,
   active: boolean
@@ -19899,11 +20179,13 @@ function MessageBody(props: MessageBodyProps): React.JSX.Element {
   );
 }
 
+const MemoizedMessageBody = memo(MessageBody);
+
 function renderMarkdownMessageBodyWithZenYouTubeEmbeds(
   props: MessageBodyProps
 ): React.JSX.Element {
   if (props.youtubeEmbedsEnabled !== true) {
-    return <MarkdownMessageBody {...props} />;
+    return <MemoizedMarkdownMessageBody {...props} />;
   }
   const displayContent =
     props.assistantStripPrismToolTail === true
@@ -19914,7 +20196,7 @@ function renderMarkdownMessageBodyWithZenYouTubeEmbeds(
       ? takeLeadingParagraphs(displayContent, props.maxParagraphs)
       : displayContent;
   if (!messageContainsYouTubeVideoLink(source)) {
-    return <MarkdownMessageBody {...props} />;
+    return <MemoizedMarkdownMessageBody {...props} />;
   }
   return <ZenYouTubeSeparatedMessageBody {...props} content={source} />;
 }
@@ -19939,7 +20221,7 @@ function ZenYouTubeSeparatedMessageBody(props: MessageBodyProps): React.JSX.Elem
           );
         }
         return (
-          <MarkdownMessageBody
+          <MemoizedMarkdownMessageBody
             key={`markdown:${index}`}
             {...props}
             content={part.markdown}
@@ -20024,6 +20306,7 @@ function MarkdownMessageBody({
   suppressDecorativePrismText,
   chatPhase,
   chatCommittedLineCount,
+  messageFontBounds,
   forcedVisibleTokenCount,
   revealMoodKey,
   typingVoicePreset = "neutral",
@@ -20063,8 +20346,40 @@ function MarkdownMessageBody({
         : null,
     [messageRole, renderAsEphemeralLines, source, zenActionsEnabled]
   );
+  const shouldHoldLocalZenActionText =
+    zenActionPresentation?.hasActions === true &&
+    !zenActionPresentation.actionOnly &&
+    renderAsEphemeralLines === true &&
+    revealWordByWord !== true &&
+    forcedVisibleTokenCount === undefined &&
+    chatPhase === "manifest";
+  const zenActionTextHoldKey = shouldHoldLocalZenActionText
+    ? `${messageRole}:${source.length}:${zenActionPresentation.cues.map((cue) => cue.key).join("|")}`
+    : null;
+  const [activeZenActionTextHoldKey, setActiveZenActionTextHoldKey] = useState<
+    string | null
+  >(() => zenActionTextHoldKey);
+  useEffect(() => {
+    if (!zenActionTextHoldKey) {
+      setActiveZenActionTextHoldKey(null);
+      return;
+    }
+    setActiveZenActionTextHoldKey(zenActionTextHoldKey);
+    const timer = window.setTimeout(() => {
+      setActiveZenActionTextHoldKey((current) =>
+        current === zenActionTextHoldKey ? null : current
+      );
+    }, ZEN_ACTION_TEXT_LAG_MS);
+    return () => window.clearTimeout(timer);
+  }, [zenActionTextHoldKey]);
+  const localZenActionTextHeld =
+    zenActionTextHoldKey !== null && activeZenActionTextHoldKey === zenActionTextHoldKey;
   const actionDisplaySource =
-    zenActionPresentation?.hasActions === true ? zenActionPresentation.mainText : source;
+    zenActionPresentation?.hasActions === true
+      ? localZenActionTextHeld
+        ? ""
+        : zenActionPresentation.mainText
+      : source;
   const normalizedSource = useMemo(
     () =>
       renderAsEphemeralLines
@@ -20106,7 +20421,7 @@ function MarkdownMessageBody({
   );
   const clampedForcedVisibleTokenCount =
     shouldUseForcedVisibleTokenCount && forcedVisibleTokenCount !== undefined
-      ? Math.max(1, Math.min(forcedVisibleTokenCount, tokens.length))
+      ? Math.max(0, Math.min(forcedVisibleTokenCount, tokens.length))
       : null;
   const effectiveVisibleTokenCount = clampedForcedVisibleTokenCount ?? visibleTokenCount;
 
@@ -20159,7 +20474,9 @@ function MarkdownMessageBody({
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
   const zenActionCue = useMemo(() => {
     if (zenActionPresentation?.hasActions !== true) return null;
-    const visibleDisplayLength = revealWordByWord
+    const visibleDisplayLength = localZenActionTextHeld
+      ? 0
+      : revealWordByWord
       ? getBotMentionDisplayLength(
           tokens.slice(0, Math.max(0, renderVisibleTokenCount)).join("")
         )
@@ -20168,7 +20485,13 @@ function MarkdownMessageBody({
       zenActionPresentation.cues,
       visibleDisplayLength
     );
-  }, [renderVisibleTokenCount, revealWordByWord, tokens, zenActionPresentation]);
+  }, [
+    localZenActionTextHeld,
+    renderVisibleTokenCount,
+    revealWordByWord,
+    tokens,
+    zenActionPresentation,
+  ]);
   const zenActionCueNode =
     zenActionCue && zenActionPresentation
       ? (
@@ -20188,13 +20511,23 @@ function MarkdownMessageBody({
     hasFencedCodeBlock &&
     (preferLocalProgressiveReveal || typeof forcedVisibleTokenCount === "number")
   );
-  const renderedSource = shouldProgressiveFenceReveal
-    ? buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount)
-    : revealWordByWord
-      ? (hasFencedCodeBlock
-        ? buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount)
-        : tokens.slice(0, renderVisibleTokenCount).join(""))
-      : chatModeSource;
+  const renderedSource = useMemo(() => {
+    if (shouldProgressiveFenceReveal) {
+      return buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount);
+    }
+    if (!revealWordByWord) return chatModeSource;
+    if (hasFencedCodeBlock) {
+      return buildProgressiveMarkdownSource(chatModeSource, renderVisibleTokenCount);
+    }
+    return tokens.slice(0, renderVisibleTokenCount).join("");
+  }, [
+    chatModeSource,
+    hasFencedCodeBlock,
+    renderVisibleTokenCount,
+    revealWordByWord,
+    shouldProgressiveFenceReveal,
+    tokens,
+  ]);
   const markdownSource = useMemo(
     () => {
       let source = renderedSource;
@@ -20268,7 +20601,11 @@ function MarkdownMessageBody({
               ? Math.max(finalLineCount, chatCommittedLineCount)
               : finalLineCount;
           const lineDynamicFontPx = hasLineContent
-            ? resolveChatModeMessageFontSizePx(effectiveLineCount, "assistant")
+            ? resolveChatModeMessageFontSizePx(
+                effectiveLineCount,
+                "assistant",
+                messageFontBounds
+              )
             : null;
           const zenMessagePlacementOrder = zenMessagePlacementOrderByLine.get(index);
           const messageLineOffset =
@@ -20748,6 +21085,8 @@ function MarkdownMessageBody({
   );
 }
 
+const MemoizedMarkdownMessageBody = memo(MarkdownMessageBody);
+
 interface DesktopMarkdownComposerHandle {
   focus: (options?: FocusOptions) => void;
   blur: () => void;
@@ -20760,6 +21099,7 @@ interface DesktopMarkdownComposerProps {
   placeholder: string;
   writingAssistEnabled: boolean;
   onValueChange: (value: string) => void;
+  onInputActivity?: () => void;
   onFocus: () => void;
   onGenerateWildcardSlotValue?: (key: BuiltInPromptWildcardSlotKey) => Promise<string>;
   chipPointerBehavior?: ComposerChipPointerBehavior;
@@ -20801,6 +21141,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       placeholder,
       writingAssistEnabled,
       onValueChange,
+      onInputActivity,
       onFocus,
       submitDisabled,
       submitLabel,
@@ -20827,6 +21168,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
   ): React.JSX.Element {
     const lastEmittedRef = useRef(value);
     const onValueChangeRef = useRef(onValueChange);
+    const onInputActivityRef = useRef(onInputActivity);
     const onFocusRef = useRef(onFocus);
     const editorRef = useRef<Editor | null>(null);
     const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
@@ -21222,8 +21564,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     useLayoutEffect(() => {
       onValueChangeRef.current = onValueChange;
+      onInputActivityRef.current = onInputActivity;
       onFocusRef.current = onFocus;
-    }, [onFocus, onValueChange]);
+    }, [onFocus, onInputActivity, onValueChange]);
 
     const commandNamesForHighlight = useMemo(
       () => commandPicks.flatMap((command) => commandInvocationNames(command)),
@@ -21789,6 +22132,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         onUpdate: ({ editor: ed }) => {
           chipActivationRef.current = null;
           prunePendingWildcardSlots(ed);
+          onInputActivityRef.current?.();
           const md = ed.getMarkdown();
           pendingValueRef.current = md;
           queueMicrotask(() => {
@@ -22142,6 +22486,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     submitIconOnly,
     onChange,
     onValueChange,
+    onInputActivity,
     onGenerateWildcardSlotValue,
     chipPointerBehavior = "resolve",
     onFocus,
@@ -22171,7 +22516,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const promptPicksRef = useRef(promptPicks);
   const wildcardPicksRef = useRef(wildcardPicks);
   const textareaValueRef = useRef(value);
+  const [textareaLocalValue, setTextareaLocalValue] = useState(value);
   const pendingTextareaCaretRef = useRef<number | null>(null);
+  const pendingTextareaSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const [textareaSelectedWildcardSlotRange, setTextareaSelectedWildcardSlotRange] =
+    useState<{ start: number; end: number } | null>(null);
   const pendingTextareaWildcardIdRef = useRef(0);
   const pendingTextareaWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
   const textareaChipActivationRef = useRef<PendingComposerChipActivation | null>(null);
@@ -22194,19 +22543,25 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const effectivePlaceholder = generatingRandomPrompt
     ? "Finding a question that fits this conversation..."
     : placeholder;
+  const textareaDisplayValue = enabled ? value : textareaLocalValue;
   const textareaChipRanges = useMemo(
     () =>
       resolveComposerTextareaChipRanges({
-        value,
+        value: textareaDisplayValue,
         commandPicks,
         promptPicks,
         wildcardPicks,
       }),
-    [commandPicks, promptPicks, value, wildcardPicks]
+    [commandPicks, promptPicks, textareaDisplayValue, wildcardPicks]
   );
   const textareaOverlayContent = useMemo(
-    () => renderComposerTextareaOverlayContent(value, textareaChipRanges),
-    [textareaChipRanges, value]
+    () =>
+      renderComposerTextareaOverlayContent(
+        textareaDisplayValue,
+        textareaChipRanges,
+        textareaSelectedWildcardSlotRange
+      ),
+    [textareaChipRanges, textareaDisplayValue, textareaSelectedWildcardSlotRange]
   );
   const syncTextareaOverlayScroll = useCallback((el: HTMLTextAreaElement) => {
     if (!textareaOverlayRef.current) return;
@@ -22282,6 +22637,16 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     },
     [syncTextareaOverlayScroll, syncTextareaSingleLineState]
   );
+  const syncTextareaSelectedWildcardSlotRange = useCallback((el: HTMLTextAreaElement) => {
+    setTextareaSelectedWildcardSlotRange(
+      findSelectedTextareaWildcardSlotReferenceRange(
+        el.value,
+        el.selectionStart ?? 0,
+        el.selectionEnd ?? 0,
+        wildcardPicksRef.current
+      )
+    );
+  }, []);
   useLayoutEffect(() => {
     mentionBotsRef.current = mentionBots;
   }, [mentionBots]);
@@ -22305,7 +22670,11 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   }, [wildcardPicks]);
   useLayoutEffect(() => {
     textareaChipActivationRef.current = null;
+    if (pendingTextareaSelectionRef.current === null) {
+      setTextareaSelectedWildcardSlotRange(null);
+    }
     textareaValueRef.current = value;
+    setTextareaLocalValue(value);
   }, [value]);
   useLayoutEffect(() => {
     taMentionRef.current = taMention;
@@ -22318,7 +22687,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     if (!enabled && el) {
       resizeTextareaToContent(el);
     }
-  }, [enabled, resizeTextareaToContent, value]);
+  }, [enabled, resizeTextareaToContent, textareaDisplayValue]);
 
   const dismissTaMentionPopover = useCallback(() => {
     setTaMention((s) =>
@@ -22353,6 +22722,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
               pending.to
             )}`;
             textareaValueRef.current = fallbackValue;
+            setTextareaLocalValue(fallbackValue);
             pendingTextareaCaretRef.current = pending.from + pending.fallback.length;
             onValueChange(fallbackValue);
             return;
@@ -22361,6 +22731,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             pending.to
           )}`;
           textareaValueRef.current = nextValue;
+          setTextareaLocalValue(nextValue);
           pendingTextareaCaretRef.current = pending.from + value.length;
           onValueChange(nextValue);
         } catch {
@@ -22370,6 +22741,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
             pending.to
           )}`;
           textareaValueRef.current = fallbackValue;
+          setTextareaLocalValue(fallbackValue);
           pendingTextareaCaretRef.current = pending.from + pending.fallback.length;
           onValueChange(fallbackValue);
         } finally {
@@ -22394,6 +22766,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       );
       if (!next) return false;
       textareaValueRef.current = next.value;
+      setTextareaLocalValue(next.value);
       pendingTextareaCaretRef.current = next.caret;
       onValueChange(next.value);
       return true;
@@ -22407,6 +22780,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       const next = replaceComposerChipText(current, target, replacement);
       if (!next) return false;
       textareaValueRef.current = next.value;
+      setTextareaLocalValue(next.value);
       pendingTextareaCaretRef.current = next.caret;
       onValueChange(next.value);
       return true;
@@ -22420,6 +22794,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       const next = replaceComposerChipText(current, target, "");
       if (!next) return false;
       textareaValueRef.current = next.value;
+      setTextareaLocalValue(next.value);
       pendingTextareaCaretRef.current = next.caret;
       onValueChange(next.value);
       return true;
@@ -22706,13 +23081,22 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
+    const pendingSelection = pendingTextareaSelectionRef.current;
+    if (!enabled && el && pendingSelection !== null) {
+      el.setSelectionRange(pendingSelection.start, pendingSelection.end);
+      pendingTextareaSelectionRef.current = null;
+      syncTextareaSelectedWildcardSlotRange(el);
+      syncTextareaMention(el);
+      return;
+    }
     const pending = pendingTextareaCaretRef.current;
     if (!enabled && el && pending !== null) {
       el.setSelectionRange(pending, pending);
       pendingTextareaCaretRef.current = null;
+      syncTextareaSelectedWildcardSlotRange(el);
       syncTextareaMention(el);
     }
-  }, [enabled, value, syncTextareaMention]);
+  }, [enabled, syncTextareaMention, syncTextareaSelectedWildcardSlotRange, value]);
 
   useImperativeHandle(
     ref,
@@ -22756,6 +23140,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           selectionEnd
         )}`;
         textareaValueRef.current = nextValue;
+        setTextareaLocalValue(nextValue);
         pendingTextareaCaretRef.current = selectionStart + text.length;
         onValueChange(nextValue);
         queueMicrotask(() => {
@@ -22781,6 +23166,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           placeholder={effectivePlaceholder}
           writingAssistEnabled={writingAssistEnabled}
           onValueChange={onValueChange}
+          onInputActivity={onInputActivity}
           onGenerateWildcardSlotValue={onGenerateWildcardSlotValue}
           chipPointerBehavior={chipPointerBehavior}
           onFocus={onFocus}
@@ -22809,14 +23195,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           >
             <div
               className={styles.composeTextareaVisualWrap}
-              data-empty={value.length === 0 ? "true" : undefined}
+              data-empty={textareaDisplayValue.length === 0 ? "true" : undefined}
             >
               <div
                 ref={textareaOverlayRef}
                 className={styles.composeTextareaVisualOverlay}
                 aria-hidden="true"
               >
-                {value.length > 0 ? (
+                {textareaDisplayValue.length > 0 ? (
                   textareaOverlayContent
                 ) : (
                   <span className={styles.composeTextareaVisualPlaceholder}>
@@ -22826,12 +23212,17 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
               </div>
               <textarea
                 ref={textareaRef}
-                value={value}
+                value={textareaDisplayValue}
                 disabled={generatingRandomPrompt}
                 data-rich-overlay="true"
                 onScroll={(event) => syncTextareaOverlayScroll(event.currentTarget)}
                 onChange={(event) => {
                   textareaChipActivationRef.current = null;
+                  pendingTextareaSelectionRef.current = null;
+                  setTextareaSelectedWildcardSlotRange(null);
+                  textareaValueRef.current = event.currentTarget.value;
+                  setTextareaLocalValue(event.currentTarget.value);
+                  onInputActivity?.();
                   onChange(event);
                   resizeTextareaToContent(event.currentTarget);
                   syncTextareaOverlayScroll(event.currentTarget);
@@ -22840,6 +23231,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 onSelect={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
+                  syncTextareaSelectedWildcardSlotRange(el);
                   scheduleTextareaMentionSync();
                 }}
                 onPointerUp={(event) => {
@@ -22901,10 +23293,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 onKeyUp={(event) => {
                   const el = event.currentTarget;
                   syncTextareaOverlayScroll(el);
+                  syncTextareaSelectedWildcardSlotRange(el);
                   scheduleTextareaMentionSync();
                 }}
                 onPaste={(event) => {
                   textareaChipActivationRef.current = null;
+                  pendingTextareaSelectionRef.current = null;
+                  setTextareaSelectedWildcardSlotRange(null);
                   const el = textareaRef.current;
                   if (!el) return;
                   const start = el.selectionStart ?? 0;
@@ -23161,7 +23556,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       });
                       return;
                     }
-                    const shortcutNext = textareaComposerShortcutChipArrowCaret({
+                    const shortcutNext = textareaComposerShortcutChipArrowSelection({
                       text: el.value,
                       selectionStart: start,
                       selectionEnd: end,
@@ -23170,9 +23565,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       promptPicks: promptPicksRef.current,
                       wildcardPicks: wildcardPicksRef.current,
                     });
-                    if (shortcutNext !== null && shortcutNext !== start) {
+                    if (
+                      shortcutNext !== null &&
+                      (shortcutNext.start !== start || shortcutNext.end !== end)
+                    ) {
                       event.preventDefault();
-                      el.setSelectionRange(shortcutNext, shortcutNext);
+                      el.setSelectionRange(shortcutNext.start, shortcutNext.end);
+                      syncTextareaSelectedWildcardSlotRange(el);
                       queueMicrotask(() => {
                         syncTextareaMention(el);
                         syncTextareaCommand(el);
@@ -23257,6 +23656,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       if (act.kind !== "none") {
                         pendingTextareaCaretRef.current = act.caret;
                         textareaValueRef.current = act.replacement;
+                        setTextareaLocalValue(act.replacement);
                         onValueChange(act.replacement);
                         setTaMention((s) =>
                           s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -23273,6 +23673,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     );
                     if (act.kind !== "none") {
                       pendingTextareaCaretRef.current = act.caret;
+                      textareaValueRef.current = act.replacement;
+                      setTextareaLocalValue(act.replacement);
                       onValueChange(act.replacement);
                       setTaMention((s) =>
                         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -23342,7 +23744,16 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     if (applied) {
                       event.preventDefault();
                       textareaValueRef.current = applied.value;
-                      pendingTextareaCaretRef.current = applied.caret;
+                      setTextareaLocalValue(applied.value);
+                      pendingTextareaCaretRef.current = null;
+                      pendingTextareaSelectionRef.current = {
+                        start: applied.selectionStart,
+                        end: applied.selectionEnd,
+                      };
+                      setTextareaSelectedWildcardSlotRange({
+                        start: applied.selectionStart,
+                        end: applied.selectionEnd,
+                      });
                       onValueChange(applied.value);
                       queueMicrotask(() => {
                         syncTextareaMention(el);
@@ -23395,6 +23806,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 if (act.kind === "none") return;
                 pendingTextareaCaretRef.current = act.caret;
                 textareaValueRef.current = act.replacement;
+                setTextareaLocalValue(act.replacement);
                 onValueChange(act.replacement);
                 setTaMention((s) =>
                   s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -23410,6 +23822,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
               );
               if (act.kind === "none") return;
               pendingTextareaCaretRef.current = act.caret;
+              textareaValueRef.current = act.replacement;
+              setTextareaLocalValue(act.replacement);
               onValueChange(act.replacement);
               setTaMention((s) =>
                 s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
@@ -24507,6 +24921,9 @@ function HomeContent(): React.JSX.Element {
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
+  const draftLiveRef = useRef("");
+  const pendingDraftSyncValueRef = useRef<string | null>(null);
+  const pendingDraftSyncTimerRef = useRef<number | null>(null);
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
@@ -24519,6 +24936,20 @@ function HomeContent(): React.JSX.Element {
   const [composerSendTintActive, setComposerSendTintActive] = useState(false);
   const [chatComposerLastTypedAtMs, setChatComposerLastTypedAtMs] =
     useState<number | null>(null);
+  const chatComposerLastTypedAtMsRef = useRef<number | null>(null);
+  const chatComposerPublishedTypedAtMsRef = useRef<number | null>(null);
+  const chatComposerTypingPublishTimerRef = useRef<number | null>(null);
+  const [zenLiveUserActionPreview, setZenLiveUserActionPreview] =
+    useState<ZenActionCue | null>(null);
+  const [zenLiveBotAction, setZenLiveBotAction] =
+    useState<ZenLiveBotActionState | null>(null);
+  const zenLiveUserActionPreviewRef = useRef<ZenActionCue | null>(null);
+  const zenLiveBotActionRef = useRef<ZenLiveBotActionState | null>(null);
+  const zenLiveActionRequestSeqRef = useRef(0);
+  const zenLiveActionAbortRef = useRef<AbortController | null>(null);
+  const zenLiveActionIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zenLiveActionLastInterruptAtMsRef = useRef(0);
+  const zenLiveActionLastInterruptKeyRef = useRef<string | null>(null);
   const [chatHeaderChromeVisible, setChatHeaderChromeVisible] = useState(true);
   const [chatComposerChromeVisible, setChatComposerChromeVisible] = useState(true);
   const chatHeaderChromeVisibleRef = useRef(true);
@@ -24533,6 +24964,35 @@ function HomeContent(): React.JSX.Element {
   const [askQuestionPatienceElapsedMs, setAskQuestionPatienceElapsedMs] =
     useState(0);
   const askQuestionPatienceElapsedMsRef = useRef(0);
+  useLayoutEffect(() => {
+    draftLiveRef.current = draft;
+  }, [draft]);
+  useLayoutEffect(() => {
+    chatComposerPublishedTypedAtMsRef.current = chatComposerLastTypedAtMs;
+  }, [chatComposerLastTypedAtMs]);
+  useEffect(() => {
+    zenLiveUserActionPreviewRef.current = zenLiveUserActionPreview;
+  }, [zenLiveUserActionPreview]);
+  useEffect(() => {
+    zenLiveBotActionRef.current = zenLiveBotAction;
+  }, [zenLiveBotAction]);
+  useEffect(() => {
+    return () => {
+      if (pendingDraftSyncTimerRef.current !== null) {
+        window.clearTimeout(pendingDraftSyncTimerRef.current);
+        pendingDraftSyncTimerRef.current = null;
+      }
+      if (chatComposerTypingPublishTimerRef.current !== null) {
+        window.clearTimeout(chatComposerTypingPublishTimerRef.current);
+        chatComposerTypingPublishTimerRef.current = null;
+      }
+      zenLiveActionAbortRef.current?.abort();
+      if (zenLiveActionIdleTimerRef.current !== null) {
+        clearTimeout(zenLiveActionIdleTimerRef.current);
+        zenLiveActionIdleTimerRef.current = null;
+      }
+    };
+  }, []);
   const [askQuestionComposerRevealed, setAskQuestionComposerRevealed] = useState(false);
   const [starterComposerRevealed, setStarterComposerRevealed] = useState(false);
   const [starterPromptSettlingMessageId, setStarterPromptSettlingMessageId] =
@@ -24577,10 +25037,19 @@ function HomeContent(): React.JSX.Element {
     zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
     zenCanvasTypingSpeed,
+    zenMessageFontMinPx,
+    zenMessageFontMaxPx,
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,
   } = effectiveZenModeSettings;
+  const zenMessageFontBounds = useMemo<ZenMessageFontBounds>(
+    () => ({
+      minPx: zenMessageFontMinPx,
+      maxPx: zenMessageFontMaxPx,
+    }),
+    [zenMessageFontMaxPx, zenMessageFontMinPx]
+  );
   const [anthropicKey, setAnthropicKey] = useState("");
   const [elevenLabsKey, setElevenLabsKey] = useState("");
   const [apiKeyDraftValidation, setApiKeyDraftValidation] =
@@ -26998,7 +27467,7 @@ function HomeContent(): React.JSX.Element {
       ? invocation.trim()
       : `/${invocation.trim()}`;
     if (normalized.length <= 1) return;
-    setDraft(normalized);
+    setComposerDraftNow(normalized);
     setComposerSendTintActive(true);
     setCommandCenterHelpModalOpen(false);
     setError(null);
@@ -29844,6 +30313,30 @@ function HomeContent(): React.JSX.Element {
   const chatEphemeralMode = view === "chat";
   const effectiveChatPresentation = view === "chat";
   const chatLikeSurface = effectiveChatPresentation;
+  const zenActionsEnabledForMessage = useCallback(
+    (message: Message): boolean =>
+      view === "chat" && messageCanUseZenActionPresentation(message),
+    [view]
+  );
+  const resolveVisibleMessageContent = useCallback(
+    (message: Message): string =>
+      resolveMessageRevealContent(message, {
+        zenActionsEnabled: zenActionsEnabledForMessage(message),
+      }),
+    [zenActionsEnabledForMessage]
+  );
+  const resolveVisibleMessageSizingContent = useCallback(
+    (message: Message): string =>
+      resolveMessageVisualSizingContent(message, {
+        zenActionsEnabled: zenActionsEnabledForMessage(message),
+      }),
+    [zenActionsEnabledForMessage]
+  );
+  const resolveMessageActionTextLagMs = useCallback(
+    (message: Message): number =>
+      resolveMessageZenActionTextLagMs(message, zenActionsEnabledForMessage(message)),
+    [zenActionsEnabledForMessage]
+  );
   const zenPersonaInkSegmentByMessageId = useMemo(
     () =>
       buildZenPersonaInkSegmentMap(detail?.messages ?? [], {
@@ -29862,15 +30355,17 @@ function HomeContent(): React.JSX.Element {
    * and the tap-to-interrupt typing pill — Zen chat mode only.
   */
   const chatAssistantTypingMechanicsActive = chatEphemeralMode;
-  const chatRevealDelayMultiplier = resolveChatRevealDelayMultiplierForTyping({
+  const chatRevealTypingPacing = resolveChatRevealTypingPacing({
     active: chatAssistantTypingMechanicsActive,
     hasDraft: draft.trim().length > 0,
     nowMs: chatEphemeralNowMs,
     lastTypingAtMs: chatComposerLastTypedAtMs,
     maxMultiplier: CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER,
-    idleHoldMs: CHAT_MODE_COMPOSING_REVEAL_IDLE_HOLD_MS,
+    pauseMs: CHAT_MODE_COMPOSING_REVEAL_PAUSE_MS,
     recoveryMs: CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS,
   });
+  const chatRevealDelayMultiplier = chatRevealTypingPacing.delayMultiplier;
+  const chatRevealPausedForComposerTyping = chatRevealTypingPacing.paused;
   const resolveZenAssistantRevealDelayMultiplier = useCallback(
     (revealKey: string): number =>
       chatRevealDelayMultiplier *
@@ -29910,19 +30405,23 @@ function HomeContent(): React.JSX.Element {
     (conversationId: string | null): void => {
       if (view !== "chat") return;
       const now = Date.now();
-      setZenFollowupBuffer((current) => {
-        const next = {
-          conversationId: current?.conversationId ?? conversationId,
-          messages: current?.messages ?? [],
-          pendingMessageCleanupMessageIds:
-            current?.pendingMessageCleanupMessageIds ?? [],
-          startedAtMs: current?.startedAtMs ?? now,
-          lastActivityAtMs: now,
-          generation: (current?.generation ?? 0) + 1,
-        };
-        zenFollowupBufferRef.current = next;
-        return next;
-      });
+      const current = zenFollowupBufferRef.current;
+      const next = {
+        conversationId: current?.conversationId ?? conversationId,
+        messages: current?.messages ?? [],
+        pendingMessageCleanupMessageIds:
+          current?.pendingMessageCleanupMessageIds ?? [],
+        startedAtMs: current?.startedAtMs ?? now,
+        lastActivityAtMs: now,
+        generation: (current?.generation ?? 0) + 1,
+      };
+      zenFollowupBufferRef.current = next;
+      if (
+        !current ||
+        now - current.lastActivityAtMs >= ZEN_FOLLOWUP_ACTIVITY_RENDER_THROTTLE_MS
+      ) {
+        setZenFollowupBuffer(next);
+      }
     },
     [view]
   );
@@ -30330,8 +30829,7 @@ function HomeContent(): React.JSX.Element {
     setDetail(null);
     setSessionOpinion(null);
     setBotOpinion(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     setComposerPrimed(false);
     setStarterComposerRevealed(false);
     setAskQuestionComposerRevealed(false);
@@ -30379,6 +30877,7 @@ function HomeContent(): React.JSX.Element {
     cancelledTokenCount,
     moodKey,
     delayMultiplier,
+    startDelayMs,
   }: {
     revealKey: string;
     displayContent: string;
@@ -30387,6 +30886,7 @@ function HomeContent(): React.JSX.Element {
     cancelledTokenCount?: number;
     moodKey: NonNullable<Message["moodKey"]>;
     delayMultiplier?: number;
+    startDelayMs?: number;
   }): number {
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
@@ -30396,7 +30896,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (typeof cancelledTokenCount === "number") {
       chatRevealPaceByKeyRef.current.delete(revealKey);
-      return Math.min(tokenTotal, Math.max(1, cancelledTokenCount));
+      return Math.min(tokenTotal, Math.max(0, cancelledTokenCount));
     }
     return resolvePacedChatRevealVisibleTokenCount({
       revealKey,
@@ -30411,6 +30911,8 @@ function HomeContent(): React.JSX.Element {
           effectiveChatRevealTiming
         ),
       delayMultiplier,
+      startDelayMs,
+      pause: chatRevealPausedForComposerTyping,
     });
   }
   useEffect(() => {
@@ -30506,7 +31008,7 @@ function HomeContent(): React.JSX.Element {
       })();
       const messageIsOnScreen =
         messageViewportMeta !== false && messageViewportMeta.isOnScreen;
-      const lineCount = countEphemeralLines(resolveMessageVisualSizingContent(message));
+      const lineCount = countEphemeralLines(resolveVisibleMessageSizingContent(message));
       const dissolveDurationMs =
         CHAT_MODE_OFFSCREEN_DISSOLVE_MS +
         Math.max(0, lineCount - 1) * CHAT_MODE_LINE_DISSOLVE_STAGGER_MS;
@@ -30533,8 +31035,9 @@ function HomeContent(): React.JSX.Element {
         !chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey);
       const estimatedRevealDoneAt = revealGatedAssistant
         ? firstSeenAt +
+          resolveMessageActionTextLagMs(message) +
           resolveRevealDurationMsForTokens(
-            tokenizeMessageReveal(resolveMessageDisplayContent(message)),
+            tokenizeMessageReveal(resolveVisibleMessageContent(message)),
             resolveMessageMoodKey(message),
             effectiveChatRevealTiming,
             resolveZenAssistantRevealDelayMultiplier(temporalKey)
@@ -30567,6 +31070,9 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageContent,
+    resolveVisibleMessageSizingContent,
     resolveZenAssistantRevealDelayMultiplier,
     chatArchiveRevealEpoch,
   ]);
@@ -30846,7 +31352,7 @@ function HomeContent(): React.JSX.Element {
 
     let visualLineCount = 0;
     for (const message of activeMessages) {
-      const displayContent = resolveMessageVisualSizingContent(message);
+      const displayContent = resolveVisibleMessageSizingContent(message);
       const sizingContent =
         chatAssistantTypingMechanicsActive &&
         message.role === "assistant" &&
@@ -30861,7 +31367,7 @@ function HomeContent(): React.JSX.Element {
                 chatCompletedRevealKeysRef.current.has(revealKey);
               if (typeof cancelledTokenCount === "number") {
                 return revealTokens
-                  .slice(0, Math.min(tokenTotal, Math.max(1, cancelledTokenCount)))
+                  .slice(0, Math.min(tokenTotal, Math.max(0, cancelledTokenCount)))
                   .join("");
               }
               if (revealCompleted) return displayContent;
@@ -30869,16 +31375,22 @@ function HomeContent(): React.JSX.Element {
               const firstSeenAt =
                 chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs;
               const elapsedMs = Math.max(0, chatEphemeralNowMs - firstSeenAt);
-              const visibleTokenCount = Math.min(
-                tokenTotal,
-                resolveVisibleTokenCountAtElapsedMs(
+              const startDelayMs = resolveMessageActionTextLagMs(message);
+              const pacedVisibleTokenCount =
+                chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
+              let visibleTokenCount = 0;
+              if (typeof pacedVisibleTokenCount === "number") {
+                visibleTokenCount = Math.max(0, pacedVisibleTokenCount);
+              } else if (!chatRevealPausedForComposerTyping && elapsedMs >= startDelayMs) {
+                visibleTokenCount = resolveVisibleTokenCountAtElapsedMs(
                   revealTokens,
-                  elapsedMs,
+                  elapsedMs - startDelayMs,
                   resolveMessageMoodKey(message),
                   effectiveChatRevealTiming,
                   resolveZenAssistantRevealDelayMultiplier(revealKey)
-                )
-              );
+                );
+              }
+              visibleTokenCount = Math.min(tokenTotal, visibleTokenCount);
               return revealTokens.slice(0, visibleTokenCount).join("");
             })()
           : displayContent;
@@ -30886,7 +31398,11 @@ function HomeContent(): React.JSX.Element {
     }
 
     return {
-      fontSizePx: resolveChatModeMessageFontSizePx(visualLineCount),
+      fontSizePx: resolveChatModeMessageFontSizePx(
+        visualLineCount,
+        "assistant",
+        zenMessageFontBounds
+      ),
       messageIds: new Set(activeMessages.map((message) => message.id)),
     };
   }, [
@@ -30896,7 +31412,11 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    chatRevealPausedForComposerTyping,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageSizingContent,
     resolveZenAssistantRevealDelayMultiplier,
+    zenMessageFontBounds,
     latestAssistantMessageId,
     latestUserMessageIndex,
   ]);
@@ -31001,7 +31521,7 @@ function HomeContent(): React.JSX.Element {
     const latestAssistantMessage =
       detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
     if (!latestAssistantMessage) return false;
-    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistantMessage));
+    const revealTokens = tokenizeMessageReveal(resolveVisibleMessageContent(latestAssistantMessage));
     const tokenTotal = Math.max(1, revealTokens.length);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
@@ -31011,18 +31531,22 @@ function HomeContent(): React.JSX.Element {
     ) {
       return true;
     }
-    const revealDurationMs = resolveRevealDurationMsForTokens(
-      revealTokens,
-      DEFAULT_MESSAGE_MOOD,
-      effectiveChatRevealTiming,
-      resolveZenAssistantRevealDelayMultiplier(revealKey)
-    );
+    const revealDurationMs =
+      resolveMessageActionTextLagMs(latestAssistantMessage) +
+      resolveRevealDurationMsForTokens(
+        revealTokens,
+        DEFAULT_MESSAGE_MOOD,
+        effectiveChatRevealTiming,
+        resolveZenAssistantRevealDelayMultiplier(revealKey)
+      );
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageContent,
     resolveZenAssistantRevealDelayMultiplier,
     latestAssistantMessageId,
     chatEphemeralNowMs,
@@ -31072,23 +31596,27 @@ function HomeContent(): React.JSX.Element {
     if (!latestAssistant) return null;
 
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
-    const interruptedText = resolveMessageDisplayContent(latestAssistant);
+    const interruptedText = resolveVisibleMessageContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(interruptedText);
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
     const tokenTotal = Math.max(1, revealTokens.length);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
+    const startDelayMs = resolveMessageActionTextLagMs(latestAssistant);
+    const elapsedMs = Math.max(0, Date.now() - firstSeenAt);
     const visibleTokenCount = Math.min(
       tokenTotal,
       typeof pacedVisibleTokenCount === "number"
-        ? Math.max(1, pacedVisibleTokenCount)
-        : resolveVisibleTokenCountAtElapsedMs(
-            revealTokens,
-            Math.max(0, Date.now() - firstSeenAt),
-            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
-            effectiveChatRevealTiming,
-            resolveZenAssistantRevealDelayMultiplier(revealKey)
-          )
+        ? Math.max(0, pacedVisibleTokenCount)
+        : elapsedMs < startDelayMs
+          ? 0
+          : resolveVisibleTokenCountAtElapsedMs(
+              revealTokens,
+              elapsedMs - startDelayMs,
+              latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+              effectiveChatRevealTiming,
+              resolveZenAssistantRevealDelayMultiplier(revealKey)
+            )
     );
     const interruptionContent = interruptedMidWordSnippet(
       interruptedText,
@@ -31297,7 +31825,7 @@ function HomeContent(): React.JSX.Element {
     if (!latestAssistant) return;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
-    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    const displayContent = resolveVisibleMessageContent(latestAssistant);
     chatCommittedFontLineCountByKeyRef.current.set(
       revealKey,
       Math.max(
@@ -31326,26 +31854,30 @@ function HomeContent(): React.JSX.Element {
     if (!latestAssistant) return;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return;
-    const displayContent = resolveMessageDisplayContent(latestAssistant);
+    const displayContent = resolveVisibleMessageContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
+    const startDelayMs = resolveMessageActionTextLagMs(latestAssistant);
+    const elapsedMs = Math.max(0, Date.now() - firstSeenAt);
     const visibleTokenCount = Math.min(
       tokenTotal,
       typeof pacedVisibleTokenCount === "number"
-        ? Math.max(1, pacedVisibleTokenCount)
-        : resolveVisibleTokenCountAtElapsedMs(
-            revealTokens,
-            Math.max(0, Date.now() - firstSeenAt),
-            latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
-            effectiveChatRevealTiming,
-            resolveZenAssistantRevealDelayMultiplier(revealKey)
-          )
+        ? Math.max(0, pacedVisibleTokenCount)
+        : elapsedMs < startDelayMs
+          ? 0
+          : resolveVisibleTokenCountAtElapsedMs(
+              revealTokens,
+              elapsedMs - startDelayMs,
+              latestAssistant.moodKey ?? DEFAULT_MESSAGE_MOOD,
+              effectiveChatRevealTiming,
+              resolveZenAssistantRevealDelayMultiplier(revealKey)
+            )
     );
     const visibleText = revealTokens
-      .slice(0, Math.min(tokenTotal, Math.max(1, visibleTokenCount)))
+      .slice(0, Math.min(tokenTotal, Math.max(0, visibleTokenCount)))
       .join("");
     chatCommittedFontLineCountByKeyRef.current.set(
       revealKey,
@@ -34172,7 +34704,7 @@ function HomeContent(): React.JSX.Element {
     if (view !== "chat") return;
     if (!detail || detail.id === "pending") return;
     const nextPersonaBotId =
-      detail.lastBotId ?? null;
+      detail.lastBotId ?? detail.botId ?? null;
     setZenPersonaBotId((current) =>
       current === nextPersonaBotId ? current : nextPersonaBotId
     );
@@ -34863,16 +35395,31 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }, [chatEphemeralMode, detail?.id, detail?.messages]);
+  const cleanupMessageRevealActive = cleanupRevealMessageKeys.size > 0;
+  const chatEphemeralClockActive =
+    chatAssistantTypingMechanicsActive &&
+    Boolean(detail?.id) &&
+    (pendingReplyVisible ||
+      replyInFlightSignals ||
+      chatAssistantRevealInProgress ||
+      cleanupMessageRevealActive ||
+      chatInterruptedSettleKeys.size > 0 ||
+      zenCanvasSpeedNudgePulseActive ||
+      zenCanvasSpeedNudgeHolding);
+  const chatEphemeralTickMs =
+    chatRevealDelayMultiplier > 1.001
+      ? CHAT_MODE_EPHEMERAL_COMPOSING_TICK_MS
+      : CHAT_MODE_EPHEMERAL_TICK_MS;
   useEffect(() => {
-    if (!chatAssistantTypingMechanicsActive || !detail?.id) return;
+    if (!chatEphemeralClockActive) return;
+    setChatEphemeralNowMs(Date.now());
     const timer = window.setInterval(() => {
       setChatEphemeralNowMs(Date.now());
-    }, CHAT_MODE_EPHEMERAL_TICK_MS);
+    }, chatEphemeralTickMs);
     return () => {
       window.clearInterval(timer);
     };
-  }, [chatAssistantTypingMechanicsActive, detail?.id]);
-  const cleanupMessageRevealActive = cleanupRevealMessageKeys.size > 0;
+  }, [chatEphemeralClockActive, chatEphemeralTickMs]);
   useEffect(() => {
     if (!cleanupMessageRevealActive) return;
     const timer = window.setTimeout(() => {
@@ -34940,16 +35487,18 @@ function HomeContent(): React.JSX.Element {
     if (chatCancelledRevealTokenCountByKeyRef.current.has(temporalKey)) return;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(temporalKey);
     if (firstSeenAt === undefined) return;
-    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
+    const revealTokens = tokenizeMessageReveal(resolveVisibleMessageContent(latestAssistant));
     const tokenTotal = Math.max(1, revealTokens.length);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(temporalKey)?.visibleTokenCount;
-    const revealDurationMs = resolveRevealDurationMsForTokens(
-      revealTokens,
-      DEFAULT_MESSAGE_MOOD,
-      effectiveChatRevealTiming,
-      resolveZenAssistantRevealDelayMultiplier(temporalKey)
-    );
+    const revealDurationMs =
+      resolveMessageActionTextLagMs(latestAssistant) +
+      resolveRevealDurationMsForTokens(
+        revealTokens,
+        DEFAULT_MESSAGE_MOOD,
+        effectiveChatRevealTiming,
+        resolveZenAssistantRevealDelayMultiplier(temporalKey)
+      );
     const visuallyComplete =
       typeof pacedVisibleTokenCount === "number"
         ? pacedVisibleTokenCount >= tokenTotal
@@ -34965,6 +35514,8 @@ function HomeContent(): React.JSX.Element {
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageContent,
     resolveZenAssistantRevealDelayMultiplier,
     pendingReplyVisible,
   ]);
@@ -36863,7 +37414,7 @@ function HomeContent(): React.JSX.Element {
     setCanvasBotMarqueeRect(null);
     setChatBotOverride(undefined);
     setZenPersonaBotId(null);
-    setDraft("");
+    setComposerDraftNow("");
     setError(null);
     setChatModelChoiceByProvider(modelDefaults);
     setChatReasoningEffort(DEFAULT_REASONING_EFFORT);
@@ -37190,6 +37741,8 @@ function HomeContent(): React.JSX.Element {
       personaTransition?: ZenPersonaTransitionInput;
       zenAutonomy?: ZenAutonomyInput;
       zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+      zenLiveActionContext?: ZenLiveActionContextInput;
+      zenLiveActionInterrupt?: ZenLiveActionInterruptInput;
     } = {}
   ): Record<string, unknown> {
     const isZenMode = view === "chat";
@@ -37300,6 +37853,12 @@ function HomeContent(): React.JSX.Element {
       ...(mode === "zen" && options.zenAskQuestionPatience
         ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
         : {}),
+      ...(mode === "zen" && options.zenLiveActionContext
+        ? { zenLiveActionContext: options.zenLiveActionContext }
+        : {}),
+      ...(mode === "zen" && options.zenLiveActionInterrupt
+        ? { zenLiveActionInterrupt: options.zenLiveActionInterrupt }
+        : {}),
     };
   }
 
@@ -37344,7 +37903,7 @@ function HomeContent(): React.JSX.Element {
         : msg.content;
     setEditingMessageId(msg.id);
     setEditingOriginalText(editableText);
-    setDraft(editableText);
+    setComposerDraftNow(editableText);
     setComposerSendTintActive(true);
     queueMicrotask(() => draftComposerRef.current?.focus());
   }
@@ -37352,8 +37911,7 @@ function HomeContent(): React.JSX.Element {
   function cancelEditMessage(): void {
     setEditingMessageId(null);
     setEditingOriginalText("");
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
   }
 
   function resumeChatModeAutoscrollForOutgoingTurn(
@@ -37515,8 +38073,7 @@ function HomeContent(): React.JSX.Element {
       }
       setEditingMessageId(null);
       setEditingOriginalText("");
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       await refreshConversations();
       if (
         editedConversation &&
@@ -37759,8 +38316,7 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     revealZenHeaderForFreshSurface();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
@@ -37862,8 +38418,7 @@ function HomeContent(): React.JSX.Element {
 
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -37964,8 +38519,7 @@ function HomeContent(): React.JSX.Element {
     setConversationStarterPrompts(null);
     pendingNvmTopicResetRef.current = false;
     if (!options.preserveComposer) {
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       if (editingMessageId !== null) {
         setEditingMessageId(null);
         setEditingOriginalText("");
@@ -38046,8 +38600,7 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     try {
       const result = await api<{ ok: true; prismMood?: PrismMoodSnapshot }>(
         `/api/conversations/${encodeURIComponent(conversationId)}/prism-mood/reset`,
@@ -38174,8 +38727,7 @@ function HomeContent(): React.JSX.Element {
 
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -38307,8 +38859,7 @@ function HomeContent(): React.JSX.Element {
   async function restartServerFromSlashCommand(): Promise<void> {
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -38360,8 +38911,7 @@ function HomeContent(): React.JSX.Element {
 
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     if (editingMessageId !== null) {
       setEditingMessageId(null);
       setEditingOriginalText("");
@@ -38431,8 +38981,7 @@ function HomeContent(): React.JSX.Element {
       setConversationStarterPrompts(null);
       setStarterComposerRevealed(false);
       setAskQuestionComposerRevealed(false);
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       if (editingMessageId !== null) {
         setEditingMessageId(null);
         setEditingOriginalText("");
@@ -38455,8 +39004,7 @@ function HomeContent(): React.JSX.Element {
     setError(null);
     if (options.clearChatComposer !== false) {
       setConversationStarterPrompts(null);
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       if (editingMessageId !== null) {
         setEditingMessageId(null);
         setEditingOriginalText("");
@@ -38490,7 +39038,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function firstComposerCommandToken(trimmedLine: string): string {
-    return trimmedLine.split(/\s+/)[0]?.trim().toLowerCase() ?? "";
+    return normalizeComposerSlashCommandLine(trimmedLine).split(/\s+/)[0]?.trim().toLowerCase() ?? "";
   }
 
   function isBuiltInOperationalSlashCommand(trimmedLine: string): boolean {
@@ -38513,6 +39061,13 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  function isPrismDevComposerCommand(trimmedLine: string): boolean {
+    return (
+      PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED &&
+      parsePrismDevChatCommand(trimmedLine) !== null
+    );
+  }
+
   function isDevOnlySlashCommand(trimmedLine: string): boolean {
     if (DEV_TOOLS_ENABLED) {
       const normalizedCommand = firstComposerCommandToken(trimmedLine);
@@ -38520,10 +39075,7 @@ function HomeContent(): React.JSX.Element {
         return true;
       }
     }
-    return (
-      PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED &&
-      parsePrismDevChatCommand(trimmedLine) !== null
-    );
+    return isPrismDevComposerCommand(trimmedLine);
   }
 
   function isLocalOnlyComposerCommand(trimmedLine: string): boolean {
@@ -38537,13 +39089,13 @@ function HomeContent(): React.JSX.Element {
   function ignoreLocalOnlyComposerCommandWhileReplying(trimmedLine: string): boolean {
     if (parseUndoSlashCommand(trimmedLine).kind !== "none") return false;
     if (parseNvmSlashCommand(trimmedLine).kind !== "none") return false;
+    if (isPrismDevComposerCommand(trimmedLine)) return false;
     const replyBusy =
       (pendingReply && !canSendTextWhileReplyPending()) ||
       chatAssistantRevealInProgress;
     if (!replyBusy) return false;
     if (!isLocalOnlyComposerCommand(trimmedLine)) return false;
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     setError(null);
     return true;
   }
@@ -38562,8 +39114,7 @@ function HomeContent(): React.JSX.Element {
     const psychicCommand = parsePsychicSlashCommand(trimmedLine);
     const nvmCommand = parseNvmSlashCommand(trimmedLine);
     if (BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)) {
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       setConversationStarterPrompts(null);
       openCommandCenterHelpModal();
       return true;
@@ -38637,8 +39188,7 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
     setConversationStarterPrompts(null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     if (tokens.length > 1) {
       setError(`${normalizedCommand} does not take extra text. Use /forget or /forget-all by itself.`);
       return true;
@@ -39021,8 +39571,7 @@ function HomeContent(): React.JSX.Element {
     setSelectedId(patchedConversation.id);
     setSessionOpinion(envelope.opinion ?? null);
     setBotOpinion(envelope.botOpinion ?? null);
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     setComposerPrimed(false);
     setStarterComposerRevealed(false);
     setAskQuestionComposerRevealed(false);
@@ -39030,11 +39579,11 @@ function HomeContent(): React.JSX.Element {
     chatSummaryRefreshMarkerRef.current = null;
     if (
       Array.isArray(envelope.conversationStarters) &&
-      envelope.conversationStarters.length >= 3
+      envelope.conversationStarters.length >= 4
     ) {
       setConversationStarterPrompts({
         conversationId: patchedConversation.id,
-        prompts: envelope.conversationStarters.slice(0, 3),
+        prompts: envelope.conversationStarters.slice(0, 4),
         assistantMessageId: getLatestAssistantMessageId(patchedConversation.messages),
       });
     } else {
@@ -39151,8 +39700,7 @@ function HomeContent(): React.JSX.Element {
       setEditingMessageId(null);
       setEditingOriginalText("");
     }
-    setDraft("");
-    setComposerSendTintActive(false);
+    clearComposerDraftNow();
     setComposerPrimed(false);
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
@@ -39272,7 +39820,7 @@ function HomeContent(): React.JSX.Element {
       void dispatch()
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Could not send buffered Zen follow-up.");
-          setDraft(latest);
+          setComposerDraftNow(latest);
           setComposerSendTintActive(true);
         })
         .finally(() => {
@@ -39320,6 +39868,8 @@ function HomeContent(): React.JSX.Element {
       personaTransition?: ZenPersonaTransitionInput;
       zenAutonomy?: ZenAutonomyInput;
       zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+      zenLiveActionInterrupt?: ZenLiveActionInterruptInput;
+      preserveComposerDraft?: boolean;
       zenFollowupDispatch?: boolean;
       zenFollowupCleanupMessageIds?: string[];
       onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
@@ -39329,23 +39879,29 @@ function HomeContent(): React.JSX.Element {
     const isPersonaTransition = options.personaTransition !== undefined;
     const isZenAutonomy = options.zenAutonomy !== undefined;
     const isAskQuestionPatienceTurn = options.zenAskQuestionPatience !== undefined;
+    const isZenLiveActionInterrupt = options.zenLiveActionInterrupt !== undefined;
     const isAssistantOnlyTurn =
-      isPersonaTransition || isZenAutonomy || isAskQuestionPatienceTurn;
+      isPersonaTransition ||
+      isZenAutonomy ||
+      isAskQuestionPatienceTurn ||
+      isZenLiveActionInterrupt;
+    const preserveComposerDraft = options.preserveComposerDraft === true;
     const rawDraft = options.draftOverride ?? draft;
     const rawTrimmed = rawDraft.trim();
+    const commandTrimmed = normalizeComposerSlashCommandLine(rawTrimmed);
     if (
-      rawTrimmed.length > 0 &&
+      commandTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
-      ignoreLocalOnlyComposerCommandWhileReplying(rawTrimmed)
+      ignoreLocalOnlyComposerCommandWhileReplying(commandTrimmed)
     ) {
       return;
     }
     if (
-      rawTrimmed.length > 0 &&
+      commandTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
-      await consumeBuiltInOperationalSlashCommand(rawTrimmed)
+      await consumeBuiltInOperationalSlashCommand(commandTrimmed)
     ) {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
@@ -39353,10 +39909,10 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (
-      rawTrimmed.length > 0 &&
+      commandTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
-      consumeGlobalClearCommand(rawTrimmed, "chat")
+      consumeGlobalClearCommand(commandTrimmed, "chat")
     ) {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
@@ -39364,10 +39920,10 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (
-      rawTrimmed.length > 0 &&
+      commandTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
-      await consumeDevSlashCommand(rawTrimmed)
+      await consumeDevSlashCommand(commandTrimmed)
     ) {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
@@ -39375,16 +39931,15 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (
-      rawTrimmed.length > 0 &&
+      commandTrimmed.length > 0 &&
       !options.starterPrompt &&
       !isAssistantOnlyTurn &&
-      consumePrismDevComposerCommand(rawTrimmed)
+      consumePrismDevComposerCommand(commandTrimmed)
     ) {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       return;
     }
     const commandCenterResolution =
@@ -39441,6 +39996,8 @@ function HomeContent(): React.JSX.Element {
             ? { prompt: "", promptWildcards: null }
           : isAskQuestionPatienceTurn
             ? { prompt: "", promptWildcards: null }
+          : isZenLiveActionInterrupt
+            ? { prompt: "", promptWildcards: null }
           : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
     const trimmed = composerWildcardResolution.prompt.trim();
@@ -39477,6 +40034,7 @@ function HomeContent(): React.JSX.Element {
       !isPersonaTransition &&
       !isZenAutonomy &&
       !isAskQuestionPatienceTurn &&
+      !isZenLiveActionInterrupt &&
       promptHasWildcardFinalization &&
       trimmed.length > 0;
     const messageFinalizationAwaitsServer =
@@ -39517,7 +40075,7 @@ function HomeContent(): React.JSX.Element {
                   ? err.message
                   : "Prism was interrupted, but the saved thread could not be updated."
               );
-              setDraft(rawDraft);
+              setComposerDraftNow(rawDraft);
               setComposerSendTintActive(rawDraft.trim().length > 0);
               return;
             }
@@ -39563,8 +40121,7 @@ function HomeContent(): React.JSX.Element {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       setError(null);
       if (interruptedAssistantPersistPromise) {
         try {
@@ -39575,7 +40132,7 @@ function HomeContent(): React.JSX.Element {
               ? err.message
               : "Prism was interrupted, but the saved thread could not be updated."
           );
-          setDraft(rawDraft);
+          setComposerDraftNow(rawDraft);
           setComposerSendTintActive(rawDraft.trim().length > 0);
           return;
         }
@@ -39610,6 +40167,7 @@ function HomeContent(): React.JSX.Element {
       !isStarterPrompt &&
       !isZenAutonomy &&
       !isAskQuestionPatienceTurn &&
+      !isZenLiveActionInterrupt &&
       forceNewConversationOnNextSend;
     if (!trimmed && !isStarterPrompt && !isAssistantOnlyTurn) return;
     let prismInterruptionForSend: PrismMoodInterruptionInput | undefined;
@@ -39672,8 +40230,7 @@ function HomeContent(): React.JSX.Element {
             appendComposerHistoryEntry(rawDraft);
           }
         }
-        setDraft("");
-        setComposerSendTintActive(false);
+        clearComposerDraftNow();
         setError(null);
       }
       return;
@@ -39689,7 +40246,7 @@ function HomeContent(): React.JSX.Element {
         allowPendingReply: true,
       });
       if (!cleared) {
-        setDraft(rawDraft);
+        setComposerDraftNow(rawDraft);
         setComposerSendTintActive(rawDraft.trim().length > 0);
         return;
       }
@@ -39722,8 +40279,7 @@ function HomeContent(): React.JSX.Element {
     if (editingMessageId && !isStarterPrompt) {
       const editMessageId = editingMessageId;
       hideZenHeaderForConversationAction();
-      setDraft("");
-      setComposerSendTintActive(false);
+      clearComposerDraftNow();
       setEditingMessageId(null);
       setEditingOriginalText("");
       draftComposerRef.current?.blur();
@@ -39746,7 +40302,7 @@ function HomeContent(): React.JSX.Element {
       });
       return;
     }
-    if (!isZenAutonomy) {
+    if (!isZenAutonomy && !isZenLiveActionInterrupt) {
       hideZenHeaderForConversationAction();
       // Any typed/chosen follow-up supersedes the starter quick-replies row.
       if (!isStarterPrompt) {
@@ -39763,7 +40319,7 @@ function HomeContent(): React.JSX.Element {
         : selectedId
     );
     const requestStartedNewConversation = requestConversationId === null || forceNewConversation;
-    if (!isZenAutonomy) {
+    if (!isZenAutonomy && !isZenLiveActionInterrupt) {
       resumeChatModeAutoscrollForOutgoingTurn(
         requestConversationId ??
           detailForSend?.id ??
@@ -39774,7 +40330,7 @@ function HomeContent(): React.JSX.Element {
     const archiveConversationId =
       requestConversationId ??
       (detailForSend?.id && detailForSend.id !== "pending" ? detailForSend.id : null);
-    if (!isZenAutonomy && view === "chat" && archiveConversationId) {
+    if (!isZenAutonomy && !isZenLiveActionInterrupt && view === "chat" && archiveConversationId) {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
@@ -39955,13 +40511,19 @@ function HomeContent(): React.JSX.Element {
       !isStarterPrompt &&
       !isZenAutonomy &&
       !isAskQuestionPatienceTurn &&
+      !isZenLiveActionInterrupt &&
       !editingMessageId &&
       !options.skipComposerHistory
     ) {
       appendComposerHistoryEntry(rawDraft);
     }
-    setDraft("");
-    setComposerSendTintActive(false);
+    if (!preserveComposerDraft) {
+      clearComposerDraftNow();
+      if (view === "chat" && !isAssistantOnlyTurn) {
+        setZenLiveUserActionPreview(null);
+        setZenLiveBotAction(null);
+      }
+    }
     let successfulConversationId: string | null = null;
     const activeZenSessionBreakGapMs = activeZenSessionBreak
       ? effectiveZenSessionBreakGapMs(activeZenSessionBreak)
@@ -40016,6 +40578,26 @@ function HomeContent(): React.JSX.Element {
       !isStarterPrompt &&
       !isAssistantOnlyTurn &&
       pendingNvmTopicResetRef.current;
+    const liveActionContextForSend: ZenLiveActionContextInput | undefined =
+      view === "chat" &&
+      !isStarterPrompt &&
+      !isAssistantOnlyTurn &&
+      zenLiveUserActionPreviewRef.current
+        ? {
+            source: "live_action",
+            activeBotId: zenPersonaBotIdForSend ?? null,
+            userAction: zenLiveUserActionPreviewRef.current.action,
+            ...(zenLiveBotActionRef.current?.action
+              ? { botAction: zenLiveBotActionRef.current.action }
+              : {}),
+            ...(zenLiveBotActionRef.current?.moodHint
+              ? { moodHint: zenLiveBotActionRef.current.moodHint }
+              : {}),
+            ...(zenLiveBotActionRef.current?.clientSequenceId
+              ? { clientSequenceId: zenLiveBotActionRef.current.clientSequenceId }
+              : {}),
+          }
+        : undefined;
 
     try {
       if (interruptedAssistantPersistPromise) {
@@ -40030,7 +40612,10 @@ function HomeContent(): React.JSX.Element {
         }
       }
       const chatBody = buildChatRequestBody(
-        isStarterPrompt || isZenAutonomy || isAskQuestionPatienceTurn
+        isStarterPrompt ||
+          isZenAutonomy ||
+          isAskQuestionPatienceTurn ||
+          isZenLiveActionInterrupt
           ? ""
           : displayTrimmed,
         {
@@ -40073,6 +40658,12 @@ function HomeContent(): React.JSX.Element {
             : {}),
           ...(options.zenAskQuestionPatience
             ? { zenAskQuestionPatience: options.zenAskQuestionPatience }
+            : {}),
+          ...(liveActionContextForSend
+            ? { zenLiveActionContext: liveActionContextForSend }
+            : {}),
+          ...(options.zenLiveActionInterrupt
+            ? { zenLiveActionInterrupt: options.zenLiveActionInterrupt }
             : {}),
           ...(options.promptInputOverride
             ? { promptInputOverride: options.promptInputOverride }
@@ -40250,12 +40841,12 @@ function HomeContent(): React.JSX.Element {
       if (stillViewingRequest && isStarterPrompt) {
         if (
           Array.isArray(d.conversationStarters) &&
-          d.conversationStarters.length >= 3
+          d.conversationStarters.length >= 4
         ) {
           setStarterComposerRevealed(false);
           setConversationStarterPrompts({
             conversationId: d.conversation.id,
-            prompts: d.conversationStarters.slice(0, 3),
+            prompts: d.conversationStarters.slice(0, 4),
             assistantMessageId: getLatestAssistantMessageId(d.conversation.messages),
           });
         } else {
@@ -40345,22 +40936,23 @@ function HomeContent(): React.JSX.Element {
         priorityCommandCancelControllerRef.current === chatRequestController;
       if (requestWasAborted) {
         if (requestWasManualCompactionCancelled || requestWasPriorityCommandCancelled) {
-          setDraft("");
-          setComposerSendTintActive(false);
+          clearComposerDraftNow();
         } else if (stillViewingRequest || requestWasZenInitialThinkingCancelled) {
           setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
           setZenPersonaBotId(previousZenPersonaBotId);
-          setDraft(
-            isStarterPrompt || requestWasZenInitialThinkingCancelled
-              ? ""
-              : restoreDraftAfterSendStops
-          );
-          setComposerSendTintActive(
-            !isStarterPrompt &&
-              !requestWasZenInitialThinkingCancelled &&
-              restoreDraftAfterSendStops.trim().length > 0
-          );
+          if (!preserveComposerDraft) {
+            setComposerDraftNow(
+              isStarterPrompt || requestWasZenInitialThinkingCancelled
+                ? ""
+                : restoreDraftAfterSendStops
+            );
+            setComposerSendTintActive(
+              !isStarterPrompt &&
+                !requestWasZenInitialThinkingCancelled &&
+                restoreDraftAfterSendStops.trim().length > 0
+            );
+          }
           if (requestWasZenInitialThinkingCancelled) {
             setSelectedId(null);
             setConversationStarterPrompts(null);
@@ -40386,10 +40978,12 @@ function HomeContent(): React.JSX.Element {
         setDetail(previousDetail);
         setPendingIncognito(previousPendingIncognito);
         setZenPersonaBotId(previousZenPersonaBotId);
-        setDraft(isStarterPrompt ? "" : restoreDraftAfterSendStops);
-        setComposerSendTintActive(
-          !isStarterPrompt && restoreDraftAfterSendStops.trim().length > 0
-        );
+        if (!preserveComposerDraft) {
+          setComposerDraftNow(isStarterPrompt ? "" : restoreDraftAfterSendStops);
+          setComposerSendTintActive(
+            !isStarterPrompt && restoreDraftAfterSendStops.trim().length > 0
+          );
+        }
       }
       setError(
         err instanceof Error
@@ -40429,7 +41023,7 @@ function HomeContent(): React.JSX.Element {
   type ComposerChip = {
     id: string;
     label: string;
-    /** Secondary line (e.g. AskQuestion “Other” affordance). */
+    /** Secondary line for chips that need compact supporting context. */
     sublabel?: string;
     action: "send" | "other";
     otherSource?: "askquestion" | "starter" | "story";
@@ -40510,9 +41104,9 @@ function HomeContent(): React.JSX.Element {
 
   function buildAskQuestionChips(
     askQuestion: NonNullable<Message["askQuestion"]>,
-    source: "askquestion" | "starter" = "askquestion"
+    _source: "askquestion" | "starter" = "askquestion"
   ): ComposerChip[] {
-    const optionChips = askQuestion.options.map((option, index) => {
+    return askQuestion.options.map((option, index) => {
       const cleaned = stripEmojiFromAskQuestionLabel(option.label);
       const fallback = `Option ${index + 1}`;
       const label = suggestedReplyLooksInternalChoiceNarration(cleaned)
@@ -40528,16 +41122,6 @@ function HomeContent(): React.JSX.Element {
         sendValue: sendValue || fallback,
       };
     });
-    return [
-      ...optionChips,
-      {
-        id: "other",
-        label: "Other",
-        sublabel: "(Explain in chat...)",
-        action: "other",
-        otherSource: source,
-      },
-    ];
   }
 
   function buildStarterAskQuestion(msg: Message): NonNullable<Message["askQuestion"]> | null {
@@ -40555,13 +41139,13 @@ function HomeContent(): React.JSX.Element {
     if (!anchorAssistant || anchorAssistant.id !== msg.id) return null;
     if (hasUserReplyAfterMessage(detail.messages, anchorAssistant.id)) return null;
     const options = conversationStarterPrompts.prompts
-      .slice(0, 3)
+      .slice(0, 4)
       .map((prompt, index) => ({
         id: String.fromCharCode(97 + index),
         label: prompt.trim(),
       }))
       .filter((option) => option.label.length > 0);
-    if (options.length !== 3) return null;
+    if (options.length !== 4) return null;
     return {
       v: 1,
       name: "AskQuestion",
@@ -40602,7 +41186,8 @@ function HomeContent(): React.JSX.Element {
     if (
       askQuestion &&
       askQuestion.name === "AskQuestion" &&
-      (askQuestion.options.length === 2 || askQuestion.options.length === 3)
+      askQuestion.options.length >= 2 &&
+      askQuestion.options.length <= 4
     ) {
       const messageIndex = detail.messages.findIndex((message) => message.id === msg.id);
       if (messageIndex < 0) return null;
@@ -40964,15 +41549,9 @@ function HomeContent(): React.JSX.Element {
             key={`${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
             type="button"
             disabled={pendingReply && view !== "chat"}
-            className={`${styles.conversationStarterChip} ${
-              chip.action === "other" ? styles.conversationStarterChipOther : ""
-            }`}
+            className={styles.conversationStarterChip}
             data-chip-kind={chip.action}
-            aria-label={
-              chip.action === "other"
-                ? "Other — explain in chat"
-                : `Suggested reply: ${chip.sendValue ?? chip.label}`
-            }
+            aria-label={`Suggested reply: ${chip.sendValue ?? chip.label}`}
             onPointerDown={(event) => handleComposerChipPointerDown(event, chip)}
             onClick={() => handleComposerChipPick(chip)}
           >
@@ -41071,15 +41650,9 @@ function HomeContent(): React.JSX.Element {
               key={`${interaction.assistantMessageId}-${chip.id}-${chip.label.slice(0, 48)}-${chipIndex}`}
               type="button"
               disabled={choicesDisabled}
-              className={`${styles.conversationStarterChip} ${
-                chip.action === "other" ? styles.conversationStarterChipOther : ""
-              }`}
+              className={styles.conversationStarterChip}
               data-chip-kind={chip.action}
-              aria-label={
-                chip.action === "other"
-                  ? "Other - explain in chat"
-                  : `Suggested reply: ${chip.sendValue ?? chip.label}`
-              }
+              aria-label={`Suggested reply: ${chip.sendValue ?? chip.label}`}
               onPointerDown={(event) => handleComposerChipPointerDown(event, chip)}
               onClick={() => handleComposerChipPick(chip)}
             >
@@ -41315,7 +41888,7 @@ function HomeContent(): React.JSX.Element {
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
     if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
     if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return true;
-    const displayContent = resolveMessageDisplayContent(message);
+    const displayContent = resolveVisibleMessageContent(message);
     const tokenTotal = Math.max(1, tokenizeMessageReveal(displayContent).length);
     const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
       revealKey,
@@ -41324,6 +41897,7 @@ function HomeContent(): React.JSX.Element {
       completed: false,
       moodKey: DEFAULT_MESSAGE_MOOD,
       delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+      startDelayMs: resolveMessageActionTextLagMs(message),
     });
     return visibleTokenCount < tokenTotal;
   }
@@ -41353,7 +41927,7 @@ function HomeContent(): React.JSX.Element {
         if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
         if (chatCompletedRevealKeysRef.current.has(revealKey)) return false;
         if (chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)) return false;
-        const displayContent = resolveMessageDisplayContent(pendingAskQuestionAssistantMessage);
+        const displayContent = resolveVisibleMessageContent(pendingAskQuestionAssistantMessage);
         const revealTokens = tokenizeMessageReveal(displayContent);
         const tokenTotal = Math.max(1, revealTokens.length);
         const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
@@ -41363,6 +41937,7 @@ function HomeContent(): React.JSX.Element {
           completed: false,
           moodKey: DEFAULT_MESSAGE_MOOD,
           delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+          startDelayMs: resolveMessageActionTextLagMs(pendingAskQuestionAssistantMessage),
         });
         return visibleTokenCount < tokenTotal;
       })()
@@ -41439,19 +42014,210 @@ function HomeContent(): React.JSX.Element {
       : starterPromptsInteractive
         ? "starter"
         : null;
-  const composerHiddenByChoiceChips =
-    activeChoiceComposerSource === "askquestion"
-      ? !askQuestionComposerRevealed
-      : activeChoiceComposerSource === "starter"
-        ? !starterComposerRevealed
-        : false;
-  const zenComposerActionPreview = useMemo(
-    () =>
-      chatLikeSurface && !composerHiddenByChoiceChips
-        ? resolveZenActionPreview(draft)
-        : null,
-    [chatLikeSurface, composerHiddenByChoiceChips, draft]
+  const composerHiddenByChoiceChips = false;
+  useEffect(() => {
+    if (!chatLikeSurface || composerHiddenByChoiceChips) {
+      setZenLiveUserActionPreview(null);
+      return;
+    }
+    const trimmedDraft = draft.trim();
+    setZenLiveUserActionPreview((previous) =>
+      resolvePersistentZenActionPreview(previous, draft, {
+        reset: /^[!/]/u.test(trimmedDraft),
+      })
+    );
+  }, [chatLikeSurface, composerHiddenByChoiceChips, draft]);
+  const zenComposerActionPreview =
+    chatLikeSurface && !composerHiddenByChoiceChips ? zenLiveUserActionPreview : null;
+  useEffect(() => {
+    setZenLiveUserActionPreview(null);
+    setZenLiveBotAction(null);
+    zenLiveActionAbortRef.current?.abort();
+    if (zenLiveActionIdleTimerRef.current !== null) {
+      clearTimeout(zenLiveActionIdleTimerRef.current);
+      zenLiveActionIdleTimerRef.current = null;
+    }
+  }, [selectedId, view, zenPersonaBotId]);
+  const requestZenLiveActionReaction = useCallback(
+    async (source: "draft_action" | "idle"): Promise<void> => {
+      if (
+        view !== "chat" ||
+        composerHiddenByChoiceChips ||
+        pendingReplyVisible ||
+        chatAssistantRevealInProgress
+      ) {
+        return;
+      }
+      const userCue = zenLiveUserActionPreviewRef.current;
+      if (!userCue && source === "draft_action") return;
+      const activeBotId = zenPersonaBotIdRef.current ?? null;
+      const sequenceId = `zen-live-${++zenLiveActionRequestSeqRef.current}`;
+      const activeConversationId =
+        detailIdRef.current && detailIdRef.current !== "pending"
+          ? detailIdRef.current
+          : selectedIdRef.current ?? undefined;
+      const previousBotAction = zenLiveBotActionRef.current?.action;
+      zenLiveActionAbortRef.current?.abort();
+      const controller = new AbortController();
+      zenLiveActionAbortRef.current = controller;
+      try {
+        const response = await api<{
+          ok: true;
+          reaction: ZenLiveActionReactionResponse;
+        }>("/api/zen/live-action-reaction", {
+          method: "POST",
+          body: JSON.stringify({
+            source,
+            activeBotId,
+            personaName: zenPersonaBot?.name ?? "Prism",
+            ...(userCue ? { userAction: userCue.action } : {}),
+            ...(previousBotAction ? { previousBotAction } : {}),
+            ...(activeConversationId ? { conversationId: activeConversationId } : {}),
+            idleMs: source === "idle"
+              ? Math.max(0, Date.now() - (chatComposerLastTypedAtMsRef.current ?? Date.now()))
+              : 0,
+            clientSequenceId: sequenceId,
+          }),
+          signal: controller.signal,
+        });
+        if (zenLiveActionAbortRef.current !== controller) return;
+        if (
+          responseIsStaleZenLiveAction(
+            response.reaction,
+            sequenceId,
+            activeBotId
+          )
+        ) {
+          return;
+        }
+        const nextAction = normalizeZenLiveBotActionState(
+          response.reaction,
+          source,
+          Date.now()
+        );
+        if (!nextAction) return;
+        setZenLiveBotAction(nextAction);
+        if (
+          nextAction.responseKind !== "interrupt_candidate" ||
+          pendingReplyVisible ||
+          chatAssistantRevealInProgress ||
+          source === "idle" ||
+          !userCue ||
+          draftLiveRef.current.trim().length === 0
+        ) {
+          return;
+        }
+        const interruptKey = `${activeBotId ?? "prism"}:${userCue.key}:${nextAction.action}`;
+        const nowMs = Date.now();
+        if (
+          zenLiveActionLastInterruptKeyRef.current === interruptKey ||
+          nowMs - zenLiveActionLastInterruptAtMsRef.current <
+            ZEN_LIVE_ACTION_INTERRUPT_COOLDOWN_MS
+        ) {
+          return;
+        }
+        zenLiveActionLastInterruptKeyRef.current = interruptKey;
+        zenLiveActionLastInterruptAtMsRef.current = nowMs;
+        await sendMessage(
+          { preventDefault() {} } as React.FormEvent,
+          {
+            draftOverride: "",
+            skipComposerHistory: true,
+            preserveComposerDraft: true,
+            zenLiveActionInterrupt: {
+              source: "live_action_interrupt",
+              activeBotId,
+              userAction: userCue.action,
+              botAction: nextAction.action,
+              moodHint: nextAction.moodHint,
+              ...(nextAction.interruptReason
+                ? { reason: nextAction.interruptReason }
+                : {}),
+              clientTurnId: `zen-live-interrupt-${nowMs.toString(36)}`,
+            },
+          }
+        );
+      } catch (err) {
+        if (
+          err instanceof DOMException && err.name === "AbortError"
+        ) {
+          return;
+        }
+        if (controller.signal.aborted) return;
+      } finally {
+        if (zenLiveActionAbortRef.current === controller) {
+          zenLiveActionAbortRef.current = null;
+        }
+      }
+    },
+    [
+      chatAssistantRevealInProgress,
+      composerHiddenByChoiceChips,
+      pendingReplyVisible,
+      view,
+      zenPersonaBot?.name,
+    ]
   );
+  useEffect(() => {
+    if (
+      !zenComposerActionPreview ||
+      !chatLikeSurface ||
+      composerHiddenByChoiceChips ||
+      pendingReplyVisible ||
+      chatAssistantRevealInProgress
+    ) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void requestZenLiveActionReaction("draft_action");
+    }, ZEN_LIVE_ACTION_REACTION_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [
+    chatAssistantRevealInProgress,
+    chatLikeSurface,
+    composerHiddenByChoiceChips,
+    pendingReplyVisible,
+    requestZenLiveActionReaction,
+    zenComposerActionPreview?.key,
+  ]);
+  useEffect(() => {
+    if (zenLiveActionIdleTimerRef.current !== null) {
+      clearTimeout(zenLiveActionIdleTimerRef.current);
+      zenLiveActionIdleTimerRef.current = null;
+    }
+    if (
+      !zenComposerActionPreview ||
+      !chatLikeSurface ||
+      composerHiddenByChoiceChips ||
+      pendingReplyVisible ||
+      chatAssistantRevealInProgress
+    ) {
+      return;
+    }
+    const delay =
+      zenLiveBotAction?.source === "idle"
+        ? ZEN_LIVE_ACTION_IDLE_REPEAT_MS
+        : ZEN_LIVE_ACTION_IDLE_FIRST_MS;
+    zenLiveActionIdleTimerRef.current = setTimeout(() => {
+      zenLiveActionIdleTimerRef.current = null;
+      void requestZenLiveActionReaction("idle");
+    }, delay);
+    return () => {
+      if (zenLiveActionIdleTimerRef.current !== null) {
+        clearTimeout(zenLiveActionIdleTimerRef.current);
+        zenLiveActionIdleTimerRef.current = null;
+      }
+    };
+  }, [
+    chatAssistantRevealInProgress,
+    chatLikeSurface,
+    composerHiddenByChoiceChips,
+    pendingReplyVisible,
+    requestZenLiveActionReaction,
+    zenComposerActionPreview?.key,
+    zenLiveBotAction?.createdAtMs,
+    zenLiveBotAction?.source,
+  ]);
   const askQuestionPatienceAssistantMessageId =
     pendingAskQuestionInteractiveKey !== null
       ? pendingAskQuestionState?.assistantMessageId ?? null
@@ -42288,7 +43054,7 @@ function HomeContent(): React.JSX.Element {
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     const atTop = el.scrollTop <= 0.5;
     const atBottom = el.scrollTop >= maxScrollTop - 0.5;
-    if (event.deltaY < -1) {
+    if (!atTop && event.deltaY < -1) {
       disarmChatModeAutoscrollFromUserGesture();
     }
     if (atTop && event.deltaY < -1) {
@@ -42337,14 +43103,16 @@ function HomeContent(): React.JSX.Element {
     chatTouchScrollLastYRef.current = nextY;
     if (nextY === null || previousY === null) return;
     const touchDeltaY = nextY - previousY;
-    // Swiping down moves the thread upward. That is the user's "pause follow"
-    // gesture while PRISM is typing, so let the scroll surface take over.
-    if (touchDeltaY > 4) {
-      disarmChatModeAutoscrollFromUserGesture();
-    }
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     const atTop = el.scrollTop <= 0.5;
     const atBottom = el.scrollTop >= maxScrollTop - 0.5;
+    // Swiping down moves the thread upward. That is the user's "pause follow"
+    // gesture while PRISM is typing, so let the scroll surface take over.
+    // At the top edge, though, this is just elastic overscroll; do not mark
+    // a fresh Zen reply as user-disarmed before the assistant row scrolls in.
+    if (!atTop && touchDeltaY > 4) {
+      disarmChatModeAutoscrollFromUserGesture();
+    }
     if (atTop && touchDeltaY > 1) {
       applyChatModeScrollElasticPull(
         el,
@@ -42611,9 +43379,77 @@ function HomeContent(): React.JSX.Element {
     }
   }, [detail]);
 
+  function publishComposerTypingActivity(timestampMs: number): void {
+    chatComposerPublishedTypedAtMsRef.current = timestampMs;
+    setChatComposerLastTypedAtMs((current) =>
+      current === timestampMs ? current : timestampMs
+    );
+  }
+
+  function cancelDeferredComposerDraftState(): void {
+    if (pendingDraftSyncTimerRef.current !== null) {
+      window.clearTimeout(pendingDraftSyncTimerRef.current);
+      pendingDraftSyncTimerRef.current = null;
+    }
+    pendingDraftSyncValueRef.current = null;
+  }
+
+  function setComposerDraftNow(nextDraft: string): void {
+    cancelDeferredComposerDraftState();
+    draftLiveRef.current = nextDraft;
+    setDraft(nextDraft);
+  }
+
+  function clearComposerDraftNow(): void {
+    setComposerDraftNow("");
+    setComposerSendTintActive(false);
+  }
+
   function markComposerTypingActivity(): void {
+    const now = Date.now();
     askQuestionPatienceLastTypingAtMsRef.current = performance.now();
-    setChatComposerLastTypedAtMs(Date.now());
+    chatComposerLastTypedAtMsRef.current = now;
+    const lastPublished = chatComposerPublishedTypedAtMsRef.current;
+    if (
+      lastPublished === null ||
+      now - lastPublished >= CHAT_MODE_COMPOSER_TYPING_PUBLISH_MS
+    ) {
+      if (chatComposerTypingPublishTimerRef.current !== null) {
+        window.clearTimeout(chatComposerTypingPublishTimerRef.current);
+        chatComposerTypingPublishTimerRef.current = null;
+      }
+      publishComposerTypingActivity(now);
+      return;
+    }
+    if (chatComposerTypingPublishTimerRef.current !== null) return;
+    chatComposerTypingPublishTimerRef.current = window.setTimeout(() => {
+      chatComposerTypingPublishTimerRef.current = null;
+      const latest = chatComposerLastTypedAtMsRef.current;
+      if (typeof latest !== "number") return;
+      publishComposerTypingActivity(latest);
+    }, Math.max(0, CHAT_MODE_COMPOSER_TYPING_PUBLISH_MS - (now - lastPublished)));
+  }
+
+  function flushDeferredComposerDraftState(): void {
+    if (pendingDraftSyncTimerRef.current !== null) {
+      window.clearTimeout(pendingDraftSyncTimerRef.current);
+      pendingDraftSyncTimerRef.current = null;
+    }
+    const nextDraft = pendingDraftSyncValueRef.current;
+    pendingDraftSyncValueRef.current = null;
+    if (typeof nextDraft !== "string") return;
+    if (draftLiveRef.current !== nextDraft) return;
+    setDraft((current) => (current === nextDraft ? current : nextDraft));
+  }
+
+  function scheduleDeferredComposerDraftState(nextDraft: string): void {
+    pendingDraftSyncValueRef.current = nextDraft;
+    if (pendingDraftSyncTimerRef.current !== null) {
+      window.clearTimeout(pendingDraftSyncTimerRef.current);
+    }
+    pendingDraftSyncTimerRef.current = window.setTimeout(() => {
+      flushDeferredComposerDraftState();
+    }, CHAT_MODE_COMPOSER_PARENT_DRAFT_SYNC_MS);
   }
 
   function updateComposerDraft(nextDraft: string) {
@@ -42621,8 +43457,10 @@ function HomeContent(): React.JSX.Element {
       nextDraft,
       composerCommandPicks
     );
+    const previousDraft = draftLiveRef.current;
+    draftLiveRef.current = normalizedNextDraft;
     resetComposerHistoryCursor();
-    if (normalizedNextDraft !== draft) {
+    if (normalizedNextDraft !== previousDraft) {
       setComposerSendTintActive(true);
       markComposerTypingActivity();
       if (
@@ -42630,17 +43468,36 @@ function HomeContent(): React.JSX.Element {
         normalizedNextDraft.trim().length > 0 &&
         (pendingReplyVisible || chatAssistantRevealInProgress)
       ) {
-        beginOrRefreshZenFollowupBuffer(
-          detail?.id && detail.id !== "pending" ? detail.id : selectedId
-        );
+        const activeConversationId =
+          detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+        beginOrRefreshZenFollowupBuffer(activeConversationId);
+        if (chatAssistantRevealInProgress && activeConversationId) {
+          cancelChatModeSmoothScroll();
+          chatAutoscrollUserDisarmedByConversationRef.current.set(
+            activeConversationId,
+            true
+          );
+          chatAutoscrollArmedByConversationRef.current.set(activeConversationId, false);
+        }
         if (pendingReplyVisible) {
           priorityCommandCancelControllerRef.current = pendingReplyAbortControllerRef.current;
           stopPendingReply();
         }
       }
     }
-    setDraft(normalizedNextDraft);
-    if (normalizedNextDraft !== draft) {
+    const shouldDeferParentDraftSync =
+      composerMarkdownEditorEnabled &&
+      view === "chat" &&
+      chatAssistantRevealInProgress &&
+      normalizedNextDraft.trim().length > 0 &&
+      previousDraft.trim().length > 0;
+    if (shouldDeferParentDraftSync) {
+      scheduleDeferredComposerDraftState(normalizedNextDraft);
+    } else {
+      cancelDeferredComposerDraftState();
+      setDraft(normalizedNextDraft);
+    }
+    if (normalizedNextDraft !== previousDraft) {
       snapAskQuestionComposerToChatBottom();
     }
   }
@@ -45722,14 +46579,6 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     commitZenPersonaTransition(botId);
-  }
-
-  function handleZenEmptyComposerBackspace(): boolean {
-    if (view !== "chat" || pendingReplyVisible || zenPersonaBotIdRef.current === null) {
-      return false;
-    }
-    commitZenPersonaOff();
-    return true;
   }
 
   function renderZenPersonaTransitionChoiceControl(compact = false): React.ReactNode {
@@ -53770,7 +54619,7 @@ function HomeContent(): React.JSX.Element {
       const latestAssistant =
         detail.messages.find((message) => message.id === latestAssistantMessageId) ?? null;
       if (!latestAssistant) return null;
-      const displayContent = resolveMessageDisplayContent(latestAssistant);
+      const displayContent = resolveVisibleMessageContent(latestAssistant);
       const revealTokens = tokenizeMessageReveal(displayContent);
       const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
         revealKey,
@@ -53779,6 +54628,7 @@ function HomeContent(): React.JSX.Element {
         completed: false,
         moodKey: DEFAULT_MESSAGE_MOOD,
         delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+        startDelayMs: resolveMessageActionTextLagMs(latestAssistant),
       });
       return revealTokens.slice(0, visibleTokenCount).join("").length;
     })();
@@ -54057,7 +54907,7 @@ function HomeContent(): React.JSX.Element {
     ) {
       return { active: false, label: "Idle", delayMs: 0, token: "Reveal complete" };
     }
-    const revealTokens = tokenizeMessageReveal(resolveMessageDisplayContent(latestAssistant));
+    const revealTokens = tokenizeMessageReveal(resolveVisibleMessageContent(latestAssistant));
     const tokenTotal = Math.max(1, revealTokens.length);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount ?? 1;
@@ -58543,6 +59393,81 @@ function HomeContent(): React.JSX.Element {
                     <label className={styles.settingsRangeField}>
                       <span className={styles.settingsRangeHeader}>
                         <span className={styles.controlLabelWithInfo}>
+                          <span>Minimum text size</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-message-font-min"
+                            label="About minimum text size"
+                            variant="control"
+                          >
+                            Sets the smallest Zen message text used for longer canvas messages.
+                          </PanelSectionInfo>
+                        </span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenMessageFontSizePx(zenMessageFontMinPx)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={MIN_ZEN_MESSAGE_FONT_SIZE_PX}
+                        max={zenMessageFontMaxPx}
+                        step={0.1}
+                        value={zenMessageFontMinPx}
+                        onChange={(event) => {
+                          const nextMin = normalizeZenMessageFontMinPxSetting(
+                            event.target.value
+                          );
+                          setSettings((previous) => {
+                            if (!previous) return previous;
+                            return {
+                              ...previous,
+                              zenMessageFontMinPx: nextMin,
+                              zenMessageFontMaxPx: normalizeZenMessageFontMaxPxSetting(
+                                previous.zenMessageFontMaxPx,
+                                nextMin
+                              ),
+                            };
+                          });
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span className={styles.controlLabelWithInfo}>
+                          <span>Maximum text size</span>
+                          <PanelSectionInfo
+                            id="settings-control-info-zen-message-font-max"
+                            label="About maximum text size"
+                            variant="control"
+                          >
+                            Sets the largest Zen message text used for short canvas messages.
+                          </PanelSectionInfo>
+                        </span>
+                        <span className={styles.settingsRangeValue}>
+                          {formatZenMessageFontSizePx(zenMessageFontMaxPx)}
+                        </span>
+                      </span>
+                      <input
+                        type="range"
+                        min={zenMessageFontMinPx}
+                        max={MAX_ZEN_MESSAGE_FONT_SIZE_PX}
+                        step={0.1}
+                        value={zenMessageFontMaxPx}
+                        onChange={(event) => {
+                          const nextMax = normalizeZenMessageFontMaxPxSetting(
+                            event.target.value,
+                            zenMessageFontMinPx
+                          );
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenMessageFontMaxPx: nextMax }
+                              : previous
+                          );
+                        }}
+                      />
+                    </label>
+                    <label className={styles.settingsRangeField}>
+                      <span className={styles.settingsRangeHeader}>
+                        <span className={styles.controlLabelWithInfo}>
                           <span>Mood sensitivity</span>
                           <PanelSectionInfo
                             id="settings-control-info-zen-mood-sensitivity"
@@ -58780,6 +59705,32 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       />
+                    </label>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={effectiveZenModeSettings.zenWallpaperGrayscaleEnabled}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? { ...previous, zenWallpaperGrayscaleEnabled: next }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Grayscale atmosphere</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-zen-wallpaper-grayscale"
+                          label="About grayscale atmosphere"
+                          variant="control"
+                        >
+                          Shows generated Atmosphere wallpapers in grayscale. Turn it off to keep vivid colors from themed or persona-driven scenes.
+                        </PanelSectionInfo>
+                      </span>
                     </label>
                     <label
                       className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
@@ -68026,7 +68977,8 @@ function HomeContent(): React.JSX.Element {
       );
     const zenAtmosphereReadabilityOverlayStyle = {
       "--zen-atmosphere-overlay-opacity": String(
-        zenAtmosphereReadabilityOverlayOpacity
+        zenAtmosphereReadabilityOverlayOpacity *
+          ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH
       ),
     } as React.CSSProperties;
     const zenPersonaFallbackAtmosphereVisible =
@@ -68039,10 +68991,15 @@ function HomeContent(): React.JSX.Element {
       : undefined;
     const zenAtmospherePrismColorActive =
       !appWidePrivateMode && composeBotAccentId === null;
+    const zenAtmosphereGrayscaleEnabled =
+      normalizeZenWallpaperGrayscaleSetting(settings?.zenWallpaperGrayscaleEnabled);
     const zenAtmosphereBackdropStyle = {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity)
       ),
+      "--zen-atmosphere-grayscale-amount": zenAtmosphereGrayscaleEnabled
+        ? "1"
+        : "0",
       "--zen-atmosphere-color-amount": zenAtmospherePrismColorActive ? "1" : "0",
     } as React.CSSProperties;
     const zenFirstReplyPending =
@@ -68732,7 +69689,7 @@ function HomeContent(): React.JSX.Element {
               msg.id === latestAssistantMessageId &&
               detail?.id
                 ? (() => {
-                    const displayContent = resolveMessageDisplayContent(msg);
+                    const displayContent = resolveVisibleMessageContent(msg);
                     const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
                       revealKey,
@@ -68744,6 +69701,7 @@ function HomeContent(): React.JSX.Element {
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
                       delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+                      startDelayMs: resolveMessageActionTextLagMs(msg),
                     });
                   })()
                 : undefined;
@@ -68753,7 +69711,7 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const cleanupRevealActive =
               cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
-            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
+            const messageDisplayContent = resolveVisibleMessageSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -68773,7 +69731,8 @@ function HomeContent(): React.JSX.Element {
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
                       messageDynamicLineCount,
-                      msg.role === "user" ? "user" : "assistant"
+                      msg.role === "user" ? "user" : "assistant",
+                      zenMessageFontBounds
                     )}px`,
                   } as React.CSSProperties)
                 : undefined;
@@ -68828,9 +69787,13 @@ function HomeContent(): React.JSX.Element {
             const zenUserMessageColorStyle = zenUserMessageColor
               ? ({ "--zen-user-message-color": zenUserMessageColor } as React.CSSProperties)
               : undefined;
-            const expandedPromptShortcutTargetKeys = new Set(
-              expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
-            );
+            const expandedPromptShortcutTargetKeys = msg.promptShortcut
+              ? new Set(expandedPromptShortcutTargetsByMessageId[msg.id] ?? [])
+              : undefined;
+            const promptShortcutExpanded =
+              expandedPromptShortcutTargetKeys?.has(
+                msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
+              ) ?? false;
             const promptShortcutUnfolded =
               chatLikeSurface &&
               ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
@@ -68968,7 +69931,7 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage
                   ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
                   : null}
-                <MessageBody
+                <MemoizedMessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
                   messageRole={msg.role}
@@ -69001,6 +69964,7 @@ function HomeContent(): React.JSX.Element {
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
+                  messageFontBounds={zenMessageFontBounds}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   typingVoicePreset={assistantVoicePreset}
@@ -69022,17 +69986,21 @@ function HomeContent(): React.JSX.Element {
                   )}
                   cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
-                  promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
-                    msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
-                  )}
+                  promptShortcutExpanded={promptShortcutExpanded}
                   expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
                   promptShortcutPresentation="expandable"
                   promptShortcutUnfolded={promptShortcutUnfolded}
                   renderPromptMetadataAsProse={false}
-                  onTogglePromptShortcut={(target) =>
-                    toggleExpandedPromptShortcutTarget(msg.id, target)
+                  onTogglePromptShortcut={
+                    msg.promptShortcut
+                      ? (target) => toggleExpandedPromptShortcutTarget(msg.id, target)
+                      : undefined
                   }
-                  onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
+                  onCollapsePromptShortcut={
+                    msg.promptShortcut
+                      ? () => collapseExpandedPromptShortcutsForMessage(msg.id)
+                      : undefined
+                  }
                 />
                 {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
@@ -69175,8 +70143,18 @@ function HomeContent(): React.JSX.Element {
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
-                {zenComposerActionPreview ? (
-                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                {zenLiveBotAction || zenComposerActionPreview || zenPersonaBot ? (
+                  <div className={styles.zenLiveActionStatusRail}>
+                    <ZenLiveBotPresencePlate
+                      bot={zenPersonaBot}
+                      actionState={zenLiveBotAction}
+                      userActionVisible={Boolean(zenComposerActionPreview)}
+                      resolvedTheme={resolvedTheme}
+                    />
+                    {zenComposerActionPreview ? (
+                      <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                    ) : null}
+                  </div>
                 ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
@@ -69193,13 +70171,13 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
+                    onInputActivity={markComposerTypingActivity}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     mentionCommitMode="select-persona"
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
                     mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
-                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
@@ -69222,6 +70200,7 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
+                onInputActivity={markComposerTypingActivity}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
@@ -70301,7 +71280,7 @@ function HomeContent(): React.JSX.Element {
               msg.id === latestAssistantMessageId &&
               detail?.id
                 ? (() => {
-                    const displayContent = resolveMessageDisplayContent(msg);
+                    const displayContent = resolveVisibleMessageContent(msg);
                     const revealKey = `${detail.id}:${msg.id}`;
                     return resolveAssistantRevealVisibleTokenCount({
                       revealKey,
@@ -70313,6 +71292,7 @@ function HomeContent(): React.JSX.Element {
                         : {}),
                       moodKey: DEFAULT_MESSAGE_MOOD,
                       delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
+                      startDelayMs: resolveMessageActionTextLagMs(msg),
                     });
                   })()
                 : undefined;
@@ -70322,7 +71302,7 @@ function HomeContent(): React.JSX.Element {
                 : null;
             const cleanupRevealActive =
               cleanupRevealKey !== null && cleanupRevealMessageKeys.has(cleanupRevealKey);
-            const messageDisplayContent = resolveMessageVisualSizingContent(msg);
+            const messageDisplayContent = resolveVisibleMessageSizingContent(msg);
             const messageDisplayLineCount = estimateVisualLineCount(messageDisplayContent);
             const committedMessageLineCount =
               temporalKey !== null
@@ -70342,7 +71322,8 @@ function HomeContent(): React.JSX.Element {
                 ? ({
                     "--message-dynamic-font-size": `${resolveChatModeMessageFontSizePx(
                       messageDynamicLineCount,
-                      msg.role === "user" ? "user" : "assistant"
+                      msg.role === "user" ? "user" : "assistant",
+                      zenMessageFontBounds
                     )}px`,
                   } as React.CSSProperties)
                 : undefined;
@@ -70376,9 +71357,13 @@ function HomeContent(): React.JSX.Element {
             const promptShortcutColorIndex = promptShortcutColorIndexByMessageId.get(msg.id);
             const commandPromptDisplay =
               chatLikeSurface && msg.role === "user" && Boolean(msg.promptShortcut || msg.promptWildcards);
-            const expandedPromptShortcutTargetKeys = new Set(
-              expandedPromptShortcutTargetsByMessageId[msg.id] ?? []
-            );
+            const expandedPromptShortcutTargetKeys = msg.promptShortcut
+              ? new Set(expandedPromptShortcutTargetsByMessageId[msg.id] ?? [])
+              : undefined;
+            const promptShortcutExpanded =
+              expandedPromptShortcutTargetKeys?.has(
+                msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
+              ) ?? false;
             const promptShortcutUnfolded =
               chatLikeSurface &&
               ZEN_PROMPT_SHORTCUTS_AUTO_UNFOLD &&
@@ -70534,7 +71519,7 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage
                   ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
                   : null}
-                <MessageBody
+                <MemoizedMessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
                   messageRole={msg.role}
@@ -70567,6 +71552,7 @@ function HomeContent(): React.JSX.Element {
                   suppressDecorativePrismText={chatLikeSurface}
                   chatPhase={chatPhase}
                   chatCommittedLineCount={messageBodyCommittedLineCount}
+                  messageFontBounds={zenMessageFontBounds}
                   forcedVisibleTokenCount={forcedVisibleTokenCount}
                   revealMoodKey={chatLikeSurface ? DEFAULT_MESSAGE_MOOD : assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
                   typingVoicePreset={assistantVoicePreset}
@@ -70588,17 +71574,21 @@ function HomeContent(): React.JSX.Element {
                   )}
                   cleanupRevealActive={cleanupRevealActive}
                   promptShortcutColorIndex={promptShortcutColorIndex}
-                  promptShortcutExpanded={expandedPromptShortcutTargetKeys.has(
-                    msg.promptShortcut?.commandId ?? PROMPT_SHORTCUT_DEFAULT_TARGET_KEY
-                  )}
+                  promptShortcutExpanded={promptShortcutExpanded}
                   expandedPromptShortcutTargetKeys={expandedPromptShortcutTargetKeys}
                   promptShortcutPresentation="expandable"
                   promptShortcutUnfolded={promptShortcutUnfolded}
                   renderPromptMetadataAsProse={false}
-                  onTogglePromptShortcut={(target) =>
-                    toggleExpandedPromptShortcutTarget(msg.id, target)
+                  onTogglePromptShortcut={
+                    msg.promptShortcut
+                      ? (target) => toggleExpandedPromptShortcutTarget(msg.id, target)
+                      : undefined
                   }
-                  onCollapsePromptShortcut={() => collapseExpandedPromptShortcutsForMessage(msg.id)}
+                  onCollapsePromptShortcut={
+                    msg.promptShortcut
+                      ? () => collapseExpandedPromptShortcutsForMessage(msg.id)
+                      : undefined
+                  }
                 />
                 {renderPsychicThoughtLine(msg)}
                 {renderAskQuestionInlineCard(msg)}
@@ -70732,8 +71722,18 @@ function HomeContent(): React.JSX.Element {
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
-                {zenComposerActionPreview ? (
-                  <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                {zenLiveBotAction || zenComposerActionPreview || zenPersonaBot ? (
+                  <div className={styles.zenLiveActionStatusRail}>
+                    <ZenLiveBotPresencePlate
+                      bot={zenPersonaBot}
+                      actionState={zenLiveBotAction}
+                      userActionVisible={Boolean(zenComposerActionPreview)}
+                      resolvedTheme={resolvedTheme}
+                    />
+                    {zenComposerActionPreview ? (
+                      <ZenActionComposerPreview cue={zenComposerActionPreview} />
+                    ) : null}
+                  </div>
                 ) : null}
                 <div className={styles.chatComposerRow}>
                   <ComposerInput
@@ -70750,13 +71750,13 @@ function HomeContent(): React.JSX.Element {
                     hideSubmitButton={hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
+                    onInputActivity={markComposerTypingActivity}
                     onFocus={handleComposerFocus}
                     resolvedTheme={resolvedTheme}
                     mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                     mentionCommitMode="select-persona"
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
                     mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
-                    onEmptyBackspace={handleZenEmptyComposerBackspace}
                     commandPicks={composerCommandPicks}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
@@ -70779,6 +71779,7 @@ function HomeContent(): React.JSX.Element {
                 hideSubmitButton={hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
+                onInputActivity={markComposerTypingActivity}
                 onFocus={handleComposerFocus}
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}

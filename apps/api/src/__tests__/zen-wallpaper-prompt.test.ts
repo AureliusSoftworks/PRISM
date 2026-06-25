@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ZEN_WALLPAPER_THEME_COUNT,
   composeZenWallpaperPrompt,
   extractZenWallpaperVisualCues,
   normalizeZenWallpaperPromptOverride,
@@ -25,11 +26,15 @@ describe("composeZenWallpaperPrompt", () => {
 
     assert.match(
       prompt,
-      /^Ambient art wallpaper for a calm Zen chat canvas, abstract first with soft symbolic motifs\./
+      /^Widescreen ambient wallpaper for a calm Zen chat canvas;/
     );
     assert.match(
       prompt,
-      /Use soft symbolic motifs suggested by family keepsake warmth, moonlight, old city stone, and fiddle-string lines;/
+      /Wallpaper theme 1\/4 - light signature:/
+    );
+    assert.match(
+      prompt,
+      /Make family keepsake warmth the clearest chat-derived influence, supported by moonlight, old city stone, and fiddle-string lines;/
     );
     assert.doesNotMatch(prompt, /\bConversation seed\b/i);
     assert.doesNotMatch(prompt, /\bCompanion context\b/i);
@@ -61,11 +66,75 @@ describe("composeZenWallpaperPrompt", () => {
 
     assert.match(
       prompt,
-      /Use soft symbolic motifs suggested by warm kitchen light, flour-dust texture, cooling tray geometry, and folded stationery;/
+      /Wallpaper theme 1\/4 - light signature:/
     );
-    assert.doesNotMatch(prompt, /Subtle abstract cues from reflective quiet/i);
-    assert.match(prompt, /quiet still-life traces rather than a literal scene/);
+    assert.match(
+      prompt,
+      /Make warm kitchen light the clearest chat-derived influence, supported by flour-dust texture, cooling tray geometry, and folded stationery;/
+    );
+    assert.doesNotMatch(prompt, /No strong concrete motif was found/i);
+    assert.match(prompt, /rather than barely-there noise/);
     assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies/);
+  });
+
+  it("cycles four distinct themed wallpaper prompts through the same chat cues", () => {
+    const args = {
+      initialUserPrompt:
+        "I keep thinking about my grandmother's handwritten recipe card.",
+      recentContext: [
+        "user: The kitchen smelled like cinnamon cookies cooling on the tray.",
+        "assistant: That sounds like a small family keepsake made of warm light, flour, and memory.",
+      ].join("\n"),
+      botName: "Prism",
+      botSystemPrompt: "assistant",
+    };
+    const prompts = Array.from({ length: ZEN_WALLPAPER_THEME_COUNT }, (_, index) =>
+      composeZenWallpaperPrompt({ ...args, generationIndex: index })
+    );
+
+    assert.equal(new Set(prompts).size, ZEN_WALLPAPER_THEME_COUNT);
+    assert.ok(prompts[0]?.includes("Wallpaper theme 1/4 - light signature"));
+    assert.ok(prompts[0]?.includes("Make warm kitchen light the clearest chat-derived influence"));
+    assert.ok(prompts[1]?.includes("Wallpaper theme 2/4 - material memory"));
+    assert.ok(prompts[1]?.includes("Make flour-dust texture the clearest chat-derived influence"));
+    assert.ok(prompts[2]?.includes("Wallpaper theme 3/4 - spatial rhythm"));
+    assert.ok(prompts[2]?.includes("Make cooling tray geometry the clearest chat-derived influence"));
+    assert.ok(prompts[3]?.includes("Wallpaper theme 4/4 - emotional weather"));
+    assert.ok(prompts[3]?.includes("Make folded stationery the clearest chat-derived influence"));
+    for (const prompt of prompts) {
+      assert.match(prompt, /distinct at a glance/);
+      assert.match(prompt, /recognizable broad light, material, silhouette, setting, spatial, or weather decisions/);
+      assert.match(prompt, /widescreen, full-bleed, readable, and center-safe/);
+    }
+  });
+
+  it("spreads long chat cue lists across all four theme prompts", () => {
+    const args = {
+      initialUserPrompt: [
+        "Atmosphere UAT:",
+        "remembered kitchen light with flour dust in a window beam,",
+        "cooling tray geometry, folded stationery from my grandmother;",
+        "moonlit tidal glass and starfield hush;",
+        "rain-washed old city stone with fiddle-string lines;",
+        "quiet desk geometry with map-line drift, soft signal arcs, still water gradients,",
+        "and local-first calm.",
+      ].join(" "),
+      recentContext: "",
+      botName: "Prism",
+      botSystemPrompt: "assistant",
+    };
+
+    const prompts = Array.from({ length: ZEN_WALLPAPER_THEME_COUNT }, (_, index) =>
+      composeZenWallpaperPrompt({ ...args, generationIndex: index })
+    );
+
+    assert.ok(prompts[0]?.includes("Make warm kitchen light the clearest chat-derived influence"));
+    assert.ok(prompts[1]?.includes("Make folded stationery the clearest chat-derived influence"));
+    assert.ok(prompts[1]?.includes("supported by family keepsake warmth, moonlight, and old city stone"));
+    assert.ok(prompts[2]?.includes("Make old city stone the clearest chat-derived influence"));
+    assert.ok(prompts[2]?.includes("supported by rain-washed light, quiet desk geometry, and map-line drift"));
+    assert.ok(prompts[3]?.includes("Make map-line drift the clearest chat-derived influence"));
+    assert.ok(prompts[3]?.includes("supported by fiddle-string lines, soft signal geometry, and warm kitchen light"));
   });
 
   it("falls back to a quiet abstract brief when the conversation has no visual hooks", () => {
@@ -78,8 +147,9 @@ describe("composeZenWallpaperPrompt", () => {
 
     assert.match(
       prompt,
-      /Subtle abstract cues from reflective quiet, soft glass haze, and slow atmospheric depth\./
+      /No strong concrete motif was found in the chat, so make pearl dawn light the clear influence/
     );
+    assert.match(prompt, /Wallpaper theme 1\/4 - light signature:/);
     assert.doesNotMatch(prompt, /\buser:/i);
     assert.doesNotMatch(prompt, /\bassistant:/i);
   });
@@ -98,7 +168,7 @@ describe("composeZenWallpaperPrompt", () => {
     );
   });
 
-  it("includes style notes before PRISM brand and safety constraints", () => {
+  it("lets style notes override palette while preserving safety constraints", () => {
     const prompt = composeZenWallpaperPrompt({
       initialUserPrompt: "let's sit by the ocean",
       recentContext: "user: ocean light\nassistant: slowly",
@@ -113,10 +183,32 @@ describe("composeZenWallpaperPrompt", () => {
     );
     assert.ok(
       prompt.indexOf("User atmosphere style notes") <
-        prompt.indexOf("Add faint prismatic rainbow accents")
+        prompt.indexOf("Do not force prismatic rainbow accents")
     );
-    assert.match(prompt, /Mostly charcoal, pearl, and mist-gray/);
+    assert.match(prompt, /these notes may override palette and setting/);
+    assert.doesNotMatch(prompt, /Mostly charcoal, pearl, and mist-gray/);
+    assert.match(prompt, /central prose region comparatively empty/);
     assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies/);
+  });
+
+  it("allows vivid persona worlds while keeping the center chat-safe", () => {
+    const prompt = composeZenWallpaperPrompt({
+      initialUserPrompt: "SpongeBob is excited to talk about jellyfishing.",
+      recentContext:
+        "user: let's talk about Bikini Bottom at sunrise\nassistant: The pineapple house is glowing under the sea.",
+      botName: "SpongeBob",
+      botSystemPrompt:
+        "You are SpongeBob SquarePants from Bikini Bottom. You love jellyfishing, pineapple house mornings, Krabby Patty warmth, and bright undersea optimism.",
+      generationIndex: 2,
+    });
+
+    assert.match(prompt, /Active bot\/persona visual context: SpongeBob\./);
+    assert.match(prompt, /Bikini Bottom/);
+    assert.match(prompt, /Let the active style or persona choose the palette, materials, setting, and vividness/);
+    assert.match(prompt, /depict the world or atmosphere rather than the character/);
+    assert.match(prompt, /central prose region comparatively empty/);
+    assert.match(prompt, /No readable text, letters, numbers, people, faces, bodies, characters, creatures/);
+    assert.doesNotMatch(prompt, /Mostly charcoal, pearl, and mist-gray/);
   });
 });
 
@@ -131,6 +223,7 @@ describe("extractZenWallpaperVisualCues", () => {
         "flour-dust texture",
         "cooling tray geometry",
         "folded stationery",
+        "family keepsake warmth",
       ]
     );
   });
