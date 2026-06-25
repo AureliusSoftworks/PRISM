@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  resolveChatRevealDelayMultiplierForTyping,
+  resolveChatRevealTypingPacing,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing.ts";
@@ -12,44 +12,62 @@ import {
   mapPendingCleanupMessagesToFinalRevealKeys,
 } from "./messageCleanupReveal.ts";
 
-describe("resolveChatRevealDelayMultiplierForTyping", () => {
+describe("resolveChatRevealTypingPacing", () => {
   const base = {
     active: true,
     hasDraft: true,
     lastTypingAtMs: 1000,
     maxMultiplier: 2,
-    idleHoldMs: 1000,
+    pauseMs: 2400,
     recoveryMs: 1200,
   };
 
-  it("holds the slowdown for one second after typing stops", () => {
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 1000 }), 2);
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 1999 }), 2);
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 2000 }), 2);
+  it("pauses the reveal during the composer cooldown", () => {
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 1000 }), {
+      paused: true,
+      delayMultiplier: 2,
+    });
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 3399 }), {
+      paused: true,
+      delayMultiplier: 2,
+    });
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 3400 }), {
+      paused: true,
+      delayMultiplier: 2,
+    });
   });
 
-  it("gradually restores to normal speed after the idle hold", () => {
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 2600 }), 1.5);
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 3200 }), 1);
-    assert.equal(resolveChatRevealDelayMultiplierForTyping({ ...base, nowMs: 5000 }), 1);
+  it("gradually restores to normal speed after the pause", () => {
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 4000 }), {
+      paused: false,
+      delayMultiplier: 1.5,
+    });
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 4600 }), {
+      paused: false,
+      delayMultiplier: 1,
+    });
+    assert.deepEqual(resolveChatRevealTypingPacing({ ...base, nowMs: 5000 }), {
+      paused: false,
+      delayMultiplier: 1,
+    });
   });
 
-  it("does not slow down without active typing context", () => {
-    assert.equal(
-      resolveChatRevealDelayMultiplierForTyping({ ...base, active: false, nowMs: 1000 }),
-      1
+  it("does not pause or slow down without active typing context", () => {
+    assert.deepEqual(
+      resolveChatRevealTypingPacing({ ...base, active: false, nowMs: 1000 }),
+      { paused: false, delayMultiplier: 1 }
     );
-    assert.equal(
-      resolveChatRevealDelayMultiplierForTyping({ ...base, hasDraft: false, nowMs: 1000 }),
-      1
+    assert.deepEqual(
+      resolveChatRevealTypingPacing({ ...base, hasDraft: false, nowMs: 1000 }),
+      { paused: false, delayMultiplier: 1 }
     );
-    assert.equal(
-      resolveChatRevealDelayMultiplierForTyping({
+    assert.deepEqual(
+      resolveChatRevealTypingPacing({
         ...base,
         lastTypingAtMs: null,
         nowMs: 1000,
       }),
-      1
+      { paused: false, delayMultiplier: 1 }
     );
   });
 });
@@ -82,6 +100,66 @@ describe("resolvePacedChatRevealVisibleTokenCount", () => {
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 0 }), 1);
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 450 }), 2);
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 450 }), 2);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 900 }), 3);
+  });
+
+  it("can hold at zero visible tokens before starting an action-first reveal", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const args = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+      startDelayMs: 320,
+    };
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 0 }), 0);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 319 }), 0);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 320 }), 1);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 420 }), 2);
+  });
+
+  it("can pause at zero visible tokens while the composer is active", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const args = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 0, pause: true }),
+      0
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 100, pause: true }),
+      0
+    );
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 150 }), 0);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 200 }), 1);
+  });
+
+  it("pauses mid-reveal and resumes without catching up missed tokens", () => {
+    const state = new Map<string, ChatRevealPaceState>();
+    const args = {
+      revealKey: "conversation:message",
+      tokenCount: 4,
+      tokenSignature: "one two three four",
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 0 }), 1);
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 100, pause: true }),
+      1
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 340, pause: true }),
+      1
+    );
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 420 }), 1);
+    assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 440 }), 2);
     assert.equal(resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 900 }), 3);
   });
 

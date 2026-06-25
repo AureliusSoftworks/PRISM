@@ -28,6 +28,14 @@ describe("chat reveal ellipsis helpers", () => {
     assert.deepEqual(tokenizeChatRevealText("Wait… now"), ["Wait", "… ", "now"]);
   });
 
+  it("reuses long stable token lists to keep composer rerenders cheap", () => {
+    const text = Array.from(
+      { length: 40 },
+      (_, index) => `steady-word-${index}`
+    ).join(" ");
+    assert.equal(tokenizeChatRevealText(text), tokenizeChatRevealText(text));
+  });
+
   it("shows spaced dots while typing and a true ellipsis when complete", () => {
     assert.equal(formatChatRevealTokenDisplay("...", { ellipsisPhase: "typing" }), ". . .");
     assert.equal(formatChatRevealTokenDisplay("... ", { ellipsisPhase: "typing" }), ". . . ");

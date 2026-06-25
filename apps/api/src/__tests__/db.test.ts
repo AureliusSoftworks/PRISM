@@ -105,6 +105,14 @@ describe("createDatabase bot export hash migration", () => {
         (column) => column.name === "zen_wallpaper_style_notes"
       );
       assert.equal(styleNotesColumn?.dflt_value, "''");
+      const zenMessageFontMinColumn = userColumns.find(
+        (column) => column.name === "zen_message_font_min_px"
+      );
+      assert.equal(zenMessageFontMinColumn?.dflt_value, "15.8");
+      const zenMessageFontMaxColumn = userColumns.find(
+        (column) => column.name === "zen_message_font_max_px"
+      );
+      assert.equal(zenMessageFontMaxColumn?.dflt_value, "32.8");
       const conversationColumns = reopened
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;
@@ -132,16 +140,20 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       const settingsRow = reopened
         .prepare(
-          "SELECT experimental_all_model_effort_enabled, psychic_mode_enabled FROM users WHERE id = ?"
+          "SELECT experimental_all_model_effort_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px FROM users WHERE id = ?"
         )
         .get("user-1") as
         | {
             experimental_all_model_effort_enabled: number;
             psychic_mode_enabled: number;
+            zen_message_font_min_px: number;
+            zen_message_font_max_px: number;
           }
         | undefined;
       assert.equal(settingsRow?.experimental_all_model_effort_enabled, 0);
       assert.equal(settingsRow?.psychic_mode_enabled, 0);
+      assert.equal(settingsRow?.zen_message_font_min_px, 15.8);
+      assert.equal(settingsRow?.zen_message_font_max_px, 32.8);
       reopened.close();
     } finally {
       restoreEnv("DB_PATH", previousDbPath);

@@ -955,6 +955,7 @@ describe("processChatMessage starter prompts", () => {
         "Help me sort one decision",
         "Ask me something grounding",
         "Follow a playful thread",
+        "Just sit with me for a minute",
       ]
     );
 
@@ -971,6 +972,7 @@ describe("processChatMessage starter prompts", () => {
         "Help me sort one decision",
         "Ask me something grounding",
         "Follow a playful thread",
+        "Just sit with me for a minute",
       ]
     );
   });
@@ -1034,6 +1036,7 @@ describe("processChatMessage starter prompts", () => {
         "Something weighing on me.",
         "A decision I keep circling.",
         "A small moment from today.",
+        "I'm not sure yet.",
       ]
     );
     await flushBackgroundTitleJobs();
@@ -6427,6 +6430,16 @@ describe("buildAskQuestionFallback", () => {
     );
     assert.equal(
       buildAskQuestionFallback("I'm curious, why did that stand out to you?"),
+      undefined
+    );
+    assert.equal(
+      buildAskQuestionFallback("Squidward, would you like to join us?"),
+      undefined
+    );
+    assert.equal(
+      buildAskQuestionFallback(
+        "...What is it, Jared, that you feel most strongly when you are alone with your thoughts?"
+      ),
       undefined
     );
   });

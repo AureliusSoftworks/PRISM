@@ -9,13 +9,17 @@ import {
   importUserSnapshot,
   type BackupSnapshot,
 } from "../backup.ts";
-import { MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH } from "../settings.ts";
+import {
+  DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+  DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
+  MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
+} from "../settings.ts";
 
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, experimental_all_model_effort_enabled = 1, psychic_mode_enabled = 1 WHERE id = ?"
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, psychic_mode_enabled = 1 WHERE id = ?"
       ).run("  misty\n glass,   paper grain  ", "user-1");
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
@@ -25,6 +29,8 @@ describe("backup Zen Atmosphere style notes", () => {
         "misty glass, paper grain"
       );
       assert.equal(snapshot.settings?.zenWallpaperBlurredEdgesEnabled, false);
+      assert.equal(snapshot.settings?.zenMessageFontMinPx, 18.4);
+      assert.equal(snapshot.settings?.zenMessageFontMaxPx, 36.7);
       assert.equal(snapshot.settings?.experimentalAllModelEffortEnabled, true);
       assert.equal(snapshot.settings?.psychicModeEnabled, true);
 
@@ -38,6 +44,8 @@ describe("backup Zen Atmosphere style notes", () => {
             ...snapshot.settings!,
             zenWallpaperStyleNotes: longNotes,
             zenWallpaperBlurredEdgesEnabled: true,
+            zenMessageFontMinPx: 22.4,
+            zenMessageFontMaxPx: 19.2,
             experimentalAllModelEffortEnabled: false,
             psychicModeEnabled: false,
           },
@@ -47,11 +55,13 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, psychic_mode_enabled FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
         zen_wallpaper_blurred_edges_enabled: number;
+        zen_message_font_min_px: number;
+        zen_message_font_max_px: number;
         experimental_all_model_effort_enabled: number;
         psychic_mode_enabled: number;
       };
@@ -61,6 +71,8 @@ describe("backup Zen Atmosphere style notes", () => {
         "x".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH)
       );
       assert.equal(restored.zen_wallpaper_blurred_edges_enabled, 1);
+      assert.equal(restored.zen_message_font_min_px, 22.4);
+      assert.equal(restored.zen_message_font_max_px, 22.4);
       assert.equal(restored.experimental_all_model_effort_enabled, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
     });
@@ -78,6 +90,8 @@ describe("backup Zen Atmosphere style notes", () => {
       >;
       delete settings.zenWallpaperStyleNotes;
       delete settings.zenWallpaperBlurredEdgesEnabled;
+      delete settings.zenMessageFontMinPx;
+      delete settings.zenMessageFontMaxPx;
 
       importUserSnapshot(
         db,
@@ -91,15 +105,19 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
         zen_wallpaper_blurred_edges_enabled: number;
+        zen_message_font_min_px: number;
+        zen_message_font_max_px: number;
       };
 
       assert.equal(restored.zen_wallpaper_style_notes, "");
       assert.equal(restored.zen_wallpaper_blurred_edges_enabled, 1);
+      assert.equal(restored.zen_message_font_min_px, DEFAULT_ZEN_MESSAGE_FONT_MIN_PX);
+      assert.equal(restored.zen_message_font_max_px, DEFAULT_ZEN_MESSAGE_FONT_MAX_PX);
     });
   });
 });

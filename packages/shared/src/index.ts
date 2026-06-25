@@ -860,6 +860,62 @@ export interface ZenAskQuestionPatienceInput {
   clientTurnId: string;
 }
 
+export type ZenLiveActionSource = "draft_action" | "idle";
+
+export type ZenLiveActionReactionKind =
+  | "silent"
+  | "show_action"
+  | "interrupt_candidate";
+
+export type ZenLiveActionMoodHint =
+  | "neutral"
+  | "attentive"
+  | "amused"
+  | "confused"
+  | "stern"
+  | "waiting"
+  | "warm";
+
+export interface ZenLiveActionReactionRequest {
+  source: ZenLiveActionSource;
+  activeBotId: string | null;
+  personaName?: string;
+  userAction?: string;
+  previousBotAction?: string;
+  conversationId?: string;
+  idleMs?: number;
+  clientSequenceId: string;
+}
+
+export interface ZenLiveActionReactionResponse {
+  kind: ZenLiveActionReactionKind;
+  botAction?: string;
+  moodHint: ZenLiveActionMoodHint;
+  confidence: number;
+  botId: string | null;
+  clientSequenceId: string;
+  interruptReason?: string;
+}
+
+export interface ZenLiveActionContextInput {
+  source: "live_action";
+  activeBotId: string | null;
+  userAction?: string;
+  botAction?: string;
+  moodHint?: ZenLiveActionMoodHint;
+  clientSequenceId?: string;
+}
+
+export interface ZenLiveActionInterruptInput {
+  source: "live_action_interrupt";
+  activeBotId: string | null;
+  userAction: string;
+  botAction: string;
+  moodHint?: ZenLiveActionMoodHint;
+  reason?: string;
+  clientTurnId: string;
+}
+
 export type ZenAutonomyDecision =
   | { action: "silent" }
   | { action: "speak"; botId: string | null };
