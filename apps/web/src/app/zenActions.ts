@@ -159,6 +159,12 @@ export function resolveCurrentZenActionCue(
   return current;
 }
 
+export function resolveCanvasZenActionCue(
+  cues: readonly ZenActionCue[]
+): ZenActionCue | null {
+  return cues[0] ?? null;
+}
+
 export function resolveZenActionPreview(text: string): ZenActionCue | null {
   const trimmed = text.trim();
   if (!trimmed || /^[!/]/u.test(trimmed)) return null;
