@@ -8,6 +8,13 @@ public sealed record ServerConfig
     public string ServerName { get; init; } = "Prism Server";
     public int ApiPort { get; init; } = 18_787;
     public int WebPort { get; init; } = 18_788;
+
+    /// <summary>
+    /// When false (default), Prism stays private to this PC. When true, the web
+    /// and API bind to all interfaces so other devices on the network can reach
+    /// it. Discovery (mDNS) only advertises while this is true.
+    /// </summary>
+    public bool LanAccessEnabled { get; init; } = false;
     public bool DiscoveryEnabled { get; init; } = true;
     public string SessionCookieName { get; init; } = "localai_session";
     public int SessionTtlHours { get; init; } = 24;
@@ -30,7 +37,10 @@ public sealed record ServerConfig
             ["API_PORT"] = ApiPort.ToString(),
             ["PORT"] = WebPort.ToString(),
             ["WEB_PORT"] = WebPort.ToString(),
-            ["HOSTNAME"] = LanWebBindHost,
+            ["PRISM_WEB_PORT"] = WebPort.ToString(),
+            ["HOSTNAME"] = LanAccessEnabled ? LanWebBindHost : LocalApiOriginHost,
+            ["PRISM_LAN_ACCESS"] = LanAccessEnabled ? "true" : "false",
+            ["PRISM_WEB_LAN"] = LanAccessEnabled ? "1" : "0",
             ["LOCALAI_API_ORIGIN"] = $"http://{LocalApiOriginHost}:{ApiPort}",
             ["PRISM_SERVER_NAME"] = ServerName,
             ["PRISM_DISCOVERY_ENABLED"] = DiscoveryEnabled ? "true" : "false",

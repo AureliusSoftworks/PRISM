@@ -35,6 +35,7 @@ final class ConfigStore {
             config.apiPort = ServerConfig.defaults.apiPort
             config.webPort = ServerConfig.defaults.webPort
         }
+        config.lanAccessEnabled = Self.readBool(env["PRISM_LAN_ACCESS"], fallback: config.lanAccessEnabled)
         config.discoveryEnabled = Self.readBool(env["PRISM_DISCOVERY_ENABLED"], fallback: config.discoveryEnabled)
         config.sessionCookieName = env["SESSION_COOKIE_NAME"] ?? config.sessionCookieName
         config.sessionTtlHours = Self.readInt(env["SESSION_TTL_HOURS"], fallback: config.sessionTtlHours)
@@ -56,6 +57,7 @@ final class ConfigStore {
         API_PORT=\(config.apiPort)
         WEB_PORT=\(config.webPort)
         PRISM_SERVER_NAME=\(config.serverName)
+        PRISM_LAN_ACCESS=\(config.lanAccessEnabled ? "true" : "false")
         PRISM_DISCOVERY_ENABLED=\(config.discoveryEnabled ? "true" : "false")
         SESSION_COOKIE_NAME=\(config.sessionCookieName)
         SESSION_TTL_HOURS=\(config.sessionTtlHours)
