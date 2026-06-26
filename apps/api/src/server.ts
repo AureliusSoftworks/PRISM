@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { getAppConfig } from "@localai/config";
+import { getAppConfig, type AppConfig } from "@localai/config";
 import {
   createDatabase,
   loadPrismMoodEventMessageIds,
@@ -33,6 +33,17 @@ import {
   runAutoSetup,
 } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
+import {
+  buildLanUrls,
+  canEditNetworkAccess as decideCanEditNetworkAccess,
+  isLoopbackAddress,
+  lanAccessManagedByEnv,
+  listLanIpv4Addresses,
+  resolveApiBindHost,
+  resolveLanAccessEnabled,
+  resolveWebPublicPort,
+  writePersistedLanAccess,
+} from "./network-config.ts";
 import {
   decideZenAutonomyTurn,
   loadPersistedConversationForChatResponse,
@@ -280,6 +291,16 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
+/**
+ * Runtime view of local-network access. `boundLanActive` reflects what the
+ * process actually bound at startup (immutable for the process lifetime);
+ * `desiredLanAccess` is the persisted choice and may change at runtime via the
+ * toggle. A mismatch means a restart is required to apply the change.
+ */
+const networkState: { desiredLanAccess: boolean; boundLanActive: boolean } = {
+  desiredLanAccess: false,
+  boundLanActive: false,
+};
 const backupAdapter = new LocalOnlyBackupAdapter();
 const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
@@ -543,14 +564,33 @@ function requireAuth(ctx: RequestContext): string {
 }
 
 function isLoopbackRequest(ctx: RequestContext): boolean {
-  const address = ctx.req.socket.remoteAddress;
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+  return isLoopbackAddress(ctx.req.socket.remoteAddress);
 }
 
 function requireLoopback(ctx: RequestContext): void {
   if (!isLoopbackRequest(ctx)) {
     throw new Error("Local pairing codes can only be generated on this Mac.");
   }
+}
+
+/**
+ * Whether the local-network toggle may be changed by this request.
+ *
+ * The guarantee "only the host machine can widen exposure" survives the web
+ * reverse-proxy: we never trust client-supplied forwarding headers, only the
+ * direct socket peer plus a server-set `x-prism-web-origin` marker that the web
+ * proxy stamps from its OWN bind mode (and strips any client copy of). A LAN
+ * device cannot reach the API over loopback, and once the web front-end is
+ * itself LAN-exposed we can no longer prove a proxied request is local, so the
+ * toggle becomes host-only (native app / host CLI) until switched off.
+ */
+function canEditNetworkAccess(ctx: RequestContext): boolean {
+  const header = ctx.req.headers["x-prism-web-origin"];
+  return decideCanEditNetworkAccess({
+    peerAddress: ctx.req.socket.remoteAddress,
+    webOrigin: Array.isArray(header) ? header[0] : header,
+    managedByEnv: lanAccessManagedByEnv(),
+  });
 }
 
 function requireLocalDeveloperRequest(ctx: RequestContext): void {
@@ -1474,6 +1514,57 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         report,
         health,
+      });
+    }),
+    route("GET", "/api/network", async (ctx) => {
+      requireAuth(ctx);
+      const webPort = resolveWebPublicPort();
+      const addresses = networkState.boundLanActive ? listLanIpv4Addresses() : [];
+      json(ctx.res, 200, {
+        ok: true,
+        network: {
+          lanAccessEnabled: networkState.desiredLanAccess,
+          active: networkState.boundLanActive,
+          restartRequired:
+            networkState.desiredLanAccess !== networkState.boundLanActive,
+          canEdit: canEditNetworkAccess(ctx),
+          managedByEnv: lanAccessManagedByEnv(),
+          apiPort: config.apiPort,
+          webPort,
+          addresses,
+          lanUrls: buildLanUrls(addresses, webPort, config.apiPort),
+        },
+      });
+    }),
+    route("POST", "/api/network", async (ctx) => {
+      requireAuth(ctx);
+      requireLoopback(ctx);
+      if (lanAccessManagedByEnv()) {
+        throw new HttpError(
+          409,
+          "Local network access is managed by this server's environment configuration; change it where Prism is launched."
+        );
+      }
+      if (!canEditNetworkAccess(ctx)) {
+        throw new HttpError(
+          403,
+          "Local network access can only be changed from this computer. Use the Prism app on the host machine."
+        );
+      }
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.lanAccessEnabled !== "boolean") {
+        throw new HttpError(400, "lanAccessEnabled (boolean) is required.");
+      }
+      writePersistedLanAccess(body.lanAccessEnabled);
+      networkState.desiredLanAccess = body.lanAccessEnabled;
+      json(ctx.res, 200, {
+        ok: true,
+        network: {
+          lanAccessEnabled: networkState.desiredLanAccess,
+          active: networkState.boundLanActive,
+          restartRequired:
+            networkState.desiredLanAccess !== networkState.boundLanActive,
+        },
       });
     }),
     route("POST", "/api/auth/register", async (ctx) => {
@@ -6897,8 +6988,17 @@ process.on("SIGTERM", () => {
   void shutdown("SIGTERM").then(() => process.exit(0));
 });
 
-const apiHost = process.env.API_HOST || "0.0.0.0";
+const lanAccessEnabled = resolveLanAccessEnabled(config);
+const apiHost = resolveApiBindHost(lanAccessEnabled);
+networkState.desiredLanAccess = lanAccessEnabled;
+networkState.boundLanActive = apiHost === "0.0.0.0";
+const effectiveConfig: AppConfig = { ...config, lanAccessEnabled };
 server.listen(config.apiPort, apiHost, () => {
-  console.log(`API ready at http://${apiHost}:${config.apiPort}`);
-  stopDiscovery = startPrismDiscovery(config);
+  const reachability = networkState.boundLanActive
+    ? "reachable on your local network"
+    : "private to this machine";
+  console.log(
+    `API ready at http://${apiHost}:${config.apiPort} (${reachability})`
+  );
+  stopDiscovery = startPrismDiscovery(effectiveConfig);
 });

@@ -41,6 +41,13 @@ export function startPrismDiscovery(
   config: AppConfig,
   advertiseService: typeof advertise = advertise
 ): StopDiscovery | null {
+  // Discovery is a sub-behavior of local-network access: it must never advertise
+  // while the server is private to the host machine, and it can still be opted
+  // out independently via PRISM_DISCOVERY_ENABLED even when LAN access is on.
+  if (config.lanAccessEnabled !== true) {
+    console.log("Prism LAN discovery disabled (local-only mode).");
+    return null;
+  }
   if (config.discoveryEnabled === false) {
     console.log("Prism LAN discovery disabled.");
     return null;
