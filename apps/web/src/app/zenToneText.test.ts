@@ -8,6 +8,7 @@ import {
 } from "./zenToneText.ts";
 import { tokenizeChatRevealText } from "./chatRevealTiming.ts";
 import {
+  resolveCanvasZenActionCue,
   resolveCurrentZenActionCue,
   resolveLatestZenActionPreview,
   resolvePersistentZenActionPreview,
@@ -161,6 +162,19 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "softly nods");
   });
 
+  it("treats double-asterisk model actions as action box cues, not canvas markdown", () => {
+    const presentation = resolveZenActionPresentation(
+      "**takes a breath** The second economy is patience."
+    );
+
+    assert.equal(presentation.hasActions, true);
+    assert.equal(presentation.mainText, "The second economy is patience.");
+    assert.deepEqual(
+      presentation.cues.map((cue) => cue.action),
+      ["takes a breath"]
+    );
+  });
+
   it("keeps multiple actions ordered and reveals later cues before their prose point", () => {
     const presentation = resolveZenActionPresentation(
       "*takes a breath* This is a longer line with enough spoken prose that the second action should arrive before the final words. *sets the cup down*"
@@ -187,6 +201,18 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(
       resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
       "sets the cup down"
+    );
+  });
+
+  it("keeps canvas action cues stable while live action cues can advance", () => {
+    const presentation = resolveZenActionPresentation(
+      "**takes a breath** This is enough prose to make a later cue arrive separately. **sets the trap gently**"
+    );
+
+    assert.equal(resolveCanvasZenActionCue(presentation.cues)?.action, "takes a breath");
+    assert.equal(
+      resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
+      "sets the trap gently"
     );
   });
 
