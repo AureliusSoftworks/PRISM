@@ -42877,3 +42877,105 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     width: 100%;
   }
 }
+
+/* ── Network access panel (local-only vs. share-on-LAN) ──────────────────── */
+.networkToggleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.networkToggleRow[data-disabled="true"] {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.networkToggleRow input[type="checkbox"] {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.networkToggleRow strong {
+  display: block;
+  font-size: 13px;
+}
+
+.networkMuted {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+.networkNotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--settings-section-color, var(--accent)) 30%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--settings-section-color, var(--accent)) 8%, var(--bg-elevated));
+}
+
+.networkNotice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  flex: 1 1 220px;
+}
+
+.networkNotice[role="alert"] {
+  border-color: color-mix(in srgb, #ff7a7a 44%, var(--line));
+  background: color-mix(in srgb, #ff7a7a 10%, var(--bg-elevated));
+}
+
+.networkUrls {
+  margin-top: 12px;
+}
+
+/* Bounded scroll so a host with many interfaces can't push the panel tall. */
+.networkUrlList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  max-height: 184px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.networkUrlRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.networkUrlValue {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.networkApiDetails {
+  margin-top: 8px;
+}
+
+.networkApiDetails summary {
+  cursor: pointer;
+}
