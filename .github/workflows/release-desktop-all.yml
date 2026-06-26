@@ -149,11 +149,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Vendor Qdrant binary for desktop runtime
-        run: |
-          chmod +x apps/server-mac/scripts/vendor-qdrant.sh
-          apps/server-mac/scripts/vendor-qdrant.sh "apps/server-mac/Resources/qdrant"
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -167,6 +162,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Stamp version
+        run: node scripts/set-version.mjs --version "${RELEASE_VERSION}"
+
+      - name: Vendor Qdrant binary for desktop runtime
+        run: |
+          chmod +x apps/server-mac/scripts/vendor-qdrant.sh
+          apps/server-mac/scripts/vendor-qdrant.sh "apps/server-mac/Resources/qdrant"
 
       - name: Build and package macOS artifact
         run: |
@@ -227,6 +230,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Stamp version
+        run: node scripts/set-version.mjs --version "${RELEASE_VERSION}"
+
       - name: Build and package Linux artifact
         env:
           # Force AppImage tools to run without kernel FUSE mounts in CI.
@@ -256,11 +262,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Vendor Qdrant binary for desktop runtime
-        shell: pwsh
-        run: |
-          pwsh apps/server-windows/scripts/vendor-qdrant.ps1 -OutputDir "apps/server-windows/src/Resources/qdrant"
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -272,6 +273,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Stamp version
+        run: node scripts/set-version.mjs --version $env:RELEASE_VERSION
+
+      - name: Vendor Qdrant binary for desktop runtime
+        shell: pwsh
+        run: |
+          pwsh apps/server-windows/scripts/vendor-qdrant.ps1 -OutputDir "apps/server-windows/src/Resources/qdrant"
 
       - name: Build and package Windows artifact
         shell: pwsh
