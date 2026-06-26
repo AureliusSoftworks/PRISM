@@ -21,14 +21,46 @@
  */
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const SHUTDOWN_GRACE_MS = 3000;
 const IS_POSIX = process.platform !== "win32";
 const apiPort = process.env.API_PORT?.trim() || "18787";
+
+// Mirror the API's resolution so the web server binds the same way: an explicit
+// PRISM_LAN_ACCESS wins, otherwise the persisted in-app toggle decides,
+// otherwise local-only.
+function resolvePersistedLanAccess() {
+  let networkConfigPath;
+  if (process.env.DB_PATH) {
+    networkConfigPath = join(dirname(process.env.DB_PATH), "network.json");
+  } else if (process.env.LOCALAI_DATA_DIR) {
+    networkConfigPath = join(process.env.LOCALAI_DATA_DIR, "network.json");
+  } else {
+    networkConfigPath = join(process.cwd(), "apps", "api", "data", "network.json");
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(networkConfigPath, "utf8"));
+    return parsed?.lanAccessEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
+const lanAccessRaw = (process.env.PRISM_LAN_ACCESS ?? "").trim();
+const LAN_ACCESS_ON = lanAccessRaw
+  ? /^(1|true|yes|on)$/i.test(lanAccessRaw)
+  : resolvePersistedLanAccess();
+const webBindHost = LAN_ACCESS_ON ? "0.0.0.0" : "127.0.0.1";
+
 const webEnv = {
   ...process.env,
   LOCALAI_API_ORIGIN:
     process.env.LOCALAI_API_ORIGIN?.trim() || `http://127.0.0.1:${apiPort}`,
+  // Lets the /api proxy stamp x-prism-web-origin so the API can keep the
+  // network toggle host-only.
+  PRISM_WEB_LAN: LAN_ACCESS_ON ? "1" : "0",
 };
 
 const children = [];
@@ -37,7 +69,12 @@ let shuttingDown = false;
 const label = (name) => `\x1b[36m[${name}]\x1b[0m`;
 
 function start(name) {
-  const child = spawn("npm", ["run", "dev", "-w", `apps/${name}`], {
+  const args = ["run", "dev", "-w", `apps/${name}`];
+  if (name === "web") {
+    // Forward an explicit hostname to `next dev` so loopback-only is the default.
+    args.push("--", "-H", webBindHost);
+  }
+  const child = spawn("npm", args, {
     stdio: "inherit",
     // POSIX: new process group so `kill(-pgid)` cascades to npm's grandchildren.
     // Windows: leave attached; npm is a .cmd shim that needs shell resolution.

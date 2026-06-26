@@ -1,11 +1,20 @@
 services:
+  # NOTE on exposure: by default every published port binds to 127.0.0.1, so a
+  # fresh `docker compose up` is private to the host machine. To allow other
+  # devices on your network to reach Prism, set these in .env and re-run
+  # `docker compose up -d`:
+  #   PRISM_BIND_HOST=0.0.0.0
+  #   PRISM_LAN_ACCESS=true
+  #   PRISM_WEB_LAN=1
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+    # Qdrant is only used internally by the API over the Docker network, so its
+    # debug port stays bound to loopback regardless of LAN access.
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
       interval: 10s
@@ -21,12 +30,18 @@ services:
     env_file: .env
     environment:
       - API_PORT=18787
+      # Inside the container the API must listen on all interfaces for Docker's
+      # port mapping to reach it; host-level exposure is controlled by the
+      # PRISM_BIND_HOST prefix on the published port below.
+      - API_HOST=0.0.0.0
+      - PRISM_LAN_ACCESS=${PRISM_LAN_ACCESS:-false}
+      - PRISM_WEB_PORT=${PRISM_WEB_PORT:-18788}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - QDRANT_URL=http://qdrant:6333
     volumes:
       - api_data:/app/apps/api/data
     ports:
-      - "18787:18787"
+      - "${PRISM_BIND_HOST:-127.0.0.1}:18787:18787"
     depends_on:
       qdrant:
         condition: service_healthy
@@ -42,9 +57,11 @@ services:
     restart: unless-stopped
     environment:
       - PORT=18788
+      - HOSTNAME=0.0.0.0
       - LOCALAI_API_ORIGIN=http://api:18787
+      - PRISM_WEB_LAN=${PRISM_WEB_LAN:-0}
     ports:
-      - "18788:18788"
+      - "${PRISM_BIND_HOST:-127.0.0.1}:18788:18788"
     depends_on:
       api:
         condition: service_healthy
@@ -53,7 +70,7 @@ services:
     image: nginx:alpine
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${PRISM_BIND_HOST:-127.0.0.1}:80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
