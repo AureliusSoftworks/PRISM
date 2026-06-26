@@ -90,17 +90,30 @@ export function CoffeeSeatPlateEmoji({
 
   const displayEyesOpen = !enabled || isTalking || eyesOpen;
   const displayText = applyCoffeeSeatBlink(baseText, displayEyesOpen);
+  const glyphParts = Array.from(displayText);
 
   return (
     <span
       className={className}
+      data-coffee-plate-emoji-glyphs={glyphParts.length}
+      data-coffee-plate-emoji-eyes-open={
+        glyphParts[0]?.trim() ? "true" : "false"
+      }
       data-voice-preset={voicePreset}
       style={{
         transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
       }}
       aria-hidden="true"
     >
-      {displayText}
+      {glyphParts.map((glyph, index) => (
+        <span
+          key={index === 0 ? "eyes" : "mouth"}
+          data-coffee-plate-emoji-glyph={glyph}
+          data-coffee-plate-emoji-part={index === 0 ? "eyes" : "mouth"}
+        >
+          {glyph}
+        </span>
+      ))}
     </span>
   );
 }
