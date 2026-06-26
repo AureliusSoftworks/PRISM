@@ -80,7 +80,7 @@ struct SetupWindowView: View {
                             TextField("Server name", text: $model.config.serverName)
                             TextField("API port", value: $model.config.apiPort, format: .number)
                             TextField("Web port", value: $model.config.webPort, format: .number)
-                            Toggle("Advertise on local network", isOn: $model.config.discoveryEnabled)
+                            Toggle("Allow access from other devices on this network", isOn: $model.config.lanAccessEnabled)
                         }
                         Section("AI runtime") {
                             TextField("Ollama host", text: $model.config.ollamaHost)
