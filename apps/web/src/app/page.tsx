@@ -344,7 +344,6 @@ import {
   normalizeZenLiveBotActionState,
   resolveZenLiveBotPresenceActionText,
   responseIsStaleZenLiveAction,
-  sanitizeZenLiveBotActionText,
   zenLiveActionMoodToBotMood,
   zenLiveActionPlateFace,
   type ZenLiveBotActionState,
