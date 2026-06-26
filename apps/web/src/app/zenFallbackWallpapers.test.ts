@@ -82,7 +82,18 @@ describe("shouldShowZenFallbackWallpaper", () => {
     );
   });
 
-  it("does not show when Atmosphere is turned off", () => {
+  it("shows for bot conversations when Atmosphere is turned off", () => {
+    assert.equal(
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        atmosphereEnabled: false,
+        hasConversationBot: true,
+      }),
+      true
+    );
+  });
+
+  it("does not show when Atmosphere is turned off and no bot is active", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({
         ...baseline,
