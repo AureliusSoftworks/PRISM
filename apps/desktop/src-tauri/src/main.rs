@@ -531,58 +531,65 @@ fn main() {
             }
         })
         .setup(|app| {
-            let state: State<'_, RuntimeState> = app.state();
-            let app_handle = app.handle().clone();
-            let splash_start = Instant::now();
-
-            let (api_port, web_port) = match start_runtime(&app_handle, &state) {
-                Ok(ports) => ports,
-                Err(error) => {
-                    emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
-                    return Ok(());
-                }
-            };
-
-            if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
-                emit_log(&app_handle, "prism", &format!("API readiness failed: {error}"));
-                return Ok(());
-            }
-            if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
-                emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
-                return Ok(());
-            }
-
-            // Hold the splash for at least 2.5 s so it's visible even on fast machines.
-            const SPLASH_MIN_MS: u64 = 2500;
-            let elapsed_ms = splash_start.elapsed().as_millis() as u64;
-            if elapsed_ms < SPLASH_MIN_MS {
-                thread::sleep(Duration::from_millis(SPLASH_MIN_MS - elapsed_ms));
-            }
-
-            let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
-                Ok(url) => url,
-                Err(error) => {
-                    emit_log(&app_handle, "prism", &format!("Invalid web URL: {error}"));
-                    return Ok(());
-                }
-            };
-
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.navigate(web_url.clone());
-            } else if let Err(error) = WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::External(web_url.clone()),
-            )
-            .title("PRISM")
-            .inner_size(1400.0, 948.0)
-            .min_inner_size(948.0, 760.0)
-            .resizable(true)
-            .maximizable(true)
-            .build() {
-                emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
-            }
+            // Tray must be set up on the main thread before the event loop starts.
             setup_tray(app)?;
+
+            let app_handle = app.handle().clone();
+
+            // Spawn startup work on a background thread so the event loop can
+            // start immediately and paint the splash screen.
+            thread::spawn(move || {
+                let state = app_handle.state::<RuntimeState>();
+                let splash_start = Instant::now();
+
+                let (api_port, web_port) = match start_runtime(&app_handle, &state) {
+                    Ok(ports) => ports,
+                    Err(error) => {
+                        emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
+                        return;
+                    }
+                };
+
+                if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
+                    emit_log(&app_handle, "prism", &format!("API readiness failed: {error}"));
+                    return;
+                }
+                if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
+                    emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
+                    return;
+                }
+
+                // Hold the splash for at least 2.5 s so it's visible on fast machines.
+                const SPLASH_MIN_MS: u64 = 2500;
+                let elapsed_ms = splash_start.elapsed().as_millis() as u64;
+                if elapsed_ms < SPLASH_MIN_MS {
+                    thread::sleep(Duration::from_millis(SPLASH_MIN_MS - elapsed_ms));
+                }
+
+                let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
+                    Ok(url) => url,
+                    Err(error) => {
+                        emit_log(&app_handle, "prism", &format!("Invalid web URL: {error}"));
+                        return;
+                    }
+                };
+
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.navigate(web_url.clone());
+                } else if let Err(error) = WebviewWindowBuilder::new(
+                    &app_handle,
+                    "main",
+                    WebviewUrl::External(web_url.clone()),
+                )
+                .title("PRISM")
+                .inner_size(1400.0, 948.0)
+                .min_inner_size(948.0, 760.0)
+                .resizable(true)
+                .maximizable(true)
+                .build() {
+                    emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
+                }
+            });
 
             Ok(())
         })
