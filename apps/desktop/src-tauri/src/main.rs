@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -379,14 +381,6 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     }
     emit_status(app, "web", "running");
 
-    eprintln!("[PRISM] Runtime root: {}", root.display());
-    eprintln!("[PRISM] Node binary:  {node}");
-    eprintln!("[PRISM] API entry:    {}", api.display());
-    eprintln!("[PRISM] Web entry:    {}", web.display());
-    eprintln!("[PRISM] Web cwd:      {}", web_cwd.display());
-    eprintln!("[PRISM] Qdrant:       {}", qdrant.display());
-    eprintln!("[PRISM] Ports:        API={api_port}  Web={web_port}");
-
     *state.qdrant_child.lock().map_err(|_| io_error("Qdrant process lock poisoned"))? = Some(qdrant_child);
     *state.api_child.lock().map_err(|_| io_error("API process lock poisoned"))? = Some(api_child);
     *state.web_child.lock().map_err(|_| io_error("Web process lock poisoned"))? = Some(web_child);
@@ -399,11 +393,9 @@ fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io
     let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{api_port}");
     emit_log(app, "prism", &format!("Waiting for API on {target}…"));
-    eprintln!("[PRISM] Waiting for API runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
-            eprintln!("[PRISM] API runtime ready after {elapsed:.1}s");
             emit_log(app, "prism", &format!("API ready ({elapsed:.1}s)"));
             emit_status(app, "api", "ready");
             return Ok(());
@@ -433,11 +425,9 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
     let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
     emit_log(app, "prism", &format!("Waiting for web on {target}…"));
-    eprintln!("[PRISM] Waiting for web runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
-            eprintln!("[PRISM] Web runtime ready after {elapsed:.1}s");
             emit_log(app, "prism", &format!("Web ready ({elapsed:.1}s)"));
             emit_status(app, "web", "ready");
             return Ok(());
@@ -457,7 +447,7 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
         thread::sleep(Duration::from_millis(500));
     }
     let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{api_port}")).is_ok();
-    eprintln!("[PRISM] Timeout reached. API alive: {api_alive}");
+    emit_log(app, "prism", &format!("Timeout reached. API alive: {api_alive}"));
     emit_status(app, "web", "error");
     Err(io_error(
         "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
@@ -547,33 +537,30 @@ fn main() {
             let (api_port, web_port) = match start_runtime(&app_handle, &state) {
                 Ok(ports) => ports,
                 Err(error) => {
-                    eprintln!("[PRISM] Runtime startup failed: {error}");
                     emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
                     return Ok(());
                 }
             };
 
             if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
-                eprintln!("[PRISM] API readiness failed: {error}");
+                emit_log(&app_handle, "prism", &format!("API readiness failed: {error}"));
                 return Ok(());
             }
             if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
-                eprintln!("[PRISM] Web readiness failed: {error}");
+                emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
                 return Ok(());
             }
 
             let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
                 Ok(url) => url,
                 Err(error) => {
-                    eprintln!("[PRISM] Invalid web URL: {error}");
+                    emit_log(&app_handle, "prism", &format!("Invalid web URL: {error}"));
                     return Ok(());
                 }
             };
 
             if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = window.navigate(web_url.clone()) {
-                    eprintln!("[PRISM] Window navigate failed: {error}");
-                }
+                let _ = window.navigate(web_url.clone());
             } else if let Err(error) = WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -585,7 +572,7 @@ fn main() {
             .resizable(true)
             .maximizable(true)
             .build() {
-                eprintln!("[PRISM] Window build failed: {error}");
+                emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
             }
             setup_tray(app)?;
 
@@ -593,10 +580,7 @@ fn main() {
         })
         .build(tauri::generate_context!()) {
         Ok(app) => app,
-        Err(error) => {
-            eprintln!("[PRISM] Failed to start desktop app: {error}");
-            return;
-        }
+        Err(_) => return,
     };
 
     app.run(|app_handle, event| match event {
