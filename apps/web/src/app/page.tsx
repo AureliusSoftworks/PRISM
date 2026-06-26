@@ -233,12 +233,14 @@ import {
   type ZenLiveActionInterruptInput,
   type ZenLiveActionReactionResponse,
   type ZenPersonaTransitionInput,
+  type ZenPersonaTransitionStyle,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
   normalizeComposerSlashCommandLine,
   parsePrismDevChatCommand,
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
+  resolvePrismDevPanelToggleAction,
 } from "./prismDevChatCommands";
 import { prismWebDevToolsEnabled } from "./prismDevGating";
 import {
@@ -260,6 +262,10 @@ import {
   resolveWildcardDeckTextRanges,
   resolveWildcardSlotTextRanges,
 } from "./tiptapPrismDevCommandHighlight";
+import {
+  applyEditorComposerGhostCompletion,
+  ComposerGhostAutocomplete,
+} from "./tiptapComposerGhostAutocomplete";
 import {
   resolvePromptShortcutPreviewHighlightRanges,
   type PromptShortcutPreviewHighlightRange,
@@ -326,6 +332,7 @@ import {
   type BotMentionPick,
 } from "./botMention";
 import {
+  resolveCanvasZenActionCue,
   resolveCurrentZenActionCue,
   resolvePersistentZenActionPreview,
   resolveZenActionPresentation,
@@ -333,12 +340,19 @@ import {
   type ZenActionCue,
 } from "./zenActions";
 import {
+  isZenLiveBotPresenceActionVerbose,
   normalizeZenLiveBotActionState,
+  resolveZenLiveBotPresenceActionText,
   responseIsStaleZenLiveAction,
+  sanitizeZenLiveBotActionText,
   zenLiveActionMoodToBotMood,
   zenLiveActionPlateFace,
   type ZenLiveBotActionState,
 } from "./zenLiveActions";
+import {
+  zenLiveBotMouthShapeFromRevealProgress,
+  type ZenLiveBotMouthShape,
+} from "./zenLiveMouth";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -380,6 +394,12 @@ import {
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
 import {
+  applyComposerGhostCompletion,
+  type ComposerGhostSuggestion,
+  resolveComposerGhostCompletion,
+} from "./composerGhostAutocomplete";
+import { COMPOSER_GHOST_LEXICON } from "./composerGhostLexicon.generated";
+import {
   resolveChatRevealTypingPacing,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
@@ -416,8 +436,11 @@ import {
   countZenPrismUserMessages,
 } from "./zenPersonaInk";
 import {
+  resolveZenPersonaPresenceDurations,
   ZEN_PERSONA_TRANSITION_CHOICES,
   resolveZenPersonaTransitionStyle,
+  zenPersonaPresenceAfterArrival,
+  type ZenPersonaPresencePhase,
   type ZenPersonaTransitionChoice,
 } from "./zenPersonaTransition";
 import {
@@ -695,16 +718,22 @@ const DEV_TOOLS_PANEL_MIN_WIDTH = 260;
 const DEV_TOOLS_PANEL_MIN_HEIGHT = 190;
 const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
 const DEV_PANEL_SAFE_AREA_ATTRIBUTE = "data-dev-panel-safe-area";
+const ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE =
+  "data-zen-live-bot-composer-boundary";
+const DEV_DEBUG_COMPOSER_VIEWPORT_MARGIN = 8;
+const DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT = 142;
+const DEV_DEBUG_COMPOSER_RESTORE_WIDTH = 168;
+const DEV_DEBUG_COMPOSER_RESTORE_HEIGHT = 34;
 const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
 const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 380;
 const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 24;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 600;
 const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH = 290;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT = 360;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH = 240;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT = 180;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH = 420;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH = 360;
+const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT = 380;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH = 340;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT = 320;
+const COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH = 560;
 const COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN = 12;
 const DEV_TOOLS_NAV_ITEMS = [
   {
@@ -885,6 +914,8 @@ const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY = "prism_dev_mood_visual_positi
 const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY = "prism_dev_zen_pause_tester_settings_v1";
 /** Dev-only Zen Persona backdrop tuning. */
 const PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY = "prism_dev_zen_persona_backdrop_v2";
+const PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY =
+  "prism_zen_live_bot_avatar_position_v1";
 const DEV_MOOD_VISUAL_DEFAULT_X = 22;
 const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
 const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
@@ -946,6 +977,10 @@ type CompactedSummaryDebugPanelDragState = {
   offsetX: number;
   offsetY: number;
 };
+type DevDebugComposerExpandedDragState = {
+  pointerId: number;
+  offsetY: number;
+};
 type DevMoodVisualPosition = { x: number; y: number };
 type DevMoodVisualDragState = {
   pointerId: number;
@@ -955,6 +990,50 @@ type DevMoodVisualDragState = {
   startClientY: number;
   moved: boolean;
 };
+type ZenLiveBotAvatarPosition = { x: number; y: number };
+type ZenLiveBotAvatarVelocity = { x: number; y: number };
+type ZenLiveBotAvatarBounds = {
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
+type ZenLiveBotAvatarDragState = {
+  pointerId: number;
+  offsetX: number;
+  offsetY: number;
+  startClientX: number;
+  startClientY: number;
+  lastClientX: number;
+  lastClientY: number;
+  startTimeMs: number;
+  lastTimeMs: number;
+  velocityX: number;
+  velocityY: number;
+  moved: boolean;
+};
+type ZenPersonaPresenceTransition = {
+  id: string;
+  fromBotId: string | null;
+  toBotId: string | null;
+  style: ZenPersonaTransitionStyle;
+  readyAtMs: number;
+  introRevealKey: string | null;
+};
+type ZenPersonaPresenceUiState = {
+  visibleBotId: string | null;
+  phase: ZenPersonaPresencePhase;
+  transition: ZenPersonaPresenceTransition | null;
+};
+function createStableZenPersonaPresenceState(
+  visibleBotId: string | null
+): ZenPersonaPresenceUiState {
+  return {
+    visibleBotId,
+    phase: "stable",
+    transition: null,
+  };
+}
 type DevToolsUiStateStorage = {
   activeSection?: DevToolsActiveSection;
   panelPosition?: DevToolsPanelPosition;
@@ -973,6 +1052,8 @@ type DevToolsUiStateStorage = {
   };
   debugComposer?: {
     minimized?: boolean;
+    y?: number;
+    restorePosition?: DevToolsPanelPosition;
   };
   compactedContext?: {
     minimized?: boolean;
@@ -1425,6 +1506,70 @@ function clampDevToolsPanelPosition(
   });
 }
 
+function clampDevOverlayPositionToViewport(
+  x: number,
+  y: number,
+  panelWidth: number,
+  panelHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  margin = DEV_DEBUG_COMPOSER_VIEWPORT_MARGIN
+): DevToolsPanelPosition {
+  const safeViewportWidth = Math.max(0, viewportWidth);
+  const safeViewportHeight = Math.max(0, viewportHeight);
+  const safePanelWidth = Math.max(1, panelWidth);
+  const safePanelHeight = Math.max(1, panelHeight);
+  const safeMargin = Math.max(0, Math.min(margin, safeViewportWidth / 2, safeViewportHeight / 2));
+  const minX = safeMargin;
+  const minY = safeMargin;
+  const maxX = Math.max(minX, safeViewportWidth - safePanelWidth - safeMargin);
+  const maxY = Math.max(minY, safeViewportHeight - safePanelHeight - safeMargin);
+  return {
+    x: Math.max(minX, Math.min(maxX, Number.isFinite(x) ? x : minX)),
+    y: Math.max(minY, Math.min(maxY, Number.isFinite(y) ? y : minY)),
+  };
+}
+
+function clampDevDebugComposerY(
+  y: number,
+  panelHeight: number,
+  viewportHeight: number
+): number {
+  return clampDevOverlayPositionToViewport(
+    0,
+    y,
+    1,
+    panelHeight,
+    1,
+    viewportHeight
+  ).y;
+}
+
+function initialDevDebugComposerY(): number {
+  const viewportHeight =
+    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
+  return clampDevDebugComposerY(
+    viewportHeight - DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT - 96,
+    DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
+    viewportHeight
+  );
+}
+
+function initialDevDebugComposerRestorePosition(): DevToolsPanelPosition {
+  const viewportWidth =
+    typeof window === "undefined" ? 1280 : Math.max(320, window.innerWidth);
+  const viewportHeight =
+    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
+  return clampDevOverlayPositionToViewport(
+    18,
+    viewportHeight - DEV_DEBUG_COMPOSER_RESTORE_HEIGHT - 118,
+    DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
+    DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
+    viewportWidth,
+    viewportHeight
+  );
+}
+
 function clampDevToolsPanelRect(
   rect: { x: number; y: number; width: number; height: number },
   viewportWidth: number,
@@ -1506,6 +1651,48 @@ function collectDevPanelSafeAreaInsets(
     viewportWidth,
     viewportHeight,
   });
+}
+
+function isElementVisibleForZenLiveBotBoundary(node: HTMLElement): boolean {
+  if (node.getAttribute("aria-hidden") === "true" || node.inert) return false;
+  const style = window.getComputedStyle(node);
+  if (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.opacity === "0"
+  ) {
+    return false;
+  }
+  const rect = node.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function collectZenLiveBotAvatarSafeAreaInsets(
+  viewportWidth: number,
+  viewportHeight: number
+): DevPanelSafeAreaInsets {
+  const insets = collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight);
+  if (typeof document === "undefined") return insets;
+
+  let composerBottomInset: number | null = null;
+  document
+    .querySelectorAll<HTMLElement>(`[${ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE}]`)
+    .forEach((node) => {
+      if (!isElementVisibleForZenLiveBotBoundary(node)) return;
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom <= 0 || rect.top >= viewportHeight) return;
+      const bottomInset = Math.max(0, viewportHeight - rect.top);
+      composerBottomInset =
+        composerBottomInset === null
+          ? bottomInset
+          : Math.max(composerBottomInset, bottomInset);
+    });
+
+  if (composerBottomInset === null) return insets;
+  return {
+    ...insets,
+    bottom: Math.min(insets.bottom, composerBottomInset),
+  };
 }
 
 function stableMeasuredDevPanelSafeAreaInset(value: number): number {
@@ -1610,6 +1797,33 @@ function clampCompactedSummaryDebugPanelRect(
   });
 }
 
+function restoreCompactedSummaryDebugPanelRect(
+  rect: CompactedSummaryDebugPanelRect,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): CompactedSummaryDebugPanelRect {
+  const wasOldTopLeftDefault =
+    rect.x <= 40 &&
+    rect.y <= 120 &&
+    rect.width <= 360 &&
+    rect.height <= 380;
+  const candidate = wasOldTopLeftDefault
+    ? {
+        x: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X,
+        y: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y,
+        width: Math.max(rect.width, COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH),
+        height: Math.max(rect.height, COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT),
+      }
+    : rect;
+  return clampCompactedSummaryDebugPanelRect(
+    candidate,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+}
+
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
   if (typeof window === "undefined") return {};
   try {
@@ -1656,6 +1870,202 @@ function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
   } catch {
     // localStorage can throw (privacy mode, quota); non-fatal.
   }
+}
+
+const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
+const ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED = 180;
+const ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED = 2200;
+const ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION = 0.82;
+const ZEN_LIVE_BOT_AVATAR_FRICTION_PER_FRAME = 0.992;
+const ZEN_LIVE_BOT_AVATAR_STOP_SPEED = 18;
+
+function readZenLiveBotAvatarPosition(): ZenLiveBotAvatarPosition | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(
+      PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ZenLiveBotAvatarPosition> | null;
+    if (
+      parsed &&
+      typeof parsed.x === "number" &&
+      Number.isFinite(parsed.x) &&
+      typeof parsed.y === "number" &&
+      Number.isFinite(parsed.y)
+    ) {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // localStorage can throw (privacy mode, quota); non-fatal.
+  }
+  return null;
+}
+
+function persistZenLiveBotAvatarPosition(position: ZenLiveBotAvatarPosition): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY,
+      JSON.stringify(position)
+    );
+  } catch {
+    // localStorage can throw (privacy mode, quota); non-fatal.
+  }
+}
+
+function measureZenLiveBotAvatarBounds(node: HTMLElement): ZenLiveBotAvatarBounds {
+  const rootRect = node.getBoundingClientRect();
+  let left = 0;
+  let top = 0;
+  let right = Math.max(1, rootRect.width);
+  let bottom = Math.max(1, rootRect.height);
+  const copy = node.querySelector<HTMLElement>("[data-zen-live-bot-action-copy='true']");
+  if (copy) {
+    const copyRect = copy.getBoundingClientRect();
+    left = Math.min(left, copyRect.left - rootRect.left);
+    top = Math.min(top, copyRect.top - rootRect.top);
+    right = Math.max(right, copyRect.right - rootRect.left);
+    bottom = Math.max(bottom, copyRect.bottom - rootRect.top);
+  }
+  return {
+    offsetX: left,
+    offsetY: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
+function resolveZenLiveBotActionCopyOffsetX(
+  node: HTMLElement,
+  position: ZenLiveBotAvatarPosition,
+  viewportWidth: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): number {
+  const copy = node.querySelector<HTMLElement>("[data-zen-live-bot-action-copy='true']");
+  if (!copy) return 0;
+  const rootRect = node.getBoundingClientRect();
+  const copyRect = copy.getBoundingClientRect();
+  const copyWidth = copyRect.width || 320;
+  const defaultCopyLeft = position.x + rootRect.width / 2 - copyWidth / 2;
+  const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
+  const safeLeftCandidate = safeAreaInsets.left + margin;
+  const safeRightCandidate = viewportWidth - safeAreaInsets.right - margin;
+  const safeLeft =
+    safeRightCandidate > safeLeftCandidate ? safeLeftCandidate : margin;
+  const safeRight =
+    safeRightCandidate > safeLeftCandidate ? safeRightCandidate : viewportWidth - margin;
+  const rightOverflow = defaultCopyLeft + copyWidth - safeRight;
+  const leftOverflow = safeLeft - defaultCopyLeft;
+  if (leftOverflow > 0) return Math.ceil(leftOverflow);
+  if (rightOverflow > 0) return -Math.ceil(rightOverflow);
+  return 0;
+}
+
+function zenLiveBotAvatarPositionLimits(
+  bounds: ZenLiveBotAvatarBounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): { minX: number; maxX: number; minY: number; maxY: number } {
+  const minUnionPosition = clampDevPanelPositionToSafeArea({
+    x: Number.NEGATIVE_INFINITY,
+    y: Number.NEGATIVE_INFINITY,
+    panelWidth: bounds.width,
+    panelHeight: bounds.height,
+    viewportWidth,
+    viewportHeight,
+    margin: ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX,
+    safeAreaInsets,
+  });
+  const maxUnionPosition = clampDevPanelPositionToSafeArea({
+    x: Number.MAX_SAFE_INTEGER,
+    y: Number.MAX_SAFE_INTEGER,
+    panelWidth: bounds.width,
+    panelHeight: bounds.height,
+    viewportWidth,
+    viewportHeight,
+    margin: ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX,
+    safeAreaInsets,
+  });
+  const minX = minUnionPosition.x - bounds.offsetX;
+  const minY = minUnionPosition.y - bounds.offsetY;
+  const maxX = Math.max(minX, maxUnionPosition.x - bounds.offsetX);
+  const maxY = Math.max(minY, maxUnionPosition.y - bounds.offsetY);
+  return { minX, maxX, minY, maxY };
+}
+
+function clampZenLiveBotAvatarPosition(
+  position: ZenLiveBotAvatarPosition,
+  bounds: ZenLiveBotAvatarBounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): ZenLiveBotAvatarPosition {
+  const { minX, maxX, minY, maxY } = zenLiveBotAvatarPositionLimits(
+    bounds,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  return {
+    x: Math.max(minX, Math.min(maxX, position.x)),
+    y: Math.max(minY, Math.min(maxY, position.y)),
+  };
+}
+
+function sampleZenLiveBotAvatarDragVelocity(
+  dragState: ZenLiveBotAvatarDragState,
+  clientX: number,
+  clientY: number,
+  timeMs: number
+): void {
+  const dtSeconds = Math.max(
+    0.008,
+    (timeMs - dragState.lastTimeMs) / 1000 || 0.016
+  );
+  const sampleVelocityX = (clientX - dragState.lastClientX) / dtSeconds;
+  const sampleVelocityY = (clientY - dragState.lastClientY) / dtSeconds;
+  dragState.velocityX = dragState.velocityX * 0.36 + sampleVelocityX * 0.64;
+  dragState.velocityY = dragState.velocityY * 0.36 + sampleVelocityY * 0.64;
+  dragState.lastClientX = clientX;
+  dragState.lastClientY = clientY;
+  dragState.lastTimeMs = timeMs;
+}
+
+function resolveZenLiveBotAvatarReleaseVelocity(
+  dragState: ZenLiveBotAvatarDragState
+): ZenLiveBotAvatarVelocity {
+  const sampledVelocity = {
+    x: dragState.velocityX,
+    y: dragState.velocityY,
+  };
+  if (
+    Math.hypot(sampledVelocity.x, sampledVelocity.y) >=
+    ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED
+  ) {
+    return sampledVelocity;
+  }
+
+  const dx = dragState.lastClientX - dragState.startClientX;
+  const dy = dragState.lastClientY - dragState.startClientY;
+  const distance = Math.hypot(dx, dy);
+  const elapsedSeconds = Math.max(
+    0.016,
+    (dragState.lastTimeMs - dragState.startTimeMs) / 1000 || 0.016
+  );
+  if (distance < 56 || elapsedSeconds > 0.48) {
+    return sampledVelocity;
+  }
+
+  const fallbackSpeed = Math.min(
+    ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED,
+    Math.max(ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED * 1.1, distance / elapsedSeconds)
+  );
+  return {
+    x: (dx / distance) * fallbackSpeed,
+    y: (dy / distance) * fallbackSpeed,
+  };
 }
 
 function resolveMemoryBubbleCollisionsPx(
@@ -3046,11 +3456,19 @@ function resolveZenUserMessageColor(
   if (personaInkSegment?.variant === "persona") {
     const rawPersonaColor = personaInkSegment.color.trim();
     if (/^#[0-9a-f]{6}$/i.test(rawPersonaColor)) {
-      return normalizeAccentForTheme(rawPersonaColor, resolvedTheme);
+      return deriveThemedAccentTextTone(
+        normalizeAccentForTheme(rawPersonaColor, resolvedTheme),
+        resolvedTheme,
+        "strong"
+      );
     }
   }
   if (!prismColor) return undefined;
-  return resolvedTheme === "light" ? prismColor.dark : prismColor.bright;
+  return deriveThemedAccentTextTone(
+    resolvedTheme === "light" ? prismColor.dark : prismColor.bright,
+    resolvedTheme,
+    "strong"
+  );
 }
 
 function coffeeBotTranscriptTextColor(
@@ -3102,6 +3520,24 @@ function displayAccentForMode(
   return privateMode
     ? privateModeAccentHex(raw, resolvedTheme)
     : normalizeAccentForTheme(raw, resolvedTheme);
+}
+
+function deriveThemedAccentTextTone(
+  normalizedAccent: string,
+  resolvedTheme: "light" | "dark",
+  strength: "subtle" | "strong"
+): string {
+  const anchor = resolvedTheme === "light" ? "#0b0a09" : "#fffdf8";
+  const amount =
+    strength === "strong"
+      ? resolvedTheme === "light" ? 0.48 : 0.42
+      : resolvedTheme === "light" ? 0.18 : 0.16;
+  const contrastTarget = strength === "strong" ? 5.2 : 3.1;
+  return ensureContrast(
+    mixHex(normalizedAccent, anchor, amount),
+    THEME_BG[resolvedTheme],
+    contrastTarget
+  );
 }
 
 function botAccentStyle(
@@ -7814,7 +8250,7 @@ const SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD =
 const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 const MAX_ZEN_WALLPAPER_OPACITY = 1;
-const ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH = 0.34;
+const ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH = 0.56;
 const DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED = true;
 const DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED = true;
 const DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED = true;
@@ -18577,17 +19013,51 @@ function composerTextareaChipLabel(value: string, range: ComposerTextareaChipRan
 function renderComposerTextareaOverlayContent(
   value: string,
   ranges: readonly ComposerTextareaChipRange[],
-  selectedWildcardSlotRange: { start: number; end: number } | null = null
+  selectedWildcardSlotRange: { start: number; end: number } | null = null,
+  ghostSuggestion: ComposerGhostSuggestion | null = null
 ): React.ReactNode {
   if (!value) return null;
-  if (ranges.length === 0) return value;
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
+  let ghostRendered = false;
+  const pushTextSegment = (start: number, end: number, key: string): void => {
+    const ghostIndex = ghostSuggestion?.prefixEnd;
+    if (
+      !ghostRendered &&
+      ghostSuggestion &&
+      typeof ghostIndex === "number" &&
+      ghostIndex >= start &&
+      ghostIndex <= end
+    ) {
+      if (ghostIndex > start) {
+        nodes.push(
+          <Fragment key={`${key}-before`}>{value.slice(start, ghostIndex)}</Fragment>
+        );
+      }
+      nodes.push(
+        <span
+          key={`${key}-ghost`}
+          className={styles.composeTextareaGhostSuffix}
+          aria-hidden="true"
+        >
+          {ghostSuggestion.suffix}
+        </span>
+      );
+      if (end > ghostIndex) {
+        nodes.push(
+          <Fragment key={`${key}-after`}>{value.slice(ghostIndex, end)}</Fragment>
+        );
+      }
+      ghostRendered = true;
+      return;
+    }
+    if (end > start) {
+      nodes.push(<Fragment key={key}>{value.slice(start, end)}</Fragment>);
+    }
+  };
   ranges.forEach((range, index) => {
     if (range.start > cursor) {
-      nodes.push(
-        <Fragment key={`text-${index}`}>{value.slice(cursor, range.start)}</Fragment>
-      );
+      pushTextSegment(cursor, range.start, `text-${index}`);
     }
     const tokenText = value.slice(range.start, range.end);
     const tokenLabel = composerTextareaChipLabel(value, range);
@@ -18629,9 +19099,7 @@ function renderComposerTextareaOverlayContent(
     );
     cursor = range.end;
   });
-  if (cursor < value.length) {
-    nodes.push(<Fragment key="text-tail">{value.slice(cursor)}</Fragment>);
-  }
+  pushTextSegment(cursor, value.length, "text-tail");
   return nodes;
 }
 
@@ -19969,57 +20437,578 @@ function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Ele
 function ZenLiveBotPresencePlate({
   bot,
   actionState,
+  replyActionText,
   userActionVisible,
+  defaultPrismPresenceVisible = false,
+  defaultPrismPresenceForming = false,
+  isTalking,
+  mouthOpen,
+  mouthShape,
+  presencePhase,
   resolvedTheme,
+  atmosphereActive,
 }: {
   bot: Bot | null;
   actionState: ZenLiveBotActionState | null;
+  replyActionText?: string | null;
   userActionVisible: boolean;
+  defaultPrismPresenceVisible?: boolean;
+  defaultPrismPresenceForming?: boolean;
+  isTalking: boolean;
+  mouthOpen: boolean;
+  mouthShape?: ZenLiveBotMouthShape | null;
+  presencePhase: ZenPersonaPresencePhase;
   resolvedTheme: "light" | "dark";
+  atmosphereActive: boolean;
 }): React.JSX.Element | null {
-  if (!bot && !actionState && !userActionVisible) return null;
   const botName = bot?.name?.trim() || "Prism";
+  const avatarRef = useRef<HTMLDivElement | null>(null);
+  const avatarDragRef = useRef<ZenLiveBotAvatarDragState | null>(null);
+  const avatarMouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const avatarLastPointerDownMsRef = useRef(0);
+  const avatarMomentumFrameRef = useRef<number | null>(null);
+  const avatarMomentumLastTimeRef = useRef<number | null>(null);
+  const avatarVelocityRef = useRef<ZenLiveBotAvatarVelocity>({ x: 0, y: 0 });
+  const [avatarPosition, setAvatarPosition] =
+    useState<ZenLiveBotAvatarPosition | null>(() => readZenLiveBotAvatarPosition());
+  const avatarPositionRef = useRef<ZenLiveBotAvatarPosition | null>(avatarPosition);
+  const avatarFloating = avatarPosition !== null;
+  const [avatarDragging, setAvatarDragging] = useState(false);
+  const [avatarFlinging, setAvatarFlinging] = useState(false);
+  const [avatarCopyOffsetX, setAvatarCopyOffsetX] = useState(0);
+
+  useEffect(() => {
+    avatarPositionRef.current = avatarPosition;
+  }, [avatarPosition]);
+
+  const stopAvatarMomentum = useCallback((persist = false): void => {
+    if (avatarMomentumFrameRef.current !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(avatarMomentumFrameRef.current);
+    }
+    avatarMomentumFrameRef.current = null;
+    avatarMomentumLastTimeRef.current = null;
+    avatarVelocityRef.current = { x: 0, y: 0 };
+    setAvatarFlinging(false);
+    if (persist && avatarPositionRef.current) {
+      persistZenLiveBotAvatarPosition(avatarPositionRef.current);
+    }
+  }, []);
+
+  const setAvatarPositionClamped = useCallback(
+    (
+      nextPosition: ZenLiveBotAvatarPosition,
+      persist = false
+    ): ZenLiveBotAvatarPosition => {
+      const node = avatarRef.current;
+      if (typeof window === "undefined" || !node) {
+        avatarPositionRef.current = nextPosition;
+        setAvatarPosition(nextPosition);
+        if (persist) persistZenLiveBotAvatarPosition(nextPosition);
+        return nextPosition;
+      }
+      const bounds = measureZenLiveBotAvatarBounds(node);
+      const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
+        window.innerWidth,
+        window.innerHeight
+      );
+      const clamped = clampZenLiveBotAvatarPosition(
+        nextPosition,
+        bounds,
+        window.innerWidth,
+        window.innerHeight,
+        safeAreaInsets
+      );
+      setAvatarCopyOffsetX(
+        resolveZenLiveBotActionCopyOffsetX(
+          node,
+          clamped,
+          window.innerWidth,
+          safeAreaInsets
+        )
+      );
+      avatarPositionRef.current = clamped;
+      setAvatarPosition(clamped);
+      if (persist) persistZenLiveBotAvatarPosition(clamped);
+      return clamped;
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    const node = avatarRef.current;
+    if (!node) return;
+    let animationFrame: number | null = null;
+    const clampCurrent = (persist = false): void => {
+      const rect = node.getBoundingClientRect();
+      const current = avatarPositionRef.current ?? { x: rect.left, y: rect.top };
+      setAvatarPositionClamped(current, persist);
+    };
+    const scheduleClamp = (): void => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        clampCurrent(true);
+      });
+    };
+    clampCurrent();
+    scheduleClamp();
+    const ResizeObserverCtor = window.ResizeObserver;
+    if (!ResizeObserverCtor) {
+      return () => {
+        if (animationFrame !== null) {
+          window.cancelAnimationFrame(animationFrame);
+        }
+      };
+    }
+    const observer = new ResizeObserverCtor(scheduleClamp);
+    observer.observe(node);
+    node
+      .querySelectorAll<HTMLElement>("[data-zen-live-bot-action-copy='true']")
+      .forEach((child) => observer.observe(child));
+    const observeSafeAreaNodes = (): void => {
+      document
+        .querySelectorAll<HTMLElement>(
+          `[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}], [${ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE}]`
+        )
+        .forEach((safeAreaNode) => observer.observe(safeAreaNode));
+    };
+    observeSafeAreaNodes();
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            observeSafeAreaNodes();
+            scheduleClamp();
+          });
+    mutationObserver?.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "class",
+        "style",
+        DEV_PANEL_SAFE_AREA_ATTRIBUTE,
+        ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE,
+        "data-chat-sidebar-hidden",
+        "data-chat-overflow-menu-open",
+        "data-choice-composer-hidden",
+        "data-session-active",
+        "data-transcript-open",
+        "data-zen-header-hidden",
+      ],
+    });
+    window.addEventListener("transitionend", scheduleClamp, true);
+    return () => {
+      observer.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener("transitionend", scheduleClamp, true);
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [
+    actionState?.action,
+    actionState?.createdAtMs,
+    avatarFloating,
+    botName,
+    isTalking,
+    setAvatarPositionClamped,
+    userActionVisible,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = (): void => {
+      if (!avatarPositionRef.current) return;
+      setAvatarPositionClamped(avatarPositionRef.current, true);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [setAvatarPositionClamped]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarMomentumFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(avatarMomentumFrameRef.current);
+        avatarMomentumFrameRef.current = null;
+      }
+      if (avatarMouseDragCleanupRef.current) {
+        avatarMouseDragCleanupRef.current();
+      }
+      if (avatarPositionRef.current) {
+        persistZenLiveBotAvatarPosition(avatarPositionRef.current);
+      }
+    };
+  }, []);
+
+  const startAvatarMomentum = useCallback(
+    (velocity: ZenLiveBotAvatarVelocity): void => {
+      if (typeof window === "undefined") return;
+      const speed = Math.hypot(velocity.x, velocity.y);
+      if (speed < ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED) {
+        stopAvatarMomentum(true);
+        return;
+      }
+      const velocityScale = Math.min(1, ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED / speed);
+      avatarVelocityRef.current = {
+        x: velocity.x * velocityScale,
+        y: velocity.y * velocityScale,
+      };
+      if (avatarMomentumFrameRef.current !== null) {
+        window.cancelAnimationFrame(avatarMomentumFrameRef.current);
+      }
+      avatarMomentumLastTimeRef.current = null;
+      setAvatarFlinging(true);
+
+      const step = (timeMs: number): void => {
+        const node = avatarRef.current;
+        const current = avatarPositionRef.current;
+        if (!node || !current) {
+          stopAvatarMomentum();
+          return;
+        }
+        const previousTime = avatarMomentumLastTimeRef.current ?? timeMs;
+        avatarMomentumLastTimeRef.current = timeMs;
+        const dt = Math.min(0.033, Math.max(0.001, (timeMs - previousTime) / 1000 || 1 / 60));
+        const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
+          window.innerWidth,
+          window.innerHeight
+        );
+        const { minX, maxX, minY, maxY } = zenLiveBotAvatarPositionLimits(
+          measureZenLiveBotAvatarBounds(node),
+          window.innerWidth,
+          window.innerHeight,
+          safeAreaInsets
+        );
+        let nextX = current.x + avatarVelocityRef.current.x * dt;
+        let nextY = current.y + avatarVelocityRef.current.y * dt;
+        let nextVx = avatarVelocityRef.current.x;
+        let nextVy = avatarVelocityRef.current.y;
+
+        if (nextX < minX) {
+          nextX = minX;
+          nextVx = Math.abs(nextVx) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+        } else if (nextX > maxX) {
+          nextX = maxX;
+          nextVx = -Math.abs(nextVx) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+        }
+        if (nextY < minY) {
+          nextY = minY;
+          nextVy = Math.abs(nextVy) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+        } else if (nextY > maxY) {
+          nextY = maxY;
+          nextVy = -Math.abs(nextVy) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+        }
+
+        const friction = Math.pow(ZEN_LIVE_BOT_AVATAR_FRICTION_PER_FRAME, dt * 60);
+        nextVx *= friction;
+        nextVy *= friction;
+        const next = { x: nextX, y: nextY };
+        avatarVelocityRef.current = { x: nextVx, y: nextVy };
+        avatarPositionRef.current = next;
+        setAvatarCopyOffsetX(
+          resolveZenLiveBotActionCopyOffsetX(
+            node,
+            next,
+            window.innerWidth,
+            safeAreaInsets
+          )
+        );
+        setAvatarPosition(next);
+
+        if (Math.hypot(nextVx, nextVy) > ZEN_LIVE_BOT_AVATAR_STOP_SPEED) {
+          avatarMomentumFrameRef.current = window.requestAnimationFrame(step);
+          return;
+        }
+        avatarMomentumFrameRef.current = null;
+        avatarMomentumLastTimeRef.current = null;
+        avatarVelocityRef.current = { x: 0, y: 0 };
+        setAvatarFlinging(false);
+        persistZenLiveBotAvatarPosition(next);
+      };
+
+      avatarMomentumFrameRef.current = window.requestAnimationFrame(step);
+    },
+    [stopAvatarMomentum]
+  );
+
+  const handleAvatarPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (event.pointerType === "mouse") return;
+      const node = avatarRef.current;
+      if (!node) return;
+      avatarLastPointerDownMsRef.current = Date.now();
+      stopAvatarMomentum();
+      const rect = node.getBoundingClientRect();
+      const current = avatarPositionRef.current ?? { x: rect.left, y: rect.top };
+      const positioned = setAvatarPositionClamped(current);
+      avatarDragRef.current = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - positioned.x,
+        offsetY: event.clientY - positioned.y,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+        startTimeMs: event.timeStamp || Date.now(),
+        lastTimeMs: event.timeStamp || Date.now(),
+        velocityX: 0,
+        velocityY: 0,
+        moved: false,
+      };
+      setAvatarDragging(false);
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is not available in every browser/test environment.
+      }
+      event.preventDefault();
+    },
+    [setAvatarPositionClamped, stopAvatarMomentum]
+  );
+
+  const handleAvatarPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const dragState = avatarDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const dx = event.clientX - dragState.startClientX;
+      const dy = event.clientY - dragState.startClientY;
+      if (!dragState.moved && Math.hypot(dx, dy) >= 5) {
+        dragState.moved = true;
+        setAvatarDragging(true);
+      }
+      if (!dragState.moved) return;
+      sampleZenLiveBotAvatarDragVelocity(
+        dragState,
+        event.clientX,
+        event.clientY,
+        event.timeStamp || Date.now()
+      );
+      setAvatarPositionClamped({
+        x: event.clientX - dragState.offsetX,
+        y: event.clientY - dragState.offsetY,
+      });
+      event.preventDefault();
+    },
+    [setAvatarPositionClamped]
+  );
+
+  const handleAvatarPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const dragState = avatarDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      avatarDragRef.current = null;
+      setAvatarDragging(false);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+      if (dragState.moved) {
+        sampleZenLiveBotAvatarDragVelocity(
+          dragState,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        );
+        startAvatarMomentum(resolveZenLiveBotAvatarReleaseVelocity(dragState));
+      } else if (avatarPositionRef.current) {
+        persistZenLiveBotAvatarPosition(avatarPositionRef.current);
+      }
+    },
+    [startAvatarMomentum]
+  );
+
+  const handleAvatarMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>): void => {
+      if (event.button !== 0) return;
+      if (avatarDragRef.current) return;
+      if (Date.now() - avatarLastPointerDownMsRef.current < 160) return;
+      const node = avatarRef.current;
+      if (!node || typeof window === "undefined") return;
+      stopAvatarMomentum();
+      avatarMouseDragCleanupRef.current?.();
+      const rect = node.getBoundingClientRect();
+      const current = avatarPositionRef.current ?? { x: rect.left, y: rect.top };
+      const positioned = setAvatarPositionClamped(current);
+      const dragState: ZenLiveBotAvatarDragState = {
+        pointerId: -1,
+        offsetX: event.clientX - positioned.x,
+        offsetY: event.clientY - positioned.y,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        lastClientX: event.clientX,
+        lastClientY: event.clientY,
+        startTimeMs: event.timeStamp || Date.now(),
+        lastTimeMs: event.timeStamp || Date.now(),
+        velocityX: 0,
+        velocityY: 0,
+        moved: false,
+      };
+      avatarDragRef.current = dragState;
+      setAvatarDragging(false);
+
+      const cleanup = (): void => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        avatarMouseDragCleanupRef.current = null;
+      };
+
+      const onMove = (moveEvent: MouseEvent): void => {
+        if (avatarDragRef.current !== dragState) return;
+        const dx = moveEvent.clientX - dragState.startClientX;
+        const dy = moveEvent.clientY - dragState.startClientY;
+        if (!dragState.moved && Math.hypot(dx, dy) >= 5) {
+          dragState.moved = true;
+          setAvatarDragging(true);
+        }
+        if (!dragState.moved) return;
+        sampleZenLiveBotAvatarDragVelocity(
+          dragState,
+          moveEvent.clientX,
+          moveEvent.clientY,
+          moveEvent.timeStamp || Date.now()
+        );
+        setAvatarPositionClamped({
+          x: moveEvent.clientX - dragState.offsetX,
+          y: moveEvent.clientY - dragState.offsetY,
+        });
+        moveEvent.preventDefault();
+      };
+
+      const onUp = (upEvent: MouseEvent): void => {
+        if (avatarDragRef.current !== dragState) return;
+        avatarDragRef.current = null;
+        setAvatarDragging(false);
+        cleanup();
+        if (dragState.moved) {
+          sampleZenLiveBotAvatarDragVelocity(
+            dragState,
+            upEvent.clientX,
+            upEvent.clientY,
+            upEvent.timeStamp || Date.now()
+          );
+          startAvatarMomentum(resolveZenLiveBotAvatarReleaseVelocity(dragState));
+        } else if (avatarPositionRef.current) {
+          persistZenLiveBotAvatarPosition(avatarPositionRef.current);
+        }
+      };
+
+      avatarMouseDragCleanupRef.current = cleanup;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      event.preventDefault();
+    },
+    [setAvatarPositionClamped, startAvatarMomentum, stopAvatarMomentum]
+  );
+
+  const transitioning = presencePhase !== "stable";
+  if (
+    !bot &&
+    !actionState &&
+    !userActionVisible &&
+    !defaultPrismPresenceVisible &&
+    !isTalking &&
+    !transitioning
+  ) {
+    return null;
+  }
+  const defaultPrismPresence = bot === null;
   const moodHint =
-    actionState?.moodHint ?? (userActionVisible || bot ? "attentive" : "waiting");
-  const plateFace = zenLiveActionPlateFace(moodHint);
-  const actionText =
-    actionState?.action ??
-    (userActionVisible ? "notices" : bot ? "listens" : "waits");
+    actionState?.moodHint ?? (bot ? "warm" : userActionVisible ? "attentive" : "waiting");
+  const faceTalking = isTalking;
+  const faceMouthShape = faceTalking
+    ? mouthShape ?? (mouthOpen ? "open-wide" : "closed")
+    : "closed";
+  const faceMouthOpen = faceTalking && faceMouthShape !== "closed";
+  const plateFace =
+    faceTalking && faceMouthShape === "closed"
+      ? { text: ":|", rotateDeg: 90 }
+      : zenLiveActionPlateFace(moodHint, faceMouthShape);
+  const actionText = transitioning
+    ? "[LOADING]"
+    : resolveZenLiveBotPresenceActionText({
+        action: actionState?.action,
+        replyAction: replyActionText,
+        isTalking: faceTalking,
+        userActionVisible,
+        hasBot: Boolean(bot),
+      });
+  const actionTextVerbose =
+    !transitioning && isZenLiveBotPresenceActionVerbose(actionText);
   const voicePreset = coffeeSeatVoicePreset(bot);
-  return (
+  const avatarStyle = {
+    ...botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
+    "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
+    ...(avatarPosition
+      ? {
+          "--zen-live-bot-avatar-x": `${avatarPosition.x}px`,
+          "--zen-live-bot-avatar-y": `${avatarPosition.y}px`,
+        }
+      : {}),
+  } as React.CSSProperties;
+  const plateNode = (
     <div
+      ref={avatarRef}
       className={styles.zenLiveBotPresencePlate}
+      data-theme={resolvedTheme}
+      data-atmosphere-active={atmosphereActive ? "true" : undefined}
       data-mood={moodHint}
       data-prism-mood={zenLiveActionMoodToBotMood(moodHint)}
-      data-source={actionState?.source ?? (bot ? "persona" : "user-action")}
+      data-source={actionState?.source ?? (bot ? "persona" : "prism")}
+      data-prism-persona={defaultPrismPresence ? "true" : undefined}
+      data-prism-forming={
+        defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
+      }
+      data-talking={faceTalking ? "true" : undefined}
+      data-mouth-open={faceTalking ? (faceMouthOpen ? "true" : "false") : undefined}
+      data-mouth-shape={faceTalking ? faceMouthShape : undefined}
+      data-presence-phase={transitioning ? presencePhase : undefined}
+      data-transitioning={transitioning ? "true" : undefined}
+      data-loading={transitioning ? "true" : undefined}
+      data-action-verbose={actionTextVerbose ? "true" : undefined}
+      data-floating={avatarFloating ? "true" : undefined}
+      data-dragging={avatarDragging ? "true" : undefined}
+      data-flinging={avatarFlinging ? "true" : undefined}
       data-interrupt={actionState?.responseKind === "interrupt_candidate" ? "true" : undefined}
       role="status"
       aria-live="polite"
       aria-label={`${botName}: ${actionText}`}
-      style={botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme)}
+      title={`Drag or fling ${botName}`}
+      style={avatarStyle}
+      onPointerDown={handleAvatarPointerDown}
+      onPointerMove={handleAvatarPointerMove}
+      onPointerUp={handleAvatarPointerUp}
+      onPointerCancel={handleAvatarPointerUp}
+      onMouseDown={handleAvatarMouseDown}
     >
       <span className={styles.zenLiveBotPresenceFace} aria-hidden="true">
+        <span className={styles.zenLiveBotPresenceSpinner} />
         <CoffeeSeatPlateEmoji
           enabled
-          isTalking={actionState?.responseKind === "interrupt_candidate"}
+          isTalking={faceTalking}
           scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
           baseText={plateFace.text}
-          rotateDeg={plateFace.rotateDeg}
+          rotateDeg={0}
           voicePreset={voicePreset}
           className={styles.zenLiveBotPresenceFaceGlyph}
         />
       </span>
-      <span className={styles.zenLiveBotPresenceCopy}>
-        <span className={styles.zenLiveBotPresenceBotGlyph} aria-hidden="true">
-          <BotGlyph name={bot?.glyph ?? "triangle"} size={26} strokeWidth={1.52} />
-        </span>
-        <span className={styles.zenLiveBotPresenceCopyText}>
-          <span className={styles.zenLiveBotPresenceActor}>{botName}</span>
-          <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
-        </span>
+      <span
+        className={styles.zenLiveBotPresenceCopy}
+        data-zen-live-bot-action-copy="true"
+      >
+        <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
       </span>
     </div>
   );
+  if (avatarFloating && typeof document !== "undefined") {
+    return createPortal(plateNode, document.body);
+  }
+  return plateNode;
 }
 
 function wrapCleanupRevealMessageBody(
@@ -20346,39 +21335,9 @@ function MarkdownMessageBody({
         : null,
     [messageRole, renderAsEphemeralLines, source, zenActionsEnabled]
   );
-  const shouldHoldLocalZenActionText =
-    zenActionPresentation?.hasActions === true &&
-    !zenActionPresentation.actionOnly &&
-    renderAsEphemeralLines === true &&
-    revealWordByWord !== true &&
-    forcedVisibleTokenCount === undefined &&
-    chatPhase === "manifest";
-  const zenActionTextHoldKey = shouldHoldLocalZenActionText
-    ? `${messageRole}:${source.length}:${zenActionPresentation.cues.map((cue) => cue.key).join("|")}`
-    : null;
-  const [activeZenActionTextHoldKey, setActiveZenActionTextHoldKey] = useState<
-    string | null
-  >(() => zenActionTextHoldKey);
-  useEffect(() => {
-    if (!zenActionTextHoldKey) {
-      setActiveZenActionTextHoldKey(null);
-      return;
-    }
-    setActiveZenActionTextHoldKey(zenActionTextHoldKey);
-    const timer = window.setTimeout(() => {
-      setActiveZenActionTextHoldKey((current) =>
-        current === zenActionTextHoldKey ? null : current
-      );
-    }, ZEN_ACTION_TEXT_LAG_MS);
-    return () => window.clearTimeout(timer);
-  }, [zenActionTextHoldKey]);
-  const localZenActionTextHeld =
-    zenActionTextHoldKey !== null && activeZenActionTextHoldKey === zenActionTextHoldKey;
   const actionDisplaySource =
     zenActionPresentation?.hasActions === true
-      ? localZenActionTextHeld
-        ? ""
-        : zenActionPresentation.mainText
+      ? zenActionPresentation.mainText
       : source;
   const normalizedSource = useMemo(
     () =>
@@ -20474,24 +21433,8 @@ function MarkdownMessageBody({
   const renderVisibleTokenCount = effectiveVisibleTokenCount;
   const zenActionCue = useMemo(() => {
     if (zenActionPresentation?.hasActions !== true) return null;
-    const visibleDisplayLength = localZenActionTextHeld
-      ? 0
-      : revealWordByWord
-      ? getBotMentionDisplayLength(
-          tokens.slice(0, Math.max(0, renderVisibleTokenCount)).join("")
-        )
-      : Number.POSITIVE_INFINITY;
-    return resolveCurrentZenActionCue(
-      zenActionPresentation.cues,
-      visibleDisplayLength
-    );
-  }, [
-    localZenActionTextHeld,
-    renderVisibleTokenCount,
-    revealWordByWord,
-    tokens,
-    zenActionPresentation,
-  ]);
+    return resolveCanvasZenActionCue(zenActionPresentation.cues);
+  }, [zenActionPresentation]);
   const zenActionCueNode =
     zenActionCue && zenActionPresentation
       ? (
@@ -21170,6 +22113,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const onValueChangeRef = useRef(onValueChange);
     const onInputActivityRef = useRef(onInputActivity);
     const onFocusRef = useRef(onFocus);
+    const writingAssistEnabledRef = useRef(writingAssistEnabled);
     const editorRef = useRef<Editor | null>(null);
     const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
     const pendingValueRef = useRef<string | null>(null);
@@ -21222,6 +22166,16 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useLayoutEffect(() => {
       wildcardPicksRef.current = wildcardPicks;
     }, [wildcardPicks]);
+    useLayoutEffect(() => {
+      writingAssistEnabledRef.current = writingAssistEnabled;
+      const ed = editorRef.current;
+      if (!ed || ed.isDestroyed) return;
+      try {
+        ed.view.dispatch(ed.state.tr.setMeta("composerGhostAutocomplete", Date.now()));
+      } catch {
+        // The editor can be mid-teardown while settings are changing.
+      }
+    }, [writingAssistEnabled]);
     useLayoutEffect(() => {
       mentionUiRef.current = mentionUi;
     }, [mentionUi]);
@@ -21611,6 +22565,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             wildcardSlotNames: wildcardSlotNamesForHighlight,
             pendingWildcardSlots: pendingWildcardSlotsForDecoration,
           }),
+          ComposerGhostAutocomplete.configure({
+            enabled: () => writingAssistEnabledRef.current,
+            lexicon: COMPOSER_GHOST_LEXICON,
+          }),
           Placeholder.configure({ placeholder }),
           Markdown.configure({
             markedOptions: {
@@ -21934,6 +22892,23 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             }
             if (
               activeEditor &&
+              writingAssistEnabledRef.current &&
+              event.key === "ArrowRight" &&
+              !event.shiftKey &&
+              !event.altKey &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !(event as globalThis.KeyboardEvent).isComposing &&
+              !commandUiRef.current.open &&
+              !mentionUiRef.current.open &&
+              applyEditorComposerGhostCompletion(activeEditor, COMPOSER_GHOST_LEXICON)
+            ) {
+              event.preventDefault();
+              queueMicrotask(() => syncComposerPopovers(activeEditor));
+              return true;
+            }
+            if (
+              activeEditor &&
               shouldBlockPrintableInPrismBotLink(activeEditor, event as globalThis.KeyboardEvent)
             ) {
               event.preventDefault();
@@ -22026,6 +23001,21 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   queueMicrotask(() => syncComposerPopovers(activeEditor));
                   return true;
                 }
+              }
+              if (
+                event.key === "Tab" &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !(event as globalThis.KeyboardEvent).isComposing &&
+                writingAssistEnabledRef.current &&
+                !commandUiRef.current.open &&
+                !mentionUiRef.current.open &&
+                applyEditorComposerGhostCompletion(activeEditor, COMPOSER_GHOST_LEXICON)
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
               }
               if (event.key === "Escape" && commandUiRef.current.open) {
                 event.preventDefault();
@@ -22521,10 +23511,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const pendingTextareaSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const [textareaSelectedWildcardSlotRange, setTextareaSelectedWildcardSlotRange] =
     useState<{ start: number; end: number } | null>(null);
+  const [textareaSelection, setTextareaSelection] =
+    useState<{ start: number; end: number } | null>(null);
+  const [textareaFocused, setTextareaFocused] = useState(false);
   const pendingTextareaWildcardIdRef = useRef(0);
   const pendingTextareaWildcardSlotsRef = useRef<PendingComposerWildcardSlot[]>([]);
   const textareaChipActivationRef = useRef<PendingComposerChipActivation | null>(null);
   const textareaLastChipPointerEventMsRef = useRef(0);
+  const textareaGhostSuggestionRef = useRef<ComposerGhostSuggestion | null>(null);
   const [taMention, setTaMention] = useState<{
     open: boolean;
     caretRect: DOMRect | null;
@@ -22554,14 +23548,66 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       }),
     [commandPicks, promptPicks, textareaDisplayValue, wildcardPicks]
   );
+  const syncTextareaSelectionState = useCallback((el: HTMLTextAreaElement) => {
+    setTextareaSelection({
+      start: el.selectionStart ?? 0,
+      end: el.selectionEnd ?? el.selectionStart ?? 0,
+    });
+  }, []);
+  const textareaGhostSuggestion = useMemo(() => {
+    if (
+      enabled ||
+      !writingAssistEnabled ||
+      generatingRandomPrompt ||
+      !textareaFocused ||
+      !textareaSelection ||
+      taMention.open ||
+      taCommand.open
+    ) {
+      return null;
+    }
+    const chipAtCaret = findComposerTextareaChipRangeAt(
+      textareaChipRanges,
+      textareaSelection.start
+    );
+    return resolveComposerGhostCompletion({
+      text: textareaDisplayValue,
+      selectionStart: textareaSelection.start,
+      selectionEnd: textareaSelection.end,
+      lexicon: COMPOSER_GHOST_LEXICON,
+      suppressed:
+        Boolean(chipAtCaret) ||
+        isCaretInPrismBotMarkdownLockedRegion(
+          textareaDisplayValue,
+          textareaSelection.start,
+          textareaSelection.end
+        ),
+    });
+  }, [
+    enabled,
+    generatingRandomPrompt,
+    taCommand.open,
+    taMention.open,
+    textareaChipRanges,
+    textareaDisplayValue,
+    textareaFocused,
+    textareaSelection,
+    writingAssistEnabled,
+  ]);
   const textareaOverlayContent = useMemo(
     () =>
       renderComposerTextareaOverlayContent(
         textareaDisplayValue,
         textareaChipRanges,
-        textareaSelectedWildcardSlotRange
+        textareaSelectedWildcardSlotRange,
+        textareaGhostSuggestion
       ),
-    [textareaChipRanges, textareaDisplayValue, textareaSelectedWildcardSlotRange]
+    [
+      textareaChipRanges,
+      textareaDisplayValue,
+      textareaGhostSuggestion,
+      textareaSelectedWildcardSlotRange,
+    ]
   );
   const syncTextareaOverlayScroll = useCallback((el: HTMLTextAreaElement) => {
     if (!textareaOverlayRef.current) return;
@@ -22682,6 +23728,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   useLayoutEffect(() => {
     taCommandRef.current = taCommand;
   }, [taCommand]);
+  useLayoutEffect(() => {
+    textareaGhostSuggestionRef.current = textareaGhostSuggestion;
+  }, [textareaGhostSuggestion]);
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!enabled && el) {
@@ -23072,12 +24121,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       ].join("\u0000");
       if (snapshot === textareaMentionSyncSnapshotRef.current) return;
       textareaMentionSyncSnapshotRef.current = snapshot;
+      syncTextareaSelectionState(el);
       syncTextareaMention(el);
     }, 120);
     return () => {
       window.clearInterval(interval);
     };
-  }, [syncTextareaMention]);
+  }, [syncTextareaMention, syncTextareaSelectionState]);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -23085,6 +24135,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     if (!enabled && el && pendingSelection !== null) {
       el.setSelectionRange(pendingSelection.start, pendingSelection.end);
       pendingTextareaSelectionRef.current = null;
+      syncTextareaSelectionState(el);
       syncTextareaSelectedWildcardSlotRange(el);
       syncTextareaMention(el);
       return;
@@ -23093,10 +24144,54 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     if (!enabled && el && pending !== null) {
       el.setSelectionRange(pending, pending);
       pendingTextareaCaretRef.current = null;
+      syncTextareaSelectionState(el);
       syncTextareaSelectedWildcardSlotRange(el);
       syncTextareaMention(el);
     }
-  }, [enabled, syncTextareaMention, syncTextareaSelectedWildcardSlotRange, value]);
+  }, [
+    enabled,
+    syncTextareaMention,
+    syncTextareaSelectedWildcardSlotRange,
+    syncTextareaSelectionState,
+    value,
+  ]);
+
+  const applyTextareaGhostCompletionAtCaret = useCallback(
+    (el: HTMLTextAreaElement): boolean => {
+      if (
+        !writingAssistEnabled ||
+        generatingRandomPrompt ||
+        taCommandRef.current.open ||
+        taMentionRef.current.open
+      ) {
+        return false;
+      }
+      const selectionStart = el.selectionStart ?? 0;
+      const selectionEnd = el.selectionEnd ?? selectionStart;
+      const chipAtCaret = findComposerTextareaChipRangeAt(textareaChipRanges, selectionStart);
+      const suggestion =
+        textareaGhostSuggestionRef.current ??
+        resolveComposerGhostCompletion({
+          text: el.value,
+          selectionStart,
+          selectionEnd,
+          lexicon: COMPOSER_GHOST_LEXICON,
+          suppressed:
+            Boolean(chipAtCaret) ||
+            isCaretInPrismBotMarkdownLockedRegion(el.value, selectionStart, selectionEnd),
+        });
+      if (!suggestion) return false;
+      const applied = applyComposerGhostCompletion(el.value, suggestion);
+      if (!applied) return false;
+      textareaValueRef.current = applied.value;
+      setTextareaLocalValue(applied.value);
+      pendingTextareaCaretRef.current = applied.caret;
+      setTextareaSelection({ start: applied.caret, end: applied.caret });
+      onValueChange(applied.value);
+      return true;
+    },
+    [generatingRandomPrompt, onValueChange, textareaChipRanges, writingAssistEnabled]
+  );
 
   useImperativeHandle(
     ref,
@@ -23222,6 +24317,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                   setTextareaSelectedWildcardSlotRange(null);
                   textareaValueRef.current = event.currentTarget.value;
                   setTextareaLocalValue(event.currentTarget.value);
+                  syncTextareaSelectionState(event.currentTarget);
                   onInputActivity?.();
                   onChange(event);
                   resizeTextareaToContent(event.currentTarget);
@@ -23230,12 +24326,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }}
                 onSelect={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   syncTextareaSelectedWildcardSlotRange(el);
                   scheduleTextareaMentionSync();
                 }}
                 onPointerUp={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
                   if (handleTextareaChipPointerActivation(el, event)) {
@@ -23250,6 +24348,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }}
                 onMouseUp={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
                   if (handleTextareaChipPointerActivation(el, event)) {
@@ -23264,6 +24363,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }}
                 onClick={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
                   if (handleTextareaChipPointerActivation(el, event)) {
@@ -23278,6 +24378,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }}
                 onDoubleClick={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   scheduleTextareaMentionSync();
                   if (resolveTextareaComposerChipDoubleClick(el, event)) {
@@ -23292,6 +24393,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                 }}
                 onKeyUp={(event) => {
                   const el = event.currentTarget;
+                  syncTextareaSelectionState(el);
                   syncTextareaOverlayScroll(el);
                   syncTextareaSelectedWildcardSlotRange(el);
                   scheduleTextareaMentionSync();
@@ -23580,6 +24682,18 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     }
                   }
                   if (
+                    event.key === "ArrowRight" &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.nativeEvent.isComposing &&
+                    applyTextareaGhostCompletionAtCaret(el)
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (
                     shouldBlockPlainTextKeyInPrismBotLockedRegion(
                       el.value,
                       el.selectionStart ?? 0,
@@ -23681,6 +24795,18 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       );
                     }
                   }
+                  if (
+                    event.key === "Tab" &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.nativeEvent.isComposing &&
+                    applyTextareaGhostCompletionAtCaret(el)
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
                   if (event.key === "Escape" && taCommandRef.current.open) {
                     event.preventDefault();
                     setTaCommand((s) =>
@@ -23762,7 +24888,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     }
                   }
                 }}
-                onFocus={onFocus}
+                onFocus={(event) => {
+                  setTextareaFocused(true);
+                  syncTextareaSelectionState(event.currentTarget);
+                  onFocus();
+                }}
+                onBlur={() => {
+                  setTextareaFocused(false);
+                  setTextareaSelection(null);
+                }}
                 placeholder={effectivePlaceholder}
                 spellCheck={writingAssistEnabled}
                 autoCorrect={writingAssistEnabled ? "on" : "off"}
@@ -24925,6 +26059,7 @@ function HomeContent(): React.JSX.Element {
   const pendingDraftSyncValueRef = useRef<string | null>(null);
   const pendingDraftSyncTimerRef = useRef<number | null>(null);
   const [debugComposerDraft, setDebugComposerDraft] = useState("");
+  const debugComposerDraftRef = useRef("");
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] = useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
   const composerHistoryIndexRef = useRef<number | null>(null);
@@ -24944,6 +26079,7 @@ function HomeContent(): React.JSX.Element {
   const [zenLiveBotAction, setZenLiveBotAction] =
     useState<ZenLiveBotActionState | null>(null);
   const zenLiveUserActionPreviewRef = useRef<ZenActionCue | null>(null);
+  const zenLiveUserActionPreviewSourceRef = useRef<"composer" | "debug">("composer");
   const zenLiveBotActionRef = useRef<ZenLiveBotActionState | null>(null);
   const zenLiveActionRequestSeqRef = useRef(0);
   const zenLiveActionAbortRef = useRef<AbortController | null>(null);
@@ -24967,6 +26103,9 @@ function HomeContent(): React.JSX.Element {
   useLayoutEffect(() => {
     draftLiveRef.current = draft;
   }, [draft]);
+  useLayoutEffect(() => {
+    debugComposerDraftRef.current = debugComposerDraft;
+  }, [debugComposerDraft]);
   useLayoutEffect(() => {
     chatComposerPublishedTypedAtMsRef.current = chatComposerLastTypedAtMs;
   }, [chatComposerLastTypedAtMs]);
@@ -25591,6 +26730,17 @@ function HomeContent(): React.JSX.Element {
   const devZenPauseTesterSuppressClickRef = useRef(false);
   const zenToolLabSuppressClickRef = useRef(false);
   const [devDebugComposerMinimized, setDevDebugComposerMinimized] = useState(false);
+  const [devDebugComposerY, setDevDebugComposerY] = useState(() =>
+    initialDevDebugComposerY()
+  );
+  const [devDebugComposerRestorePosition, setDevDebugComposerRestorePosition] =
+    useState<DevToolsPanelPosition>(() => initialDevDebugComposerRestorePosition());
+  const debugComposerRef = useRef<HTMLDivElement | null>(null);
+  const debugComposerRestoreRef = useRef<HTMLButtonElement | null>(null);
+  const debugComposerExpandedDragRef =
+    useRef<DevDebugComposerExpandedDragState | null>(null);
+  const debugComposerRestoreDragRef = useRef<DevLayerOrbDragState | null>(null);
+  const debugComposerRestoreSuppressClickRef = useRef(false);
   const [devToolsUiStorageLoaded, setDevToolsUiStorageLoaded] = useState(!DEV_TOOLS_ENABLED);
   const [devZenPauseTiming, setDevZenPauseTiming] = useState<ChatRevealTimingSettings>(
     DEFAULT_CHAT_REVEAL_TIMING
@@ -25616,20 +26766,18 @@ function HomeContent(): React.JSX.Element {
     setDevToolsConsoleOnly(false);
     if (section) setDevToolsActiveSection(section);
   }, []);
-  const showDevToolsLayer = useCallback(() => {
-    setDevToolsUnlocked(true);
-    setDevToolsOpen(false);
-    setDevToolsMinimized(true);
-    setDevToolsMessage(null);
-    setDevToolsConsoleOnly(false);
-  }, []);
-  const toggleDevToolsLayer = useCallback(() => {
-    if (devToolsUnlocked) {
+  const toggleDevToolsPanel = useCallback(() => {
+    const action = resolvePrismDevPanelToggleAction({
+      devToolsUnlocked,
+      devToolsOpen,
+      devToolsMinimized,
+    });
+    if (action === "close-layer") {
       closeDevTools();
     } else {
-      showDevToolsLayer();
+      openDevTools();
     }
-  }, [closeDevTools, devToolsUnlocked, showDevToolsLayer]);
+  }, [closeDevTools, devToolsMinimized, devToolsOpen, devToolsUnlocked, openDevTools]);
   const minimizeDevTools = useCallback(() => {
     setDevToolsOpen(false);
     setDevToolsMinimized(true);
@@ -25905,10 +27053,195 @@ function HomeContent(): React.JSX.Element {
   const [zenPersonaBotId, setZenPersonaBotId] = useState<string | null>(null);
   const zenPersonaBotIdRef = useRef<string | null>(null);
   zenPersonaBotIdRef.current = zenPersonaBotId;
+  const [zenPersonaPresence, setZenPersonaPresence] =
+    useState<ZenPersonaPresenceUiState>(() =>
+      createStableZenPersonaPresenceState(null)
+    );
+  const zenPersonaPresenceRef = useRef<ZenPersonaPresenceUiState>(
+    createStableZenPersonaPresenceState(null)
+  );
+  const zenPersonaPresenceTimerRef = useRef<number | null>(null);
   const [
     zenPersonaTransitionChoice,
     setZenPersonaTransitionChoice,
   ] = useState<ZenPersonaTransitionChoice>("auto");
+  const setZenPersonaPresenceState = useCallback(
+    (next: ZenPersonaPresenceUiState): void => {
+      zenPersonaPresenceRef.current = next;
+      setZenPersonaPresence(next);
+    },
+    []
+  );
+  const clearZenPersonaPresenceTimer = useCallback((): void => {
+    if (zenPersonaPresenceTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(zenPersonaPresenceTimerRef.current);
+    }
+    zenPersonaPresenceTimerRef.current = null;
+  }, []);
+  const scheduleZenPersonaPresenceTimer = useCallback(
+    (callback: () => void, delayMs: number): void => {
+      if (typeof window === "undefined" || delayMs <= 0) {
+        callback();
+        return;
+      }
+      zenPersonaPresenceTimerRef.current = window.setTimeout(() => {
+        zenPersonaPresenceTimerRef.current = null;
+        callback();
+      }, delayMs);
+    },
+    []
+  );
+  const resolveZenPersonaPresenceTiming = useCallback(() => {
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return resolveZenPersonaPresenceDurations({ reducedMotion });
+  }, []);
+  const settleZenPersonaPresence = useCallback(
+    (visibleBotId: string | null): void => {
+      clearZenPersonaPresenceTimer();
+      const stable = zenPersonaPresenceAfterArrival(visibleBotId);
+      setZenPersonaPresenceState({
+        visibleBotId: stable.visibleBotId,
+        phase: stable.phase,
+        transition: null,
+      });
+    },
+    [clearZenPersonaPresenceTimer, setZenPersonaPresenceState]
+  );
+  const startZenPersonaPresenceDeparture = useCallback(
+    (transition: ZenPersonaPresenceTransition): void => {
+      clearZenPersonaPresenceTimer();
+      const timing = resolveZenPersonaPresenceTiming();
+      const departingTransition: ZenPersonaPresenceTransition = {
+        ...transition,
+        readyAtMs: Date.now() + timing.departMs + timing.arriveMs,
+      };
+      setZenPersonaPresenceState({
+        visibleBotId: departingTransition.fromBotId,
+        phase: "departing",
+        transition: departingTransition,
+      });
+
+      const beginArrival = (): void => {
+        const currentTransition = zenPersonaPresenceRef.current.transition;
+        if (!currentTransition || currentTransition.id !== departingTransition.id) {
+          return;
+        }
+        setZenPersonaPresenceState({
+          visibleBotId: departingTransition.toBotId,
+          phase: "arriving",
+          transition: departingTransition,
+        });
+        scheduleZenPersonaPresenceTimer(() => {
+          const latestTransition = zenPersonaPresenceRef.current.transition;
+          if (!latestTransition || latestTransition.id !== departingTransition.id) {
+            return;
+          }
+          setZenPersonaPresenceState({
+            visibleBotId: departingTransition.toBotId,
+            phase: "stable",
+            transition: null,
+          });
+        }, timing.arriveMs);
+      };
+
+      scheduleZenPersonaPresenceTimer(beginArrival, timing.departMs);
+    },
+    [
+      clearZenPersonaPresenceTimer,
+      resolveZenPersonaPresenceTiming,
+      scheduleZenPersonaPresenceTimer,
+      setZenPersonaPresenceState,
+    ]
+  );
+  const beginZenPersonaPresenceTransition = useCallback(
+    (input: {
+      fromBotId: string | null;
+      toBotId: string | null;
+      style: ZenPersonaTransitionStyle;
+    }): void => {
+      clearZenPersonaPresenceTimer();
+      const transition: ZenPersonaPresenceTransition = {
+        id: `zen-presence-${Date.now().toString(36)}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+        fromBotId: input.fromBotId,
+        toBotId: input.toBotId,
+        style: input.style,
+        readyAtMs: Date.now(),
+        introRevealKey: null,
+      };
+
+      if (input.style === "previous-introduces") {
+        setZenPersonaPresenceState({
+          visibleBotId: input.fromBotId,
+          phase: "stable",
+          transition,
+        });
+        return;
+      }
+
+      startZenPersonaPresenceDeparture(transition);
+    },
+    [
+      clearZenPersonaPresenceTimer,
+      setZenPersonaPresenceState,
+      startZenPersonaPresenceDeparture,
+    ]
+  );
+  const registerZenPersonaPresenceIntroReveal = useCallback(
+    (transition: ZenPersonaTransitionInput, revealKey: string): void => {
+      const currentTransition = zenPersonaPresenceRef.current.transition;
+      if (
+        !currentTransition ||
+        currentTransition.style !== "previous-introduces" ||
+        currentTransition.fromBotId !== transition.fromBotId ||
+        currentTransition.toBotId !== transition.toBotId
+      ) {
+        return;
+      }
+      const nextTransition: ZenPersonaPresenceTransition = {
+        ...currentTransition,
+        introRevealKey: revealKey,
+      };
+      setZenPersonaPresenceState({
+        visibleBotId: currentTransition.fromBotId,
+        phase: "stable",
+        transition: nextTransition,
+      });
+    },
+    [setZenPersonaPresenceState]
+  );
+  const resolveZenPersonaTransitionRevealStartAt = useCallback(
+    (transition: ZenPersonaTransitionInput | undefined): number | undefined => {
+      if (!transition || transition.style !== "new-speaks") return undefined;
+      const currentTransition = zenPersonaPresenceRef.current.transition;
+      if (
+        !currentTransition ||
+        currentTransition.style !== "new-speaks" ||
+        currentTransition.fromBotId !== transition.fromBotId ||
+        currentTransition.toBotId !== transition.toBotId
+      ) {
+        return Date.now();
+      }
+      return Math.max(Date.now(), currentTransition.readyAtMs);
+    },
+    []
+  );
+  useEffect(() => {
+    return () => clearZenPersonaPresenceTimer();
+  }, [clearZenPersonaPresenceTimer]);
+  useEffect(() => {
+    const current = zenPersonaPresenceRef.current;
+    if (current.transition || current.visibleBotId === zenPersonaBotId) return;
+    settleZenPersonaPresence(zenPersonaBotId);
+  }, [settleZenPersonaPresence, zenPersonaBotId]);
+  useEffect(() => {
+    if (view === "chat") return;
+    settleZenPersonaPresence(zenPersonaBotIdRef.current);
+  }, [settleZenPersonaPresence, view]);
   const [images, setImages] = useState<ImageRecord[]>([]);
   /** Full-gallery fetch for bot tallies while the grid shows a filtered list. */
   const [imageBotDirectorySnapshot, setImageBotDirectorySnapshot] = useState<
@@ -26866,6 +28199,38 @@ function HomeContent(): React.JSX.Element {
           if (typeof debugComposer?.minimized === "boolean") {
             setDevDebugComposerMinimized(debugComposer.minimized);
           }
+          if (
+            typeof debugComposer?.y === "number" &&
+            Number.isFinite(debugComposer.y)
+          ) {
+            setDevDebugComposerY(
+              clampDevDebugComposerY(
+                debugComposer.y,
+                DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
+                viewportH
+              )
+            );
+          }
+          const debugComposerRestorePosition = isRecord(debugComposer?.restorePosition)
+            ? debugComposer.restorePosition
+            : null;
+          if (
+            typeof debugComposerRestorePosition?.x === "number" &&
+            typeof debugComposerRestorePosition?.y === "number" &&
+            Number.isFinite(debugComposerRestorePosition.x) &&
+            Number.isFinite(debugComposerRestorePosition.y)
+          ) {
+            setDevDebugComposerRestorePosition(
+              clampDevOverlayPositionToViewport(
+                debugComposerRestorePosition.x,
+                debugComposerRestorePosition.y,
+                DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
+                DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
+                viewportW,
+                viewportH
+              )
+            );
+          }
 
           const compactedContext = isRecord(parsed.compactedContext)
             ? parsed.compactedContext
@@ -26887,7 +28252,7 @@ function HomeContent(): React.JSX.Element {
               Number.isFinite(height)
             ) {
               setCompactedSummaryDebugPanelRect(
-                clampCompactedSummaryDebugPanelRect(
+                restoreCompactedSummaryDebugPanelRect(
                   { x, y, width, height },
                   viewportW,
                   viewportH
@@ -26949,6 +28314,8 @@ function HomeContent(): React.JSX.Element {
         },
         debugComposer: {
           minimized: devDebugComposerMinimized,
+          y: devDebugComposerY,
+          restorePosition: devDebugComposerRestorePosition,
         },
         compactedContext: {
           minimized: compactedSummaryDebugMinimized,
@@ -26967,6 +28334,8 @@ function HomeContent(): React.JSX.Element {
     compactedSummaryDebugMinimized,
     compactedSummaryDebugPanelRect,
     devDebugComposerMinimized,
+    devDebugComposerRestorePosition,
+    devDebugComposerY,
     devMoodVisualOpen,
     devMoodVisualPosition,
     devToolsActiveSection,
@@ -27027,6 +28396,27 @@ function HomeContent(): React.JSX.Element {
       )
     );
   }, [devPanelSafeAreaInsets, devToolsRuntimeActive, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    if (!devToolsRuntimeActive) return;
+    setDevDebugComposerY((current) =>
+      clampDevDebugComposerY(
+        current,
+        debugComposerRef.current?.offsetHeight ?? DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
+        viewportHeight
+      )
+    );
+    setDevDebugComposerRestorePosition((current) =>
+      clampDevOverlayPositionToViewport(
+        current.x,
+        current.y,
+        debugComposerRestoreRef.current?.offsetWidth ?? DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
+        debugComposerRestoreRef.current?.offsetHeight ?? DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
+        viewportWidth,
+        viewportHeight
+      )
+    );
+  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback((event: React.TouchEvent<HTMLElement>) => {
     if (!sidebarDrawerMode) return;
@@ -27203,6 +28593,124 @@ function HomeContent(): React.JSX.Element {
       if (dragState.moved) {
         window.setTimeout(() => {
           suppressClickRef.current = false;
+        }, 0);
+      }
+    },
+    []
+  );
+  const startDebugComposerExpandedDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (event.button !== 0) return;
+      const panel = debugComposerRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      debugComposerExpandedDragRef.current = {
+        pointerId: event.pointerId,
+        offsetY: event.clientY - rect.top,
+      };
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is missing in some test environments.
+      }
+      event.preventDefault();
+    },
+    []
+  );
+  const dragDebugComposerExpanded = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const dragState = debugComposerExpandedDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const panel = debugComposerRef.current;
+      if (!panel) return;
+      const nextY = clampDevDebugComposerY(
+        event.clientY - dragState.offsetY,
+        panel.getBoundingClientRect().height,
+        window.innerHeight
+      );
+      panel.style.top = `${nextY}px`;
+      setDevDebugComposerY(nextY);
+      event.preventDefault();
+    },
+    []
+  );
+  const endDebugComposerExpandedDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const dragState = debugComposerExpandedDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      debugComposerExpandedDragRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+    },
+    []
+  );
+  const startDebugComposerRestoreDrag = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return;
+      const panel = debugComposerRestoreRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      debugComposerRestoreDragRef.current = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
+      debugComposerRestoreSuppressClickRef.current = false;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is missing in some test environments.
+      }
+    },
+    []
+  );
+  const dragDebugComposerRestore = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const dragState = debugComposerRestoreDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const panel = debugComposerRestoreRef.current;
+      if (!panel) return;
+      const dx = Math.abs(event.clientX - dragState.startClientX);
+      const dy = Math.abs(event.clientY - dragState.startClientY);
+      if (dx > 3 || dy > 3) {
+        dragState.moved = true;
+        debugComposerRestoreSuppressClickRef.current = true;
+      }
+      const rect = panel.getBoundingClientRect();
+      const next = clampDevOverlayPositionToViewport(
+        event.clientX - dragState.offsetX,
+        event.clientY - dragState.offsetY,
+        rect.width,
+        rect.height,
+        window.innerWidth,
+        window.innerHeight
+      );
+      panel.style.left = `${next.x}px`;
+      panel.style.top = `${next.y}px`;
+      setDevDebugComposerRestorePosition(next);
+    },
+    []
+  );
+  const endDebugComposerRestoreDrag = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const dragState = debugComposerRestoreDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      debugComposerRestoreDragRef.current = null;
+      debugComposerRestoreSuppressClickRef.current = dragState.moved;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Safe no-op for environments without pointer capture support.
+      }
+      if (dragState.moved) {
+        window.setTimeout(() => {
+          debugComposerRestoreSuppressClickRef.current = false;
         }, 0);
       }
     },
@@ -28252,6 +29760,14 @@ function HomeContent(): React.JSX.Element {
       ? bots.find((bot) => bot.id === zenPersonaBotId) ?? null
       : null;
   }, [bots, zenPersonaBotId]);
+  const navbarCustomizerBot = useMemo<Bot | null>(() => {
+    return view === "chat" ? zenPersonaBot ?? activeBot : activeBot;
+  }, [activeBot, view, zenPersonaBot]);
+  const zenLivePresenceBot = useMemo<Bot | null>(() => {
+    return zenPersonaPresence.visibleBotId
+      ? bots.find((bot) => bot.id === zenPersonaPresence.visibleBotId) ?? null
+      : null;
+  }, [bots, zenPersonaPresence.visibleBotId]);
 
   /**
    * Provider to actually treat as "preferred" for chat-side reads. When the
@@ -28518,6 +30034,13 @@ function HomeContent(): React.JSX.Element {
   }, [composeBotAccentId, detail?.messages, view]);
 
   const composeStyle = useMemo<React.CSSProperties | undefined>(() => {
+    const composeBaseColor = selectedComposeBotAccent
+      ? selectedComposeBotAccent
+      : nextZenUserMessagePrismColor
+        ? resolvedTheme === "light"
+          ? nextZenUserMessagePrismColor.dark
+          : nextZenUserMessagePrismColor.bright
+        : null;
     if (
       !selectedComposeBotAccent &&
       !nextZenUserMessagePrismColor &&
@@ -28529,6 +30052,18 @@ function HomeContent(): React.JSX.Element {
     if (selectedComposeBotAccent) {
       style["--compose-bot-color"] = selectedComposeBotAccent;
     }
+    if (composeBaseColor) {
+      style["--compose-user-send-color"] = deriveThemedAccentTextTone(
+        composeBaseColor,
+        resolvedTheme,
+        "strong"
+      );
+      style["--compose-user-placeholder-color"] = deriveThemedAccentTextTone(
+        composeBaseColor,
+        resolvedTheme,
+        "subtle"
+      );
+    }
     if (nextZenUserMessagePrismColor) {
       style["--compose-user-send-color-bright"] = nextZenUserMessagePrismColor.bright;
       style["--compose-user-send-color-dark"] = nextZenUserMessagePrismColor.dark;
@@ -28537,7 +30072,12 @@ function HomeContent(): React.JSX.Element {
       style["--compose-keyboard-inset"] = `${mobileKeyboardInset}px`;
     }
     return style;
-  }, [mobileKeyboardInset, nextZenUserMessagePrismColor, selectedComposeBotAccent]);
+  }, [
+    mobileKeyboardInset,
+    nextZenUserMessagePrismColor,
+    resolvedTheme,
+    selectedComposeBotAccent,
+  ]);
 
   const privateChatButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!selectedComposeBotAccent) return undefined;
@@ -31289,22 +32829,36 @@ function HomeContent(): React.JSX.Element {
     }
     return null;
   }, [detail?.messages]);
+  const latestAssistantMessage = useMemo<Message | null>(() => {
+    if (!detail?.messages || !latestAssistantMessageId) return null;
+    return (
+      detail.messages.find((message) => message.id === latestAssistantMessageId) ??
+      null
+    );
+  }, [detail?.messages, latestAssistantMessageId]);
   const markLatestAssistantRevealEligible = useCallback(
-    (conversation: ConversationDetail): void => {
-      if (!chatAssistantTypingMechanicsActive || !conversation.id) return;
+    (
+      conversation: ConversationDetail,
+      options: { firstSeenAtMs?: number } = {}
+    ): string | null => {
+      if (!chatAssistantTypingMechanicsActive || !conversation.id) return null;
       const latestAssistant = (() => {
         for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
           if (conversation.messages[i]?.role === "assistant") return conversation.messages[i]!;
         }
         return null;
       })();
-      if (!latestAssistant) return;
+      if (!latestAssistant) return null;
       const revealKey = `${conversation.id}:${latestAssistant.id}`;
       chatAssistantRevealEligibleKeysRef.current.add(revealKey);
       chatCompletedRevealKeysRef.current.delete(revealKey);
       chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
       chatRevealPaceByKeyRef.current.delete(revealKey);
-      chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+      chatMessageFirstSeenAtRef.current.set(
+        revealKey,
+        options.firstSeenAtMs ?? Date.now()
+      );
+      return revealKey;
     },
     [chatAssistantTypingMechanicsActive]
   );
@@ -31555,6 +33109,137 @@ function HomeContent(): React.JSX.Element {
     chatAssistantRevealInProgress && detail?.id && latestAssistantMessageId
       ? `${detail.id}:${latestAssistantMessageId}`
       : null;
+  const zenLiveBotMouthPhaseMs =
+    chatRevealDelayMultiplier > 1.001
+      ? CHAT_MODE_EPHEMERAL_COMPOSING_TICK_MS
+      : CHAT_MODE_EPHEMERAL_TICK_MS;
+  const zenLiveBotRevealMouthShape = useMemo<ZenLiveBotMouthShape | null>(() => {
+    if (!chatAssistantRevealInProgress || !detail?.id || !latestAssistantMessageId) {
+      return null;
+    }
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return null;
+    if (!latestAssistantMessage) return null;
+    const displayContent = resolveVisibleMessageContent(latestAssistantMessage);
+    const revealTokens = tokenizeMessageReveal(displayContent);
+    const delayMultiplier = resolveZenAssistantRevealDelayMultiplier(revealKey);
+    const moodKey = latestAssistantMessage.moodKey ?? DEFAULT_MESSAGE_MOOD;
+    const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
+      revealKey,
+      displayContent,
+      nowMs: chatEphemeralNowMs,
+      completed: false,
+      moodKey,
+      delayMultiplier,
+      startDelayMs: resolveMessageActionTextLagMs(latestAssistantMessage),
+    });
+    return zenLiveBotMouthShapeFromRevealProgress({
+      tokens: revealTokens,
+      visibleTokenCount,
+      nowMs: chatEphemeralNowMs,
+      firstSeenAtMs: chatMessageFirstSeenAtRef.current.get(revealKey) ?? chatEphemeralNowMs,
+      startDelayMs: resolveMessageActionTextLagMs(latestAssistantMessage),
+      phaseMs: zenLiveBotMouthPhaseMs,
+    });
+  }, [
+    chatAssistantRevealInProgress,
+    chatEphemeralNowMs,
+    zenLiveBotMouthPhaseMs,
+    detail?.id,
+    latestAssistantMessage,
+    latestAssistantMessageId,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageContent,
+    resolveZenAssistantRevealDelayMultiplier,
+  ]);
+  const zenLiveBotTalking =
+    chatLikeSurface &&
+    zenLiveBotRevealMouthShape !== null &&
+    (latestAssistantMessage?.botId ?? null) === zenPersonaPresence.visibleBotId;
+  const zenLiveBotMouthOpen =
+    zenLiveBotTalking && zenLiveBotRevealMouthShape !== "closed";
+  const zenLiveReplyActionText = useMemo(() => {
+    if (!zenLiveBotTalking || !detail?.id || !latestAssistantMessageId) return null;
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return null;
+    if (!latestAssistantMessage || !zenActionsEnabledForMessage(latestAssistantMessage)) {
+      return null;
+    }
+    const presentation = resolveZenActionPresentation(
+      resolveMessageDisplayContent(latestAssistantMessage)
+    );
+    if (!presentation.hasActions) return null;
+    const displayContent = resolveVisibleMessageContent(latestAssistantMessage);
+    const revealTokens = tokenizeMessageReveal(displayContent);
+    const delayMultiplier = resolveZenAssistantRevealDelayMultiplier(revealKey);
+    const moodKey = latestAssistantMessage.moodKey ?? DEFAULT_MESSAGE_MOOD;
+    const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
+      revealKey,
+      displayContent,
+      nowMs: chatEphemeralNowMs,
+      completed: false,
+      moodKey,
+      delayMultiplier,
+      startDelayMs: resolveMessageActionTextLagMs(latestAssistantMessage),
+    });
+    const visibleDisplayLength = getBotMentionDisplayLength(
+      revealTokens.slice(0, Math.max(0, visibleTokenCount)).join("")
+    );
+    return (
+      resolveCurrentZenActionCue(
+        presentation.cues,
+        visibleDisplayLength
+      )?.action ?? null
+    );
+  }, [
+    chatEphemeralNowMs,
+    detail?.id,
+    latestAssistantMessage,
+    latestAssistantMessageId,
+    resolveMessageActionTextLagMs,
+    resolveVisibleMessageContent,
+    resolveZenAssistantRevealDelayMultiplier,
+    zenActionsEnabledForMessage,
+    zenLiveBotTalking,
+  ]);
+  useEffect(() => {
+    const transition = zenPersonaPresence.transition;
+    if (
+      !transition ||
+      transition.style !== "previous-introduces" ||
+      !transition.introRevealKey ||
+      zenPersonaPresence.phase !== "stable"
+    ) {
+      return;
+    }
+    if (chatAssistantRevealInProgress) return;
+    if (
+      !chatCompletedRevealKeysRef.current.has(transition.introRevealKey) &&
+      chatAssistantRevealEligibleKeysRef.current.has(transition.introRevealKey)
+    ) {
+      return;
+    }
+    startZenPersonaPresenceDeparture(transition);
+  }, [
+    chatAssistantRevealInProgress,
+    startZenPersonaPresenceDeparture,
+    zenPersonaPresence.phase,
+    zenPersonaPresence.transition,
+  ]);
+  const completeZenPersonaPresenceIntroReveal = useCallback(
+    (revealKey: string): void => {
+      const transition = zenPersonaPresenceRef.current.transition;
+      if (
+        !transition ||
+        transition.style !== "previous-introduces" ||
+        transition.introRevealKey !== revealKey
+      ) {
+        return;
+      }
+      startZenPersonaPresenceDeparture(transition);
+    },
+    [startZenPersonaPresenceDeparture]
+  );
   const zenCanvasSpeedNudgePulseActive =
     activeAssistantRevealKey !== null &&
     zenCanvasSpeedNudgeState.revealKey === activeAssistantRevealKey &&
@@ -31656,6 +33341,11 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  function isLocalOnlyAssistantInterruptionId(messageId: string): boolean {
+    const normalized = String(messageId);
+    return normalized.startsWith("pending-") || normalized.startsWith("debug-echo-");
+  }
+
   function applyActiveAssistantRevealInterruption(
     interruption: ActiveAssistantRevealInterruption
   ): Promise<PrismMoodSnapshot | undefined> | null {
@@ -31699,7 +33389,7 @@ function HomeContent(): React.JSX.Element {
     setChatEphemeralNowMs(Date.now());
 
     if (
-      String(interruption.assistantMessageId).startsWith("pending-") ||
+      isLocalOnlyAssistantInterruptionId(interruption.assistantMessageId) ||
       interruption.conversationId === "pending"
     ) {
       return null;
@@ -31753,7 +33443,7 @@ function HomeContent(): React.JSX.Element {
     });
     setChatEphemeralNowMs(Date.now());
     if (
-      String(interruption.assistantMessageId).startsWith("pending-") ||
+      isLocalOnlyAssistantInterruptionId(interruption.assistantMessageId) ||
       interruption.conversationId === "pending"
     ) {
       return null;
@@ -31837,6 +33527,7 @@ function HomeContent(): React.JSX.Element {
     chatCompletedRevealKeysRef.current.add(revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
     chatRevealPaceByKeyRef.current.delete(revealKey);
+    completeZenPersonaPresenceIntroReveal(revealKey);
     setChatEphemeralNowMs(Date.now());
   }
 
@@ -32012,7 +33703,7 @@ function HomeContent(): React.JSX.Element {
     const label = zenFollowupActive
       ? `${displayName} is waiting while you type…`
       : chatAssistantRevealInProgress
-      ? `${displayName} is replying…`
+      ? `${displayName} is speaking…`
       : pickGeneratingLabel(displayName, salt);
     const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
@@ -32473,6 +34164,7 @@ function HomeContent(): React.JSX.Element {
               <strong>Compacted context</strong>
               <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
             </div>
+            <span className={styles.compactedSummaryDebugGrip} aria-hidden="true" />
             <button
               type="button"
               className={styles.compactedSummaryDebugMinimizeButton}
@@ -35507,10 +37199,12 @@ function HomeContent(): React.JSX.Element {
       chatCompletedRevealKeysRef.current.add(temporalKey);
       chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
       chatRevealPaceByKeyRef.current.delete(temporalKey);
+      completeZenPersonaPresenceIntroReveal(temporalKey);
     }
   }, [
     chatAssistantTypingMechanicsActive,
     chatEphemeralNowMs,
+    completeZenPersonaPresenceIntroReveal,
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
@@ -38182,7 +39876,7 @@ function HomeContent(): React.JSX.Element {
         return true;
       }
       if (trimmedLine.trimStart().slice(4).trim().length === 0) {
-        toggleDevToolsLayer();
+        toggleDevToolsPanel();
         return true;
       }
       openDevTools();
@@ -40767,8 +42461,34 @@ function HomeContent(): React.JSX.Element {
             conversation: patchedConversation,
           };
         }
+        let latestRevealKey: string | null = null;
         if (!isZenAutonomy || zenAutonomySpoke) {
-          markLatestAssistantRevealEligible(patchedConversation);
+          const transitionRevealStartAt =
+            resolveZenPersonaTransitionRevealStartAt(options.personaTransition);
+          latestRevealKey = markLatestAssistantRevealEligible(
+            patchedConversation,
+            transitionRevealStartAt === undefined
+              ? {}
+              : { firstSeenAtMs: transitionRevealStartAt }
+          );
+        }
+        if (options.personaTransition?.style === "previous-introduces") {
+          if (latestRevealKey) {
+            registerZenPersonaPresenceIntroReveal(
+              options.personaTransition,
+              latestRevealKey
+            );
+          } else {
+            const activeTransition = zenPersonaPresenceRef.current.transition;
+            if (
+              activeTransition &&
+              activeTransition.style === "previous-introduces" &&
+              activeTransition.fromBotId === options.personaTransition.fromBotId &&
+              activeTransition.toBotId === options.personaTransition.toBotId
+            ) {
+              startZenPersonaPresenceDeparture(activeTransition);
+            }
+          }
         }
         const pendingCleanupIdsForReveal = [
           ...(optimisticPromptCleanupMessageId ? [optimisticPromptCleanupMessageId] : []),
@@ -40941,6 +42661,7 @@ function HomeContent(): React.JSX.Element {
           setDetail(requestWasZenInitialThinkingCancelled ? null : previousDetail);
           setPendingIncognito(previousPendingIncognito);
           setZenPersonaBotId(previousZenPersonaBotId);
+          settleZenPersonaPresence(previousZenPersonaBotId);
           if (!preserveComposerDraft) {
             setComposerDraftNow(
               isStarterPrompt || requestWasZenInitialThinkingCancelled
@@ -40978,6 +42699,7 @@ function HomeContent(): React.JSX.Element {
         setDetail(previousDetail);
         setPendingIncognito(previousPendingIncognito);
         setZenPersonaBotId(previousZenPersonaBotId);
+        settleZenPersonaPresence(previousZenPersonaBotId);
         if (!preserveComposerDraft) {
           setComposerDraftNow(isStarterPrompt ? "" : restoreDraftAfterSendStops);
           setComposerSendTintActive(
@@ -42020,15 +43742,58 @@ function HomeContent(): React.JSX.Element {
       setZenLiveUserActionPreview(null);
       return;
     }
-    const trimmedDraft = draft.trim();
+    const debugDraftActive =
+      devToolsRuntimeActive &&
+      view === "chat" &&
+      !devDebugComposerMinimized &&
+      debugComposerDraft.trim().length > 0;
+    const previewSource = debugDraftActive ? "debug" : "composer";
+    const previewDraft = debugDraftActive ? debugComposerDraft : draft;
+    const trimmedDraft = previewDraft.trim();
+    const sourceChanged =
+      zenLiveUserActionPreviewSourceRef.current !== previewSource;
+    zenLiveUserActionPreviewSourceRef.current = previewSource;
     setZenLiveUserActionPreview((previous) =>
-      resolvePersistentZenActionPreview(previous, draft, {
+      resolvePersistentZenActionPreview(sourceChanged ? null : previous, previewDraft, {
         reset: /^[!/]/u.test(trimmedDraft),
       })
     );
-  }, [chatLikeSurface, composerHiddenByChoiceChips, draft]);
+  }, [
+    chatLikeSurface,
+    composerHiddenByChoiceChips,
+    debugComposerDraft,
+    devDebugComposerMinimized,
+    devToolsRuntimeActive,
+    draft,
+    view,
+  ]);
   const zenComposerActionPreview =
     chatLikeSurface && !composerHiddenByChoiceChips ? zenLiveUserActionPreview : null;
+  const zenLiveVisibleBotAction = useMemo<ZenLiveBotActionState | null>(() => {
+    if (!zenLiveBotAction) return null;
+    return (zenLiveBotAction.botId ?? null) === zenPersonaPresence.visibleBotId
+      ? zenLiveBotAction
+      : null;
+  }, [zenLiveBotAction, zenPersonaPresence.visibleBotId]);
+  const zenDefaultPrismPresenceVisible =
+    chatLikeSurface &&
+    zenPersonaBotId === null &&
+    zenPersonaPresence.visibleBotId === null &&
+    !zenEmptyHeroVisible;
+  const zenDefaultPrismPresenceForming =
+    zenDefaultPrismPresenceVisible &&
+    view === "chat" &&
+    pendingReplyVisible &&
+    pendingReplyStartMessageCount === 0 &&
+    detail?.hasAssistantReply !== true;
+  const zenLivePresenceRailVisible =
+    zenDefaultPrismPresenceVisible ||
+    Boolean(
+      zenLiveVisibleBotAction ||
+        zenComposerActionPreview ||
+        zenLivePresenceBot ||
+        zenLiveBotTalking
+    ) || zenPersonaPresence.phase !== "stable";
   useEffect(() => {
     setZenLiveUserActionPreview(null);
     setZenLiveBotAction(null);
@@ -42050,6 +43815,11 @@ function HomeContent(): React.JSX.Element {
       }
       const userCue = zenLiveUserActionPreviewRef.current;
       if (!userCue && source === "draft_action") return;
+      const currentActionDraftText =
+        source === "draft_action" &&
+        zenLiveUserActionPreviewSourceRef.current === "debug"
+          ? debugComposerDraftRef.current
+          : draftLiveRef.current;
       const activeBotId = zenPersonaBotIdRef.current ?? null;
       const sequenceId = `zen-live-${++zenLiveActionRequestSeqRef.current}`;
       const activeConversationId =
@@ -42103,7 +43873,7 @@ function HomeContent(): React.JSX.Element {
           chatAssistantRevealInProgress ||
           source === "idle" ||
           !userCue ||
-          draftLiveRef.current.trim().length === 0
+          currentActionDraftText.trim().length === 0
         ) {
           return;
         }
@@ -43257,11 +45027,18 @@ function HomeContent(): React.JSX.Element {
     return composerImageJobOrb?.conversationId === activeConversationId;
   }
 
+  const composerReplyInterruptActive = chatLikeSurface && chatAssistantRevealInProgress;
+
   function composerSubmitUsesRandomNudge(value: string): boolean {
-    return editingMessageId === null && value.trim().length === 0;
+    return (
+      !composerReplyInterruptActive &&
+      editingMessageId === null &&
+      value.trim().length === 0
+    );
   }
 
   function composerSubmitLabel(value: string): React.ReactNode {
+    if (composerReplyInterruptActive) return "Shh!";
     if (composerSubmitUsesRandomNudge(value)) {
       return <BotGlyph name="dice" size={30} strokeWidth={1.45} />;
     }
@@ -43275,6 +45052,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitAriaLabel(value: string): string {
+    if (composerReplyInterruptActive) return "Shh! Interrupt current reply";
     if (composerSubmitUsesRandomNudge(value)) {
       return composerRandomPromptBusy
         ? "Generating suggested prompt"
@@ -43292,6 +45070,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitDisabled(value: string): boolean {
+    if (composerReplyInterruptActive) return false;
     if (composerSubmitUsesRandomNudge(value)) {
       return (
         composerRandomPromptBusy ||
@@ -43306,6 +45085,11 @@ function HomeContent(): React.JSX.Element {
 
   function handleComposerSubmit(e: React.FormEvent<HTMLFormElement>) {
     const liveDraft = draftComposerRef.current?.getValue() ?? draft;
+    if (composerReplyInterruptActive) {
+      e.preventDefault();
+      handleTypingIndicatorPress();
+      return;
+    }
     if (composerSubmitUsesRandomNudge(liveDraft)) {
       e.preventDefault();
       void sendRandomConversationNudge();
@@ -43315,6 +45099,11 @@ function HomeContent(): React.JSX.Element {
       starterPrompt: isStarterPromptReady(liveDraft),
       draftOverride: liveDraft,
     });
+  }
+
+  function updateDebugComposerDraft(nextDraft: string): void {
+    setDebugComposerDraft(nextDraft);
+    publishComposerTypingActivity(Date.now());
   }
 
   function submitDebugComposerEcho(): void {
@@ -43335,6 +45124,11 @@ function HomeContent(): React.JSX.Element {
     chatSummaryRefreshMarkerRef.current = null;
     setError(null);
     setDebugComposerDraft("");
+    debugComposerDraftRef.current = "";
+    if (zenLiveUserActionPreviewSourceRef.current === "debug") {
+      setZenLiveUserActionPreview(null);
+      setZenLiveBotAction(null);
+    }
     const fallbackBotId = zenPersonaBotId;
     const fallbackBot = fallbackBotId
       ? bots.find((bot) => bot.id === fallbackBotId) ?? null
@@ -43359,7 +45153,7 @@ function HomeContent(): React.JSX.Element {
       const nextBotId = fallbackBotId;
       const nextBotColor = debugBot?.color ?? null;
       const baseMessages = current?.messages ?? [];
-      return {
+      const nextConversation = {
         id: current?.id ?? "pending",
         title: current?.title ?? "New chat",
         botId: current?.botId ?? null,
@@ -43369,6 +45163,8 @@ function HomeContent(): React.JSX.Element {
         hasAssistantReply: true,
         messages: [...baseMessages, debugAssistantMessage],
       };
+      markLatestAssistantRevealEligible(nextConversation);
+      return nextConversation;
     });
     setChatEphemeralNowMs(Date.now());
   }
@@ -46524,28 +48320,21 @@ function HomeContent(): React.JSX.Element {
     focusDraftInput();
   }
 
-  function commitZenPersonaOff(): void {
-    setZenPersonaBotId(null);
-    if (zenSessionHasNotStarted()) {
-      setSelectedBotId(null);
-    }
-    focusDraftInput();
-  }
-
   function commitZenPersonaTransition(nextBotId: string | null): void {
     if (pendingReplyVisible) return;
     const fromBotId = zenPersonaBotIdRef.current;
     if (fromBotId === nextBotId) return;
-    if (nextBotId === null) {
-      commitZenPersonaOff();
-      return;
-    }
 
     const style = resolveZenPersonaTransitionStyle(zenPersonaTransitionChoice, {
       fromBotId,
       toBotId: nextBotId,
     });
 
+    beginZenPersonaPresenceTransition({
+      fromBotId,
+      toBotId: nextBotId,
+      style,
+    });
     setZenPersonaBotId(nextBotId);
     const syntheticSubmit = {
       preventDefault() {
@@ -48811,8 +50600,8 @@ function HomeContent(): React.JSX.Element {
   }
 
   function openActiveBotCustomizer() {
-    if (!activeBot) return;
-    openBotCustomizer(activeBot);
+    if (!navbarCustomizerBot) return;
+    openBotCustomizer(navbarCustomizerBot);
   }
 
   function openBotCustomizer(bot: Bot) {
@@ -53127,6 +54916,232 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderUniversalNavbarButtons = ({
+    disabled = false,
+    showAtmosphere = view === "chat",
+    showHub = view !== "hub",
+    onBeforeAction,
+    onHub,
+    imageReadyChip = null,
+    toolStyles = {},
+  }: {
+    disabled?: boolean;
+    showAtmosphere?: boolean;
+    showHub?: boolean;
+    onBeforeAction?: () => void;
+    onHub?: () => void;
+    imageReadyChip?: React.ReactNode;
+    toolStyles?: {
+      memories?: React.CSSProperties;
+      atmosphere?: React.CSSProperties;
+      images?: React.CSSProperties;
+      bots?: React.CSSProperties;
+      theme?: React.CSSProperties;
+    };
+  } = {}): React.ReactNode => {
+    const runAction = (action: () => void): void => {
+      onBeforeAction?.();
+      action();
+    };
+    const runAsyncAction = (action: () => Promise<void>): void => {
+      onBeforeAction?.();
+      void action();
+    };
+    const openNavbarImages = async (): Promise<void> => {
+      const inflightKey = resolveActiveImageGenInflightScopeKey();
+      if (inflightKey) {
+        await openImagesPanelForScopeKey(inflightKey);
+        return;
+      }
+      if (navbarCustomizerBot) {
+        await openImagesPanelForBot(navbarCustomizerBot);
+        return;
+      }
+      await openAllImagesPanel();
+    };
+    const openNavbarMemories = (): void => {
+      if (view === "hub") {
+        void openAllMemoriesPanel();
+        return;
+      }
+      openContextualMemoriesPanel();
+    };
+    const openNavbarBots = (): void => {
+      if (navbarCustomizerBot) {
+        openBotCustomizer(navbarCustomizerBot);
+        return;
+      }
+      openFreshBotCustomizer();
+    };
+    const zenWallpaper = detail?.zenWallpaper;
+    const zenAtmosphereHasConversation = Boolean(
+      detail && detail.mode === "zen" && selectedId
+    );
+    const zenAtmosphereBusy = Boolean(
+      detail &&
+        (zenWallpaperBusyConversationId === detail.id ||
+          zenWallpaper?.status === "generating")
+    );
+    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
+    const zenAtmosphereError =
+      zenWallpaper?.status === "error" && zenWallpaperError
+        ? zenWallpaperError
+        : null;
+    const zenAtmosphereDisabled =
+      disabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation;
+    const zenAtmosphereTooltip = !zenAtmosphereHasConversation
+      ? "Send a Zen message before enabling Atmosphere"
+      : zenAtmosphereBusy
+          ? "Generating Zen Atmosphere"
+          : zenAtmosphereError
+            ? `Atmosphere failed: ${zenAtmosphereError}`
+          : zenAtmosphereEnabled
+            ? "Turn off Zen Atmosphere"
+            : "Turn on Zen Atmosphere";
+    const zenAtmosphereState = zenAtmosphereBusy
+      ? "generating"
+      : zenAtmosphereEnabled
+          ? "on"
+          : "off";
+    const toggleZenAtmosphere = (): void => {
+      if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
+      const nextEnabled = !zenAtmosphereEnabled;
+      if (nextEnabled) {
+        zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
+          detail.id,
+          detail.messages.length
+        );
+      } else {
+        zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
+      }
+      void requestZenWallpaperUpdate(detail.id, {
+        enabled: nextEnabled,
+        generate: false,
+      });
+    };
+    const themeAriaLabel =
+      effectiveThemeMode === "system"
+        ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+        : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`;
+    const themeTooltip =
+      effectiveThemeMode === "system"
+        ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+        : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
+    const botsTooltip = navbarCustomizerBot ? "Edit bot" : "Bots";
+    const botsAriaLabel = navbarCustomizerBot
+      ? `Edit ${navbarCustomizerBot.name}`
+      : "Open bot customizer";
+    const imagesButton = (
+      <button
+        type="button"
+        className={styles.headerIconButton}
+        onClick={() => runAsyncAction(openNavbarImages)}
+        aria-label="Images"
+        data-glyph-tooltip="Images"
+        disabled={disabled}
+        style={toolStyles.images}
+      >
+        <ImagesGlyph />
+      </button>
+    );
+
+    return (
+      <>
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          onClick={() => runAction(() => openRightPanel("command-center"))}
+          aria-label="Open Prompt Center"
+          data-glyph-tooltip="Prompt Center"
+          disabled={disabled}
+        >
+          <SlashCommandGlyph />
+        </button>
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          onClick={() => runAction(() => openRightPanel("settings"))}
+          aria-label="Open settings"
+          data-glyph-tooltip="Settings"
+          disabled={disabled}
+        >
+          <WrenchGlyph />
+        </button>
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          onClick={() => runAction(openNavbarMemories)}
+          aria-label="Memories"
+          data-glyph-tooltip="Memories"
+          disabled={disabled}
+          style={toolStyles.memories}
+        >
+          <BookmarkGlyph />
+        </button>
+        {showAtmosphere ? (
+          <button
+            type="button"
+            className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
+            onClick={() => runAction(toggleZenAtmosphere)}
+            aria-label={zenAtmosphereTooltip}
+            aria-pressed={zenAtmosphereEnabled}
+            data-glyph-tooltip={zenAtmosphereTooltip}
+            data-atmosphere-state={zenAtmosphereState}
+            disabled={zenAtmosphereDisabled}
+            style={toolStyles.atmosphere}
+          >
+            <AtmosphereGlyph />
+          </button>
+        ) : null}
+        {imageReadyChip ? (
+          <span className={styles.imagesHeaderAffordance}>
+            {imagesButton}
+            {imageReadyChip}
+          </span>
+        ) : (
+          imagesButton
+        )}
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          onClick={() => runAction(openNavbarBots)}
+          aria-label={botsAriaLabel}
+          data-glyph-tooltip={botsTooltip}
+          disabled={disabled}
+          style={toolStyles.bots}
+        >
+          <BotsGlyph />
+        </button>
+        <button
+          type="button"
+          className={styles.themeToggleButton}
+          onClick={() => runAsyncAction(cycleThemeMode)}
+          aria-label={themeAriaLabel}
+          data-title={themeTooltip}
+          data-glyph-tooltip={themeTooltip}
+          disabled={disabled}
+          style={toolStyles.theme}
+        >
+          <ThemeGlyph mode={effectiveThemeMode} />
+        </button>
+        {showHub ? (
+          <button
+            type="button"
+            className={styles.headerIconButton}
+            onClick={() => runAction(onHub ?? handleHeaderHubClick)}
+            aria-label="Back to Hub"
+            data-glyph-tooltip="Back to Hub"
+            disabled={disabled}
+          >
+            <HomeGlyph />
+          </button>
+        ) : null}
+      </>
+    );
+  };
+
   /** Conversation tools — Settings / Memories / Edit bot / Export / Delete.
    *  Desktop renders inline in the chat header bar.
    *  Mobile floats a wrench gear at top-right that opens the menu as a popout. */
@@ -53146,7 +55161,7 @@ function HomeContent(): React.JSX.Element {
     const isZenSurface = view === "chat";
     const gearHidden = sidebarOpen || panel !== null;
     const deleteArmed = pendingDeleteKey === HEADER_DELETE_KEY;
-    const canBotActions = !isZenSurface && Boolean(activeBot);
+    const canBotActions = true;
     const canMemoryActions = true;
     const canFavoriteActions = !isZenSurface && Boolean(activeBot);
     const canExport = !isZenSurface && Boolean(detail && selectedId);
@@ -53281,8 +55296,8 @@ function HomeContent(): React.JSX.Element {
         void openImagesPanelForScopeKey(inflightKey);
         return;
       }
-      if (activeBot) {
-        void openImagesPanelForBot(activeBot);
+      if (navbarCustomizerBot) {
+        void openImagesPanelForBot(navbarCustomizerBot);
         return;
       }
       void openAllImagesPanel();
@@ -53334,7 +55349,11 @@ function HomeContent(): React.JSX.Element {
     };
     const handleEditBot = () => {
       closeMenu();
-      openActiveBotCustomizer();
+      if (navbarCustomizerBot) {
+        openActiveBotCustomizer();
+      } else {
+        openFreshBotCustomizer();
+      }
     };
     const handleExport = () => {
       closeMenu();
@@ -53443,142 +55462,20 @@ function HomeContent(): React.JSX.Element {
               <StarGlyph />
             </button>
           ) : null}
-          <button
-            type="button"
-            className={styles.headerIconButton}
-            onClick={handleOpenCommandCenter}
-            aria-label="Open Prompt Center"
-            data-glyph-tooltip="Prompt Center"
-            disabled={headerActionsDisabled}
-          >
-            <SlashCommandGlyph />
-          </button>
-          <div className={styles.chatHeaderGearAnchor}>
-            <button
-              ref={chatOverflowGearButtonRef}
-              type="button"
-              className={styles.chatGearButton}
-              aria-label="Open settings"
-              data-glyph-tooltip="Settings"
-              onClick={handleSettings}
-            >
-              <WrenchGlyph />
-            </button>
-          </div>
-          {showToolbarMemoriesButton ? (
-            <button
-              type="button"
-              className={styles.headerIconButton}
-              onClick={handleMemories}
-              aria-label="Memories"
-              data-glyph-tooltip="Memories"
-              disabled={headerActionsDisabled || !canMemoryActions}
-              style={privateDefaultMemoriesStyle}
-            >
-              <BookmarkGlyph />
-            </button>
-          ) : null}
-          {showZenAtmosphereButton ? (
-            <button
-              type="button"
-              className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
-              onClick={toggleZenAtmosphere}
-              aria-label={zenAtmosphereTooltip}
-              aria-pressed={zenAtmosphereEnabled}
-              data-glyph-tooltip={zenAtmosphereTooltip}
-              data-atmosphere-state={zenAtmosphereState}
-              disabled={zenAtmosphereDisabled}
-              style={privateDefaultAtmosphereStyle}
-            >
-              <AtmosphereGlyph />
-            </button>
-          ) : null}
-          {showToolbarMemoriesButton ? (
-            chatToolbarImageReadyChip ? (
-              <span className={styles.imagesHeaderAffordance}>
-                <button
-                  type="button"
-                  className={styles.headerIconButton}
-                  onClick={handleImages}
-                  aria-label="Images"
-                  data-glyph-tooltip="Images"
-                  disabled={headerActionsDisabled}
-                  style={privateDefaultImagesStyle}
-                >
-                  <ImagesGlyph />
-                </button>
-                {chatToolbarImageReadyChip}
-              </span>
-            ) : (
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                onClick={handleImages}
-                aria-label="Images"
-                data-glyph-tooltip="Images"
-                disabled={headerActionsDisabled}
-                style={privateDefaultImagesStyle}
-              >
-                <ImagesGlyph />
-              </button>
-            )
-          ) : null}
-          {!showSettingsOnly && !isZenSurface ? (
-            <button
-              type="button"
-              className={styles.headerIconButton}
-              onClick={() => {
-                closeMenu();
-                if (activeBot) {
-                  openActiveBotCustomizer();
-                } else {
-                  openFreshBotCustomizer();
-                }
-              }}
-              aria-label={activeBot ? `Edit ${activeBot.name}` : "Open bot customizer"}
-              data-glyph-tooltip={activeBot ? "Edit bot" : "Bots"}
-              disabled={headerActionsDisabled}
-              style={privateDefaultBotsStyle}
-            >
-              <BotsGlyph />
-            </button>
-          ) : null}
-          {showChatThemeButton ? (
-            <button
-              type="button"
-              className={styles.themeToggleButton}
-              onClick={() => void cycleThemeMode()}
-              aria-label={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-              }
-              data-title={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
-              data-glyph-tooltip={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
-              style={privateDefaultThemeStyle}
-            >
-              <ThemeGlyph mode={effectiveThemeMode} />
-            </button>
-          ) : null}
-          {showSandboxHubButton ? (
-            <button
-              type="button"
-              className={styles.headerIconButton}
-              onClick={handleHeaderHubClick}
-              aria-label="Back to Hub"
-              data-glyph-tooltip="Back to Hub"
-            >
-              <HomeGlyph />
-            </button>
-          ) : null}
+          {renderUniversalNavbarButtons({
+            disabled: headerActionsDisabled,
+            showAtmosphere: showZenAtmosphereButton,
+            showHub: showSandboxHubButton,
+            onBeforeAction: closeMenu,
+            imageReadyChip: chatToolbarImageReadyChip,
+            toolStyles: {
+              memories: privateDefaultMemoriesStyle,
+              atmosphere: privateDefaultAtmosphereStyle,
+              images: privateDefaultImagesStyle,
+              bots: privateDefaultBotsStyle,
+              theme: privateDefaultThemeStyle,
+            },
+          })}
         </div>
       );
     }
@@ -53686,7 +55583,7 @@ function HomeContent(): React.JSX.Element {
                 Images
               </button>
             ) : null}
-            {!showSettingsOnly && canBotActions && (
+            {canBotActions && (
               <button
                 type="button"
                 role="menuitem"
@@ -53696,7 +55593,7 @@ function HomeContent(): React.JSX.Element {
                   handleEditBot();
                 }}
               >
-                Edit bot
+                {navbarCustomizerBot ? `Edit ${navbarCustomizerBot.name}` : "Bots"}
               </button>
             )}
             {!showSettingsOnly && !isZenSurface && (
@@ -53869,7 +55766,9 @@ function HomeContent(): React.JSX.Element {
       headerActionsDisabled ||
       zenAtmosphereBusy ||
       !zenAtmosphereHasConversation;
-    const editBotsLabel = activeBot ? `Edit ${activeBot.name}` : "Bots";
+    const editBotsLabel = navbarCustomizerBot
+      ? `Edit ${navbarCustomizerBot.name}`
+      : "Bots";
     const themeLabel =
       effectiveThemeMode === "system"
         ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
@@ -54018,7 +55917,7 @@ function HomeContent(): React.JSX.Element {
             Images
           </button>
         ) : null}
-        {!showSettingsOnly && !isZenSurface ? (
+        {!showSettingsOnly ? (
           <button
             type="button"
             role="menuitem"
@@ -54026,7 +55925,7 @@ function HomeContent(): React.JSX.Element {
             onClick={() => {
               if (headerActionsDisabled) return;
               runAndClose(() => {
-                if (activeBot) {
+                if (navbarCustomizerBot) {
                   openActiveBotCustomizer();
                 } else {
                   openFreshBotCustomizer();
@@ -54527,9 +56426,21 @@ function HomeContent(): React.JSX.Element {
     if (devDebugComposerMinimized) {
       return (
         <button
+          ref={debugComposerRestoreRef}
           type="button"
           className={styles.debugComposerRestoreButton}
-          onClick={() => setDevDebugComposerMinimized(false)}
+          style={{
+            left: devDebugComposerRestorePosition.x,
+            top: devDebugComposerRestorePosition.y,
+          }}
+          onPointerDown={startDebugComposerRestoreDrag}
+          onPointerMove={dragDebugComposerRestore}
+          onPointerUp={endDebugComposerRestoreDrag}
+          onPointerCancel={endDebugComposerRestoreDrag}
+          onClick={() => {
+            if (debugComposerRestoreSuppressClickRef.current) return;
+            setDevDebugComposerMinimized(false);
+          }}
           aria-label="Restore debug composer"
         >
           <Maximize2 aria-hidden="true" size={14} />
@@ -54538,14 +56449,26 @@ function HomeContent(): React.JSX.Element {
       );
     }
     return (
-      <div className={styles.debugComposerBox}>
-        <div className={styles.debugComposerHeader}>
+      <div
+        ref={debugComposerRef}
+        className={styles.debugComposerBox}
+        style={{ top: devDebugComposerY }}
+        data-floating="true"
+      >
+        <div
+          className={styles.debugComposerHeader}
+          onPointerDown={startDebugComposerExpandedDrag}
+          onPointerMove={dragDebugComposerExpanded}
+          onPointerUp={endDebugComposerExpandedDrag}
+          onPointerCancel={endDebugComposerExpandedDrag}
+        >
           <div className={styles.debugComposerLabel} aria-live="polite">
-            DEBUG COMPOSER (local echo only)
+            DEBUG COMPOSER (echo + actions)
           </div>
           <button
             type="button"
             className={styles.debugComposerMinimizeButton}
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setDevDebugComposerMinimized(true)}
             aria-label="Minimize debug composer"
           >
@@ -54555,8 +56478,8 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.debugComposerRow} data-debug-composer="true">
           <textarea
             value={debugComposerDraft}
-            onChange={(event) => setDebugComposerDraft(event.currentTarget.value)}
-            placeholder="Type text to echo as a bot reply..."
+            onChange={(event) => updateDebugComposerDraft(event.currentTarget.value)}
+            placeholder="Type a debug reply; *actions* drive the bot panel..."
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey) return;
               event.preventDefault();
@@ -67317,41 +69240,10 @@ function HomeContent(): React.JSX.Element {
       coffeeLiveInterruptionCue?.kind === "botInterruptsPlayer"
         ? `${interruptionCueBotName} cuts in briefly, but you can keep typing.`
         : null;
-    /** Same conversation-tools affordances as the chat pane header (minus Sandbox-only zen). */
-    const coffeeSandboxDefaultBotView =
-      view !== "chat" && !privateChatActive && selectedBotId === null && !activeBot;
-    const coffeeToolbarShowSettingsOnly =
-      !detail &&
-      !activeBot &&
-      view !== "chat" &&
-      !defaultConversationUsesPrismIdentity &&
-      !coffeeSandboxDefaultBotView;
+    /** Same global utility affordances as the chat pane header. */
     // Unlike the main chat header, keep coffee toolbar visible while a right
     // panel is open so Settings / Memories / Images / Bots remain reachable.
     const coffeeToolbarGearHidden = sidebarOpen;
-    const coffeeToolbarDisabled =
-      !effectiveChatPresentation &&
-      detail != null &&
-      (!detail.hasAssistantReply || pendingReply);
-    const coffeeToolbarCanMemoryActions = true;
-    const handleCoffeeToolbarSettings = () => {
-      openRightPanel("settings");
-    };
-    const handleCoffeeToolbarMemories = () => {
-      openContextualMemoriesPanel();
-    };
-    const handleCoffeeToolbarImages = () => {
-      const inflightKey = resolveActiveImageGenInflightScopeKey();
-      if (inflightKey) {
-        void openImagesPanelForScopeKey(inflightKey);
-        return;
-      }
-      if (activeBot) {
-        void openImagesPanelForBot(activeBot);
-        return;
-      }
-      void openAllImagesPanel();
-    };
     const coffeeMainSurfaceStyle: React.CSSProperties = {
       ...(appShellStyle ?? {}),
       ...(composeStyle ?? {}),
@@ -67441,9 +69333,8 @@ function HomeContent(): React.JSX.Element {
             <div
               className={`${styles.coffeeHeaderActions} ${
                 coffeeToolbarGearHidden ? styles.chatHeaderActionsHidden : ""
-              } ${coffeeToolbarDisabled ? styles.chatHeaderActionsDisabled : ""}`}
+              }`}
               aria-label="Conversation tools"
-              aria-disabled={coffeeToolbarDisabled}
             >
               {renderMemoryToasts()}
               <div className={styles.chatHeaderModelPicker}>
@@ -67472,87 +69363,12 @@ function HomeContent(): React.JSX.Element {
                   Join session
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                aria-label="Open settings"
-                data-glyph-tooltip="Settings"
-                onClick={handleCoffeeToolbarSettings}
-              >
-                <WrenchGlyph />
-              </button>
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                onClick={handleCoffeeToolbarMemories}
-                aria-label="Memories"
-                data-glyph-tooltip="Memories"
-                disabled={coffeeToolbarDisabled || !coffeeToolbarCanMemoryActions}
-              >
-                <BookmarkGlyph />
-              </button>
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                onClick={handleCoffeeToolbarImages}
-                aria-label="Images"
-                data-glyph-tooltip="Images"
-                disabled={coffeeToolbarDisabled}
-              >
-                <ImagesGlyph />
-              </button>
-              {!coffeeToolbarShowSettingsOnly ? (
-                <button
-                  type="button"
-                  className={styles.headerIconButton}
-                  onClick={() => {
-                    if (activeBot) {
-                      openActiveBotCustomizer();
-                    } else {
-                      openFreshBotCustomizer();
-                    }
-                  }}
-                  aria-label={
-                    activeBot ? `Edit ${activeBot.name}` : "Open bot customizer"
-                  }
-                  data-glyph-tooltip={activeBot ? "Edit bot" : "Bots"}
-                  disabled={coffeeToolbarDisabled}
-                >
-                  <BotsGlyph />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={styles.themeToggleButton}
-                onClick={() => void cycleThemeMode()}
-                aria-label={
-                  effectiveThemeMode === "system"
-                    ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                }
-                data-title={
-                  effectiveThemeMode === "system"
-                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-                }
-                data-glyph-tooltip={
-                  effectiveThemeMode === "system"
-                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-                }
-              >
-                <ThemeGlyph mode={effectiveThemeMode} />
-              </button>
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                onClick={() => void exitCoffeeToHub()}
-                aria-label="Back to Hub"
-                title="Back to Hub"
-                data-glyph-tooltip="Back to Hub"
-              >
-                <HomeGlyph />
-              </button>
+              {renderUniversalNavbarButtons({
+                showAtmosphere: false,
+                onHub: () => {
+                  void exitCoffeeToHub();
+                },
+              })}
               <button
                 type="button"
                 className={styles.headerIconButton}
@@ -68591,16 +70407,10 @@ function HomeContent(): React.JSX.Element {
                 <MessageBubbleGlyph />
                 <span className={styles.storyActionLabel}>Log</span>
               </button>
-              <button
-                type="button"
-                className={styles.storyIconButton}
-                onClick={() => navigateToView("hub")}
-                aria-label="Back to Hub"
-                title="Back to Hub"
-              >
-                <HomeGlyph />
-                <span className={styles.storyActionLabel}>Hub</span>
-              </button>
+              {renderUniversalNavbarButtons({
+                showAtmosphere: false,
+                onHub: () => navigateToView("hub"),
+              })}
             </div>
           </header>
           {storyError ? (
@@ -68659,61 +70469,14 @@ function HomeContent(): React.JSX.Element {
           </div>
           <PrismWordmarkWithVersion className={styles.brandWordmark} />
           <div className={styles.hubFooter}>
-            <button
-              type="button"
-              className={styles.themeToggleButton}
-              onClick={() => void cycleThemeMode()}
-              aria-label={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-              }
-              data-title={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
-              data-glyph-tooltip={
-                effectiveThemeMode === "system"
-                  ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                  : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-              }
+            <div
+              className={`${styles.chatHeaderActions} ${styles.hubUtilityActions}`}
+              aria-label="Navigation tools"
             >
-              <ThemeGlyph mode={effectiveThemeMode} />
-            </button>
-            <div className={styles.hubUtilityActions}>
-              <button
-                type="button"
-                className={styles.hubNavButton}
-                onClick={() => openRightPanel("settings")}
-              >
-                <WrenchGlyph />
-                <span>Settings</span>
-              </button>
-              <button
-                type="button"
-                className={styles.hubNavButton}
-                onClick={openFreshBotCustomizer}
-              >
-                <BotsGlyph />
-                <span>Bots</span>
-              </button>
-              <button
-                type="button"
-                className={styles.hubNavButton}
-                onClick={() => void openAllImagesPanel()}
-              >
-                <ImagesGlyph />
-                <span>Images</span>
-              </button>
-              <button
-                type="button"
-                className={styles.hubNavButton}
-                onClick={() => void openAllMemoriesPanel()}
-              >
-                <BookmarkGlyph />
-                <span>Memories</span>
-              </button>
+              {renderUniversalNavbarButtons({
+                showAtmosphere: false,
+                showHub: false,
+              })}
             </div>
           </div>
         </div>
@@ -68933,6 +70696,7 @@ function HomeContent(): React.JSX.Element {
     const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
       chatSurface: chatLikeSurface,
       atmosphereEnabled: zenConversationAtmosphereEnabled,
+      hasConversationBot: zenFallbackWallpaperBotId !== null,
       hasRememberedWallpaper: zenRememberedWallpaperVisible,
       atmosphereTimelineLength: zenAtmosphereTimeline.length,
       hasConversationMessages:
@@ -68966,11 +70730,11 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
       (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
     ) || zenFallbackWallpaperVisible;
-    const zenAtmosphereReadabilityOverlayOpacity = zenRememberedWallpaperVisible
-      ? 0
-      : zenFallbackWallpaperVisible
+    const zenAtmosphereReadabilityOverlayOpacity = zenFallbackWallpaperVisible
+      ? 1
+      : zenRememberedWallpaperVisible
         ? 1
-      : maxZenAtmosphereLayerOpacity(zenAtmosphereDisplayLayerOpacities);
+        : maxZenAtmosphereLayerOpacity(zenAtmosphereDisplayLayerOpacities);
     const zenAtmosphereBlurredEdgesEnabled =
       normalizeZenWallpaperBlurredEdgesSetting(
         settings?.zenWallpaperBlurredEdgesEnabled
@@ -69306,7 +71070,7 @@ function HomeContent(): React.JSX.Element {
               )}
             </div>
           ) : null}
-          {zenAtmosphereWallpaperVisible && !zenRememberedWallpaperVisible ? (
+          {zenAtmosphereWallpaperVisible ? (
             <div
               className={styles.zenAtmosphereReadabilityOverlay}
               data-edge-mode={
@@ -70087,7 +71851,6 @@ function HomeContent(): React.JSX.Element {
           {compactedSummaryDebugNode}
           {manualCompactionIndicatorNode}
         </div>
-        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
@@ -70143,20 +71906,31 @@ function HomeContent(): React.JSX.Element {
             view === "chat" ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
-                {zenLiveBotAction || zenComposerActionPreview || zenPersonaBot ? (
+                {zenLivePresenceRailVisible ? (
                   <div className={styles.zenLiveActionStatusRail}>
                     <ZenLiveBotPresencePlate
-                      bot={zenPersonaBot}
-                      actionState={zenLiveBotAction}
+                      bot={zenLivePresenceBot}
+                      actionState={zenLiveVisibleBotAction}
+                      replyActionText={zenLiveReplyActionText}
                       userActionVisible={Boolean(zenComposerActionPreview)}
+                      defaultPrismPresenceVisible={zenDefaultPrismPresenceVisible}
+                      defaultPrismPresenceForming={zenDefaultPrismPresenceForming}
+                      isTalking={zenLiveBotTalking}
+                      mouthOpen={zenLiveBotMouthOpen}
+                      mouthShape={zenLiveBotRevealMouthShape}
+                      presencePhase={zenPersonaPresence.phase}
                       resolvedTheme={resolvedTheme}
+                      atmosphereActive={zenAtmosphereWallpaperVisible}
                     />
                     {zenComposerActionPreview ? (
                       <ZenActionComposerPreview cue={zenComposerActionPreview} />
                     ) : null}
                   </div>
                 ) : null}
-                <div className={styles.chatComposerRow}>
+                <div
+                  className={styles.chatComposerRow}
+                  data-zen-live-bot-composer-boundary="true"
+                >
                   <ComposerInput
                     ref={draftComposerRef}
                     enabled={composerMarkdownEditorEnabled}
@@ -70168,7 +71942,7 @@ function HomeContent(): React.JSX.Element {
                     submitLabel={composerSubmitLabel(draft)}
                     submitAriaLabel={composerSubmitAriaLabel(draft)}
                     submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                    hideSubmitButton={hideMobileEmptySend}
+                    hideSubmitButton={composerReplyInterruptActive ? false : hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
                     onInputActivity={markComposerTypingActivity}
@@ -70197,7 +71971,7 @@ function HomeContent(): React.JSX.Element {
                 submitLabel={composerSubmitLabel(draft)}
                 submitAriaLabel={composerSubmitAriaLabel(draft)}
                 submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                hideSubmitButton={hideMobileEmptySend}
+                hideSubmitButton={composerReplyInterruptActive ? false : hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
                 onInputActivity={markComposerTypingActivity}
@@ -71677,7 +73451,6 @@ function HomeContent(): React.JSX.Element {
           {compactedSummaryDebugNode}
           {manualCompactionIndicatorNode}
         </div>
-        {chatLikeSurface ? typingIndicatorNode : null}
 
         <form
           className={styles.compose}
@@ -71722,20 +73495,31 @@ function HomeContent(): React.JSX.Element {
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
-                {zenLiveBotAction || zenComposerActionPreview || zenPersonaBot ? (
+                {zenLivePresenceRailVisible ? (
                   <div className={styles.zenLiveActionStatusRail}>
                     <ZenLiveBotPresencePlate
-                      bot={zenPersonaBot}
-                      actionState={zenLiveBotAction}
+                      bot={zenLivePresenceBot}
+                      actionState={zenLiveVisibleBotAction}
+                      replyActionText={zenLiveReplyActionText}
                       userActionVisible={Boolean(zenComposerActionPreview)}
+                      defaultPrismPresenceVisible={zenDefaultPrismPresenceVisible}
+                      defaultPrismPresenceForming={zenDefaultPrismPresenceForming}
+                      isTalking={zenLiveBotTalking}
+                      mouthOpen={zenLiveBotMouthOpen}
+                      mouthShape={zenLiveBotRevealMouthShape}
+                      presencePhase={zenPersonaPresence.phase}
                       resolvedTheme={resolvedTheme}
+                      atmosphereActive={false}
                     />
                     {zenComposerActionPreview ? (
                       <ZenActionComposerPreview cue={zenComposerActionPreview} />
                     ) : null}
                   </div>
                 ) : null}
-                <div className={styles.chatComposerRow}>
+                <div
+                  className={styles.chatComposerRow}
+                  data-zen-live-bot-composer-boundary="true"
+                >
                   <ComposerInput
                     ref={draftComposerRef}
                     enabled={composerMarkdownEditorEnabled}
@@ -71747,7 +73531,7 @@ function HomeContent(): React.JSX.Element {
                     submitLabel={composerSubmitLabel(draft)}
                     submitAriaLabel={composerSubmitAriaLabel(draft)}
                     submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                    hideSubmitButton={hideMobileEmptySend}
+                    hideSubmitButton={composerReplyInterruptActive ? false : hideMobileEmptySend}
                     onChange={handleComposerChange}
                     onValueChange={updateComposerDraft}
                     onInputActivity={markComposerTypingActivity}
@@ -71776,7 +73560,7 @@ function HomeContent(): React.JSX.Element {
                 submitLabel={composerSubmitLabel(draft)}
                 submitAriaLabel={composerSubmitAriaLabel(draft)}
                 submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                hideSubmitButton={hideMobileEmptySend}
+                hideSubmitButton={composerReplyInterruptActive ? false : hideMobileEmptySend}
                 onChange={handleComposerChange}
                 onValueChange={updateComposerDraft}
                 onInputActivity={markComposerTypingActivity}
