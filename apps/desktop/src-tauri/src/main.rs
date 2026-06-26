@@ -466,7 +466,7 @@ fn is_app_quitting(app_handle: &AppHandle) -> bool {
 
 fn mark_app_quitting(app_handle: &AppHandle) {
     let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
-    if let Ok(mut guard) = lifecycle.is_quitting.lock() { *guard = true; }
+    let _ = lifecycle.is_quitting.lock().map(|mut g| *g = true);
 }
 
 fn show_main_window(app_handle: &AppHandle) {
