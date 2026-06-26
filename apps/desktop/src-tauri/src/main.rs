@@ -533,6 +533,7 @@ fn main() {
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
             let app_handle = app.handle().clone();
+            let splash_start = Instant::now();
 
             let (api_port, web_port) = match start_runtime(&app_handle, &state) {
                 Ok(ports) => ports,
@@ -549,6 +550,13 @@ fn main() {
             if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
                 emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
                 return Ok(());
+            }
+
+            // Hold the splash for at least 2.5 s so it's visible even on fast machines.
+            const SPLASH_MIN_MS: u64 = 2500;
+            let elapsed_ms = splash_start.elapsed().as_millis() as u64;
+            if elapsed_ms < SPLASH_MIN_MS {
+                thread::sleep(Duration::from_millis(SPLASH_MIN_MS - elapsed_ms));
             }
 
             let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
