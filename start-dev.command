@@ -122,4 +122,4 @@ LOCALAI_API_ORIGIN=http://127.0.0.1:8788 \
 NEXT_TELEMETRY_DISABLED=1 \
 HOSTNAME=127.0.0.1 \
 PORT=3003 \
-npx next dev -H 127.0.0.1 -p 3003
+npx next dev --webpack -H 127.0.0.1 -p 3003

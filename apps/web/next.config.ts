@@ -38,20 +38,21 @@ const extraDevOrigins =
     .filter(Boolean) ?? [];
 
 function resolvePrismBranch(): string {
+  try {
+    const fromGit = execSync("git branch --show-current", {
+      cwd: MONOREPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (fromGit) return fromGit;
+  } catch {
+    // Fall back to explicit release metadata below when Git is unavailable.
+  }
+
   const fromEnv =
     process.env.NEXT_PUBLIC_PRISM_BRANCH?.trim() || process.env.PRISM_BRANCH?.trim();
   if (fromEnv) return fromEnv;
-  try {
-    return (
-      execSync("git branch --show-current", {
-        cwd: MONOREPO_ROOT,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || "unknown"
-    );
-  } catch {
-    return "unknown";
-  }
+  return "unknown";
 }
 
 const nextConfig: NextConfig = {
