@@ -149,6 +149,7 @@ import {
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
+import { NetworkAccessPanel } from "./NetworkAccessPanel";
 import {
   BOT_FACT_KEY_LABELS,
   BOT_VOICE_PRESET_LABELS,
@@ -62034,6 +62035,8 @@ function HomeContent(): React.JSX.Element {
                     </label>
                   </div>
                 </section>
+
+                <NetworkAccessPanel fetchAuthenticated={fetchAuthenticated} />
 
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
