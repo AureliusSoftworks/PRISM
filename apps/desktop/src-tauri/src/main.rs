@@ -6,6 +6,20 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+trait CommandNoWindow {
+    fn no_window(&mut self) -> &mut Self;
+}
+impl CommandNoWindow for Command {
+    fn no_window(&mut self) -> &mut Self {
+        #[cfg(target_os = "windows")]
+        self.creation_flags(0x08000000);
+        self
+    }
+}
+
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -307,6 +321,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdin(Stdio::null())
         .stdout(Stdio::from(qdrant_stdout_file))
         .stderr(Stdio::from(qdrant_stderr_file))
+        .no_window()
         .spawn()
         .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
     emit_status(app, "qdrant", "running");
@@ -326,6 +341,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(api_stderr_file))
+        .no_window()
         .spawn()
         .map_err(|e| {
             let _ = qdrant_child.kill();
@@ -350,6 +366,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(web_stderr_file))
+        .no_window()
         .spawn()
         .map_err(|e| {
             let _ = api_child.kill();
