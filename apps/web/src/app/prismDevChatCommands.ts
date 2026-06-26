@@ -38,6 +38,24 @@ export type ParsedPrismDevChatCommand =
   | { kind: "askquestion" }
   | { kind: "unknown"; token: string };
 
+export type PrismDevPanelToggleAction = "open-panel" | "close-layer";
+
+export interface PrismDevPanelToggleState {
+  devToolsUnlocked: boolean;
+  devToolsOpen: boolean;
+  devToolsMinimized: boolean;
+}
+
+export function resolvePrismDevPanelToggleAction({
+  devToolsUnlocked,
+  devToolsOpen,
+  devToolsMinimized,
+}: PrismDevPanelToggleState): PrismDevPanelToggleAction {
+  return devToolsUnlocked && devToolsOpen && !devToolsMinimized
+    ? "close-layer"
+    : "open-panel";
+}
+
 export function parsePrismDevChatCommand(trimmedLine: string): ParsedPrismDevChatCommand | null {
   if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return null;
   const t = normalizeComposerSlashCommandLine(trimmedLine).trimStart();
