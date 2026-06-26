@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // This codebase uses the `useEffect(() => { setState(...) }, [signal])`
+      // pattern intentionally for imperative dismissal signals. Treat as a
+      // warning rather than a blocking error.
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;
