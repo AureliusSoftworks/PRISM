@@ -51,6 +51,54 @@ describe("parseZenLiveActionReactionResponse", () => {
     assert.equal(response.botAction, undefined);
   });
 
+  it("strips quoted dialogue from visible action text", () => {
+    const response = parseZenLiveActionReactionResponse(
+      JSON.stringify({
+        kind: "show_action",
+        botAction:
+          'Smiles warmly, gestures to the dancing, and sings softly "You are a joy to see"',
+        moodHint: "warm",
+        confidence: 0.77,
+      }),
+      request()
+    );
+
+    assert.equal(response.kind, "show_action");
+    assert.equal(response.botAction, "Smiles warmly, gestures to the dancing");
+  });
+
+  it("strips dangling speech bridge words from visible action text", () => {
+    const response = parseZenLiveActionReactionResponse(
+      JSON.stringify({
+        kind: "show_action",
+        botAction: "offers a warm smile and a gentle wave back, saying",
+        moodHint: "warm",
+        confidence: 0.77,
+      }),
+      request()
+    );
+
+    assert.equal(response.kind, "show_action");
+    assert.equal(response.botAction, "offers a warm smile and a gentle wave back");
+  });
+
+  it("keeps fuller stage directions for the action plate", () => {
+    const action =
+      "rests one hand over his heart, then offers a small, careful nod toward your courage";
+    const response = parseZenLiveActionReactionResponse(
+      JSON.stringify({
+        kind: "show_action",
+        botAction: action,
+        moodHint: "warm",
+        confidence: 0.77,
+      }),
+      request()
+    );
+
+    assert.equal(response.kind, "show_action");
+    assert.equal(response.botAction, action);
+  });
+
   it("requires stricter confidence for interrupt candidates", () => {
     const downgraded = parseZenLiveActionReactionResponse(
       JSON.stringify({

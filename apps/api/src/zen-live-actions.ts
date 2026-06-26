@@ -8,12 +8,14 @@ import type {
 } from "@localai/shared";
 import type { LlmProvider, ProviderMessage } from "./providers.ts";
 
-const MAX_ACTION_CHARS = 96;
+const MAX_ACTION_CHARS = 180;
 const MAX_CONTEXT_ACTION_CHARS = 120;
 const SHOW_ACTION_MIN_CONFIDENCE = 0.46;
 const INTERRUPT_MIN_CONFIDENCE = 0.88;
 
 const OUT_OF_PERSONA_ACTION_RE = /\b(?:twerk(?:s|ing)?|striptease|porn|sexual|horny|meme\s+lord|yeet|skibidi|rizz|fortnite|dab(?:s|bing)?|floss(?:es|ing)?|cartwheel(?:s|ing)?\s+uncontrollably)\b/iu;
+const TRAILING_SPEECH_BRIDGE_RE =
+  /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
 
 export function normalizeZenLiveActionText(
   value: unknown,
@@ -23,6 +25,11 @@ export function normalizeZenLiveActionText(
   let normalized = value.replace(/\s+/g, " ").trim();
   normalized = normalized.replace(/^\*+|\*+$/gu, "").trim();
   normalized = normalized.replace(/^[("'\u201c\u2018]+|[)"'\u201d\u2019]+$/gu, "").trim();
+  normalized = normalized.replace(
+    /\s*(?:"[^"]*(?:"|$)|\u201c[^\u201d]*(?:\u201d|$)|\u2018[^\u2019]*(?:\u2019|$))/gu,
+    " "
+  ).trim();
+  normalized = normalized.replace(TRAILING_SPEECH_BRIDGE_RE, "").trim();
   normalized = normalized.replace(/[.!?\u2026;:,]+$/u, "").trim();
   if (!normalized) return undefined;
   if (Array.from(normalized).length > maxChars) {
@@ -268,7 +275,8 @@ function buildZenLiveActionReactionMessages(args: {
         "Never invent random memes, sexual behavior, slapstick that breaks the persona, or actions that contradict the persona.",
         "Use interrupt_candidate only for rare, high-confidence, persona-significant moments where the assistant should speak before the user sends. Otherwise use show_action or silent.",
         "For idle beats, never interrupt. Use only subtle believable waiting actions.",
-        "Keep botAction under 12 words, stage-direction style, without surrounding asterisks.",
+        "Use one readable stage direction, usually 8-24 words, without surrounding asterisks.",
+        "Do not include dialogue, quote marks, or speech bridge words such as saying, asking, replying, or telling.",
       ].join("\n"),
     },
     {
