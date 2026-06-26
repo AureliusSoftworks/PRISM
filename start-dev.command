@@ -70,6 +70,25 @@ echo "[4/5] Dependencies ready."
 # ── Data directory ───────────────────────────────────────────────────────────
 mkdir -p apps/api/data
 
+# ── Local-network access (private by default) ────────────────────────────────
+# .env is already sourced above, so PRISM_LAN_ACCESS (if set) wins; otherwise
+# the persisted in-app toggle decides; otherwise OFF.
+WEB_BIND_HOST="127.0.0.1"
+WEB_LAN_FLAG="0"
+case "$(printf '%s' "${PRISM_LAN_ACCESS:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) WEB_BIND_HOST="0.0.0.0"; WEB_LAN_FLAG="1" ;;
+    "")
+        if [ -f "apps/api/data/network.json" ] && grep -Eq '"lanAccessEnabled"[[:space:]]*:[[:space:]]*true' "apps/api/data/network.json"; then
+            WEB_BIND_HOST="0.0.0.0"; WEB_LAN_FLAG="1"
+        fi
+        ;;
+esac
+if [ "$WEB_LAN_FLAG" = "1" ]; then
+    echo "Local network access: ON (reachable from other devices)"
+else
+    echo "Local network access: OFF (private to this machine)"
+fi
+
 echo "[5/5] Starting watch-mode dev servers..."
 echo
 echo "Press Ctrl+C to stop."
@@ -109,6 +128,7 @@ trap cleanup INT TERM EXIT
 echo "Starting API (watch, dev DB)..."
 DB_PATH="$(pwd)/apps/api/data/localai-dev.db" \
 API_PORT=8788 \
+PRISM_WEB_PORT=3003 \
 NEXT_TELEMETRY_DISABLED=1 \
 node --env-file-if-exists=.env --watch --experimental-strip-types apps/api/src/server.ts &
 API_PID=$!
@@ -120,6 +140,7 @@ sleep 1
 cd apps/web
 LOCALAI_API_ORIGIN=http://127.0.0.1:8788 \
 NEXT_TELEMETRY_DISABLED=1 \
-HOSTNAME=127.0.0.1 \
+HOSTNAME="$WEB_BIND_HOST" \
+PRISM_WEB_LAN="$WEB_LAN_FLAG" \
 PORT=3003 \
-npx next dev --webpack -H 127.0.0.1 -p 3003
+npx next dev --webpack -H "$WEB_BIND_HOST" -p 3003

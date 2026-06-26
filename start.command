@@ -64,11 +64,36 @@ fi
 # ── Data directory ───────────────────────────────────────────────────────────
 mkdir -p apps/api/data
 
+# ── Local-network access (private by default) ────────────────────────────────
+# Resolve the same way the API does: an explicit PRISM_LAN_ACCESS (env or .env)
+# wins, otherwise the persisted in-app toggle (apps/api/data/network.json),
+# otherwise OFF. When ON, the web server binds to all interfaces so other
+# devices on your network can reach it.
+LAN_ACCESS_RAW="${PRISM_LAN_ACCESS:-}"
+if [ -z "$LAN_ACCESS_RAW" ] && [ -f ".env" ]; then
+    LAN_ACCESS_RAW="$(grep -E '^[[:space:]]*PRISM_LAN_ACCESS[[:space:]]*=' .env | tail -n1 | cut -d= -f2- | tr -d '"'\'' \r' || true)"
+fi
+WEB_BIND_HOST="127.0.0.1"
+WEB_LAN_FLAG="0"
+case "$(printf '%s' "$LAN_ACCESS_RAW" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) WEB_BIND_HOST="0.0.0.0"; WEB_LAN_FLAG="1" ;;
+    "")
+        if [ -f "apps/api/data/network.json" ] && grep -Eq '"lanAccessEnabled"[[:space:]]*:[[:space:]]*true' "apps/api/data/network.json"; then
+            WEB_BIND_HOST="0.0.0.0"; WEB_LAN_FLAG="1"
+        fi
+        ;;
+esac
+
 echo "[5/5] Starting servers..."
 echo
 echo "============================================"
-echo "  API:  http://localhost:8787"
+echo "  API:  http://localhost:18787"
 echo "  Web:  http://localhost:3000"
+if [ "$WEB_LAN_FLAG" = "1" ]; then
+    echo "  Local network access: ON (reachable from other devices)"
+else
+    echo "  Local network access: OFF (private to this machine)"
+fi
 echo "============================================"
 echo
 echo "Press Ctrl+C to stop both servers."
@@ -91,6 +116,7 @@ trap cleanup INT TERM EXIT
 # Without it, OPENAI_API_KEY / OLLAMA_HOST / etc. from .env never reach the
 # API process and every OpenAI chat turn 401s with a cryptic "invalid key".
 echo "Starting API..."
+PRISM_WEB_PORT=3000 \
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/server.ts &
 API_PID=$!
 
@@ -125,4 +151,5 @@ fi
 
 # ── Start web (foreground) ───────────────────────────────────────────────────
 echo "Starting frontend in production mode..."
-HOSTNAME=127.0.0.1 PORT=3000 node apps/web/.next/standalone/apps/web/server.js
+HOSTNAME="$WEB_BIND_HOST" PRISM_WEB_LAN="$WEB_LAN_FLAG" PORT=3000 \
+    node apps/web/.next/standalone/apps/web/server.js
