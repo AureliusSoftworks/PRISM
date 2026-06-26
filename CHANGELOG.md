@@ -67,6 +67,15 @@ _Staging area — nothing queued for release yet._
 - Zen fallback wallpaper now activates when a conversation bot is
   present even if the atmosphere layer is disabled.
 
+### Desktop
+
+- **Boot splash screen.** The desktop app now shows the Zen thinking
+  screen (spinning prismatic ring, floating triangle, aurora background)
+  while services start up. API and web stdout stream live into a
+  console pane at the bottom of the screen. Per-service status badges
+  (Qdrant / API / Web) check off as each becomes ready, then the
+  interface loads automatically.
+
 ## [0.1.0] - 2026-05-03
 
 First **production** public release: product and marketing version **0.1.0** across web UI, native server binaries, and App Store–bound clients. GitHub `server/v0.1.0` is the canonical download lane for macOS (DMG), Windows (Inno installer), and Linux (runtime tarball). Native retail clients are built in CI as **Actions artifacts only** until App Store distribution is wired.

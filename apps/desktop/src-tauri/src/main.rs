@@ -1,3 +1,4 @@
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::{fs, fs::OpenOptions};
@@ -7,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use url::Url;
 
 const DEFAULT_API_PORT: u16 = 19787;
@@ -205,6 +206,38 @@ fn pick_available_port(preferred: u16, forbidden: &[u16]) -> std::io::Result<u16
     )))
 }
 
+/// Emit a boot log line to the splash screen.
+fn emit_log(app: &AppHandle, source: &str, line: &str) {
+    let _ = app.emit("prism-log", serde_json::json!({ "source": source, "line": line }));
+}
+
+/// Emit a service status update to the splash screen.
+fn emit_status(app: &AppHandle, service: &str, state: &str) {
+    let _ = app.emit("prism-status", serde_json::json!({ "service": service, "state": state }));
+}
+
+/// Spawn a background thread that reads lines from `reader`, writes them to
+/// `log_file`, and forwards each line to the splash screen via Tauri events.
+fn spawn_log_tee(
+    reader: impl std::io::Read + Send + 'static,
+    mut log_file: std::fs::File,
+    app: AppHandle,
+    source: &'static str,
+) {
+    thread::spawn(move || {
+        let buf = BufReader::new(reader);
+        for line in buf.lines() {
+            match line {
+                Ok(line) => {
+                    let _ = writeln!(log_file, "{line}");
+                    emit_log(&app, source, &line);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
 fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16, u16)> {
     let root = runtime_root(app);
     let node = node_binary(&root);
@@ -228,42 +261,30 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let logs_dir = localai_data_dir.join("logs");
     fs::create_dir_all(&logs_dir)
         .map_err(|error| io_error(format!("Failed to create PRISM log directory: {error}")))?;
-    let api_log = logs_dir.join("api.log");
-    let web_log = logs_dir.join("web.log");
+
+    let api_log    = logs_dir.join("api.log");
+    let web_log    = logs_dir.join("web.log");
     let qdrant_log = logs_dir.join("qdrant.log");
-    let api_stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&api_log)
-        .map_err(|error| io_error(format!("Failed to open API log file: {error}")))?;
-    let api_stderr = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&api_log)
-        .map_err(|error| io_error(format!("Failed to open API log file: {error}")))?;
-    let web_stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&web_log)
-        .map_err(|error| io_error(format!("Failed to open web log file: {error}")))?;
-    let web_stderr = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&web_log)
-        .map_err(|error| io_error(format!("Failed to open web log file: {error}")))?;
-    let qdrant_stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&qdrant_log)
-        .map_err(|error| io_error(format!("Failed to open qdrant log file: {error}")))?;
-    let qdrant_stderr = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&qdrant_log)
-        .map_err(|error| io_error(format!("Failed to open qdrant log file: {error}")))?;
+
+    // Qdrant: both streams go to file (very verbose, not useful on splash).
+    let qdrant_stdout_file = OpenOptions::new().create(true).append(true).open(&qdrant_log)
+        .map_err(|e| io_error(format!("Failed to open qdrant log: {e}")))?;
+    let qdrant_stderr_file = qdrant_stdout_file.try_clone()
+        .map_err(|e| io_error(format!("Failed to clone qdrant log handle: {e}")))?;
+
+    // API: stdout piped to splash + file; stderr to file only.
+    let api_stdout_file = OpenOptions::new().create(true).append(true).open(&api_log)
+        .map_err(|e| io_error(format!("Failed to open api log: {e}")))?;
+    let api_stderr_file = api_stdout_file.try_clone()
+        .map_err(|e| io_error(format!("Failed to clone api log handle: {e}")))?;
+
+    // Web: stdout piped to splash + file; stderr to file only.
+    let web_stdout_file = OpenOptions::new().create(true).append(true).open(&web_log)
+        .map_err(|e| io_error(format!("Failed to open web log: {e}")))?;
+    let web_stderr_file = web_stdout_file.try_clone()
+        .map_err(|e| io_error(format!("Failed to clone web log handle: {e}")))?;
+
     let api_port = pick_available_port(DEFAULT_API_PORT, &[])?;
-    // Keep web on a different port than API even when both fall back into the
-    // same nearby range due local conflicts.
     let web_port = pick_available_port(DEFAULT_WEB_PORT, &[api_port])?;
     let localai_api_origin = format!("http://127.0.0.1:{api_port}");
     let qdrant_url = "http://127.0.0.1:6333";
@@ -275,19 +296,24 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     fs::create_dir_all(&qdrant_storage_dir)
         .map_err(|error| io_error(format!("Failed to create Qdrant data directory: {error}")))?;
 
+    emit_log(app, "prism", &format!("Runtime root: {}", root.display()));
+    emit_log(app, "prism", &format!("Ports: API={api_port}  Web={web_port}"));
+
+    // ── Qdrant ──
+    emit_status(app, "qdrant", "starting");
     let mut qdrant_child = Command::new(&qdrant)
-        .env(
-            "QDRANT__STORAGE__STORAGE_PATH",
-            qdrant_storage_dir.to_string_lossy().to_string(),
-        )
-        // Bind to localhost only so Windows Firewall never prompts the user.
+        .env("QDRANT__STORAGE__STORAGE_PATH", qdrant_storage_dir.to_string_lossy().to_string())
         .env("QDRANT__SERVICE__HOST", "127.0.0.1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(qdrant_stdout))
-        .stderr(Stdio::from(qdrant_stderr))
+        .stdout(Stdio::from(qdrant_stdout_file))
+        .stderr(Stdio::from(qdrant_stderr_file))
         .spawn()
-        .map_err(|error| io_error(format!("Failed to start bundled Qdrant: {error}")))?;
+        .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
+    emit_status(app, "qdrant", "running");
+    emit_log(app, "qdrant", &format!("Started (pid {})", qdrant_child.id()));
 
+    // ── API ──
+    emit_status(app, "api", "starting");
     let mut api_child = Command::new(&node)
         .arg(&api)
         .current_dir(&root)
@@ -298,17 +324,22 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("QDRANT_URL", qdrant_url)
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(api_stdout))
-        .stderr(Stdio::from(api_stderr))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(api_stderr_file))
         .spawn()
-        .map_err(|error| {
+        .map_err(|e| {
             let _ = qdrant_child.kill();
-            io_error(format!("Failed to start Prism API: {error}"))
+            io_error(format!("Failed to start Prism API: {e}"))
         })?;
 
-    // Next.js standalone must bind to a specific host; default 0.0.0.0 can
-    // trigger firewall prompts on Windows.  HOSTNAME=127.0.0.1 keeps it local.
-    let web_child = Command::new(&node)
+    if let Some(stdout) = api_child.stdout.take() {
+        spawn_log_tee(stdout, api_stdout_file, app.clone(), "api");
+    }
+    emit_status(app, "api", "running");
+
+    // ── Web ──
+    emit_status(app, "web", "starting");
+    let mut web_child = Command::new(&node)
         .arg(&web)
         .current_dir(&web_cwd)
         .env("PORT", web_port.to_string())
@@ -317,14 +348,19 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("LOCALAI_API_ORIGIN", localai_api_origin)
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(web_stdout))
-        .stderr(Stdio::from(web_stderr))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(web_stderr_file))
         .spawn()
-        .map_err(|error| {
+        .map_err(|e| {
             let _ = api_child.kill();
             let _ = qdrant_child.kill();
-            io_error(format!("Failed to start Prism web runtime: {error}"))
+            io_error(format!("Failed to start Prism web runtime: {e}"))
         })?;
+
+    if let Some(stdout) = web_child.stdout.take() {
+        spawn_log_tee(stdout, web_stdout_file, app.clone(), "web");
+    }
+    emit_status(app, "web", "running");
 
     eprintln!("[PRISM] Runtime root: {}", root.display());
     eprintln!("[PRISM] Node binary:  {node}");
@@ -334,38 +370,33 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     eprintln!("[PRISM] Qdrant:       {}", qdrant.display());
     eprintln!("[PRISM] Ports:        API={api_port}  Web={web_port}");
 
-    *state
-        .qdrant_child
-        .lock()
-        .map_err(|_| io_error("Qdrant process lock poisoned"))? = Some(qdrant_child);
-    *state
-        .api_child
-        .lock()
-        .map_err(|_| io_error("API process lock poisoned"))? = Some(api_child);
-    *state
-        .web_child
-        .lock()
-        .map_err(|_| io_error("Web process lock poisoned"))? = Some(web_child);
+    *state.qdrant_child.lock().map_err(|_| io_error("Qdrant process lock poisoned"))? = Some(qdrant_child);
+    *state.api_child.lock().map_err(|_| io_error("API process lock poisoned"))? = Some(api_child);
+    *state.web_child.lock().map_err(|_| io_error("Web process lock poisoned"))? = Some(web_child);
 
     Ok((api_port, web_port))
 }
 
-fn wait_for_api(api_port: u16, state: &RuntimeState) -> std::io::Result<()> {
+fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
     let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{api_port}");
+    emit_log(app, "prism", &format!("Waiting for API on {target}…"));
     eprintln!("[PRISM] Waiting for API runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
-            eprintln!("[PRISM] API runtime ready after {:.1}s", start.elapsed().as_secs_f64());
+            let elapsed = start.elapsed().as_secs_f64();
+            eprintln!("[PRISM] API runtime ready after {elapsed:.1}s");
+            emit_log(app, "prism", &format!("API ready ({elapsed:.1}s)"));
+            emit_status(app, "api", "ready");
             return Ok(());
         }
-        // Fail fast if the API process exited instead of letting the UI load
-        // into a misleading "Prism API unreachable" state.
         if let Ok(mut guard) = state.api_child.lock() {
             if let Some(ref mut child) = *guard {
                 if let Ok(Some(exit_status)) = child.try_wait() {
                     let elapsed = start.elapsed().as_secs_f64();
+                    emit_status(app, "api", "error");
+                    emit_log(app, "prism", &format!("API exited after {elapsed:.1}s: {exit_status}"));
                     return Err(io_error(format!(
                         "Prism API exited after {elapsed:.1}s with status {exit_status}. Check api.log in the app data directory."
                     )));
@@ -374,26 +405,32 @@ fn wait_for_api(api_port: u16, state: &RuntimeState) -> std::io::Result<()> {
         }
         thread::sleep(Duration::from_millis(500));
     }
+    emit_status(app, "api", "error");
     Err(io_error(
         "Prism API did not start in time (90s timeout). Check api.log in the app data directory.",
     ))
 }
 
-fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState) -> std::io::Result<()> {
+fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
     let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
+    emit_log(app, "prism", &format!("Waiting for web on {target}…"));
     eprintln!("[PRISM] Waiting for web runtime on {target} (timeout {STARTUP_TIMEOUT_SECS}s)...");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
-            eprintln!("[PRISM] Web runtime ready after {:.1}s", start.elapsed().as_secs_f64());
+            let elapsed = start.elapsed().as_secs_f64();
+            eprintln!("[PRISM] Web runtime ready after {elapsed:.1}s");
+            emit_log(app, "prism", &format!("Web ready ({elapsed:.1}s)"));
+            emit_status(app, "web", "ready");
             return Ok(());
         }
-        // Fail fast if the web process exited instead of waiting the full timeout.
         if let Ok(mut guard) = state.web_child.lock() {
             if let Some(ref mut child) = *guard {
                 if let Ok(Some(exit_status)) = child.try_wait() {
                     let elapsed = start.elapsed().as_secs_f64();
+                    emit_status(app, "web", "error");
+                    emit_log(app, "prism", &format!("Web exited after {elapsed:.1}s: {exit_status}"));
                     return Err(io_error(format!(
                         "Prism web runtime exited after {elapsed:.1}s with status {exit_status}. Check web.log in the app data directory."
                     )));
@@ -402,9 +439,9 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState) -> std::io::
         }
         thread::sleep(Duration::from_millis(500));
     }
-    // Check if API is also down — that would indicate a broader issue.
     let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{api_port}")).is_ok();
     eprintln!("[PRISM] Timeout reached. API alive: {api_alive}");
+    emit_status(app, "web", "error");
     Err(io_error(
         "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
     ))
@@ -412,37 +449,24 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState) -> std::io::
 
 fn stop_runtime(state: &RuntimeState) {
     if let Ok(mut guard) = state.qdrant_child.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-        }
+        if let Some(mut child) = guard.take() { let _ = child.kill(); }
     }
     if let Ok(mut guard) = state.api_child.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-        }
+        if let Some(mut child) = guard.take() { let _ = child.kill(); }
     }
     if let Ok(mut guard) = state.web_child.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-        }
+        if let Some(mut child) = guard.take() { let _ = child.kill(); }
     }
 }
 
 fn is_app_quitting(app_handle: &AppHandle) -> bool {
     let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
-    lifecycle
-        .is_quitting
-        .lock()
-        .map(|guard| *guard)
-        .unwrap_or(false)
+    lifecycle.is_quitting.lock().map(|g| *g).unwrap_or(false)
 }
 
 fn mark_app_quitting(app_handle: &AppHandle) {
     let lifecycle: State<'_, AppLifecycleState> = app_handle.state();
-    let lock_result = lifecycle.is_quitting.lock();
-    if let Ok(mut guard) = lock_result {
-        *guard = true;
-    }
+    if let Ok(mut guard) = lifecycle.is_quitting.lock() { *guard = true; }
 }
 
 fn show_main_window(app_handle: &AppHandle) {
@@ -465,10 +489,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .tooltip("Prism")
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
             "restore" => show_main_window(app_handle),
-            "exit" => {
-                mark_app_quitting(app_handle);
-                app_handle.exit(0);
-            }
+            "exit" => { mark_app_quitting(app_handle); app_handle.exit(0); }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -476,8 +497,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } = event
-            {
+            } = event {
                 show_main_window(tray.app_handle());
             }
         });
@@ -498,30 +518,29 @@ fn main() {
         .manage(AppLifecycleState::new())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if is_app_quitting(&window.app_handle()) {
-                    return;
-                }
+                if is_app_quitting(&window.app_handle()) { return; }
                 api.prevent_close();
                 let _ = window.hide();
             }
         })
         .setup(|app| {
             let state: State<'_, RuntimeState> = app.state();
-            let (api_port, web_port) = match start_runtime(&app.handle(), &state) {
+            let app_handle = app.handle().clone();
+
+            let (api_port, web_port) = match start_runtime(&app_handle, &state) {
                 Ok(ports) => ports,
                 Err(error) => {
                     eprintln!("[PRISM] Runtime startup failed: {error}");
-                    // Keep app alive so startup errors never abort the process.
-                    // The default Tauri window still opens and logs guide recovery.
+                    emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
                     return Ok(());
                 }
             };
 
-            if let Err(error) = wait_for_api(api_port, &state) {
+            if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
                 eprintln!("[PRISM] API readiness failed: {error}");
                 return Ok(());
             }
-            if let Err(error) = wait_for_web(web_port, api_port, &state) {
+            if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
                 eprintln!("[PRISM] Web readiness failed: {error}");
                 return Ok(());
             }
