@@ -12,6 +12,61 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.3.0] - 2026-06-25
+
+### Added
+
+- **Composer ghost autocomplete.** As you type, the composer now offers
+  a greyed-out word completion ranked by natural language frequency.
+  Tab or right-arrow accepts the suggestion; any other key dismisses it.
+  Built on a pre-generated lexicon (SUBTLEX word frequencies) so
+  suggestions require no network round-trip and work fully offline.
+- **Zen live bot face.** The bot's face in Zen mode now renders as
+  distinct, CSS-controlled eye and mouth elements rather than a single
+  text glyph. Eyes and mouth animate independently — blinking, tracking
+  presence state, and reflecting the bot's current mood.
+- **Zen bot talking mouth.** While the bot is actively replying, the
+  mouth shape animates in sync with the reveal stream. Open-wide,
+  open-small, and open-round variants correspond to different phoneme
+  weight cues derived from the live token reveal pacing.
+- **Floating, draggable Zen avatar.** The bot presence plate in Zen
+  can be picked up and repositioned anywhere on screen. Release with
+  momentum and it flings with physics, bouncing off viewport edges.
+  Position is persisted across sessions.
+- **Zen persona presence transitions.** Switching personas in Zen now
+  plays a smooth departing/arriving animation sequence. The outgoing
+  persona desaturates and fades; the incoming one saturates in. Respects
+  `prefers-reduced-motion`.
+
+### Changed
+
+- **Cleaner Zen action stage directions.** Bot action descriptions no
+  longer leak quoted speech or trailing bridge phrases ("…and says softly",
+  "…asking"). The display plate now shows only the pure stage direction.
+  The LLM prompt is updated to reinforce this boundary, and the stripping
+  logic runs on both API and web sides.
+- **Expanded action text length.** The visible action plate now supports
+  longer stage directions (up to ~24 words) so richer, multi-clause
+  actions can render without truncation.
+- **Zen readability overlay reworked.** The atmospheric wallpaper
+  readability layer is rebuilt as a single-element gradient with a
+  horizontal mask fade, replacing the previous dual pseudo-element
+  ellipse approach. Results in better text contrast across a wider
+  range of wallpapers without introducing blur halos.
+- **Face font tokens.** Typing dots, pending reply dots, and coffee-mode
+  face glyphs now share a unified `--prism-face-font` / `--prism-face-weight`
+  token pair, keeping all bot face characters visually consistent across
+  surfaces and themes.
+
+### Fixed
+
+- Tooltip positioning stabilized to prevent edge-of-viewport drift.
+- Zen header visibility no longer flickers on scroll boundary transitions.
+- Interrupted chat fragments in prompts now render correctly rather than
+  being swallowed by the preceding message boundary.
+- Zen fallback wallpaper now activates when a conversation bot is
+  present even if the atmosphere layer is disabled.
+
 ## [0.1.0] - 2026-05-03
 
 First **production** public release: product and marketing version **0.1.0** across web UI, native server binaries, and App Store–bound clients. GitHub `server/v0.1.0` is the canonical download lane for macOS (DMG), Windows (Inno installer), and Linux (runtime tarball). Native retail clients are built in CI as **Actions artifacts only** until App Store distribution is wired.
