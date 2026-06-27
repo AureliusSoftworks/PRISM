@@ -10,49 +10,88 @@ use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-use std::os::windows::io::AsRawHandle;
-
 // Windows Job Object with KILL_ON_JOB_CLOSE: when PRISM.exe exits or is
 // forcefully terminated by an installer, Windows automatically kills every
 // child process (node.exe, qdrant.exe, etc.) assigned to the job, releasing
 // file locks before the installer overwrites the runtime binaries.
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::{
-    Foundation::HANDLE,
-    System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    },
-};
+mod win_job {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+    use std::sync::OnceLock;
 
-#[cfg(target_os = "windows")]
-static CHILD_JOB: std::sync::OnceLock<HANDLE> = std::sync::OnceLock::new();
+    // Mirror of Win32 JOBOBJECT_BASIC_LIMIT_INFORMATION (64-bit layout).
+    // repr(C) inserts the same padding the C compiler would.
+    #[repr(C)]
+    struct BasicLimitInfo {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
 
-#[cfg(target_os = "windows")]
-fn init_child_job() {
-    unsafe {
-        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-        if job == 0 { return; }
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        if SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            std::ptr::addr_of!(info) as *const core::ffi::c_void,
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        ) == 0 { return; }
-        let _ = CHILD_JOB.set(job);
+    const KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const JOB_OBJECT_BASIC_LIMIT_INFORMATION: i32 = 2;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(lp_attrs: *const c_void, lp_name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(
+            h_job: *mut c_void, info_class: i32,
+            info: *const c_void, info_len: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(h_job: *mut c_void, h_process: *mut c_void) -> i32;
+    }
+
+    // Raw pointer wrapper that is Send + Sync: we only write once (OnceLock)
+    // and thereafter only read the handle value for Win32 calls.
+    struct JobHandle(*mut c_void);
+    unsafe impl Send for JobHandle {}
+    unsafe impl Sync for JobHandle {}
+
+    static CHILD_JOB: OnceLock<JobHandle> = OnceLock::new();
+
+    pub fn init() {
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() { return; }
+            let info = BasicLimitInfo {
+                per_process_user_time_limit: 0,
+                per_job_user_time_limit: 0,
+                limit_flags: KILL_ON_JOB_CLOSE,
+                minimum_working_set_size: 0,
+                maximum_working_set_size: 0,
+                active_process_limit: 0,
+                affinity: 0,
+                priority_class: 0,
+                scheduling_class: 0,
+            };
+            if SetInformationJobObject(
+                job, JOB_OBJECT_BASIC_LIMIT_INFORMATION,
+                std::ptr::addr_of!(info) as *const c_void,
+                std::mem::size_of::<BasicLimitInfo>() as u32,
+            ) == 0 { return; }
+            let _ = CHILD_JOB.set(JobHandle(job));
+        }
+    }
+
+    pub fn assign(child: &Child) {
+        if let Some(j) = CHILD_JOB.get() {
+            unsafe { let _ = AssignProcessToJobObject(j.0, child.as_raw_handle()); }
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn assign_to_child_job(child: &Child) {
-    if let Some(&job) = CHILD_JOB.get() {
-        unsafe { let _ = AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE); }
-    }
-}
+fn init_child_job() { win_job::init(); }
+#[cfg(target_os = "windows")]
+fn assign_to_child_job(child: &Child) { win_job::assign(child); }
 
 #[cfg(not(target_os = "windows"))]
 fn init_child_job() {}
