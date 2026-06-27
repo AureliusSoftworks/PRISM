@@ -12,6 +12,21 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.3] - 2026-06-27
+
+### Desktop
+
+- **NSIS upgrade hook now actually runs.** The `installer.nsh` hook file
+  was never included in the built installer because `installerHooks` was
+  missing from `tauri.conf.json`. Now wired correctly — the pre-install
+  macro fires before any files are extracted on every upgrade.
+- **Correct process names in hook.** The hook previously searched for
+  `PRISM.exe`; the actual Tauri binary is `prism_desktop.exe`. Fixed.
+- **Scoped `node.exe` kill.** The hook now terminates `node.exe` processes
+  running from the Prism runtime folder specifically (via PowerShell path
+  filter `*\Prism\runtime\*`), leaving any other Node.js apps on the
+  machine untouched.
+
 ## [0.4.2] - 2026-06-27
 
 ### Desktop
