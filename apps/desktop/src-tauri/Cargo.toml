@@ -1,6 +1,6 @@
 [package]
 name = "prism_desktop"
-version = "0.4.0"
+version = "0.4.1"
 description = "Prism unified desktop shell"
 authors = ["Prism"]
 license = ""
@@ -15,3 +15,6 @@ tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects"] }
