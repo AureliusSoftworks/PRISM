@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  resolveZenPersonaPresenceDurations,
   resolveZenPersonaTransitionStyle,
+  zenPersonaPresenceAfterPickerSelection,
+  zenPersonaPresenceAfterRestore,
 } from "./zenPersonaTransition.ts";
 
 describe("resolveZenPersonaTransitionStyle", () => {
@@ -66,5 +69,78 @@ describe("resolveZenPersonaTransitionStyle", () => {
       }),
       "previous-introduces"
     );
+  });
+});
+
+describe("zenPersonaPresenceAfterPickerSelection", () => {
+  it("keeps the outgoing bot visible while new-speaks begins departure", () => {
+    assert.deepEqual(
+      zenPersonaPresenceAfterPickerSelection({
+        fromBotId: "bot-a",
+        toBotId: "bot-b",
+        style: "new-speaks",
+      }),
+      {
+        visibleBotId: "bot-a",
+        phase: "departing",
+        targetBotId: "bot-b",
+        waitingForIntroReveal: false,
+      }
+    );
+  });
+
+  it("keeps the outgoing bot stable while previous-introduces reveals", () => {
+    assert.deepEqual(
+      zenPersonaPresenceAfterPickerSelection({
+        fromBotId: "bot-a",
+        toBotId: "bot-b",
+        style: "previous-introduces",
+      }),
+      {
+        visibleBotId: "bot-a",
+        phase: "stable",
+        targetBotId: "bot-b",
+        waitingForIntroReveal: true,
+      }
+    );
+  });
+
+  it("supports transitions back to Default", () => {
+    assert.deepEqual(
+      zenPersonaPresenceAfterPickerSelection({
+        fromBotId: "bot-a",
+        toBotId: null,
+        style: "new-speaks",
+      }),
+      {
+        visibleBotId: "bot-a",
+        phase: "departing",
+        targetBotId: null,
+        waitingForIntroReveal: false,
+      }
+    );
+  });
+
+  it("restores the prior visible bot after an abort or error", () => {
+    assert.deepEqual(zenPersonaPresenceAfterRestore("bot-a"), {
+      visibleBotId: "bot-a",
+      phase: "stable",
+      targetBotId: "bot-a",
+      waitingForIntroReveal: false,
+    });
+  });
+
+  it("collapses leave and arrival timing for reduced motion", () => {
+    assert.deepEqual(resolveZenPersonaPresenceDurations({ reducedMotion: true }), {
+      departMs: 0,
+      arriveMs: 0,
+    });
+  });
+
+  it("uses fixed visual timings by default", () => {
+    assert.deepEqual(resolveZenPersonaPresenceDurations(), {
+      departMs: 260,
+      arriveMs: 360,
+    });
   });
 });

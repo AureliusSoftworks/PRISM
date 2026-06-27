@@ -62,8 +62,8 @@
                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ApiPort, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
                     <TextBlock Grid.Row="2" Text="Web port" Margin="0,4,8,8" />
                     <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding WebPort, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="3" Text="Advertise on LAN" Margin="0,4,8,8" />
-                    <CheckBox Grid.Row="3" Grid.Column="1" IsChecked="{Binding DiscoveryEnabled}" Margin="0,4,0,8" />
+                    <TextBlock Grid.Row="3" Text="Allow access from other devices" Margin="0,4,8,8" />
+                    <CheckBox Grid.Row="3" Grid.Column="1" IsChecked="{Binding LanAccessEnabled}" Margin="0,4,0,8" />
                     <TextBlock Grid.Row="4" Text="Ollama host" Margin="0,4,8,8" />
                     <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding OllamaHost, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
                     <TextBlock Grid.Row="5" Text="Ollama model" Margin="0,4,8,8" />

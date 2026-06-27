@@ -266,7 +266,9 @@ set "LOCALAI_API_ORIGIN=http://127.0.0.1:18789"
 set "NEXT_TELEMETRY_DISABLED=1"
 set "HOSTNAME=0.0.0.0"
 set "PORT=18790"
-call npx next dev -H 0.0.0.0 -p 18790
+REM Next 16/Turbopack can leave the browser pinned on stale CSS HMR chunks for
+REM the large Prism stylesheet. Use webpack dev until that path is stable.
+call npx next dev --webpack -H 0.0.0.0 -p 18790
 
 REM -- Teardown: when the web window exits, take the paired API window with it
 echo.

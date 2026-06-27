@@ -3,9 +3,376 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Prism Desktop</title>
+    <title>Prism</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --accent:   #2fd3e3;
+        --fg:       #e8edf2;
+        --fg-muted: #7a8898;
+        --bg-deep:  #05070b;
+        --bg:       #080c12;
+        --mono:     ui-monospace, "Cascadia Code", "Fira Code", "Menlo", monospace;
+        --sans:     system-ui, -apple-system, sans-serif;
+      }
+
+      html, body {
+        height: 100%;
+        background: var(--bg-deep);
+        color: var(--fg);
+        font-family: var(--sans);
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      /* ── Full-screen veil with aurora gradients ── */
+      .veil {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background:
+          radial-gradient(circle at 50% 40%, color-mix(in srgb, #5de6ff 14%, transparent) 0 18%, transparent 44%),
+          radial-gradient(circle at 36% 58%, color-mix(in srgb, #ff4d6d  9%, transparent) 0 22%, transparent 50%),
+          radial-gradient(circle at 64% 60%, color-mix(in srgb, #ff9f1c  8%, transparent) 0 20%, transparent 46%),
+          var(--bg-deep);
+        animation: veilIn 420ms ease-out both;
+      }
+
+      /* ── Center section (logo + status) ── */
+      .center {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        padding: 32px 24px 8px;
+        animation: floatIn 620ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+      }
+
+      /* ── Halo orbit ── */
+      .halo {
+        position: relative;
+        width: clamp(96px, 17dvh, 132px);
+        height: clamp(96px, 17dvh, 132px);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        isolation: isolate;
+        background: radial-gradient(circle, rgba(255,255,255,0.07) 0 45%, transparent 70%);
+        box-shadow:
+          0 24px 76px rgba(0,0,0,0.36),
+          0 0 60px color-mix(in srgb, #5de6ff 22%, transparent),
+          inset 0 0 0 1px rgba(255,255,255,0.13);
+        animation: haloDrift 2.6s ease-in-out infinite;
+      }
+
+      /* spinning rainbow ring */
+      .ring {
+        position: absolute;
+        inset: -14px;
+        border-radius: 999px;
+        padding: 2px;
+        background: conic-gradient(from 18deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff, #ff4d6d);
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        opacity: 0.86;
+        z-index: -1;
+        animation: ringSpin 4.8s linear infinite;
+      }
+
+      /* blurred conic aura */
+      .aura {
+        position: absolute;
+        inset: -44px;
+        border-radius: 999px;
+        background: conic-gradient(
+          from 120deg,
+          color-mix(in srgb, #ff4d6d 38%, transparent),
+          color-mix(in srgb, #2fd3e3 38%, transparent),
+          color-mix(in srgb, #7b5cff 34%, transparent),
+          color-mix(in srgb, #ff9f1c 34%, transparent),
+          color-mix(in srgb, #ff4d6d 38%, transparent)
+        );
+        filter: blur(28px);
+        opacity: 0.4;
+        z-index: -2;
+        animation: auraPulse 2.8s ease-in-out infinite;
+      }
+
+      /* Prism triangle glyph */
+      .glyph {
+        width: clamp(42px, 7.2dvh, 56px);
+        height: clamp(42px, 7.2dvh, 56px);
+        color: color-mix(in srgb, var(--fg) 92%, #5de6ff 8%);
+        filter:
+          drop-shadow(0 0 16px color-mix(in srgb, currentColor 32%, transparent))
+          drop-shadow(0 3px 10px rgba(0,0,0,0.34));
+        animation: glyphPulse 1.55s ease-in-out infinite;
+      }
+
+      /* ── Status label ── */
+      .label {
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        color: color-mix(in srgb, var(--fg) 86%, var(--fg-muted));
+        text-shadow:
+          0 1px 2px rgba(0,0,0,0.24),
+          0 0 18px color-mix(in srgb, #5de6ff 16%, transparent);
+        min-height: 1.4em;
+        transition: opacity 200ms ease;
+      }
+
+      /* ── Service badges ── */
+      .services {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .svc {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px 4px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: color-mix(in srgb, var(--bg) 72%, transparent);
+        font-size: 0.72rem;
+        font-weight: 640;
+        letter-spacing: 0.02em;
+        color: var(--fg-muted);
+        transition: border-color 300ms ease, color 300ms ease, background 300ms ease;
+      }
+
+      .svc-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--fg-muted);
+        transition: background 300ms ease, box-shadow 300ms ease;
+        animation: dotPulse 1.4s ease-in-out infinite;
+      }
+
+      .svc[data-state="running"] {
+        border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+        color: color-mix(in srgb, var(--fg) 72%, var(--accent));
+      }
+      .svc[data-state="running"] .svc-dot {
+        background: var(--accent);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 64%, transparent);
+      }
+
+      .svc[data-state="ready"] {
+        border-color: color-mix(in srgb, #b7e63a 36%, transparent);
+        color: color-mix(in srgb, var(--fg) 82%, #b7e63a);
+        animation: none;
+      }
+      .svc[data-state="ready"] .svc-dot {
+        background: #b7e63a;
+        box-shadow: 0 0 7px color-mix(in srgb, #b7e63a 56%, transparent);
+        animation: none;
+      }
+
+      .svc[data-state="error"] {
+        border-color: color-mix(in srgb, #ff4d6d 36%, transparent);
+        color: #ff6b84;
+      }
+      .svc[data-state="error"] .svc-dot {
+        background: #ff4d6d;
+        box-shadow: 0 0 7px color-mix(in srgb, #ff4d6d 56%, transparent);
+        animation: none;
+      }
+
+      /* ── Console pane ── */
+      .console {
+        flex: 0 0 auto;
+        width: 100%;
+        max-height: 36dvh;
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        background:
+          linear-gradient(to bottom, transparent 0%, color-mix(in srgb, #000 28%, transparent) 100%),
+          color-mix(in srgb, var(--bg-deep) 88%, #000);
+        border-top: 1px solid rgba(255,255,255,0.05);
+      }
+
+      .console-header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        color: var(--fg-muted);
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+
+      .console-dot { width: 5px; height: 5px; border-radius: 999px; }
+      .console-dot:nth-child(1) { background: #ff5f57; }
+      .console-dot:nth-child(2) { background: #febc2e; }
+      .console-dot:nth-child(3) { background: #28c840; }
+
+      .console-lines {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 8px 0 12px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.1) transparent;
+      }
+
+      .log-line {
+        display: flex;
+        align-items: baseline;
+        gap: 0;
+        padding: 1px 14px;
+        font: 11px/1.55 var(--mono);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .log-src {
+        flex: 0 0 auto;
+        font-weight: 700;
+        margin-right: 8px;
+        min-width: 3.6ch;
+      }
+      .log-src[data-src="api"]    { color: var(--accent); }
+      .log-src[data-src="web"]    { color: #7b5cff; }
+      .log-src[data-src="qdrant"] { color: #ff9f1c; }
+      .log-src[data-src="prism"]  { color: color-mix(in srgb, var(--fg) 60%, var(--fg-muted)); }
+
+      .log-text {
+        flex: 1 1 auto;
+        color: color-mix(in srgb, var(--fg) 64%, var(--fg-muted));
+      }
+
+      /* ── Keyframes ── */
+      @keyframes veilIn    { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes floatIn   { from { opacity: 0; transform: translateY(clamp(48px,10dvh,96px)) scale(0.88); } to { opacity: 1; transform: none; } }
+      @keyframes haloDrift { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-9px) scale(1.025); } }
+      @keyframes ringSpin  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      @keyframes auraPulse { 0%,100% { opacity: 0.32; transform: scale(0.96); } 50% { opacity: 0.52; transform: scale(1.06); } }
+      @keyframes glyphPulse{ 0%,100% { opacity: 0.82; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.06); } }
+      @keyframes dotPulse  { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .halo, .ring, .aura, .glyph, .svc-dot { animation: none !important; }
+        .veil, .center { animation: none !important; }
+      }
+    </style>
   </head>
   <body>
-    <p>Prism Desktop shell bootstrap</p>
+    <div class="veil">
+      <div class="center">
+        <div class="halo" aria-hidden="true">
+          <div class="aura"></div>
+          <div class="ring"></div>
+          <svg class="glyph" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" fill="none" aria-hidden="true">
+            <path d="M28 6L48 43H8L28 6Z" stroke="currentColor" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="10" stroke-width="7"/>
+          </svg>
+        </div>
+
+        <div class="label" id="label" role="status" aria-live="polite">Starting Prism…</div>
+
+        <div class="services" role="list" aria-label="Service status">
+          <div class="svc" id="svc-qdrant" data-state="waiting" role="listitem">
+            <span class="svc-dot"></span>Qdrant
+          </div>
+          <div class="svc" id="svc-api" data-state="waiting" role="listitem">
+            <span class="svc-dot"></span>API
+          </div>
+          <div class="svc" id="svc-web" data-state="waiting" role="listitem">
+            <span class="svc-dot"></span>Web
+          </div>
+        </div>
+      </div>
+
+      <div class="console" role="log" aria-label="Boot log">
+        <div class="console-header">
+          <span class="console-dot"></span>
+          <span class="console-dot"></span>
+          <span class="console-dot"></span>
+          <span style="margin-left:4px">Prism Boot Log</span>
+        </div>
+        <div class="console-lines" id="lines"></div>
+      </div>
+    </div>
+
+    <script>
+      const linesEl = document.getElementById("lines");
+      const labelEl = document.getElementById("label");
+      let autoScroll = true;
+
+      linesEl.addEventListener("scroll", () => {
+        const { scrollTop, scrollHeight, clientHeight } = linesEl;
+        autoScroll = scrollHeight - scrollTop - clientHeight < 32;
+      });
+
+      function appendLog(source, text) {
+        const line = document.createElement("div");
+        line.className = "log-line";
+        const src = document.createElement("span");
+        src.className = "log-src";
+        src.dataset.src = source;
+        src.textContent = source;
+        const msg = document.createElement("span");
+        msg.className = "log-text";
+        msg.textContent = text;
+        line.appendChild(src);
+        line.appendChild(msg);
+        linesEl.appendChild(line);
+        if (autoScroll) linesEl.scrollTop = linesEl.scrollHeight;
+      }
+
+      function setService(id, state) {
+        const el = document.getElementById("svc-" + id);
+        if (el) el.dataset.state = state;
+      }
+
+      const LABELS = {
+        "api:ready": "Loading web interface…",
+        "web:ready": "Ready",
+      };
+
+      function handleStatus(payload) {
+        const { service, state } = payload;
+        setService(service, state);
+        const key = service + ":" + state;
+        if (LABELS[key]) labelEl.textContent = LABELS[key];
+      }
+
+      // Wire Tauri events once the API is available
+      function initTauri() {
+        if (!window.__TAURI__?.event) {
+          setTimeout(initTauri, 50);
+          return;
+        }
+        window.__TAURI__.event.listen("prism-log", (e) => {
+          const { source, line } = e.payload;
+          appendLog(source, line);
+        });
+        window.__TAURI__.event.listen("prism-status", (e) => {
+          handleStatus(e.payload);
+        });
+        appendLog("prism", "Boot log ready.");
+      }
+
+      document.addEventListener("DOMContentLoaded", initTauri);
+    </script>
   </body>
 </html>

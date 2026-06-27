@@ -6,6 +6,8 @@ import {
   DEFAULT_ZEN_FRESH_START_GAP_MS,
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+  DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+  DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
   DEFAULT_ZEN_SESSION_IDLE_GAP_MS,
@@ -19,10 +21,12 @@ import {
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
   MAX_ZEN_CANVAS_TYPING_SPEED,
+  MAX_ZEN_MESSAGE_FONT_SIZE_PX,
   MAX_ZEN_WALLPAPER_OPACITY,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
   MIN_ZEN_ASK_QUESTION_PATIENCE_MS,
   MIN_ZEN_CANVAS_TYPING_SPEED,
+  MIN_ZEN_MESSAGE_FONT_SIZE_PX,
   MIN_ZEN_WALLPAPER_OPACITY,
   normalizeZenWallpaperStyleNotes,
   parseHiddenBotModelIds,
@@ -81,6 +85,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
+    zenMessageFontMinPx: DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
+    zenMessageFontMaxPx: DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: 0,
@@ -852,7 +858,7 @@ describe("resolveNextSettings — Zen Atmosphere text mask", () => {
 });
 
 describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
-  it("enforces grayscale even when clients send boolean values", () => {
+  it("stores the grayscale preference from boolean values", () => {
     assert.equal(
       resolveNextSettings({ zenWallpaperGrayscaleEnabled: true }, baseline())
         .zenWallpaperGrayscaleEnabled,
@@ -863,19 +869,19 @@ describe("resolveNextSettings — Zen Atmosphere grayscale", () => {
         { zenWallpaperGrayscaleEnabled: false },
         baseline({ zenWallpaperGrayscaleEnabled: 1 })
       ).zenWallpaperGrayscaleEnabled,
-      true
+      false
     );
   });
 
-  it("normalizes stored false or invalid grayscale values to enabled", () => {
+  it("preserves stored false and falls back for invalid grayscale values", () => {
     const current = baseline({ zenWallpaperGrayscaleEnabled: 0 });
-    assert.equal(resolveNextSettings({}, current).zenWallpaperGrayscaleEnabled, true);
+    assert.equal(resolveNextSettings({}, current).zenWallpaperGrayscaleEnabled, false);
     assert.equal(
       resolveNextSettings(
         { zenWallpaperGrayscaleEnabled: "sometimes" },
         current
       ).zenWallpaperGrayscaleEnabled,
-      true
+      false
     );
   });
 });
@@ -1096,6 +1102,64 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       resolveNextSettings({ zenCanvasTypingSpeed: "nope" }, current).zenCanvasTypingSpeed,
       1.25
     );
+  });
+
+  it("stores Zen message font bounds", () => {
+    const next = resolveNextSettings(
+      {
+        zenMessageFontMinPx: 17.2,
+        zenMessageFontMaxPx: 34.6,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenMessageFontMinPx, 17.2);
+    assert.equal(next.zenMessageFontMaxPx, 34.6);
+  });
+
+  it("clamps Zen message font bounds while preserving current values for invalid input", () => {
+    const current = baseline({
+      zenMessageFontMinPx: 16.4,
+      zenMessageFontMaxPx: 31.6,
+    });
+
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMinPx: 2 }, current).zenMessageFontMinPx,
+      MIN_ZEN_MESSAGE_FONT_SIZE_PX
+    );
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMaxPx: 90 }, current).zenMessageFontMaxPx,
+      MAX_ZEN_MESSAGE_FONT_SIZE_PX
+    );
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMinPx: 17.24 }, current).zenMessageFontMinPx,
+      17.2
+    );
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMaxPx: 31.66 }, current).zenMessageFontMaxPx,
+      31.7
+    );
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMinPx: "nope" }, current).zenMessageFontMinPx,
+      16.4
+    );
+    assert.equal(
+      resolveNextSettings({ zenMessageFontMaxPx: "nope" }, current).zenMessageFontMaxPx,
+      31.6
+    );
+  });
+
+  it("keeps Zen message max at or above the selected min", () => {
+    const next = resolveNextSettings(
+      {
+        zenMessageFontMinPx: 24,
+        zenMessageFontMaxPx: 18,
+      },
+      baseline()
+    );
+
+    assert.equal(next.zenMessageFontMinPx, 24);
+    assert.equal(next.zenMessageFontMaxPx, 24);
   });
 
   it("stores AskQuestion patience timer settings", () => {

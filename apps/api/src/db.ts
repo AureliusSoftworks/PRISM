@@ -140,7 +140,7 @@ export function createDatabase(): DatabaseSync {
       preferred_openai_image_model TEXT,
       preferred_zen_wallpaper_local_image_model TEXT,
       preferred_zen_wallpaper_openai_image_model TEXT,
-      zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15,
+      zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28,
       zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
       zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1,
       zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1,
@@ -153,6 +153,8 @@ export function createDatabase(): DatabaseSync {
       zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
+      zen_message_font_min_px REAL NOT NULL DEFAULT 15.8,
+      zen_message_font_max_px REAL NOT NULL DEFAULT 32.8,
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
@@ -649,7 +651,7 @@ export function createDatabase(): DatabaseSync {
     (column) => column.name === "zen_wallpaper_opacity"
   );
   if (!hasZenWallpaperOpacity) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.15;");
+    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28;");
   }
   const hasZenWallpaperTextMaskEnabled = userColumns.some(
     (column) => column.name === "zen_wallpaper_text_mask_enabled"
@@ -722,6 +724,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenCanvasTypingSpeed) {
     db.exec("ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;");
+  }
+  const hasZenMessageFontMinPx = userColumns.some(
+    (column) => column.name === "zen_message_font_min_px"
+  );
+  if (!hasZenMessageFontMinPx) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_message_font_min_px REAL NOT NULL DEFAULT 15.8;");
+  }
+  const hasZenMessageFontMaxPx = userColumns.some(
+    (column) => column.name === "zen_message_font_max_px"
+  );
+  if (!hasZenMessageFontMaxPx) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_message_font_max_px REAL NOT NULL DEFAULT 32.8;");
   }
   const hasZenAskQuestionPatienceEnabled = userColumns.some(
     (column) => column.name === "zen_ask_question_patience_enabled"

@@ -672,6 +672,9 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
                 wildcardSlotRange.badge && wildcardSlotRange.labelEnd
                   ? wildcardSlotRange.labelEnd
                   : tokenEnd;
+              const selected =
+                state.selection.from === wildcardSlotRange.from &&
+                state.selection.to === wildcardSlotRange.to;
               decorations.push(
                 Decoration.inline(wildcardSlotRange.from, wildcardSlotRange.from + 1, {
                   class: "tiptapPrismWildcardSlotHiddenSyntax",
@@ -691,7 +694,14 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
               }
               decorations.push(
                 Decoration.inline(tokenStart, visibleTokenEnd, {
-                  class: "tiptapPrismWildcardSlotToken",
+                  class: `tiptapPrismWildcardSlotToken${
+                    selected ? " tiptapPrismWildcardSlotTokenSelected" : ""
+                  }`,
+                  ...(selected
+                    ? {
+                        "data-prism-wildcard-selected": "true",
+                      }
+                    : {}),
                   ...(wildcardSlotRange.badge
                     ? {
                         "data-prism-wildcard-badge": wildcardSlotRange.badge,

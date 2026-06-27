@@ -55,6 +55,7 @@ export interface PrismMoodInterruptionInput {
   assistantMessageId?: string;
   visibleTokenCount?: number;
   totalTokenCount?: number;
+  interruptedContent?: string;
 }
 
 export type PrismMoodIgnoredQuestionPenaltyLevel = "light" | "normal" | "elevated";

@@ -1,14 +1,15 @@
 {
   "name": "@localai/web",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --experimental-strip-types src/app/apiBackendUnavailable.test.ts src/app/askQuestionPatience.test.ts src/app/backendUnavailable.test.ts src/app/botMemoryDossier.test.ts src/app/botMention.test.ts src/app/browserShortcutGuards.test.ts src/app/chatRevealPacing.test.ts src/app/chatRevealTiming.test.ts src/app/chatZenReasoningEffort.test.ts src/app/commandCenterOrdering.test.ts src/app/composerChipActivation.test.ts src/app/composerMentionPortal.test.ts src/app/composerShortcutCompletion.test.ts src/app/coffee-bot-info-card.test.ts src/app/coffee-replay.test.ts src/app/coffee-seat-plate-blink.test.ts src/app/coffee-seat-gaze.test.ts src/app/coffee-user-reveal-flow.test.ts src/app/coffeeOfflineProtection.test.ts src/app/devPanelSafeArea.test.ts src/app/nvmCommand.test.ts src/app/plainTextWordBackspace.test.ts src/app/prismBotMarkdownNav.test.ts src/app/prismDevGating.test.ts src/app/psychicCommand.test.ts src/app/psychicThoughtDisplay.test.ts src/app/promptRandomization.test.ts src/app/promptShortcutChipDisplay.test.ts src/app/promptShortcutPreviewHighlight.test.ts src/app/providerMode.test.ts src/app/story-mode-dialog.test.ts src/app/tiptapPrismDevCommandHighlight.test.ts src/app/undoSlashCommand.test.ts src/app/wildcardDecks.test.ts src/app/youtubeEmbed.test.ts src/app/zenAtmosphere.test.ts src/app/zenCanvasSpeedNudge.test.ts src/app/zenFallbackWallpapers.test.ts src/app/zenPersonaInk.test.ts src/app/zenPersonaTransition.test.ts src/app/zenToolLab.test.ts src/app/zenToneText.test.ts",
+    "test": "node --test --experimental-strip-types src/app/apiBackendUnavailable.test.ts src/app/askQuestionPatience.test.ts src/app/backendUnavailable.test.ts src/app/botMemoryDossier.test.ts src/app/botMention.test.ts src/app/browserShortcutGuards.test.ts src/app/chatRevealPacing.test.ts src/app/chatRevealTiming.test.ts src/app/chatZenReasoningEffort.test.ts src/app/commandCenterOrdering.test.ts src/app/composerChipActivation.test.ts src/app/composerGhostAutocomplete.test.ts src/app/composerMentionPortal.test.ts src/app/composerShortcutCompletion.test.ts src/app/coffee-bot-info-card.test.ts src/app/coffee-replay.test.ts src/app/coffee-seat-plate-blink.test.ts src/app/coffee-seat-gaze.test.ts src/app/coffee-user-reveal-flow.test.ts src/app/coffeeOfflineProtection.test.ts src/app/devPanelSafeArea.test.ts src/app/nvmCommand.test.ts src/app/plainTextWordBackspace.test.ts src/app/prismBotMarkdownNav.test.ts src/app/prismDevChatCommands.test.ts src/app/prismDevGating.test.ts src/app/psychicCommand.test.ts src/app/psychicThoughtDisplay.test.ts src/app/promptRandomization.test.ts src/app/promptShortcutChipDisplay.test.ts src/app/promptShortcutPreviewHighlight.test.ts src/app/providerMode.test.ts src/app/story-mode-dialog.test.ts src/app/tiptapPrismDevCommandHighlight.test.ts src/app/undoSlashCommand.test.ts src/app/wildcardDecks.test.ts src/app/youtubeEmbed.test.ts src/app/zenAtmosphere.test.ts src/app/zenCanvasSpeedNudge.test.ts src/app/zenFallbackWallpapers.test.ts src/app/zenLiveActions.test.ts src/app/zenLiveMouth.test.ts src/app/zenPersonaInk.test.ts src/app/zenPersonaTransition.test.ts src/app/zenToolLab.test.ts src/app/zenToneText.test.ts",
+    "generate:ghost-lexicon": "node scripts/generate-composer-ghost-lexicon.mjs",
     "predev": "npm --prefix ../../packages/shared run build",
     "prebuild": "npm --prefix ../../packages/shared run build",
     "pretypecheck": "npm --prefix ../../packages/shared run build",
-    "dev": "next dev -p 18788",
+    "dev": "next dev --webpack -p 18788",
     "build": "next build",
     "start": "PORT=18788 node .next/standalone/apps/web/server.js",
     "lint": "eslint",
@@ -27,7 +28,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "subtlex-word-frequencies": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
