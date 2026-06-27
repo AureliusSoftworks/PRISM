@@ -12,6 +12,17 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.4] - 2026-06-27
+
+### Desktop
+
+- **NSIS hook compile error fixed.** The hook used `nsProcess` (not
+  available in Tauri's NSIS build environment) instead of Tauri's
+  bundled `nsis_tauri_utils` plugin. Replaced with
+  `nsis_tauri_utils::KillProcessCurrentUser`. Also fixed NSIS string
+  escaping for the PowerShell command (`$$` for literal `$`, `$\"` for
+  literal `"`). The EXE installer is now produced again alongside the MSI.
+
 ## [0.4.3] - 2026-06-27
 
 ### Desktop
