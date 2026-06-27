@@ -42887,6 +42887,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
 }
 
+.networkToggleRow span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
 .networkToggleRow[data-disabled="true"] {
   cursor: default;
   opacity: 0.72;
