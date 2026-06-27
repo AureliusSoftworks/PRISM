@@ -12,6 +12,17 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.2] - 2026-06-27
+
+### Desktop
+
+- **Windows Job Object fix (compile error in 0.4.1).** The `windows-sys`
+  crate used in 0.4.1 defines `HANDLE` as `*mut c_void` in v0.59, making
+  the static job handle non-`Send`. Re-implemented using a zero-dependency
+  `extern "system"` declaration against kernel32 directly, with a manually
+  mirrored `JOBOBJECT_BASIC_LIMIT_INFORMATION` struct. Behaviour is
+  identical — child processes are still killed automatically on parent exit.
+
 ## [0.4.1] - 2026-06-26
 
 ### Desktop
