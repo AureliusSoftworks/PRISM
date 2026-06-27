@@ -12,6 +12,19 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.5] - 2026-06-27
+
+### Fixed
+
+- **"Restart Prism" notice no longer persists after restarting.** The
+  desktop app was hardcoding loopback (`127.0.0.1`) for both the API and
+  web servers regardless of the Network settings toggle, so `desiredLanAccess`
+  and `boundLanActive` were always out of sync and the "Saved. Restart Prism
+  to apply the new network setting." message appeared permanently. The desktop
+  app now reads `network.json` at startup and binds to `0.0.0.0` when "Access
+  from other devices" is enabled, or loopback when it is not. Toggling the
+  setting and restarting now takes effect correctly.
+
 ## [0.4.4] - 2026-06-27
 
 ### Desktop

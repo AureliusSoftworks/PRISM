@@ -206,6 +206,24 @@ fn bundled_runtime_root(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// Read the persisted LAN-access preference from `network.json` in the app data
+/// directory. Returns `false` (private/loopback) when the file is absent or
+/// unreadable — the same safe default as the server-side logic.
+fn read_lan_access_enabled(data_dir: &std::path::Path) -> bool {
+    let path = data_dir.join("network.json");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let val: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    val.get("lanAccessEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn runtime_root(app: &AppHandle) -> PathBuf {
     if let Ok(custom) = std::env::var("PRISM_DESKTOP_RUNTIME_ROOT") {
         return PathBuf::from(custom);
@@ -391,6 +409,10 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let api_port = pick_available_port(DEFAULT_API_PORT, &[])?;
     let web_port = pick_available_port(DEFAULT_WEB_PORT, &[api_port])?;
     let localai_api_origin = format!("http://127.0.0.1:{api_port}");
+    // Honour the persisted LAN-access preference: bind to 0.0.0.0 when the
+    // user has enabled "Access from other devices", loopback otherwise.
+    let lan_access = read_lan_access_enabled(&localai_data_dir);
+    let bind_host = if lan_access { "0.0.0.0" } else { "127.0.0.1" };
     let qdrant_url = "http://127.0.0.1:6333";
     let web_cwd = web
         .parent()
@@ -424,7 +446,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .arg(&api)
         .current_dir(&root)
         .env("API_PORT", api_port.to_string())
-        .env("API_HOST", "127.0.0.1")
+        .env("API_HOST", bind_host)
         .env("WEB_PORT", web_port.to_string())
         .env("LOCALAI_DATA_DIR", localai_data_dir_value.clone())
         .env("QDRANT_URL", qdrant_url)
@@ -451,7 +473,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .arg(&web)
         .current_dir(&web_cwd)
         .env("PORT", web_port.to_string())
-        .env("HOSTNAME", "127.0.0.1")
+        .env("HOSTNAME", bind_host)
         .env("API_PORT", api_port.to_string())
         .env("LOCALAI_API_ORIGIN", localai_api_origin)
         .env("PRISM_DESKTOP_MODE", "1")
