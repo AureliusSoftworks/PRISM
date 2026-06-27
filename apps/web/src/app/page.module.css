@@ -3151,6 +3151,10 @@
   --settings-section-color: #ff4f85;
 }
 
+.settingsSection[data-settings-section="network"] {
+  --settings-section-color: #4f9dff;
+}
+
 .settingsSectionHeader {
   display: flex;
   justify-content: space-between;
@@ -42899,8 +42903,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .networkToggleRow input[type="checkbox"] {
+  /* `.form input` forces width:100% (for text fields); without resetting it
+     here the checkbox's flex-basis fills the whole row and crushes the label
+     text to one character per line. Match the 16px used by `.checkbox input`. */
+  width: 16px;
+  height: 16px;
   margin-top: 3px;
   flex: 0 0 auto;
+  accent-color: var(--settings-section-color);
 }
 
 .networkToggleRow strong {

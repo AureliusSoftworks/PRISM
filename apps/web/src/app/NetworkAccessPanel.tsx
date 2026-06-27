@@ -121,7 +121,7 @@ export function NetworkAccessPanel({
 
   return (
     <section
-      className={styles.settingsSection}
+      className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
       data-settings-section="network"
       aria-labelledby="settings-network-title"
     >
