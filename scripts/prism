@@ -20,6 +20,7 @@ MAC_SERVER_APP_PATH="apps/server-mac/DerivedData/Build/Products/Debug/Prism Serv
 usage() {
   cat <<'USAGE'
 Usage:
+  prism                 (launches the local web dev server)
   prism ios
   prism phone
   prism mac-client
@@ -37,9 +38,10 @@ Aliases:
   prism server
 
 Notes:
-  prism up runs the combined dev launcher (`npm run dev`) which
-  starts/restarts both API (http://localhost:18787) and web
-  (http://localhost:18788) together in one foreground session.
+  prism (with no arguments) and prism up both run the combined dev
+  launcher (`npm run dev`) which starts/restarts both API
+  (http://localhost:18787) and web (http://localhost:18788) together
+  in one foreground session.
   prism down shuts down the local API/web dev processes by freeing
   ports 18787 and 18788.
   prism standalone builds the desktop app and opens the folder containing
@@ -530,7 +532,7 @@ case "${1:-}" in
   mac-server | server)
     run_mac_server
     ;;
-  up | web)
+  "" | up | web)
     run_web
     ;;
   down)
