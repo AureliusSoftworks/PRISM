@@ -10,6 +10,54 @@ use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::io::AsRawHandle;
+
+// Windows Job Object with KILL_ON_JOB_CLOSE: when PRISM.exe exits or is
+// forcefully terminated by an installer, Windows automatically kills every
+// child process (node.exe, qdrant.exe, etc.) assigned to the job, releasing
+// file locks before the installer overwrites the runtime binaries.
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::{
+    Foundation::HANDLE,
+    System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    },
+};
+
+#[cfg(target_os = "windows")]
+static CHILD_JOB: std::sync::OnceLock<HANDLE> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn init_child_job() {
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job == 0 { return; }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            std::ptr::addr_of!(info) as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0 { return; }
+        let _ = CHILD_JOB.set(job);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn assign_to_child_job(child: &Child) {
+    if let Some(&job) = CHILD_JOB.get() {
+        unsafe { let _ = AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE); }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn init_child_job() {}
+#[cfg(not(target_os = "windows"))]
+fn assign_to_child_job(_child: &Child) {}
 
 trait CommandNoWindow {
     fn no_window(&mut self) -> &mut Self;
@@ -255,6 +303,7 @@ fn spawn_log_tee(
 }
 
 fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16, u16)> {
+    init_child_job();
     let root = runtime_root(app);
     let node = node_binary(&root);
     let api = api_entrypoint(&root).ok_or_else(|| {
@@ -326,6 +375,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .no_window()
         .spawn()
         .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
+    assign_to_child_job(&qdrant_child);
     emit_status(app, "qdrant", "running");
     emit_log(app, "qdrant", &format!("Started (pid {})", qdrant_child.id()));
 
@@ -350,6 +400,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
             io_error(format!("Failed to start Prism API: {e}"))
         })?;
 
+    assign_to_child_job(&api_child);
     if let Some(stdout) = api_child.stdout.take() {
         spawn_log_tee(stdout, api_stdout_file, app.clone(), "api");
     }
@@ -376,6 +427,7 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
             io_error(format!("Failed to start Prism web runtime: {e}"))
         })?;
 
+    assign_to_child_job(&web_child);
     if let Some(stdout) = web_child.stdout.take() {
         spawn_log_tee(stdout, web_stdout_file, app.clone(), "web");
     }
