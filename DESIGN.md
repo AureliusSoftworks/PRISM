@@ -174,12 +174,17 @@ Conversations support `parent_id` and `fork_message_id`. Forking copies all mess
 ## Deployment
 
 Docker Compose with four services:
-1. `nginx` — LAN ingress on port 80, proxies `/api/` to backend, `/` to frontend
+1. `nginx` — front door on port 80, proxies `/api/` to backend, `/` to frontend
 2. `web` — Next.js standalone production build
 3. `api` — Node.js backend with SQLite and Qdrant clients
 4. `qdrant` — vector database with persistent volume
 
 All services use `restart: unless-stopped` for headless boot recovery.
+
+**Local-first networking:** published ports bind to `127.0.0.1` by default, so a
+fresh deployment is private to the host. Local-network access is an explicit,
+host-only opt-in (`PRISM_LAN_ACCESS` / Settings -> Network) that flips the web and
+API binds to `0.0.0.0` and enables mDNS discovery. Qdrant always stays loopback.
 
 ## Clients and distribution (current)
 

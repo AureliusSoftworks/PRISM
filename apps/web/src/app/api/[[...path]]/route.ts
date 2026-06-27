@@ -18,6 +18,27 @@ const API_ORIGIN = (process.env.LOCALAI_API_ORIGIN ?? "http://127.0.0.1:18787").
   ""
 );
 
+/**
+ * Whether this web front-end is itself exposed on the local network. Launch
+ * scripts / Docker set `PRISM_WEB_LAN=1` when binding to all interfaces. The API
+ * uses the `x-prism-web-origin` marker we stamp below (never a client-supplied
+ * value) to keep the network toggle host-only.
+ */
+const WEB_IS_LAN_EXPOSED = process.env.PRISM_WEB_LAN === "1";
+
+/**
+ * Headers a remote browser must never be able to set: anything we use to reason
+ * about request locality. We strip them before forwarding and stamp our own.
+ */
+const UNTRUSTED_LOCALITY_HEADERS = new Set([
+  "x-prism-web-origin",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "forwarded",
+]);
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 /** Upper bound for hosted deployments (e.g. Vercel); local `next dev` ignores this. */
@@ -59,10 +80,13 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
 
   const headers = new Headers();
   request.headers.forEach((value, key) => {
-    if (!hopByHopRequest.has(key.toLowerCase())) {
+    const lower = key.toLowerCase();
+    if (!hopByHopRequest.has(lower) && !UNTRUSTED_LOCALITY_HEADERS.has(lower)) {
       headers.set(key, value);
     }
   });
+  // Stamp our own bind mode so the API can keep the network toggle host-only.
+  headers.set("x-prism-web-origin", WEB_IS_LAN_EXPOSED ? "lan" : "loopback");
 
   const init: RequestInit & { duplex?: "half" } = {
     method: request.method,

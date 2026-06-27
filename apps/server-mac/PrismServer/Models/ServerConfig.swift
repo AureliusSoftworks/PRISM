@@ -7,6 +7,10 @@ struct ServerConfig: Equatable {
     var serverName: String
     var apiPort: Int
     var webPort: Int
+    /// When false (default), Prism stays private to this Mac. When true, the web
+    /// and API bind to all interfaces so other devices on the network can reach
+    /// it. Discovery (mDNS) only advertises while this is true.
+    var lanAccessEnabled: Bool
     var discoveryEnabled: Bool
     var sessionCookieName: String
     var sessionTtlHours: Int
@@ -28,6 +32,7 @@ struct ServerConfig: Equatable {
         serverName: "Prism Server",
         apiPort: 18_787,
         webPort: 18_788,
+        lanAccessEnabled: false,
         discoveryEnabled: true,
         sessionCookieName: "localai_session",
         sessionTtlHours: 24,
@@ -44,7 +49,10 @@ struct ServerConfig: Equatable {
         var env: [String: String] = [
             "API_PORT": String(apiPort),
             "PORT": String(webPort),
-            "HOSTNAME": Self.lanWebBindHost,
+            "PRISM_WEB_PORT": String(webPort),
+            "HOSTNAME": lanAccessEnabled ? Self.lanWebBindHost : Self.localAPIOriginHost,
+            "PRISM_LAN_ACCESS": lanAccessEnabled ? "true" : "false",
+            "PRISM_WEB_LAN": lanAccessEnabled ? "1" : "0",
             "LOCALAI_API_ORIGIN": "http://\(Self.localAPIOriginHost):\(apiPort)",
             "PRISM_SERVER_NAME": serverName,
             "PRISM_DISCOVERY_ENABLED": discoveryEnabled ? "true" : "false",

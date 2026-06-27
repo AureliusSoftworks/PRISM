@@ -23,10 +23,10 @@ describe("Zen Tool Lab", () => {
     );
   });
 
-  it("builds a three-option AskQuestion sample", () => {
+  it("builds a four-option AskQuestion sample", () => {
     const sample = buildZenToolLabMessageSample("ask-question");
     assert.equal(sample.askQuestion?.name, "AskQuestion");
-    assert.equal(sample.askQuestion?.options.length, 3);
+    assert.equal(sample.askQuestion?.options.length, 4);
   });
 
   it("builds a binary AskQuestion sample", () => {

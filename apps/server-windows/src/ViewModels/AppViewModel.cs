@@ -215,6 +215,12 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         set => UpdateConfig(_config with { WebPort = value });
     }
 
+    public bool LanAccessEnabled
+    {
+        get => _config.LanAccessEnabled;
+        set => UpdateConfig(_config with { LanAccessEnabled = value });
+    }
+
     public bool DiscoveryEnabled
     {
         get => _config.DiscoveryEnabled;

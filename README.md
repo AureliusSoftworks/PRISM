@@ -102,6 +102,27 @@ npm run dev
 
 ---
 
+## Network access (private by default)
+
+Prism runs **only on the computer it is installed on** unless you choose to
+share it. Out of the box the web app, API, and supporting services all listen on
+`127.0.0.1` (loopback), so nothing else on your network can connect.
+
+To reach Prism from your phone or another computer on the same network:
+
+- **In the app:** open **Settings -> Network -> Share on local network**, turn it
+  on, then restart Prism. The panel then shows the addresses (for example
+  `http://192.168.1.20:18788`) to open from your other device.
+- **Mac/Windows server app:** toggle **Allow access from other devices on this
+  network** in setup; the app restarts itself to apply.
+- **Docker:** set `PRISM_BIND_HOST=0.0.0.0`, `PRISM_LAN_ACCESS=true`, and
+  `PRISM_WEB_LAN=1` in `.env`, then `docker compose up -d`.
+
+For safety, network access can only be switched on/off from the host machine
+itself, and turning it on may prompt your OS to allow incoming connections.
+
+---
+
 ## Architecture (today, simplified)
 
 ```text

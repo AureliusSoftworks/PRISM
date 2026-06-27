@@ -137,6 +137,18 @@ function normalizeComfyUiHost(value: string | undefined): string {
 export interface AppConfig {
   apiPort: number;
   serverName: string;
+  /**
+   * Whether other devices on the local network may reach this server. When
+   * false (the default), services bind to loopback only and stay private to the
+   * host machine. The API server overlays a persisted file value on top of this
+   * env-derived default; see `resolveLanAccessEnabled` in the API layer.
+   */
+  lanAccessEnabled: boolean;
+  /**
+   * Opt-out for mDNS/Bonjour advertisement. Discovery only ever advertises when
+   * `lanAccessEnabled` is also true, so this can never imply network exposure on
+   * its own.
+   */
   discoveryEnabled: boolean;
   sessionCookieName: string;
   sessionTtlHours: number;
@@ -159,6 +171,7 @@ export function getAppConfig(): AppConfig {
   return {
     apiPort: Number(process.env.API_PORT ?? "18787"),
     serverName: process.env.PRISM_SERVER_NAME ?? "Prism Server",
+    lanAccessEnabled: readBooleanEnv("PRISM_LAN_ACCESS", false),
     discoveryEnabled: readBooleanEnv("PRISM_DISCOVERY_ENABLED", true),
     sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "localai_session",
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? "24"),

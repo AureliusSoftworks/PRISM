@@ -184,6 +184,27 @@ describe("AskQuestion patience timer", () => {
     );
   });
 
+  it("keeps four-option AskQuestion rows selectable", () => {
+    const askQuestion: TestAskQuestion = {
+      name: "AskQuestion",
+      prompt: "Pick a route:",
+      options: [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+        { id: "c", label: "C" },
+        { id: "d", label: "D" },
+      ],
+    };
+
+    assert.deepEqual(
+      pendingAskQuestion([
+        { id: "user-1", role: "user" },
+        { id: "assistant-1", role: "assistant", askQuestion },
+      ]),
+      { askQuestion, assistantMessageId: "assistant-1" }
+    );
+  });
+
   it("closes an AskQuestion once a later assistant turn exists", () => {
     assert.equal(
       pendingAskQuestion([

@@ -57,7 +57,13 @@ function assertBuild(build) {
 
 async function updateJsonVersion(relativePath, version) {
   const absolutePath = path.join(repoRoot, relativePath);
-  const raw = await readFile(absolutePath, "utf8");
+  let raw;
+  try {
+    raw = await readFile(absolutePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return false;
+    throw err;
+  }
   const parsed = JSON.parse(raw);
   const previousVersion = parsed.version;
   parsed.version = version;
@@ -70,7 +76,13 @@ async function updateJsonVersion(relativePath, version) {
 
 async function replaceInFile(relativePath, replacer) {
   const absolutePath = path.join(repoRoot, relativePath);
-  const original = await readFile(absolutePath, "utf8");
+  let original;
+  try {
+    original = await readFile(absolutePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return false;
+    throw err;
+  }
   const updated = replacer(original);
   if (updated !== original) {
     await writeFile(absolutePath, updated, "utf8");

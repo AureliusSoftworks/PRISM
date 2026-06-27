@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { getAppConfig } from "@localai/config";
+import { getAppConfig, type AppConfig } from "@localai/config";
 import {
   createDatabase,
   loadPrismMoodEventMessageIds,
@@ -34,6 +34,17 @@ import {
 } from "./setup-automation.ts";
 import { startPrismDiscovery, type StopDiscovery } from "./discovery.ts";
 import {
+  buildLanUrls,
+  canEditNetworkAccess as decideCanEditNetworkAccess,
+  isLoopbackAddress,
+  lanAccessManagedByEnv,
+  listLanIpv4Addresses,
+  resolveApiBindHost,
+  resolveLanAccessEnabled,
+  resolveWebPublicPort,
+  writePersistedLanAccess,
+} from "./network-config.ts";
+import {
   decideZenAutonomyTurn,
   loadPersistedConversationForChatResponse,
   normalizeSessionResumeContext,
@@ -42,6 +53,12 @@ import {
   refreshConversationTitle,
   upsertBotOpinion,
 } from "./chat.ts";
+import {
+  generateZenLiveActionReaction,
+  normalizeZenLiveActionContextInput,
+  normalizeZenLiveActionInterruptInput,
+  normalizeZenLiveActionReactionRequest,
+} from "./zen-live-actions.ts";
 import {
   cancelActiveImageJobForConversation,
   peekActiveImageJobForUser,
@@ -145,6 +162,8 @@ import {
   normalizeZenAutonomyEnabled,
   normalizeZenCanvasTypingSpeed,
   normalizeZenFreshStartGapMs,
+  normalizeZenMessageFontMaxPx,
+  normalizeZenMessageFontMinPx,
   normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
@@ -272,6 +291,16 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 const config = getAppConfig();
 const db = createDatabase();
 const masterKey = deriveMasterKey(config.encryptionMasterKey);
+/**
+ * Runtime view of local-network access. `boundLanActive` reflects what the
+ * process actually bound at startup (immutable for the process lifetime);
+ * `desiredLanAccess` is the persisted choice and may change at runtime via the
+ * toggle. A mismatch means a restart is required to apply the change.
+ */
+const networkState: { desiredLanAccess: boolean; boundLanActive: boolean } = {
+  desiredLanAccess: false,
+  boundLanActive: false,
+};
 const backupAdapter = new LocalOnlyBackupAdapter();
 const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
@@ -472,6 +501,8 @@ interface UserDbRow {
   zen_wallpaper_reveal_span_message_count: number | null;
   zen_mood_sensitivity: number | null;
   zen_canvas_typing_speed: number | null;
+  zen_message_font_min_px: number | null;
+  zen_message_font_max_px: number | null;
   zen_ask_question_patience_enabled: number | null;
   zen_ask_question_patience_ms: number | null;
   zen_autonomy_enabled: number | null;
@@ -533,14 +564,33 @@ function requireAuth(ctx: RequestContext): string {
 }
 
 function isLoopbackRequest(ctx: RequestContext): boolean {
-  const address = ctx.req.socket.remoteAddress;
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+  return isLoopbackAddress(ctx.req.socket.remoteAddress);
 }
 
 function requireLoopback(ctx: RequestContext): void {
   if (!isLoopbackRequest(ctx)) {
     throw new Error("Local pairing codes can only be generated on this Mac.");
   }
+}
+
+/**
+ * Whether the local-network toggle may be changed by this request.
+ *
+ * The guarantee "only the host machine can widen exposure" survives the web
+ * reverse-proxy: we never trust client-supplied forwarding headers, only the
+ * direct socket peer plus a server-set `x-prism-web-origin` marker that the web
+ * proxy stamps from its OWN bind mode (and strips any client copy of). A LAN
+ * device cannot reach the API over loopback, and once the web front-end is
+ * itself LAN-exposed we can no longer prove a proxied request is local, so the
+ * toggle becomes host-only (native app / host CLI) until switched off.
+ */
+function canEditNetworkAccess(ctx: RequestContext): boolean {
+  const header = ctx.req.headers["x-prism-web-origin"];
+  return decideCanEditNetworkAccess({
+    peerAddress: ctx.req.socket.remoteAddress,
+    webOrigin: Array.isArray(header) ? header[0] : header,
+    managedByEnv: lanAccessManagedByEnv(),
+  });
 }
 
 function requireLocalDeveloperRequest(ctx: RequestContext): void {
@@ -616,7 +666,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -856,6 +906,9 @@ function readPrismInterruption(value: unknown): PrismMoodInterruptionInput | und
       : {}),
     ...(typeof record.totalTokenCount === "number" && Number.isFinite(record.totalTokenCount)
       ? { totalTokenCount: Math.max(1, Math.floor(record.totalTokenCount)) }
+      : {}),
+    ...(typeof record.interruptedContent === "string" && record.interruptedContent.trim().length > 0
+      ? { interruptedContent: record.interruptedContent.trim() }
       : {}),
   };
 }
@@ -1461,6 +1514,57 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         report,
         health,
+      });
+    }),
+    route("GET", "/api/network", async (ctx) => {
+      requireAuth(ctx);
+      const webPort = resolveWebPublicPort();
+      const addresses = networkState.boundLanActive ? listLanIpv4Addresses() : [];
+      json(ctx.res, 200, {
+        ok: true,
+        network: {
+          lanAccessEnabled: networkState.desiredLanAccess,
+          active: networkState.boundLanActive,
+          restartRequired:
+            networkState.desiredLanAccess !== networkState.boundLanActive,
+          canEdit: canEditNetworkAccess(ctx),
+          managedByEnv: lanAccessManagedByEnv(),
+          apiPort: config.apiPort,
+          webPort,
+          addresses,
+          lanUrls: buildLanUrls(addresses, webPort, config.apiPort),
+        },
+      });
+    }),
+    route("POST", "/api/network", async (ctx) => {
+      requireAuth(ctx);
+      requireLoopback(ctx);
+      if (lanAccessManagedByEnv()) {
+        throw new HttpError(
+          409,
+          "Local network access is managed by this server's environment configuration; change it where Prism is launched."
+        );
+      }
+      if (!canEditNetworkAccess(ctx)) {
+        throw new HttpError(
+          403,
+          "Local network access can only be changed from this computer. Use the Prism app on the host machine."
+        );
+      }
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.lanAccessEnabled !== "boolean") {
+        throw new HttpError(400, "lanAccessEnabled (boolean) is required.");
+      }
+      writePersistedLanAccess(body.lanAccessEnabled);
+      networkState.desiredLanAccess = body.lanAccessEnabled;
+      json(ctx.res, 200, {
+        ok: true,
+        network: {
+          lanAccessEnabled: networkState.desiredLanAccess,
+          active: networkState.boundLanActive,
+          restartRequired:
+            networkState.desiredLanAccess !== networkState.boundLanActive,
+        },
       });
     }),
     route("POST", "/api/auth/register", async (ctx) => {
@@ -2413,6 +2517,7 @@ function buildRoutes(): RouteDefinition[] {
           botSystemPrompt:
             wallpaperBot?.system_prompt ?? conversation.bot_system_prompt,
           styleNotes: user.zen_wallpaper_style_notes,
+          generationIndex: existingWallpaper.history.length,
         });
 
       const botForcesLocal =
@@ -3583,6 +3688,64 @@ function buildRoutes(): RouteDefinition[] {
         model: resolvedAuto.model,
       });
     }),
+    route("POST", "/api/zen/live-action-reaction", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const request = normalizeZenLiveActionReactionRequest(ctx.body);
+      if (!request) {
+        throw new HttpError(400, "A Zen live action request is required.");
+      }
+      const user = getUserRow(userId);
+      let personaName = request.personaName?.trim() || "Prism";
+      let personaSystemPrompt: string | undefined;
+      if (request.activeBotId) {
+        const bot = db
+          .prepare(
+            "SELECT name, system_prompt, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+          )
+          .get(request.activeBotId, userId) as
+          | {
+              name?: string;
+              system_prompt?: string;
+              flirt_enabled?: number | null;
+            }
+          | undefined;
+        if (bot) {
+          personaName = bot.name?.trim() || personaName;
+          personaSystemPrompt = composeBotSystemPrompt(
+            personaName,
+            bot.system_prompt,
+            bot.flirt_enabled === 1
+          );
+        }
+      }
+      const liveActionAbort = new AbortController();
+      const onLiveActionClientClose = () => {
+        if (!ctx.res.writableEnded) {
+          liveActionAbort.abort();
+        }
+      };
+      ctx.req.once("close", onLiveActionClientClose);
+      ctx.req.once("aborted", onLiveActionClientClose);
+      ctx.res.once("close", onLiveActionClientClose);
+      try {
+        const provider = getAuxiliaryProvider(
+          user.prism_default_llm_model,
+          dualOllamaWorkloadOptions(user)
+        );
+        const reaction = await generateZenLiveActionReaction({
+          provider,
+          request,
+          personaName,
+          personaSystemPrompt,
+          signal: liveActionAbort.signal,
+        });
+        json(ctx.res, 200, { ok: true, reaction });
+      } finally {
+        ctx.req.off("close", onLiveActionClientClose);
+        ctx.req.off("aborted", onLiveActionClientClose);
+        ctx.res.off("close", onLiveActionClientClose);
+      }
+    }),
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -3604,11 +3767,16 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen" ? readZenAutonomy(body.zenAutonomy) : undefined;
       const requestedAskQuestionPatience =
         mode === "zen" ? readZenAskQuestionPatience(body.zenAskQuestionPatience) : undefined;
+      const requestedZenLiveActionInterrupt =
+        mode === "zen"
+          ? normalizeZenLiveActionInterruptInput(body.zenLiveActionInterrupt)
+          : undefined;
       const message =
         starterPrompt ||
         requestedPersonaTransition ||
         requestedZenAutonomy ||
-        requestedAskQuestionPatience
+        requestedAskQuestionPatience ||
+        requestedZenLiveActionInterrupt
           ? ""
           : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(body.promptShortcut);
@@ -3662,13 +3830,20 @@ function buildRoutes(): RouteDefinition[] {
       const topicReset = mode === "zen" && body.topicReset === true;
       const prismInterruption =
         mode === "zen" ? readPrismInterruption(body.prismInterruption) : undefined;
+      const zenLiveActionContext =
+        mode === "zen" ? normalizeZenLiveActionContextInput(body.zenLiveActionContext) : undefined;
       const personaTransition =
         mode === "zen" ? requestedPersonaTransition : undefined;
       const zenAutonomy = mode === "zen" ? requestedZenAutonomy : undefined;
       const zenAskQuestionPatience =
         mode === "zen" ? requestedAskQuestionPatience : undefined;
+      const zenLiveActionInterrupt =
+        mode === "zen" ? requestedZenLiveActionInterrupt : undefined;
       if (zenAskQuestionPatience && botId === undefined) {
         effectiveBotId = zenAskQuestionPatience.activeBotId;
+      }
+      if (zenLiveActionInterrupt && botId === undefined) {
+        effectiveBotId = zenLiveActionInterrupt.activeBotId;
       }
       if (zenAutonomy) {
         if (!normalizeZenAutonomyEnabled(user.zen_autonomy_enabled)) {
@@ -3936,6 +4111,8 @@ function buildRoutes(): RouteDefinition[] {
             ...(personaTransition ? { personaTransition } : {}),
             ...(zenAutonomy ? { zenAutonomy } : {}),
             ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
+            ...(zenLiveActionContext ? { zenLiveActionContext } : {}),
+            ...(zenLiveActionInterrupt ? { zenLiveActionInterrupt } : {}),
             incognito,
             ephemeralMessages,
             botSystemPrompt,
@@ -4965,6 +5142,9 @@ function buildRoutes(): RouteDefinition[] {
         ...(parsedPrismInterruption?.totalTokenCount !== undefined
           ? { totalTokenCount: parsedPrismInterruption.totalTokenCount }
           : {}),
+        ...(parsedPrismInterruption?.interruptedContent
+          ? { interruptedContent: parsedPrismInterruption.interruptedContent }
+          : {}),
       };
       const currentMood = loadPrismMoodState(db, userId, message.conversation_id, mode) ??
         createDefaultPrismMoodState(mode, now);
@@ -5092,6 +5272,9 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const zenMessageFontMinPx = normalizeZenMessageFontMinPx(
+        user.zen_message_font_min_px
+      );
       json(ctx.res, 200, {
         ok: true,
         settings: {
@@ -5185,6 +5368,12 @@ function buildRoutes(): RouteDefinition[] {
           ),
           zenCanvasTypingSpeed: normalizeZenCanvasTypingSpeed(
             user.zen_canvas_typing_speed
+          ),
+          zenMessageFontMinPx,
+          zenMessageFontMaxPx: normalizeZenMessageFontMaxPx(
+            user.zen_message_font_max_px,
+            undefined,
+            zenMessageFontMinPx
           ),
           zenAskQuestionPatienceEnabled: normalizeZenAskQuestionPatienceEnabled(
             user.zen_ask_question_patience_enabled
@@ -5400,6 +5589,8 @@ function buildRoutes(): RouteDefinition[] {
           user.zen_wallpaper_reveal_span_message_count,
         zenMoodSensitivity: user.zen_mood_sensitivity,
         zenCanvasTypingSpeed: user.zen_canvas_typing_speed,
+        zenMessageFontMinPx: user.zen_message_font_min_px,
+        zenMessageFontMaxPx: user.zen_message_font_max_px,
         zenAskQuestionPatienceEnabled: user.zen_ask_question_patience_enabled,
         zenAskQuestionPatienceMs: user.zen_ask_question_patience_ms,
         zenAutonomyEnabled: user.zen_autonomy_enabled,
@@ -5462,7 +5653,7 @@ function buildRoutes(): RouteDefinition[] {
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -5506,6 +5697,8 @@ function buildRoutes(): RouteDefinition[] {
         next.zenWallpaperRevealSpanMessageCount,
         next.zenMoodSensitivity,
         next.zenCanvasTypingSpeed,
+        next.zenMessageFontMinPx,
+        next.zenMessageFontMaxPx,
         next.zenAskQuestionPatienceEnabled ? 1 : 0,
         next.zenAskQuestionPatienceMs,
         next.zenAutonomyEnabled ? 1 : 0,
@@ -6795,8 +6988,17 @@ process.on("SIGTERM", () => {
   void shutdown("SIGTERM").then(() => process.exit(0));
 });
 
-const apiHost = process.env.API_HOST || "0.0.0.0";
+const lanAccessEnabled = resolveLanAccessEnabled(config);
+const apiHost = resolveApiBindHost(lanAccessEnabled);
+networkState.desiredLanAccess = lanAccessEnabled;
+networkState.boundLanActive = apiHost === "0.0.0.0";
+const effectiveConfig: AppConfig = { ...config, lanAccessEnabled };
 server.listen(config.apiPort, apiHost, () => {
-  console.log(`API ready at http://${apiHost}:${config.apiPort}`);
-  stopDiscovery = startPrismDiscovery(config);
+  const reachability = networkState.boundLanActive
+    ? "reachable on your local network"
+    : "private to this machine";
+  console.log(
+    `API ready at http://${apiHost}:${config.apiPort} (${reachability})`
+  );
+  stopDiscovery = startPrismDiscovery(effectiveConfig);
 });

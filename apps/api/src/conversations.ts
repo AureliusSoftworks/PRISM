@@ -467,11 +467,7 @@ export function appendZenWallpaperHistoryEntry(
   const normalizedEntry = normalizeZenWallpaperHistoryEntry(entry);
   if (!normalizedEntry) return parseZenWallpaperHistory(rawHistory);
   const history = parseZenWallpaperHistory(rawHistory);
-  const existing = history.find(
-    (item) =>
-      item.imageId === normalizedEntry.imageId ||
-      item.generationMessageCount === normalizedEntry.generationMessageCount
-  );
+  const existing = history.find((item) => item.imageId === normalizedEntry.imageId);
   const mergedEntry: ZenWallpaperHistoryEntry = existing
     ? {
         ...existing,
@@ -483,11 +479,7 @@ export function appendZenWallpaperHistoryEntry(
         createdAt: normalizedEntry.createdAt ?? existing.createdAt,
       }
     : normalizedEntry;
-  const previous = history.filter(
-    (item) =>
-      item.imageId !== mergedEntry.imageId &&
-      item.generationMessageCount !== mergedEntry.generationMessageCount
-  );
+  const previous = history.filter((item) => item.imageId !== mergedEntry.imageId);
   return normalizeZenWallpaperHistory([...previous, mergedEntry]);
 }
 
@@ -568,9 +560,7 @@ export function buildZenWallpaperHistoryForGeneratedImage(
     options.restoreMessageLimit
   );
   const generatedEntryIncluded = prunedHistory.some(
-    (historyEntry) =>
-      historyEntry.imageId === normalizedEntry.imageId ||
-      historyEntry.generationMessageCount === normalizedEntry.generationMessageCount
+    (historyEntry) => historyEntry.imageId === normalizedEntry.imageId
   );
   return generatedEntryIncluded
     ? prunedHistory
@@ -595,9 +585,10 @@ export function pruneZenWallpaperHistoryForRestoreWindow(
   const latest = Math.max(0, Math.floor(latestMessageCount));
   const windowStart = Math.max(0, latest - Math.max(0, Math.floor(restoreMessageLimit)));
   return parseZenWallpaperHistory(rawHistory).filter((entry) => {
+    const generatedAt = entry.generationMessageCount;
     const revealStart = entry.revealStartMessageCount ?? entry.generationMessageCount;
     const revealFull = entry.revealFullMessageCount ?? entry.generationMessageCount;
-    return revealFull >= windowStart && revealStart <= latest;
+    return revealFull >= windowStart && generatedAt <= latest;
   });
 }
 
@@ -736,11 +727,7 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
 
   let history = normalizeZenWallpaperHistory(metadata.history);
   if (currentImageId && currentGenerationMessageCount !== null) {
-    const hasCurrentImageEntry = history.some(
-      (entry) =>
-        entry.imageId === currentImageId ||
-        entry.generationMessageCount === currentGenerationMessageCount
-    );
+    const hasCurrentImageEntry = history.some((entry) => entry.imageId === currentImageId);
     if (!hasCurrentImageEntry) {
       history = normalizeZenWallpaperHistory([
         ...history,

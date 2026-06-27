@@ -95,6 +95,7 @@ function buildAskQuestionSample(binary: boolean): ZenToolLabMessageSample {
             { id: "a", label: "Smoke A" },
             { id: "b", label: "Smoke B" },
             { id: "c", label: "Smoke C" },
+            { id: "d", label: "Smoke D" },
           ],
     },
   };

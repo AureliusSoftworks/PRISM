@@ -9,6 +9,8 @@ import {
   restoreFactoryDefaultsInDatabase,
 } from "../account-reset.ts";
 import {
+  DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
+  DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
   DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
   DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
@@ -61,6 +63,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             zen_wallpaper_blurred_edges_enabled,
             zen_wallpaper_style_notes,
             zen_mood_sensitivity,
+            zen_message_font_min_px, zen_message_font_max_px,
             composer_writing_assist, fallback_model_message_stripe,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
@@ -114,6 +117,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         DEFAULT_ZEN_WALLPAPER_STYLE_NOTES
       );
       assert.equal(user.zen_mood_sensitivity, DEFAULT_ZEN_MOOD_SENSITIVITY);
+      assert.equal(user.zen_message_font_min_px, DEFAULT_ZEN_MESSAGE_FONT_MIN_PX);
+      assert.equal(user.zen_message_font_max_px, DEFAULT_ZEN_MESSAGE_FONT_MAX_PX);
       assert.equal(user.composer_writing_assist, 1);
       assert.equal(user.fallback_model_message_stripe, 1);
       assert.equal(user.prism_default_llm_model, null);
@@ -188,6 +193,8 @@ function seedResetFixture(db: DatabaseSync): void {
       zen_wallpaper_blurred_edges_enabled = 0,
       zen_wallpaper_style_notes = 'paper grain',
       zen_mood_sensitivity = 0.88,
+      zen_message_font_min_px = 18.4,
+      zen_message_font_max_px = 38.2,
       composer_writing_assist = 0,
       fallback_model_message_stripe = 0,
       prism_default_llm_model = 'aux-a',

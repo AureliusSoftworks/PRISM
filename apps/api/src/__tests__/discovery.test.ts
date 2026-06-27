@@ -12,6 +12,7 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     apiPort: 18787,
     serverName: "Test Prism",
+    lanAccessEnabled: true,
     discoveryEnabled: true,
     sessionCookieName: "localai_session",
     sessionTtlHours: 24,
@@ -54,6 +55,21 @@ describe("startPrismDiscovery", () => {
 
     const stop = startPrismDiscovery(
       createConfig({ discoveryEnabled: false }),
+      () => {
+        advertised = true;
+        return async () => {};
+      }
+    );
+
+    assert.equal(stop, null);
+    assert.equal(advertised, false);
+  });
+
+  it("does not advertise in local-only mode (LAN access off)", () => {
+    let advertised = false;
+
+    const stop = startPrismDiscovery(
+      createConfig({ lanAccessEnabled: false }),
       () => {
         advertised = true;
         return async () => {};

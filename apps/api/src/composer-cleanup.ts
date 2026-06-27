@@ -7,7 +7,7 @@ export const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
 
 export const COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT =
-  "You are Prism's send-time proofreader. Correct only tiny grammar, a/an article choice, plurality, pronoun, capitalization, punctuation, and spacing issues. Always fix obvious a/an agreement, such as a before consonant sounds and an before vowel sounds. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, URLs, and every wildcard-selected concept. Return JSON only: {\"prompt\":\"corrected user-visible prompt only\",\"replacements\":[{\"index\":0,\"value\":\"corrected wildcard value\"}]}. The prompt value must contain only the final message the user meant to send. Never include labels, delimiters, JSON wrappers, wildcard metadata, replacement lists, or explanations inside prompt. The replacements array must contain one entry for each provided replacement index, using the exact value text as it appears in the corrected prompt.";
+  "You are Prism's send-time proofreader. Correct only tiny grammar, a/an article choice, plurality, pronoun, capitalization, punctuation, and spacing issues. Always fix obvious a/an agreement, such as a before consonant sounds and an before vowel sounds. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, URLs, and every wildcard-selected concept. When a wildcard value is directly joined to letters or numbers on either side, treat the whole joined word or name as protected and leave it exactly unchanged. Return JSON only: {\"prompt\":\"corrected user-visible prompt only\",\"replacements\":[{\"index\":0,\"value\":\"corrected wildcard value\"}]}. The prompt value must contain only the final message the user meant to send. Never include labels, delimiters, JSON wrappers, wildcard metadata, replacement lists, or explanations inside prompt. The replacements array must contain one entry for each provided replacement index, using the exact value text as it appears in the corrected prompt.";
 
 export function readComposerCleanupText(value: unknown): string {
   if (typeof value !== "string") {
@@ -123,6 +123,119 @@ function findReplacementValueRange(
   }
 
   return null;
+}
+
+function isJoinedWildcardTokenChar(value: string): boolean {
+  return /^[\p{L}\p{N}]$/u.test(value);
+}
+
+function joinedWildcardTokenRange(
+  prompt: string,
+  replacement: PromptShortcutWildcardReplacement
+): { start: number; end: number } | null {
+  const start = replacement.start;
+  const end = replacement.end;
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isFinite(start) ||
+    !Number.isFinite(end)
+  ) {
+    return null;
+  }
+  const normalizedStart = Math.floor(start);
+  const normalizedEnd = Math.floor(end);
+  if (
+    normalizedStart < 0 ||
+    normalizedEnd <= normalizedStart ||
+    normalizedEnd > prompt.length ||
+    prompt.slice(normalizedStart, normalizedEnd) !== replacement.value
+  ) {
+    return null;
+  }
+  const touchesPrevious =
+    normalizedStart > 0 &&
+    isJoinedWildcardTokenChar(prompt[normalizedStart - 1] ?? "");
+  const touchesNext =
+    normalizedEnd < prompt.length &&
+    isJoinedWildcardTokenChar(prompt[normalizedEnd] ?? "");
+  if (!touchesPrevious && !touchesNext) return null;
+
+  let tokenStart = normalizedStart;
+  let tokenEnd = normalizedEnd;
+  while (
+    tokenStart > 0 &&
+    isJoinedWildcardTokenChar(prompt[tokenStart - 1] ?? "")
+  ) {
+    tokenStart -= 1;
+  }
+  while (
+    tokenEnd < prompt.length &&
+    isJoinedWildcardTokenChar(prompt[tokenEnd] ?? "")
+  ) {
+    tokenEnd += 1;
+  }
+  return { start: tokenStart, end: tokenEnd };
+}
+
+function restoreJoinedWildcardTokens(args: {
+  prompt: string;
+  original: string;
+  replacements: readonly PromptShortcutWildcardReplacement[];
+}): { prompt: string; protectedIndexes: Set<number>; preserved: boolean } {
+  const protectedIndexes = new Set<number>();
+  const protectedTokens: Array<{ start: number; end: number; text: string }> = [];
+  const protectedTokenKeys = new Set<string>();
+  for (const [index, replacement] of args.replacements.entries()) {
+    const range = joinedWildcardTokenRange(args.original, replacement);
+    if (!range) continue;
+    protectedIndexes.add(index);
+    const key = `${range.start}:${range.end}`;
+    if (protectedTokenKeys.has(key)) continue;
+    protectedTokenKeys.add(key);
+    protectedTokens.push({
+      ...range,
+      text: args.original.slice(range.start, range.end),
+    });
+  }
+  protectedTokens.sort((a, b) => a.start - b.start || a.end - b.end);
+  if (protectedTokens.length === 0) {
+    return { prompt: args.prompt, protectedIndexes, preserved: true };
+  }
+
+  let prompt = args.prompt;
+  let cursor = 0;
+  for (const { text: token } of protectedTokens) {
+    const exactIndex = prompt.indexOf(token, cursor);
+    if (exactIndex >= 0) {
+      cursor = exactIndex + token.length;
+      continue;
+    }
+    const foldedIndex = prompt
+      .toLocaleLowerCase()
+      .indexOf(token.toLocaleLowerCase(), cursor);
+    if (foldedIndex < 0) {
+      return { prompt: args.original, protectedIndexes, preserved: false };
+    }
+    prompt =
+      prompt.slice(0, foldedIndex) +
+      token +
+      prompt.slice(foldedIndex + token.length);
+    cursor = foldedIndex + token.length;
+  }
+  return { prompt, protectedIndexes, preserved: true };
+}
+
+function replacementValuesWithoutProtectedJoinedTokens(
+  values: ReadonlyMap<number, string>,
+  protectedIndexes: ReadonlySet<number>
+): ReadonlyMap<number, string> {
+  if (protectedIndexes.size === 0 || values.size === 0) return values;
+  const filtered = new Map(values);
+  for (const index of protectedIndexes) {
+    filtered.delete(index);
+  }
+  return filtered;
 }
 
 export function realignPromptWildcardReplacements(
@@ -260,17 +373,33 @@ export async function cleanupResolvedPromptWithModel(args: {
     }
   );
   const cleanup = normalizeSendCleanupResponse(raw, prompt, replacements);
-  const alignedReplacements = realignPromptWildcardReplacements(
-    cleanup.prompt,
+  const protectedCleanup = restoreJoinedWildcardTokens({
+    prompt: cleanup.prompt,
+    original: prompt,
     replacements,
-    cleanup.replacementValues
+  });
+  if (!protectedCleanup.preserved) {
+    return {
+      prompt,
+      replacements: replacements.map((replacement) => ({ ...replacement })),
+      changed: false,
+    };
+  }
+  const replacementValues = replacementValuesWithoutProtectedJoinedTokens(
+    cleanup.replacementValues,
+    protectedCleanup.protectedIndexes
+  );
+  const alignedReplacements = realignPromptWildcardReplacements(
+    protectedCleanup.prompt,
+    replacements,
+    replacementValues
   );
   if (replacements.length > 0 && alignedReplacements.length !== replacements.length) {
     throw new Error("Writing cleanup could not realign wildcard replacements.");
   }
   return {
-    prompt: cleanup.prompt,
+    prompt: protectedCleanup.prompt,
     replacements: alignedReplacements,
-    changed: cleanup.prompt !== prompt,
+    changed: protectedCleanup.prompt !== prompt,
   };
 }

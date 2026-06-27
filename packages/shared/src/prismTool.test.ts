@@ -108,7 +108,7 @@ describe("parseAssistantPrismTools", () => {
     });
   });
 
-  it("accepts extra options and normalizes to a/b/c chips", () => {
+  it("accepts four options and normalizes to a/b/c/d chips", () => {
     const inner = JSON.stringify({
       v: 1,
       name: "AskQuestion",
@@ -131,6 +131,7 @@ describe("parseAssistantPrismTools", () => {
         { id: "a", label: "First" },
         { id: "b", label: "Second" },
         { id: "c", label: "Third" },
+        { id: "d", label: "Fourth" },
       ],
     });
   });

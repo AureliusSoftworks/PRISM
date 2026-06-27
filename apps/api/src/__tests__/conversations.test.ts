@@ -470,6 +470,63 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
       ]
     );
   });
+
+  it("keeps distinct forced variants generated at the same message count", () => {
+    let rawHistory = "[]";
+    for (let index = 0; index < 4; index += 1) {
+      const history = buildZenWallpaperHistoryForGeneratedImage(
+        rawHistory,
+        {
+          imageId: `wallpaper-${index + 1}`,
+          promptSeed: `theme ${index + 1}`,
+          generationMessageCount: 12,
+          revealStartMessageCount: index === 0 ? 12 : 16,
+          revealFullMessageCount: index === 0 ? 24 : 28,
+          createdAt: `2026-06-24T12:00:0${index}.000Z`,
+        },
+        {
+          latestMessageCount: 12,
+          restoreMessageLimit: 80,
+        }
+      );
+      rawHistory = JSON.stringify(history);
+    }
+
+    const history = JSON.parse(rawHistory) as Array<{
+      imageId: string;
+      promptSeed: string | null;
+      generationMessageCount: number;
+    }>;
+    assert.deepEqual(
+      history.map((entry) => ({
+        imageId: entry.imageId,
+        promptSeed: entry.promptSeed,
+        generationMessageCount: entry.generationMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-1",
+          promptSeed: "theme 1",
+          generationMessageCount: 12,
+        },
+        {
+          imageId: "wallpaper-2",
+          promptSeed: "theme 2",
+          generationMessageCount: 12,
+        },
+        {
+          imageId: "wallpaper-3",
+          promptSeed: "theme 3",
+          generationMessageCount: 12,
+        },
+        {
+          imageId: "wallpaper-4",
+          promptSeed: "theme 4",
+          generationMessageCount: 12,
+        },
+      ]
+    );
+  });
 });
 
 describe("recoverStaleZenWallpaperGenerationStatus", () => {
