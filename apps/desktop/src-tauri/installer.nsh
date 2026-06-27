@@ -1,48 +1,35 @@
 ; PRISM Desktop NSIS installer hooks.
+; NSIS_HOOK_PREINSTALL fires before any files are extracted.
 ;
-; NSIS_HOOK_PREINSTALL runs before any files are extracted.  If a previous
-; Prism install left orphaned child processes (node.exe, qdrant.exe) — either
-; because the user force-quit the app or because an older build pre-dates the
-; Job Object fix — those processes hold file locks on runtime binaries and
-; cause "Error opening file for writing" dialogs during upgrade.
+; Kills any running Prism processes so the installer can overwrite
+; runtime binaries (node.exe, qdrant.exe, libvips DLLs) without
+; hitting "Error opening file for writing" dialogs on upgrade.
 ;
-; Fix strategy:
-;   1. Gracefully close the tray app via WM_CLOSE so it can clean up.
-;   2. Force-kill prism_desktop.exe and qdrant.exe by name if still alive.
-;   3. Kill only the node.exe processes that live under Prism's install
-;      directory (avoids collateral damage to other Node.js apps on the system).
+; Uses nsis_tauri_utils (Tauri's bundled NSIS plugin) for process
+; detection and kill — nsProcess is not available in Tauri's NSIS env.
+; node.exe is killed via PowerShell filtered to Prism's runtime path
+; so unrelated Node.js apps on the machine are unaffected.
+;
+; NSIS escaping notes:
+;   $$   -> literal $ in a double-quoted NSIS string
+;   $\"  -> literal " in a double-quoted NSIS string
 
 !macro NSIS_HOOK_PREINSTALL
   SetDetailsPrint listonly
-  DetailPrint "PRISM pre-install: terminating any running Prism processes..."
+  DetailPrint "PRISM pre-install: terminating Prism processes..."
 
-  ; 1. Ask the tray app to close gracefully (gives Job Object time to fire).
-  FindWindow $0 "" "PRISM"
-  IntCmp $0 0 prism_no_window
-    SendMessage $0 ${WM_CLOSE} 0 0
-    Sleep 1500
-  prism_no_window:
+  ; Kill the Prism desktop shell (Job Object in new builds kills children too)
+  nsis_tauri_utils::KillProcessCurrentUser "prism_desktop.exe"
+  Pop $R0
 
-  ; 2. Force-kill the main process and Qdrant by name.
-  nsProcess::_FindProcess "prism_desktop.exe" $R0
-  StrCmp $R0 "0" 0 skip_prism
-    nsProcess::_KillProcess "prism_desktop.exe" $R0
-    Sleep 1000
-  skip_prism:
+  ; Kill Qdrant
+  nsis_tauri_utils::KillProcessCurrentUser "qdrant.exe"
+  Pop $R0
 
-  nsProcess::_FindProcess "qdrant.exe" $R0
-  StrCmp $R0 "0" 0 skip_qdrant
-    nsProcess::_KillProcess "qdrant.exe" $R0
-    Sleep 500
-  skip_qdrant:
+  ; Kill node.exe processes running from Prism's runtime folder only
+  nsExec::ExecToLog "powershell.exe -NoProfile -NonInteractive -Command $\"Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '*\Prism\runtime\*' } | Stop-Process -Force$\""
+  Pop $R0
 
-  ; 3. Kill node.exe processes that are running from this install's runtime
-  ;    folder only — leaves any other Node.js apps on the machine untouched.
-  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -Command \
-    "Get-Process node -ErrorAction SilentlyContinue \
-     | Where-Object { $_.Path -like ''*\Prism\runtime\*'' } \
-     | Stop-Process -Force"'
-
-  Sleep 500
+  Sleep 1000
   SetDetailsPrint lastused
 !macroend
