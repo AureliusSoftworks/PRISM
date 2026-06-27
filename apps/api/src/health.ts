@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AppConfig } from "@localai/config";
 
 export const PRISM_API_VERSION = 1;
-export const PRISM_SERVER_VERSION = "0.4.3";
+export const PRISM_SERVER_VERSION = "0.4.4";
 
 export type ServiceState = "ready" | "configured" | "not_configured" | "error";
 
