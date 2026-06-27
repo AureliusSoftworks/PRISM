@@ -12,6 +12,19 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.1] - 2026-06-26
+
+### Desktop
+
+- **Windows upgrade installer no longer blocks on locked runtime files.**
+  Previous Prism builds left `node.exe` and `libvips-42.dll` locked when
+  the installer tried to overwrite them, producing "Error opening file for
+  writing" dialogs. Two complementary fixes: a Windows Job Object
+  (`KILL_ON_JOB_CLOSE`) ensures child processes die automatically whenever
+  the parent exits or is force-killed; an NSIS pre-install hook
+  explicitly terminates any surviving `PRISM.exe` / `qdrant.exe` processes
+  before files are extracted.
+
 ## [0.4.0] - 2026-06-26
 
 ### Added
