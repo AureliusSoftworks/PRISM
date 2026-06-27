@@ -12,6 +12,42 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.4.0] - 2026-06-26
+
+### Added
+
+- **Private-by-default networking.** The API server now binds to loopback
+  (`127.0.0.1`) instead of all interfaces, so Prism is unreachable from
+  other devices on the local network unless you explicitly opt in. Desktop
+  launcher paths and Docker Compose updated to match.
+- **LAN access toggle.** The Mac and Windows server tray apps now include
+  a Network settings control. Enabling it rebinds the server to `0.0.0.0`
+  so other devices on the LAN can reach Prism. Disabled by default.
+- **Web Network settings panel.** A new settings section in the web UI
+  shows the current network access mode and lets you flip the LAN toggle
+  without leaving the app. The panel also surfaces the API proxy's
+  hardened header and host-validation rules.
+- **Local-first networking documentation.** New docs cover the loopback-
+  default model, what opting in to LAN access means in practice, and the
+  security boundary between local and remote callers.
+
+### Changed
+
+- Desktop service launch now runs on a background thread so the splash
+  screen paints and animates immediately rather than freezing until the
+  first child process starts.
+
+### Fixed
+
+- Splash screen holds for a minimum of 2.5 s before auto-navigating to
+  the app, even when services start unusually fast, so the loading state
+  is always visible and status badges have time to check off.
+- Console windows suppressed on Windows: the Tauri shell no longer opens
+  a console window (`windows_subsystem = "windows"`), and child processes
+  (API, Qdrant, etc.) are spawned with `CREATE_NO_WINDOW` so no stray
+  terminal flashes on startup.
+- Rust lifetime error in `mark_app_quitting` resolved.
+
 ## [0.3.0] - 2026-06-25
 
 ### Added
