@@ -11,7 +11,8 @@ import {
   recordPrismMoodEventOnce,
   upsertPrismMoodState,
 } from "./db.ts";
-import { clearCookie, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import { buildApiRootLandingHtml } from "./api-root-landing.ts";
+import { clearCookie, html, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
@@ -6904,6 +6905,17 @@ function buildRoutes(): RouteDefinition[] {
         ctx.res,
         200,
         await buildHealthResponse(db, config, process.uptime())
+      );
+    }),
+    route("GET", "/", async (ctx) => {
+      html(
+        ctx.res,
+        200,
+        await buildApiRootLandingHtml({
+          hostHeader: ctx.req.headers.host,
+          apiPort: config.apiPort,
+          webPort: resolveWebPublicPort(),
+        })
       );
     })
   ];
