@@ -10,7 +10,7 @@ It stages:
 
 - API runtime (`apps/api/dist/server.js`)
 - Next standalone web runtime (`apps/web/.next/standalone/apps/web/server.js`)
-- workspace runtime dependencies (`@localai/config`, `@localai/shared`, `dnssd-advertise`)
+- workspace runtime packages (`@localai/config`, `@localai/shared`) plus the API production dependency closure from `package-lock.json`
 - platform Qdrant binary (`qdrant/qdrant` on macOS/Linux, `qdrant/qdrant.exe` on Windows)
 - `runtime-layout.json` manifest with default ports and OS data/log paths
 
