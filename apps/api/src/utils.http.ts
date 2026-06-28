@@ -32,6 +32,16 @@ export function json(
   res.end(JSON.stringify(payload));
 }
 
+export function html(
+  res: ServerResponse,
+  statusCode: number,
+  body: string
+): void {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(body);
+}
+
 export function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) {
     return {};

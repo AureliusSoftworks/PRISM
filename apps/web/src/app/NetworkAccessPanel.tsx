@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import QRCode from "qrcode";
 import styles from "./page.module.css";
 
 /**
@@ -36,6 +37,7 @@ export function NetworkAccessPanel({
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [noticeDismissed, setNoticeDismissed] = useState(true);
+  const [primaryQrUrl, setPrimaryQrUrl] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -118,6 +120,34 @@ export function NetworkAccessPanel({
   const restartRequired = info?.restartRequired ?? false;
   const webUrls = info?.lanUrls.web ?? [];
   const apiUrls = info?.lanUrls.api ?? [];
+  const primaryWebUrl = webUrls[0] ?? null;
+  const secondaryWebUrls = webUrls.slice(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPrimaryQrUrl(null);
+    if (!primaryWebUrl) return;
+
+    void QRCode.toDataURL(primaryWebUrl, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 168,
+      color: {
+        dark: "#111827",
+        light: "#ffffff",
+      },
+    })
+      .then((url) => {
+        if (!cancelled) setPrimaryQrUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPrimaryQrUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryWebUrl]);
 
   return (
     <section
@@ -201,27 +231,79 @@ export function NetworkAccessPanel({
 
           {enabled && info?.active && (webUrls.length > 0 || apiUrls.length > 0) && (
             <div className={styles.networkUrls}>
-              <p className={styles.networkMuted}>
-                Open Prism from another device using one of these addresses:
-              </p>
-              <ul className={styles.networkUrlList}>
-                {webUrls.map((url) => (
-                  <li key={`web-${url}`} className={styles.networkUrlRow}>
-                    <span className={styles.networkUrlValue}>{url}</span>
-                    <button
-                      type="button"
-                      className={styles.linkButton}
-                      onClick={() => copyUrl(url)}
-                    >
-                      {copied === url ? "Copied" : "Copy"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {primaryWebUrl && (
+                <div className={styles.networkShareCard}>
+                  <div className={styles.networkShareCopy}>
+                    <strong>Open Prism on a phone or tablet</strong>
+                    <p>
+                      Scan this code or copy the web address, then save Prism to
+                      your Home Screen or bookmarks.
+                    </p>
+                    <div className={styles.networkPrimaryUrlRow}>
+                      <span className={styles.networkUrlValue}>{primaryWebUrl}</span>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => copyUrl(primaryWebUrl)}
+                      >
+                        {copied === primaryWebUrl ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className={styles.networkQrFrame} aria-label="Prism web address QR code">
+                    {primaryQrUrl ? (
+                      <span
+                        className={styles.networkQrImage}
+                        style={{ backgroundImage: `url(${primaryQrUrl})` }}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <span>QR</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {secondaryWebUrls.length > 0 && (
+                <>
+                  <p className={styles.networkMuted}>
+                    Other Prism web addresses for this computer:
+                  </p>
+                  <ul className={styles.networkUrlList}>
+                    {secondaryWebUrls.map((url) => (
+                      <li key={`web-${url}`} className={styles.networkUrlRow}>
+                        <span className={styles.networkUrlValue}>{url}</span>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          onClick={() => copyUrl(url)}
+                        >
+                          {copied === url ? "Copied" : "Copy"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {!primaryWebUrl && webUrls.length > 0 && (
+                <ul className={styles.networkUrlList}>
+                  {webUrls.map((url) => (
+                    <li key={`web-${url}`} className={styles.networkUrlRow}>
+                      <span className={styles.networkUrlValue}>{url}</span>
+                      <button
+                        type="button"
+                        className={styles.linkButton}
+                        onClick={() => copyUrl(url)}
+                      >
+                        {copied === url ? "Copied" : "Copy"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {apiUrls.length > 0 && (
                 <details className={styles.networkApiDetails}>
                   <summary className={styles.networkMuted}>
-                    Direct API address (for the iPhone/Mac apps)
+                    Direct API address
                   </summary>
                   <ul className={styles.networkUrlList}>
                     {apiUrls.map((url) => (
@@ -237,6 +319,10 @@ export function NetworkAccessPanel({
                       </li>
                     ))}
                   </ul>
+                  <p className={styles.networkMuted}>
+                    Use this for direct API checks. The web address above is the
+                    one to open and save on client devices.
+                  </p>
                 </details>
               )}
               <p className={styles.networkMuted}>
