@@ -9,6 +9,7 @@ import {
   Raleway,
 } from "next/font/google";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
+import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import "./globals.css";
 
@@ -92,6 +93,7 @@ export default function RootLayout({
         <BlockBrowserInspection />
         <DisableNativeTooltips />
         {children}
+        <ClientInstallCoach />
       </body>
     </html>
   );

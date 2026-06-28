@@ -12,6 +12,33 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.5.0] - 2026-06-28
+
+### Added
+
+- **Client save/install handoff.** The Network settings panel now presents
+  the primary web address with a QR code and copy action, making it easier
+  to open Prism from a phone, tablet, or other LAN device without retyping
+  the host IP and port.
+- **Browser-specific save guidance.** Client devices now get a dismissible
+  prompt with platform-appropriate instructions: Add to Home Screen on iOS,
+  install prompts where Chromium exposes them, and bookmark guidance
+  elsewhere.
+- **Helpful API root page.** Visiting the API port directly now shows a
+  small human-facing Prism API landing page with an Open Prism link, API
+  health link, and QR code instead of a JSON 404.
+
+### Changed
+
+- **Bare `prism` launches the web dev server.** Running the local helper
+  without subcommands now starts the web dev server, matching the common
+  local-development path more closely.
+
+### Fixed
+
+- **Network settings labels stay readable.** The LAN toggle checkbox and
+  label text no longer clip or collapse in the settings panel.
+
 ## [0.4.5] - 2026-06-27
 
 ### Fixed

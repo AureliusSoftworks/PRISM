@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release"
+  short_description: "Cut PRISM releases safely"
+  default_prompt: "Use $release to prepare and cut a PRISM release."
