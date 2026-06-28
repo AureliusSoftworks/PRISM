@@ -12,6 +12,16 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area — nothing queued for release yet._
 
+## [0.5.1] - 2026-06-28
+
+### Desktop
+
+- **Packaged desktop API starts after the QR-code landing page update.** The
+  desktop runtime staging step now copies the API's production dependency
+  closure from `package-lock.json`, so newly added runtime packages such as
+  `qrcode` are included in Windows, macOS, and Linux desktop builds instead
+  of crashing the bundled API at startup.
+
 ## [0.5.0] - 2026-06-28
 
 ### Added

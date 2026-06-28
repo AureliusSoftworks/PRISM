@@ -9,6 +9,10 @@ import { spawn } from "node:child_process";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+const workspaceRuntimePackages = new Set([
+  "@localai/config",
+  "@localai/shared"
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -61,18 +65,118 @@ async function copyFile(source, destination) {
   await fs.copyFile(source, destination);
 }
 
+async function readJsonFile(target) {
+  const raw = await fs.readFile(target, "utf8");
+  return JSON.parse(raw);
+}
+
 async function fileExists(target) {
   return fs.stat(target).then(() => true).catch(() => false);
 }
 
-async function copyNodePackage(packageName, destinationNodeModules) {
-  const parts = packageName.split("/");
-  const source = path.join(repoRoot, "node_modules", ...parts);
+function nodeModulesPackagePath(packageName) {
+  return `node_modules/${packageName}`;
+}
+
+function lockPackageName(lockPackagePath) {
+  const parts = lockPackagePath.split("/");
+  const markerIndex = parts.lastIndexOf("node_modules");
+  const firstNamePart = parts[markerIndex + 1] ?? "";
+  if (firstNamePart.startsWith("@")) {
+    return `${firstNamePart}/${parts[markerIndex + 2] ?? ""}`;
+  }
+  return firstNamePart;
+}
+
+function resolveDependencyLockPath(lockPackages, fromLockPackagePath, dependencyName) {
+  let currentPath = fromLockPackagePath;
+  while (currentPath) {
+    const nestedCandidate = `${currentPath}/node_modules/${dependencyName}`;
+    if (lockPackages[nestedCandidate]) {
+      return nestedCandidate;
+    }
+
+    const markerIndex = currentPath.lastIndexOf("/node_modules/");
+    if (markerIndex === -1) {
+      break;
+    }
+    currentPath = currentPath.slice(0, markerIndex);
+  }
+
+  const rootCandidate = nodeModulesPackagePath(dependencyName);
+  if (lockPackages[rootCandidate]) {
+    return rootCandidate;
+  }
+
+  return "";
+}
+
+async function copyLockedNodePackage(lockPackagePath, destinationRoot, options = {}) {
+  const { optional = false } = options;
+  const source = path.join(repoRoot, ...lockPackagePath.split("/"));
   if (!(await fileExists(source))) {
-    console.log(`Skipping unavailable runtime package: ${packageName}`);
+    const packageName = lockPackageName(lockPackagePath);
+    if (optional) {
+      console.log(`Skipping unavailable optional runtime package: ${packageName}`);
+      return false;
+    }
+    throw new Error(`Missing runtime package: ${packageName} (${source})`);
+  }
+  await copyDir(source, path.join(destinationRoot, ...lockPackagePath.split("/")));
+  return true;
+}
+
+async function copyRuntimeDependencyClosure(lockfile, packageName, destinationRoot, copiedPackages, options = {}) {
+  const { optional = false, fromLockPackagePath = "" } = options;
+  if (workspaceRuntimePackages.has(packageName)) {
     return;
   }
-  await copyDir(source, path.join(destinationNodeModules, ...parts));
+
+  const lockPackages = lockfile.packages ?? {};
+  const lockPackagePath = fromLockPackagePath
+    ? resolveDependencyLockPath(lockPackages, fromLockPackagePath, packageName)
+    : nodeModulesPackagePath(packageName);
+  if (!lockPackagePath) {
+    if (optional) {
+      console.log(`Skipping unavailable optional runtime package: ${packageName}`);
+      return;
+    }
+    throw new Error(`Missing package-lock entry for runtime package: ${packageName}`);
+  }
+
+  const lockEntry = lockPackages[lockPackagePath];
+  if (!lockEntry) {
+    if (optional) {
+      console.log(`Skipping unavailable optional runtime package: ${packageName}`);
+      return;
+    }
+    throw new Error(`Missing package-lock entry for runtime package: ${packageName}`);
+  }
+
+  if (copiedPackages.has(lockPackagePath)) {
+    return;
+  }
+
+  const packageWasCopied = await copyLockedNodePackage(lockPackagePath, destinationRoot, {
+    optional: optional || lockEntry.optional === true
+  });
+  if (!packageWasCopied) {
+    return;
+  }
+  copiedPackages.add(lockPackagePath);
+
+  for (const dependencyName of Object.keys(lockEntry.dependencies ?? {})) {
+    await copyRuntimeDependencyClosure(lockfile, dependencyName, destinationRoot, copiedPackages, {
+      fromLockPackagePath: lockPackagePath
+    });
+  }
+
+  for (const dependencyName of Object.keys(lockEntry.optionalDependencies ?? {})) {
+    await copyRuntimeDependencyClosure(lockfile, dependencyName, destinationRoot, copiedPackages, {
+      optional: true,
+      fromLockPackagePath: lockPackagePath
+    });
+  }
 }
 
 async function main() {
@@ -116,6 +220,8 @@ async function main() {
   await copyFile(path.join(repoRoot, "package-lock.json"), path.join(resolvedOutputDir, "package-lock.json"));
 
   console.log("Staging runtime dependencies...");
+  const apiPackageJson = await readJsonFile(path.join(repoRoot, "apps", "api", "package.json"));
+  const lockfile = await readJsonFile(path.join(repoRoot, "package-lock.json"));
   const runtimeNodeModules = path.join(resolvedOutputDir, "node_modules");
   await copyDir(
     path.join(repoRoot, "packages", "config"),
@@ -125,45 +231,10 @@ async function main() {
     path.join(repoRoot, "packages", "shared"),
     path.join(runtimeNodeModules, "@localai", "shared")
   );
-  await copyNodePackage("dnssd-advertise", runtimeNodeModules);
 
-  // The API imports sharp at startup for generated-image thumbnails. Copy the
-  // package plus whichever platform-specific @img binaries npm installed on
-  // this runner; without these, packaged desktop builds can start the web UI
-  // while the API process crashes immediately.
-  await copyNodePackage("sharp", runtimeNodeModules);
-  await copyNodePackage("detect-libc", runtimeNodeModules);
-  await copyNodePackage("@img/colour", runtimeNodeModules);
-  for (const packageName of [
-    "@img/sharp-darwin-arm64",
-    "@img/sharp-darwin-x64",
-    "@img/sharp-libvips-darwin-arm64",
-    "@img/sharp-libvips-darwin-x64",
-    "@img/sharp-libvips-linux-arm",
-    "@img/sharp-libvips-linux-arm64",
-    "@img/sharp-libvips-linux-ppc64",
-    "@img/sharp-libvips-linux-riscv64",
-    "@img/sharp-libvips-linux-s390x",
-    "@img/sharp-libvips-linux-x64",
-    "@img/sharp-libvips-linuxmusl-arm64",
-    "@img/sharp-libvips-linuxmusl-x64",
-    "@img/sharp-libvips-win32-arm64",
-    "@img/sharp-libvips-win32-ia32",
-    "@img/sharp-libvips-win32-x64",
-    "@img/sharp-linux-arm",
-    "@img/sharp-linux-arm64",
-    "@img/sharp-linux-ppc64",
-    "@img/sharp-linux-riscv64",
-    "@img/sharp-linux-s390x",
-    "@img/sharp-linux-x64",
-    "@img/sharp-linuxmusl-arm64",
-    "@img/sharp-linuxmusl-x64",
-    "@img/sharp-wasm32",
-    "@img/sharp-win32-arm64",
-    "@img/sharp-win32-ia32",
-    "@img/sharp-win32-x64"
-  ]) {
-    await copyNodePackage(packageName, runtimeNodeModules);
+  const copiedPackages = new Set();
+  for (const packageName of Object.keys(apiPackageJson.dependencies ?? {})) {
+    await copyRuntimeDependencyClosure(lockfile, packageName, resolvedOutputDir, copiedPackages);
   }
 
   console.log("Staging Node runtime...");
