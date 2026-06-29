@@ -58,6 +58,50 @@ describe("prompt wildcard resolution", () => {
     }
   });
 
+  it("does not cap built-in wildcard slots at the model wildcard limit", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for built-in wildcards");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const keys = [
+      "NAME",
+      "ADJECTIVE",
+      "PERSON",
+      "PLACE",
+      "OBJECT",
+      "COLOR",
+      "NOUN",
+      "ACTION",
+      "VERB",
+      "TIME",
+      "PROBLEM",
+      "GENRE",
+      "STYLE",
+    ];
+    const prompt = Array.from(
+      { length: 24 },
+      (_, index) => `{${keys[index % keys.length]}${index + 1}}`
+    ).join(" ");
+
+    assert.equal(promptWildcardNames(prompt).length, 24);
+    const result = await resolvePromptWildcardsWithModel({
+      prompt,
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.equal(result.replacements.length, 24);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
+  });
+
   it("accepts the visible number wildcard and NUM alias with the same range", async () => {
     const provider: LlmProvider = {
       name: "local",
@@ -476,6 +520,42 @@ describe("prompt wildcard resolution", () => {
         { key: "MOOD", value: "hushed", source: "wildcard" },
       ]
     );
+  });
+
+  it("caps only model-backed wildcard requests and locally fills overflow", async () => {
+    let requestedPrompt = "";
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages: ProviderMessage[]) {
+        requestedPrompt = messages.at(-1)?.content ?? "";
+        return JSON.stringify(
+          Object.fromEntries(
+            Array.from({ length: 16 }, (_, index) => [
+              `MOOD__REF_${index + 1}`,
+              `mood-${index + 1}`,
+            ])
+          )
+        );
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const prompt = Array.from(
+      { length: 18 },
+      (_, index) => `{MOOD${index + 1}}`
+    ).join(" ");
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt,
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.match(requestedPrompt, /MOOD__REF_16/u);
+    assert.doesNotMatch(requestedPrompt, /MOOD__REF_17/u);
+    assert.equal(result.replacements.length, 18);
+    assert.doesNotMatch(result.prompt, /\{(?:#\d*|[A-Z][A-Z0-9_ ]{1,63})\}/u);
   });
 
   it("preserves resolved deck replacements around true wildcard slots", () => {

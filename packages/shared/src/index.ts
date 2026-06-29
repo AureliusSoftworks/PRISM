@@ -1098,10 +1098,12 @@ export interface CoffeeTurnRequest {
 /** Response body for `POST /api/coffee/turn`. */
 export interface CoffeeTurnResponse {
   conversation: Conversation;
-  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). */
-  speakerBotId: string;
+  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). Null only for stale no-op turns. */
+  speakerBotId: string | null;
   /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
   routerReason?: string;
+  /** True when an obsolete autonomous turn was safely discarded without inserting a reply. */
+  stale?: boolean;
   /** Optional interruption event payload for live Coffee table presentation. */
   interruption?: CoffeeInterruptionEvent;
   /** Present when a Coffee user turn started an async image generation job. */

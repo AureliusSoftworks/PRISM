@@ -14,7 +14,7 @@ import {
 const PROMPT_WILDCARD_SYSTEM_PROMPT =
   "You fill prompt-template wildcards. Return JSON only. The wildcard key and generation rule are authoritative: never change a PERSON into an adjective, an ADJECTIVE into a person, or any other key into a different kind of value just because nearby grammar suggests it. For each requested wildcard occurrence key, choose one concrete replacement value that satisfies that wildcard type and still fits the surrounding prompt. Values should be short natural words or phrases, not explanations, not placeholders, and not wrapped in braces. Treat repeated wildcard keys as independent random draws unless the occurrence key explicitly repeats.";
 const PROMPT_WILDCARD_PATTERN = /\{([^{}\r\n]{1,80})\}/g;
-const PROMPT_WILDCARD_MAX_KEYS = 16;
+const PROMPT_WILDCARD_MAX_MODEL_KEYS = 16;
 const PROMPT_WILDCARD_VALUE_MAX_CHARS = 96;
 const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
   "vivid",
@@ -194,9 +194,38 @@ function promptWildcardOccurrences(prompt: string): PromptWildcardOccurrence[] {
       end: start + token.length,
       reference: parsedName.reference,
     });
-    if (occurrences.length >= PROMPT_WILDCARD_MAX_KEYS) break;
   }
   return occurrences;
+}
+
+function splitModelPromptWildcardOccurrences(
+  occurrences: readonly PromptWildcardOccurrence[]
+): {
+  providerOccurrences: PromptWildcardOccurrence[];
+  fallbackOccurrences: PromptWildcardOccurrence[];
+} {
+  const providerRequestKeys = new Set<string>();
+  const fallbackRequestKeys = new Set<string>();
+  const providerOccurrences: PromptWildcardOccurrence[] = [];
+  const fallbackOccurrences: PromptWildcardOccurrence[] = [];
+  for (const occurrence of occurrences) {
+    if (providerRequestKeys.has(occurrence.requestKey)) {
+      providerOccurrences.push(occurrence);
+      continue;
+    }
+    if (fallbackRequestKeys.has(occurrence.requestKey)) {
+      fallbackOccurrences.push(occurrence);
+      continue;
+    }
+    if (providerRequestKeys.size < PROMPT_WILDCARD_MAX_MODEL_KEYS) {
+      providerRequestKeys.add(occurrence.requestKey);
+      providerOccurrences.push(occurrence);
+      continue;
+    }
+    fallbackRequestKeys.add(occurrence.requestKey);
+    fallbackOccurrences.push(occurrence);
+  }
+  return { providerOccurrences, fallbackOccurrences };
 }
 
 function promptWildcardRequestLines(
@@ -596,11 +625,20 @@ export async function resolvePromptWildcardsWithModel(args: {
       existingReplacements
     );
   }
+  const { providerOccurrences, fallbackOccurrences } =
+    splitModelPromptWildcardOccurrences(modelOccurrences);
+  const fallbackValues = fillMissingPromptWildcardValues(
+    new Map(),
+    fallbackOccurrences
+  );
   try {
-    const exampleKey = modelOccurrences[0]?.requestKey ?? "CUSTOM__1";
+    const exampleKey = providerOccurrences[0]?.requestKey ?? "CUSTOM__1";
     const promptForModel =
-      scriptedValues.size > 0
-        ? applyPromptWildcardValues(prompt, scriptedValues).prompt
+      scriptedValues.size > 0 || fallbackValues.size > 0
+        ? applyPromptWildcardValues(
+            prompt,
+            new Map([...scriptedValues, ...fallbackValues])
+          ).prompt
         : prompt;
     const promptMessages: ProviderMessage[] = [
       { role: "system", content: PROMPT_WILDCARD_SYSTEM_PROMPT },
@@ -611,7 +649,7 @@ export async function resolvePromptWildcardsWithModel(args: {
           promptForModel,
           "",
           "Wildcard occurrences:",
-          ...promptWildcardRequestLines(modelOccurrences),
+          ...promptWildcardRequestLines(providerOccurrences),
           "",
           `Return a single JSON object whose keys are exactly those occurrence keys. Include a string property named "${exampleKey}" and the other requested keys.`,
           "Each unique occurrence key is one random draw. If the same occurrence key appears at multiple positions, use that same value everywhere.",
@@ -623,14 +661,14 @@ export async function resolvePromptWildcardsWithModel(args: {
     const raw = await args.provider.generateResponse(promptMessages, {
       ...args.generationOverrides,
       temperature: Math.max(0.6, args.generationOverrides.temperature ?? 0.72),
-      maxTokens: Math.min(900, Math.max(160, modelOccurrences.length * 70)),
+      maxTokens: Math.min(900, Math.max(160, providerOccurrences.length * 70)),
       jsonMode: true,
       signal: args.signal,
     });
-    const values = extractPromptWildcardValues(raw, modelOccurrences);
+    const values = extractPromptWildcardValues(raw, providerOccurrences);
     return applyPromptWildcardValues(
       prompt,
-      new Map([...scriptedValues, ...values]),
+      new Map([...scriptedValues, ...fallbackValues, ...values]),
       existingReplacements
     );
   } catch (error) {

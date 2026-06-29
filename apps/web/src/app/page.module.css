@@ -18058,7 +18058,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate {
   --coffee-bot-color: var(--bot-color, var(--accent));
-  --coffee-plate-emoji-nudge-y: clamp(-14px, -1.05vw, -8px);
+  --coffee-plate-emoji-nudge-y: clamp(0px, 1.4%, 5px);
   --coffee-plate-emoji-face-scale-y: 1;
   --zen-presence-face-bg:
     radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.07), transparent 48%),
@@ -18180,10 +18180,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenLiveBotPresenceTalk 260ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
+.zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
+  .zenLiveBotPresenceFace {
+  animation: zenLiveBotPresenceIdle 4.8s ease-in-out infinite;
+}
+
 .zenLiveBotPresencePlate[data-talking="true"][data-mouth-open="true"]
   .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"]::before {
+  [data-coffee-plate-emoji-part="mouth"] {
   animation: zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+@keyframes zenLiveBotPresenceIdle {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  54% {
+    transform: translateY(-0.75px) scale(1.006);
+  }
 }
 
 @keyframes zenLiveBotPresenceTalk {
@@ -18200,19 +18216,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes zenLiveBotPresenceMouthPulse {
   0%,
   100% {
-    transform:
-      translate(-50%, -50%)
-      translateY(var(--zen-live-mouth-y, 0em))
-      rotate(var(--zen-live-mouth-rotate, 90deg))
-      scale(var(--zen-live-mouth-scale, 1));
+    transform: scale(1);
   }
 
   50% {
-    transform:
-      translate(-50%, -50%)
-      translateY(var(--zen-live-mouth-y, 0em))
-      rotate(var(--zen-live-mouth-rotate, 90deg))
-      scale(var(--zen-live-mouth-pulse-scale, 1.14));
+    transform: scale(1.14);
   }
 }
 
@@ -18254,9 +18262,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   height: clamp(72px, 8.8vw, 108px);
   flex: 0 0 auto;
   display: grid;
-  align-items: center;
+  align-items: start;
   justify-items: center;
-  padding-top: 0;
+  padding-top: clamp(11px, 6%, 18px);
   border-radius: 50%;
   background: var(--zen-presence-face-bg);
   border: 1px solid var(--zen-presence-face-border);
@@ -18377,171 +18385,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceGlyph {
-  --zen-live-eye-dot-size: 0.108em;
-  --zen-live-eye-spread: 0.46em;
-  --zen-live-mouth-rotate: 90deg;
-  --zen-live-mouth-y: -0.01em;
-  --zen-live-mouth-scale: 1;
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1em);
-  grid-template-rows: 0.28em 0.34em;
-  row-gap: 0.12em;
-  align-items: center;
-  justify-items: center;
-  justify-content: center;
-  min-width: 1em;
-  min-height: 0.74em;
-  font-family: var(--prism-face-font);
-  font-size: clamp(1.97rem, 5.87vw, 2.93rem);
-  font-weight: var(--prism-face-weight);
-  line-height: 1;
-  letter-spacing: var(--prism-face-letter-spacing);
-  font-variant-ligatures: none;
-  font-feature-settings: "liga" 0, "calt" 0;
   color: var(--zen-presence-face-ink);
   position: relative;
   z-index: 1;
-  transform-origin: center center;
-  transition: transform 140ms ease;
+  text-shadow: 0 0 0.16em color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] {
-  display: block;
-  width: 1em;
-  text-align: center;
+  display: inline-block;
+  color: currentColor;
   transform-origin: center center;
-  justify-self: center;
 }
 
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
-  position: relative;
-  align-self: center;
-  width: 0.78em;
-  height: 0.24em;
-  color: transparent;
-  transform: translateY(-0.035em);
-}
-
-.zenLiveBotPresenceFaceGlyph:has(
-    [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"]
-  )
-  [data-coffee-plate-emoji-part="eyes"],
-.zenLiveBotPresenceFaceGlyph:has(
-    [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"]
-  )
-  [data-coffee-plate-emoji-part="eyes"],
-.zenLiveBotPresenceFaceGlyph:has(
-    [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"]
-  )
+.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
   [data-coffee-plate-emoji-part="eyes"] {
-  transform: translateY(-0.085em);
-}
-
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"]::before,
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"]::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: var(--zen-live-eye-dot-size);
-  height: var(--zen-live-eye-dot-size);
-  border-radius: 999px;
-  background: var(--zen-presence-face-ink);
-  box-shadow: 0 0 0.16em color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
-  transform: translate(-50%, -50%);
-}
-
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"]::before {
-  left: calc(50% - (var(--zen-live-eye-spread) / 2));
-}
-
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"]::after {
-  left: calc(50% + (var(--zen-live-eye-spread) / 2));
-}
-
-.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
-  [data-coffee-plate-emoji-part="eyes"]::before,
-.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
-  [data-coffee-plate-emoji-part="eyes"]::after {
-  width: calc(var(--zen-live-eye-dot-size) * 1.5);
-  height: calc(var(--zen-live-eye-dot-size) * 0.24);
   opacity: 0.82;
+  transform: scaleX(1.24) scaleY(0.42);
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
-  position: relative;
-  align-self: center;
-  width: 0.82em;
-  height: 0.34em;
-  color: transparent;
-  line-height: 1;
-  transform: none;
-}
-
-.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"]::before {
-  content: attr(data-coffee-plate-emoji-glyph);
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  display: block;
-  width: 1em;
-  color: var(--zen-presence-face-ink);
-  font: inherit;
-  line-height: 1;
-  text-align: center;
-  text-shadow: inherit;
-  transform:
-    translate(-50%, -50%)
-    translateY(var(--zen-live-mouth-y, 0em))
-    rotate(var(--zen-live-mouth-rotate, 90deg))
-    scale(var(--zen-live-mouth-scale, 1));
-  transform-origin: center center;
   will-change: transform;
 }
 
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] {
-  --zen-live-mouth-rotate: 0deg;
-  --zen-live-mouth-y: -0.015em;
-}
-
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] {
-  --zen-live-mouth-scale: 0.94;
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::before,
-.zenLiveBotPresencePlate[data-prism-persona="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::after {
-  background: var(--zen-presence-face-ink);
-  box-shadow: 0 0 0.16em color-mix(in srgb, var(--zen-presence-face-ink) 28%, transparent);
-  animation: none;
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"] {
-  background: none;
-  color: transparent;
-  -webkit-background-clip: initial;
-  background-clip: initial;
-  text-shadow: none;
-  animation: none;
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"]::before {
-  background: none;
-  color: var(--zen-presence-face-ink);
-  -webkit-background-clip: initial;
-  background-clip: initial;
+.zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFaceGlyph {
   text-shadow: none;
 }
 
@@ -18571,42 +18437,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::before,
-.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::after {
+  .zenLiveBotPresenceFaceGlyph {
   color: #ff3f6f;
-  background: currentColor;
-  box-shadow: 0 0 0.2em currentColor;
+  text-shadow: 0 0 0.2em rgba(255, 63, 111, 0.28);
   animation: zenLivePrismRainbowInk 1.24s linear infinite;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::before,
-.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::after,
+  .zenLiveBotPresenceFaceGlyph,
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::before,
-.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="eyes"]::after {
+  .zenLiveBotPresenceFaceGlyph {
   color: #be1442;
-  box-shadow: 0 0 0.17em currentColor;
+  text-shadow: 0 0 0.14em rgba(190, 20, 66, 0.2);
   animation: zenLivePrismRainbowInkLight 1.24s linear infinite;
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part="mouth"]::before {
-  background: transparent;
-  color: var(--zen-presence-face-ink);
-  -webkit-background-clip: initial;
-  background-clip: initial;
-  text-shadow: none;
 }
 
 @keyframes zenLivePrismRainbowAura {
@@ -18896,18 +18739,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     animation-duration: 1ms;
   }
 
-  .zenLiveBotPresencePlate[data-prism-persona="true"]
+  .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
+    .zenLiveBotPresenceFace,
+  .zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace,
+  .zenLiveBotPresencePlate[data-talking="true"][data-mouth-open="true"]
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part="eyes"]::before,
-  .zenLiveBotPresencePlate[data-prism-persona="true"]
-    .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part="eyes"]::after,
-  .zenLiveBotPresencePlate[data-prism-persona="true"]
-    .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part="mouth"] {
-    animation-duration: 1ms;
-  }
-
+    [data-coffee-plate-emoji-part="mouth"],
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
     .zenLiveBotPresenceFace::before,
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -18915,11 +18752,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     animation-duration: 1ms;
   }
 
-  .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-    .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part="mouth"]::before {
-    animation-duration: 1ms, 1ms;
-  }
 }
 
 @media (max-width: 640px) {
@@ -18936,7 +18768,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresenceFace {
     width: 74px;
     height: 74px;
-    --coffee-plate-emoji-nudge-y: -9px;
+    --coffee-plate-emoji-nudge-y: clamp(1px, 1%, 4px);
   }
 
   .zenLiveBotPresenceFaceGlyph {
@@ -40376,28 +40208,44 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatActionBadge {
   position: absolute;
-  top: -14px;
+  top: clamp(-62px, -5.2vw, -46px);
   right: -8px;
   z-index: 7;
-  max-width: min(220px, 34vw);
-  display: inline-flex;
+  box-sizing: border-box;
+  width: min(156px, 24vw, calc(100vw - 56px));
+  min-width: min(132px, calc(100vw - 56px));
+  max-width: calc(100vw - 56px);
+  min-height: 3.45rem;
+  display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 22px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 62%, rgba(255, 255, 255, 0.26));
-  background: color-mix(in srgb, #070707 76%, var(--coffee-bot-color) 24%);
+  padding: 7px 10px 8px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 48%, rgba(255, 255, 255, 0.14));
+  background: color-mix(in srgb, #060608 78%, var(--coffee-bot-color) 22%);
   color: rgba(255, 255, 255, 0.96);
   box-shadow:
-    0 0 0 3px rgba(0, 0, 0, 0.34),
-    0 0 16px color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
+    0 0 0 1px rgba(0, 0, 0, 0.5) inset,
+    0 0 26px color-mix(in srgb, var(--coffee-bot-color) 44%, transparent),
+    0 0 52px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.5);
+  line-height: 1.22;
+  isolation: isolate;
+  overflow: hidden;
   pointer-events: none;
   transform: translate3d(0, 0, 0);
   transition:
     transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 220ms ease,
     filter 220ms ease;
+}
+
+.coffeeSeatActionBadge[data-action-verbose="true"] {
+  top: clamp(-76px, -6.4vw, -58px);
+  width: min(276px, 34vw, calc(100vw - 56px));
+  min-width: min(204px, calc(100vw - 56px));
+  min-height: 4.55rem;
+  padding: 8px 12px 9px;
 }
 
 .coffeeSeatActionBadge[data-badge-side="left"] {
@@ -40413,16 +40261,36 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatActionBadgeText {
-  display: block;
+  position: relative;
+  z-index: 1;
+  display: -webkit-box;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  max-height: 1.8rem;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
   font-size: 0.7rem;
-  line-height: 1;
+  line-height: 1.22;
   font-style: italic;
+  font-weight: 600;
   letter-spacing: 0.01em;
+  text-align: center;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
+  opacity: 0.86;
   animation: coffeeSeatActionBadgeTextSwapIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.coffeeSeatActionBadge[data-action-verbose="true"] .coffeeSeatActionBadgeText {
+  max-height: 4.05rem;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  line-height: 1.25;
+  opacity: 0.92;
 }
 
 .coffeeSeatActionBadgeCurrent {
@@ -40448,11 +40316,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatActionBadgeGhost[data-badge-side="right"] {
-  transform: translate3d(36px, -8px, 0) scale(0.92);
+  transform: translate3d(36px, -12px, 0) scale(0.92);
 }
 
 .coffeeSeatActionBadgeGhost[data-badge-side="left"] {
-  transform: translate3d(-36px, -8px, 0) scale(0.92);
+  transform: translate3d(-36px, -12px, 0) scale(0.92);
 }
 
 @keyframes coffeeSeatActionBadgeTextSwapIn {
@@ -42862,6 +42730,36 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     width: min(210px, 42vw);
     font-size: 0.7rem;
     -webkit-line-clamp: 3;
+  }
+
+  .coffeeSeatActionBadge {
+    top: -54px;
+    width: min(150px, 44vw, calc(100vw - 32px));
+    min-width: min(116px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
+    min-height: 3.25rem;
+    padding: 6px 8px 7px;
+    border-radius: 12px;
+  }
+
+  .coffeeSeatActionBadge[data-action-verbose="true"] {
+    top: -70px;
+    width: min(188px, 54vw, calc(100vw - 32px));
+    min-width: min(164px, calc(100vw - 32px));
+    min-height: 4.2rem;
+    padding: 7px 9px 8px;
+  }
+
+  .coffeeSeatActionBadgeText {
+    max-height: 1.75rem;
+    font-size: 0.66rem;
+  }
+
+  .coffeeSeatActionBadge[data-action-verbose="true"] .coffeeSeatActionBadgeText {
+    max-height: 3.75rem;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    font-size: 0.66rem;
   }
 
   .coffeePickerGrid {

@@ -53,6 +53,7 @@ import {
 import {
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
+  coffeeShouldIgnoreStaleTurnResponse,
 } from "./coffee-user-reveal-flow";
 import {
   DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
@@ -3753,7 +3754,7 @@ const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] =
 const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
 const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
-const COFFEE_SEAT_ACTION_BADGE_MAX_CHARS = 48;
+const COFFEE_SEAT_ACTION_BADGE_MAX_CHARS = 112;
 const COFFEE_SEAT_ACTION_BADGE_MIN_CLAUSE_CHARS = 14;
 const COFFEE_POLL_PANEL_DEFAULT_POSITION: CoffeePollPanelPosition = { x: 28, y: 96 };
 const COFFEE_POLL_BUBBLE_DRAG_SUPPRESS_CLICK_PX = 6;
@@ -6941,6 +6942,14 @@ interface Bot {
   chat_enabled: number;
 }
 
+function replaceBotRowById(rows: Bot[], updatedBot: Bot): Bot[] {
+  const index = rows.findIndex((bot) => bot.id === updatedBot.id);
+  if (index === -1) return [updatedBot, ...rows];
+  const next = rows.slice();
+  next[index] = updatedBot;
+  return next;
+}
+
 interface BotExportMemory {
   text: string;
   confidence?: number;
@@ -8197,6 +8206,7 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
 const AUTO_MODEL_CHOICE = "auto";
+const DEFAULT_BOT_CHAT_MODEL_CHOICE = DISABLED_MODEL_CHOICE;
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = "auto";
 const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   auto: "Auto",
@@ -8616,8 +8626,8 @@ function createBotFormHasEnteredData(options: {
 }): boolean {
   if (options.name.trim().length > 0) return true;
   if (botProfileCompletionCount(options.profile) > 0) return true;
-  if (options.localModel !== AUTO_MODEL_CHOICE) return true;
-  if (options.onlineModel !== AUTO_MODEL_CHOICE) return true;
+  if (options.localModel !== DEFAULT_BOT_CHAT_MODEL_CHOICE) return true;
+  if (options.onlineModel !== DEFAULT_BOT_CHAT_MODEL_CHOICE) return true;
   if (!options.onlineEnabled) return true;
   if (options.deleteProtected) return true;
   if (options.flirtEnabled) return true;
@@ -20992,9 +21002,9 @@ function ZenLiveBotPresencePlate({
           isTalking={faceTalking}
           scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
           baseText={plateFace.text}
-          rotateDeg={0}
+          rotateDeg={plateFace.rotateDeg}
           voicePreset={voicePreset}
-          className={styles.zenLiveBotPresenceFaceGlyph}
+          className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
         />
       </span>
       <span
@@ -27506,8 +27516,8 @@ function HomeContent(): React.JSX.Element {
   // into edit mode. No inline per-card edit form, no duplicated picker.
   const [newBotName, setNewBotName] = useState("");
   const [botProfile, setBotProfile] = useState<BotProfileFields>(() => blankBotProfile());
-  const [newBotLocalModel, setNewBotLocalModel] = useState(AUTO_MODEL_CHOICE);
-  const [newBotOnlineModel, setNewBotOnlineModel] = useState(AUTO_MODEL_CHOICE);
+  const [newBotLocalModel, setNewBotLocalModel] = useState(DEFAULT_BOT_CHAT_MODEL_CHOICE);
+  const [newBotOnlineModel, setNewBotOnlineModel] = useState(DEFAULT_BOT_CHAT_MODEL_CHOICE);
   const [newBotLocalImageModel, setNewBotLocalImageModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOpenAiImageModel, setNewBotOpenAiImageModel] = useState(AUTO_MODEL_CHOICE);
   const [newBotOnlineEnabled, setNewBotOnlineEnabled] = useState(true);
@@ -27584,8 +27594,8 @@ function HomeContent(): React.JSX.Element {
   const latestCreateBotDraftRef = useRef({
     name: "",
     profile: blankBotProfile(),
-    localModel: AUTO_MODEL_CHOICE,
-    onlineModel: AUTO_MODEL_CHOICE,
+    localModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
+    onlineModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
     onlineEnabled: true,
     deleteProtected: false,
     flirtEnabled: false,
@@ -39162,8 +39172,8 @@ function HomeContent(): React.JSX.Element {
 
     setNewBotName("");
     setBotProfile(blankBotProfile());
-    setNewBotLocalModel(AUTO_MODEL_CHOICE);
-    setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotLocalModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
+    setNewBotOnlineModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
     setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
     setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineEnabled(true);
@@ -49432,8 +49442,8 @@ function HomeContent(): React.JSX.Element {
   const resetBotForm = useCallback(() => {
     setNewBotName("");
     setBotProfile(blankBotProfile());
-    setNewBotLocalModel(AUTO_MODEL_CHOICE);
-    setNewBotOnlineModel(AUTO_MODEL_CHOICE);
+    setNewBotLocalModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
+    setNewBotOnlineModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
     setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
     setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
     setNewBotOnlineEnabled(true);
@@ -52188,7 +52198,7 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api(`/api/bots/${id}`, {
+      const result = await api<{ bot?: Bot }>(`/api/bots/${id}`, {
         method: "PATCH",
         body: JSON.stringify({
           name: trimmedName,
@@ -52231,7 +52241,12 @@ function HomeContent(): React.JSX.Element {
       };
       setEditingBotId(id);
       setColorWheelOpen(false);
-      await refreshBots();
+      const updatedBot = result.bot;
+      if (updatedBot?.id) {
+        setBots((list) => replaceBotRowById(list, updatedBot));
+      } else {
+        await refreshBots();
+      }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
     } finally {
@@ -63738,6 +63753,7 @@ function HomeContent(): React.JSX.Element {
                                 placement="down"
                                 minMenuWidthPx={260}
                                 showAutoOption={false}
+                                showDisabledOption
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                               />
                               <small>Used when this bot replies while the editor is set to LOCAL.</small>
@@ -63756,6 +63772,7 @@ function HomeContent(): React.JSX.Element {
                                 placement="down"
                                 minMenuWidthPx={260}
                                 showAutoOption={false}
+                                showDisabledOption
                                 dismissPopoversSignal={composerPopoverDismissSignal}
                               />
                               <small>
@@ -63977,6 +63994,7 @@ function HomeContent(): React.JSX.Element {
                               placement="down"
                               minMenuWidthPx={260}
                               showAutoOption={false}
+                              showDisabledOption
                               dismissPopoversSignal={composerPopoverDismissSignal}
                             />
                             <small>Used when this bot replies while the editor is set to LOCAL.</small>
@@ -64005,6 +64023,7 @@ function HomeContent(): React.JSX.Element {
                               placement="down"
                               minMenuWidthPx={260}
                               showAutoOption={false}
+                              showDisabledOption
                               dismissPopoversSignal={composerPopoverDismissSignal}
                             />
                             <small>
@@ -66332,8 +66351,9 @@ function HomeContent(): React.JSX.Element {
       const response = await api<{
         ok: true;
         conversation: CoffeeConversationState;
-        speakerBotId: string;
+        speakerBotId: string | null;
         routerReason?: string;
+        stale?: boolean;
         interruption?: CoffeeInterruptionEvent;
       }>(`/api/coffee/sessions/${encodeURIComponent(conversationId)}/continue`, {
         method: "POST",
@@ -66351,6 +66371,16 @@ function HomeContent(): React.JSX.Element {
         }),
         signal: abortController.signal,
       });
+      if (coffeeShouldIgnoreStaleTurnResponse(response)) {
+        setCoffeePendingSpeakerBotId(null);
+        setCoffeePendingRevealConversation(null);
+        setCoffeeTurnRhythmState(
+          coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
+        );
+        return;
+      }
+      const responseSpeakerBotId = response.speakerBotId;
+      if (!responseSpeakerBotId) return;
       void refreshConversations().catch((err) => {
         console.warn("[coffee] refreshConversations after continue failed", err);
       });
@@ -66360,7 +66390,7 @@ function HomeContent(): React.JSX.Element {
       // to flash in the center card before the typewriter starts.
       queueCoffeeReveal({
         conversation: response.conversation,
-        speakerBotId: response.speakerBotId,
+        speakerBotId: responseSpeakerBotId,
         includeCooldown: false,
         onReveal: () => {
           if (coffeeAutoplayPausedRef.current) return;
@@ -66539,6 +66569,9 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     clearCoffeeLoopTimer();
+    coffeeContinueAbortRef.current?.abort();
+    coffeeContinueAbortRef.current = null;
+    setCoffeeAutoBusy(false);
     const pendingRevealMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingRevealLatestMessage =
       pendingRevealMessages.length > 0
@@ -66684,8 +66717,9 @@ function HomeContent(): React.JSX.Element {
       const response = await api<{
         ok: true;
         conversation: CoffeeConversationState;
-        speakerBotId: string;
+        speakerBotId: string | null;
         routerReason?: string;
+        stale?: boolean;
         interruption?: CoffeeInterruptionEvent;
       }>("/api/coffee/turn", {
         method: "POST",
@@ -66705,6 +66739,17 @@ function HomeContent(): React.JSX.Element {
         }),
         signal: abortController.signal,
       });
+      if (coffeeShouldIgnoreStaleTurnResponse(response)) {
+        setCoffeePendingSpeakerBotId(null);
+        setCoffeePendingRevealConversation(null);
+        setCoffeeUserRevealText("");
+        setCoffeeTurnRhythmState(
+          coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
+        );
+        return;
+      }
+      const responseSpeakerBotId = response.speakerBotId;
+      if (!responseSpeakerBotId) return;
       void refreshConversations().catch((err) => {
         console.warn("[coffee] refreshConversations after turn failed", err);
       });
@@ -66729,7 +66774,7 @@ function HomeContent(): React.JSX.Element {
         const userLine = extractCoffeeUserLineFromTurnMessages(response.conversation.messages);
         const revealArgs: CoffeePendingRevealQueueArgs = {
           conversation: response.conversation,
-          speakerBotId: response.speakerBotId,
+          speakerBotId: responseSpeakerBotId,
           includeCooldown: true,
           onReveal: () => {
             if (coffeeAutoplayPausedRef.current) return;
@@ -66740,7 +66785,7 @@ function HomeContent(): React.JSX.Element {
           },
         };
         if (userLine) {
-          setCoffeePendingSpeakerBotId(response.speakerBotId);
+          setCoffeePendingSpeakerBotId(responseSpeakerBotId);
           if (coffeeShouldQueueAssistantRevealAfterUserTyping(coffeeTurnRhythmStateRef.current)) {
             coffeePendingRevealAfterUserRef.current = revealArgs;
           } else {
@@ -67425,6 +67470,9 @@ function HomeContent(): React.JSX.Element {
               {coffeeConversation.messages.map((message) => {
                 const isAssistant = message.role === "assistant";
                 const isUser = message.role === "user";
+                const transcriptContent = isAssistant
+                  ? coffeeTableDisplayText(message.content)
+                  : message.content;
                 return (
                 <li
                   key={message.id}
@@ -67449,14 +67497,18 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.coffeeMessageUserLabel}>You</div>
                   )}
                   <div className={styles.coffeeMessageContent}>
-                    {renderPlainTextWithBotMentions(message.content, {
-                      keyPrefix: message.id,
-                      botsById: chatEnabledBotMentionMap,
-                      resolvedTheme,
-                      normalizeAccentForTheme,
-                      // Self-name auto-coloring is fine here — the "PATRICK STAR" label
-                      // above the bubble already uses the speaker's identity color.
-                    })}
+                    {transcriptContent.trim().length > 0
+                      ? renderPlainTextWithBotMentions(transcriptContent, {
+                          keyPrefix: message.id,
+                          botsById: chatEnabledBotMentionMap,
+                          resolvedTheme,
+                          normalizeAccentForTheme,
+                          // Self-name auto-coloring is fine here — the "PATRICK STAR" label
+                          // above the bubble already uses the speaker's identity color.
+                        })
+                      : isAssistant
+                        ? <span className={styles.srOnly}>Non-verbal action.</span>
+                        : null}
                   </div>
                 </li>
                 );
@@ -68400,6 +68452,12 @@ function HomeContent(): React.JSX.Element {
                   : seatLastActionHistory.length > 1
                     ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
                   : null;
+            const seatActionPrimaryVerbose = seatActionPrimaryText
+              ? isZenLiveBotPresenceActionVerbose(seatActionPrimaryText)
+              : false;
+            const seatActionGhostVerbose = seatActionGhostText
+              ? isZenLiveBotPresenceActionVerbose(seatActionGhostText)
+              : false;
             const pendingAssistantMood =
               liveTableTypingBot && pendingLatestMessage?.role === "assistant"
                 ? pendingLatestMessage.moodKey
@@ -68531,6 +68589,7 @@ function HomeContent(): React.JSX.Element {
                   <div
                     className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
                     data-badge-side={seatBadgeSide}
+                    data-action-verbose={seatActionGhostVerbose ? "true" : undefined}
                     aria-hidden="true"
                   >
                     <span
@@ -68570,6 +68629,7 @@ function HomeContent(): React.JSX.Element {
                   <div
                     className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
                     data-badge-side={seatBadgeSide}
+                    data-action-verbose={seatActionPrimaryVerbose ? "true" : undefined}
                     aria-label={`${bot.name} action: ${seatActionPrimaryText}`}
                     title={`${bot.name}: ${seatActionPrimaryText}`}
                   >

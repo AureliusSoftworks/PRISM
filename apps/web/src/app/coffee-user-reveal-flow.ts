@@ -23,3 +23,10 @@ export function coffeePendingSubmittedUserLineVisible(args: {
     args.userRevealText.trim().length > 0
   );
 }
+
+export function coffeeShouldIgnoreStaleTurnResponse(response: {
+  stale?: boolean;
+  speakerBotId?: string | null;
+}): boolean {
+  return response.stale === true || !response.speakerBotId;
+}

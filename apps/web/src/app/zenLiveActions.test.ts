@@ -80,6 +80,25 @@ describe("resolveZenLiveBotPresenceActionText", () => {
 });
 
 describe("zenLiveActionPlateFace", () => {
+  it("maps closed Zen action moods to Coffee-style plate faces", () => {
+    const cases = [
+      ["amused", ":)"],
+      ["warm", ":]"],
+      ["attentive", ":]"],
+      ["confused", ":?"],
+      ["stern", ":["],
+      ["waiting", ":|"],
+      ["neutral", ":|"],
+    ] as const;
+
+    for (const [moodHint, text] of cases) {
+      assert.deepEqual(zenLiveActionPlateFace(moodHint, "closed"), {
+        text,
+        rotateDeg: 90,
+      });
+    }
+  });
+
   it("supports open-mouth shapes for Zen speech", () => {
     assert.deepEqual(zenLiveActionPlateFace("warm", "open-wide"), {
       text: ":0",
