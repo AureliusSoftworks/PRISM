@@ -85,6 +85,8 @@ import {
 import {
   clampCoffeeReplayMessageIndex,
   coffeeReplayVisibleMessages,
+  coffeeSystemSynopsisIsDisplayable,
+  coffeeTranscriptVisibleMessages,
   collectCoffeeReplayActionsForBot,
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
@@ -3749,7 +3751,6 @@ const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS = 0.65;
 const COFFEE_CENTER_FEED_MAX_LINES = 14;
 const COFFEE_DISCARD_ON_EXIT_WINDOW_MS = 10_000;
-const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [2, 3, 5];
 const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
@@ -4315,7 +4316,7 @@ function coffeeConversationHasSessionSynopsis(
     conversation?.messages.some(
       (message) =>
         message.role === "system" &&
-        message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+        coffeeSystemSynopsisIsDisplayable(message.content)
     )
   );
 }
@@ -67433,6 +67434,7 @@ function HomeContent(): React.JSX.Element {
   );
   const renderCoffeeTranscriptPanel = (): React.JSX.Element | null => {
     if (!coffeeConversation) return null;
+    const transcriptMessages = coffeeTranscriptVisibleMessages(coffeeConversation.messages);
     return (
       <>
         <div
@@ -67453,7 +67455,7 @@ function HomeContent(): React.JSX.Element {
           <header className={styles.coffeeTranscriptHeader}>
             <div>
               <span className={styles.sectionLabel}>Table talk</span>
-              <p>{`${coffeeConversation.messages.length} messages`}</p>
+              <p>{`${transcriptMessages.length} messages`}</p>
             </div>
             <button
               type="button"
@@ -67467,7 +67469,7 @@ function HomeContent(): React.JSX.Element {
           </header>
           <section className={styles.coffeeThread} aria-live="polite">
             <ul className={styles.coffeeMessages}>
-              {coffeeConversation.messages.map((message) => {
+              {transcriptMessages.map((message) => {
                 const isAssistant = message.role === "assistant";
                 const isUser = message.role === "user";
                 const transcriptContent = isAssistant
@@ -67831,7 +67833,7 @@ function HomeContent(): React.JSX.Element {
         ? messages.filter(
             (message) =>
               message.role === "system" &&
-              message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+              coffeeSystemSynopsisIsDisplayable(message.content)
           )
         : [];
     const centerFeedSourceMessages =

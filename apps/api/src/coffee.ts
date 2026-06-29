@@ -34,6 +34,7 @@ import {
   type ProviderName,
 } from "./providers.ts";
 import {
+  ABOUT_YOU_MEMORY_SOURCE,
   buildInitialAboutYouMemoryText,
   extractBotPreferredAddressMemoryCandidates,
   hasAboutYouMemoryForBot,
@@ -283,6 +284,40 @@ const COFFEE_LOOP_MOTIF_STOPWORDS = new Set([
   "would",
 ]);
 
+const COFFEE_FALLBACK_FOCUS_BLOCKED_TOKENS = new Set([
+  "before",
+  "change",
+  "finish",
+  "finished",
+  "krabs",
+  "patrick",
+  "plankton",
+  "profound",
+  "sentence",
+  "sharper",
+  "sometime",
+  "spongebob",
+  "squidward",
+  "test",
+  "wearines",
+  "we'd",
+  "we'll",
+  "we're",
+  "we've",
+  "wed",
+  "well",
+  "were",
+  "weve",
+  "you'd",
+  "you'll",
+  "you're",
+  "you've",
+  "youd",
+  "youll",
+  "youre",
+  "youve",
+]);
+
 function coffeeLoopMotifToken(raw: string): string | null {
   const lower = raw.toLowerCase();
   const normalized = lower
@@ -299,6 +334,20 @@ function coffeeLoopMotifTokens(raw: string): string[] {
   for (const match of raw.matchAll(/[\p{L}\p{N}']+/gu)) {
     const token = coffeeLoopMotifToken(match[0]);
     if (token) tokens.add(token);
+  }
+  return [...tokens];
+}
+
+function coffeeFallbackFocusTokens(raw: string): string[] {
+  const tokens = new Set<string>();
+  for (const match of raw.matchAll(/[\p{L}\p{N}']+/gu)) {
+    const original = match[0];
+    if (/^[A-Z]/u.test(original)) continue;
+    const token = coffeeLoopMotifToken(original);
+    if (!token) continue;
+    if (token.includes("'")) continue;
+    if (COFFEE_FALLBACK_FOCUS_BLOCKED_TOKENS.has(token)) continue;
+    tokens.add(token);
   }
   return [...tokens];
 }
@@ -580,12 +629,34 @@ export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null
           ),
           ""
         )
+        .replace(
+          new RegExp(
+            `^\\s*\\*{0,2}${escaped}\\*{0,2}\\s+with\\s+[^.!?\\n]{3,80}?\\s+(?=[A-Z"“'‘(])`,
+            ""
+          ),
+          ""
+        )
         .trim();
     }
     if (text === before) break;
   }
 
   return text;
+}
+
+function stripCoffeeSelfAddressNoise(
+  raw: string,
+  speakerName: string | null | undefined
+): string {
+  const name = typeof speakerName === "string" ? speakerName.trim() : "";
+  if (!name) return raw;
+  const escaped = escapeRegExp(name);
+  return raw
+    .replace(new RegExp(`([,;:!?])\\s*${escaped}\\s*[—-]\\s*`, "gi"), "$1 ")
+    .replace(new RegExp(`\\s+[—-]\\s*${escaped}\\s*[—-]\\s*`, "gi"), " ")
+    .replace(new RegExp(`\\s+${escaped}\\s*[—-]\\s*`, "gi"), " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
@@ -653,6 +724,7 @@ const COFFEE_PROMPT_LEAK_ANYWHERE_PATTERNS = [
 ] as const;
 
 const COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS = 48;
+const COFFEE_SPEAKER_REPLY_DECODE_MIN_TOKENS = 96;
 const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
   /\bas\s+(?:an?\s+)?(?:digital\s+)?ai\s+(?:assistant|model)\b/i,
   /\bi\s+am\s+(?:an?\s+)?(?:digital\s+)?(?:ai|language model|chatbot|virtual assistant)\b/i,
@@ -666,6 +738,8 @@ const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
 
 const COFFEE_STAGE_ACTION_VERB_RE =
   /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:adjusts?|arches?|blinks?|breathes?|chuckles?|crosses?|drums?|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|laughs?|leans?|looks?|mutters?|nods?|pauses?|picks?|places?|plucks?|points?|ponders?|pours?|raises?|rolls?|rubs?|scoffs?|scratches?|sets?|shakes?|shifts?|shrugs?|sighs?|sips?|smiles?|smirks?|snorts?|squints?|stares?|stirs?|straightens?|taps?|tilts?|touches?|turns?|waves?|winces?)\b/i;
+const COFFEE_STAGE_ACTION_BODY_PART_RE =
+  /^(?:(?:his|her|their|my)\s+)?(?:brows?|claws?|eyes?|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
 const COFFEE_STAGE_ACTION_BLOCK_RE = /\*+([^*\n]+?)\*+/g;
 
 function isValidCoffeeStageAction(action: string): boolean {
@@ -675,6 +749,7 @@ function isValidCoffeeStageAction(action: string): boolean {
   if (tokenCount > 10) return false;
   const lower = normalized.toLowerCase();
   if (COFFEE_STAGE_ACTION_VERB_RE.test(lower)) return true;
+  if (COFFEE_STAGE_ACTION_BODY_PART_RE.test(lower)) return true;
   // Allow common verb-like morphology so we don't over-prune natural actions.
   return /\b\p{L}+(?:ing|ed)\b/iu.test(lower);
 }
@@ -784,6 +859,11 @@ const COFFEE_META_TABLE_MANAGEMENT_PATTERNS = [
   /\bsilent moderator\b/i,
 ] as const;
 
+const COFFEE_INCOHERENT_TABLE_LINE_PATTERNS = [
+  /\bsometimes\s+the\s+what\b/i,
+  /\bwhat\s+[^.!?]{0,48}\b(?:we['’]?ve|weve)\b[^.!?]{0,48}\bchanges?\b/i,
+] as const;
+
 export function coffeeReplyIsLowValueTableLine(raw: string): boolean {
   const visible = visibleCoffeeSpeechForValueScan(raw).replace(/[“”]/g, "\"");
   const normalized = visible.replace(/\s+/g, " ").trim();
@@ -791,8 +871,74 @@ export function coffeeReplyIsLowValueTableLine(raw: string): boolean {
   if (COFFEE_META_TABLE_MANAGEMENT_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return true;
   }
+  if (COFFEE_INCOHERENT_TABLE_LINE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return true;
+  }
   if (normalized.length > 72) return false;
   return COFFEE_LOW_VALUE_TABLE_LINE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+const COFFEE_UNFINISHED_REPLY_TRAILING_WORDS = new Set([
+  "a",
+  "also",
+  "an",
+  "and",
+  "as",
+  "at",
+  "because",
+  "but",
+  "for",
+  "from",
+  "if",
+  "in",
+  "into",
+  "mostly",
+  "of",
+  "on",
+  "or",
+  "since",
+  "so",
+  "than",
+  "that",
+  "the",
+  "then",
+  "though",
+  "to",
+  "unless",
+  "until",
+  "when",
+  "where",
+  "whether",
+  "while",
+  "with",
+  "without",
+]);
+
+export function coffeeReplyLooksUnfinished(raw: string): boolean {
+  const visible = visibleCoffeeSpeechForValueScan(raw).replace(/[“”]/g, "\"");
+  const normalized = visible.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/[.!?…)"'\]]$/u.test(normalized)) return false;
+  if (/[—-]$/u.test(normalized)) return true;
+  const words = normalized.toLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? [];
+  if (words.length === 0) return false;
+  const last = words[words.length - 1]?.replace(/[’']/g, "") ?? "";
+  if (COFFEE_UNFINISHED_REPLY_TRAILING_WORDS.has(last)) return true;
+  const tail = words.slice(-2).join(" ").replace(/[’']/g, "");
+  return tail === "but mostly" || tail === "and then" || tail === "so that";
+}
+
+export function coffeeSpeakerMaxTokensForTurn(
+  speakerMaxTokens: number | null | undefined,
+  coffeeCap: number
+): number {
+  const cap = Math.max(1, Math.floor(coffeeCap));
+  const floor = Math.min(cap, COFFEE_SPEAKER_REPLY_DECODE_MIN_TOKENS);
+  const requested =
+    typeof speakerMaxTokens === "number" && Number.isFinite(speakerMaxTokens)
+      ? Math.max(1, Math.floor(speakerMaxTokens))
+      : cap;
+  return Math.min(cap, Math.max(floor, requested));
 }
 
 /**
@@ -806,12 +952,14 @@ export function sanitizeCoffeeTableReply(
 ): string {
   const stripped = stripCoffeeSpeakerPrefix(raw, speakerName);
   if (!stripped) return "";
+  const withoutSelfAddressNoise = stripCoffeeSelfAddressNoise(stripped, speakerName);
   const withStageActionsSanitized = normalizeCoffeeUnmarkedStageActionOpener(
-    sanitizeCoffeeStageActions(stripped)
+    sanitizeCoffeeStageActions(withoutSelfAddressNoise)
   );
   if (coffeeReplyLooksLikePromptLeak(withStageActionsSanitized)) return "";
   if (coffeeReplyBreaksCharacterImmersion(withStageActionsSanitized)) return "";
   if (coffeeReplyIsLowValueTableLine(withStageActionsSanitized)) return "";
+  if (coffeeReplyLooksUnfinished(withStageActionsSanitized)) return "";
   return clampCoffeeTableReplyText(withStageActionsSanitized, maxChars);
 }
 
@@ -1055,7 +1203,7 @@ function buildCoffeeFreshFallbackBeat(args: {
     ? [
         `*taps the cup once* Put ${focus} under a consequence we can see.`,
         `*leans back* ${focus} only matters if someone names who pays for it.`,
-        `*stirs slowly* The sharper test is what ${focus} changes at the table.`,
+        `*stirs slowly* The sharper test is whether ${focus} changes anything at the table.`,
         `*glances around* ${focus} needs one example before it becomes a verdict.`,
         `*sets the cup down* The cost of ${focus} is the part worth saying plainly.`,
       ]
@@ -1080,13 +1228,17 @@ function buildCoffeeFreshFallbackBeat(args: {
   return clampCoffeeTableReplyText(fallback, args.maxChars);
 }
 
-function coffeeFallbackFocusPhrase(raw: string): string | null {
+export function coffeeFallbackFocusPhrase(raw: string): string | null {
   const visible = visibleCoffeeSpeechForValueScan(raw)
     .replace(/\b(?:just said|the user says|latest table moment)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const tokens = coffeeLoopMotifTokens(visible).filter(
-    (token) => token !== "sigmund" && token !== "freud" && token !== "darth" && token !== "vader"
+  const tokens = coffeeFallbackFocusTokens(visible).filter(
+    (token) =>
+      token !== "sigmund" &&
+      token !== "freud" &&
+      token !== "darth" &&
+      token !== "vader"
   );
   if (tokens.length === 0) return null;
   const phrase = tokens.slice(0, 2).join(" and ");
@@ -1496,6 +1648,7 @@ function normalizeCoffeeMeetingSummary(raw: string): string | null {
   if (!collapsed) return null;
   const withoutFence = collapsed.replace(/^["'`]+|["'`]+$/g, "").trim();
   if (!withoutFence) return null;
+  if (coffeeTextMentionsInternalAccountMetadata(withoutFence)) return null;
   if (coffeeReplyLooksLikePromptLeak(withoutFence)) return null;
   if (coffeeReplyBreaksCharacterImmersion(withoutFence)) return null;
   if (withoutFence.length < 24) return null;
@@ -1513,6 +1666,7 @@ export function normalizeCoffeeSessionSynopsis(raw: string): string | null {
     .replace(/^\*\*session synopsis\*\*\s*[:\-]?\s*/i, "")
     .replace(/^session synopsis\s*[:\-]\s*/i, "")
     .trim();
+  if (coffeeTextMentionsInternalAccountMetadata(withoutHeading)) return null;
   if (coffeeReplyLooksLikePromptLeak(withoutHeading)) return null;
   if (withoutHeading.length < 40) return null;
   const prefixed = `${COFFEE_SESSION_SYNOPSIS_PREFIX} ${withoutHeading}`;
@@ -1524,7 +1678,14 @@ function coffeeSessionAlreadyHasSynopsis(history: readonly ChatMessage[]): boole
   return history.some(
     (message) =>
       message.role === "system" &&
-      message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX)
+      message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX) &&
+      !coffeeTextMentionsInternalAccountMetadata(message.content)
+  );
+}
+
+export function coffeeTextMentionsInternalAccountMetadata(text: string): boolean {
+  return /\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/i.test(
+    text
   );
 }
 
@@ -1601,7 +1762,7 @@ type CoffeeSynopsisMemoryRow = {
   bot_name: string | null;
 };
 
-function loadCoffeeSessionMemoryChangeLines(
+export function loadCoffeeSessionMemoryChangeLines(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
@@ -1621,6 +1782,7 @@ function loadCoffeeSessionMemoryChangeLines(
     .all(userId, conversationId) as CoffeeSynopsisMemoryRow[];
   const lines: string[] = [];
   for (const row of rows) {
+    if (row.source === ABOUT_YOU_MEMORY_SOURCE) continue;
     try {
       const payload = decryptJson(
         { ciphertext: row.ciphertext, iv: row.iv, tag: row.tag },
@@ -1628,6 +1790,7 @@ function loadCoffeeSessionMemoryChangeLines(
       ) as { text?: unknown };
       const text = typeof payload.text === "string" ? payload.text.replace(/\s+/g, " ").trim() : "";
       if (!text) continue;
+      if (coffeeTextMentionsInternalAccountMetadata(text)) continue;
       const scope = row.bot_name ? `${row.bot_name}` : "Global";
       lines.push(`- ${scope} ${row.source}/${row.tier}: ${text}`);
     } catch {
@@ -1658,7 +1821,7 @@ function buildCoffeeSessionSynopsisMessages(args: {
     {
       role: "system",
       content:
-        "Write a concise end-of-session Coffee table synopsis for the user. Be concrete, observant, and natural. Do not mention prompts or hidden rules.",
+        "Write a concise end-of-session Coffee table synopsis for the user. Be concrete, observant, and natural. Do not mention prompts, hidden rules, account metadata, display names, or system-noted facts.",
     },
     {
       role: "user",
@@ -7440,8 +7603,8 @@ async function generateCoffeeBotReply(args: {
   if (typeof speaker.temperature === "number") {
     speakerOptions.temperature = speaker.temperature;
   }
-  speakerOptions.maxTokens = Math.min(
-    typeof speaker.maxTokens === "number" ? speaker.maxTokens : replyCaps.speakerMaxOutputTokens,
+  speakerOptions.maxTokens = coffeeSpeakerMaxTokensForTurn(
+    speaker.maxTokens,
     replyCaps.speakerMaxOutputTokens
   );
   const speakerMessages = buildSpeakerPrompt({
@@ -7492,6 +7655,9 @@ async function generateCoffeeBotReply(args: {
     typeof speakerReply === "string"
       ? repairBotMentionBrackets(speakerReply, peersForRepair)
       : speakerReply;
+  const speakerReplyWasUnfinished =
+    typeof speakerReplyRepaired === "string" &&
+    coffeeReplyLooksUnfinished(stripCoffeeSpeakerPrefix(speakerReplyRepaired, speaker.name));
   let replyText =
     typeof speakerReplyRepaired === "string"
       ? sanitizeCoffeeTableReply(
@@ -7500,7 +7666,7 @@ async function generateCoffeeBotReply(args: {
           replyCaps.tableReplyMaxChars
         )
       : "";
-  if (!replyText && typeof speakerReply === "string") {
+  if (!replyText && !speakerReplyWasUnfinished && typeof speakerReply === "string") {
     try {
       replyText = await repairCoffeePromptLeak({
         speakerProvider,

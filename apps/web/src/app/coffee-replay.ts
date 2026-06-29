@@ -1,5 +1,21 @@
 import { extractStageDirections } from "./botMention.ts";
 
+const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
+
+export function coffeeTextMentionsInternalAccountMetadata(text: string): boolean {
+  return /\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/i.test(
+    text
+  );
+}
+
+export function coffeeSystemSynopsisIsDisplayable(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    trimmed.startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX) &&
+    !coffeeTextMentionsInternalAccountMetadata(trimmed)
+  );
+}
+
 export interface CoffeeReplayMessageLike {
   id?: string;
   role: string;
@@ -28,6 +44,24 @@ export function coffeeReplayVisibleMessages<T>(
   if (messages.length === 0) return [];
   const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, replayMessageIndex);
   return messages.slice(0, clampedIndex + 1);
+}
+
+export function coffeeTranscriptVisibleMessages<T extends { role: string; content: string }>(
+  messages: readonly T[]
+): T[] {
+  return messages.filter((message) => {
+    if (
+      message.role === "system" &&
+      message.content.trim().startsWith(COFFEE_SESSION_SYNOPSIS_PREFIX) &&
+      !coffeeSystemSynopsisIsDisplayable(message.content)
+    ) {
+      return false;
+    }
+    if (message.role !== "assistant") {
+      return message.content.trim().length > 0;
+    }
+    return extractStageDirections(message.content).mainText.trim().length > 0;
+  });
 }
 
 export function collectCoffeeReplayActionsForBot(

@@ -16,14 +16,17 @@ import {
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
   coffeeLatestMessageIdChanged,
+  coffeeFallbackFocusPhrase,
   coffeeReplyBreaksCharacterImmersion,
   coffeeMeetingSummarySourceMessages,
   coffeeReplyIsLowValueTableLine,
+  coffeeReplyLooksUnfinished,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
   coffeeReplyRepeatsRecentMotifs,
   coffeeReplyRepeatsPollFallbackShape,
   coffeeReplyRepeatsStockFallbackShape,
+  coffeeSpeakerMaxTokensForTurn,
   coffeeSpeakerUsesOrganicSeeds,
   collectCoffeePollVotes,
   computePlayerInterruptionConsequences,
@@ -45,6 +48,7 @@ import {
   initializeCoffeeSocialState,
   interruptedSnippetFromTokenCount,
   loadCoffeeStarterMemoryContext,
+  loadCoffeeSessionMemoryChangeLines,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
   normalizeCoffeeSeatBotIds,
@@ -64,6 +68,7 @@ import {
   sanitizeCoffeeTableReply,
   kickoffCoffeeMeetingSummaryRefresh,
   stripCoffeeSpeakerPrefix,
+  coffeeTextMentionsInternalAccountMetadata,
   updateCoffeeGroup,
   updateCoffeePreset,
   type CoffeeBotProfile,
@@ -458,6 +463,7 @@ function seedCoffeeMemory(
   options: {
     id: string;
     text: string;
+    conversationId?: string | null;
     botId?: string | null;
     source?: "direct" | "inferred" | "compiled" | "about_you";
     category?: "general" | "user" | "bot_relation";
@@ -470,10 +476,11 @@ function seedCoffeeMemory(
     `INSERT INTO memories
        (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category,
         tier, durability, source, certainty, source_message_ids, created_at)
-     VALUES (?, ?, NULL, ?, ?, ?, ?, 0.91, ?, ?, 0.7, ?, 0.91, '[]', ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0.91, ?, ?, 0.7, ?, 0.91, '[]', ?)`
   ).run(
     options.id,
     userId,
+    options.conversationId ?? null,
     options.botId ?? null,
     encrypted.ciphertext,
     encrypted.iv,
@@ -2950,6 +2957,21 @@ describe("coffee prompt leak cleanup", () => {
     );
   });
 
+  it("detects malformed Coffee fallback grammar as low-value", () => {
+    assert.equal(
+      coffeeReplyIsLowValueTableLine(
+        "The sharper test is what squidward and we've changes at the table."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyIsLowValueTableLine(
+        "Sometimes the what, SpongeBob— sometimes the stars align."
+      ),
+      true
+    );
+  });
+
   it("drops prompt-leak replies instead of showing them on the table", () => {
     assert.equal(
       sanitizeCoffeeTableReply(
@@ -3012,6 +3034,20 @@ describe("coffee prompt leak cleanup", () => {
       sanitizeCoffeeTableReply("SpongeBob: Yeah, I can do that.", "SpongeBob"),
       "Yeah, I can do that."
     );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "SpongeBob with profound weariness I can still return the lunchbox.",
+        "SpongeBob"
+      ),
+      "I can still return the lunchbox."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "SpongeBob with profound weariness Sometimes the what, SpongeBob— sometimes the stars align.",
+        "SpongeBob"
+      ),
+      ""
+    );
   });
 
   it("downgrades weak noun-like stage tags to plain prose", () => {
@@ -3063,6 +3099,56 @@ describe("coffee prompt leak cleanup", () => {
       ),
       "*shifts in chair with a long, theatrical sigh* Of all the ridiculous theories to waste oxygen on, this one takes the cake."
     );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "claws slam the table Now hold on just a barnacle-encrusted minute.",
+        "Mr. Krabs"
+      ),
+      "*claws slam the table* Now hold on just a barnacle-encrusted minute."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "claws are useful at work Now that is just common sense.",
+        "Mr. Krabs"
+      ),
+      "claws are useful at work Now that is just common sense."
+    );
+  });
+
+  it("rejects obviously unfinished Coffee replies instead of storing a cutoff", () => {
+    assert.equal(
+      coffeeReplyLooksUnfinished(
+        "Oh! You want to know what I think? The coffee cup is pretty neat! But mostly"
+      ),
+      true
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Oh! You want to know what I think? The coffee cup is pretty neat! But mostly",
+        "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(coffeeReplyLooksUnfinished("I mostly trust the quiet option"), false);
+    assert.equal(
+      sanitizeCoffeeTableReply("I mostly trust the quiet option.", "Squidward"),
+      "I mostly trust the quiet option."
+    );
+  });
+
+  it("does not build fallback focus phrases from speaker-name or pronoun debris", () => {
+    assert.equal(
+      coffeeFallbackFocusPhrase(
+        "The sharper test is what Squidward and we've changes at the table."
+      ),
+      null
+    );
+    assert.equal(
+      coffeeFallbackFocusPhrase(
+        "SpongeBob with profound weariness Sometimes the what, SpongeBob— sometimes the sentence ended before you finished it?"
+      ),
+      null
+    );
   });
 
   it("dedupes model-returned session synopsis headings", () => {
@@ -3071,6 +3157,21 @@ describe("coffee prompt leak cleanup", () => {
         "**Session Synopsis** The table circled manipulation and trust while Vader pressed for evidence and Freud overextended the psychological frame."
       ),
       "Session synopsis: The table circled manipulation and trust while Vader pressed for evidence and Freud overextended the psychological frame."
+    );
+  });
+
+  it("rejects session synopses that mention internal account metadata", () => {
+    assert.equal(
+      coffeeTextMentionsInternalAccountMetadata(
+        "The poll leans True (3-2), and the system noted your account display name is admin."
+      ),
+      true
+    );
+    assert.equal(
+      normalizeCoffeeSessionSynopsis(
+        "The poll leans True (3-2), and the system noted your account display name is admin."
+      ),
+      null
     );
   });
 
@@ -3213,6 +3314,49 @@ describe("coffee meeting summary helpers", () => {
     ]);
     assert.equal(source.length, 2);
     assert.equal(source.some((message) => message.id === "a2"), false);
+  });
+
+  it("omits account metadata from session synopsis memory-change lines", () => {
+    const db = createCoffeeTestDb();
+    const userId = "summary-user";
+    const userKey = Buffer.alloc(32, 11);
+    const conversationId = "conv-synopsis-memory";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-about-you",
+      conversationId,
+      botId: ALICE.id,
+      source: "about_you",
+      text: "Your account display name is admin.",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-direct",
+      conversationId,
+      botId: ALICE.id,
+      source: "direct",
+      text: "Alice learned the user wants sharper poll arguments.",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-mis-sourced-account",
+      conversationId,
+      botId: null,
+      source: "direct",
+      text: "Your account has not provided a display name yet.",
+      createdAt: "2026-01-01T00:00:02.000Z",
+    });
+
+    const lines = loadCoffeeSessionMemoryChangeLines(
+      db,
+      userId,
+      conversationId,
+      userKey
+    );
+
+    assert.deepEqual(lines, [
+      "- Alice direct/short_term: Alice learned the user wants sharper poll arguments.",
+    ]);
   });
 
   it("refreshes summaries only after enough new assistant turns", () => {
@@ -3761,9 +3905,19 @@ describe("normalizeCoffeeSessionSettings", () => {
 describe("coffeeReplyLengthCaps", () => {
   it("maps presets to bounded caps", () => {
     const brief = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "brief" }));
-    assert.deepEqual(brief, { tableReplyMaxChars: 60, speakerMaxOutputTokens: 32 });
+    assert.deepEqual(brief, { tableReplyMaxChars: 60, speakerMaxOutputTokens: 72 });
+    const balanced = coffeeReplyLengthCaps(
+      normalizeCoffeeSessionSettings({ responseLength: "balanced" })
+    );
+    assert.deepEqual(balanced, { tableReplyMaxChars: 110, speakerMaxOutputTokens: 104 });
     const roomy = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "roomy" }));
-    assert.deepEqual(roomy, { tableReplyMaxChars: 220, speakerMaxOutputTokens: 140 });
+    assert.deepEqual(roomy, { tableReplyMaxChars: 220, speakerMaxOutputTokens: 180 });
+  });
+
+  it("keeps enough Coffee decode room even when a bot profile cap is tiny", () => {
+    assert.equal(coffeeSpeakerMaxTokensForTurn(24, 104), 96);
+    assert.equal(coffeeSpeakerMaxTokensForTurn(128, 180), 128);
+    assert.equal(coffeeSpeakerMaxTokensForTurn(512, 180), 180);
   });
 });
 
