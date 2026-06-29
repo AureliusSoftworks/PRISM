@@ -41,7 +41,7 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
 export const COFFEE_TABLE_REPLY_MAX_CHARS_HARD = 240;
 
 /** Absolute ceiling for speaker decode tokens. */
-export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 160;
+export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 180;
 
 /** Max messages loaded from DB / forwarded window (plan: cap at 32). */
 export const COFFEE_HISTORY_WINDOW_HARD_CAP = 32;
@@ -126,8 +126,9 @@ export function coffeeEffectiveMemoryCallbacks(settings: CoffeeSessionSettings):
 }
 
 /**
- * Table card character cap and speaker max tokens from response length preset,
- * clamped to hard ceilings.
+ * Table card character target and speaker decode headroom from response length
+ * preset, clamped to hard ceilings. The character cap is prompt-side guidance;
+ * the token cap should leave enough room for the model to finish a sentence.
  */
 export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
   tableReplyMaxChars: number;
@@ -139,20 +140,20 @@ export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
   switch (preset) {
     case "brief":
       tableReplyMaxChars = 60;
-      speakerMaxOutputTokens = 32;
+      speakerMaxOutputTokens = 72;
       break;
     case "detailed":
       tableReplyMaxChars = 160;
-      speakerMaxOutputTokens = 96;
+      speakerMaxOutputTokens = 132;
       break;
     case "roomy":
       tableReplyMaxChars = 220;
-      speakerMaxOutputTokens = 140;
+      speakerMaxOutputTokens = 180;
       break;
     case "balanced":
     default:
       tableReplyMaxChars = 110;
-      speakerMaxOutputTokens = 64;
+      speakerMaxOutputTokens = 104;
       break;
   }
   return {

@@ -2687,6 +2687,10 @@ const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 const ZEN_RESTORE_MESSAGE_LIMIT = 80;
 const SESSION_RESUME_SUMMARY_MAX_CHARS = 700;
 const SESSION_RESUME_GAP_MAX_MS = 1000 * 60 * 60 * 24 * 45;
+const COFFEE_CONTINUITY_DEFAULT_LIMIT = 2;
+const COFFEE_CONTINUITY_QUERY_LIMIT = 100;
+const COFFEE_CONTINUITY_SUMMARY_MAX_CHARS = 700;
+const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
 function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
@@ -2770,6 +2774,170 @@ function buildSessionResumePromptContext(
   if (context.resumedAt) lines.push(`Resume moment: ${context.resumedAt}.`);
   if (context.summary) lines.push(`Friendly recap shown to the user: ${context.summary}`);
   return lines.join("\n");
+}
+
+export interface CoffeeContinuityContext {
+  conversationId: string;
+  title: string;
+  topic: string | null;
+  summary: string;
+  updatedAt: string;
+}
+
+function parseCoffeeContinuityBotIds(raw: string | null | undefined): string[] {
+  if (typeof raw !== "string" || raw.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function coffeeContinuityMentionsInternalAccountMetadata(text: string): boolean {
+  return /\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/i.test(
+    text
+  );
+}
+
+function normalizeCoffeeContinuityText(
+  value: string | null | undefined,
+  maxChars = COFFEE_CONTINUITY_SUMMARY_MAX_CHARS
+): string | null {
+  const collapsed = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!collapsed) return null;
+  const withoutSynopsisPrefix = collapsed
+    .replace(/^#{1,6}\s*session synopsis\s*[:\-]?\s*/i, "")
+    .replace(/^\*\*session synopsis\*\*\s*[:\-]?\s*/i, "")
+    .replace(/^session synopsis\s*[:\-]\s*/i, "")
+    .trim();
+  if (!withoutSynopsisPrefix) return null;
+  if (coffeeContinuityMentionsInternalAccountMetadata(withoutSynopsisPrefix)) return null;
+  if (withoutSynopsisPrefix.length <= maxChars) return withoutSynopsisPrefix;
+  return `${withoutSynopsisPrefix.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function normalizeCoffeeContinuityTopic(value: string | null | undefined): string | null {
+  return normalizeCoffeeContinuityText(value, 140);
+}
+
+export function loadRecentCoffeeContinuityContexts(args: {
+  db: DatabaseSync;
+  userId: string;
+  botId: string | null | undefined;
+  limit?: number;
+}): CoffeeContinuityContext[] {
+  const botId = normalizeChatBotId(args.botId);
+  if (!botId) return [];
+  const limit = Math.max(0, Math.min(10, Math.floor(args.limit ?? COFFEE_CONTINUITY_DEFAULT_LIMIT)));
+  if (limit === 0) return [];
+  const rows = args.db
+    .prepare(
+      `SELECT c.id, c.title, c.bot_group_ids, c.coffee_topic, c.coffee_meeting_summary,
+              c.updated_at,
+              (SELECT m.content
+                 FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.user_id = c.user_id
+                  AND m.role = 'system'
+                  AND m.content LIKE ?
+                ORDER BY m.created_at DESC
+                LIMIT 1) AS session_synopsis,
+              EXISTS (
+                SELECT 1
+                  FROM messages m_spoke
+                 WHERE m_spoke.conversation_id = c.id
+                   AND m_spoke.user_id = c.user_id
+                   AND m_spoke.role = 'assistant'
+                   AND m_spoke.bot_id = ?
+              ) AS bot_spoke
+         FROM conversations c
+        WHERE c.user_id = ?
+          AND c.conversation_mode = 'coffee'
+          AND COALESCE(c.incognito, 0) = 0
+          AND (
+            c.bot_group_ids LIKE ?
+            OR EXISTS (
+              SELECT 1
+                FROM messages m_filter
+               WHERE m_filter.conversation_id = c.id
+                 AND m_filter.user_id = c.user_id
+                 AND m_filter.role = 'assistant'
+                 AND m_filter.bot_id = ?
+            )
+          )
+          AND (
+            COALESCE(c.coffee_meeting_summary, '') != ''
+            OR EXISTS (
+              SELECT 1
+                FROM messages m_summary
+               WHERE m_summary.conversation_id = c.id
+                 AND m_summary.user_id = c.user_id
+                 AND m_summary.role = 'system'
+                 AND m_summary.content LIKE ?
+            )
+          )
+        ORDER BY c.updated_at DESC
+        LIMIT ?`
+    )
+    .all(
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      botId,
+      args.userId,
+      `%${botId}%`,
+      botId,
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      COFFEE_CONTINUITY_QUERY_LIMIT
+    ) as Array<{
+      id: string;
+      title: string | null;
+      bot_group_ids: string | null;
+      coffee_topic: string | null;
+      coffee_meeting_summary: string | null;
+      session_synopsis: string | null;
+      bot_spoke: number;
+      updated_at: string;
+    }>;
+
+  const contexts: CoffeeContinuityContext[] = [];
+  for (const row of rows) {
+    const groupBotIds = parseCoffeeContinuityBotIds(row.bot_group_ids);
+    const participated = groupBotIds.includes(botId) || row.bot_spoke === 1;
+    if (!participated) continue;
+    const summary =
+      normalizeCoffeeContinuityText(row.session_synopsis) ??
+      normalizeCoffeeContinuityText(row.coffee_meeting_summary);
+    if (!summary) continue;
+    contexts.push({
+      conversationId: row.id,
+      title: normalizeCoffeeContinuityText(row.title, 90) ?? "Coffee Session",
+      topic: normalizeCoffeeContinuityTopic(row.coffee_topic),
+      summary,
+      updatedAt: row.updated_at,
+    });
+    if (contexts.length >= limit) break;
+  }
+  return contexts;
+}
+
+export function buildCoffeeContinuityPromptContext(
+  contexts: readonly CoffeeContinuityContext[]
+): string | null {
+  if (contexts.length === 0) return null;
+  return [
+    "Recent Coffee session context for this bot:",
+    "These are summary-level notes from the most recent Coffee sessions this bot participated in. Use them only as lightweight continuity when the user follows up on a Coffee-session remark. Do not invent exact quotes; if the user supplies a quote, use it as their reference point.",
+    ...contexts.map((context, index) => {
+      const label = context.topic
+        ? `${context.title} - topic: ${context.topic}`
+        : context.title;
+      return `- ${index + 1}. ${label}: ${context.summary}`;
+    }),
+  ].join("\n");
 }
 
 function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
@@ -5231,6 +5399,7 @@ function buildPromptMessages(args: {
   zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityLabel?: string | null;
+  coffeeContinuityContexts?: CoffeeContinuityContext[];
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
@@ -5325,6 +5494,12 @@ function buildPromptMessages(args: {
   );
   if (zenPersonaContinuityHint) {
     promptMessages.push({ role: "system", content: zenPersonaContinuityHint });
+  }
+  const coffeeContinuityHint = buildCoffeeContinuityPromptContext(
+    args.coffeeContinuityContexts ?? []
+  );
+  if (coffeeContinuityHint) {
+    promptMessages.push({ role: "system", content: coffeeContinuityHint });
   }
   if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
@@ -5926,6 +6101,7 @@ export async function processChatMessage(
       botOpinion: null,
       prismMood: null,
       threadSummary: null,
+      coffeeContinuityContexts: [],
       memoryLines: [],
       memoryClarification: null,
       sessionResumeContext: settings.sessionResumeContext,
@@ -6596,6 +6772,7 @@ export async function processChatMessage(
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
+  let coffeeContinuityContexts: CoffeeContinuityContext[] = [];
   if (
     !incognitoForTurn &&
     !personaTransitionTurn &&
@@ -6634,10 +6811,29 @@ export async function processChatMessage(
     memoryLines = pipelineResult.memoryLines;
     mentionedBotContexts = pipelineResult.mentionedBotContexts;
   }
+  if (
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
+    !commandCenterPromptTurn &&
+    !skipMemoryForMoodCooldownTurn &&
+    !prismMoodIgnoreTurn &&
+    activeMemoryBotId
+  ) {
+    coffeeContinuityContexts = loadRecentCoffeeContinuityContexts({
+      db,
+      userId,
+      botId: activeMemoryBotId,
+    });
+  }
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; coffeeContinuity=${coffeeContinuityContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
   );
 
   let userMessageId: string | null = null;
@@ -6791,6 +6987,7 @@ export async function processChatMessage(
     zenSessionMemoryContext,
     zenPersonaContinuityContext,
     zenPersonaContinuityLabel: settings.starterPromptLabel,
+    coffeeContinuityContexts,
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
