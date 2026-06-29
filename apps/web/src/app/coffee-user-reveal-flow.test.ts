@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
+  coffeeShouldIgnoreStaleTurnResponse,
 } from "./coffee-user-reveal-flow.ts";
 
 describe("coffee user reveal flow", () => {
@@ -39,5 +40,11 @@ describe("coffee user reveal flow", () => {
       }),
       false
     );
+  });
+
+  it("ignores stale Coffee turn responses without a visible speaker", () => {
+    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ stale: true, speakerBotId: null }), true);
+    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: null }), true);
+    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: "bot-vader" }), false);
   });
 });

@@ -40,9 +40,10 @@ _Staging area — nothing queued for release yet._
 
 ### Changed
 
-- **Bare `prism` launches the web dev server.** Running the local helper
-  without subcommands now starts the web dev server, matching the common
-  local-development path more closely.
+- **Bare `prism` launches and opens the web dev server.** Running the local
+  helper without subcommands now starts the combined API/web dev server and
+  opens the web page once it is ready, preferring Codex on macOS with a
+  browser fallback.
 
 ### Fixed
 

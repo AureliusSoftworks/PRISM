@@ -69,6 +69,7 @@ import {
 } from "./image-job-slot.ts";
 import {
   collectCoffeePollVotes,
+  buildCoffeePollExportLines,
   createCoffeePoll,
   createCoffeePreset,
   createCoffeeGroupWithGeneratedName,
@@ -151,6 +152,7 @@ import {
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
+  readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
 } from "./bots.ts";
@@ -4466,7 +4468,8 @@ function buildRoutes(): RouteDefinition[] {
           },
           sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-        }
+        },
+        { structuredBallots: true }
       );
       json(ctx.res, 200, {
         ok: true,
@@ -6359,8 +6362,8 @@ function buildRoutes(): RouteDefinition[] {
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
       const model = readOptionalString(body.model);
-      const localModel = readOptionalString(body.localModel);
-      const onlineModel = readOptionalString(body.onlineModel);
+      const localModel = readBotPreferredModelForCreate(body.localModel);
+      const onlineModel = readBotPreferredModelForCreate(body.onlineModel);
       const localImageModel = readOptionalString(body.localImageModel);
       const openaiImageModel = readOptionalString(body.openaiImageModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
@@ -6584,7 +6587,12 @@ function buildRoutes(): RouteDefinition[] {
           prismDefaultLlmModel: user.prism_default_llm_model,
         });
       }
-      json(ctx.res, 200, { ok: true });
+      const updatedBot = db
+        .prepare(
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId);
+      json(ctx.res, 200, { ok: true, bot: updatedBot });
     }),
     route("DELETE", "/api/bots/selected", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -6666,6 +6674,21 @@ function buildRoutes(): RouteDefinition[] {
       ];
       if (conversation.conversation_mode === "coffee") {
         const botIds = parseConversationBotGroupIds(conversation.bot_group_ids);
+        const botNamesById = new Map<string, string>();
+        if (botIds.length > 0) {
+          const placeholders = botIds.map(() => "?").join(", ");
+          const botRows = db.prepare(
+            `SELECT id, name
+               FROM bots
+              WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`
+          ).all(userId, ...botIds) as Array<{ id: string; name: string | null }>;
+          for (const row of botRows) {
+            if (typeof row.name === "string" && row.name.trim().length > 0) {
+              botNamesById.set(row.id, row.name.trim());
+            }
+          }
+        }
+        const botLabels = botIds.map((id) => botNamesById.get(id) ?? id);
         const assistantMessages = messages.filter((message) => message.role === "assistant");
         const speakerCounts = new Map<string, number>();
         for (const message of assistantMessages) {
@@ -6677,7 +6700,7 @@ function buildRoutes(): RouteDefinition[] {
         lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
         lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
         lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
-        lines.push(`- Bots: ${botIds.length > 0 ? botIds.join(", ") : "unknown"}`);
+        lines.push(`- Bots: ${botLabels.length > 0 ? botLabels.join(", ") : "unknown"}`);
         lines.push(`- Messages: ${messages.length}`);
         lines.push(`- Bot replies: ${assistantMessages.length}`);
         lines.push(
@@ -6687,9 +6710,14 @@ function buildRoutes(): RouteDefinition[] {
               : "none"
           }`
         );
-        lines.push(`- Started: ${conversation.created_at}`);
+        lines.push(`- Created: ${conversation.created_at}`);
+        lines.push(`- First message: ${messages[0]?.created_at ?? "none"}`);
         lines.push(`- Updated: ${conversation.updated_at}`);
         lines.push("");
+        const pollLines = buildCoffeePollExportLines(db, userId, conversationId);
+        if (pollLines.length > 0) {
+          lines.push(...pollLines);
+        }
         lines.push("## Transcript");
         lines.push("");
       }

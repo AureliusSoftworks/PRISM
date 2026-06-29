@@ -13,6 +13,7 @@ import {
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
+  readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
 } from "../bots.ts";
@@ -145,6 +146,21 @@ describe("bot export hash helpers", () => {
       createHash: () => "0123456789abcdef0123456789abcdef",
     });
     assert.equal(resolved, "0123456789abcdef0123456789abcdef");
+  });
+});
+
+describe("readBotPreferredModelForCreate", () => {
+  it("defaults omitted bot model preferences to disabled", () => {
+    assert.equal(readBotPreferredModelForCreate(undefined), "disabled");
+  });
+
+  it("keeps explicit blank or null preferences as inherited defaults", () => {
+    assert.equal(readBotPreferredModelForCreate("   "), null);
+    assert.equal(readBotPreferredModelForCreate(null), null);
+  });
+
+  it("stores explicit bot model preferences", () => {
+    assert.equal(readBotPreferredModelForCreate(" llama3.2 "), "llama3.2");
   });
 });
 

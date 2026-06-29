@@ -5261,7 +5261,7 @@ function buildPromptMessages(args: {
   ) {
     promptMessages.push({
       role: "system",
-      content: `The user's preferred name is "${trimmedDisplayName}". Use it naturally when it helps, but do not overuse it.`,
+      content: `The user's account display name is "${trimmedDisplayName}". Use it naturally when it helps, but do not treat it as an explicitly stated preferred name.`,
     });
   }
   if (args.devMemoriesEnabled) {

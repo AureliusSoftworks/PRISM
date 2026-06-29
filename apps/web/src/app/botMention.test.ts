@@ -582,6 +582,21 @@ describe("extractStageDirections", () => {
     );
     assert.equal(pinches.mainText, "A kazoo, Patrick? That's not an instrument.");
     assert.deepEqual(pinches.actions, ["pinches the bridge of his nose"]);
+
+    const laughs = extractStageDirections(
+      "SpongeBob laughs nervously I guess that makes sense."
+    );
+    assert.equal(laughs.mainText, "I guess that makes sense.");
+    assert.deepEqual(laughs.actions, ["SpongeBob laughs nervously"]);
+
+    const shifts = extractStageDirections(
+      "shifts in chair with a long, theatrical sigh Of all the ridiculous theories to waste oxygen on, this one takes the cake."
+    );
+    assert.equal(
+      shifts.mainText,
+      "Of all the ridiculous theories to waste oxygen on, this one takes the cake."
+    );
+    assert.deepEqual(shifts.actions, ["shifts in chair with a long, theatrical sigh"]);
   });
 
   it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {

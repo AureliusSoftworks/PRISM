@@ -23,13 +23,19 @@ Usage:
 Notes:
   windows-server is Windows-only and runs the WPF tray app from source.
   up runs the combined dev launcher and starts both API
-  (http://localhost:18787) and web (http://localhost:18788).
+  (http://localhost:18787) and web (http://localhost:18788), then opens
+  the web page once it is ready.
   down stops local dev processes listening on ports 18787 and 18788.
   standalone runs the desktop standalone launcher (npm run desktop).
   standalone-win dispatches the desktop release workflow and opens the
   desktop/v<version> release page in the browser.
   reset removes local Prism account/data state (factory reset) while
   intentionally keeping launcher configuration files.
+
+Environment:
+  PRISM_OPEN_WEB=0 disables opening the web page.
+  PRISM_WEB_URL overrides the opened URL.
+  PRISM_OPEN_URL_COMMAND runs a custom opener with PRISM_OPEN_URL set.
 "@
 }
 
@@ -143,6 +149,64 @@ function Ensure-GhReady {
     }
 }
 
+function Test-PrismOpenWebEnabled {
+    $value = if ($env:PRISM_OPEN_WEB) { $env:PRISM_OPEN_WEB.Trim() } else { "1" }
+    return $value -notmatch '^(0|false|no|off)$'
+}
+
+function Start-PrismWebOpenWhenReady {
+    if (-not (Test-PrismOpenWebEnabled)) {
+        return
+    }
+
+    $url = if ($env:PRISM_WEB_URL) { $env:PRISM_WEB_URL } else { "http://localhost:18788" }
+    $attempts = 120
+    if ($env:PRISM_OPEN_WAIT_ATTEMPTS -and $env:PRISM_OPEN_WAIT_ATTEMPTS -match '^\d+$') {
+        $attempts = [int]$env:PRISM_OPEN_WAIT_ATTEMPTS
+    }
+    $delayMs = 500
+    if ($env:PRISM_OPEN_WAIT_SECONDS -and $env:PRISM_OPEN_WAIT_SECONDS -match '^\d+(\.\d+)?$') {
+        $delayMs = [int]([double]$env:PRISM_OPEN_WAIT_SECONDS * 1000)
+    }
+
+    Start-Job -ScriptBlock {
+        param(
+            [string]$Url,
+            [int]$Attempts,
+            [int]$DelayMs,
+            [string]$OpenCommand
+        )
+
+        for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+            try {
+                Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 1 *> $null
+                break
+            } catch {
+                if ($attempt -eq $Attempts) {
+                    break
+                }
+                Start-Sleep -Milliseconds $DelayMs
+            }
+        }
+
+        Write-Host "Opening Prism web: $Url"
+        if (-not [string]::IsNullOrWhiteSpace($OpenCommand)) {
+            $env:PRISM_OPEN_URL = $Url
+            $shell = Get-Command pwsh -ErrorAction SilentlyContinue
+            if ($null -eq $shell) {
+                $shell = Get-Command powershell -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $shell) {
+                & $shell.Source -NoProfile -Command $OpenCommand
+            } else {
+                Start-Process $Url
+            }
+        } else {
+            Start-Process $Url
+        }
+    } -ArgumentList $url, $attempts, $delayMs, $env:PRISM_OPEN_URL_COMMAND | Out-Null
+}
+
 function Invoke-StandaloneWin {
     $version = if ($Arguments.Count -ge 1) { $Arguments[0] } else { "" }
     $releaseChannel = if ($Arguments.Count -ge 2) { $Arguments[1] } else { "" }
@@ -233,6 +297,7 @@ switch ($Command.ToLowerInvariant()) {
         break
     }
     { $_ -in @("up", "web") } {
+        Start-PrismWebOpenWhenReady
         npm run dev
         break
     }

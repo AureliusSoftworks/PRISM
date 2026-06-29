@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { stripBotProfileMetaSuffix } from "@localai/shared";
+import { DISABLED_MODEL_CHOICE, stripBotProfileMetaSuffix } from "@localai/shared";
 import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
@@ -105,6 +105,13 @@ export function resolveBotExportHashForCreate(options: {
     if (!options.hasExistingHash(candidate)) return candidate;
   }
   throw new Error("Could not generate a unique bot export hash.");
+}
+
+export function readBotPreferredModelForCreate(value: unknown): string | null {
+  if (value === undefined) return DISABLED_MODEL_CHOICE;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 /**
