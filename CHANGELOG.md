@@ -10,7 +10,53 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
-_Staging area — nothing queued for release yet._
+_Staging area - nothing queued for release yet._
+
+## [0.5.2] - 2026-06-30
+
+### Added
+
+- **Bot panel home, library, and selected-bot hub.** Opening Bots now starts
+  from clear Create new bot and Browse bots choices. Selecting an existing
+  bot opens a hub with Customize, Memories, Images, and Settings instead of
+  jumping straight into the editor.
+- **Split bot customization from bot settings.** Existing bot Customize now
+  focuses on identity, persona, color, glyph, and profile fields, while
+  Settings holds UX and routing controls such as model preferences, image
+  defaults, reply style, online capability, flirt/roleplay, and delete
+  protection.
+- **Coffee Session controls and continuity.** Coffee groups can now tune
+  reply length, table energy, crosstalk, pacing, focus, memory callbacks,
+  and presets. Coffee conversations also carry recent session context forward
+  so repeat meetings feel less reset-heavy.
+- **Animated Coffee cup states.** Coffee seats now show color-matched cup
+  sprites that sip, cool, drain, and empty over the course of a session,
+  giving the table a clearer sense of time and presence.
+- **Manual AskQuestion and WebSearch tools.** The composer and server now
+  support user-armed AskQuestion requests, assistant WebSearch requests, and
+  web-result source cards backed by Brave Search when configured.
+
+### Changed
+
+- **Coffee seating and stage directions are cleaner.** Four-bot tables now
+  orient left-side bots toward the table, bot action text lingers longer,
+  and stage-direction extraction handles more natural action phrasing.
+- **Coffee action text uses more of the viewport.** Stage directions reserve
+  space outside the table and avoid overlapping each other, keeping active
+  conversations readable at narrower sizes.
+- **Bare `prism` opens the web app when ready.** Running `prism` or
+  `prism up` starts the combined dev stack and opens the web page once it
+  responds, with Codex-first opening on macOS and environment overrides for
+  custom launch behavior.
+
+### Fixed
+
+- **Bot deletion clears relationship records.** Removing one bot, selected
+  bots, or all bots now also removes relationship rows that referenced those
+  bots.
+- **Coffee prompt and mode guardrails are tighter.** Coffee, Chat, and Zen
+  routing now more consistently keep lane-specific memory, prompt context,
+  local/online behavior, and assistant tool use inside the intended mode.
 
 ## [0.5.1] - 2026-06-28
 
@@ -40,10 +86,9 @@ _Staging area — nothing queued for release yet._
 
 ### Changed
 
-- **Bare `prism` launches and opens the web dev server.** Running the local
-  helper without subcommands now starts the combined API/web dev server and
-  opens the web page once it is ready, preferring Codex on macOS with a
-  browser fallback.
+- **Bare `prism` launches the web dev server.** Running the local helper
+  without subcommands now starts the web dev server, matching the common
+  local-development path more closely.
 
 ### Fixed
 
