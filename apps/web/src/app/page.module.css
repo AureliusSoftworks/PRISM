@@ -25257,6 +25257,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.panelBots[data-bot-panel-view="home"],
+.panelBots[data-bot-panel-view="botHub"] {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .panelBots[data-editor-only="true"] {
   --accent: var(--editor-bot-color);
   --accent-hover: color-mix(in srgb, var(--editor-bot-color) 82%, var(--editor-bot-text) 18%);
@@ -26851,6 +26856,158 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-self: stretch;
   min-height: 0;
   width: 100%;
+}
+
+.botPanelHome,
+.botPanelHub {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding-bottom: max(16px, calc(env(safe-area-inset-bottom) + 16px));
+  animation: botCustomizerIn 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.botPanelChoiceCard,
+.botPanelHubAction {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, var(--accent-ink) 28%);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at 92% 12%,
+      color-mix(in srgb, var(--accent) 13%, transparent),
+      transparent 40%
+    ),
+    color-mix(in srgb, var(--bg) 82%, var(--bg-surface));
+  color: var(--fg);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 90ms ease,
+    box-shadow 150ms ease;
+}
+
+.botPanelChoiceCard:hover,
+.botPanelChoiceCard:focus-visible,
+.botPanelHubAction:hover,
+.botPanelHubAction:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line-strong));
+  background:
+    radial-gradient(
+      circle at 92% 12%,
+      color-mix(in srgb, var(--accent) 19%, transparent),
+      transparent 42%
+    ),
+    var(--bg-hover);
+  box-shadow: 0 14px 32px -30px color-mix(in srgb, var(--accent) 72%, #000000);
+  outline: none;
+}
+
+.botPanelChoiceCard:active,
+.botPanelHubAction:active {
+  transform: translateY(1px);
+}
+
+.botPanelChoiceGlyph,
+.botPanelHubGlyph {
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--accent) 78%, var(--accent-ink) 22%),
+      var(--accent)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent-text) 22%, transparent),
+    0 12px 26px -22px color-mix(in srgb, var(--accent) 82%, #000000);
+}
+
+.botPanelChoiceCopy,
+.botPanelHubAction span,
+.botPanelHubCopy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.botPanelChoiceCopy strong,
+.botPanelHubAction strong,
+.botPanelHubCopy strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.12;
+}
+
+.botPanelChoiceCopy small,
+.botPanelHubAction small,
+.botPanelHubCopy small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.botPanelHubHero {
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 42%, var(--line));
+  border-radius: 18px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  background:
+    radial-gradient(
+      circle at 90% 10%,
+      color-mix(in srgb, var(--editor-bot-color) 24%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 82%, var(--editor-bot-color) 18%),
+      color-mix(in srgb, var(--bg) 92%, var(--editor-bot-color) 8%)
+    );
+}
+
+.botPanelHubGlyph {
+  color: var(--editor-bot-text);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color) 82%, var(--editor-bot-ink) 18%),
+      var(--editor-bot-color)
+    );
+}
+
+.botPanelHubCopy > span {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botPanelHubActions {
+  display: grid;
+  gap: 9px;
 }
 
 .panelBots .form > * {
@@ -28981,6 +29138,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   overflow: hidden;
+}
+
+.panelBots[data-bot-panel-view="library"] .botLibraryDrawer {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.panelBots[data-bot-panel-view="library"] .botLibraryHandle {
+  display: none;
 }
 
 .botLibraryDrawer:not([data-expanded="true"]) {
