@@ -24,6 +24,13 @@ describe("coffeeSeatHorizontalTableSide", () => {
     assert.equal(coffeeSeatHorizontalTableSide(false, 0, 5, 4), 1);
   });
 
+  it("classifies full-stage 4-seat ring as two left and two right seats", () => {
+    assert.equal(coffeeSeatHorizontalTableSide(false, 0, 4, 0), -1);
+    assert.equal(coffeeSeatHorizontalTableSide(false, 0, 4, 1), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(false, 0, 4, 2), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(false, 0, 4, 3), -1);
+  });
+
   it("classifies two-bot layout as left/right", () => {
     assert.equal(coffeeSeatHorizontalTableSide(false, 0, 2, 0), -1);
     assert.equal(coffeeSeatHorizontalTableSide(false, 1, 2, 1), 1);
@@ -36,8 +43,9 @@ describe("coffeeSeatIsTopHead", () => {
     assert.equal(coffeeSeatIsTopHead(true, 5, 1, 1), false);
   });
 
-  it("identifies full-stage head only for 3+ bots layout 0", () => {
+  it("identifies only centered full-stage top seats as head", () => {
     assert.equal(coffeeSeatIsTopHead(false, 5, 0, 0), true);
+    assert.equal(coffeeSeatIsTopHead(false, 4, 0, 0), false);
     assert.equal(coffeeSeatIsTopHead(false, 5, 1, 0), false);
     assert.equal(coffeeSeatIsTopHead(false, 2, 0, 0), false);
   });

@@ -70001,43 +70001,49 @@ function HomeContent(): React.JSX.Element {
                   data-team-rank={display.teamRank ?? undefined}
                   style={coffeeBotVisualStyle(display.bot)}
                 >
-                  {display.seatActionGhostText ? (
-                    <div
-                      key={`${display.bot.id}:ghost-shell:${display.seatActionGhostText}`}
-                      className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
-                      data-badge-side={display.seatBadgeSide}
-                      data-action-verbose={
-                        display.seatActionGhostVerbose ? "true" : undefined
-                      }
-                      aria-hidden="true"
-                    >
-                      <span
-                        key={`${display.bot.id}:ghost:${display.seatActionGhostText}`}
-                        className={styles.coffeeSeatActionBadgeText}
+                  <div
+                    className={styles.coffeeSeatActionBadgeStack}
+                    data-badge-side={display.seatBadgeSide}
+                    data-has-ghost={display.seatActionGhostText ? "true" : undefined}
+                  >
+                    {display.seatActionPrimaryText ? (
+                      <div
+                        key={`${display.bot.id}:current-shell:${display.seatActionPrimaryText}`}
+                        className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
+                        data-badge-side={display.seatBadgeSide}
+                        data-action-verbose={
+                          display.seatActionPrimaryVerbose ? "true" : undefined
+                        }
+                        aria-label={`${display.bot.name} action: ${display.seatActionPrimaryText}`}
+                        title={`${display.bot.name}: ${display.seatActionPrimaryText}`}
                       >
-                        {display.seatActionGhostText}
-                      </span>
-                    </div>
-                  ) : null}
-                  {display.seatActionPrimaryText ? (
-                    <div
-                      key={`${display.bot.id}:current-shell:${display.seatActionPrimaryText}`}
-                      className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
-                      data-badge-side={display.seatBadgeSide}
-                      data-action-verbose={
-                        display.seatActionPrimaryVerbose ? "true" : undefined
-                      }
-                      aria-label={`${display.bot.name} action: ${display.seatActionPrimaryText}`}
-                      title={`${display.bot.name}: ${display.seatActionPrimaryText}`}
-                    >
-                      <span
-                        key={`${display.bot.id}:current:${display.seatActionPrimaryText}`}
-                        className={styles.coffeeSeatActionBadgeText}
+                        <span
+                          key={`${display.bot.id}:current:${display.seatActionPrimaryText}`}
+                          className={styles.coffeeSeatActionBadgeText}
+                        >
+                          {display.seatActionPrimaryText}
+                        </span>
+                      </div>
+                    ) : null}
+                    {display.seatActionGhostText ? (
+                      <div
+                        key={`${display.bot.id}:ghost-shell:${display.seatActionGhostText}`}
+                        className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
+                        data-badge-side={display.seatBadgeSide}
+                        data-action-verbose={
+                          display.seatActionGhostVerbose ? "true" : undefined
+                        }
+                        aria-hidden="true"
                       >
-                        {display.seatActionPrimaryText}
-                      </span>
-                    </div>
-                  ) : null}
+                        <span
+                          key={`${display.bot.id}:ghost:${display.seatActionGhostText}`}
+                          className={styles.coffeeSeatActionBadgeText}
+                        >
+                          {display.seatActionGhostText}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
