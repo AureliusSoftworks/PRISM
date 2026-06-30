@@ -5,6 +5,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { parseBuiltInPromptWildcardReference } from "@localai/shared";
 
 const DEV_COMMAND_RE = /^\/(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
+const TOOL_SHORTCUT_RE = /^(\s*)\?([a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const TRUE_WILDCARD_SLOT_RE = /\{([^{}\r\n]{1,80})\}/g;
@@ -29,6 +30,8 @@ interface PrismDevCommandHighlightOptions {
   promptNames: readonly string[] | null;
   /** User-created wildcard decks. These are decorated inline after `!`. */
   wildcardNames: readonly string[] | null;
+  /** Fixed composer tool picks. These are decorated as leading `?tool` chips. */
+  toolNames: readonly string[] | null;
   /** Built-in model-filled wildcard slots. These are decorated inline until send. */
   wildcardSlotNames: readonly string[] | null;
   /** Temporary rich-composer hardcoded wildcard generations. */
@@ -88,7 +91,7 @@ function normalizedKnownNames(names: readonly string[] | null | undefined): Set<
   if (!names) return null;
   return new Set(
     names
-      .map((name) => name.trim().replace(/^[!/]+/, "").toLowerCase())
+      .map((name) => name.trim().replace(/^[!/?]+/, "").toLowerCase())
       .filter(Boolean)
   );
 }
@@ -298,6 +301,24 @@ export function resolvePromptShortcutTextRanges(
   return ranges;
 }
 
+export function resolveLeadingToolShortcutTextRange(
+  firstTextBlockText: string,
+  options: { toolNames?: readonly string[] | null } = {}
+): PromptShortcutTextRange | null {
+  const known = normalizedKnownNames(options.toolNames);
+  if (known && known.size === 0) return null;
+  const match = TOOL_SHORTCUT_RE.exec(firstTextBlockText);
+  if (!match) return null;
+  const name = (match[2] ?? "").trim().toLowerCase();
+  if (!name || (known && !known.has(name))) return null;
+  const start = match[1]?.length ?? 0;
+  return {
+    start,
+    end: start + 1 + name.length,
+    name,
+  };
+}
+
 export function resolveWildcardDeckTextRanges(
   text: string,
   options: { wildcardNames?: readonly string[] | null } = {}
@@ -454,6 +475,29 @@ export function findLeadingDevCommandTokenRange(
   return findLeadingDevCommandRanges(doc, commandNames)?.command ?? null;
 }
 
+export function findLeadingToolShortcutTokenRange(
+  doc: ProseMirrorNode,
+  toolNames?: readonly string[] | null
+): { from: number; to: number; name: string } | null {
+  let firstTextBlockText = "";
+  let firstTextBlockPos = -1;
+  doc.descendants((node: ProseMirrorNode, pos: number) => {
+    if (!node.isTextblock) return true;
+    firstTextBlockText = node.textContent;
+    firstTextBlockPos = pos;
+    return false;
+  });
+  if (firstTextBlockPos < 0) return null;
+  const range = resolveLeadingToolShortcutTextRange(firstTextBlockText, { toolNames });
+  return range
+    ? {
+        from: firstTextBlockPos + 1 + range.start,
+        to: firstTextBlockPos + 1 + range.end,
+        name: range.name,
+      }
+    : null;
+}
+
 export function findPromptShortcutTokenRanges(
   doc: ProseMirrorNode,
   promptNames?: readonly string[] | null
@@ -577,6 +621,7 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
       commandNames: null,
       promptNames: null,
       wildcardNames: null,
+      toolNames: null,
       wildcardSlotNames: null,
       pendingWildcardSlots: null,
     };
@@ -597,6 +642,10 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
             const wildcardRanges = findWildcardDeckTokenRanges(
               state.doc,
               this.options.wildcardNames
+            );
+            const toolRange = findLeadingToolShortcutTokenRange(
+              state.doc,
+              this.options.toolNames
             );
             const wildcardSlotRanges = findWildcardSlotTokenRanges(
               state.doc,
@@ -640,6 +689,18 @@ export const PrismDevCommandHighlight = Extension.create<PrismDevCommandHighligh
                   })
                 );
               }
+            }
+            if (toolRange) {
+              decorations.push(
+                Decoration.inline(toolRange.from, toolRange.from + 1, {
+                  class: "tiptapPrismToolChipPrefix",
+                })
+              );
+              decorations.push(
+                Decoration.inline(toolRange.from + 1, toolRange.to, {
+                  class: "tiptapPrismToolToken",
+                })
+              );
             }
             for (const promptRange of promptRanges) {
               decorations.push(

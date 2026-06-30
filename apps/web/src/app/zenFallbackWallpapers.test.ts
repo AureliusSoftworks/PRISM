@@ -61,14 +61,29 @@ describe("shouldShowZenFallbackWallpaper", () => {
     );
   });
 
-  it("does not show while remembered or generated Atmosphere data is present", () => {
+  it("does not show while remembered or visible generated Atmosphere data is present", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({ ...baseline, hasRememberedWallpaper: true }),
       false
     );
     assert.equal(
-      shouldShowZenFallbackWallpaper({ ...baseline, atmosphereTimelineLength: 1 }),
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        atmosphereTimelineLength: 1,
+        hasVisibleAtmosphere: true,
+      }),
       false
+    );
+  });
+
+  it("bridges generated Atmosphere metadata that has not faded in yet", () => {
+    assert.equal(
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        atmosphereTimelineLength: 1,
+        hasVisibleAtmosphere: false,
+      }),
+      true
     );
   });
 

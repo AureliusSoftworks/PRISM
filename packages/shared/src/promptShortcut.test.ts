@@ -6,6 +6,7 @@ import {
   isDisabledPromptWildcardToken,
   normalizeBuiltInPromptWildcardSlotKey,
   parseBuiltInPromptWildcardReference,
+  parseStoredManualAskQuestionPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredPsychicThoughtPayload,
@@ -266,6 +267,16 @@ describe("prompt shortcut payloads", () => {
         model: "llama3.2",
         createdAt: "2026-06-22T12:00:00.000Z",
       },
+      manualAskQuestion: {
+        v: 1,
+        name: "AskQuestion",
+        question: "Pick one:",
+        options: [
+          { id: "a", label: "Tea" },
+          { id: "b", label: "Coffee" },
+        ],
+        selectedOptionId: "b",
+      },
     });
 
     assert.equal(typeof serialized, "string");
@@ -292,6 +303,18 @@ describe("prompt shortcut payloads", () => {
       provider: "local",
       model: "llama3.2",
       createdAt: "2026-06-22T12:00:00.000Z",
+    });
+    assert.deepEqual(parseStoredManualAskQuestionPayload(serialized), {
+      v: 1,
+      name: "AskQuestion",
+      question: "Pick one:",
+      options: [
+        { id: "a", label: "Tea" },
+        { id: "b", label: "Coffee" },
+      ],
+      selectedOptionId: "b",
+      selectedOptionIndex: 1,
+      selectedOptionLabel: "Coffee",
     });
   });
 

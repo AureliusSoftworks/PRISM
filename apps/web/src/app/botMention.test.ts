@@ -582,6 +582,47 @@ describe("extractStageDirections", () => {
     );
     assert.equal(pinches.mainText, "A kazoo, Patrick? That's not an instrument.");
     assert.deepEqual(pinches.actions, ["pinches the bridge of his nose"]);
+
+    const laughs = extractStageDirections(
+      "SpongeBob laughs nervously I guess that makes sense."
+    );
+    assert.equal(laughs.mainText, "I guess that makes sense.");
+    assert.deepEqual(laughs.actions, ["SpongeBob laughs nervously"]);
+
+    const shifts = extractStageDirections(
+      "shifts in chair with a long, theatrical sigh Of all the ridiculous theories to waste oxygen on, this one takes the cake."
+    );
+    assert.equal(
+      shifts.mainText,
+      "Of all the ridiculous theories to waste oxygen on, this one takes the cake."
+    );
+    assert.deepEqual(shifts.actions, ["shifts in chair with a long, theatrical sigh"]);
+  });
+
+  it("lifts long takes-style coffee actions before spoken prose", () => {
+    const out = extractStageDirections(
+      "takes a long, deliberate sip of coffee, then sets the cup down with precision A roof and a job he loves—sure, but does he love the work?"
+    );
+    assert.equal(
+      out.mainText,
+      "A roof and a job he loves—sure, but does he love the work?"
+    );
+    assert.deepEqual(out.actions, [
+      "takes a long, deliberate sip of coffee, then sets the cup down with precision",
+    ]);
+  });
+
+  it("lifts narrows-eyes actions before honest spoken prose", () => {
+    const out = extractStageDirections(
+      "narrows eyes at the coffee cup, then back at SpongeBob Honest and consistent aren't the same thing though—you can mean every word and still contradict yourself tomorrow."
+    );
+    assert.equal(
+      out.mainText,
+      "Honest and consistent aren't the same thing though—you can mean every word and still contradict yourself tomorrow."
+    );
+    assert.deepEqual(out.actions, [
+      "narrows eyes at the coffee cup, then back at SpongeBob",
+    ]);
   });
 
   it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {
@@ -593,6 +634,19 @@ describe("extractStageDirections", () => {
       "Consider this acorn: it already contains the potential of the entire tree."
     );
     assert.deepEqual(out.actions, ["Marcus Aurelius, picks up an acorn from the table"]);
+  });
+
+  it("lifts speaker-prefixed unmarked actions before character interjections", () => {
+    const out = extractStageDirections(
+      "Plankton, pushes coffee cup aside with a sharp clink and drums claws on the table Ar ar ar! You're all getting philosophical on me, but I'll tell"
+    );
+    assert.equal(
+      out.mainText,
+      "Ar ar ar! You're all getting philosophical on me, but I'll tell"
+    );
+    assert.deepEqual(out.actions, [
+      "Plankton, pushes coffee cup aside with a sharp clink and drums claws on the table",
+    ]);
   });
 
   it("lifts unmarked actions after an addressed bot mention", () => {
@@ -627,6 +681,12 @@ describe("extractStageDirections", () => {
   it("does not turn ordinary leading prose into an action", () => {
     const out = extractStageDirections("Looks like rain today.");
     assert.equal(out.mainText, "Looks like rain today.");
+    assert.deepEqual(out.actions, []);
+  });
+
+  it("does not turn ordinary narrowing prose into an action", () => {
+    const out = extractStageDirections("Narrowing the scope helps us focus.");
+    assert.equal(out.mainText, "Narrowing the scope helps us focus.");
     assert.deepEqual(out.actions, []);
   });
 

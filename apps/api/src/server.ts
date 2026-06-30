@@ -53,6 +53,7 @@ import {
   readBotOpinion,
   refreshConversationTitle,
   upsertBotOpinion,
+  type ManualChatToolRequest,
 } from "./chat.ts";
 import {
   generateZenLiveActionReaction,
@@ -69,7 +70,10 @@ import {
 } from "./image-job-slot.ts";
 import {
   collectCoffeePollVotes,
+  buildCoffeePollExportLines,
+  buildCoffeeTeamExportLines,
   createCoffeePoll,
+  createCoffeeTeamsForSession,
   createCoffeePreset,
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
@@ -83,7 +87,9 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
+  setCoffeePlayerTeam,
   setCoffeePollPlayerVote,
   updateCoffeePreset,
   updateCoffeeGroup,
@@ -151,6 +157,7 @@ import {
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
+  readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
 } from "./bots.ts";
@@ -208,6 +215,8 @@ import {
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import {
   composeVerbatimFirstImagePrompt,
+  COFFEE_SESSION_DURATION_MINUTES_MAX,
+  COFFEE_SESSION_DURATION_MINUTES_MIN,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   encodeComfyUiRemoteWorkflowModelId,
   formatComfyUiRemoteWorkflowLabel,
@@ -220,6 +229,7 @@ import {
   normalizePromptWildcardRunMetadata,
   reasoningEffortForRequest,
   parseBuiltInPromptWildcardReference,
+  parseStoredManualAskQuestionPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
@@ -880,12 +890,67 @@ function readOptionalString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function readManualChatTool(value: unknown): ManualChatToolRequest | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HttpError(400, "manualTool must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const rawName = typeof record.name === "string" ? record.name.trim().toLowerCase() : "";
+  if (rawName === "websearch" || rawName === "web-search" || rawName === "web_search") {
+    const query = readOptionalString(record.query);
+    return { name: "webSearch", ...(query ? { query: query.slice(0, 500) } : {}) };
+  }
+  if (rawName === "imagegen" || rawName === "image-gen" || rawName === "image_gen") {
+    const prompt = readOptionalString(record.prompt);
+    return { name: "imageGen", ...(prompt ? { prompt: prompt.slice(0, 1000) } : {}) };
+  }
+  if (rawName === "askquestion" || rawName === "ask-question" || rawName === "ask_question") {
+    const question = readOptionalString(record.question);
+    const options = Array.isArray(record.options)
+      ? record.options
+          .map((option) =>
+            typeof option === "string" ? option.trim().replace(/\s+/g, " ").slice(0, 80) : ""
+          )
+          .filter((option) => option.length > 0)
+          .slice(0, 4)
+      : undefined;
+    return {
+      name: "askQuestion",
+      ...(question ? { question: question.slice(0, 240) } : {}),
+      ...(options && options.length > 0 ? { options } : {}),
+    };
+  }
+  throw new HttpError(400, "manualTool.name must be webSearch, imageGen, or askQuestion.");
+}
+
 function readModelOverride(value: unknown): string | null {
   const model = readOptionalString(value);
   if (model && isDisabledModelChoice(model)) {
     throw new HttpError(400, "This model lane is disabled. Choose Auto or a model before sending.");
   }
   return model;
+}
+
+function readCoffeeTeamCreateInput(value: unknown):
+  | {
+      left?: { name?: unknown; description?: unknown };
+      right?: { name?: unknown; description?: unknown };
+      assignments?: unknown;
+      playerTeamId?: unknown;
+    }
+  | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const left =
+    record.left && typeof record.left === "object" && !Array.isArray(record.left)
+      ? (record.left as { name?: unknown; description?: unknown })
+      : undefined;
+  const right =
+    record.right && typeof record.right === "object" && !Array.isArray(record.right)
+      ? (record.right as { name?: unknown; description?: unknown })
+      : undefined;
+  return { left, right, assignments: record.assignments, playerTeamId: record.playerTeamId };
 }
 
 function readPrismMoodMode(value: unknown): PrismMoodMode {
@@ -1973,7 +2038,7 @@ function buildRoutes(): RouteDefinition[] {
         .prepare(
           `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
                   c.coffee_settings, c.coffee_group_id, c.coffee_duration_minutes,
-                  c.coffee_topic,
+                  c.coffee_topic, c.coffee_absent_bot_ids,
                   c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
                   c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
                   c.zen_wallpaper_status, c.zen_wallpaper_history,
@@ -2004,6 +2069,7 @@ function buildRoutes(): RouteDefinition[] {
             coffee_group_id: string | null;
             coffee_duration_minutes: number | null;
             coffee_topic: string | null;
+            coffee_absent_bot_ids: string | null;
             zen_wallpaper_enabled: number | null;
             zen_wallpaper_image_id: string | null;
             zen_wallpaper_prompt_seed: string | null;
@@ -2103,6 +2169,7 @@ function buildRoutes(): RouteDefinition[] {
             promptWildcards,
             promptWildcards?.resolvedPrompt ?? row.content
           );
+          const manualAskQuestion = parseStoredManualAskQuestionPayload(row.tool_payload);
           return {
             ...shared,
             ...(promptShortcutWithResolvedPrompt
@@ -2111,6 +2178,7 @@ function buildRoutes(): RouteDefinition[] {
             ...(promptWildcardsWithResolvedPrompt
               ? { promptWildcards: promptWildcardsWithResolvedPrompt }
               : {}),
+            ...(manualAskQuestion ? { manualAskQuestion } : {}),
           };
         }
         if (row.role !== "assistant") return shared;
@@ -2135,6 +2203,7 @@ function buildRoutes(): RouteDefinition[] {
           ...(assembled.sentGeneratedImage
             ? { sentGeneratedImage: assembled.sentGeneratedImage }
             : {}),
+          ...(assembled.webSearch ? { webSearch: assembled.webSearch } : {}),
         };
       });
       const opinionRow = db
@@ -2197,6 +2266,7 @@ function buildRoutes(): RouteDefinition[] {
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
       const coffeeSeatBotIdsOut = parseConversationCoffeeSeatBotIds(conversation.bot_group_ids);
+      const coffeeAbsentBotIdsOut = parseConversationBotGroupIds(conversation.coffee_absent_bot_ids);
       let prismMoodOut =
         conversationModeOut === "coffee"
           ? null
@@ -2245,11 +2315,15 @@ function buildRoutes(): RouteDefinition[] {
             ? { coffeeGroupId: conversation.coffee_group_id ?? null }
             : {}),
           ...(coffeeSeatBotIdsOut.length > 0 ? { coffeeSeatBotIds: coffeeSeatBotIdsOut } : {}),
+          ...(conversationModeOut === "coffee" && coffeeAbsentBotIdsOut.length > 0
+            ? { coffeeAbsentBotIds: coffeeAbsentBotIdsOut }
+            : {}),
           ...(coffeeSettingsOut !== undefined ? { coffeeSettings: coffeeSettingsOut } : {}),
           ...(conversationModeOut === "coffee" &&
-          (conversation.coffee_duration_minutes === 2 ||
-            conversation.coffee_duration_minutes === 3 ||
-            conversation.coffee_duration_minutes === 5)
+          typeof conversation.coffee_duration_minutes === "number" &&
+          Number.isInteger(conversation.coffee_duration_minutes) &&
+          conversation.coffee_duration_minutes >= COFFEE_SESSION_DURATION_MINUTES_MIN &&
+          conversation.coffee_duration_minutes <= COFFEE_SESSION_DURATION_MINUTES_MAX
             ? { coffeeSessionDurationMinutes: conversation.coffee_duration_minutes }
             : {}),
           ...(conversationModeOut === "coffee" &&
@@ -3787,12 +3861,13 @@ function buildRoutes(): RouteDefinition[] {
         !starterPrompt && commandCenterPrompt
           ? readOptionalString(body.resolvedCommandCenterPrompt)
           : null;
-      const promptInputOverride =
-        !starterPrompt && !commandCenterPrompt
-          ? readOptionalString(body.promptInputOverride)
-          : null;
-      const conversationId =
-        typeof body.conversationId === "string" ? body.conversationId : undefined;
+	      const promptInputOverride =
+	        !starterPrompt && !commandCenterPrompt
+	          ? readOptionalString(body.promptInputOverride)
+	          : null;
+	      const manualTool = !starterPrompt ? readManualChatTool(body.manualTool) : undefined;
+	      const conversationId =
+	        typeof body.conversationId === "string" ? body.conversationId : undefined;
       const forceNewConversation = body.forceNewConversation === true;
       const sessionEnding = body.sessionEnding === true;
       // Three-valued parse for bot routing:
@@ -4127,9 +4202,10 @@ function buildRoutes(): RouteDefinition[] {
             signal: chatAbort.signal,
             ...(commandCenterPrompt ? { commandCenterPrompt: true } : {}),
             ...(messageForChat !== message ? { promptInputOverride: messageForChat } : {}),
-            ...(promptShortcutForChat ? { promptShortcut: promptShortcutForChat } : {}),
-            ...(promptWildcardsForChat ? { promptWildcards: promptWildcardsForChat } : {}),
-          },
+	            ...(promptShortcutForChat ? { promptShortcut: promptShortcutForChat } : {}),
+	            ...(promptWildcardsForChat ? { promptWildcards: promptWildcardsForChat } : {}),
+	            ...(manualTool ? { manualTool } : {}),
+	          },
           conversationId
         );
       } catch (error) {
@@ -4310,6 +4386,7 @@ function buildRoutes(): RouteDefinition[] {
               options: (body.initialPoll as Record<string, unknown>).options,
             }
           : undefined;
+      const initialTeams = readCoffeeTeamCreateInput(body.initialTeams);
       const result = await createCoffeeConversationFromGroup(
         db,
         userId,
@@ -4318,7 +4395,9 @@ function buildRoutes(): RouteDefinition[] {
           coffeeSettings: body.coffeeSettings,
           durationMinutes: body.durationMinutes,
           presetId: body.presetId,
+          excludedBotIds: body.excludedBotIds,
           initialPoll,
+          initialTeams,
         },
         {
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -4347,6 +4426,7 @@ function buildRoutes(): RouteDefinition[] {
               options: (body.initialPoll as Record<string, unknown>).options,
             }
           : undefined;
+      const initialTeams = readCoffeeTeamCreateInput(body.initialTeams);
       const result = await createCoffeeConversation(
         db,
         userId,
@@ -4354,6 +4434,7 @@ function buildRoutes(): RouteDefinition[] {
           groupBotIds,
           coffeeSettings: body.coffeeSettings,
           initialPoll,
+          initialTeams,
         },
         {
           prismDefaultLlmModel: user.prism_default_llm_model,
@@ -4379,6 +4460,54 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/teams", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const result = await createCoffeeTeamsForSession(
+        db,
+        userId,
+        ctx.params.id,
+        readCoffeeTeamCreateInput(body) ?? {},
+        {
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        }
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/teams/tiebreak", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const result = resolveCoffeeTeamTiebreaker(
+        db,
+        userId,
+        ctx.params.id,
+        body.winnerTeamId
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/teams/player", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const result = setCoffeePlayerTeam(
+        db,
+        userId,
+        ctx.params.id,
+        body.teamId
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
       });
     }),
     route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
@@ -4466,7 +4595,8 @@ function buildRoutes(): RouteDefinition[] {
           },
           sessionRemainingMs,
           ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-        }
+        },
+        { structuredBallots: true }
       );
       json(ctx.res, 200, {
         ok: true,
@@ -6359,8 +6489,8 @@ function buildRoutes(): RouteDefinition[] {
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
       const model = readOptionalString(body.model);
-      const localModel = readOptionalString(body.localModel);
-      const onlineModel = readOptionalString(body.onlineModel);
+      const localModel = readBotPreferredModelForCreate(body.localModel);
+      const onlineModel = readBotPreferredModelForCreate(body.onlineModel);
       const localImageModel = readOptionalString(body.localImageModel);
       const openaiImageModel = readOptionalString(body.openaiImageModel);
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
@@ -6584,7 +6714,12 @@ function buildRoutes(): RouteDefinition[] {
           prismDefaultLlmModel: user.prism_default_llm_model,
         });
       }
-      json(ctx.res, 200, { ok: true });
+      const updatedBot = db
+        .prepare(
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId);
+      json(ctx.res, 200, { ok: true, bot: updatedBot });
     }),
     route("DELETE", "/api/bots/selected", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -6666,6 +6801,21 @@ function buildRoutes(): RouteDefinition[] {
       ];
       if (conversation.conversation_mode === "coffee") {
         const botIds = parseConversationBotGroupIds(conversation.bot_group_ids);
+        const botNamesById = new Map<string, string>();
+        if (botIds.length > 0) {
+          const placeholders = botIds.map(() => "?").join(", ");
+          const botRows = db.prepare(
+            `SELECT id, name
+               FROM bots
+              WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`
+          ).all(userId, ...botIds) as Array<{ id: string; name: string | null }>;
+          for (const row of botRows) {
+            if (typeof row.name === "string" && row.name.trim().length > 0) {
+              botNamesById.set(row.id, row.name.trim());
+            }
+          }
+        }
+        const botLabels = botIds.map((id) => botNamesById.get(id) ?? id);
         const assistantMessages = messages.filter((message) => message.role === "assistant");
         const speakerCounts = new Map<string, number>();
         for (const message of assistantMessages) {
@@ -6677,7 +6827,7 @@ function buildRoutes(): RouteDefinition[] {
         lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
         lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
         lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
-        lines.push(`- Bots: ${botIds.length > 0 ? botIds.join(", ") : "unknown"}`);
+        lines.push(`- Bots: ${botLabels.length > 0 ? botLabels.join(", ") : "unknown"}`);
         lines.push(`- Messages: ${messages.length}`);
         lines.push(`- Bot replies: ${assistantMessages.length}`);
         lines.push(
@@ -6687,9 +6837,18 @@ function buildRoutes(): RouteDefinition[] {
               : "none"
           }`
         );
-        lines.push(`- Started: ${conversation.created_at}`);
+        lines.push(`- Created: ${conversation.created_at}`);
+        lines.push(`- First message: ${messages[0]?.created_at ?? "none"}`);
         lines.push(`- Updated: ${conversation.updated_at}`);
         lines.push("");
+        const pollLines = buildCoffeePollExportLines(db, userId, conversationId);
+        if (pollLines.length > 0) {
+          lines.push(...pollLines);
+        }
+        const teamLines = buildCoffeeTeamExportLines(db, userId, conversationId);
+        if (teamLines.length > 0) {
+          lines.push(...teamLines);
+        }
         lines.push("## Transcript");
         lines.push("");
       }

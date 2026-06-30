@@ -5,22 +5,33 @@ import type { LlmProvider } from "../providers.ts";
 import {
   COFFEE_GROUP_MAX_SIZE,
   COFFEE_GROUP_MIN_SIZE,
+  advanceCoffeeTeamStateAfterReply,
   autoTagPeerMentionsInCoffeeReply,
   applyCoffeeOrganicSeedToReply,
   buildCoffeeConversationQualityState,
+  buildCoffeeDepartureOpportunity,
   buildCoffeeEmergencyFallbackReply,
+  buildCoffeePollExportLines,
   buildCoffeeTableTuningAppendix,
   buildRouterPrompt,
   buildSpeakerPrompt,
+  applyCoffeeRelationshipSocialDeltas,
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
+  coffeeLatestMessageIdChanged,
+  coffeeFallbackFocusPhrase,
   coffeeReplyBreaksCharacterImmersion,
+  coffeeReplySignalsPoliteDeparture,
   coffeeMeetingSummarySourceMessages,
   coffeeReplyIsLowValueTableLine,
+  coffeeReplyLooksUnfinished,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
   coffeeReplyRepeatsRecentMotifs,
   coffeeReplyRepeatsPollFallbackShape,
+  coffeeReplyRepeatsStockFallbackShape,
+  coffeeSpeakerMaxTokensForTurn,
+  coffeeUserMessageIsActionOnly,
   coffeeSpeakerUsesOrganicSeeds,
   collectCoffeePollVotes,
   computePlayerInterruptionConsequences,
@@ -30,33 +41,48 @@ import {
   createCoffeeConversationFromGroup,
   createCoffeePoll,
   createCoffeePreset,
+  createCoffeeTeamsForSession,
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeSessionPoll,
   updateCoffeeConversationSettings,
   listCoffeePresets,
   effectiveCoffeeSpeakerProvider,
+  extractCoffeeRelationshipSignals,
+  extractLastAddressedBotId,
   inferCoffeeGroupName,
   inferCoffeeStarterTopics,
   initializeCoffeeSocialState,
   interruptedSnippetFromTokenCount,
+  loadCoffeeAttendanceContext,
   loadCoffeeStarterMemoryContext,
+  loadCoffeeSessionMemoryChangeLines,
+  formatCoffeeAttendancePromptSummary,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
   normalizeCoffeeSeatBotIds,
+  normalizeCoffeeSessionSynopsis,
+  parseCoffeePollStructuredBallot,
   parseStoredBotGroupIds,
   parseStoredCoffeeSeatBotIds,
   parseStoredCoffeeSessionSettings,
   parseRouterResponse,
   persistCoffeeMeetingSummaryIfNewer,
+  pickCoffeeSpeakerBalanceOverride,
   pickDirectedSpeaker,
   pickFallbackSpeaker,
+  processCoffeeTurn,
+  randomizeCoffeeSeatBotIdsForSession,
   repairBotMentionBrackets,
+  resolveCoffeeTeamTiebreaker,
+  seedCoffeeSocialStateFromRelationships,
+  setCoffeePlayerTeam,
   shouldRefreshCoffeeMeetingSummary,
   setCoffeeConversationTopic,
   sanitizeCoffeeTableReply,
   kickoffCoffeeMeetingSummaryRefresh,
   stripCoffeeSpeakerPrefix,
+  coffeeTextMentionsInternalAccountMetadata,
   updateCoffeeGroup,
   updateCoffeePreset,
   type CoffeeBotProfile,
@@ -70,6 +96,7 @@ import {
   serializeStoredBotPrompt,
   normalizeCoffeeSessionSettings,
   type ChatMessage,
+  type CoffeeTeamState,
 } from "@localai/shared";
 
 /**
@@ -114,6 +141,20 @@ const MR_KRABS: CoffeeBotProfile = {
   systemPrompt: "Protective restaurant owner who guards the Krabby Patty formula.",
   color: "#ff4444",
   glyph: "anchor",
+  localModel: null,
+  onlineModel: null,
+  defaultModel: null,
+  temperature: 0.7,
+  maxTokens: 512,
+  onlineEnabled: true,
+};
+
+const JESUS: CoffeeBotProfile = {
+  id: "bot-jesus",
+  name: "Jesus Christ",
+  systemPrompt: "Jesus Christ, teacher of mercy, forgiveness, resurrection, sacrificial love, and the Kingdom of God.",
+  color: "#3399ff",
+  glyph: "fish",
   localModel: null,
   onlineModel: null,
   defaultModel: null,
@@ -241,6 +282,17 @@ describe("normalizeCoffeeSeatBotIds", () => {
   });
 });
 
+describe("randomizeCoffeeSeatBotIdsForSession", () => {
+  it("deals occupied group seats into a fresh five-seat session layout", () => {
+    const result = randomizeCoffeeSeatBotIdsForSession(
+      [null, "bot-a", "bot-b", null, null],
+      () => 0
+    );
+
+    assert.deepEqual(result, ["bot-b", null, null, null, "bot-a"]);
+  });
+});
+
 /**
  * Per-bot "Offline only" lock — the player marks a bot as protected in the
  * bot editor (toggle commits to a 🔒 state). Coffee Sessions must respect
@@ -280,6 +332,8 @@ function createCoffeeTestDb(): DatabaseSync {
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
       coffee_topic TEXT,
+      coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]',
+      coffee_team_mode_json TEXT,
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
@@ -348,6 +402,19 @@ function createCoffeeTestDb(): DatabaseSync {
       leave_pressure REAL NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, conversation_id, bot_id)
+    );
+    CREATE TABLE bot_relationships (
+      user_id TEXT NOT NULL,
+      source_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'neutral',
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_bot_id, target_bot_id)
     );
     CREATE TABLE coffee_groups (
       id TEXT PRIMARY KEY,
@@ -451,6 +518,7 @@ function seedCoffeeMemory(
   options: {
     id: string;
     text: string;
+    conversationId?: string | null;
     botId?: string | null;
     source?: "direct" | "inferred" | "compiled" | "about_you";
     category?: "general" | "user" | "bot_relation";
@@ -463,10 +531,11 @@ function seedCoffeeMemory(
     `INSERT INTO memories
        (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category,
         tier, durability, source, certainty, source_message_ids, created_at)
-     VALUES (?, ?, NULL, ?, ?, ?, ?, 0.91, ?, ?, 0.7, ?, 0.91, '[]', ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0.91, ?, ?, 0.7, ?, 0.91, '[]', ?)`
   ).run(
     options.id,
     userId,
+    options.conversationId ?? null,
     options.botId ?? null,
     encrypted.ciphertext,
     encrypted.iv,
@@ -476,6 +545,35 @@ function seedCoffeeMemory(
     options.source ?? "direct",
     options.createdAt ?? new Date().toISOString()
   );
+}
+
+async function withMockedCoffeeFetch<T>(
+  replyText: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  const mockFetch: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/api/chat")) {
+      return new Response(JSON.stringify({ message: { content: replyText } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.includes("/api/embeddings")) {
+      return new Response(JSON.stringify({ embedding: [0.1, 0.2, 0.3] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response("not found", { status: 404 });
+  };
+  globalThis.fetch = mockFetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 describe("createCoffeeConversation", () => {
@@ -650,6 +748,556 @@ describe("createCoffeeConversation", () => {
     assert.equal(getCoffeeSessionPoll(db, userId, result.conversation.id)?.id, followUpPoll.id);
   });
 
+  it("validates and starts Coffee Teams as an alternative opening ritual", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = await withMockedCoffeeFetch("[]", () =>
+      createCoffeeConversation(db, userId, {
+        groupBotIds: [ALICE.id, BORIS.id],
+      })
+    );
+
+    await assert.rejects(
+      () =>
+        createCoffeeTeamsForSession(db, userId, result.conversation.id, {
+          left: { name: "Left", description: "" },
+          right: { name: "Right", description: "Defend the right side." },
+          assignments: { [ALICE.id]: "left", [BORIS.id]: "right" },
+        }),
+      /description/
+    );
+
+    await assert.rejects(
+      () =>
+        createCoffeeTeamsForSession(db, userId, result.conversation.id, {
+          left: { name: "Left", description: "Defend the left side." },
+          right: { name: "Right", description: "Defend the right side." },
+          assignments: { [ALICE.id]: "left", "bot-missing": "right" },
+        }),
+      /not seated/
+    );
+
+    const created = await withMockedCoffeeFetch(
+      '{"bots":[{"botId":"bot-alice","currentTeamId":"left","satisfaction":0.8,"conviction":0.8},{"botId":"bot-boris","currentTeamId":"right","satisfaction":0.8,"conviction":0.8}]}',
+      () =>
+        createCoffeeTeamsForSession(db, userId, result.conversation.id, {
+          left: { name: "Questions", description: "Curiosity and careful questions." },
+          right: { name: "Practical", description: "Decisions and concrete action." },
+          assignments: { [ALICE.id]: "left", [BORIS.id]: "right" },
+        })
+    );
+
+    assert.equal(created.teams.counts.left, 1);
+    assert.equal(created.teams.counts.right, 1);
+    assert.equal(created.conversation.coffeeTeams?.left.name, "Questions");
+    assert.match(created.conversation.coffeeTopic ?? "", /Questions vs Practical/);
+  });
+
+  it("keeps opening Coffee Team assignments stable until the debate changes them", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const curious: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-curious",
+      systemPrompt: "curiosity questions exploration wonder evidence questions",
+    };
+    const practical: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-practical",
+      systemPrompt: "practical action procedure results decisions",
+    };
+    seedCoffeeBot(db, userId, curious);
+    seedCoffeeBot(db, userId, practical);
+    seedCoffeeBot(db, userId, CARA);
+    seedCoffeeBot(db, userId, DANTE);
+    seedCoffeeBot(db, userId, ELENA);
+
+    const response = await withMockedCoffeeFetch(
+      '{"bots":[{"botId":"bot-curious","currentTeamId":"right"},{"botId":"bot-practical","currentTeamId":"right"},{"botId":"bot-cara","currentTeamId":"right"},{"botId":"bot-dante","currentTeamId":"right"},{"botId":"bot-elena","currentTeamId":"right"}]}',
+      () =>
+        createCoffeeConversation(db, userId, {
+          groupBotIds: [curious.id, practical.id, CARA.id, DANTE.id, ELENA.id],
+          initialTeams: {
+            left: { name: "Profit", description: "profit control extraction margins" },
+            right: { name: "Curiosity", description: "curiosity questions exploration wonder evidence" },
+            assignments: {
+              [curious.id]: "left",
+              [practical.id]: "right",
+              [CARA.id]: "undecided",
+              [DANTE.id]: "undecided",
+              [ELENA.id]: "undecided",
+            },
+          },
+        })
+    );
+
+    assert.equal(response.conversation.coffeeTeams?.bots[curious.id]?.currentTeamId, "left");
+    assert.equal(response.conversation.coffeeTeams?.bots[curious.id]?.originalTeamId, "left");
+    assert.equal(response.conversation.coffeeTeams?.bots[curious.id]?.lastSwitchReason, null);
+    assert.equal(response.conversation.coffeeTeams?.bots[CARA.id]?.currentTeamId, "undecided");
+    assert.equal(response.conversation.coffeeTeams?.bots[DANTE.id]?.currentTeamId, "undecided");
+    assert.equal(response.conversation.coffeeTeams?.bots[ELENA.id]?.currentTeamId, "undecided");
+    assert.equal(response.conversation.coffeeTeams?.counts.left, 1);
+    assert.equal(response.conversation.coffeeTeams?.counts.undecided, 3);
+    assert.equal(response.conversation.coffeeTeams?.counts.right, 1);
+    assert.equal(response.conversation.coffeeTeams?.status, "active");
+    assert.equal(response.conversation.coffeeTeams?.winnerTeamId, null);
+  });
+
+  it("tracks the player as a Coffee Teams participant and records player switches", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const response = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTeams: {
+        left: { name: "Left", description: "The left case." },
+        right: { name: "Right", description: "The right case." },
+        assignments: { [ALICE.id]: "left", [BORIS.id]: "right" },
+        playerTeamId: "left",
+      },
+    });
+
+    assert.equal(response.conversation.coffeeTeams?.player?.currentTeamId, "left");
+    assert.equal(response.conversation.coffeeTeams?.counts.left, 2);
+    assert.equal(response.conversation.coffeeTeams?.counts.right, 1);
+
+    const switched = setCoffeePlayerTeam(
+      db,
+      userId,
+      response.conversation.id,
+      "right"
+    );
+
+    assert.equal(switched.teams.player?.currentTeamId, "right");
+    assert.equal(switched.teams.counts.left, 1);
+    assert.equal(switched.teams.counts.right, 2);
+    assert.equal(
+      switched.conversation.messages.at(-1)?.content,
+      "*switches from Left to Right*"
+    );
+  });
+
+  it("keeps pending Coffee Team switches out of counts until the bot speaks", () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const state: CoffeeTeamState = {
+      left: { id: "left", name: "Left", description: "Left case." },
+      right: { id: "right", name: "Right", description: "Right case." },
+      undecidedLabel: "Undecided",
+      bots: {
+        [ALICE.id]: {
+          botId: ALICE.id,
+          originalTeamId: "left",
+          currentTeamId: "left",
+          satisfaction: 0.7,
+          conviction: 0.7,
+          pendingSwitchTeamId: null,
+          pendingSwitchReason: null,
+          lastSwitchReason: null,
+          updatedAt: now,
+        },
+        [BORIS.id]: {
+          botId: BORIS.id,
+          originalTeamId: "right",
+          currentTeamId: "right",
+          satisfaction: 0.2,
+          conviction: 0.2,
+          pendingSwitchTeamId: "left",
+          pendingSwitchReason: "Alice made the left case sound sturdier.",
+          lastSwitchReason: null,
+          updatedAt: now,
+        },
+      },
+      counts: { left: 1, undecided: 0, right: 1 },
+      status: "active",
+      winnerTeamId: null,
+      tiebreakerPromptedAt: null,
+      resolvedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const afterAlice = advanceCoffeeTeamStateAfterReply({
+      state,
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      replyText: "Left is the stronger argument.",
+      now: "2026-01-01T00:00:01.000Z",
+    })!;
+    assert.equal(afterAlice.counts.left, 1);
+    assert.equal(afterAlice.counts.right, 1);
+    assert.equal(afterAlice.bots[BORIS.id]?.currentTeamId, "right");
+
+    const afterBoris = advanceCoffeeTeamStateAfterReply({
+      state: afterAlice,
+      speaker: BORIS,
+      group: [ALICE, BORIS],
+      replyText: "I am moving left because Alice made the practical risk clearer.",
+      now: "2026-01-01T00:00:02.000Z",
+    })!;
+    assert.equal(afterBoris.counts.left, 2);
+    assert.equal(afterBoris.status, "left_won");
+    assert.equal(afterBoris.winnerTeamId, "left");
+  });
+
+  it("allows the user to resolve a tied Coffee Teams ending", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = await withMockedCoffeeFetch(
+      '{"bots":[{"botId":"bot-alice","currentTeamId":"left","satisfaction":0.8,"conviction":0.8},{"botId":"bot-boris","currentTeamId":"right","satisfaction":0.8,"conviction":0.8}]}',
+      () =>
+        createCoffeeConversation(db, userId, {
+          groupBotIds: [ALICE.id, BORIS.id],
+          initialTeams: {
+            left: { name: "Left", description: "The left case." },
+            right: { name: "Right", description: "The right case." },
+            assignments: { [ALICE.id]: "left", [BORIS.id]: "right" },
+          },
+        })
+    );
+    const resolved = resolveCoffeeTeamTiebreaker(
+      db,
+      userId,
+      result.conversation.id,
+      "right"
+    );
+
+    assert.equal(resolved.teams.status, "tie_resolved");
+    assert.equal(resolved.teams.winnerTeamId, "right");
+    assert.equal(resolved.conversation.coffeeTeams?.winnerTeamId, "right");
+  });
+
+  it("adds Coffee Teams context to prompts without hidden numeric scores", () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const teams: CoffeeTeamState = {
+      left: { id: "left", name: "Poets", description: "Metaphor and feeling." },
+      right: { id: "right", name: "Engineers", description: "Systems and verification." },
+      undecidedLabel: "Undecided",
+      bots: {
+        [ALICE.id]: {
+          botId: ALICE.id,
+          originalTeamId: "left",
+          currentTeamId: "left",
+          satisfaction: 0.333,
+          conviction: 0.444,
+          pendingSwitchTeamId: null,
+          pendingSwitchReason: null,
+          lastSwitchReason: null,
+          updatedAt: now,
+        },
+        [BORIS.id]: {
+          botId: BORIS.id,
+          originalTeamId: "right",
+          currentTeamId: "right",
+          satisfaction: 0.555,
+          conviction: 0.666,
+          pendingSwitchTeamId: null,
+          pendingSwitchReason: null,
+          lastSwitchReason: null,
+          updatedAt: now,
+        },
+      },
+      counts: { left: 1, undecided: 0, right: 1 },
+      status: "active",
+      winnerTeamId: null,
+      tiebreakerPromptedAt: null,
+      resolvedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const routerPrompt = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Begin.",
+      lastSpeakerBotId: null,
+      coffeeTeams: teams,
+    })
+      .map((message) => message.content)
+      .join("\n");
+    const speakerPrompt = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Begin.",
+      socialByBotId: initializeCoffeeSocialState([ALICE, BORIS], {}),
+      coffeeTeams: teams,
+    })
+      .map((message) => message.content)
+      .join("\n");
+
+    assert.match(routerPrompt, /Poets/);
+    assert.match(speakerPrompt, /Engineers/);
+    assert.doesNotMatch(`${routerPrompt}\n${speakerPrompt}`, /satisfaction=\d|conviction=\d/);
+  });
+
+  it("falls back to persona-grounded Coffee poll votes instead of seeded option bias", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const spongeBob: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-spongebob",
+      name: "SpongeBob",
+      systemPrompt: "Optimistic fry cook who loves greeting customers and doing his job at the Krusty Krab.",
+    };
+    const squidward: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-squidward",
+      name: "Squidward",
+      systemPrompt: "Irritable cashier who wants the dining room quiet, civilized, and free of nonsense.",
+    };
+    const patrick: CoffeeBotProfile = {
+      ...CARA,
+      id: "bot-patrick",
+      name: "Patrick Star",
+      systemPrompt: "Hungry, simplehearted friend who is always ready for snacks and lunch.",
+    };
+    const plankton: CoffeeBotProfile = {
+      ...DANTE,
+      id: "bot-plankton",
+      name: "Plankton",
+      systemPrompt: "Scheming rival who wants to steal the Krabby Patty formula.",
+    };
+    const mrKrabs: CoffeeBotProfile = {
+      ...MR_KRABS,
+      systemPrompt: "Protective restaurant owner obsessed with money, profits, and guarding the Krabby Patty formula.",
+    };
+    for (const bot of [spongeBob, squidward, patrick, plankton, mrKrabs]) {
+      seedCoffeeBot(db, userId, bot);
+    }
+
+    const result = await createCoffeeConversation(db, userId, {
+      groupBotIds: [spongeBob.id, squidward.id, patrick.id, plankton.id, mrKrabs.id],
+      initialPoll: {
+        question: "The Krusty Krab has one hour before opening. What should we do first?",
+        options: [
+          "Practice the perfect customer greeting.",
+          "Make the dining room quiet and civilized.",
+          "Take a snack break and think about lunch.",
+          "Protect the Krabby Patty formula and maximize profits.",
+        ],
+      },
+    });
+
+    const collected = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 120_000 }
+    );
+    const optionByBotId = new Map(
+      collected.poll.votes.map((vote) => [vote.botId, collected.poll.options[vote.optionIndex ?? -1]])
+    );
+
+    assert.equal(optionByBotId.get(spongeBob.id), "Practice the perfect customer greeting.");
+    assert.equal(optionByBotId.get(squidward.id), "Make the dining room quiet and civilized.");
+    assert.equal(optionByBotId.get(patrick.id), "Take a snack break and think about lunch.");
+    assert.equal(
+      optionByBotId.get(plankton.id),
+      "Protect the Krabby Patty formula and maximize profits."
+    );
+    assert.equal(
+      optionByBotId.get(mrKrabs.id),
+      "Protect the Krabby Patty formula and maximize profits."
+    );
+  });
+
+  it("parses structured Coffee poll ballots without defaulting invalid output to the first option", () => {
+    const options = ["Practice greeting", "Quiet dining room", "Snack break"];
+
+    assert.deepEqual(
+      parseCoffeePollStructuredBallot(
+        '{"knowledgeBasis":"public_persona","personaInstinct":"Patrick treats the lunchbox as possible food before procedure.","optionId":"option-3","confidence":0.88,"rationale":"Patrick wants lunch."}',
+        options
+      ),
+      {
+        knowledgeBasis: "public_persona",
+        personaInstinct: "Patrick treats the lunchbox as possible food before procedure.",
+        optionIndex: 2,
+        confidence: 0.88,
+        rationale: "Patrick wants lunch.",
+      }
+    );
+    assert.equal(
+      parseCoffeePollStructuredBallot(
+        '{"knowledgeBasis":"public_persona","personaInstinct":"bad","optionId":"option-9","confidence":0.9,"rationale":"bad id"}',
+        options
+      ),
+      null
+    );
+    assert.equal(
+      parseCoffeePollStructuredBallot(
+        '{"optionId":"option-2","confidence":0.9,"rationale":"missing stance"}',
+        options
+      ),
+      null
+    );
+  });
+
+  it("uses one structured Coffee poll ballot per bot when a ballot provider is supplied", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const result = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialPoll: {
+        question: "Which table rule wins?",
+        options: ["Ask questions", "Cook first"],
+      },
+    });
+    const calls: string[] = [];
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        const joined = messages.map((message) => message.content).join("\n");
+        calls.push(joined);
+        return joined.includes("Bot name: Boris")
+          ? '{"knowledgeBasis":"bot_profile","personaInstinct":"Boris is a grumpy chef, so food is his first practical priority.","optionId":"option-2","confidence":0.91,"rationale":"Boris trusts food first."}'
+          : '{"knowledgeBasis":"bot_profile","personaInstinct":"Alice starts from curiosity and questions.","optionId":"option-1","confidence":0.87,"rationale":"Alice starts by asking why."}';
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const collected = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      { structuredBallots: true, pollVoteProvider: provider }
+    );
+    const optionByBotId = new Map(
+      collected.poll.votes.map((vote) => [vote.botId, collected.poll.options[vote.optionIndex ?? -1]])
+    );
+
+    assert.equal(calls.length, 2);
+    assert.match(calls[0] ?? "", /persona's likely stance/);
+    assert.match(calls[0] ?? "", /public\/common persona knowledge/);
+    assert.match(calls[0] ?? "", /knowledgeBasis/);
+    assert.match(calls[0] ?? "", /personaInstinct/);
+    assert.equal(optionByBotId.get(ALICE.id), "Ask questions");
+    assert.equal(optionByBotId.get(BORIS.id), "Cook first");
+    assert.match(
+      collected.poll.votes.find((vote) => vote.botId === BORIS.id)?.explanation ?? "",
+      /Boris trusts food first/
+    );
+  });
+
+  it("keeps invalid structured Coffee poll ballots pending until final collection", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const result = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialPoll: {
+        question: "Which table rule wins?",
+        options: ["Ask questions", "Cook first"],
+      },
+    });
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return '{"optionId":"option-2","confidence":0.91,"rationale":"old shape, no stance"}';
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const pending = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      { structuredBallots: true, pollVoteProvider: provider }
+    );
+
+    assert.equal(pending.poll.status, "open");
+    assert.equal(
+      pending.poll.votes.every((vote) => vote.kind === "pending" && vote.optionIndex === null),
+      true
+    );
+    assert.equal(
+      pending.poll.tallies.reduce((sum, tally) => sum + tally.voteCount, 0),
+      0
+    );
+
+    const closed = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      result.poll?.id ?? "",
+      { preferredProvider: "local", sessionRemainingMs: 0 },
+      { structuredBallots: true, pollVoteProvider: provider }
+    );
+
+    assert.equal(closed.poll.status, "closed");
+    assert.equal(
+      closed.poll.votes.every((vote) => vote.kind === "option" && typeof vote.optionIndex === "number"),
+      true
+    );
+  });
+
+  it("exports Coffee poll question, options, tallies, and votes", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    const poll = createCoffeePoll(db, userId, session.conversation.id, {
+      question: "Is manipulation justified?",
+      options: ["TRUE", "FALSE"],
+    });
+    db.prepare(
+      `INSERT INTO coffee_poll_votes
+         (user_id, poll_id, conversation_id, bot_id, vote_kind, option_index,
+          explanation, suggested_option, confidence, deliberation_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'option', 1, ?, NULL, 1, '{}', ?, ?)`
+    ).run(
+      userId,
+      poll.id,
+      session.conversation.id,
+      "__player__",
+      "You picked FALSE.",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z"
+    );
+    db.prepare(
+      `UPDATE coffee_poll_votes
+          SET vote_kind = 'option', option_index = 1, explanation = ?, confidence = 0.82, updated_at = ?
+        WHERE user_id = ? AND poll_id = ? AND bot_id = ?`
+    ).run("Boris chose FALSE.", "2026-01-01T00:00:01.000Z", userId, poll.id, BORIS.id);
+    db.prepare(
+      "UPDATE coffee_polls SET status = 'closed', closed_at = ?, updated_at = ? WHERE id = ?"
+    ).run("2026-01-01T00:00:02.000Z", "2026-01-01T00:00:02.000Z", poll.id);
+
+    const markdown = buildCoffeePollExportLines(db, userId, session.conversation.id).join("\n");
+
+    assert.match(markdown, /## Polls/);
+    assert.match(markdown, /Is manipulation justified\?/);
+    assert.match(markdown, /Options: TRUE, FALSE/);
+    assert.match(markdown, /Final result: FALSE \(2 votes\)/);
+    assert.match(markdown, /Tallies: TRUE 0, FALSE 2/);
+    assert.match(markdown, /Boris: FALSE, confidence 0\.82/);
+    assert.match(markdown, /You: FALSE, confidence 1\.00/);
+    assert.match(markdown, /Poll context:/);
+  });
+
   it("ignores prompt-leaked assistant lines when computing poll votes", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -808,6 +1456,73 @@ describe("createCoffeeConversation", () => {
     assert.equal(collected.poll.options[borisVote?.optionIndex ?? -1], "false");
   });
 
+  it("repairs a locked Good vs Evil vote when the bot visibly rejects the wrong side", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, JESUS);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const result = await createCoffeeConversation(db, userId, {
+      groupBotIds: [JESUS.id, BORIS.id],
+      initialPoll: {
+        question: "Good vs Evil",
+        options: ["Good always prevails!", "Evil always prevails!"],
+      },
+    });
+    const pollId = result.poll?.id ?? "";
+    const now = "2026-05-23T00:00:00.000Z";
+    db.prepare(
+      `UPDATE coffee_poll_votes
+          SET vote_kind = 'option',
+              option_index = 1,
+              explanation = ?,
+              confidence = 0.91,
+              deliberation_json = ?,
+              updated_at = ?
+        WHERE user_id = ? AND poll_id = ? AND bot_id = ?`
+    ).run(
+      "Jesus Christ picks the bleak option.",
+      JSON.stringify({
+        stage: "finalized",
+        leaningOptionIndex: 1,
+        alternateOptionIndex: null,
+        confidence: 0.91,
+        blocker: null,
+        note: "Bad hidden ballot.",
+        updatedAt: now,
+      }),
+      now,
+      userId,
+      pollId,
+      JESUS.id
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, NULL, ?)`
+    ).run(
+      "jesus-rejects-evil",
+      result.conversation.id,
+      userId,
+      "I am called here to say evil prevails, Jared, yet I cannot. I have watched a buried seed split the stone above it; goodness loses the field and still feeds the world.",
+      JESUS.id,
+      now
+    );
+
+    const collected = await collectCoffeePollVotes(
+      db,
+      userId,
+      result.conversation.id,
+      pollId,
+      { preferredProvider: "local", sessionRemainingMs: 120_000 }
+    );
+    const jesusVote = collected.poll.votes.find((vote) => vote.botId === JESUS.id);
+
+    assert.equal(jesusVote?.kind, "option");
+    assert.equal(collected.poll.options[jesusVote?.optionIndex ?? -1], "Good always prevails!");
+    assert.match(jesusVote?.explanation ?? "", /changes to "Good always prevails!"/);
+  });
+
   it("renames the session title to the chosen coffee topic", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -938,7 +1653,7 @@ describe("Coffee group foundation", () => {
     assert.match(row.title, new RegExp(`^${topic.slice(0, 12).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 
-  it("starts a session from a Coffee group and freezes its snapshot", async () => {
+  it("starts a session from a Coffee group and freezes a randomized seat snapshot", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -955,13 +1670,17 @@ describe("Coffee group foundation", () => {
 
     assert.equal(result.conversation.coffeeGroupId, group.id);
     assert.equal(result.conversation.coffeeSessionDurationMinutes, 3);
-    assert.deepEqual(result.conversation.coffeeSeatBotIds, [
-      null,
-      ALICE.id,
-      BORIS.id,
-      null,
-      null,
-    ]);
+    assert.equal(result.conversation.coffeeSeatBotIds?.length, COFFEE_GROUP_MAX_SIZE);
+    assert.deepEqual(
+      [...(result.conversation.botGroupIds ?? [])].sort(),
+      [ALICE.id, BORIS.id].sort()
+    );
+    assert.deepEqual(
+      [...(result.conversation.coffeeSeatBotIds ?? [])]
+        .filter((id): id is string => typeof id === "string")
+        .sort(),
+      [ALICE.id, BORIS.id].sort()
+    );
     assert.equal(result.conversation.coffeeSettings?.responseLength, "roomy");
 
     const row = db
@@ -973,10 +1692,140 @@ describe("Coffee group foundation", () => {
     };
     assert.equal(row.coffee_group_id, group.id);
     assert.equal(row.coffee_duration_minutes, 3);
-    assert.deepEqual(JSON.parse(row.bot_group_ids), [null, ALICE.id, BORIS.id, null, null]);
+    assert.deepEqual(JSON.parse(row.bot_group_ids), result.conversation.coffeeSeatBotIds);
   });
 
-  it("rejects unsupported group session durations", async () => {
+  it("starts a group session with excluded bots absent from the frozen roster", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+    const group = createCoffeeGroup(db, userId, {
+      name: "Guest List",
+      groupBotIds: [ALICE.id, BORIS.id, CARA.id],
+    });
+
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {
+      excludedBotIds: [BORIS.id],
+      durationMinutes: 3,
+    });
+
+    assert.deepEqual(
+      [...(result.conversation.botGroupIds ?? [])].sort(),
+      [ALICE.id, CARA.id].sort()
+    );
+    assert.deepEqual(result.conversation.coffeeAbsentBotIds, [BORIS.id]);
+    assert.equal(result.conversation.botGroupIds?.includes(BORIS.id), false);
+    assert.equal(result.conversation.coffeeSeatBotIds?.includes(BORIS.id), false);
+
+    const row = db
+      .prepare("SELECT coffee_absent_bot_ids FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { coffee_absent_bot_ids: string };
+    assert.deepEqual(JSON.parse(row.coffee_absent_bot_ids), [BORIS.id]);
+
+    const event = db
+      .prepare(
+        "SELECT payload FROM coffee_group_events WHERE group_id = ? AND event_type = 'session_created'"
+      )
+      .get(group.id) as { payload: string };
+    const payload = JSON.parse(event.payload) as {
+      attendingBotIds: string[];
+      absentBotIds: string[];
+    };
+    assert.deepEqual([...payload.attendingBotIds].sort(), [ALICE.id, CARA.id].sort());
+    assert.deepEqual(payload.absentBotIds, [BORIS.id]);
+  });
+
+  it("persists a polite empty-cup departure after a bot chooses to leave", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-depart-0";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+
+    const created = await withMockedCoffeeFetch("[]", () =>
+      createCoffeeConversation(db, userId, {
+        groupBotIds: [ALICE.id, BORIS.id, CARA.id],
+        durationMinutes: 10,
+      })
+    );
+    db.prepare("UPDATE conversations SET id = ? WHERE id = ?").run(
+      conversationId,
+      created.conversation.id
+    );
+    db.prepare("UPDATE coffee_bot_social_state SET conversation_id = ? WHERE conversation_id = ?").run(
+      conversationId,
+      created.conversation.id
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, NULL, ?)`
+    ).run(
+      "alice-prior",
+      conversationId,
+      userId,
+      "I think the table needs one more careful distinction.",
+      ALICE.id,
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const result = await withMockedCoffeeFetch(
+      "*stands and pushes chair back with a grateful nod* Thank you for the coffee and the company; I should get going.",
+      () =>
+        processCoffeeTurn(
+          db,
+          userId,
+          {
+            conversationId,
+            message: "Keep going.",
+            directedSpeakerBotId: ALICE.id,
+          },
+          {
+            preferredProvider: "local",
+            sessionRemainingMs: 1,
+          }
+        )
+    );
+
+    assert.equal(result.speakerBotId, ALICE.id);
+    assert.equal(result.conversation.botGroupIds?.includes(ALICE.id), false);
+    assert.equal(result.conversation.botGroupIds?.length, 2);
+    assert.deepEqual(result.conversation.coffeeAbsentBotIds, [ALICE.id]);
+    assert.equal(result.conversation.messages.at(-1)?.botName, ALICE.name);
+    const row = db
+      .prepare("SELECT bot_group_ids, coffee_absent_bot_ids FROM conversations WHERE id = ?")
+      .get(conversationId) as {
+      bot_group_ids: string;
+      coffee_absent_bot_ids: string;
+    };
+    assert.equal(JSON.parse(row.bot_group_ids).includes(ALICE.id), false);
+    assert.deepEqual(JSON.parse(row.coffee_absent_bot_ids), [ALICE.id]);
+  });
+
+  it("rejects excluded bots that are not in the Coffee group", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    await assert.rejects(
+      async () => {
+        await createCoffeeConversationFromGroup(db, userId, group.id, {
+          excludedBotIds: [CARA.id],
+        });
+      },
+      /not in this group/
+    );
+  });
+
+  it("rejects group sessions when too many bots are excluded", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
@@ -987,9 +1836,85 @@ describe("Coffee group foundation", () => {
 
     await assert.rejects(
       async () => {
-        await createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 15 });
+        await createCoffeeConversationFromGroup(db, userId, group.id, {
+          excludedBotIds: [BORIS.id],
+        });
       },
-      /2, 3, or 5 minutes/
+      /Pick at least 2 bots/
+    );
+  });
+
+  it("derives attendance context from recent Coffee group absences", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id, CARA.id],
+    });
+
+    await createCoffeeConversationFromGroup(db, userId, group.id, {
+      excludedBotIds: [BORIS.id],
+    });
+    await createCoffeeConversationFromGroup(db, userId, group.id, {
+      excludedBotIds: [BORIS.id],
+    });
+    const current = await createCoffeeConversationFromGroup(db, userId, group.id, {});
+
+    const context = loadCoffeeAttendanceContext({
+      db,
+      userId,
+      conversationId: current.conversation.id,
+      coffeeGroupId: group.id,
+      group: [ALICE, BORIS, CARA],
+      absentBotIds: [],
+    });
+    assert.ok(context);
+    assert.ok(context.returningBotNames.includes("Boris"));
+    assert.match(context.recentAbsenceLines.join("\n"), /Boris was absent recently/);
+    assert.match(
+      formatCoffeeAttendancePromptSummary(context) ?? "",
+      /Returning after being away recently: Boris/
+    );
+  });
+
+  it("accepts expanded group session durations through 30 minutes", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {
+      durationMinutes: 30,
+    });
+
+    assert.equal(result.conversation.coffeeSessionDurationMinutes, 30);
+  });
+
+  it("rejects out-of-range group session durations", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    await assert.rejects(
+      async () => {
+        await createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 2 });
+      },
+      /3 to 30/
+    );
+    await assert.rejects(
+      async () => {
+        await createCoffeeConversationFromGroup(db, userId, group.id, { durationMinutes: 31 });
+      },
+      /3 to 30/
     );
   });
 
@@ -1029,9 +1954,16 @@ describe("Coffee presets", () => {
       coffeeSettings: { responseLength: "roomy" },
     });
     const presets = listCoffeePresets(db, userId);
+    const builtIns = presets.filter((preset) => preset.builtIn);
 
-    assert.ok(presets.length >= 4);
-    assert.ok(presets.slice(0, 3).every((preset) => preset.builtIn));
+    assert.equal(builtIns.length, 4);
+    assert.deepEqual(
+      builtIns.map((preset) => preset.name),
+      ["Quiet Table", "Easy Banter", "Theater Night", "Afterparty"]
+    );
+    assert.ok(presets.slice(0, builtIns.length).every((preset) => preset.builtIn));
+    assert.equal(builtIns.find((preset) => preset.name === "Theater Night")?.settings.crossTalk, "chatty");
+    assert.equal(builtIns.find((preset) => preset.name === "Afterparty")?.settings.crossTalk, "pileup");
     assert.equal(presets.at(-1)?.id, created.id);
   });
 
@@ -1076,7 +2008,7 @@ describe("Coffee presets", () => {
     });
 
     const explicit = await createCoffeeConversationFromGroup(db, userId, group.id, {
-      durationMinutes: 2,
+      durationMinutes: 10,
       presetId: preset.id,
     });
     assert.equal(explicit.conversation.coffeeSettings?.responseLength, "roomy");
@@ -1144,6 +2076,27 @@ describe("buildRouterPrompt", () => {
     assert.match(system!.content, /"directive": "<one short next-move cue>"/);
   });
 
+  it("threads attendance context without making absent bots selectable", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, CARA],
+      history: [],
+      userMessage: "Start the table.",
+      lastSpeakerBotId: null,
+      attendanceContext: {
+        currentAbsentBotIds: [BORIS.id],
+        currentAbsentBotNames: ["Boris"],
+        returningBotNames: [],
+        recentAbsenceLines: [],
+      },
+    });
+    const system = messages[0]!.content;
+    assert.match(system, /Away this session: Boris/);
+    assert.match(system, /not a roll call/);
+    assert.match(system, /id="bot-alice"/);
+    assert.match(system, /id="bot-cara"/);
+    assert.doesNotMatch(system, /id="bot-boris"/);
+  });
+
   it("threads the session topic into the router system prompt when provided", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, BORIS],
@@ -1188,6 +2141,10 @@ describe("buildRouterPrompt", () => {
       history: [],
       userMessage: "Pick a topic.",
       lastSpeakerBotId: "bot-alice",
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "relaxed",
+        crossTalk: "normal",
+      }),
     });
     const system = messages[0];
     assert.match(system!.content, /last bot to speak was id="bot-alice"/);
@@ -1256,6 +2213,34 @@ describe("buildRouterPrompt", () => {
     assert.match(system, /Quiet relevant candidates: Cara, Dante, Elena/);
     assert.match(system, /Dominant duo detected: Alice \+ Boris/);
     assert.match(system, /redirect back to the truth\/art question using one table object/);
+  });
+
+  it("can deterministically override an overexposed router pick with a quiet seated bot", () => {
+    const group = [ALICE, BORIS, CARA, DANTE, ELENA];
+    const now = new Date().toISOString();
+    const history: ChatMessage[] = [
+      { id: "m1", role: "assistant", botName: "Alice", content: "Manipulation is insight wearing a mask.", createdAt: now },
+      { id: "m2", role: "assistant", botName: "Alice", content: "The unconscious keeps returning to power.", createdAt: now },
+      { id: "m3", role: "assistant", botName: "Alice", content: "Power reveals hidden desire.", createdAt: now },
+      { id: "m4", role: "assistant", botName: "Boris", content: "Fear can still organize the kitchen.", createdAt: now },
+      { id: "m5", role: "assistant", botName: "Alice", content: "Desire is never absent from leadership.", createdAt: now },
+      { id: "m6", role: "assistant", botName: "Alice", content: "The psyche keeps circling the ruler.", createdAt: now },
+    ];
+
+    const override = pickCoffeeSpeakerBalanceOverride({
+      group,
+      history,
+      pickedBotId: ALICE.id,
+      sessionSettings: normalizeCoffeeSessionSettings({
+        tableEnergy: "theatre",
+        crossTalk: "chatty",
+      }),
+      coffeeTopic: "Can manipulation ever be justified?",
+    });
+
+    assert.ok(override);
+    assert.notEqual(override?.id, ALICE.id);
+    assert.ok([CARA.id, DANTE.id, ELENA.id].includes(override?.id ?? ""));
   });
 
   it("keeps small quiet sessions on lighter quality guidance", () => {
@@ -1354,6 +2339,24 @@ describe("buildRouterPrompt", () => {
     assert.match(focus!.content, /Alice just said/);
   });
 
+  it("frames action-only user turns as non-verbal actions for routing", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "*takes a quiet sip*",
+      userActionOnly: true,
+      lastSpeakerBotId: ALICE.id,
+    });
+    const combined = messages.map((message) => message.content).join("\n");
+    const latest = messages.at(-2);
+
+    assert.match(combined, /non-verbal table action/i);
+    assert.match(combined, /Do not treat it as an interruption/i);
+    assert.equal(latest?.role, "user");
+    assert.match(latest!.content, /The user performs a non-verbal table action/);
+    assert.doesNotMatch(latest!.content, /The user says/);
+  });
+
   it("welcomes bot-to-bot banter when cross-talk is chatty", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, BORIS],
@@ -1388,6 +2391,252 @@ describe("buildRouterPrompt", () => {
       sessionRemainingMs: 21_000,
     });
     assert.doesNotMatch(messages[0]!.content, /Session wrap-up window/);
+  });
+});
+
+describe("Coffee bot-to-bot relationships", () => {
+  const baseSocial = {
+    [ALICE.id]: {
+      disposition: 0.5,
+      valuesFriction: 0.35,
+      restraint: 0.65,
+      engagement: 0.65,
+      leavePressure: 0.1,
+    },
+    [BORIS.id]: {
+      disposition: 0.5,
+      valuesFriction: 0.35,
+      restraint: 0.65,
+      engagement: 0.65,
+      leavePressure: 0.1,
+    },
+  };
+
+  it("extracts directed warm and tense peer signals only for seated non-self bots", () => {
+    const warm = extractCoffeeRelationshipSignals({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      replyText: "Boris, I agree with your gentle approach.",
+    });
+    assert.equal(warm.length, 1);
+    assert.equal(warm[0]?.targetBotId, BORIS.id);
+    assert.equal(warm[0]?.trend, "up");
+    assert.ok((warm[0]?.delta ?? 0) > 0);
+
+    const tense = extractCoffeeRelationshipSignals({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      replyText: "Boris, I challenge that too-easy read.",
+    });
+    assert.equal(tense[0]?.targetBotId, BORIS.id);
+    assert.equal(tense[0]?.trend, "down");
+    assert.ok((tense[0]?.delta ?? 0) < 0);
+
+    assert.deepEqual(
+      extractCoffeeRelationshipSignals({
+        speaker: ALICE,
+        group: [ALICE, BORIS],
+        replyText: "Alice, I agree with myself.",
+      }),
+      []
+    );
+    assert.deepEqual(
+      extractCoffeeRelationshipSignals({
+        speaker: ALICE,
+        group: [ALICE, BORIS],
+        replyText: "Daria, I agree with you.",
+      }),
+      []
+    );
+  });
+
+  it("applies relationship mood shifts to Coffee social state", () => {
+    const tenseSignals = extractCoffeeRelationshipSignals({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      replyText: "Boris, I challenge that too-easy read.",
+    });
+    const shifted = applyCoffeeRelationshipSocialDeltas({
+      previousByBotId: baseSocial,
+      speakerBotId: ALICE.id,
+      signals: tenseSignals,
+    });
+
+    assert.ok(shifted[ALICE.id]!.valuesFriction > baseSocial[ALICE.id]!.valuesFriction);
+    assert.ok(shifted[ALICE.id]!.disposition < baseSocial[ALICE.id]!.disposition);
+    assert.ok(shifted[BORIS.id]!.valuesFriction > baseSocial[BORIS.id]!.valuesFriction);
+  });
+
+  it("seeds a new Coffee session from durable pair relationships", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    db.prepare(
+      `INSERT INTO bot_relationships (
+        user_id, source_bot_id, target_bot_id, score, band, mood_key,
+        trend, last_reason, recent_reasons, updated_at
+      ) VALUES (?, ?, ?, 80, 'warm', 'joyful', 'up', ?, '[]', ?)`
+    ).run(
+      userId,
+      ALICE.id,
+      BORIS.id,
+      "The speaker showed warmth toward this peer during Coffee.",
+      "2026-01-01T00:00:00.000Z"
+    );
+
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    assert.ok(
+      (session.conversation.coffeeBotSocialById?.[ALICE.id]?.disposition ?? 0) >
+        baseSocial[ALICE.id]!.disposition
+    );
+    assert.ok(
+      (session.conversation.coffeeBotSocialById?.[ALICE.id]?.valuesFriction ?? 1) <
+        baseSocial[ALICE.id]!.valuesFriction
+    );
+  });
+
+  it("adds durable relationship rows and encrypted bot-scoped memories after Coffee replies", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const userKey = Buffer.alloc(32, 17);
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    await withMockedCoffeeFetch("Boris, I agree with your gentle approach; it gives the table a humane next step.", () =>
+      processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId: session.conversation.id,
+          message: "What should the table do next?",
+          directedSpeakerBotId: ALICE.id,
+        },
+        { preferredProvider: "local", userKey }
+      )
+    );
+
+    const relationship = db
+      .prepare(
+        "SELECT source_bot_id, target_bot_id, score, trend FROM bot_relationships WHERE user_id = ?"
+      )
+      .get(userId) as
+      | { source_bot_id: string; target_bot_id: string; score: number; trend: string }
+      | undefined;
+    assert.equal(relationship?.source_bot_id, ALICE.id);
+    assert.equal(relationship?.target_bot_id, BORIS.id);
+    assert.equal(relationship?.trend, "up");
+    assert.ok((relationship?.score ?? 0) > 50);
+
+    const memoryLines = loadCoffeeSessionMemoryChangeLines(
+      db,
+      userId,
+      session.conversation.id,
+      userKey
+    );
+    assert.ok(
+      memoryLines.some((line) =>
+        /Alice tended to agree with Boris during Coffee/i.test(line)
+      )
+    );
+  });
+
+  it("keeps incognito Coffee relationship effects session-only", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const userKey = Buffer.alloc(32, 19);
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    db.prepare("UPDATE conversations SET incognito = 1 WHERE id = ?").run(
+      session.conversation.id
+    );
+
+    await withMockedCoffeeFetch("Boris, I agree with your gentle approach.", () =>
+      processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId: session.conversation.id,
+          message: "Keep this private.",
+          directedSpeakerBotId: ALICE.id,
+        },
+        { preferredProvider: "local", userKey }
+      )
+    );
+
+    const relationshipCount = db
+      .prepare("SELECT COUNT(*) AS n FROM bot_relationships WHERE user_id = ?")
+      .get(userId) as { n: number };
+    const memoryCount = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND category = 'bot_relation'"
+      )
+      .get(userId) as { n: number };
+    const aliceSocial = db
+      .prepare(
+        "SELECT values_friction FROM coffee_bot_social_state WHERE user_id = ? AND conversation_id = ? AND bot_id = ?"
+      )
+      .get(userId, session.conversation.id, ALICE.id) as
+      | { values_friction: number }
+      | undefined;
+
+    assert.equal(relationshipCount.n, 0);
+    assert.equal(memoryCount.n, 0);
+    assert.ok((aliceSocial?.values_friction ?? 1) < baseSocial[ALICE.id]!.valuesFriction);
+  });
+
+  it("injects durable pair reads into Coffee prompts as soft context", () => {
+    const relationshipsBySource = {
+      [ALICE.id]: {
+        [BORIS.id]: {
+          sourceBotId: ALICE.id,
+          targetBotId: BORIS.id,
+          score: 72,
+          band: "warm" as const,
+          moodKey: "warm" as const,
+          trend: "up" as const,
+          lastReason: "The speaker showed warmth toward this peer during Coffee.",
+          recentReasons: ["The speaker showed warmth toward this peer during Coffee."],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    };
+
+    const routerMessages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Start.",
+      lastSpeakerBotId: null,
+      relationshipsBySource,
+    });
+    assert.match(routerMessages[0]!.content, /Durable bot-to-bot relationship reads/);
+    assert.match(routerMessages[0]!.content, /Alice -> Boris: warm/);
+
+    const speakerMessages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Start.",
+      socialByBotId: baseSocial,
+      relationshipsBySource,
+    });
+    assert.match(
+      speakerMessages.map((message) => message.content).join("\n"),
+      /Your durable bot-to-bot relationship reads/
+    );
+    assert.match(
+      speakerMessages.map((message) => message.content).join("\n"),
+      /Boris: warm/
+    );
   });
 });
 
@@ -1994,7 +3243,7 @@ describe("buildSpeakerPrompt", () => {
       (message) =>
         message.role === "system" &&
         message.content.includes("Coffee Mode") &&
-        message.content.includes("110 characters")
+        message.content.includes("160 characters")
     );
     assert.ok(systemInstruction);
     assert.match(systemInstruction!.content, /no line breaks/);
@@ -2005,7 +3254,7 @@ describe("buildSpeakerPrompt", () => {
     assert.match(systemInstruction!.content, /still warming up/);
     // Cap is now a soft target — the server no longer truncates, so the
     // prompt language reflects "aim for X chars" instead of "Hard cap".
-    assert.match(systemInstruction!.content, /soft target around 110 characters/);
+    assert.match(systemInstruction!.content, /soft target around 160 characters/);
     assert.match(systemInstruction!.content, /server no longer truncates/);
     assert.match(systemInstruction!.content, /Never repeat a recent table line exactly/);
     assert.match(systemInstruction!.content, /Never claim to be an AI assistant/);
@@ -2040,6 +3289,57 @@ describe("buildSpeakerPrompt", () => {
     const joined = messages.map((m) => m.content).join("\n");
     assert.match(joined, /Tiny rituals that keep the week gentle/);
     assert.match(joined, /Table topic anchor/);
+  });
+
+  it("threads attendance context into speaker prompts as optional social texture", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, CARA],
+      history: [],
+      userMessage: "Start the table.",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      attendanceContext: {
+        currentAbsentBotIds: [BORIS.id],
+        currentAbsentBotNames: ["Boris"],
+        returningBotNames: [],
+        recentAbsenceLines: ["Boris was absent recently."],
+      },
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+    assert.match(joined, /Away this session: Boris/);
+    assert.match(joined, /Boris was absent recently/);
+
+    const livePeerMessage = messages.find((message) =>
+      message.content.includes("Other bots at the table right now:")
+    );
+    assert.ok(livePeerMessage);
+    assert.match(livePeerMessage!.content, /Cara/);
+    assert.doesNotMatch(livePeerMessage!.content, /Boris/);
+  });
+
+  it("treats display name as account metadata instead of a preferred-name fact", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "What do you think?",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+      userDisplayName: "Jared",
+      firstContactIntro: true,
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+
+    assert.match(combined, /account display name is "Jared"/);
+    assert.match(combined, /Do not ask how they like to be addressed/);
+    assert.doesNotMatch(combined, /preferred name is/i);
+    assert.doesNotMatch(combined, /how-they-like-to-be-addressed/i);
   });
 
   it("threads opening poll results into the speaker group context", () => {
@@ -2085,6 +3385,23 @@ describe("buildSpeakerPrompt", () => {
     assert.match(joined, /Silent moderator cue for this turn/);
     assert.match(joined, /Challenge the strongest claim with one concrete example/);
     assert.match(joined, /Do not mention any moderator/i);
+  });
+
+  it("threads non-numeric coffee cup context into the speaker prompt", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Your turn.",
+      socialByBotId: {},
+      sessionRemainingMs: 180_000,
+      coffeeSessionDurationMinutes: 10,
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+    assert.match(joined, /Your table coffee/);
+    assert.match(joined, /coffee is/);
+    assert.match(joined, /temperature|sipping|amount|taste/i);
+    assert.doesNotMatch(joined, /coffee progress|frameIndex|frame index/i);
   });
 
   it("teaches speakers to follow the quality objective with a concrete move", () => {
@@ -2234,12 +3551,37 @@ describe("buildSpeakerPrompt", () => {
     const combined = messages.map((m) => m.content).join("\n");
     assert.match(combined, /Stage-direction format/);
     assert.match(combined, /single asterisks/);
-    assert.match(combined, /\*pours coffee\*/);
+    assert.match(combined, /\*tilts head\*/);
     assert.match(combined, /Coffee Mode is not Markdown-formatted chat/);
     assert.match(combined, /not `the \*thought\* that counts`/);
     assert.match(combined, /Do not put ordinary sentence words inside asterisks/);
+    assert.match(combined, /Coffee is a rare ambient prop/);
+    assert.match(combined, /never in the same beat as spoken words/);
     // The old anti-asterisk line must be gone now that we're enabling stage directions.
     assert.doesNotMatch(combined, /No asterisk stage directions/);
+  });
+
+  it("nudges action-only user turns toward action responses", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "*takes a quiet sip*",
+      userActionOnly: true,
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+    });
+    const combined = messages.map((m) => m.content).join("\n");
+    const userTurnInstruction = messages.at(-1);
+
+    assert.match(combined, /non-verbal table action/i);
+    assert.match(combined, /Usually answer with one short `\*action\*`/);
+    assert.equal(userTurnInstruction?.role, "user");
+    assert.match(userTurnInstruction!.content, /respond with a brief table action/i);
+    assert.doesNotMatch(userTurnInstruction!.content, /answer with your next short table line now/i);
   });
 });
 
@@ -2449,6 +3791,25 @@ describe("coffee repeated reply cleanup", () => {
       false
     );
   });
+
+  it("detects repeated stock critique fallback shapes across action and mention wrappers", () => {
+    const history = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "*sits back for a beat* That answer needs a sharper reason before I buy it.",
+        createdAt: new Date().toISOString(),
+      },
+    ] as const;
+
+    assert.equal(
+      coffeeReplyRepeatsStockFallbackShape(
+        "[Darth Vader](prism-bot://bot-vader), that answer needs a sharper reason before I buy it.",
+        history
+      ),
+      true
+    );
+  });
 });
 
 describe("parseRouterResponse", () => {
@@ -2614,6 +3975,21 @@ describe("coffee prompt leak cleanup", () => {
     );
   });
 
+  it("detects malformed Coffee fallback grammar as low-value", () => {
+    assert.equal(
+      coffeeReplyIsLowValueTableLine(
+        "The sharper test is what squidward and we've changes at the table."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplyIsLowValueTableLine(
+        "Sometimes the what, SpongeBob— sometimes the stars align."
+      ),
+      true
+    );
+  });
+
   it("drops prompt-leak replies instead of showing them on the table", () => {
     assert.equal(
       sanitizeCoffeeTableReply(
@@ -2676,6 +4052,20 @@ describe("coffee prompt leak cleanup", () => {
       sanitizeCoffeeTableReply("SpongeBob: Yeah, I can do that.", "SpongeBob"),
       "Yeah, I can do that."
     );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "SpongeBob with profound weariness I can still return the lunchbox.",
+        "SpongeBob"
+      ),
+      "I can still return the lunchbox."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "SpongeBob with profound weariness Sometimes the what, SpongeBob— sometimes the stars align.",
+        "SpongeBob"
+      ),
+      ""
+    );
   });
 
   it("downgrades weak noun-like stage tags to plain prose", () => {
@@ -2705,6 +4095,129 @@ describe("coffee prompt leak cleanup", () => {
     assert.equal(
       sanitizeCoffeeTableReply("*dryly sets his cup down* Fine.", "Squidward"),
       "*dryly sets his cup down* Fine."
+    );
+  });
+
+  it("wraps obvious unmarked stage-action openers before storing", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "touches the rim of the coffee cup Truth extracted by deceit stains the vessel.",
+        "Darth Vader"
+      ),
+      "*touches the rim of the coffee cup* Truth extracted by deceit stains the vessel."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply("Looks like rain today.", "Darth Vader"),
+      "Looks like rain today."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "shifts in chair with a long, theatrical sigh Of all the ridiculous theories to waste oxygen on, this one takes the cake.",
+        "Squidward"
+      ),
+      "*shifts in chair with a long, theatrical sigh* Of all the ridiculous theories to waste oxygen on, this one takes the cake."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Plankton, pushes coffee cup aside with a sharp clink and drums claws on the table Ar ar ar! You're all getting philosophical on me, but I'll tell",
+        "Plankton"
+      ),
+      "*pushes coffee cup aside with a sharp clink and drums claws on the table* Ar ar ar! You're all getting philosophical on me, but I'll tell"
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "claws slam the table Now hold on just a barnacle-encrusted minute.",
+        "Mr. Krabs"
+      ),
+      "*claws slam the table* Now hold on just a barnacle-encrusted minute."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Mr. Krabs, drums claws on the table Now hold on just a barnacle-encrusted minute.",
+        "Mr. Krabs"
+      ),
+      "*drums claws on the table* Now hold on just a barnacle-encrusted minute."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "claws are useful at work Now that is just common sense.",
+        "Mr. Krabs"
+      ),
+      "claws are useful at work Now that is just common sense."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "takes a long, deliberate sip of coffee, then sets the cup down with precision A roof and a job he loves—sure, but does he love the work?",
+        "Squidward"
+      ),
+      "*takes a long, deliberate sip of coffee, then sets the cup down with precision* A roof and a job he loves—sure, but does he love the work?"
+    );
+  });
+
+  it("recognizes user action-only messages", () => {
+    assert.equal(coffeeUserMessageIsActionOnly("*takes a quiet sip*"), true);
+    assert.equal(coffeeUserMessageIsActionOnly("takes a quiet sip"), true);
+    assert.equal(coffeeUserMessageIsActionOnly("*takes a quiet sip* Okay, continue."), false);
+    assert.equal(coffeeUserMessageIsActionOnly("Okay, continue."), false);
+  });
+
+  it("rejects obviously unfinished Coffee replies instead of storing a cutoff", () => {
+    assert.equal(
+      coffeeReplyLooksUnfinished(
+        "Oh! You want to know what I think? The coffee cup is pretty neat! But mostly"
+      ),
+      true
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Oh! You want to know what I think? The coffee cup is pretty neat! But mostly",
+        "SpongeBob"
+      ),
+      ""
+    );
+    assert.equal(coffeeReplyLooksUnfinished("I mostly trust the quiet option"), false);
+    assert.equal(
+      sanitizeCoffeeTableReply("I mostly trust the quiet option.", "Squidward"),
+      "I mostly trust the quiet option."
+    );
+  });
+
+  it("does not build fallback focus phrases from speaker-name or pronoun debris", () => {
+    assert.equal(
+      coffeeFallbackFocusPhrase(
+        "The sharper test is what Squidward and we've changes at the table."
+      ),
+      null
+    );
+    assert.equal(
+      coffeeFallbackFocusPhrase(
+        "SpongeBob with profound weariness Sometimes the what, SpongeBob— sometimes the sentence ended before you finished it?"
+      ),
+      null
+    );
+  });
+
+  it("dedupes model-returned session synopsis headings", () => {
+    assert.equal(
+      normalizeCoffeeSessionSynopsis(
+        "**Session Synopsis** The table circled manipulation and trust while Vader pressed for evidence and Freud overextended the psychological frame."
+      ),
+      "Session synopsis: The table circled manipulation and trust while Vader pressed for evidence and Freud overextended the psychological frame."
+    );
+  });
+
+  it("rejects session synopses that mention internal account metadata", () => {
+    assert.equal(
+      coffeeTextMentionsInternalAccountMetadata(
+        "The poll leans True (3-2), and the system noted your account display name is admin."
+      ),
+      true
+    );
+    assert.equal(
+      normalizeCoffeeSessionSynopsis(
+        "The poll leans True (3-2), and the system noted your account display name is admin."
+      ),
+      null
     );
   });
 
@@ -2847,6 +4360,49 @@ describe("coffee meeting summary helpers", () => {
     ]);
     assert.equal(source.length, 2);
     assert.equal(source.some((message) => message.id === "a2"), false);
+  });
+
+  it("omits account metadata from session synopsis memory-change lines", () => {
+    const db = createCoffeeTestDb();
+    const userId = "summary-user";
+    const userKey = Buffer.alloc(32, 11);
+    const conversationId = "conv-synopsis-memory";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-about-you",
+      conversationId,
+      botId: ALICE.id,
+      source: "about_you",
+      text: "Your account display name is admin.",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-direct",
+      conversationId,
+      botId: ALICE.id,
+      source: "direct",
+      text: "Alice learned the user wants sharper poll arguments.",
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    seedCoffeeMemory(db, userId, userKey, {
+      id: "memory-mis-sourced-account",
+      conversationId,
+      botId: null,
+      source: "direct",
+      text: "Your account has not provided a display name yet.",
+      createdAt: "2026-01-01T00:00:02.000Z",
+    });
+
+    const lines = loadCoffeeSessionMemoryChangeLines(
+      db,
+      userId,
+      conversationId,
+      userKey
+    );
+
+    assert.deepEqual(lines, [
+      "- Alice direct/short_term: Alice learned the user wants sharper poll arguments.",
+    ]);
   });
 
   it("refreshes summaries only after enough new assistant turns", () => {
@@ -3032,6 +4588,44 @@ describe("pickDirectedSpeaker", () => {
   });
 });
 
+describe("Coffee direct mention routing helpers", () => {
+  it("resolves the current user message's seated prism-bot mention", () => {
+    const addressed = extractLastAddressedBotId({
+      line: "[Darth Vader](prism-bot://bot-boris), what are your thoughts?",
+      speakerBotId: null,
+      seatedBotIds: new Set([ALICE.id, BORIS.id]),
+    });
+
+    assert.equal(addressed, BORIS.id);
+  });
+});
+
+describe("Coffee stale autonomous guard helpers", () => {
+  it("detects when a newer message lands after an autonomous turn starts", () => {
+    const db = createCoffeeTestDb();
+    const userId = "stale-user";
+    const now = "2026-01-01T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id,
+          coffee_duration_minutes, coffee_preset_id, coffee_topic, coffee_meeting_summary,
+          coffee_meeting_summary_message_count, coffee_meeting_summary_updated_at, incognito, created_at, updated_at)
+       VALUES (?, ?, 'Coffee Session', 'coffee', NULL, ?, NULL, NULL, 5, NULL, 'Power', NULL, NULL, NULL, 0, ?, ?)`
+    ).run("conv-stale", userId, JSON.stringify([ALICE.id, BORIS.id]), now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("m1", "conv-stale", userId, "assistant", "First line.", now);
+
+    assert.equal(coffeeLatestMessageIdChanged(db, userId, "conv-stale", "m1"), false);
+
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("m2", "conv-stale", userId, "user", "Actually, Vader?", "2026-01-01T00:00:01.000Z");
+
+    assert.equal(coffeeLatestMessageIdChanged(db, userId, "conv-stale", "m1"), true);
+  });
+});
+
 describe("coffee social state helpers", () => {
   it("clamps social values to the 0-1 range", () => {
     assert.equal(clampCoffeeSocialValue(-0.25), 0);
@@ -3078,6 +4672,89 @@ describe("coffee social state helpers", () => {
     assert.ok(next[BORIS.id]!.restraint > previous[BORIS.id]!.restraint);
     assert.ok(next[BORIS.id]!.engagement > previous[BORIS.id]!.engagement);
     assert.ok(next[ALICE.id]!.engagement < previous[ALICE.id]!.engagement);
+  });
+
+  it("offers empty-cup departure only after meaningful participation", () => {
+    const seatBotIds = [ALICE.id, BORIS.id, CARA.id, null, null];
+    const participatedHistory: ChatMessage[] = [
+      {
+        id: "m1",
+        role: "assistant",
+        botName: ALICE.name,
+        content: "I think the question needs one more careful distinction.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    const opportunity = buildCoffeeDepartureOpportunity({
+      conversationId: "conv-depart-0",
+      speaker: ALICE,
+      seatBotIds,
+      history: participatedHistory,
+      social: {
+        disposition: 0.54,
+        valuesFriction: 0.3,
+        restraint: 0.7,
+        engagement: 0.38,
+        leavePressure: 0.72,
+      },
+      sessionRemainingMs: 1,
+      durationMinutes: 10,
+    });
+
+    assert.match(opportunity ?? "", /coffee is empty/i);
+    assert.match(opportunity ?? "", /politely leave/i);
+    assert.equal(
+      buildCoffeeDepartureOpportunity({
+        conversationId: "conv-depart-0",
+        speaker: ALICE,
+        seatBotIds,
+        history: [],
+        social: {
+          disposition: 0.54,
+          valuesFriction: 0.3,
+          restraint: 0.7,
+          engagement: 0.38,
+          leavePressure: 0.72,
+        },
+        sessionRemainingMs: 1,
+        durationMinutes: 10,
+      }),
+      null
+    );
+    assert.equal(
+      buildCoffeeDepartureOpportunity({
+        conversationId: "conv-depart-0",
+        speaker: ALICE,
+        seatBotIds: [ALICE.id, BORIS.id, null, null, null],
+        history: participatedHistory,
+        social: {
+          disposition: 0.54,
+          valuesFriction: 0.3,
+          restraint: 0.7,
+          engagement: 0.38,
+          leavePressure: 0.72,
+        },
+        sessionRemainingMs: 1,
+        durationMinutes: 10,
+      }),
+      null
+    );
+  });
+
+  it("detects graceful departure replies without treating staying as leaving", () => {
+    assert.equal(
+      coffeeReplySignalsPoliteDeparture(
+        "*stands and pushes chair back* Thank you for the coffee; I should get going."
+      ),
+      true
+    );
+    assert.equal(
+      coffeeReplySignalsPoliteDeparture(
+        "The coffee is gone, but this conversation still has my attention."
+      ),
+      false
+    );
   });
 
   it("injects social guardrail context into speaker prompts", () => {
@@ -3284,6 +4961,33 @@ describe("maybeBuildBotInterruptionEvent", () => {
     assert.ok((event?.socialConsequences.length ?? 0) >= 1);
   });
 
+  it("makes pile-up sessions more interruptive than normal sessions", () => {
+    const hitCountFor = (sessionSettings: ReturnType<typeof normalizeCoffeeSessionSettings>) => {
+      let hits = 0;
+      for (let attempt = 0; attempt < 240; attempt += 1) {
+        const event = maybeBuildBotInterruptionEvent({
+          turnKind: "autonomous",
+          userIsComposing: true,
+          speaker: BORIS,
+          socialByBotId,
+          group: [ALICE, BORIS],
+          conversationId: `coffee-rate-${attempt}`,
+          historyLength: 12,
+          sessionSettings,
+        });
+        if (event) hits += 1;
+      }
+      return hits;
+    };
+    const normalHits = hitCountFor(
+      normalizeCoffeeSessionSettings({ tableEnergy: "relaxed", crossTalk: "normal" })
+    );
+    const pileupHits = hitCountFor(
+      normalizeCoffeeSessionSettings({ tableEnergy: "afterparty", crossTalk: "pileup" })
+    );
+    assert.ok(pileupHits > normalHits, `expected ${pileupHits} > ${normalHits}`);
+  });
+
   it("scales bot interruption social deltas with bounded bell weighting", () => {
     const eventForPrefix = (prefix: string) => {
       for (let attempt = 0; attempt < 220; attempt += 1) {
@@ -3330,10 +5034,15 @@ describe("maybeBuildBotInterruptionEvent", () => {
 
 describe("normalizeCoffeeSessionSettings", () => {
   it("returns defaults for non-objects and ignores invalid enums", () => {
+    const defaults = normalizeCoffeeSessionSettings(undefined);
     assert.deepEqual(
-      normalizeCoffeeSessionSettings(undefined),
+      defaults,
       { ...DEFAULT_COFFEE_SESSION_SETTINGS }
     );
+    assert.equal(defaults.tableEnergy, "theatre");
+    assert.equal(defaults.crossTalk, "chatty");
+    assert.equal(defaults.responseDelayBias, 76);
+    assert.equal(defaults.givePlayerLastWord, false);
     assert.deepEqual(
       normalizeCoffeeSessionSettings({ responseLength: "huge", crossTalk: "loud" }),
       { ...DEFAULT_COFFEE_SESSION_SETTINGS }
@@ -3345,11 +5054,15 @@ describe("normalizeCoffeeSessionSettings", () => {
       responseLength: "detailed",
       responseDelayBias: -20,
       breathingRoom: 200,
+      tableEnergy: "afterparty",
+      crossTalk: "pileup",
       stayOnThread: false,
     });
     assert.equal(s.responseLength, "detailed");
     assert.equal(s.responseDelayBias, 0);
     assert.equal(s.breathingRoom, 100);
+    assert.equal(s.tableEnergy, "afterparty");
+    assert.equal(s.crossTalk, "pileup");
     assert.equal(s.stayOnThread, false);
   });
 });
@@ -3357,9 +5070,19 @@ describe("normalizeCoffeeSessionSettings", () => {
 describe("coffeeReplyLengthCaps", () => {
   it("maps presets to bounded caps", () => {
     const brief = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "brief" }));
-    assert.deepEqual(brief, { tableReplyMaxChars: 60, speakerMaxOutputTokens: 32 });
+    assert.deepEqual(brief, { tableReplyMaxChars: 60, speakerMaxOutputTokens: 72 });
+    const balanced = coffeeReplyLengthCaps(
+      normalizeCoffeeSessionSettings({ responseLength: "balanced" })
+    );
+    assert.deepEqual(balanced, { tableReplyMaxChars: 110, speakerMaxOutputTokens: 104 });
     const roomy = coffeeReplyLengthCaps(normalizeCoffeeSessionSettings({ responseLength: "roomy" }));
-    assert.deepEqual(roomy, { tableReplyMaxChars: 220, speakerMaxOutputTokens: 140 });
+    assert.deepEqual(roomy, { tableReplyMaxChars: 220, speakerMaxOutputTokens: 180 });
+  });
+
+  it("keeps enough Coffee decode room even when a bot profile cap is tiny", () => {
+    assert.equal(coffeeSpeakerMaxTokensForTurn(24, 104), 96);
+    assert.equal(coffeeSpeakerMaxTokensForTurn(128, 180), 128);
+    assert.equal(coffeeSpeakerMaxTokensForTurn(512, 180), 180);
   });
 });
 
@@ -3386,6 +5109,12 @@ describe("buildCoffeeTableTuningAppendix", () => {
     );
     assert.match(chatty, /riffing is welcome/i);
     assert.match(chatty, /Discourage hard topic jumps/i);
+
+    const pileup = buildCoffeeTableTuningAppendix(
+      normalizeCoffeeSessionSettings({ tableEnergy: "afterparty", crossTalk: "pileup" })
+    );
+    assert.match(pileup, /brief interruptions/i);
+    assert.match(pileup, /overcaffeinated/i);
   });
 });
 

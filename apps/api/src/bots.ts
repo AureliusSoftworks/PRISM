@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { stripBotProfileMetaSuffix } from "@localai/shared";
+import { DISABLED_MODEL_CHOICE, stripBotProfileMetaSuffix } from "@localai/shared";
 import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
@@ -107,6 +107,13 @@ export function resolveBotExportHashForCreate(options: {
   throw new Error("Could not generate a unique bot export hash.");
 }
 
+export function readBotPreferredModelForCreate(value: unknown): string | null {
+  if (value === undefined) return DISABLED_MODEL_CHOICE;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
  * Permanently remove a single bot owned by `userId`.
  *
@@ -151,6 +158,9 @@ export function deleteBot(
     db.prepare(
       "DELETE FROM memories WHERE user_id = ? AND bot_id = ? AND COALESCE(source, 'direct') != 'about_you'"
     ).run(userId, botId);
+    db.prepare(
+      "DELETE FROM bot_relationships WHERE user_id = ? AND (source_bot_id = ? OR target_bot_id = ?)"
+    ).run(userId, botId, botId);
     db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(
       botId,
       userId
@@ -205,6 +215,11 @@ export function deleteBots(
          AND bot_id IN (${placeholders})
          AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
     ).run(userId, ...ids);
@@ -273,6 +288,11 @@ export function deleteAllBots(
          AND bot_id IN (${placeholders})
          AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
     ).run(userId, ...ids);

@@ -22,10 +22,10 @@ describe("composer shortcut exact completion matching", () => {
     assert.equal(composerShortcutQueryExactlyMatchesCommand("dr", draftReply), true);
   });
 
-  it("matches punctuation-only aliases", () => {
+  it("does not match punctuation-only aliases because ? opens the tool picker", () => {
     const help = { name: "help", aliases: ["?"] };
-    assert.equal(composerShortcutQueryExactlyMatchesCommand("?", help), true);
-    assert.equal(composerShortcutQueryExactlyMatchesCommand("/?", help), true);
+    assert.equal(composerShortcutQueryExactlyMatchesCommand("?", help), false);
+    assert.equal(composerShortcutQueryExactlyMatchesCommand("/?", help), false);
   });
 
   it("does not match partial command names", () => {
@@ -76,6 +76,16 @@ describe("composer shortcut insertion text", () => {
         name: "clear",
       }),
       "/clear "
+    );
+  });
+
+  it("keeps tool completion question-mark-prefixed", () => {
+    assert.equal(
+      composerShortcutInsertionText({
+        id: "tool:web-search",
+        name: "web-search",
+      }),
+      "?web-search "
     );
   });
 });

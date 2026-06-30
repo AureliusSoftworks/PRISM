@@ -30,7 +30,8 @@ PHONE_DEVICE_ID="Device UDID" prism phone
 ```
 
 `prism up` and `prism standalone-dev` are the long-lived commands in this set:
-- `prism up` runs the combined API + web dev flow.
+- `prism` and `prism up` run the combined API + web dev flow and open the web
+  page once it is ready.
 - `prism down` stops the combined API + web dev flow.
 - `prism standalone` opens the latest macOS desktop installer DMG (building one if needed).
 - `prism standalone-win [version] [channel]` dispatches the desktop release workflow (`release-main.yml`) for Windows packaging and opens the `desktop/v<version>` release page. If `version` is omitted, the root `package.json` version is used.
@@ -217,15 +218,27 @@ uploads `Prism-Server-Setup-v<version>-win-x64.exe` and the optional portable
 
 Browser + API iteration in one command. Runs the combined dev launcher and
 starts both API ([http://localhost:18787](http://localhost:18787)) and web
-([http://localhost:18788](http://localhost:18788)) in one foreground session.
+([http://localhost:18788](http://localhost:18788)) in one foreground session,
+then opens the web page once it is ready. On macOS, the opener tries Codex
+first and falls back to the default browser if needed.
 Use Ctrl+C to stop the running foreground process, or run `prism down` from
 another terminal to free both ports.
 
 ```bash
+prism
 prism up
 ```
 
 Equivalent to `npm run dev` from the repo root.
+
+Useful overrides:
+
+```bash
+PRISM_OPEN_WEB=0 prism
+PRISM_OPEN_TARGET=browser prism
+PRISM_WEB_URL="http://localhost:18788/prism" prism
+PRISM_OPEN_URL_COMMAND='open -a "Codex" "$PRISM_OPEN_URL"' prism
+```
 
 To stop existing local API + web listeners:
 
@@ -285,4 +298,3 @@ What `prism reset` deletes:
 
 What it keeps intentionally:
 - launcher configuration files (for example `.env`)
-
