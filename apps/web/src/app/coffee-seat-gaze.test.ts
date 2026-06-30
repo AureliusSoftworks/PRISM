@@ -44,18 +44,18 @@ describe("coffeeSeatIsTopHead", () => {
 });
 
 describe("coffeePlateFaceScaleYFromSeatHorizontalSide", () => {
-  it("flips only right-of-center seats on Y after rotate", () => {
-    assert.equal(coffeePlateFaceScaleYFromSeatHorizontalSide(-1), "1");
+  it("flips left-of-center seats on Y after rotate so they face inward", () => {
+    assert.equal(coffeePlateFaceScaleYFromSeatHorizontalSide(-1), "-1");
     assert.equal(coffeePlateFaceScaleYFromSeatHorizontalSide(0), "1");
-    assert.equal(coffeePlateFaceScaleYFromSeatHorizontalSide(1), "-1");
+    assert.equal(coffeePlateFaceScaleYFromSeatHorizontalSide(1), "1");
   });
 });
 
 describe("coffeeHeadPlateFaceScaleYFromGazeTargetSide", () => {
-  it("flips Y when gaze target is on the right half of the ring", () => {
-    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(-1), "1");
+  it("flips Y when gaze target is on the left half of the ring", () => {
+    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(-1), "-1");
     assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(0), "1");
-    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(1), "-1");
+    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(1), "1");
   });
 });
 

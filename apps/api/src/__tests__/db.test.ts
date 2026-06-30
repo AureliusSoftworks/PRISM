@@ -133,6 +133,12 @@ describe("createDatabase bot export hash migration", () => {
         .all() as Array<{ name: string }>;
       assert.ok(botOpinionColumns.some((column) => column.name === "boundary_level"));
       assert.ok(botOpinionColumns.some((column) => column.name === "repair_count"));
+      const botRelationshipColumns = reopened
+        .prepare("PRAGMA table_info(bot_relationships)")
+        .all() as Array<{ name: string }>;
+      assert.ok(botRelationshipColumns.some((column) => column.name === "source_bot_id"));
+      assert.ok(botRelationshipColumns.some((column) => column.name === "target_bot_id"));
+      assert.ok(botRelationshipColumns.some((column) => column.name === "mood_key"));
       const row = reopened
         .prepare("SELECT export_hash FROM bots WHERE id = ?")
         .get("bot-1") as { export_hash: string | null } | undefined;

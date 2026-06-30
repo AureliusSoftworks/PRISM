@@ -46,6 +46,12 @@ import {
 } from "./backendUnavailable";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
+  buildCoffeeCupVisualState,
+  coffeeCupShouldMirrorForSeat,
+  coffeeCupSideForSeat,
+  type CoffeeCupVisualState,
+} from "./coffee-cup-sprites";
+import {
   coffeeHeadGazeHorizontalSign,
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeSeatIsTopHead,
@@ -54,7 +60,14 @@ import {
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
+  coffeeTableTalkAutoplayDeferralMs,
 } from "./coffee-user-reveal-flow";
+import {
+  coffeeGroupAttendanceCanStart,
+  coffeeGroupAttendingBotIds,
+  coffeeGroupSessionExcludedBotIds,
+  toggleCoffeeExcludedBotId,
+} from "./coffee-session-attendance";
 import {
   DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
   DEV_PANEL_SAFE_AREA_SIDES,
@@ -84,10 +97,14 @@ import {
 } from "./askQuestionPatience";
 import {
   clampCoffeeReplayMessageIndex,
+  coffeeActionCanDisplayWhileSpeaking,
+  coffeeActionIsSip,
+  coffeeActionPassesSipCadence,
   coffeeReplayVisibleMessages,
   coffeeSystemSynopsisIsDisplayable,
   coffeeTranscriptVisibleMessages,
   collectCoffeeReplayActionsForBot,
+  sanitizeCoffeeActionForBot,
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
 import {
@@ -102,6 +119,16 @@ import {
 } from "./nvmCommand";
 import { shouldResetPreviousSessionContext } from "./naturalContextReset";
 import { parseUndoSlashCommand } from "./undoSlashCommand";
+import {
+  MANUAL_ASK_QUESTION_OPTION_COUNT_MAX,
+  MANUAL_ASK_QUESTION_OPTION_COUNT_MIN,
+  MANUAL_ASK_QUESTION_OPTION_PLACEHOLDERS,
+  buildManualAskQuestionPayload,
+  ensureManualAskQuestionOptionRows,
+  parseManualAskQuestionDraft,
+  splitManualAskQuestionOptionText,
+  type ManualAskQuestionDraft,
+} from "./manualAskQuestionTool";
 import {
   psychicThoughtDisplayLineForMessage,
   type PsychicCanvasScratchpadPayload,
@@ -190,6 +217,10 @@ import {
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   PRISM_DEFAULT_STORY_THEME,
+  COFFEE_SESSION_DURATION_MINUTES_MAX,
+  COFFEE_SESSION_DURATION_MINUTES_MIN,
+  COFFEE_SESSION_DURATION_MINUTES_STEP,
+  DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
   COFFEE_POLL_OPTION_COUNT_MAX,
   COFFEE_POLL_OPTION_COUNT_MIN,
@@ -202,7 +233,12 @@ import {
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
+  type CoffeeSessionDurationMinutes,
   type CoffeeSessionSettings,
+  type CoffeeTeamId,
+  type CoffeeTeamSessionConfig,
+  type CoffeeTeamState,
+  type CoffeeWinningTeamId,
   type CoffeeTopicSelectionMode,
   type BotProfileFields,
   type BotProfileScaleValue,
@@ -217,7 +253,10 @@ import {
   type PromptWildcardRunMetadata,
   type PsychicThoughtPayload,
   type BuiltInPromptWildcardSlotKey,
+  type ChatManualToolRequest,
+  type ManualAskQuestionResultPayload,
   type SentGeneratedImagePayload,
+  type WebSearchPayload,
   type ZenDisplayMetadata,
   type StoryEpisodeManifest,
   type StoryInventoryItem,
@@ -255,8 +294,9 @@ import {
 } from "./zenToolLab";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
-  findLeadingDevCommandTokenRange,
-  findPromptShortcutTokenRanges,
+	  findLeadingDevCommandTokenRange,
+	  findLeadingToolShortcutTokenRange,
+	  findPromptShortcutTokenRanges,
   findWildcardDeckTokenRanges,
   findWildcardSlotTokenRanges,
   type PendingWildcardSlotDecoration,
@@ -3634,7 +3674,7 @@ type StoryDialogCursor = {
 // `normalizeCoffeeGroupBotIds` validator agree on what's acceptable.
 const COFFEE_GROUP_MIN_SIZE_CLIENT = 2;
 const COFFEE_GROUP_MAX_SIZE_CLIENT = 5;
-const COFFEE_SESSION_DURATION_MS = 4 * 60 * 1000;
+const COFFEE_SESSION_DURATION_MS = DEFAULT_COFFEE_SESSION_DURATION_MINUTES * 60 * 1000;
 const COFFEE_REPLY_DELAY_MIN_MS = 12000;
 const COFFEE_REPLY_DELAY_MAX_MS = 28000;
 const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
@@ -3643,6 +3683,9 @@ const COFFEE_ARRIVAL_STEP_MS = 850;
 const COFFEE_ARRIVAL_SETTLE_MS = 900;
 const COFFEE_POLL_REFRESH_MS = 4_000;
 const COFFEE_POLL_OPTION_PLACEHOLDERS = ["Choice A", "Choice B", "Choice C", "Choice D"] as const;
+const COFFEE_TEAM_SIDE_MIN_SIZE_CLIENT = 1;
+const COFFEE_TEAM_SIDE_MAX_SIZE_CLIENT = 4;
+const COFFEE_TEAM_IDS: readonly CoffeeTeamId[] = ["left", "undecided", "right"];
 const STORY_SESSION_POLL_MS = 1_500;
 const STORY_PROJECTION_FALLBACK_ASSET_ID = "projection_fallback";
 const STORY_SPRITE_FALLBACK_ASSET_ID = "sprite_fallback_silhouette";
@@ -3734,6 +3777,44 @@ function formatCoffeePollBotVoteLabel(
   if (vote.kind === "pending") return "Thinking...";
   return "No vote";
 }
+
+function defaultCoffeeTeamAssignments(botIds: readonly string[]): Record<string, CoffeeTeamId> {
+  const assignments: Record<string, CoffeeTeamId> = {};
+  botIds.forEach((botId, index) => {
+    assignments[botId] = index === 0 ? "left" : index === 1 ? "right" : "undecided";
+  });
+  return assignments;
+}
+
+function coffeeTeamDraftCounts(
+  assignments: Record<string, CoffeeTeamId>,
+  botIds: readonly string[]
+): Record<CoffeeTeamId, number> {
+  const counts: Record<CoffeeTeamId, number> = { left: 0, undecided: 0, right: 0 };
+  for (const botId of botIds) {
+    const teamId = assignments[botId] ?? "undecided";
+    counts[teamId] += 1;
+  }
+  return counts;
+}
+
+function coffeeTeamName(state: CoffeeTeamState | null | undefined, teamId: CoffeeTeamId): string {
+  if (teamId === "left") return state?.left.name?.trim() || "Left";
+  if (teamId === "right") return state?.right.name?.trim() || "Right";
+  return state?.undecidedLabel?.trim() || "Undecided";
+}
+
+function coffeeTeamOutcomeText(state: CoffeeTeamState | null | undefined): string | null {
+  if (!state) return null;
+  if (state.status === "left_won" || (state.status === "tie_resolved" && state.winnerTeamId === "left")) {
+    return `${state.left.name} wins`;
+  }
+  if (state.status === "right_won" || (state.status === "tie_resolved" && state.winnerTeamId === "right")) {
+    return `${state.right.name} wins`;
+  }
+  if (state.status === "tiebreaker") return "Tie - choose the winner";
+  return null;
+}
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
@@ -3751,10 +3832,8 @@ const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
 const COFFEE_INTERRUPTION_FALLBACK_VISIBLE_PROGRESS = 0.65;
 const COFFEE_CENTER_FEED_MAX_LINES = 14;
 const COFFEE_DISCARD_ON_EXIT_WINDOW_MS = 10_000;
-const COFFEE_SESSION_DURATION_OPTIONS: readonly CoffeeSessionDurationMinutes[] = [2, 3, 5];
-const COFFEE_DEFAULT_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+const COFFEE_TABLE_TALK_TYPING_GRACE_MS = 5_200;
 const COFFEE_AUTO_PRESET_ID = "__auto__";
-const COFFEE_CUP_ROTATION_BIAS_DEGREES = 45;
 const COFFEE_SEAT_ACTION_BADGE_MAX_CHARS = 112;
 const COFFEE_SEAT_ACTION_BADGE_MIN_CLAUSE_CHARS = 14;
 const COFFEE_POLL_PANEL_DEFAULT_POSITION: CoffeePollPanelPosition = { x: 28, y: 96 };
@@ -3879,10 +3958,29 @@ function coffeeSessionDurationMs(
   conversation: Pick<CoffeeConversationState, "coffeeSessionDurationMinutes"> | null | undefined
 ): number {
   const minutes = conversation?.coffeeSessionDurationMinutes;
-  if (minutes === 2 || minutes === 3 || minutes === 5) {
+  if (
+    typeof minutes === "number" &&
+    Number.isInteger(minutes) &&
+    minutes >= COFFEE_SESSION_DURATION_MINUTES_MIN &&
+    minutes <= COFFEE_SESSION_DURATION_MINUTES_MAX
+  ) {
     return minutes * 60 * 1000;
   }
   return COFFEE_SESSION_DURATION_MS;
+}
+
+function clampCoffeeSessionDurationMinutes(value: unknown): CoffeeSessionDurationMinutes {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value.trim())
+        : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  if (!Number.isFinite(numeric)) return DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  return Math.max(
+    COFFEE_SESSION_DURATION_MINUTES_MIN,
+    Math.min(COFFEE_SESSION_DURATION_MINUTES_MAX, Math.round(numeric))
+  );
 }
 
 function randomCoffeeAutonomousDelayMs(
@@ -3901,16 +3999,22 @@ function randomCoffeeAutonomousDelayMs(
   );
   const range = Math.max(0, maxMs - minMs);
   const delayUnit =
-    settings.crossTalk === "chatty"
-      ? Math.min(Math.random(), Math.random())
-      : Math.max(Math.random(), Math.random());
+    settings.crossTalk === "pileup"
+      ? Math.min(Math.random(), Math.random(), Math.random())
+      : settings.crossTalk === "chatty"
+        ? Math.min(Math.random(), Math.random())
+        : Math.max(Math.random(), Math.random());
   let ms = minMs + Math.floor(delayUnit * range);
   const crossScale =
-    settings.crossTalk === "chatty" ? 0.72 : settings.crossTalk === "rare" ? 1.12 : 1;
+    settings.crossTalk === "pileup"
+      ? 0.52
+      : settings.crossTalk === "chatty" ? 0.72 : settings.crossTalk === "rare" ? 1.12 : 1;
   const roomScale = 0.82 + room * 0.55;
   ms = Math.round(ms * crossScale * roomScale * delayMultiplier);
   return Math.max(
-    settings.crossTalk === "chatty" && settings.responseDelayBias >= 95 ? 450 : minMs,
+    settings.crossTalk === "pileup" && settings.responseDelayBias >= 95
+      ? 260
+      : settings.crossTalk === "chatty" && settings.responseDelayBias >= 95 ? 450 : minMs,
     Math.min(Math.round(maxMs * 1.35), ms)
   );
 }
@@ -3980,10 +4084,13 @@ function coffeeSeatsFromBotIds(botIds: readonly string[] | undefined): Array<str
   return seats;
 }
 
-function coffeeCupRotationBias(seed: string): string {
-  const unit = stableUnitValue(seed);
-  const degrees = Math.round((unit * 2 - 1) * COFFEE_CUP_ROTATION_BIAS_DEGREES);
-  return `${degrees}deg`;
+function coffeeCupSpriteStyle(state: CoffeeCupVisualState): React.CSSProperties {
+  return {
+    "--coffee-cup-sprite": `url("${state.restImageUrl}")`,
+    "--coffee-cup-sip-sprite": `url("${state.sipImageUrl}")`,
+    "--coffee-cup-frame-x": state.frameX,
+    "--coffee-cup-frame-y": state.frameY,
+  } as React.CSSProperties;
 }
 
 type CoffeeArrivalScenario =
@@ -4126,6 +4233,7 @@ interface CoffeeConversationState {
   botGroupIds?: string[];
   coffeeGroupId?: string | null;
   coffeeSeatBotIds?: Array<string | null>;
+  coffeeAbsentBotIds?: string[];
   incognito?: boolean;
   lastBotId?: string | null;
   lastBotColor?: string | null;
@@ -4135,6 +4243,8 @@ interface CoffeeConversationState {
   coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   /** Server-persisted anchor topic for this Coffee session. */
   coffeeTopic?: string | null;
+  /** Optional Coffee Teams opening ritual state. Numeric scores stay server-hidden. */
+  coffeeTeams?: CoffeeTeamState | null;
   createdAt?: string;
   updatedAt?: string;
   messages: CoffeeConversationMessage[];
@@ -4155,8 +4265,6 @@ interface CoffeeGroupState {
   createdAt: string;
   updatedAt: string;
 }
-
-type CoffeeSessionDurationMinutes = 2 | 3 | 5;
 
 interface CoffeePresetState {
   id: string;
@@ -4266,15 +4374,29 @@ function coffeeTableDisplayText(text: string): string {
   return extractStageDirections(clampCoffeeTableText(text)).mainText;
 }
 
-function normalizeCoffeeSeatActionBadgeText(raw: string): string {
+function normalizeCoffeeSeatActionBadgeText(
+  raw: string,
+  bot?: Pick<Bot, "name" | "system_prompt" | "glyph"> | null
+): string {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   if (!collapsed) return "";
-  let text = collapsed
-    .replace(/^\*+|\*+$/g, "")
-    .replace(/^\[[^\]\n]+\]\(prism-bot:\/\/[^)\n]+\)\s*,?\s*/i, "")
-    .replace(/^[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3},\s+/u, "")
-    .replace(/[.!?;:,\s]+$/u, "")
-    .trim();
+  let text = sanitizeCoffeeActionForBot(
+    collapsed
+      .replace(/^\*+|\*+$/g, "")
+      .replace(/^\[[^\]\n]+\]\(prism-bot:\/\/[^)\n]+\)\s*,?\s*/i, "")
+      .replace(/^[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+){0,3},\s+/u, "")
+      .replace(/^[“”"]+|[“”"]+$/g, "")
+      .replace(/[.!?;:,\s]+$/u, "")
+      .replace(/^[“”"]+|[“”"]+$/g, "")
+      .trim(),
+    bot
+      ? {
+          name: bot.name,
+          systemPrompt: bot.system_prompt,
+          glyph: bot.glyph,
+        }
+      : null
+  );
   if (!text) return "";
   if (text.length <= COFFEE_SEAT_ACTION_BADGE_MAX_CHARS) return text;
 
@@ -4302,11 +4424,7 @@ function coffeeMessageHasTableText(
   message: CoffeeConversationMessage | null | undefined
 ): boolean {
   if (!message) return false;
-  if (message.role !== "assistant") {
-    return message.content.trim().length > 0;
-  }
-  const { mainText } = extractStageDirections(clampCoffeeTableText(message.content));
-  return mainText.trim().length > 0;
+  return coffeeTableDisplayText(message.content).trim().length > 0;
 }
 
 function coffeeConversationHasSessionSynopsis(
@@ -4351,7 +4469,7 @@ interface ConversationSummary {
   /** Coffee-only durable parent group id, null for legacy sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only timed session duration once group-owned sessions are used. */
-  coffeeSessionDurationMinutes?: 2 | 3 | 5;
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   /** Private chat flag — drives the sidebar privacy marker and, when opened, the grayscale-shell override. */
   incognito: boolean;
   /** Bot id of the most recent assistant message; null for Default-last OR no-reply-yet (disambiguate via hasAssistantReply). */
@@ -4416,12 +4534,16 @@ interface Message {
     bookmarkLabel?: string;
     finishLabel?: string;
   };
-  /** Assistant attached a generated image (also listed in the Images library). */
-  sentGeneratedImage?: SentGeneratedImagePayload;
-  /** User-entered Prompt Center shortcut that resolved into this message content. */
+	  /** Assistant attached a generated image (also listed in the Images library). */
+	  sentGeneratedImage?: SentGeneratedImagePayload;
+	  /** Assistant attached fresh web results from Brave Search. */
+	  webSearch?: WebSearchPayload;
+	  /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** User-entered AskQuestion tool result completed by the assistant's selected choice. */
+  manualAskQuestion?: ManualAskQuestionResultPayload;
   /** Concise simulated reasoning summary shown when Psychic mode is enabled. */
   psychicThought?: PsychicThoughtPayload;
   /** Live-only verbose Psychic scratchpad shown in the active canvas when Psychic is enabled. */
@@ -6331,8 +6453,14 @@ interface ChatBackendDebugEvent {
   detail?: string;
   elapsedMs: number;
 }
-type ChatToolCallEventName = "sendGeneratedImage" | "askQuestion" | "unknown";
-type ChatToolCallEventStatus = "detected" | "acquired" | "busy" | "dropped";
+type ChatToolCallEventName = "sendGeneratedImage" | "askQuestion" | "webSearch" | "unknown";
+type ChatToolCallEventStatus =
+  | "detected"
+  | "acquired"
+  | "busy"
+  | "dropped"
+  | "blocked"
+  | "completed";
 interface ChatToolCallEvent {
   name: ChatToolCallEventName;
   status: ChatToolCallEventStatus;
@@ -6598,7 +6726,7 @@ function formatBackendDebugLine(prefix: string, event: ChatBackendDebugEvent): s
 }
 
 const DEV_METRICS_INLINE_TOKEN_PATTERN =
-  /(\[[^\]\n]+\]|\/api\/[^\s;,)]+|\/[A-Za-z][\w/-]*|(?:mode|chars|bot|provider|model|incognito|jobId|prompt)=("[^"]*"|[^\s;\u2014,)]+)|\b\d+(?:\.\d+)?(?:ms|%)\b|\b(?:backend|route|context|model|tool|summary|memories?|memory|opinion|provider|incognito|started|created|retracted|rejected|triggered|requested|failed|succeeded|detected|acquired|busy|dropped)\b|"[^"]*")/gi;
+  /(\[[^\]\n]+\]|\/api\/[^\s;,)]+|\/[A-Za-z][\w/-]*|(?:mode|chars|bot|provider|model|incognito|jobId|prompt)=("[^"]*"|[^\s;\u2014,)]+)|\b\d+(?:\.\d+)?(?:ms|%)\b|\b(?:backend|route|context|model|tool|summary|memories?|memory|opinion|provider|incognito|started|created|retracted|rejected|triggered|requested|failed|succeeded|detected|acquired|busy|dropped|blocked|completed)\b|"[^"]*")/gi;
 
 function formatDevMetricsTimestamp(createdAt: string): string {
   const date = new Date(createdAt);
@@ -7079,7 +7207,7 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   PSYCHIC_COMMAND_NAME,
   NVM_COMMAND_NAME,
 ]);
-const BUILT_IN_HELP_COMMAND_ALIASES = ["?"];
+const BUILT_IN_HELP_COMMAND_ALIASES: string[] = [];
 const BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = ["wallpaper", "wall", "background"];
 const BUILT_IN_UNDO_COMMAND_ALIASES = ["undo-turn"];
 const BUILT_IN_HELP_SLASH_COMMANDS = new Set([
@@ -7475,6 +7603,119 @@ function isComposerTrueWildcardSlotPick(command: CommandCenterCommand): boolean 
   return command.id.startsWith("wildcard-slot:");
 }
 
+function isComposerToolPick(command: CommandCenterCommand): boolean {
+  return command.id.startsWith("tool:");
+}
+
+type ComposerManualToolKind = "askQuestion" | "webSearch" | "imageGen";
+
+const COMPOSER_TOOL_PICKS: CommandCenterCommand[] = [
+  {
+    id: "tool:ask-question",
+    name: "ask-question",
+    title: "Ask a question",
+    command: "Ask the bot a question, then optionally add fixed answers.",
+    aliases: ["ask", "question"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: "built-in",
+    updatedAt: "built-in",
+  },
+  {
+    id: "tool:web-search",
+    name: "web-search",
+    title: "Search the web",
+    command: "Search the web for the draft text and answer from fresh results.",
+    aliases: ["search", "web"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: "built-in",
+    updatedAt: "built-in",
+  },
+  {
+    id: "tool:image-gen",
+    name: "image-gen",
+    title: "Generate an image",
+    command: "Use the draft text as an image prompt.",
+    aliases: ["image", "generate-image"],
+    arguments: [],
+    builtIn: true,
+    readOnly: true,
+    createdAt: "built-in",
+    updatedAt: "built-in",
+  },
+];
+
+function composerToolKindFromCommandName(name: string): ComposerManualToolKind | null {
+  const normalized = normalizeCommandNameInput(name);
+  if (normalized === "ask-question" || normalized === "ask" || normalized === "question") {
+    return "askQuestion";
+  }
+  if (normalized === "web-search" || normalized === "search" || normalized === "web") {
+    return "webSearch";
+  }
+  if (
+    normalized === "image-gen" ||
+    normalized === "image" ||
+    normalized === "generate-image"
+  ) {
+    return "imageGen";
+  }
+  return null;
+}
+
+function composerToolDisplayName(command: CommandCenterCommand): string {
+  if (!isComposerToolPick(command)) return command.name;
+  return command.title.trim() || command.name.replace(/-/g, " ");
+}
+
+interface ComposerManualToolResolution {
+  message: string;
+  manualTool: ChatManualToolRequest;
+}
+
+function composerManualToolMessage(tool: ChatManualToolRequest, fallback = ""): string {
+  if (tool.name === "webSearch") return (tool.query ?? fallback).trim();
+  if (tool.name === "imageGen") return (tool.prompt ?? fallback).trim();
+  return (tool.question ?? fallback).trim();
+}
+
+function resolveComposerManualToolRequest(
+  draft: string
+): ComposerManualToolResolution | null {
+  const match = /^(\s*)\?([a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(draft);
+  if (!match) return null;
+  const kind = composerToolKindFromCommandName(match[2] ?? "");
+  if (!kind) return null;
+  const rawMessage = draft.slice(match[0]!.length).replace(/^\s+/, "");
+  const message = rawMessage.trim();
+  if (kind === "webSearch") {
+    return {
+      message,
+      manualTool: { name: "webSearch", query: message },
+    };
+  }
+  if (kind === "imageGen") {
+    return {
+      message,
+      manualTool: { name: "imageGen", prompt: message },
+    };
+  }
+  const askQuestion = parseManualAskQuestionDraft(message);
+  return {
+    message: askQuestion.question || message,
+    manualTool: {
+      name: "askQuestion",
+      question: askQuestion.question,
+      ...(askQuestion.options.length >= MANUAL_ASK_QUESTION_OPTION_COUNT_MIN
+        ? { options: askQuestion.options }
+        : {}),
+    },
+  };
+}
+
 function composerTrueWildcardSlotKey(
   command: CommandCenterCommand
 ): BuiltInPromptWildcardSlotKey | null {
@@ -7507,19 +7748,22 @@ function composerTrueWildcardSlotDisplayTokens(command: CommandCenterCommand): s
 }
 
 function composerCommandDisplayName(command: CommandCenterCommand): string {
+  if (isComposerToolPick(command)) return composerToolDisplayName(command);
   return command.name;
 }
 
 const PENDING_COMPOSER_WILDCARD_SLOT_TEXT = "\uE000PRISM_PENDING_WILDCARD\uE000";
 
-function composerShortcutInvocationPrefix(command: CommandCenterCommand): "/" | "!" | "{" {
+function composerShortcutInvocationPrefix(command: CommandCenterCommand): "/" | "!" | "?" | "{" {
   if (isComposerTrueWildcardSlotPick(command)) return "{";
+  if (isComposerToolPick(command)) return "?";
   return isComposerWildcardDeckPick(command) ? "!" : "/";
 }
 
 function composerCommandPickKind(
   command: CommandCenterCommand
-): "command" | "prompt" | "wildcard" | "wildcard-slot" {
+): "command" | "tool" | "prompt" | "wildcard" | "wildcard-slot" {
+  if (isComposerToolPick(command)) return "tool";
   if (isComposerTrueWildcardSlotPick(command)) return "wildcard-slot";
   if (isComposerWildcardDeckPick(command)) return "wildcard";
   return isCommandCenterOperationalCommand(command) ? "command" : "prompt";
@@ -7608,7 +7852,7 @@ function commandMatchesInvocationName(
 function commandCenterCommandForChipText(
   commands: readonly CommandCenterCommand[],
   chipText: string,
-  prefix: "/" | "!"
+  prefix: "/" | "!" | "?"
 ): CommandCenterCommand | null {
   const trimmed = chipText.trim();
   if (!trimmed.startsWith(prefix)) return null;
@@ -7645,10 +7889,15 @@ interface LeadingCommandChipMatch {
 
 function resolveLeadingCommandChipMatch(
   value: string,
-  commands: readonly CommandCenterCommand[]
+  commands: readonly CommandCenterCommand[],
+  prefix: "/" | "?" = "/"
 ): LeadingCommandChipMatch | null {
   const firstLine = value.split(/\r?\n/u, 1)[0] ?? "";
-  const match = /^(\s*)\/(\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu.exec(firstLine);
+  const escapedPrefix = prefix === "/" ? "\\/" : "\\?";
+  const match = new RegExp(
+    `^(\\s*)${escapedPrefix}([a-z0-9][a-z0-9-]*)(?=\\s|$)`,
+    "iu"
+  ).exec(firstLine);
   if (!match) return null;
   const normalizedName = normalizeCommandNameInput(match[2] ?? "");
   if (!normalizedName) return null;
@@ -18600,14 +18849,15 @@ interface ComposerInputProps {
   mentionCommitMode?: ComposerMentionCommitMode;
   onMentionPersonaSelect?: (botId: string) => void;
   mentionPopoverFooter?: React.ReactNode;
-  onEmptyBackspace?: () => boolean;
-  commandPicks?: readonly CommandCenterCommand[];
-  promptPicks?: readonly CommandCenterCommand[];
-  wildcardPicks?: readonly CommandCenterCommand[];
+	  onEmptyBackspace?: () => boolean;
+	  commandPicks?: readonly CommandCenterCommand[];
+	  toolPicks?: readonly CommandCenterCommand[];
+	  promptPicks?: readonly CommandCenterCommand[];
+	  wildcardPicks?: readonly CommandCenterCommand[];
   dismissPopoversSignal?: number;
 }
 
-type ComposerShortcutScope = "leading" | "inline" | "wildcard" | "wildcard-slot";
+type ComposerShortcutScope = "leading" | "tool" | "inline" | "wildcard" | "wildcard-slot";
 
 interface ComposerShortcutToken {
   from: number;
@@ -18791,6 +19041,23 @@ function leadingSlashShortcutTokenFromLinePrefix(
   };
 }
 
+function toolShortcutTokenFromLinePrefix(
+  textToCaret: string,
+  lineStartOffset = 0
+): ComposerShortcutToken | null {
+  const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
+  const lineToCaret = textToCaret.slice(lineStartInText);
+  const match = /^(\s*)\?([a-z0-9-]*)$/iu.exec(lineToCaret);
+  if (!match) return null;
+  const from = lineStartOffset + lineStartInText + (match[1]?.length ?? 0);
+  return {
+    from,
+    to: lineStartOffset + textToCaret.length,
+    query: match[2] ?? "",
+    scope: "tool",
+  };
+}
+
 function promptShortcutTokenFromTextToCaret(
   textToCaret: string,
   lineStartOffset = 0
@@ -18856,6 +19123,9 @@ function shortcutTokenFromTextToCaret(
   if (scope === "leading") {
     return leadingSlashShortcutTokenFromLinePrefix(textToCaret, lineStartOffset);
   }
+  if (scope === "tool") {
+    return toolShortcutTokenFromLinePrefix(textToCaret, lineStartOffset);
+  }
   if (scope === "wildcard") {
     return wildcardDeckTokenFromTextToCaret(textToCaret, lineStartOffset);
   }
@@ -18892,7 +19162,7 @@ function getComposerShortcutFromTextarea(
   return shortcutTokenFromTextToCaret(text.slice(0, caret), 0, scope);
 }
 
-type ComposerTextareaChipKind = "command" | "prompt" | "wildcard" | "wildcard-slot";
+type ComposerTextareaChipKind = "command" | "tool" | "prompt" | "wildcard" | "wildcard-slot";
 
 interface ComposerTextareaChipRange {
   start: number;
@@ -18963,11 +19233,13 @@ function resolveBuiltInWildcardSlotTextRanges(
 function resolveComposerTextareaChipRanges({
   value,
   commandPicks,
+  toolPicks,
   promptPicks,
   wildcardPicks,
 }: {
   value: string;
   commandPicks: readonly CommandCenterCommand[];
+  toolPicks: readonly CommandCenterCommand[];
   promptPicks: readonly CommandCenterCommand[];
   wildcardPicks: readonly CommandCenterCommand[];
 }): ComposerTextareaChipRange[] {
@@ -18982,6 +19254,18 @@ function resolveComposerTextareaChipRanges({
       start: leading.commandStart,
       end: leading.commandEnd,
       kind: "command",
+    });
+  }
+  const tool = resolveLeadingCommandChipMatch(
+    value,
+    toolPicks.filter(isComposerToolPick),
+    "?"
+  );
+  if (tool) {
+    ranges.push({
+      start: tool.commandStart,
+      end: tool.commandEnd,
+      kind: "tool",
     });
   }
   const promptNames = promptPicks.flatMap((command) => commandInvocationNames(command));
@@ -19018,7 +19302,7 @@ function composerTextareaChipLabel(value: string, range: ComposerTextareaChipRan
     if (reference?.reference) label = reference.slot.label;
     return label.replace(/[-_]+/gu, " ").toLowerCase();
   }
-  return token.replace(/^[!/]/u, "");
+  return token.replace(/^[!/?]/u, "");
 }
 
 function renderComposerTextareaOverlayContent(
@@ -19286,9 +19570,10 @@ function applyTextareaCommandChipDelete(
   selectionStart: number,
   selectionEnd: number,
   direction: "backward" | "forward",
-  commands: readonly CommandCenterCommand[]
+  commands: readonly CommandCenterCommand[],
+  prefix: "/" | "?" = "/"
 ): { value: string; caret: number } | null {
-  const match = resolveLeadingCommandChipMatch(text, commands);
+  const match = resolveLeadingCommandChipMatch(text, commands, prefix);
   if (!match) return null;
 
   const start = Math.min(selectionStart, selectionEnd);
@@ -19474,6 +19759,7 @@ function textareaComposerShortcutChipArrowSelection({
   selectionEnd,
   direction,
   commandPicks,
+  toolPicks,
   promptPicks,
   wildcardPicks,
 }: {
@@ -19482,6 +19768,7 @@ function textareaComposerShortcutChipArrowSelection({
   selectionEnd: number;
   direction: "left" | "right";
   commandPicks: readonly CommandCenterCommand[];
+  toolPicks: readonly CommandCenterCommand[];
   promptPicks: readonly CommandCenterCommand[];
   wildcardPicks: readonly CommandCenterCommand[];
 }): { start: number; end: number } | null {
@@ -19490,6 +19777,7 @@ function textareaComposerShortcutChipArrowSelection({
   const ranges = resolveComposerTextareaChipRanges({
     value: text,
     commandPicks,
+    toolPicks,
     promptPicks,
     wildcardPicks,
   });
@@ -19519,6 +19807,34 @@ function applyLeadingCommandChipBoundaryDelete(
 
   const chipFrom = commandRange.from;
   const chipTo = commandRange.to;
+  let from = chipFrom;
+  let to = chipTo;
+
+  if (!sel.empty) {
+    if (sel.from >= chipTo || sel.to <= chipFrom) return false;
+    from = Math.min(sel.from, chipFrom);
+    to = Math.max(sel.to, chipTo);
+  } else if (direction === "backward") {
+    if (sel.from <= chipFrom || sel.from > chipTo) return false;
+  } else if (sel.from < chipFrom || sel.from >= chipTo) {
+    return false;
+  }
+
+  editor.chain().focus().deleteRange({ from, to }).run();
+  return true;
+}
+
+function applyLeadingToolChipBoundaryDelete(
+  editor: Editor,
+  direction: "backward" | "forward",
+  toolNames: readonly string[]
+): boolean {
+  const sel = editor.state.selection;
+  const toolRange = findLeadingToolShortcutTokenRange(editor.state.doc, toolNames);
+  if (!toolRange) return false;
+
+  const chipFrom = toolRange.from;
+  const chipTo = toolRange.to;
   let from = chipFrom;
   let to = chipTo;
 
@@ -19669,7 +19985,7 @@ function applyWildcardSlotReferenceCycle(
   return false;
 }
 
-type ComposerShortcutChipKind = "command" | "prompt" | "wildcard" | "wildcard-slot";
+type ComposerShortcutChipKind = "command" | "tool" | "prompt" | "wildcard" | "wildcard-slot";
 
 interface EditorComposerShortcutChipRange {
   kind: ComposerShortcutChipKind;
@@ -19690,6 +20006,7 @@ function editorChipTokenRange(range: { from: number; to: number }): {
 function findEditorComposerShortcutChipRanges(
   editor: Editor,
   commandNames: readonly string[],
+  toolNames: readonly string[],
   promptNames: readonly string[],
   wildcardNames: readonly string[],
   wildcardSlotNames: readonly string[]
@@ -19700,6 +20017,13 @@ function findEditorComposerShortcutChipRanges(
     ranges.push({
       kind: "command",
       ...editorChipTokenRange(commandRange),
+    });
+  }
+  const toolRange = findLeadingToolShortcutTokenRange(editor.state.doc, toolNames);
+  if (toolRange) {
+    ranges.push({
+      kind: "tool",
+      ...editorChipTokenRange(toolRange),
     });
   }
   for (const promptRange of findPromptShortcutTokenRanges(editor.state.doc, promptNames)) {
@@ -19738,10 +20062,11 @@ function composerShortcutChipKindFromClick(
         ? target.parentElement
         : null;
   const chip = element?.closest(
-    ".tiptapPrismDevCommandToken, .tiptapPrismPromptShortcutToken, .tiptapPrismWildcardDeckToken, .tiptapPrismWildcardSlotToken"
+    ".tiptapPrismDevCommandToken, .tiptapPrismToolToken, .tiptapPrismPromptShortcutToken, .tiptapPrismWildcardDeckToken, .tiptapPrismWildcardSlotToken"
   );
   if (!chip) return null;
   if (chip.classList.contains("tiptapPrismDevCommandToken")) return "command";
+  if (chip.classList.contains("tiptapPrismToolToken")) return "tool";
   if (chip.classList.contains("tiptapPrismWildcardDeckToken")) return "wildcard";
   if (chip.classList.contains("tiptapPrismWildcardSlotToken")) return "wildcard-slot";
   return "prompt";
@@ -19752,6 +20077,7 @@ function findEditorComposerShortcutChipRangeAt(
   pos: number,
   kind: ComposerShortcutChipKind,
   commandNames: readonly string[],
+  toolNames: readonly string[],
   promptNames: readonly string[],
   wildcardNames: readonly string[],
   wildcardSlotNames: readonly string[]
@@ -19760,6 +20086,7 @@ function findEditorComposerShortcutChipRangeAt(
     findEditorComposerShortcutChipRanges(
       editor,
       commandNames,
+      toolNames,
       promptNames,
       wildcardNames,
       wildcardSlotNames
@@ -19915,6 +20242,7 @@ function applyComposerShortcutChipArrowKey(
   editor: Editor,
   direction: "left" | "right",
   commandNames: readonly string[],
+  toolNames: readonly string[],
   promptNames: readonly string[],
   wildcardNames: readonly string[],
   wildcardSlotNames: readonly string[]
@@ -19925,6 +20253,7 @@ function applyComposerShortcutChipArrowKey(
   const ranges = findEditorComposerShortcutChipRanges(
     editor,
     commandNames,
+    toolNames,
     promptNames,
     wildcardNames,
     wildcardSlotNames
@@ -20092,6 +20421,9 @@ interface ComposerCommandPopoverProps {
 }
 
 function commandPickDescription(command: CommandCenterCommand): string {
+  if (isComposerToolPick(command)) {
+    return command.command.trim();
+  }
   if (isComposerTrueWildcardSlotPick(command)) {
     return command.title.trim() || "Filled by the selected model on send.";
   }
@@ -20226,24 +20558,28 @@ function ComposerCommandPopover({
       style={adjustedStyle}
       role="listbox"
       aria-label={
-        scope === "wildcard-slot"
-          ? "Choose a wildcard"
-          : scope === "wildcard"
-            ? "Choose a wildcard deck"
-          : scope === "leading"
-            ? "Choose a command or prompt"
+	        scope === "wildcard-slot"
+	          ? "Choose a wildcard"
+	          : scope === "wildcard"
+	            ? "Choose a wildcard deck"
+	            : scope === "tool"
+	              ? "Choose a tool"
+	          : scope === "leading"
+	            ? "Choose a command or prompt"
             : "Choose a prompt"
       }
     >
       <div className={styles.composeBotListbox}>
         {commands.length === 0 && (
           <div className={styles.composeBotNoMatches} role="presentation">
-            {scope === "wildcard"
-              ? "No decks match."
-              : scope === "wildcard-slot"
-                ? "No wildcards match."
-              : scope === "leading"
-                ? "No commands or prompts match."
+	            {scope === "wildcard"
+	              ? "No decks match."
+	              : scope === "wildcard-slot"
+	                ? "No wildcards match."
+	                : scope === "tool"
+	                  ? "No tools match."
+	                : scope === "leading"
+	                ? "No commands or prompts match."
                 : "No prompts match."}
           </div>
         )}
@@ -20328,9 +20664,11 @@ function ComposerCommandPopover({
           const previousKind = previousCommand ? composerCommandPickKind(previousCommand) : null;
           const sectionHeader =
             showSectionHeaders && commandKind !== previousKind
-              ? commandKind === "command"
-                ? "Commands"
-                : commandKind === "wildcard-slot"
+	              ? commandKind === "command"
+	                ? "Commands"
+	                : commandKind === "tool"
+	                  ? "Tools"
+	                : commandKind === "wildcard-slot"
                   ? "Wildcards"
                   : commandKind === "wildcard"
                   ? "Decks"
@@ -21842,7 +22180,7 @@ function MarkdownMessageBody({
                     : `${isWildcardToken ? "Open wildcard" : "Open prompt"} ${label}`
               }
             >
-              <span>{label.replace(/^[!/]+/, "")}</span>
+              <span>{label.replace(/^[!/?]+/, "")}</span>
             </button>
           );
           if (!promptPreviewActive || !promptShortcut) return chip;
@@ -22072,9 +22410,11 @@ interface DesktopMarkdownComposerProps {
   onMentionPersonaSelect?: (botId: string) => void;
   mentionPopoverFooter?: React.ReactNode;
   onEmptyBackspace?: () => boolean;
-  /** Slash commands shown in the composer autocomplete menu at the first word. */
-  commandPicks?: readonly CommandCenterCommand[];
-  /** User prompt shortcuts shown in the composer autocomplete menu. */
+	  /** Slash commands shown in the composer autocomplete menu at the first word. */
+	  commandPicks?: readonly CommandCenterCommand[];
+	  /** Tool commands shown by the `?` picker. */
+	  toolPicks?: readonly CommandCenterCommand[];
+	  /** User prompt shortcuts shown in the composer autocomplete menu. */
   promptPicks?: readonly CommandCenterCommand[];
   /** User wildcard decks shown in the composer autocomplete menu. */
   wildcardPicks?: readonly CommandCenterCommand[];
@@ -22108,9 +22448,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       mentionCommitMode = "insert-mention",
       onMentionPersonaSelect,
       mentionPopoverFooter,
-      onEmptyBackspace,
-      commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
-      promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	      onEmptyBackspace,
+	      commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	      toolPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	      promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       onGenerateWildcardSlotValue,
       chipPointerBehavior = "resolve",
@@ -22134,8 +22475,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
     const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
     const onEmptyBackspaceRef = useRef(onEmptyBackspace);
-    const commandPicksRef = useRef(commandPicks);
-    const promptPicksRef = useRef(promptPicks);
+	    const commandPicksRef = useRef(commandPicks);
+	    const toolPicksRef = useRef(toolPicks);
+	    const promptPicksRef = useRef(promptPicks);
     const wildcardPicksRef = useRef(wildcardPicks);
     const [mentionUi, setMentionUi] = useState<{
       open: boolean;
@@ -22168,10 +22510,13 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     useLayoutEffect(() => {
       onEmptyBackspaceRef.current = onEmptyBackspace;
     }, [onEmptyBackspace]);
-    useLayoutEffect(() => {
-      commandPicksRef.current = commandPicks;
-    }, [commandPicks]);
-    useLayoutEffect(() => {
+	    useLayoutEffect(() => {
+	      commandPicksRef.current = commandPicks;
+	    }, [commandPicks]);
+	    useLayoutEffect(() => {
+	      toolPicksRef.current = toolPicks;
+	    }, [toolPicks]);
+	    useLayoutEffect(() => {
       promptPicksRef.current = promptPicks;
     }, [promptPicks]);
     useLayoutEffect(() => {
@@ -22346,34 +22691,42 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       });
     }, []);
 
-    const syncCommandPopover = useCallback((ed: Editor) => {
-      const leadingToken =
-        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "leading")
-          : null;
-      const promptToken =
-        !leadingToken && promptPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "inline")
-          : null;
-      const wildcardToken =
-        !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "wildcard")
-          : null;
-      const wildcardSlotToken =
-        !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
-          : null;
-      const token = leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
-      const scope: ComposerShortcutScope = leadingToken
-        ? "leading"
-        : promptToken
-          ? "inline"
-          : wildcardToken
-            ? "wildcard"
-            : "wildcard-slot";
-      const commands = leadingToken
-        ? [...commandPicksRef.current, ...promptPicksRef.current]
-        : promptToken
+	    const syncCommandPopover = useCallback((ed: Editor) => {
+	      const toolToken =
+	        toolPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "tool")
+	          : null;
+	      const leadingToken =
+	        !toolToken && (commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0)
+	          ? getComposerShortcutFromEditor(ed, "leading")
+	          : null;
+	      const promptToken =
+	        !toolToken && !leadingToken && promptPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "inline")
+	          : null;
+	      const wildcardToken =
+	        !toolToken && !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "wildcard")
+	          : null;
+	      const wildcardSlotToken =
+	        !toolToken && !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
+	          : null;
+	      const token = toolToken ?? leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
+	      const scope: ComposerShortcutScope = toolToken
+	        ? "tool"
+	        : leadingToken
+	        ? "leading"
+	        : promptToken
+	          ? "inline"
+	          : wildcardToken
+	            ? "wildcard"
+	            : "wildcard-slot";
+	      const commands = toolToken
+	        ? toolPicksRef.current
+	        : leadingToken
+	        ? [...commandPicksRef.current, ...promptPicksRef.current]
+	        : promptToken
           ? promptPicksRef.current
           : wildcardToken
             ? wildcardPicksRef.current.filter(isComposerWildcardDeckPick)
@@ -22388,13 +22741,15 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
       );
       const filtered =
-        scope === "wildcard"
-          ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
-          : scope === "wildcard-slot"
-            ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
-          : scope === "leading"
-            ? filterLeadingPicksForShortcutQuery(commands, token.query)
-          : filterCommandPicksForShortcutQuery(commands, token.query);
+	        scope === "wildcard"
+	          ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
+	          : scope === "wildcard-slot"
+	            ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
+	          : scope === "tool"
+	            ? filterCommandPicksForShortcutQuery(commands, token.query)
+	          : scope === "leading"
+	            ? filterLeadingPicksForShortcutQuery(commands, token.query)
+	          : filterCommandPicksForShortcutQuery(commands, token.query);
       const view = getMountedEditorView(ed);
       if (!view) {
         setCommandUi((s) =>
@@ -22431,24 +22786,28 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       });
     }, []);
 
-    const syncComposerPopovers = useCallback((ed: Editor) => {
-      const leadingToken =
-        commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "leading")
-          : null;
-      const promptToken =
-        promptPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "inline")
-          : null;
-      const wildcardToken =
-        wildcardPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "wildcard")
-          : null;
-      const wildcardSlotToken =
-        !wildcardToken && wildcardPicksRef.current.length > 0
-          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
-          : null;
-      if (leadingToken || promptToken || wildcardToken || wildcardSlotToken) {
+	    const syncComposerPopovers = useCallback((ed: Editor) => {
+	      const toolToken =
+	        toolPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "tool")
+	          : null;
+	      const leadingToken =
+	        !toolToken && (commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0)
+	          ? getComposerShortcutFromEditor(ed, "leading")
+	          : null;
+	      const promptToken =
+	        !toolToken && promptPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "inline")
+	          : null;
+	      const wildcardToken =
+	        !toolToken && wildcardPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "wildcard")
+	          : null;
+	      const wildcardSlotToken =
+	        !toolToken && !wildcardToken && wildcardPicksRef.current.length > 0
+	          ? getComposerShortcutFromEditor(ed, "wildcard-slot")
+	          : null;
+	      if (toolToken || leadingToken || promptToken || wildcardToken || wildcardSlotToken) {
         syncCommandPopover(ed);
         return;
       }
@@ -22506,7 +22865,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
 
     const resolveEditorComposerChipActivation = useCallback(
       (ed: Editor, target: ComposerChipActivationTarget): boolean => {
-        if (target.kind === "command") return false;
+        if (target.kind === "command" || target.kind === "tool") return false;
 
         if (target.kind === "prompt") {
           const command = commandCenterCommandForChipText(
@@ -22536,6 +22895,10 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
     const commandNamesForHighlight = useMemo(
       () => commandPicks.flatMap((command) => commandInvocationNames(command)),
       [commandPicks]
+    );
+    const toolNamesForHighlight = useMemo(
+      () => toolPicks.flatMap((command) => commandInvocationNames(command)),
+      [toolPicks]
     );
     const promptNamesForHighlight = useMemo(
       () => promptPicks.flatMap((command) => commandInvocationNames(command)),
@@ -22571,6 +22934,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
           }),
           PrismDevCommandHighlight.configure({
             commandNames: commandNamesForHighlight,
+            toolNames: toolNamesForHighlight,
             promptNames: promptNamesForHighlight,
             wildcardNames: wildcardNamesForHighlight,
             wildcardSlotNames: wildcardSlotNamesForHighlight,
@@ -22659,6 +23023,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               pos,
               chipKind,
               commandNamesForHighlight,
+              toolNamesForHighlight,
               promptNamesForHighlight,
               wildcardNamesForHighlight,
               wildcardSlotNamesForHighlight
@@ -22694,7 +23059,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               return false;
             }
             chipActivationRef.current = null;
-            if (target.kind === "command") return false;
+            if (target.kind === "command" || target.kind === "tool") return false;
             event.preventDefault();
             const applied = resolveEditorComposerChipActivation(activeEditor, target);
             if (applied) {
@@ -22768,6 +23133,17 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 return true;
               }
               if (
+                applyLeadingToolChipBoundaryDelete(
+                  activeEditor,
+                  "backward",
+                  toolNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
                 applyLeadingCommandChipBoundaryDelete(
                   activeEditor,
                   "backward",
@@ -22825,6 +23201,17 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   activeEditor,
                   "forward",
                   promptNamesForHighlight
+                )
+              ) {
+                event.preventDefault();
+                queueMicrotask(() => syncComposerPopovers(activeEditor));
+                return true;
+              }
+              if (
+                applyLeadingToolChipBoundaryDelete(
+                  activeEditor,
+                  "forward",
+                  toolNamesForHighlight
                 )
               ) {
                 event.preventDefault();
@@ -22891,6 +23278,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                   activeEditor,
                   dir,
                   commandNamesForHighlight,
+                  toolNamesForHighlight,
                   promptNamesForHighlight,
                   wildcardNamesForHighlight,
                   wildcardSlotNamesForHighlight
@@ -23161,6 +23549,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         prunePendingWildcardSlots,
         rememberLocallyEmittedValue,
         commandNamesForHighlight,
+        toolNamesForHighlight,
         promptNamesForHighlight,
         wildcardNamesForHighlight,
         wildcardSlotNamesForHighlight,
@@ -23498,8 +23887,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     onMentionPersonaSelect,
     mentionPopoverFooter,
     onEmptyBackspace,
-    commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
-    promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	    commandPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	    toolPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+	    promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     dismissPopoversSignal,
   },
@@ -23513,8 +23903,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const mentionCommitModeRef = useRef<ComposerMentionCommitMode>(mentionCommitMode);
   const onMentionPersonaSelectRef = useRef(onMentionPersonaSelect);
   const onEmptyBackspaceRef = useRef(onEmptyBackspace);
-  const commandPicksRef = useRef(commandPicks);
-  const promptPicksRef = useRef(promptPicks);
+	  const commandPicksRef = useRef(commandPicks);
+	  const toolPicksRef = useRef(toolPicks);
+	  const promptPicksRef = useRef(promptPicks);
   const wildcardPicksRef = useRef(wildcardPicks);
   const textareaValueRef = useRef(value);
   const [textareaLocalValue, setTextareaLocalValue] = useState(value);
@@ -23552,13 +23943,14 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   const textareaChipRanges = useMemo(
     () =>
       resolveComposerTextareaChipRanges({
-        value: textareaDisplayValue,
-        commandPicks,
-        promptPicks,
-        wildcardPicks,
-      }),
-    [commandPicks, promptPicks, textareaDisplayValue, wildcardPicks]
-  );
+	        value: textareaDisplayValue,
+	        commandPicks,
+	        toolPicks,
+	        promptPicks,
+	        wildcardPicks,
+	      }),
+	    [commandPicks, promptPicks, textareaDisplayValue, toolPicks, wildcardPicks]
+	  );
   const syncTextareaSelectionState = useCallback((el: HTMLTextAreaElement) => {
     setTextareaSelection({
       start: el.selectionStart ?? 0,
@@ -23716,10 +24108,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
   useLayoutEffect(() => {
     onEmptyBackspaceRef.current = onEmptyBackspace;
   }, [onEmptyBackspace]);
-  useLayoutEffect(() => {
-    commandPicksRef.current = commandPicks;
-  }, [commandPicks]);
-  useLayoutEffect(() => {
+	  useLayoutEffect(() => {
+	    commandPicksRef.current = commandPicks;
+	  }, [commandPicks]);
+	  useLayoutEffect(() => {
+	    toolPicksRef.current = toolPicks;
+	  }, [toolPicks]);
+	  useLayoutEffect(() => {
     promptPicksRef.current = promptPicks;
   }, [promptPicks]);
   useLayoutEffect(() => {
@@ -23864,7 +24259,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
 
   const resolveTextareaComposerChipActivation = useCallback(
     (target: ComposerChipActivationTarget): boolean => {
-      if (target.kind === "command") return false;
+      if (target.kind === "command" || target.kind === "tool") return false;
 
       if (target.kind === "prompt") {
         const command = commandCenterCommandForChipText(
@@ -23890,12 +24285,13 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       el: HTMLTextAreaElement,
       event?: Pick<React.MouseEvent<HTMLTextAreaElement>, "clientX" | "clientY">
     ): ComposerChipActivationTarget | null => {
-      const ranges = resolveComposerTextareaChipRanges({
-        value: el.value,
-        commandPicks: commandPicksRef.current,
-        promptPicks: promptPicksRef.current,
-        wildcardPicks: wildcardPicksRef.current,
-      });
+	      const ranges = resolveComposerTextareaChipRanges({
+	        value: el.value,
+	        commandPicks: commandPicksRef.current,
+	        toolPicks: toolPicksRef.current,
+	        promptPicks: promptPicksRef.current,
+	        wildcardPicks: wildcardPicksRef.current,
+	      });
       const range =
         event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
           ? findComposerTextareaChipRangeAtPoint(
@@ -23944,7 +24340,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
         return false;
       }
       textareaChipActivationRef.current = null;
-      if (target.kind === "command") return false;
+      if (target.kind === "command" || target.kind === "tool") return false;
       return resolveTextareaComposerChipActivation(target);
     },
     [
@@ -23962,7 +24358,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     ): boolean => {
       const target = findTextareaComposerChipActivationTarget(el, event);
       textareaChipActivationRef.current = null;
-      if (!target || target.kind === "command") return false;
+      if (!target || target.kind === "command" || target.kind === "tool") return false;
       if (chipPointerBehavior === "delete") {
         return deleteTextareaChipActivationTarget(target);
       }
@@ -23982,35 +24378,43 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
     dismissTaCommandPopover();
   }, [dismissPopoversSignal, dismissTaCommandPopover, dismissTaMentionPopover]);
 
-  const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
-    const caret = el.selectionStart ?? 0;
-    const leadingToken =
-      commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0
-        ? getComposerShortcutFromTextarea(el.value, caret, "leading")
-        : null;
-    const promptToken =
-      !leadingToken && promptPicksRef.current.length > 0
-        ? getComposerShortcutFromTextarea(el.value, caret, "inline")
-        : null;
-    const wildcardToken =
-      !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
-        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard")
-        : null;
-    const wildcardSlotToken =
-      !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
-        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard-slot")
-        : null;
-    const token = leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
-    const scope: ComposerShortcutScope = leadingToken
-      ? "leading"
-      : promptToken
-        ? "inline"
-        : wildcardToken
-          ? "wildcard"
-          : "wildcard-slot";
-    const commands = leadingToken
-      ? [...commandPicksRef.current, ...promptPicksRef.current]
-      : promptToken
+	  const syncTextareaCommand = useCallback((el: HTMLTextAreaElement): boolean => {
+	    const caret = el.selectionStart ?? 0;
+	    const toolToken =
+	      toolPicksRef.current.length > 0
+	        ? getComposerShortcutFromTextarea(el.value, caret, "tool")
+	        : null;
+	    const leadingToken =
+	      !toolToken && (commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0)
+	        ? getComposerShortcutFromTextarea(el.value, caret, "leading")
+	        : null;
+	    const promptToken =
+	      !toolToken && !leadingToken && promptPicksRef.current.length > 0
+	        ? getComposerShortcutFromTextarea(el.value, caret, "inline")
+	        : null;
+	    const wildcardToken =
+	      !toolToken && !leadingToken && !promptToken && wildcardPicksRef.current.length > 0
+	        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard")
+	        : null;
+	    const wildcardSlotToken =
+	      !toolToken && !leadingToken && !promptToken && !wildcardToken && wildcardPicksRef.current.length > 0
+	        ? getComposerShortcutFromTextarea(el.value, caret, "wildcard-slot")
+	        : null;
+	    const token = toolToken ?? leadingToken ?? promptToken ?? wildcardToken ?? wildcardSlotToken;
+	    const scope: ComposerShortcutScope = toolToken
+	      ? "tool"
+	      : leadingToken
+	      ? "leading"
+	      : promptToken
+	        ? "inline"
+	        : wildcardToken
+	          ? "wildcard"
+	          : "wildcard-slot";
+	    const commands = toolToken
+	      ? toolPicksRef.current
+	      : leadingToken
+	      ? [...commandPicksRef.current, ...promptPicksRef.current]
+	      : promptToken
         ? promptPicksRef.current
         : wildcardToken
           ? wildcardPicksRef.current.filter(isComposerWildcardDeckPick)
@@ -24025,13 +24429,15 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
     );
     const filtered =
-      scope === "wildcard"
-        ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
-        : scope === "wildcard-slot"
-          ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
-        : scope === "leading"
-          ? filterLeadingPicksForShortcutQuery(commands, token.query)
-        : filterCommandPicksForShortcutQuery(commands, token.query);
+	      scope === "wildcard"
+	        ? filterWildcardDeckPicksForShortcutQuery(commands, token.query)
+	        : scope === "wildcard-slot"
+	          ? filterWildcardSlotPicksForShortcutQuery(commands, token.query)
+	        : scope === "tool"
+	          ? filterCommandPicksForShortcutQuery(commands, token.query)
+	        : scope === "leading"
+	          ? filterLeadingPicksForShortcutQuery(commands, token.query)
+	        : filterCommandPicksForShortcutQuery(commands, token.query);
     const caretRect = getTextareaCaretClientRect(el);
     const anchorRect = caretRect
       ? getComposerCommandMenuAnchorRect(composeEditorShellRef.current, caretRect)
@@ -24125,9 +24531,10 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
         el.value,
         el.selectionStart ?? 0,
         el.selectionEnd ?? 0,
-        mentionBotsRef.current.length,
-        commandPicksRef.current.length,
-        promptPicksRef.current.length,
+	        mentionBotsRef.current.length,
+	        commandPicksRef.current.length,
+	        toolPicksRef.current.length,
+	        promptPicksRef.current.length,
         wildcardPicksRef.current.length,
       ].join("\u0000");
       if (snapshot === textareaMentionSyncSnapshotRef.current) return;
@@ -24288,6 +24695,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
           mentionPopoverFooter={mentionPopoverFooter}
           onEmptyBackspace={onEmptyBackspace}
           commandPicks={commandPicks}
+          toolPicks={toolPicks}
           promptPicks={promptPicks}
           wildcardPicks={wildcardPicks}
           generatingRandomPrompt={generatingRandomPrompt}
@@ -24476,6 +24884,20 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       onValueChange(applied.value);
                       return;
                     }
+                    const toolApplied = applyTextareaCommandChipDelete(
+                      el.value,
+                      start,
+                      end,
+                      "backward",
+                      toolPicksRef.current,
+                      "?"
+                    );
+                    if (toolApplied) {
+                      event.preventDefault();
+                      pendingTextareaCaretRef.current = toolApplied.caret;
+                      onValueChange(toolApplied.value);
+                      return;
+                    }
                     const commandApplied = applyTextareaCommandChipDelete(
                       el.value,
                       start,
@@ -24561,6 +24983,20 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       event.preventDefault();
                       pendingTextareaCaretRef.current = applied.caret;
                       onValueChange(applied.value);
+                      return;
+                    }
+                    const toolApplied = applyTextareaCommandChipDelete(
+                      el.value,
+                      start,
+                      end,
+                      "forward",
+                      toolPicksRef.current,
+                      "?"
+                    );
+                    if (toolApplied) {
+                      event.preventDefault();
+                      pendingTextareaCaretRef.current = toolApplied.caret;
+                      onValueChange(toolApplied.value);
                       return;
                     }
                     const commandApplied = applyTextareaCommandChipDelete(
@@ -24673,11 +25109,12 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                       text: el.value,
                       selectionStart: start,
                       selectionEnd: end,
-                      direction: dir,
-                      commandPicks: commandPicksRef.current,
-                      promptPicks: promptPicksRef.current,
-                      wildcardPicks: wildcardPicksRef.current,
-                    });
+	                      direction: dir,
+	                      commandPicks: commandPicksRef.current,
+	                      toolPicks: toolPicksRef.current,
+	                      promptPicks: promptPicksRef.current,
+	                      wildcardPicks: wildcardPicksRef.current,
+	                    });
                     if (
                       shortcutNext !== null &&
                       (shortcutNext.start !== start || shortcutNext.end !== end)
@@ -26066,6 +26503,8 @@ function HomeContent(): React.JSX.Element {
   const [sessionOpinion, setSessionOpinion] = useState<SessionOpinion | null>(null);
   const [botOpinion, setBotOpinion] = useState<BotOpinion | null>(null);
   const [draft, setDraft] = useState("");
+  const [manualAskQuestionModal, setManualAskQuestionModal] =
+    useState<ManualAskQuestionDraft | null>(null);
   const draftLiveRef = useRef("");
   const pendingDraftSyncValueRef = useRef<string | null>(null);
   const pendingDraftSyncTimerRef = useRef<number | null>(null);
@@ -29632,6 +30071,95 @@ function HomeContent(): React.JSX.Element {
       next.add(imageId);
       return next;
     });
+  }
+
+  function webSearchResultSource(result: WebSearchPayload["results"][number]): string {
+    const explicit = (result.source ?? result.displayUrl ?? "").trim();
+    if (explicit) return explicit;
+    try {
+      return new URL(result.url).hostname.replace(/^www\./iu, "");
+    } catch {
+      return result.url;
+    }
+  }
+
+  function formatWebSearchFetchedAt(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function renderAssistantWebSearchCard(webSearch: WebSearchPayload): React.ReactElement {
+    const fetchedLabel = formatWebSearchFetchedAt(webSearch.fetchedAt);
+    return (
+      <aside className={styles.assistantWebSearchCard} aria-label="Web search results">
+        <div className={styles.assistantWebSearchHeader}>
+          <div className={styles.assistantWebSearchTitleBlock}>
+            <span className={styles.assistantWebSearchEyebrow}>Web search</span>
+            <span className={styles.assistantWebSearchQuery}>{webSearch.query}</span>
+          </div>
+          {fetchedLabel ? (
+            <span className={styles.assistantWebSearchFetched}>{fetchedLabel}</span>
+          ) : null}
+        </div>
+        {webSearch.results.length > 0 ? (
+          <ol className={styles.assistantWebSearchResults}>
+            {webSearch.results.map((result) => {
+              const source = webSearchResultSource(result);
+              const favicon = result.faviconUrl?.trim();
+              const thumbnail = result.thumbnailUrl?.trim();
+              const publishedLabel = result.publishedAt
+                ? formatWebSearchFetchedAt(result.publishedAt) || result.publishedAt
+                : "";
+              return (
+                <li key={result.url} className={styles.assistantWebSearchResult}>
+                  {thumbnail ? (
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.assistantWebSearchThumb}
+                      aria-label={`Open ${result.title}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={thumbnail} alt="" loading="lazy" decoding="async" />
+                    </a>
+                  ) : null}
+                  <div className={styles.assistantWebSearchResultBody}>
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.assistantWebSearchResultTitle}
+                    >
+                      {result.title}
+                    </a>
+                    <span className={styles.assistantWebSearchSource}>
+                      {favicon ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={favicon} alt="" loading="lazy" decoding="async" />
+                      ) : null}
+                      <span>{source}</span>
+                      {publishedLabel ? <span>{publishedLabel}</span> : null}
+                    </span>
+                    {result.snippet ? (
+                      <p className={styles.assistantWebSearchSnippet}>{result.snippet}</p>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className={styles.assistantWebSearchEmpty}>No results returned.</p>
+        )}
+      </aside>
+    );
   }
 
   function renderAssistantSentGeneratedImage(
@@ -34446,6 +34974,9 @@ function HomeContent(): React.JSX.Element {
   const [coffeeSelectedSessionId, setCoffeeSelectedSessionId] = useState<string | null>(null);
   const [coffeeGroups, setCoffeeGroups] = useState<CoffeeGroupState[]>([]);
   const [coffeeSelectedGroupId, setCoffeeSelectedGroupId] = useState<string | null>(null);
+  const [coffeeExcludedBotIds, setCoffeeExcludedBotIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [coffeeCollapsedGroupIds, setCoffeeCollapsedGroupIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -34453,13 +34984,23 @@ function HomeContent(): React.JSX.Element {
   const [coffeePresets, setCoffeePresets] = useState<CoffeePresetState[]>([]);
   const [coffeePresetsLoading, setCoffeePresetsLoading] = useState(false);
   const [coffeeSelectedDurationMinutes, setCoffeeSelectedDurationMinutes] =
-    useState<CoffeeSessionDurationMinutes>(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    useState<CoffeeSessionDurationMinutes>(DEFAULT_COFFEE_SESSION_DURATION_MINUTES);
   const [coffeeSelectedPresetId, setCoffeeSelectedPresetId] = useState("");
   const [coffeeOpeningPollModalOpen, setCoffeeOpeningPollModalOpen] = useState(false);
   const [coffeeOpeningPollQuestion, setCoffeeOpeningPollQuestion] = useState("");
   const [coffeeOpeningPollOptions, setCoffeeOpeningPollOptions] = useState<string[]>(() =>
     buildDefaultCoffeePollOptionDraft()
   );
+  const [coffeeTeamsModalOpen, setCoffeeTeamsModalOpen] = useState(false);
+  const [coffeeTeamsLeftName, setCoffeeTeamsLeftName] = useState("Left");
+  const [coffeeTeamsLeftDescription, setCoffeeTeamsLeftDescription] = useState("");
+  const [coffeeTeamsRightName, setCoffeeTeamsRightName] = useState("Right");
+  const [coffeeTeamsRightDescription, setCoffeeTeamsRightDescription] = useState("");
+  const [coffeeTeamsAssignments, setCoffeeTeamsAssignments] = useState<Record<string, CoffeeTeamId>>({});
+  const [coffeeTeamsTiebreakerBusy, setCoffeeTeamsTiebreakerBusy] = useState(false);
+  const [coffeeTeamsDraftPlayerTeamId, setCoffeeTeamsDraftPlayerTeamId] =
+    useState<CoffeeTeamId>("undecided");
+  const [coffeeTeamsPlayerSwitchBusy, setCoffeeTeamsPlayerSwitchBusy] = useState(false);
   const [coffeeActivePoll, setCoffeeActivePoll] = useState<CoffeePollState | null>(null);
   const coffeeActivePollRef = useRef<CoffeePollState | null>(null);
   const [coffeePollResultsOpen, setCoffeePollResultsOpen] = useState(false);
@@ -34495,6 +35036,35 @@ function HomeContent(): React.JSX.Element {
     coffeePollResultsOpen,
     devPanelSafeAreaInsets,
     view,
+    viewportHeight,
+    viewportWidth,
+  ]);
+  useEffect(() => {
+    if (!coffeeActivePoll || !coffeePollResultsOpen || coffeePollPanelMinimized) return;
+    const panel = coffeePollPanelRef.current;
+    if (!panel || typeof ResizeObserver === "undefined") return;
+    const resizeObserver = new ResizeObserver(() => {
+      const rect = panel.getBoundingClientRect();
+      setCoffeePollPanelPosition((current) => {
+        const next = clampCoffeePollPanelPosition(
+          current.x,
+          current.y,
+          rect.width,
+          rect.height,
+          viewportWidth,
+          viewportHeight,
+          devPanelSafeAreaInsets
+        );
+        return next.x === current.x && next.y === current.y ? current : next;
+      });
+    });
+    resizeObserver.observe(panel);
+    return () => resizeObserver.disconnect();
+  }, [
+    coffeeActivePoll,
+    coffeePollPanelMinimized,
+    coffeePollResultsOpen,
+    devPanelSafeAreaInsets,
     viewportHeight,
     viewportWidth,
   ]);
@@ -34558,6 +35128,7 @@ function HomeContent(): React.JSX.Element {
   /** Full user line shown in the center card during `userTableTyping` (before `queueCoffeeReveal`). */
   const [coffeeUserRevealText, setCoffeeUserRevealText] = useState("");
   const coffeePendingRevealAfterUserRef = useRef<CoffeePendingRevealQueueArgs | null>(null);
+  const coffeeRevealSettledWaitersRef = useRef<Array<() => void>>([]);
   /** Latest {@link queueCoffeeReveal} — the typewriter `useEffect` sits above its declaration in source order. */
   const queueCoffeeRevealFnRef = useRef<(args: CoffeePendingRevealQueueArgs) => void>(() => {});
   const [coffeeInterruptedSnippet, setCoffeeInterruptedSnippet] =
@@ -34577,6 +35148,8 @@ function HomeContent(): React.JSX.Element {
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeeAutoplayPausedRef = useRef(false);
   const coffeeDraftRef = useRef("");
+  const coffeeTableTalkLastTypedAtRef = useRef(0);
+  const coffeeTableTalkLastTypedConversationIdRef = useRef<string | null>(null);
   const coffeeReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const coffeeReplayTypewriterRafRef = useRef<number | null>(null);
   const coffeeReplayTypewriterLengthRef = useRef(0);
@@ -34654,6 +35227,9 @@ function HomeContent(): React.JSX.Element {
     touchPreviewPointerIdRef.current = null;
     setExpandedPromptShortcutTargetsByMessageId({});
     setCoffeeOpeningPollModalOpen(false);
+    setCoffeeTeamsModalOpen(false);
+    setCoffeeTeamsTiebreakerBusy(false);
+    setCoffeeTeamsPlayerSwitchBusy(false);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
     coffeePollPanelDragRef.current = null;
@@ -35777,6 +36353,21 @@ function HomeContent(): React.JSX.Element {
     (coffeeConversation
       ? coffeeSeatsFromBotIds(coffeeConversation.botGroupIds)
       : coffeeSelectedSeatBotIds);
+  const coffeeExcludedBotIdsArray = useMemo(
+    () => Array.from(coffeeExcludedBotIds),
+    [coffeeExcludedBotIds]
+  );
+  const coffeeSelectedGroupAttendingBotIds = useMemo(() => {
+    if (!coffeeSelectedGroup) return [];
+    return coffeeGroupAttendingBotIds(coffeeSelectedGroup.botGroupIds, coffeeExcludedBotIds);
+  }, [coffeeExcludedBotIds, coffeeSelectedGroup]);
+  const coffeeSelectedGroupAttendanceValid = coffeeSelectedGroup
+    ? coffeeGroupAttendanceCanStart(
+        coffeeSelectedGroup.botGroupIds,
+        coffeeExcludedBotIds,
+        COFFEE_GROUP_MIN_SIZE_CLIENT
+      )
+    : false;
   /** True when at least one bot in the current Coffee scope (selected during
    *  picking, or seated during a live session) is locked to "Offline only".
    *  When this is true the Coffee provider toggle locks to LOCAL — a single
@@ -39199,7 +39790,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeSelectedGroupId(null);
     setCoffeeCollapsedGroupIds(new Set());
     setCoffeePresets([]);
-    setCoffeeSelectedDurationMinutes(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    setCoffeeSelectedDurationMinutes(DEFAULT_COFFEE_SESSION_DURATION_MINUTES);
     setCoffeeSelectedPresetId("");
     setCoffeeOpeningPollModalOpen(false);
     setCoffeeOpeningPollQuestion("");
@@ -39440,6 +40031,7 @@ function HomeContent(): React.JSX.Element {
       promptInputOverride?: string;
       promptShortcut?: PromptShortcutMetadata;
       promptWildcards?: PromptWildcardRunMetadata;
+      manualTool?: ChatManualToolRequest;
       prismInterruption?: PrismMoodInterruptionInput;
       conversationIdOverride?: string | null;
       zenPersonaBotId?: string | null;
@@ -39549,6 +40141,7 @@ function HomeContent(): React.JSX.Element {
         : {}),
       ...(options.promptShortcut ? { promptShortcut: options.promptShortcut } : {}),
       ...(options.promptWildcards ? { promptWildcards: options.promptWildcards } : {}),
+      ...(options.manualTool ? { manualTool: options.manualTool } : {}),
       ...(mode === "zen" && options.personaTransition
         ? { personaTransition: options.personaTransition }
         : {}),
@@ -41568,6 +42161,7 @@ function HomeContent(): React.JSX.Element {
       starterPromptWarrantsIntro?: boolean;
       draftOverride?: string;
       promptInputOverride?: string;
+      manualToolOverride?: ChatManualToolRequest;
       queuedConversationId?: string | null;
       skipComposerHistory?: boolean;
       personaTransition?: ZenPersonaTransitionInput;
@@ -41705,7 +42299,43 @@ function HomeContent(): React.JSX.Element {
             ? { prompt: "", promptWildcards: null }
           : resolveComposerWildcardDraft(rawDraft);
     const composerPromptWildcards = composerWildcardResolution.promptWildcards;
-    const trimmed = composerWildcardResolution.prompt.trim();
+    const parsedManualToolResolution =
+      !commandCenterPromptActive && !isAssistantOnlyTurn && !options.starterPrompt
+        ? resolveComposerManualToolRequest(composerWildcardResolution.prompt)
+        : null;
+    const manualToolResolution = options.manualToolOverride
+      ? {
+          message: composerManualToolMessage(
+            options.manualToolOverride,
+            composerWildcardResolution.prompt
+          ),
+          manualTool: options.manualToolOverride,
+        }
+      : parsedManualToolResolution;
+    const manualToolForSend = manualToolResolution?.manualTool;
+    const trimmed = (manualToolResolution?.message ?? composerWildcardResolution.prompt).trim();
+    if (manualToolForSend && trimmed.length === 0) {
+      setError(
+        manualToolForSend.name === "askQuestion"
+          ? "Add a question after the tool chip."
+          : "Add a search query or image prompt after the tool chip."
+      );
+      return;
+    }
+    if (manualToolForSend?.name === "askQuestion" && !options.manualToolOverride) {
+      const question = (manualToolForSend.question ?? trimmed).trim();
+      if (!question) {
+        setError("Add a question after the tool chip.");
+        return;
+      }
+      setManualAskQuestionModal({
+        question,
+        options: ensureManualAskQuestionOptionRows(
+          Array.isArray(manualToolForSend.options) ? manualToolForSend.options : []
+        ),
+      });
+      return;
+    }
     const displayTrimmed = commandCenterPromptActive ? rawTrimmed : trimmed;
     const restoreDraftAfterSendStops = commandCenterPromptActive ? rawDraft : trimmed;
     const isStarterPrompt =
@@ -42342,6 +42972,7 @@ function HomeContent(): React.JSX.Element {
           ...(composerPromptWildcardsForSend
             ? { promptWildcards: composerPromptWildcardsForSend }
             : {}),
+          ...(manualToolForSend ? { manualTool: manualToolForSend } : {}),
           ...(sessionResumeContextForSend
             ? { sessionResumeContext: sessionResumeContextForSend }
             : {}),
@@ -42751,6 +43382,77 @@ function HomeContent(): React.JSX.Element {
         scheduleNextQueuedPrompt(successfulConversationId);
       }
     }
+  }
+
+  function updateManualAskQuestionOption(index: number, value: string): void {
+    setManualAskQuestionModal((current) => {
+      if (!current) return current;
+      const nextOptions = [...current.options];
+      const splitOptions = splitManualAskQuestionOptionText(value);
+      if (splitOptions.length > 1) {
+        nextOptions.splice(index, 1, ...splitOptions);
+        return {
+          ...current,
+          options: ensureManualAskQuestionOptionRows(
+            nextOptions.slice(0, MANUAL_ASK_QUESTION_OPTION_COUNT_MAX)
+          ),
+        };
+      }
+      nextOptions[index] = value;
+      return {
+        ...current,
+        options: nextOptions.slice(0, MANUAL_ASK_QUESTION_OPTION_COUNT_MAX),
+      };
+    });
+  }
+
+  function addManualAskQuestionOption(): void {
+    setManualAskQuestionModal((current) => {
+      if (!current || current.options.length >= MANUAL_ASK_QUESTION_OPTION_COUNT_MAX) {
+        return current;
+      }
+      return { ...current, options: [...current.options, ""] };
+    });
+  }
+
+  function removeManualAskQuestionOption(index: number): void {
+    setManualAskQuestionModal((current) => {
+      if (!current || current.options.length <= MANUAL_ASK_QUESTION_OPTION_COUNT_MIN) {
+        return current;
+      }
+      return {
+        ...current,
+        options: current.options.filter((_, optionIndex) => optionIndex !== index),
+      };
+    });
+  }
+
+  function manualAskQuestionPayload(): ReturnType<typeof buildManualAskQuestionPayload> {
+    if (!manualAskQuestionModal) return null;
+    return buildManualAskQuestionPayload(
+      manualAskQuestionModal.question,
+      manualAskQuestionModal.options
+    );
+  }
+
+  async function submitManualAskQuestionModal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const payload = manualAskQuestionPayload();
+    if (!payload) {
+      setError("Add a question before asking.");
+      return;
+    }
+    const manualTool: ChatManualToolRequest = {
+      name: "askQuestion",
+      question: payload.question,
+      ...(payload.options ? { options: payload.options } : {}),
+    };
+    setManualAskQuestionModal(null);
+    setError(null);
+    await sendMessage(event, {
+      draftOverride: payload.question,
+      manualToolOverride: manualTool,
+    });
   }
 
   type ComposerChip = {
@@ -43392,6 +44094,76 @@ function HomeContent(): React.JSX.Element {
               {renderComposerChipContent(chip, { splitAskQuestionLabels: true })}
             </button>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderManualAskQuestionResultCard(msg: Message): React.ReactNode {
+    if (msg.role !== "user" || !msg.manualAskQuestion) return null;
+    const manualAskQuestion = msg.manualAskQuestion;
+    if (
+      manualAskQuestion.name !== "AskQuestion" ||
+      manualAskQuestion.options.length < 2 ||
+      manualAskQuestion.options.length > 4
+    ) {
+      return null;
+    }
+    const selectedIndex =
+      typeof manualAskQuestion.selectedOptionIndex === "number"
+        ? manualAskQuestion.selectedOptionIndex
+        : manualAskQuestion.options.findIndex(
+            (option) => option.id === manualAskQuestion.selectedOptionId
+          );
+    const selectedOption =
+      selectedIndex >= 0 ? manualAskQuestion.options[selectedIndex] : undefined;
+    return (
+      <div
+        className={styles.askQuestionInlineCard}
+        data-ask-question-panel="true"
+        data-manual-ask-question-panel="true"
+        data-ask-question-state={selectedOption ? "other-selected" : "unanswered"}
+        role="group"
+        aria-label="AskQuestion result"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={styles.askQuestionInlineHeader}>
+          <span className={styles.askQuestionInlineEyebrow}>Asked the bot</span>
+        </div>
+        <p className={styles.askQuestionInlinePrompt}>
+          {manualAskQuestion.question}
+        </p>
+        {selectedOption ? (
+          <div className={styles.askQuestionInlineAnswer}>
+            <span>Bot picked</span>
+            <p>{selectedOption.label}</p>
+          </div>
+        ) : null}
+        <div
+          className={styles.askQuestionInlineChoices}
+          data-choices-disabled="true"
+        >
+          {manualAskQuestion.options.map((option, optionIndex) => {
+            const selected = selectedIndex === optionIndex;
+            return (
+              <div
+                key={`${msg.id}-${option.id}-${option.label.slice(0, 48)}-${optionIndex}`}
+                className={`${styles.conversationStarterChip} ${styles.manualAskQuestionChoice}`}
+                data-manual-ask-question-selected={selected ? "true" : undefined}
+                aria-current={selected ? "true" : undefined}
+              >
+                {renderComposerChipContent(
+                  {
+                    id: option.id,
+                    label: option.label,
+                    action: "send",
+                    sendValue: option.label,
+                  },
+                  { splitAskQuestionLabels: true }
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -58398,6 +59170,122 @@ function HomeContent(): React.JSX.Element {
   // would perturb CSS grid/flex layout in the parent <main>.
   const renderSharedPanels = (): React.JSX.Element => (
     <>
+      {manualAskQuestionModal ? (
+        <div
+          className={styles.coffeePollModalBackdrop}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setManualAskQuestionModal(null);
+            }
+          }}
+        >
+          <form
+            className={styles.coffeePollModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manual-ask-question-title"
+            onSubmit={(event) => {
+              void submitManualAskQuestionModal(event);
+            }}
+          >
+            <header className={styles.coffeePollModalHeader}>
+              <div>
+                <span>AskQuestion</span>
+                <h4 id="manual-ask-question-title">Question for the bot</h4>
+                <p>Leave choices blank for an open answer.</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close AskQuestion modal"
+                onClick={() => setManualAskQuestionModal(null)}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </header>
+            <div className={styles.coffeePollModalBody}>
+              <label>
+                <span>Question</span>
+                <textarea
+                  value={manualAskQuestionModal.question}
+                  onChange={(event) =>
+                    setManualAskQuestionModal((current) =>
+                      current ? { ...current, question: event.target.value } : current
+                    )
+                  }
+                  placeholder="What should the bot answer?"
+                  maxLength={180}
+                  rows={3}
+                  autoFocus
+                />
+              </label>
+              <div className={styles.coffeePollModalOptionSection}>
+                <span className={styles.coffeePollModalOptionLabel}>Optional answers</span>
+                <div className={styles.coffeePollOptionChipList}>
+                  {manualAskQuestionModal.options.map((option, index) => (
+                    <span
+                      key={index}
+                      className={styles.coffeePollOptionChip}
+                      data-filled={option.trim().length > 0 ? "true" : undefined}
+                    >
+                      <input
+                        type="text"
+                        value={option}
+                        onChange={(event) =>
+                          updateManualAskQuestionOption(index, event.target.value)
+                        }
+                        placeholder={
+                          MANUAL_ASK_QUESTION_OPTION_PLACEHOLDERS[index] ?? "Choice"
+                        }
+                        maxLength={80}
+                        aria-label={`AskQuestion answer ${index + 1}`}
+                      />
+                      {manualAskQuestionModal.options.length >
+                      MANUAL_ASK_QUESTION_OPTION_COUNT_MIN ? (
+                        <button
+                          type="button"
+                          className={styles.coffeePollOptionChipRemove}
+                          aria-label={`Remove ${
+                            MANUAL_ASK_QUESTION_OPTION_PLACEHOLDERS[index] ?? "choice"
+                          }`}
+                          onClick={() => removeManualAskQuestionOption(index)}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </span>
+                  ))}
+                  {manualAskQuestionModal.options.length <
+                  MANUAL_ASK_QUESTION_OPTION_COUNT_MAX ? (
+                    <button
+                      type="button"
+                      className={styles.coffeePollOptionAddChip}
+                      aria-label="Add AskQuestion answer"
+                      onClick={addManualAskQuestionOption}
+                    >
+                      +
+                    </button>
+                  ) : null}
+                </div>
+                <small className={styles.coffeePollModalOptionHint}>
+                  Two or more filled choices make the bot pick exactly one.
+                </small>
+              </div>
+              {!manualAskQuestionPayload() ? (
+                <p className={styles.coffeePollModalHint}>Add a question before asking.</p>
+              ) : null}
+            </div>
+            <footer className={styles.coffeePollModalActions}>
+              <button type="button" onClick={() => setManualAskQuestionModal(null)}>
+                Cancel
+              </button>
+              <button type="submit" disabled={!manualAskQuestionPayload()}>
+                {manualAskQuestionPayload()?.options ? "Ask with choices" : "Ask open-ended"}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
       <input
         ref={botImportInputRef}
         type="file"
@@ -65401,8 +66289,25 @@ function HomeContent(): React.JSX.Element {
       coffeeTypewriterRafRef.current = null;
     }
   };
+  const resolveCoffeeRevealSettledWaiters = () => {
+    const waiters = coffeeRevealSettledWaitersRef.current;
+    if (waiters.length === 0) return;
+    coffeeRevealSettledWaitersRef.current = [];
+    for (const resolve of waiters) resolve();
+  };
+  const waitForCoffeeRevealToSettle = async (): Promise<void> => {
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        coffeeRevealSettledWaitersRef.current.push(resolve);
+      }),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, COFFEE_BOT_REVEAL_DELAY_MAX_MS + COFFEE_SEND_COOLDOWN_MS * 2);
+      }),
+    ]);
+  };
   const resetCoffeeRhythm = () => {
     clearCoffeeRhythmTimers();
+    resolveCoffeeRevealSettledWaiters();
     setCoffeeTypewriterLength(0);
     setCoffeePendingSpeakerBotId(null);
     setCoffeePendingRevealConversation(null);
@@ -65456,11 +66361,34 @@ function HomeContent(): React.JSX.Element {
       setCoffeeTurnRhythmState(
         coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle"
       );
+      resolveCoffeeRevealSettledWaiters();
       args.onReveal?.();
     };
     clearCoffeeRhythmTimers();
     setCoffeePendingRevealConversation(args.conversation);
     setCoffeePendingSpeakerBotId(args.speakerBotId);
+    const typingDeferralMs = args.includeCooldown
+      ? 0
+      : coffeeTableTalkAutonomousDeferralMs(args.conversation.id);
+    if (typingDeferralMs > 0) {
+      const revealAfterTypingGrace = () => {
+        const nextDeferralMs = coffeeTableTalkAutonomousDeferralMs(args.conversation.id);
+        if (nextDeferralMs > 0) {
+          setCoffeeTurnRhythmState(
+            coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "cooldown"
+          );
+          coffeeCooldownTimerRef.current = setTimeout(revealAfterTypingGrace, nextDeferralMs);
+          return;
+        }
+        setCoffeeTurnRhythmState("tableTyping");
+        coffeeRevealTimerRef.current = setTimeout(applyReveal, revealDelayMs);
+      };
+      setCoffeeTurnRhythmState(
+        coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "cooldown"
+      );
+      coffeeCooldownTimerRef.current = setTimeout(revealAfterTypingGrace, typingDeferralMs);
+      return;
+    }
     if (args.includeCooldown) {
       setCoffeeTurnRhythmState("cooldown");
       coffeeCooldownTimerRef.current = setTimeout(() => {
@@ -65511,20 +66439,7 @@ function HomeContent(): React.JSX.Element {
       "--coffee-bot-text": pickReadableText(accent),
     } as React.CSSProperties;
   };
-  const coffeeSeatVisualStyle = (
-    bot: Bot,
-    seatIndex: number,
-    layoutIndex: number,
-    seatCount: number
-  ): React.CSSProperties => {
-    const sessionSeed = coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft";
-    return {
-      ...coffeeBotVisualStyle(bot),
-      "--coffee-cup-rotation-bias": coffeeCupRotationBias(
-        `${sessionSeed}:${bot.id}:${seatIndex}:${layoutIndex}:${seatCount}`
-      ),
-    } as React.CSSProperties;
-  };
+  const coffeeSeatVisualStyle = (bot: Bot): React.CSSProperties => coffeeBotVisualStyle(bot);
   const coffeeBotSubtitle = (bot: Bot): string => {
     const clean = bot.system_prompt.replace(/\s+/g, " ").trim();
     if (!clean) return "Coffee guest";
@@ -65595,8 +66510,8 @@ function HomeContent(): React.JSX.Element {
     return normalizeCoffeeSessionSettings({
       responseLength: pick(["brief", "balanced", "detailed", "roomy"] as const),
       responseDelayBias: Math.round(Math.random() * 100),
-      tableEnergy: pick(["still", "relaxed", "buzzy", "theatre"] as const),
-      crossTalk: pick(["rare", "normal", "chatty"] as const),
+      tableEnergy: pick(["still", "relaxed", "buzzy", "theatre", "afterparty"] as const),
+      crossTalk: pick(["rare", "normal", "chatty", "pileup"] as const),
       breathingRoom: Math.round(Math.random() * 100),
       stayOnThread: Math.random() >= 0.35,
       givePlayerLastWord: Math.random() >= 0.35,
@@ -65684,6 +66599,54 @@ function HomeContent(): React.JSX.Element {
     if (!question || options.length < 2) return undefined;
     return { question, options };
   };
+  const coffeeTeamSetupBotIds = (): string[] =>
+    (coffeeConversation?.botGroupIds ?? coffeeActiveBotIds).filter(
+      (botId): botId is string => typeof botId === "string" && botId.length > 0
+    );
+  const resetCoffeeTeamsDraft = (botIds = coffeeTeamSetupBotIds()) => {
+    setCoffeeTeamsLeftName("Left");
+    setCoffeeTeamsLeftDescription("");
+    setCoffeeTeamsRightName("Right");
+    setCoffeeTeamsRightDescription("");
+    setCoffeeTeamsAssignments(defaultCoffeeTeamAssignments(botIds));
+    setCoffeeTeamsDraftPlayerTeamId("undecided");
+  };
+  const openCoffeeTeamsModal = () => {
+    resetCoffeeTeamsDraft();
+    setCoffeeTeamsModalOpen(true);
+  };
+  const updateCoffeeTeamAssignment = (botId: string, teamId: CoffeeTeamId) => {
+    setCoffeeTeamsAssignments((current) => ({ ...current, [botId]: teamId }));
+  };
+  const coffeeTeamsPayload = (): CoffeeTeamSessionConfig | undefined => {
+    const botIds = coffeeTeamSetupBotIds();
+    const leftName = coffeeTeamsLeftName.replace(/\s+/g, " ").trim();
+    const rightName = coffeeTeamsRightName.replace(/\s+/g, " ").trim();
+    const leftDescription = coffeeTeamsLeftDescription.replace(/\s+/g, " ").trim();
+    const rightDescription = coffeeTeamsRightDescription.replace(/\s+/g, " ").trim();
+    if (!leftName || !rightName || !leftDescription || !rightDescription) return undefined;
+    const assignments: Record<string, CoffeeTeamId> = {};
+    for (const botId of botIds) {
+      const teamId = coffeeTeamsAssignments[botId] ?? "undecided";
+      if (!COFFEE_TEAM_IDS.includes(teamId)) return undefined;
+      assignments[botId] = teamId;
+    }
+    const counts = coffeeTeamDraftCounts(assignments, botIds);
+    if (
+      counts.left < COFFEE_TEAM_SIDE_MIN_SIZE_CLIENT ||
+      counts.right < COFFEE_TEAM_SIDE_MIN_SIZE_CLIENT ||
+      counts.left > COFFEE_TEAM_SIDE_MAX_SIZE_CLIENT ||
+      counts.right > COFFEE_TEAM_SIDE_MAX_SIZE_CLIENT
+    ) {
+      return undefined;
+    }
+    return {
+      left: { name: leftName, description: leftDescription },
+      right: { name: rightName, description: rightDescription },
+      assignments,
+      playerTeamId: coffeeTeamsDraftPlayerTeamId,
+    };
+  };
   const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
   const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
     if (!coffeeSearchTerm) return true;
@@ -65700,6 +66663,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
     setCoffeeSelectedGroupId(null);
+    setCoffeeExcludedBotIds(new Set());
     setCoffeeSelectedSeatBotIds(emptyCoffeeSeatBotIds());
     setCoffeeDraft("");
     setCoffeeBusy(false);
@@ -65713,6 +66677,10 @@ function HomeContent(): React.JSX.Element {
     setCoffeeStarterTopics([]);
     setCoffeePendingArrivalScenario("user-first");
     resetCoffeeOpeningPollDraft();
+    resetCoffeeTeamsDraft([]);
+    setCoffeeTeamsModalOpen(false);
+    setCoffeeTeamsTiebreakerBusy(false);
+    setCoffeeTeamsPlayerSwitchBusy(false);
     setCoffeeActivePoll(null);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
@@ -65730,13 +66698,14 @@ function HomeContent(): React.JSX.Element {
     setCoffeeConversation(null);
     setCoffeeSelectedSessionId(null);
     setCoffeeSelectedGroupId(group.id);
+    setCoffeeExcludedBotIds(new Set());
     collapseCoffeeGroupsExcept(group.id);
     setCoffeeSelectedSeatBotIds(group.coffeeSeatBotIds);
     setCoffeeSessionSettings(normalizeCoffeeSessionSettings(group.coffeeSettings));
     setCoffeeSettingsDraft(normalizeCoffeeSessionSettings(group.coffeeSettings));
     setCoffeeGroupNameDraft(group.name);
     setCoffeeSelectedPresetId(group.presetMode === "auto" ? COFFEE_AUTO_PRESET_ID : "");
-    setCoffeeSelectedDurationMinutes(COFFEE_DEFAULT_SESSION_DURATION_MINUTES);
+    setCoffeeSelectedDurationMinutes(DEFAULT_COFFEE_SESSION_DURATION_MINUTES);
     setCoffeeDraft("");
     setCoffeeBusy(false);
     setCoffeeAutoBusy(false);
@@ -65747,9 +66716,23 @@ function HomeContent(): React.JSX.Element {
     assignCoffeeSessionEndsAtMs(null);
     setCoffeeSessionPhase("selecting");
     resetCoffeeOpeningPollDraft();
+    resetCoffeeTeamsDraft(group.botGroupIds);
+    setCoffeeTeamsModalOpen(false);
+    setCoffeeTeamsTiebreakerBusy(false);
+    setCoffeeTeamsPlayerSwitchBusy(false);
     setCoffeeActivePoll(null);
     setCoffeePollResultsOpen(false);
     setCoffeePollPanelMinimized(false);
+  };
+  const coffeeTableTalkAutonomousDeferralMs = (conversationId: string, now = Date.now()): number => {
+    return coffeeTableTalkAutoplayDeferralMs({
+      conversationId,
+      draft: coffeeDraftRef.current,
+      lastTypedAtMs: coffeeTableTalkLastTypedAtRef.current,
+      lastTypedConversationId: coffeeTableTalkLastTypedConversationIdRef.current,
+      nowMs: now,
+      graceMs: COFFEE_TABLE_TALK_TYPING_GRACE_MS,
+    });
   };
   const scheduleCoffeeAutonomousTurn = (
     conversationId: string,
@@ -65771,9 +66754,18 @@ function HomeContent(): React.JSX.Element {
     if (!ignoreDraft && coffeeDraftRef.current.trim().length > 0) return;
     const delay = randomCoffeeAutonomousDelayMs(coffeeSessionSettingsRef.current, delayMultiplier);
     const sessionDeadline = effectiveEndsAt;
-    coffeeLoopTimerRef.current = setTimeout(() => {
+    const startAutonomousTurn = () => {
+      const typingDeferralMs = coffeeTableTalkAutonomousDeferralMs(conversationId);
+      if (typingDeferralMs > 0) {
+        if (coffeeDraftRef.current.trim().length > 0) {
+          setCoffeeTurnRhythmState("playerComposing");
+        }
+        coffeeLoopTimerRef.current = setTimeout(startAutonomousTurn, typingDeferralMs);
+        return;
+      }
       void continueCoffeeSession(conversationId, sessionDeadline);
-    }, delay);
+    };
+    coffeeLoopTimerRef.current = setTimeout(startAutonomousTurn, delay);
   };
   const currentCoffeeSessionRemainingMs = (): number | null => {
     const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
@@ -65877,6 +66869,97 @@ function HomeContent(): React.JSX.Element {
       return false;
     } finally {
       setCoffeeBusy(false);
+    }
+  };
+  const createCoffeeTeamsTopic = async (
+    conversation: CoffeeConversationState,
+    scenario: CoffeeArrivalScenario
+  ): Promise<boolean> => {
+    const initialTeams = coffeeTeamsPayload();
+    if (!initialTeams) {
+      setCoffeeError(
+        "Name both sides, describe what they stand for, and place 1-4 bots on each side."
+      );
+      return false;
+    }
+    setCoffeeBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        teams: CoffeeTeamState;
+      }>(`/api/coffee/sessions/${encodeURIComponent(conversation.id)}/teams`, {
+        method: "POST",
+        body: JSON.stringify(initialTeams),
+      });
+      setCoffeeConversation(response.conversation);
+      setCoffeeStarterTopics([]);
+      setCoffeeTeamsModalOpen(false);
+      startCoffeeArrivalSequence(response.conversation, scenario);
+      void refreshConversations();
+      return true;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to start Coffee Teams.");
+      return false;
+    } finally {
+      setCoffeeBusy(false);
+    }
+  };
+  const resolveCoffeeTeamTiebreaker = async (
+    winnerTeamId: CoffeeWinningTeamId
+  ): Promise<boolean> => {
+    const conversation = coffeeConversationRef.current ?? coffeeConversation;
+    if (!conversation || coffeeTeamsTiebreakerBusy) return false;
+    setCoffeeTeamsTiebreakerBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        teams: CoffeeTeamState;
+      }>(`/api/coffee/sessions/${encodeURIComponent(conversation.id)}/teams/tiebreak`, {
+        method: "POST",
+        body: JSON.stringify({ winnerTeamId }),
+      });
+      setCoffeeConversation(response.conversation);
+      void refreshConversations();
+      return true;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to resolve Coffee Teams tie.");
+      return false;
+    } finally {
+      setCoffeeTeamsTiebreakerBusy(false);
+    }
+  };
+  const switchCoffeePlayerTeam = async (teamId: CoffeeTeamId): Promise<boolean> => {
+    const conversation = coffeeConversationRef.current ?? coffeeConversation;
+    if (!conversation || coffeeTeamsPlayerSwitchBusy) return false;
+    const currentTeamId = conversation.coffeeTeams?.player?.currentTeamId ?? "undecided";
+    if (currentTeamId === teamId) return false;
+    setCoffeeTeamsPlayerSwitchBusy(true);
+    setCoffeeError(null);
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        teams: CoffeeTeamState;
+      }>(`/api/coffee/sessions/${encodeURIComponent(conversation.id)}/teams/player`, {
+        method: "POST",
+        body: JSON.stringify({ teamId }),
+      });
+      setCoffeeConversation(response.conversation);
+      void refreshConversations();
+      if (coffeeSessionPhase === "live") {
+        const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
+        scheduleCoffeeAutonomousTurn(response.conversation.id, endsAt, true, 0.45);
+      }
+      return true;
+    } catch (err) {
+      setCoffeeError(err instanceof Error ? err.message : "Failed to switch Coffee Teams side.");
+      return false;
+    } finally {
+      setCoffeeTeamsPlayerSwitchBusy(false);
     }
   };
   const castCoffeePlayerPollVote = async (
@@ -66075,6 +67158,14 @@ function HomeContent(): React.JSX.Element {
     group = coffeeSelectedGroup
   ): Promise<CoffeeConversationState | null> => {
     if (!group || coffeeBusy) return null;
+    const excludedBotIds = coffeeGroupSessionExcludedBotIds(
+      group.botGroupIds,
+      coffeeExcludedBotIdsArray
+    );
+    if (!coffeeGroupAttendanceCanStart(group.botGroupIds, excludedBotIds, COFFEE_GROUP_MIN_SIZE_CLIENT)) {
+      setCoffeeError(`Invite at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to start a Coffee Session.`);
+      return null;
+    }
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -66088,6 +67179,7 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           durationMinutes: coffeeSelectedDurationMinutes,
           ...(coffeeSelectedPresetId ? { presetId: coffeeSelectedPresetId } : {}),
+          ...(excludedBotIds.length > 0 ? { excludedBotIds } : {}),
         }),
       });
       setCoffeeConversation(response.conversation);
@@ -66100,6 +67192,7 @@ function HomeContent(): React.JSX.Element {
         response.conversation.coffeeSeatBotIds ??
           coffeeSeatsFromBotIds(response.conversation.botGroupIds ?? group.botGroupIds)
       );
+      setCoffeeExcludedBotIds(new Set());
       setCoffeeAutoplayPausedValue(false);
       const serverStarters = response.coffeeStarterTopics ?? [];
       const seatLayout =
@@ -66258,6 +67351,7 @@ function HomeContent(): React.JSX.Element {
       const groupIds = response.conversation.botGroupIds ?? [];
       setCoffeeConversation(response.conversation);
       setCoffeeSelectedGroupId(response.conversation.coffeeGroupId ?? null);
+      setCoffeeExcludedBotIds(new Set());
       setCoffeeSessionSettings(
         normalizeCoffeeSessionSettings(response.conversation.coffeeSettings ?? undefined)
       );
@@ -66340,6 +67434,19 @@ function HomeContent(): React.JSX.Element {
     if (endsAtLive && Date.now() >= endsAtLive) {
       setCoffeeSessionPhase("finished");
       return;
+    }
+    if (!directedSpeakerBotId) {
+      const typingDeferralMs = coffeeTableTalkAutonomousDeferralMs(conversationId);
+      if (typingDeferralMs > 0) {
+        clearCoffeeLoopTimer();
+        if (coffeeDraftRef.current.trim().length > 0) {
+          setCoffeeTurnRhythmState("playerComposing");
+        }
+        coffeeLoopTimerRef.current = setTimeout(() => {
+          scheduleCoffeeAutonomousTurn(conversationId, endsAtLive, true, 0.35);
+        }, typingDeferralMs);
+        return;
+      }
     }
     clearCoffeeLoopTimer();
     setCoffeeAutoBusy(true);
@@ -66569,17 +67676,28 @@ function HomeContent(): React.JSX.Element {
       setCoffeeError(coffeeCommand.error);
       return;
     }
-    clearCoffeeLoopTimer();
-    coffeeContinueAbortRef.current?.abort();
-    coffeeContinueAbortRef.current = null;
-    setCoffeeAutoBusy(false);
+    const draftStageDirections = extractStageDirections(trimmed);
+    const draftTableText = draftStageDirections.mainText.trim();
     const pendingRevealMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingRevealLatestMessage =
       pendingRevealMessages.length > 0
         ? pendingRevealMessages[pendingRevealMessages.length - 1]
         : null;
+    const draftIsActionOnly =
+      draftTableText.length === 0 && draftStageDirections.actions.length > 0;
+    const actionShouldWaitForBotReveal =
+      draftIsActionOnly &&
+      coffeeTurnRhythmState === "tableTyping" &&
+      pendingRevealLatestMessage?.role === "assistant";
+    if (!actionShouldWaitForBotReveal) {
+      clearCoffeeLoopTimer();
+      coffeeContinueAbortRef.current?.abort();
+      coffeeContinueAbortRef.current = null;
+      setCoffeeAutoBusy(false);
+    }
     let playerInterruption: CoffeePlayerInterruptionInput | undefined;
     if (
+      !draftIsActionOnly &&
       coffeeTurnRhythmState === "tableTyping" &&
       pendingRevealLatestMessage?.role === "assistant" &&
       coffeePendingSpeakerBotId
@@ -66617,8 +67735,19 @@ function HomeContent(): React.JSX.Element {
       setCoffeePendingRevealConversation(null);
       setCoffeeTurnRhythmState("playerComposing");
     }
-    let activeConversation = coffeeConversation;
-    let activeEndsAt = coffeeSessionEndsAtMs;
+    if (actionShouldWaitForBotReveal) {
+      setCoffeeBusy(true);
+      setCoffeeDraft("");
+      setCoffeeError(null);
+      await waitForCoffeeRevealToSettle();
+      clearCoffeeLoopTimer();
+      coffeeContinueAbortRef.current?.abort();
+      coffeeContinueAbortRef.current = null;
+      setCoffeeAutoBusy(false);
+      setCoffeeBusy(false);
+    }
+    let activeConversation = coffeeConversationRef.current ?? coffeeConversation;
+    let activeEndsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
     if (!activeConversation) {
       activeConversation = await createCoffeeSession({ startArrival: false });
       if (!activeConversation) return;
@@ -66710,8 +67839,13 @@ function HomeContent(): React.JSX.Element {
     );
     coffeePendingRevealAfterUserRef.current = null;
     clearCoffeeRhythmTimers();
-    setCoffeeUserRevealText(trimmed);
-    setCoffeeTurnRhythmState("userTableTyping");
+    if (draftTableText.length > 0) {
+      setCoffeeUserRevealText(trimmed);
+      setCoffeeTurnRhythmState("userTableTyping");
+    } else {
+      setCoffeeUserRevealText("");
+      setCoffeeTurnRhythmState("botThinking");
+    }
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
     try {
@@ -67177,6 +68311,10 @@ function HomeContent(): React.JSX.Element {
       </li>
     );
   };
+  const coffeeModelQualityHintText =
+    coffeeAnyOfflineProtected || coffeeProvider === "local"
+      ? "Model caliber matters: stronger local models carry banter, interruptions, and persona contrast better. If the table feels flat, try a stronger local model before judging the group."
+      : "Model caliber matters: stronger models carry banter, interruptions, and persona contrast better. If the table feels flat, try a stronger model before judging the group.";
   const renderCoffeeSessionSettingsFields = (
     settings = coffeeSessionSettings,
     setSettings = setCoffeeSessionSettings,
@@ -67284,7 +68422,8 @@ function HomeContent(): React.JSX.Element {
             <option value="still">Still water</option>
             <option value="relaxed">Relaxed</option>
             <option value="buzzy">Buzzy</option>
-            <option value="theatre">Theatre night</option>
+            <option value="theatre">Theater night</option>
+            <option value="afterparty">Afterparty</option>
           </select>
         </div>
         <div className={styles.coffeeSettingsField}>
@@ -67315,6 +68454,7 @@ function HomeContent(): React.JSX.Element {
             <option value="rare">Rare — one voice at a time</option>
             <option value="normal">Normal overlap</option>
             <option value="chatty">Chatty — lots of riffing</option>
+            <option value="pileup">Pile-up — interruptive</option>
           </select>
         </div>
         <div className={styles.coffeeSettingsField}>
@@ -67563,6 +68703,7 @@ function HomeContent(): React.JSX.Element {
               These defaults are stored on this device and are sent when you start a new Coffee Session.
               Adjust them here before you sit down; during a live table, use Table talk to read the thread.
             </p>
+            <p className={styles.coffeeModelQualityHint}>{coffeeModelQualityHintText}</p>
             {renderCoffeeSessionSettingsFields()}
           </section>
         </aside>
@@ -67928,6 +69069,8 @@ function HomeContent(): React.JSX.Element {
                 : "Reviewing a completed session."
               : coffeeSessionPhase === "finished" && !coffeeReplayActive
                 ? "Preparing session synopsis..."
+              : coffeeSelectedGroup && !coffeeSelectedGroupAttendanceValid
+                ? `Invite at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots to begin.`
               : coffeeSelectedGroup
                 ? "This group is ready."
                 : "Select bots below, then create a Coffee Group.";
@@ -67983,14 +69126,35 @@ function HomeContent(): React.JSX.Element {
       const botIdByName = new Map<string, string>(
         coffeeMentionBotPicks.map((bot) => [bot.name, bot.id])
       );
-      for (const message of tableTimelineMessages) {
+      const lastSipMessageIndexByBotId = new Map<string, number>();
+      for (let messageIndex = 0; messageIndex < tableTimelineMessages.length; messageIndex += 1) {
+        const message = tableTimelineMessages[messageIndex]!;
         if (message.role !== "assistant" || !message.botName) continue;
         const botId = botIdByName.get(message.botName);
         if (!botId) continue;
+        const bot = coffeeBotsById.get(botId) ?? null;
         const { actions } = extractStageDirections(message.content);
-        const actionHistory = actions
-          .map((action) => normalizeCoffeeSeatActionBadgeText(action))
-          .filter((action) => action.length > 0);
+        const actionHistory: string[] = [];
+        let acceptedSipForMessage = false;
+        for (const action of actions) {
+          const normalized = normalizeCoffeeSeatActionBadgeText(action, bot);
+          if (!normalized) continue;
+          if (coffeeActionIsSip(normalized)) {
+            if (acceptedSipForMessage) continue;
+            if (
+              !coffeeActionPassesSipCadence(
+                normalized,
+                messageIndex,
+                lastSipMessageIndexByBotId.get(botId)
+              )
+            ) {
+              continue;
+            }
+            acceptedSipForMessage = true;
+            lastSipMessageIndexByBotId.set(botId, messageIndex);
+          }
+          actionHistory.push(normalized);
+        }
         if (actionHistory.length > 0) {
           const previous = out.get(botId) ?? [];
           const next = [...previous];
@@ -68015,6 +69179,8 @@ function HomeContent(): React.JSX.Element {
         }
       >();
       if (!tableTypingBot || !tableTypingAssistantRawText) return out;
+      const tableTypingBotActionContext = coffeeBotsById.get(tableTypingBot.id) ?? null;
+      const tableTypingSpokenText = extractStageDirections(tableTypingAssistantRawText).mainText;
       const cues = extractStageDirectionCues(tableTypingAssistantRawText);
       if (cues.length === 0) return out;
       let activeCueIndex = -1;
@@ -68024,10 +69190,20 @@ function HomeContent(): React.JSX.Element {
         }
       }
       if (activeCueIndex >= 0) {
-        const current = normalizeCoffeeSeatActionBadgeText(cues[activeCueIndex]!.action);
+        const currentRaw = cues[activeCueIndex]!.action;
+        if (!coffeeActionCanDisplayWhileSpeaking(currentRaw, tableTypingSpokenText)) return out;
+        const current = normalizeCoffeeSeatActionBadgeText(
+          currentRaw,
+          tableTypingBotActionContext
+        );
         if (current.length > 0) {
           const previousRaw = activeCueIndex > 0 ? cues[activeCueIndex - 1]!.action : "";
-          const previousNormalized = normalizeCoffeeSeatActionBadgeText(previousRaw);
+          const previousNormalized = coffeeActionCanDisplayWhileSpeaking(
+            previousRaw,
+            tableTypingSpokenText
+          )
+            ? normalizeCoffeeSeatActionBadgeText(previousRaw, tableTypingBotActionContext)
+            : "";
           out.set(tableTypingBot.id, {
             current,
             previous: previousNormalized.length > 0 ? previousNormalized : null,
@@ -68050,6 +69226,31 @@ function HomeContent(): React.JSX.Element {
           !arrivedBotIds.has(entry.botId)
         );
       });
+    const coffeeTeamsState = coffeeConversation?.coffeeTeams ?? null;
+    const coffeeTeamRankByBotId = new Map<string, number>();
+    if (coffeeTeamsState) {
+      const ranks: Record<CoffeeTeamId, number> = { left: 0, undecided: 0, right: 0 };
+      for (const { bot } of visibleCoffeeSeats) {
+        const teamId = coffeeTeamsState.bots[bot.id]?.currentTeamId ?? "undecided";
+        coffeeTeamRankByBotId.set(bot.id, ranks[teamId]);
+        ranks[teamId] += 1;
+      }
+    }
+    const coffeeTeamsOutcome = coffeeTeamOutcomeText(coffeeTeamsState);
+    const coffeeTeamsNeedsTiebreaker =
+      coffeeTeamsState?.status === "tiebreaker" ||
+      (coffeeSessionPhase === "finished" &&
+        coffeeTeamsState != null &&
+        !coffeeTeamsState.winnerTeamId &&
+        coffeeTeamsState.counts.left === coffeeTeamsState.counts.right &&
+        coffeeTeamsState.counts.left > 0);
+    const coffeePlayerTeamId = coffeeTeamsState?.player?.currentTeamId ?? "undecided";
+    const coffeePlayerTeamSwitchAllowed =
+      coffeeTeamsState?.status === "active" &&
+      !previewingSession &&
+      coffeeSessionPhase !== "selecting" &&
+      coffeeSessionPhase !== "topic" &&
+      coffeeSessionPhase !== "finished";
     /** Bottom autoplay dock — visible while live, but the recap UI moves into the
      *  table center on finished, so we hide the dock there entirely. */
     const coffeeSessionJoinedDock =
@@ -68060,8 +69261,10 @@ function HomeContent(): React.JSX.Element {
     /** Compact table only before a session exists — once a conversation is loaded, use full-size assets. */
     const compactCoffeeStage =
       coffeeSessionPhase === "selecting" && coffeeConversation === null;
-    const coffeeGroupReadyToStart =
+    const coffeeGroupSelectedForStart =
       coffeeSessionPhase === "selecting" && coffeeConversation === null && coffeeSelectedGroup !== null;
+    const coffeeGroupReadyToStart =
+      coffeeGroupSelectedForStart && coffeeSelectedGroupAttendanceValid;
     const coffeeGazeNameToId = new Map<string, string>(
       visibleCoffeeSeats.map(({ bot }) => [bot.name, bot.id])
     );
@@ -68070,6 +69273,57 @@ function HomeContent(): React.JSX.Element {
       seatIndex,
       layoutIndex,
     }));
+    const coffeeSeatActionDisplays = visibleCoffeeSeats
+      .map(({ seatIndex, bot }, layoutIndex) => {
+        const teamId = coffeeTeamsState?.bots[bot.id]?.currentTeamId ?? null;
+        const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
+        const seatLiveActionBadgeText = seatTypingActionState?.current ?? null;
+        const seatLastActionHistory = latestSeatActionsByBotId.get(bot.id) ?? [];
+        const seatLastActionBadgeText =
+          seatLastActionHistory.length > 0
+            ? seatLastActionHistory[seatLastActionHistory.length - 1] ?? null
+            : null;
+        const seatIsThinkingThisSeat = thinkingBotId === bot.id;
+        const seatActionPrimaryText = seatLiveActionBadgeText ?? seatLastActionBadgeText;
+        const seatActionGhostText =
+          seatIsThinkingThisSeat && seatLastActionBadgeText
+            ? seatLastActionBadgeText
+            : seatTypingActionState?.previous
+              ? seatTypingActionState.previous
+              : seatLiveActionBadgeText &&
+                  seatLastActionBadgeText &&
+                  seatLiveActionBadgeText !== seatLastActionBadgeText
+                ? seatLastActionBadgeText
+                : seatLastActionHistory.length > 1
+                  ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
+                  : null;
+        const displayPrimaryText =
+          !seatIsThinkingThisSeat && !notifiedBotIds.has(bot.id)
+            ? seatActionPrimaryText
+            : null;
+        return {
+          bot,
+          seatIndex,
+          layoutIndex,
+          teamId,
+          teamRank: teamId ? coffeeTeamRankByBotId.get(bot.id) ?? 0 : null,
+          seatCount: visibleCoffeeSeats.length,
+          seatBadgeSide: coffeeSeatBadgeSide(visibleCoffeeSeats.length, layoutIndex),
+          seatActionGhostText,
+          seatActionGhostVerbose: seatActionGhostText
+            ? isZenLiveBotPresenceActionVerbose(seatActionGhostText)
+            : false,
+          seatActionPrimaryText: displayPrimaryText,
+          seatActionPrimaryVerbose: displayPrimaryText
+            ? isZenLiveBotPresenceActionVerbose(displayPrimaryText)
+            : false,
+        };
+      })
+      .filter(
+        (display) =>
+          display.seatActionGhostText != null ||
+          display.seatActionPrimaryText != null
+      );
     const coffeePollTotalVotes = coffeeActivePoll
       ? coffeeActivePoll.votes.filter((vote) => vote.kind === "option").length
       : 0;
@@ -68100,6 +69354,12 @@ function HomeContent(): React.JSX.Element {
       coffeePollSessionRemainingMs <= COFFEE_POLL_FINALIZE_REMAINING_MS;
     const coffeePollIsBinary =
       coffeeActivePoll != null && coffeeActivePoll.options.length === COFFEE_POLL_OPTION_COUNT_MIN;
+    const coffeeTeamsModalBotIds = coffeeTeamSetupBotIds();
+    const coffeeTeamsDraftCounts = coffeeTeamDraftCounts(
+      coffeeTeamsAssignments,
+      coffeeTeamsModalBotIds
+    );
+    const coffeeTeamsDraftReady = coffeeTeamsPayload() != null;
     const coffeePollInSession =
       coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live";
     const coffeePollBubbleVisible =
@@ -68129,7 +69389,7 @@ function HomeContent(): React.JSX.Element {
         )
           .map((action) => ({
             ...action,
-            action: normalizeCoffeeSeatActionBadgeText(action.action),
+            action: normalizeCoffeeSeatActionBadgeText(action.action, replayActionPanelBot),
           }))
           .filter((action) => action.action.length > 0)
       : [];
@@ -68149,6 +69409,7 @@ function HomeContent(): React.JSX.Element {
         data-preview={previewingSession ? "true" : undefined}
         data-replay-active={coffeeReplayActive ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
+        data-team-mode={coffeeTeamsState ? "true" : undefined}
         aria-label="Coffee table"
         onWheel={handleCoffeeReplayWheel}
       >
@@ -68162,6 +69423,81 @@ function HomeContent(): React.JSX.Element {
         <div className={styles.coffeeTableScene}>
           <div className={styles.coffeeTableGlow} aria-hidden="true" />
           <div className={styles.coffeeTableDisk} aria-hidden="true" />
+          {coffeeTeamsState ? (
+            <aside className={styles.coffeeTeamsStatusPanel} aria-label="Coffee Teams score">
+              <div className={styles.coffeeTeamsStatusHeader}>
+                <span>Teams</span>
+                <strong>{coffeeTeamsOutcome ?? "Live score"}</strong>
+              </div>
+              <div className={styles.coffeeTeamsScoreRow}>
+                <span data-team-id="left">
+                  <b>{coffeeTeamsState.counts.left}</b>
+                  {coffeeTeamsState.left.name}
+                </span>
+                <span data-team-id="undecided">
+                  <b>{coffeeTeamsState.counts.undecided}</b>
+                  Undecided
+                </span>
+                <span data-team-id="right">
+                  <b>{coffeeTeamsState.counts.right}</b>
+                  {coffeeTeamsState.right.name}
+                </span>
+              </div>
+              <div
+                className={styles.coffeeTeamsPlayerControl}
+                data-team-id={coffeePlayerTeamId}
+              >
+                <span>You</span>
+                <div aria-label="Your Coffee Teams side">
+                  {COFFEE_TEAM_IDS.map((teamId) => (
+                    <button
+                      key={teamId}
+                      type="button"
+                      data-team-id={teamId}
+                      data-selected={coffeePlayerTeamId === teamId ? "true" : undefined}
+                      disabled={
+                        !coffeePlayerTeamSwitchAllowed ||
+                        coffeeTeamsPlayerSwitchBusy ||
+                        coffeePlayerTeamId === teamId
+                      }
+                      onClick={() => void switchCoffeePlayerTeam(teamId)}
+                    >
+                      {coffeeTeamName(coffeeTeamsState, teamId)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {coffeeTeamsNeedsTiebreaker ? (
+                <div className={styles.coffeeTeamsTiebreaker}>
+                  <p>The table tied. Pick the side whose final pitch landed.</p>
+                  <blockquote data-team-id="left">
+                    {coffeeTeamsState.tiebreakerPitches?.left ??
+                      `${coffeeTeamsState.left.name}: ${coffeeTeamsState.left.description}`}
+                  </blockquote>
+                  <blockquote data-team-id="right">
+                    {coffeeTeamsState.tiebreakerPitches?.right ??
+                      `${coffeeTeamsState.right.name}: ${coffeeTeamsState.right.description}`}
+                  </blockquote>
+                  <div>
+                    <button
+                      type="button"
+                      disabled={coffeeTeamsTiebreakerBusy}
+                      onClick={() => void resolveCoffeeTeamTiebreaker("left")}
+                    >
+                      Choose {coffeeTeamsState.left.name}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={coffeeTeamsTiebreakerBusy}
+                      onClick={() => void resolveCoffeeTeamTiebreaker("right")}
+                    >
+                      Choose {coffeeTeamsState.right.name}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </aside>
+          ) : null}
           <div className={styles.coffeeTableFocalColumn}>
             <div className={styles.coffeeTableFocalStack}>
               <div
@@ -68337,14 +69673,18 @@ function HomeContent(): React.JSX.Element {
                     {coffeeBusy ? "Creating group..." : "Create Coffee Group →"}
                   </button>
                 )}
-                {coffeeGroupReadyToStart && (
+                {coffeeGroupSelectedForStart && (
                   <button
                     type="button"
                     className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
-                    disabled={coffeeBusy}
+                    disabled={coffeeBusy || !coffeeSelectedGroupAttendanceValid}
                     onClick={() => void startCoffeeSessionFromGroup()}
                   >
-                    {coffeeBusy ? "Starting..." : `Start ${coffeeSelectedDurationMinutes}m session`}
+                    {coffeeBusy
+                      ? "Starting..."
+                      : coffeeSelectedGroupAttendanceValid
+                        ? `Start session with ${coffeeSelectedGroupAttendingBotIds.length}`
+                        : `Invite ${COFFEE_GROUP_MIN_SIZE_CLIENT} bots`}
                   </button>
                 )}
                 {previewingSession && (
@@ -68425,41 +69765,27 @@ function HomeContent(): React.JSX.Element {
                     >
                       Start with a poll
                     </button>
+                    <button
+                      type="button"
+                      className={styles.coffeeTopicChip}
+                      data-kind="teams"
+                      disabled={coffeeBusy}
+                      onClick={openCoffeeTeamsModal}
+                    >
+                      Start with teams
+                    </button>
                   </div>
                 </div>
               ) : null}
             </div>
           </div>
           {visibleCoffeeSeats.map(({ seatIndex, bot }, layoutIndex) => {
+            const seatTeamState = coffeeTeamsState?.bots[bot.id] ?? null;
+            const seatTeamId = seatTeamState?.currentTeamId ?? null;
+            const seatTeamRank = seatTeamId ? coffeeTeamRankByBotId.get(bot.id) ?? 0 : null;
             const isTableTypingThisSeat = tableTypingBot?.id === bot.id;
-            const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
-            const seatLiveActionBadgeText = seatTypingActionState?.current ?? null;
-            const seatLastActionHistory = latestSeatActionsByBotId.get(bot.id) ?? [];
-            const seatLastActionBadgeText =
-              seatLastActionHistory.length > 0
-                ? seatLastActionHistory[seatLastActionHistory.length - 1] ?? null
-                : null;
             const seatIsThinkingThisSeat = thinkingBotId === bot.id;
             const seatBadgeSide = coffeeSeatBadgeSide(visibleCoffeeSeats.length, layoutIndex);
-            const seatActionPrimaryText = seatLiveActionBadgeText ?? seatLastActionBadgeText;
-            const seatActionGhostText =
-              seatIsThinkingThisSeat && seatLastActionBadgeText
-                ? seatLastActionBadgeText
-                : seatTypingActionState?.previous
-                  ? seatTypingActionState.previous
-                : seatLiveActionBadgeText &&
-                    seatLastActionBadgeText &&
-                    seatLiveActionBadgeText !== seatLastActionBadgeText
-                  ? seatLastActionBadgeText
-                  : seatLastActionHistory.length > 1
-                    ? seatLastActionHistory[seatLastActionHistory.length - 2] ?? null
-                  : null;
-            const seatActionPrimaryVerbose = seatActionPrimaryText
-              ? isZenLiveBotPresenceActionVerbose(seatActionPrimaryText)
-              : false;
-            const seatActionGhostVerbose = seatActionGhostText
-              ? isZenLiveBotPresenceActionVerbose(seatActionGhostText)
-              : false;
             const pendingAssistantMood =
               liveTableTypingBot && pendingLatestMessage?.role === "assistant"
                 ? pendingLatestMessage.moodKey
@@ -68487,6 +69813,38 @@ function HomeContent(): React.JSX.Element {
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
             const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, mouthOpenWhileTyping);
+            const replayCupProgress =
+              coffeeReplayActive && messages.length > 1
+                ? clampedReplayMessageIndex / Math.max(1, messages.length - 1)
+                : coffeeReplayActive
+                  ? 0
+                  : null;
+            const coffeeCupVisual = buildCoffeeCupVisualState({
+              seed: `${coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft"}:${bot.id}:${seatIndex}:${layoutIndex}`,
+              botColor: bot.color,
+              nowMs: coffeeSessionClockMs,
+              sessionStartedAtMs: coffeeSessionStartedAtRef.current,
+              sessionEndsAtMs: coffeeSessionEndsAtMs,
+              durationMinutes:
+                coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes,
+              progressOverride: replayCupProgress,
+              speaking: isTableTypingThisSeat,
+              forceEmpty: coffeeSessionPhase === "finished" && !coffeeReplayActive,
+            });
+            const coffeeCupSide = coffeeCupSideForSeat({
+              compact: compactCoffeeStage,
+              seatIndex,
+              seatCount: visibleCoffeeSeats.length,
+              layoutIndex,
+              sessionSeed: coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft",
+            });
+            const coffeeCupMirrored = coffeeCupShouldMirrorForSeat({
+              compact: compactCoffeeStage,
+              seatIndex,
+              seatCount: visibleCoffeeSeats.length,
+              layoutIndex,
+              sessionSeed: coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft",
+            });
             const isTopHeadSeat = coffeeSeatIsTopHead(
               compactCoffeeStage,
               visibleCoffeeSeats.length,
@@ -68523,16 +69881,15 @@ function HomeContent(): React.JSX.Element {
                 data-seat={seatIndex}
                 data-layout-seat={layoutIndex}
                 data-seat-count={visibleCoffeeSeats.length}
+                data-cup-side={coffeeCupSide}
+                data-team-id={seatTeamId ?? undefined}
+                data-team-rank={seatTeamRank ?? undefined}
+                data-team-pending={seatTeamState?.pendingSwitchTeamId ? "true" : undefined}
                 data-prism-mood={prismSeatMood}
                 data-director-enabled={directorTapEnabled ? "true" : undefined}
                 data-replay-review-enabled={replayActionReviewEnabled ? "true" : undefined}
                 data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
-                data-table-dimmed={
-                  activeTableSpeakerBotId != null && activeTableSpeakerBotId !== bot.id
-                    ? "true"
-                    : undefined
-                }
-                style={coffeeSeatVisualStyle(bot, seatIndex, layoutIndex, visibleCoffeeSeats.length)}
+                style={coffeeSeatVisualStyle(bot)}
                 disabled={!seatInteractive}
                 onClick={() => {
                   if (replayActionReviewEnabled) {
@@ -68576,7 +69933,22 @@ function HomeContent(): React.JSX.Element {
                       voicePreset={seatVoicePreset}
                       className={styles.coffeeSeatPlateEmoji}
                     />
+                    {seatTeamId ? (
+                      <span className={styles.coffeeSeatTeamBadge} data-team-id={seatTeamId}>
+                        {coffeeTeamName(coffeeTeamsState, seatTeamId)}
+                      </span>
+                    ) : null}
                   </div>
+                  <div
+                    className={styles.coffeeCup}
+                    data-cup-frame={coffeeCupVisual.frameIndex}
+                    data-cup-side={coffeeCupSide}
+                    data-cup-mirrored={coffeeCupMirrored ? "true" : undefined}
+                    data-cup-sipping={coffeeCupVisual.sipping ? "true" : undefined}
+                    style={coffeeCupSpriteStyle(coffeeCupVisual)}
+                    title={coffeeCupVisual.label}
+                    aria-hidden="true"
+                  />
                   <div className={styles.coffeeSeatGlowPill}>
                     <span className={styles.coffeeSeatGlowGlyph} aria-hidden="true">
                       <BotGlyph name={bot.glyph} size={26} strokeWidth={1.52} />
@@ -68584,24 +69956,8 @@ function HomeContent(): React.JSX.Element {
                     <div className={styles.coffeeSeatGlowText}>
                       <span>{bot.name}</span>
                     </div>
-                    <div className={styles.coffeeCup} aria-hidden="true" />
                   </div>
                 </div>
-                {seatActionGhostText ? (
-                  <div
-                    className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
-                    data-badge-side={seatBadgeSide}
-                    data-action-verbose={seatActionGhostVerbose ? "true" : undefined}
-                    aria-hidden="true"
-                  >
-                    <span
-                      key={`${bot.id}:ghost:${seatActionGhostText}`}
-                      className={styles.coffeeSeatActionBadgeText}
-                    >
-                      {seatActionGhostText}
-                    </span>
-                  </div>
-                ) : null}
                 {seatIsThinkingThisSeat ? (
                   <div
                     className={styles.coffeeSeatThinkingIndicator}
@@ -68627,25 +69983,65 @@ function HomeContent(): React.JSX.Element {
                   >
                     <span aria-hidden="true">!</span>
                   </div>
-                ) : seatActionPrimaryText ? (
-                  <div
-                    className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
-                    data-badge-side={seatBadgeSide}
-                    data-action-verbose={seatActionPrimaryVerbose ? "true" : undefined}
-                    aria-label={`${bot.name} action: ${seatActionPrimaryText}`}
-                    title={`${bot.name}: ${seatActionPrimaryText}`}
-                  >
-                    <span
-                      key={`${bot.id}:current:${seatActionPrimaryText}`}
-                      className={styles.coffeeSeatActionBadgeText}
-                    >
-                      {seatActionPrimaryText}
-                    </span>
-                  </div>
                 ) : null}
               </button>
             );
           })}
+          {coffeeSeatActionDisplays.length > 0 ? (
+            <div className={styles.coffeeSeatActionLayer} aria-label="Coffee table actions">
+              {coffeeSeatActionDisplays.map((display) => (
+                <div
+                  key={`${display.seatIndex}-${display.bot.id}-action-anchor`}
+                  className={styles.coffeeSeatActionAnchor}
+                  data-coffee-seat-action-anchor="true"
+                  data-seat={display.seatIndex}
+                  data-layout-seat={display.layoutIndex}
+                  data-seat-count={display.seatCount}
+                  data-team-id={display.teamId ?? undefined}
+                  data-team-rank={display.teamRank ?? undefined}
+                  style={coffeeBotVisualStyle(display.bot)}
+                >
+                  {display.seatActionGhostText ? (
+                    <div
+                      key={`${display.bot.id}:ghost-shell:${display.seatActionGhostText}`}
+                      className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeGhost}`}
+                      data-badge-side={display.seatBadgeSide}
+                      data-action-verbose={
+                        display.seatActionGhostVerbose ? "true" : undefined
+                      }
+                      aria-hidden="true"
+                    >
+                      <span
+                        key={`${display.bot.id}:ghost:${display.seatActionGhostText}`}
+                        className={styles.coffeeSeatActionBadgeText}
+                      >
+                        {display.seatActionGhostText}
+                      </span>
+                    </div>
+                  ) : null}
+                  {display.seatActionPrimaryText ? (
+                    <div
+                      key={`${display.bot.id}:current-shell:${display.seatActionPrimaryText}`}
+                      className={`${styles.coffeeSeatActionBadge} ${styles.coffeeSeatActionBadgeCurrent}`}
+                      data-badge-side={display.seatBadgeSide}
+                      data-action-verbose={
+                        display.seatActionPrimaryVerbose ? "true" : undefined
+                      }
+                      aria-label={`${display.bot.name} action: ${display.seatActionPrimaryText}`}
+                      title={`${display.bot.name}: ${display.seatActionPrimaryText}`}
+                    >
+                      <span
+                        key={`${display.bot.id}:current:${display.seatActionPrimaryText}`}
+                        className={styles.coffeeSeatActionBadgeText}
+                      >
+                        {display.seatActionPrimaryText}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {replayActionReviewEnabled && replayActionPanelBot ? (
             <aside
               className={styles.coffeeReplayActionPanel}
@@ -69011,6 +70407,177 @@ function HomeContent(): React.JSX.Element {
             </form>
           </div>
         ) : null}
+        {coffeeTeamsModalOpen && coffeeSessionPhase === "topic" && coffeeConversation ? (
+          <div
+            className={styles.coffeePollModalBackdrop}
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setCoffeeTeamsModalOpen(false);
+              }
+            }}
+          >
+            <form
+              className={`${styles.coffeePollModal} ${styles.coffeeTeamsModal}`}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Start Coffee Teams topic"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createCoffeeTeamsTopic(coffeeConversation, coffeePendingArrivalScenario);
+              }}
+            >
+              <header className={styles.coffeePollModalHeader}>
+                <div>
+                  <span>Teams topic</span>
+                  <h4>Split the table</h4>
+                  <p>Each side needs a name, a stance, and 1-4 bots. Pick where you start; Undecided cannot win.</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close Coffee Teams modal"
+                  onClick={() => setCoffeeTeamsModalOpen(false)}
+                >
+                  ×
+                </button>
+              </header>
+              <div className={styles.coffeePollModalBody}>
+                <div className={styles.coffeeTeamsSideFields}>
+                  <label data-team-id="left">
+                    <span>Left side</span>
+                    <input
+                      type="text"
+                      value={coffeeTeamsLeftName}
+                      onChange={(event) => setCoffeeTeamsLeftName(event.target.value)}
+                      placeholder="Team name"
+                      maxLength={42}
+                      autoFocus
+                    />
+                    <textarea
+                      value={coffeeTeamsLeftDescription}
+                      onChange={(event) => setCoffeeTeamsLeftDescription(event.target.value)}
+                      placeholder="What this side stands for"
+                      maxLength={240}
+                    />
+                  </label>
+                  <label data-team-id="right">
+                    <span>Right side</span>
+                    <input
+                      type="text"
+                      value={coffeeTeamsRightName}
+                      onChange={(event) => setCoffeeTeamsRightName(event.target.value)}
+                      placeholder="Team name"
+                      maxLength={42}
+                    />
+                    <textarea
+                      value={coffeeTeamsRightDescription}
+                      onChange={(event) => setCoffeeTeamsRightDescription(event.target.value)}
+                      placeholder="What this side stands for"
+                      maxLength={240}
+                    />
+                  </label>
+                </div>
+                <div className={styles.coffeeTeamsPlayerPicker}>
+                  <span>You start on</span>
+                  <div aria-label="Your starting Coffee Teams side">
+                    {COFFEE_TEAM_IDS.map((teamId) => {
+                      const teamLabel =
+                        teamId === "left"
+                          ? coffeeTeamsLeftName.trim() || "Left"
+                          : teamId === "right"
+                            ? coffeeTeamsRightName.trim() || "Right"
+                            : "Undecided";
+                      return (
+                        <button
+                          key={teamId}
+                          type="button"
+                          data-team-id={teamId}
+                          data-selected={coffeeTeamsDraftPlayerTeamId === teamId ? "true" : undefined}
+                          onClick={() => setCoffeeTeamsDraftPlayerTeamId(teamId)}
+                        >
+                          {teamLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className={styles.coffeeTeamsSetupColumns}>
+                  {COFFEE_TEAM_IDS.map((teamId) => {
+                    const teamLabel =
+                      teamId === "left"
+                        ? coffeeTeamsLeftName.trim() || "Left"
+                        : teamId === "right"
+                          ? coffeeTeamsRightName.trim() || "Right"
+                          : "Undecided";
+                    const assignedBotIds = coffeeTeamsModalBotIds.filter(
+                      (botId) => (coffeeTeamsAssignments[botId] ?? "undecided") === teamId
+                    );
+                    return (
+                      <section key={teamId} data-team-id={teamId}>
+                        <header>
+                          <span>{teamLabel}</span>
+                          <b>{coffeeTeamsDraftCounts[teamId]}</b>
+                        </header>
+                        <div>
+                          {assignedBotIds.length > 0 ? (
+                            assignedBotIds.map((botId) => {
+                              const bot = coffeeBotsById.get(botId);
+                              return (
+                                <article key={botId} className={styles.coffeeTeamsBotCard}>
+                                  <span
+                                    className={styles.coffeeSessionDot}
+                                    style={bot ? coffeeBotVisualStyle(bot) : undefined}
+                                    aria-hidden="true"
+                                  />
+                                  <strong>{bot?.name ?? "Bot"}</strong>
+                                  <div aria-label={`${bot?.name ?? "Bot"} team placement`}>
+                                    {COFFEE_TEAM_IDS.map((targetTeamId) => (
+                                      <button
+                                        key={targetTeamId}
+                                        type="button"
+                                        data-selected={teamId === targetTeamId ? "true" : undefined}
+                                        onClick={() => updateCoffeeTeamAssignment(botId, targetTeamId)}
+                                      >
+                                        {targetTeamId === "left"
+                                          ? "L"
+                                          : targetTeamId === "right"
+                                            ? "R"
+                                            : "U"}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </article>
+                              );
+                            })
+                          ) : (
+                            <p>No bots here.</p>
+                          )}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+                {!coffeeTeamsDraftReady ? (
+                  <p className={styles.coffeePollModalHint}>
+                    Name and describe both sides, then place 1-4 bots on Left and 1-4 on Right.
+                  </p>
+                ) : null}
+              </div>
+              <footer className={styles.coffeePollModalActions}>
+                <button
+                  type="button"
+                  onClick={() => setCoffeeTeamsModalOpen(false)}
+                  disabled={coffeeBusy}
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={coffeeBusy || !coffeeTeamsDraftReady}>
+                  {coffeeBusy ? "Starting..." : "Start teams"}
+                </button>
+              </footer>
+            </form>
+          </div>
+        ) : null}
       </section>
     );
   };
@@ -69037,10 +70604,16 @@ function HomeContent(): React.JSX.Element {
       setCoffeeAutoTopicToggleBusy(false);
     }
   };
+  const toggleCoffeeGroupGuestAttendance = (botId: string) => {
+    if (coffeeBusy) return;
+    setCoffeeExcludedBotIds((current) => toggleCoffeeExcludedBotId(current, botId));
+  };
   const renderCoffeeGroupOverview = (): React.JSX.Element | null => {
     const group = coffeeSelectedGroup;
     if (!group || coffeeConversation) return null;
     const groupBots = coffeeGroupBots(group);
+    const attendingCount = groupBots.filter((bot) => !coffeeExcludedBotIds.has(bot.id)).length;
+    const awayCount = Math.max(0, groupBots.length - attendingCount);
     const groupSessions = coffeeSessionsByGroupId.get(group.id) ?? [];
     const moodScore = coffeeGroupMoodScore(group);
     const moodLabel = coffeeGroupMoodLabel(group);
@@ -69072,22 +70645,33 @@ function HomeContent(): React.JSX.Element {
               spellCheck={false}
             />
             <p>
-              {groupBots.length} seated bots · {groupSessions.length} saved sessions
+              {attendingCount} invited · {awayCount} away · {groupSessions.length} saved sessions
             </p>
           </div>
           <div className={styles.coffeeGroupStartPanel}>
             <span className={styles.coffeeGroupStartLabel}>New session setup</span>
             <div className={styles.coffeeDurationPicker} aria-label="Coffee Session duration">
-              {COFFEE_SESSION_DURATION_OPTIONS.map((duration) => (
-                <button
-                  key={duration}
-                  type="button"
-                  data-selected={coffeeSelectedDurationMinutes === duration ? "true" : undefined}
-                  onClick={() => setCoffeeSelectedDurationMinutes(duration)}
-                >
-                  {duration}m
-                </button>
-              ))}
+              <div className={styles.coffeeDurationSliderHeader}>
+                <span className={styles.coffeeGroupStartControlLabel}>Duration</span>
+                <strong>{coffeeSelectedDurationMinutes}m</strong>
+              </div>
+              <input
+                type="range"
+                min={COFFEE_SESSION_DURATION_MINUTES_MIN}
+                max={COFFEE_SESSION_DURATION_MINUTES_MAX}
+                step={COFFEE_SESSION_DURATION_MINUTES_STEP}
+                value={coffeeSelectedDurationMinutes}
+                onChange={(event) =>
+                  setCoffeeSelectedDurationMinutes(
+                    clampCoffeeSessionDurationMinutes(event.currentTarget.value)
+                  )
+                }
+                aria-label="Coffee Session duration in minutes"
+              />
+              <div className={styles.coffeeDurationSliderRange} aria-hidden="true">
+                <span>{COFFEE_SESSION_DURATION_MINUTES_MIN}m</span>
+                <span>{COFFEE_SESSION_DURATION_MINUTES_MAX}m</span>
+              </div>
             </div>
             <div className={styles.coffeeGroupPresetField}>
               <span className={`${styles.coffeeGroupStartControlLabel} ${styles.controlLabelWithInfo}`}>
@@ -69129,18 +70713,40 @@ function HomeContent(): React.JSX.Element {
                 </small>
               </span>
             </label>
+            <p className={styles.coffeeModelQualityHint}>{coffeeModelQualityHintText}</p>
           </div>
         </div>
         <div className={styles.coffeeGroupOverviewGrid}>
           <section className={styles.coffeeGroupOverviewCard}>
-            <h3>Current table</h3>
+            <h3>Guest list</h3>
             <ul className={styles.coffeeGroupBotList}>
-              {groupBots.map((bot) => (
-                <li key={bot.id} style={coffeeBotVisualStyle(bot)}>
-                  <span className={styles.coffeeSessionDot} aria-hidden="true" />
-                  <span>{bot.name}</span>
-                </li>
-              ))}
+              {groupBots.map((bot) => {
+                const away = coffeeExcludedBotIds.has(bot.id);
+                return (
+                  <li
+                    key={bot.id}
+                    style={coffeeBotVisualStyle(bot)}
+                    data-away={away ? "true" : undefined}
+                  >
+                    <button
+                      type="button"
+                      className={styles.coffeeGroupGuestButton}
+                      data-away={away ? "true" : undefined}
+                      disabled={coffeeBusy}
+                      aria-pressed={!away}
+                      aria-label={`${bot.name} is ${away ? "away" : "invited"} for this session`}
+                      title={away ? `${bot.name} will sit this one out` : `${bot.name} is invited`}
+                      onClick={() => toggleCoffeeGroupGuestAttendance(bot.id)}
+                    >
+                      <span className={styles.coffeeSessionDot} aria-hidden="true" />
+                      <span className={styles.coffeeGroupGuestName}>{bot.name}</span>
+                      <span className={styles.coffeeGroupGuestStatus}>
+                        {away ? "Away" : "Invited"}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </section>
           <section className={styles.coffeeGroupOverviewCard}>
@@ -69698,6 +71304,14 @@ function HomeContent(): React.JSX.Element {
                   placeholder={coffeeComposerPlaceholder}
                   writingAssistEnabled={settings?.composerWritingAssist !== false}
                   onValueChange={(next) => {
+                    coffeeDraftRef.current = next;
+                    const activeCoffeeConversationId =
+                      coffeeConversationRef.current?.id ?? coffeeConversation?.id ?? null;
+                    if (activeCoffeeConversationId) {
+                      coffeeTableTalkLastTypedAtRef.current = Date.now();
+                      coffeeTableTalkLastTypedConversationIdRef.current =
+                        activeCoffeeConversationId;
+                    }
                     setCoffeeDraft(next);
                     if (next.trim().length > 0) {
                       clearCoffeeLoopTimer();
@@ -70757,19 +72371,6 @@ function HomeContent(): React.JSX.Element {
         ) ??
         `${zenFallbackWallpaperConversationId}:${zenFallbackWallpaperBotId ?? ""}`)
       : zenFallbackWallpaperNewConversationSeed;
-    const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
-      chatSurface: chatLikeSurface,
-      atmosphereEnabled: zenConversationAtmosphereEnabled,
-      hasConversationBot: zenFallbackWallpaperBotId !== null,
-      hasRememberedWallpaper: zenRememberedWallpaperVisible,
-      atmosphereTimelineLength: zenAtmosphereTimeline.length,
-      hasConversationMessages:
-        (detail?.messages.length ?? 0) > 0 || pendingReplyVisible,
-    });
-    const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
-      ? resolveZenFallbackWallpaperVariant(zenFallbackWallpaperSeed)
-      : null;
-    const zenFallbackWallpaperVisible = Boolean(zenFallbackWallpaperVariant);
     const zenRememberedAtmosphereEntry: ZenWallpaperHistoryEntry | null =
       zenRememberedWallpaperVisible && zenRememberedWallpaperPreview
         ? {
@@ -70791,9 +72392,25 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisplayLayerOpacities = zenRememberedAtmosphereEntry
       ? { [zenRememberedAtmosphereEntry.imageId]: 1 }
       : zenAtmosphereMeasuredLayerOpacities;
-    const zenAtmosphereWallpaperVisible = zenAtmosphereDisplayTimeline.some(
+    const zenGeneratedAtmosphereVisible = zenAtmosphereDisplayTimeline.some(
       (entry) => (zenAtmosphereDisplayLayerOpacities[entry.imageId] ?? 0) > 0.01
-    ) || zenFallbackWallpaperVisible;
+    );
+    const zenFallbackWallpaperEligible = shouldShowZenFallbackWallpaper({
+      chatSurface: chatLikeSurface,
+      atmosphereEnabled: zenConversationAtmosphereEnabled,
+      hasConversationBot: zenFallbackWallpaperBotId !== null,
+      hasRememberedWallpaper: zenRememberedWallpaperVisible,
+      atmosphereTimelineLength: zenAtmosphereTimeline.length,
+      hasVisibleAtmosphere: zenGeneratedAtmosphereVisible,
+      hasConversationMessages:
+        (detail?.messages.length ?? 0) > 0 || pendingReplyVisible,
+    });
+    const zenFallbackWallpaperVariant = zenFallbackWallpaperEligible
+      ? resolveZenFallbackWallpaperVariant(zenFallbackWallpaperSeed)
+      : null;
+    const zenFallbackWallpaperVisible = Boolean(zenFallbackWallpaperVariant);
+    const zenAtmosphereWallpaperVisible =
+      zenGeneratedAtmosphereVisible || zenFallbackWallpaperVisible;
     const zenAtmosphereReadabilityOverlayOpacity = zenFallbackWallpaperVisible
       ? 1
       : zenRememberedWallpaperVisible
@@ -71759,6 +73376,9 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage
                   ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
                   : null}
+                {msg.role === "assistant" && msg.webSearch
+                  ? renderAssistantWebSearchCard(msg.webSearch)
+                  : null}
                 <MemoizedMessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
@@ -71831,6 +73451,7 @@ function HomeContent(): React.JSX.Element {
                   }
                 />
                 {renderPsychicThoughtLine(msg)}
+                {renderManualAskQuestionResultCard(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -72017,6 +73638,7 @@ function HomeContent(): React.JSX.Element {
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
                     mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
                     commandPicks={composerCommandPicks}
+                    toolPicks={COMPOSER_TOOL_PICKS}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
                     dismissPopoversSignal={composerPopoverDismissSignal}
@@ -72043,6 +73665,7 @@ function HomeContent(): React.JSX.Element {
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
+                toolPicks={COMPOSER_TOOL_PICKS}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
                 dismissPopoversSignal={composerPopoverDismissSignal}
@@ -73357,6 +74980,9 @@ function HomeContent(): React.JSX.Element {
                 {msg.role === "assistant" && msg.sentGeneratedImage
                   ? renderAssistantSentGeneratedImage(msg.sentGeneratedImage)
                   : null}
+                {msg.role === "assistant" && msg.webSearch
+                  ? renderAssistantWebSearchCard(msg.webSearch)
+                  : null}
                 <MemoizedMessageBody
                   content={msg.content}
                   assistantStripPrismToolTail={msg.role === "assistant"}
@@ -73429,6 +75055,7 @@ function HomeContent(): React.JSX.Element {
                   }
                 />
                 {renderPsychicThoughtLine(msg)}
+                {renderManualAskQuestionResultCard(msg)}
                 {renderAskQuestionInlineCard(msg)}
                 {renderStoryActionInlineCard(msg)}
                 {copied && (
@@ -73606,6 +75233,7 @@ function HomeContent(): React.JSX.Element {
                     onMentionPersonaSelect={handleZenMentionPersonaSelection}
                     mentionPopoverFooter={renderZenPersonaTransitionChoiceControl(true)}
                     commandPicks={composerCommandPicks}
+                    toolPicks={COMPOSER_TOOL_PICKS}
                     promptPicks={commandCenterPromptPicks}
                     wildcardPicks={composerWildcardDeckPicks}
                     dismissPopoversSignal={composerPopoverDismissSignal}
@@ -73632,6 +75260,7 @@ function HomeContent(): React.JSX.Element {
                 resolvedTheme={resolvedTheme}
                 mentionBots={chatMentionsEnabled ? composeMentionBotPicks : []}
                 commandPicks={composerCommandPicks}
+                toolPicks={COMPOSER_TOOL_PICKS}
                 promptPicks={commandCenterPromptPicks}
                 wildcardPicks={composerWildcardDeckPicks}
                 dismissPopoversSignal={composerPopoverDismissSignal}

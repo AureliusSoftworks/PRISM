@@ -158,6 +158,9 @@ export function deleteBot(
     db.prepare(
       "DELETE FROM memories WHERE user_id = ? AND bot_id = ? AND COALESCE(source, 'direct') != 'about_you'"
     ).run(userId, botId);
+    db.prepare(
+      "DELETE FROM bot_relationships WHERE user_id = ? AND (source_bot_id = ? OR target_bot_id = ?)"
+    ).run(userId, botId, botId);
     db.prepare("DELETE FROM bots WHERE id = ? AND user_id = ?").run(
       botId,
       userId
@@ -212,6 +215,11 @@ export function deleteBots(
          AND bot_id IN (${placeholders})
          AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
     ).run(userId, ...ids);
@@ -280,6 +288,11 @@ export function deleteAllBots(
          AND bot_id IN (${placeholders})
          AND COALESCE(source, 'direct') != 'about_you'`
     ).run(userId, ...ids);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
     ).run(userId, ...ids);

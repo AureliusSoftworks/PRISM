@@ -14,7 +14,7 @@ export interface ComposerShortcutInsertionCandidate {
 }
 
 export function normalizeComposerShortcutQuery(value: string): string {
-  return value.trim().replace(/^[!/]+/, "").toLowerCase();
+  return value.trim().replace(/^[!/?]+/, "").toLowerCase();
 }
 
 export function composerShortcutInsertionText(
@@ -24,7 +24,11 @@ export function composerShortcutInsertionText(
     const fallback = command.command?.trim() || `{${command.name}}`;
     return `${fallback} `;
   }
-  const prefix = command.id.startsWith("wildcard:") ? "!" : "/";
+  const prefix = command.id.startsWith("wildcard:")
+    ? "!"
+    : command.id.startsWith("tool:")
+      ? "?"
+      : "/";
   return `${prefix}${command.name} `;
 }
 

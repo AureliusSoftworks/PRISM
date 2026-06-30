@@ -2675,6 +2675,52 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
+  it("blocks automatic WebSearch tool calls in LOCAL mode", async () => {
+    const db = createChatTestDb();
+    const seenUrls: string[] = [];
+    const webSearchTool = {
+      v: 1,
+      webSearch: { query: "latest Prism release news" },
+    };
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seenUrls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              `I should check fresh sources.\n<<<PRISM_TOOL>>>\n${JSON.stringify(webSearchTool)}\n<<<END_PRISM_TOOL>>>`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What is the latest?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.webSearch, undefined);
+    assert.ok(seenUrls.every((url) => !url.includes("api.search.brave.com")));
+    const webSearchStatuses =
+      result.toolCalls
+        ?.filter((event) => event.name === "webSearch")
+        .map((event) => event.status) ?? [];
+    assert.ok(webSearchStatuses.includes("detected"));
+    assert.ok(webSearchStatuses.includes("blocked"));
+    assert.equal(webSearchStatuses.includes("completed"), false);
+  });
+
   it("persists binary yes/no AskQuestion choices", async () => {
     const db = createChatTestDb();
     const askPayload = {
@@ -2713,6 +2759,148 @@ describe("processChatMessage AskQuestion tool", () => {
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
     assert.equal(lastAssistant?.content, "I can package that for you.");
     assert.deepEqual(lastAssistant?.askQuestion, askPayload);
+  });
+
+  it("uses manual AskQuestion choices as answer constraints and persists a completed result card", async () => {
+    const db = createChatTestDb();
+    const promptTexts: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/chat")) {
+        promptTexts.push((body.messages ?? [])
+          .map((message) => `${message.role}: ${message.content}`)
+          .join("\n"));
+        if (promptTexts.length > 1) {
+          return new Response(JSON.stringify({ message: { content: '{"title":"Lemon Pick"}' } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "lemons\n\nI'd pick lemons: sharp, bright, and at least memorable.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Would you rather eat:",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        manualTool: {
+          name: "askQuestion",
+          question: "Would you rather eat:",
+          options: ["Potatoes", "lemons", "lemons", "chicken", "broccoli", "carrots"],
+        },
+      }
+    );
+
+    const promptText = promptTexts[0] ?? "";
+    assert.match(promptText, /using Prism's AskQuestion tool/i);
+    assert.match(promptText, /must choose exactly one/i);
+    assert.match(promptText, /choose the closest available answer/i);
+    assert.match(promptText, /1\. Potatoes/);
+    assert.match(promptText, /2\. lemons/);
+    assert.match(promptText, /3\. chicken/);
+    assert.match(promptText, /4\. broccoli/);
+    assert.doesNotMatch(promptText, /carrots/);
+    const userMessage = result.conversation.messages.find((m) => m.role === "user");
+    assert.deepEqual(userMessage?.manualAskQuestion, {
+      v: 1,
+      name: "AskQuestion",
+      question: "Would you rather eat:",
+      options: [
+        { id: "a", label: "Potatoes" },
+        { id: "b", label: "lemons" },
+        { id: "c", label: "chicken" },
+        { id: "d", label: "broccoli" },
+      ],
+      selectedOptionId: "b",
+      selectedOptionIndex: 1,
+      selectedOptionLabel: "lemons",
+    });
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(
+      lastAssistant?.content,
+      "lemons\n\nI'd pick lemons: sharp, bright, and at least memorable."
+    );
+    assert.equal(lastAssistant?.askQuestion, undefined);
+  });
+
+  it("uses open-ended manual AskQuestion as a direct-answer hint", async () => {
+    const db = createChatTestDb();
+    const promptTexts: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/chat")) {
+        promptTexts.push((body.messages ?? [])
+          .map((message) => `${message.role}: ${message.content}`)
+          .join("\n"));
+        if (promptTexts.length > 1) {
+          return new Response(JSON.stringify({ message: { content: '{"title":"Warmer Wording"}' } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            message: { content: "It reads warmer when the first option is shorter." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Which wording feels warmer?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        manualTool: {
+          name: "askQuestion",
+          question: "Which wording feels warmer?",
+        },
+      }
+    );
+
+    const promptText = promptTexts[0] ?? "";
+    assert.match(promptText, /ask you directly/i);
+    assert.match(promptText, /Answer the question directly/i);
+    assert.doesNotMatch(promptText, /must choose exactly one/i);
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "It reads warmer when the first option is shorter.");
+    assert.equal(lastAssistant?.askQuestion, undefined);
   });
 
   it("drops story action rails from story setup questions", async () => {
