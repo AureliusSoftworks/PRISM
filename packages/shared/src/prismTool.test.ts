@@ -10,6 +10,7 @@ import {
   serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionPayload,
+  type CoffeeAmbientActionPayload,
   type WebSearchPayload,
 } from "./prismTool.ts";
 
@@ -593,6 +594,24 @@ describe("hydrateAssistantMessageParts", () => {
     });
     assert.equal(h.content, "Fresh context.");
     assert.deepEqual(h.webSearch, webSearch);
+  });
+
+  it("hydrates persisted Coffee ambient actions from tool_payload", () => {
+    const coffeeAmbientAction: CoffeeAmbientActionPayload = {
+      v: 1,
+      name: "coffeeAmbientAction",
+      source: "scripted",
+      category: "sip",
+      action: "takes a quiet sip",
+    };
+    const stored = serializeAssistantToolPayload({ coffeeAmbientAction });
+    assert.deepEqual(parseStoredAssistantToolPayload(stored).coffeeAmbientAction, coffeeAmbientAction);
+    const h = hydrateAssistantMessageParts({
+      content: "That tracks.",
+      toolPayload: stored,
+    });
+    assert.equal(h.content, "That tracks.");
+    assert.deepEqual(h.coffeeAmbientAction, coffeeAmbientAction);
   });
 });
 

@@ -700,6 +700,58 @@ describe("extractStageDirections", () => {
     );
     assert.deepEqual(out.actions, ["strokes chin thoughtfully"]);
   });
+
+  it("lifts transcript-style settled posture before spoken prose", () => {
+    const out = extractStageDirections(
+      "settles into chair and regards the warm cup When sadness keeps returning, the first task is not to win an argument with it."
+    );
+    assert.equal(
+      out.mainText,
+      "When sadness keeps returning, the first task is not to win an argument with it."
+    );
+    assert.deepEqual(out.actions, [
+      "settles into chair and regards the warm cup",
+    ]);
+  });
+
+  it("lifts name-prefixed lift actions before spoken prose", () => {
+    const out = extractStageDirections(
+      "Plato, lifts eyes from the tablet and nods slowly And we cool too — not because time moves, but because attention returns."
+    );
+    assert.equal(
+      out.mainText,
+      "And we cool too — not because time moves, but because attention returns."
+    );
+    assert.deepEqual(out.actions, [
+      "Plato, lifts eyes from the tablet and nods slowly",
+    ]);
+  });
+
+  it("lifts addressed markdown lift actions without leaking them onto the table", () => {
+    const out = extractStageDirections(
+      "[Plato](prism-bot://bot-plato), lifts eyes from the tablet and nods slowly And we cool too — not because time moves, but because attention returns."
+    );
+    assert.equal(
+      out.mainText,
+      "[Plato](prism-bot://bot-plato), And we cool too — not because time moves, but because attention returns."
+    );
+    assert.deepEqual(out.actions, [
+      "lifts eyes from the tablet and nods slowly",
+    ]);
+  });
+
+  it("lifts reach-and-straighten actions before a The-spoken handoff", () => {
+    const out = extractStageDirections(
+      "reaches across and straightens the cup with quiet deliberateness The fear is not proof that the road is closed."
+    );
+    assert.equal(
+      out.mainText,
+      "The fear is not proof that the road is closed."
+    );
+    assert.deepEqual(out.actions, [
+      "reaches across and straightens the cup with quiet deliberateness",
+    ]);
+  });
 });
 
 describe("extractStageDirectionCues", () => {

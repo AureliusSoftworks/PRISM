@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import {
   COFFEE_SIP_ACTION_MIN_MESSAGE_GAP,
   clampCoffeeReplayMessageIndex,
+  coffeeActionsForMessage,
   coffeeActionCanDisplayWhileSpeaking,
   coffeeActionIsSip,
   coffeeActionPassesSipCadence,
+  coffeeActionSipMessageGapForDuration,
   coffeeReplayVisibleMessages,
   coffeeSystemSynopsisIsDisplayable,
   coffeeTranscriptVisibleMessages,
@@ -76,6 +78,47 @@ describe("coffee replay helpers", () => {
     assert.deepEqual(actions.map((action) => action.action), ["sips coffee"]);
   });
 
+  it("merges scripted ambient metadata with parsed stage actions", () => {
+    const message = {
+      id: "m1",
+      role: "assistant",
+      botName: "Nova",
+      content: "*nods* That tracks.",
+      coffeeAmbientAction: {
+        v: 1 as const,
+        name: "coffeeAmbientAction" as const,
+        source: "scripted" as const,
+        category: "cup" as const,
+        action: "sets the cup down",
+      },
+    };
+
+    assert.deepEqual(coffeeActionsForMessage(message), ["nods", "sets the cup down"]);
+    assert.deepEqual(
+      collectCoffeeReplayActionsForBot([message], "Nova").map((action) => action.action),
+      ["nods", "sets the cup down"]
+    );
+  });
+
+  it("does not make metadata-only ambience a visible transcript row", () => {
+    const messages = [
+      {
+        id: "m1",
+        role: "assistant",
+        content: "",
+        coffeeAmbientAction: {
+          v: 1 as const,
+          name: "coffeeAmbientAction" as const,
+          source: "scripted" as const,
+          category: "cup" as const,
+          action: "sets the cup down",
+        },
+      },
+    ];
+
+    assert.deepEqual(coffeeTranscriptVisibleMessages(messages), []);
+  });
+
   it("rewrites impossible facial-hair actions for known beardless characters", () => {
     assert.equal(
       sanitizeCoffeeActionForBot("strokes beard thoughtfully, then chuckles", {
@@ -120,5 +163,17 @@ describe("coffee replay helpers", () => {
       true
     );
     assert.equal(coffeeActionPassesSipCadence("nods slowly", 11, 10), true);
+  });
+
+  it("scales sip action throttling with Coffee session duration", () => {
+    const shortGap = coffeeActionSipMessageGapForDuration(3);
+    const defaultGap = coffeeActionSipMessageGapForDuration(10);
+    const longGap = coffeeActionSipMessageGapForDuration(30);
+
+    assert.equal(shortGap, COFFEE_SIP_ACTION_MIN_MESSAGE_GAP);
+    assert.ok(defaultGap > shortGap);
+    assert.ok(longGap > defaultGap);
+    assert.equal(coffeeActionPassesSipCadence("sips coffee", 10 + longGap - 1, 10, longGap), false);
+    assert.equal(coffeeActionPassesSipCadence("sips coffee", 10 + longGap, 10, longGap), true);
   });
 });

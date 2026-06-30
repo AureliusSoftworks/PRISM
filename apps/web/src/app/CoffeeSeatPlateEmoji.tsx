@@ -29,6 +29,11 @@ export type CoffeeSeatPlateEmojiProps = {
   className: string;
 };
 
+type CoffeeSeatPlateBlinkState = {
+  eyesOpen: boolean;
+  key: string;
+};
+
 /**
  * Renders the vertical plate emoticon with a timer-driven blink independent of
  * typewriter mouth animation and Prism mood.
@@ -42,7 +47,12 @@ export function CoffeeSeatPlateEmoji({
   voicePreset,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
-  const [eyesOpen, setEyesOpen] = useState(true);
+  const blinkKey = `${enabled ? "enabled" : "disabled"}:${isTalking ? "talking" : "idle"}:${baseText}:${scheduleKey}`;
+  const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
+    eyesOpen: true,
+    key: blinkKey,
+  });
+  const eyesOpen = blinkState.key === blinkKey ? blinkState.eyesOpen : true;
 
   useEffect(() => {
     if (!enabled || isTalking) {
@@ -71,10 +81,10 @@ export function CoffeeSeatPlateEmoji({
     const armNextBlink = () => {
       arm(() => {
         if (cancelled) return;
-        setEyesOpen(false);
+        setBlinkState({ eyesOpen: false, key: blinkKey });
         arm(() => {
           if (cancelled) return;
-          setEyesOpen(true);
+          setBlinkState({ eyesOpen: true, key: blinkKey });
           armNextBlink();
         }, randomBetween(80, 140));
       }, randomBetween(1500, 4000));
@@ -86,7 +96,7 @@ export function CoffeeSeatPlateEmoji({
       cancelled = true;
       clearAll();
     };
-  }, [enabled, isTalking, scheduleKey]);
+  }, [blinkKey, enabled, isTalking, scheduleKey]);
 
   const displayEyesOpen = !enabled || isTalking || eyesOpen;
   const displayText = applyCoffeeSeatBlink(baseText, displayEyesOpen);
@@ -101,7 +111,7 @@ export function CoffeeSeatPlateEmoji({
       }
       data-voice-preset={voicePreset}
       style={{
-        transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
+        transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
       }}
       aria-hidden="true"
     >

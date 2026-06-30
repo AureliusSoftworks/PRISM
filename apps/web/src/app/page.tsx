@@ -49,11 +49,14 @@ import {
   buildCoffeeCupVisualState,
   coffeeCupShouldMirrorForSeat,
   coffeeCupSideForSeat,
+  coffeeCupSipAnimationTiming,
   type CoffeeCupVisualState,
 } from "./coffee-cup-sprites";
 import {
+  coffeePlateFaceScaleYFromSeatHorizontalSide,
   coffeeHeadGazeHorizontalSign,
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
+  coffeeSeatHorizontalTableSide,
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
 import {
@@ -97,9 +100,11 @@ import {
 } from "./askQuestionPatience";
 import {
   clampCoffeeReplayMessageIndex,
+  coffeeActionsForMessage,
   coffeeActionCanDisplayWhileSpeaking,
   coffeeActionIsSip,
   coffeeActionPassesSipCadence,
+  coffeeActionSipMessageGapForDuration,
   coffeeReplayVisibleMessages,
   coffeeSystemSynopsisIsDisplayable,
   coffeeTranscriptVisibleMessages,
@@ -233,6 +238,7 @@ import {
   type BotCustomFact,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
+  type CoffeeAmbientActionPayload,
   type CoffeeSessionDurationMinutes,
   type CoffeeSessionSettings,
   type CoffeeTeamId,
@@ -393,6 +399,7 @@ import {
   type ZenLiveBotActionState,
 } from "./zenLiveActions";
 import {
+  zenLiveBotMouthShapeFromSpeechPhase,
   zenLiveBotMouthShapeFromRevealProgress,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
@@ -4090,6 +4097,8 @@ function coffeeCupSpriteStyle(state: CoffeeCupVisualState): React.CSSProperties 
     "--coffee-cup-sip-sprite": `url("${state.sipImageUrl}")`,
     "--coffee-cup-frame-x": state.frameX,
     "--coffee-cup-frame-y": state.frameY,
+    "--coffee-cup-sip-duration-ms": `${state.sipAnimationMs}ms`,
+    "--coffee-cup-sip-hold-ms": `${state.sipHoldMs}ms`,
   } as React.CSSProperties;
 }
 
@@ -4113,7 +4122,7 @@ function coffeeSeatBadgeSide(seatCount: number, layoutIndex: number): CoffeeSeat
   // near stage edges. Mapping mirrors seat geometry in `page.module.css`.
   if (seatCount === 2) return layoutIndex === 1 ? "left" : "right";
   if (seatCount === 3) return layoutIndex === 2 ? "left" : "right";
-  if (seatCount === 4) return layoutIndex === 1 ? "left" : "right";
+  if (seatCount === 4) return layoutIndex === 1 || layoutIndex === 2 ? "left" : "right";
   if (seatCount >= 5) return layoutIndex === 2 || layoutIndex === 4 ? "left" : "right";
   return "right";
 }
@@ -4129,6 +4138,8 @@ interface CoffeeConversationMessage {
   /** When present (future API / hydrated rows), drives seat-plate emoji mood. */
   moodKey?: BotMoodKey;
   moodConfidence?: number;
+  /** Coffee-only scripted ambience shown as table UI, not transcript text. */
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 }
 
 interface CoffeePlayerInterruptionInput {
@@ -4261,6 +4272,8 @@ interface CoffeeGroupState {
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty/missing = Auto. */
   modelChoiceByProvider?: { local?: string; openai?: string; anthropic?: string };
+  /** Server-persisted topic pool generated from each bot in the group. */
+  starterTopicsByBotId?: Record<string, string[]>;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -4826,15 +4839,30 @@ function collectGeneratedImageIds(messages: readonly Message[]): string[] {
 }
 type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
-/** How many typewriter characters advance before swapping open/closed mouth. */
+/** How many typewriter characters advance before moving to the next Zen mouth phase. */
 const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 3;
+const COFFEE_SEAT_MOOD_PULSE_MS = 8_000;
 
-function coffeeSeatMouthOpenFromVisibleLength(visibleLength: number): boolean {
-  return (
-    Math.floor(
+function coffeeSeatStableHash(text: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function coffeeSeatMouthShapeFromVisibleLength(
+  visibleLength: number,
+  speechSeedText: string
+): ZenLiveBotMouthShape {
+  if (visibleLength <= 0) return "closed";
+  return zenLiveBotMouthShapeFromSpeechPhase({
+    speechSeedText,
+    phaseIndex: Math.floor(
       Math.max(0, visibleLength) / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE
-    ) % 2 === 0
-  );
+    ),
+  });
 }
 
 function lastCoffeeAssistantMoodKeyForBotName(
@@ -4858,19 +4886,70 @@ function coffeeSeatSocialHeuristicMood(
   social: CoffeeBotSocialSnapshot | undefined
 ): BotMoodKey | undefined {
   if (!social) return undefined;
-  if (social.leavePressure > 0.72 || social.valuesFriction > 0.68) {
+  if (social.leavePressure > 0.62 || social.valuesFriction > 0.58) {
     return "strained";
   }
-  if (social.disposition < 0.36 && social.restraint < 0.42) {
+  if (
+    social.valuesFriction > 0.46 ||
+    social.disposition < 0.42 ||
+    (social.disposition < 0.5 && social.restraint < 0.46)
+  ) {
     return "guarded";
   }
-  if (social.disposition > 0.7 && social.engagement > 0.52) {
+  if (social.disposition > 0.64 && social.engagement > 0.48) {
     return "joyful";
   }
-  if (social.disposition > 0.55) {
+  if (social.disposition > 0.5 || social.engagement > 0.66) {
     return "warm";
   }
   return undefined;
+}
+
+function coffeeSeatLiveMood({
+  baseMood,
+  social,
+  botId,
+  nowMs,
+  isSpeaking,
+  sessionLive,
+}: {
+  baseMood: BotMoodKey;
+  social: CoffeeBotSocialSnapshot | undefined;
+  botId: string;
+  nowMs: number;
+  isSpeaking: boolean;
+  sessionLive: boolean;
+}): BotMoodKey {
+  if (!sessionLive || isSpeaking) return baseMood;
+
+  const botOffsetMs = coffeeSeatStableHash(`${botId}:mood-offset`) % COFFEE_SEAT_MOOD_PULSE_MS;
+  const pulseIndex = Math.floor((Math.max(0, nowMs) + botOffsetMs) / COFFEE_SEAT_MOOD_PULSE_MS);
+  const roll = coffeeSeatStableHash(`${botId}:${pulseIndex}:${baseMood}`) % 100;
+  const valuesFriction = social?.valuesFriction ?? 0.32;
+  const leavePressure = social?.leavePressure ?? 0.18;
+  const disposition = social?.disposition ?? 0.52;
+  const engagement = social?.engagement ?? 0.5;
+
+  switch (baseMood) {
+    case "joyful":
+      return roll < 22 ? "warm" : "joyful";
+    case "warm":
+      if (valuesFriction > 0.5 && roll < 24) return "guarded";
+      if (disposition > 0.62 && engagement > 0.58 && roll < 42) return "joyful";
+      return roll < 18 ? "neutral" : "warm";
+    case "guarded":
+      if (leavePressure > 0.58 && roll < 36) return "strained";
+      if (disposition > 0.56 && roll < 24) return "neutral";
+      return roll < 26 ? "neutral" : "guarded";
+    case "strained":
+      return roll < 24 ? "guarded" : "strained";
+    case "neutral":
+    default:
+      if (leavePressure > 0.48 && roll < 30) return "strained";
+      if (valuesFriction > 0.42 && roll < 38) return "guarded";
+      if (disposition > 0.54 && engagement > 0.56 && roll < 38) return "warm";
+      return roll < 16 ? "warm" : "neutral";
+  }
 }
 
 function coffeeSeatEmojiMoodFromPrism(mood: BotMoodKey): CoffeeSeatEmojiMood {
@@ -4891,27 +4970,40 @@ function coffeeSeatEmojiMoodFromPrism(mood: BotMoodKey): CoffeeSeatEmojiMood {
 }
 
 /** Vertical two-glyph plate emoji with rotation so ASCII reads upright on the seat disk. */
-function coffeeSeatPlateGlyph(emojiMood: CoffeeSeatEmojiMood, mouthOpen: boolean): {
+function coffeeSeatOpenMouthGlyph(
+  eyes: ":" | ";" | ">",
+  mouthShape: ZenLiveBotMouthShape
+): string | null {
+  if (mouthShape === "open-wide") return `${eyes}0`;
+  if (mouthShape === "open-small") return `${eyes}o`;
+  if (mouthShape === "open-round") return `${eyes}O`;
+  return null;
+}
+
+function coffeeSeatPlateGlyph(
+  emojiMood: CoffeeSeatEmojiMood,
+  mouthShape: ZenLiveBotMouthShape = "closed"
+): {
   text: string;
   rotateDeg: number;
 } {
   switch (emojiMood) {
     case "happy":
-      return { text: mouthOpen ? ":D" : ":)", rotateDeg: 90 };
+      return { text: coffeeSeatOpenMouthGlyph(":", mouthShape) ?? ":)", rotateDeg: 90 };
     case "warm":
       // Softer than joyful: content smile vs surprised-open warmth while "speaking".
-      return { text: mouthOpen ? ":0" : ":]", rotateDeg: 90 };
+      return { text: coffeeSeatOpenMouthGlyph(":", mouthShape) ?? ":]", rotateDeg: 90 };
     case "neutral":
-      return { text: mouthOpen ? ":o" : ":|", rotateDeg: 90 };
+      return { text: coffeeSeatOpenMouthGlyph(":", mouthShape) ?? ":|", rotateDeg: 90 };
     case "sad":
       return {
-        text: mouthOpen ? ";0" : ";(",
+        text: coffeeSeatOpenMouthGlyph(";", mouthShape) ?? ";(",
         rotateDeg: 90,
       };
     case "angry":
-      return { text: mouthOpen ? ":V" : ":[", rotateDeg: 90 };
+      return { text: coffeeSeatOpenMouthGlyph(">", mouthShape) ?? ">[", rotateDeg: 90 };
     default:
-      return { text: mouthOpen ? ":o" : ":|", rotateDeg: 90 };
+      return { text: coffeeSeatOpenMouthGlyph(":", mouthShape) ?? ":|", rotateDeg: 90 };
   }
 }
 
@@ -11352,12 +11444,15 @@ function MessageMoodFace(props: {
   voicePreset?: BotVoicePreset;
   isTalking?: boolean;
   mouthOpen?: boolean;
+  mouthShape?: ZenLiveBotMouthShape | null;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
   const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(moodKey);
-  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, props.mouthOpen === true);
+  const seatMouthShape =
+    props.mouthShape ?? (props.mouthOpen === true ? "open-wide" : "closed");
+  const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, seatMouthShape);
   const color = props.color?.trim();
   const style = color
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
@@ -57430,8 +57525,12 @@ function HomeContent(): React.JSX.Element {
     })();
     const devMoodFaceVisibleLength = chatRevealVisibleLength ?? coffeeRevealVisibleLength;
     const devMoodFaceTalking = devMoodFaceVisibleLength !== null;
-    const devMoodFaceMouthOpen =
-      devMoodFaceTalking && coffeeSeatMouthOpenFromVisibleLength(devMoodFaceVisibleLength);
+    const devMoodFaceMouthShape = devMoodFaceTalking
+      ? coffeeSeatMouthShapeFromVisibleLength(
+          devMoodFaceVisibleLength,
+          `dev-mood:${moodKey}:${activeBot?.id ?? "default"}`
+        )
+      : "closed";
     return (
       <div
         ref={devMoodVisualRef}
@@ -57463,7 +57562,7 @@ function HomeContent(): React.JSX.Element {
             color={activeBot?.color}
             voicePreset={coffeeSeatVoicePreset(activeBot)}
             isTalking={devMoodFaceTalking}
-            mouthOpen={devMoodFaceMouthOpen}
+            mouthShape={devMoodFaceMouthShape}
           />
         </button>
         {ignoreRemainingLabel ? (
@@ -69364,23 +69463,35 @@ function HomeContent(): React.JSX.Element {
       }
       return out;
     })();
-    const latestSeatActionsByBotId = (() => {
-      const out = new Map<string, string[]>();
-      if (!conversationActive) return out;
+    const coffeeSeatActionState = (() => {
+      const actionHistoryByBotId = new Map<string, string[]>();
+      const sipCountByBotId = new Map<string, number>();
+      const lastSipAnimationByBotId = new Map<
+        string,
+        {
+          sipCount: number;
+          startedAtMs: number;
+        }
+      >();
+      if (!conversationActive) {
+        return { actionHistoryByBotId, sipCountByBotId, lastSipAnimationByBotId };
+      }
       const botIdByName = new Map<string, string>(
         coffeeMentionBotPicks.map((bot) => [bot.name, bot.id])
       );
       const lastSipMessageIndexByBotId = new Map<string, number>();
+      const sessionSipMessageGap = coffeeActionSipMessageGapForDuration(
+        coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes
+      );
       for (let messageIndex = 0; messageIndex < tableTimelineMessages.length; messageIndex += 1) {
         const message = tableTimelineMessages[messageIndex]!;
         if (message.role !== "assistant" || !message.botName) continue;
         const botId = botIdByName.get(message.botName);
         if (!botId) continue;
         const bot = coffeeBotsById.get(botId) ?? null;
-        const { actions } = extractStageDirections(message.content);
         const actionHistory: string[] = [];
         let acceptedSipForMessage = false;
-        for (const action of actions) {
+        for (const action of coffeeActionsForMessage(message)) {
           const normalized = normalizeCoffeeSeatActionBadgeText(action, bot);
           if (!normalized) continue;
           if (coffeeActionIsSip(normalized)) {
@@ -69389,18 +69500,28 @@ function HomeContent(): React.JSX.Element {
               !coffeeActionPassesSipCadence(
                 normalized,
                 messageIndex,
-                lastSipMessageIndexByBotId.get(botId)
+                lastSipMessageIndexByBotId.get(botId),
+                sessionSipMessageGap
               )
             ) {
               continue;
             }
             acceptedSipForMessage = true;
             lastSipMessageIndexByBotId.set(botId, messageIndex);
+            const nextSipCount = (sipCountByBotId.get(botId) ?? 0) + 1;
+            sipCountByBotId.set(botId, nextSipCount);
+            const startedAtMs = Date.parse(message.createdAt);
+            if (Number.isFinite(startedAtMs)) {
+              lastSipAnimationByBotId.set(botId, {
+                sipCount: nextSipCount,
+                startedAtMs,
+              });
+            }
           }
           actionHistory.push(normalized);
         }
         if (actionHistory.length > 0) {
-          const previous = out.get(botId) ?? [];
+          const previous = actionHistoryByBotId.get(botId) ?? [];
           const next = [...previous];
           for (const action of actionHistory) {
             // Keep every meaningful transition, but avoid immediate duplicates.
@@ -69409,11 +69530,14 @@ function HomeContent(): React.JSX.Element {
             }
           }
           // Keep the two most recent actions visible (current + ghost).
-          out.set(botId, next.slice(-2));
+          actionHistoryByBotId.set(botId, next.slice(-2));
         }
       }
-      return out;
+      return { actionHistoryByBotId, sipCountByBotId, lastSipAnimationByBotId };
     })();
+    const latestSeatActionsByBotId = coffeeSeatActionState.actionHistoryByBotId;
+    const coffeeCupSipCountByBotId = coffeeSeatActionState.sipCountByBotId;
+    const coffeeCupLastSipAnimationByBotId = coffeeSeatActionState.lastSipAnimationByBotId;
     const typingSeatActionByBotId = (() => {
       const out = new Map<
         string,
@@ -70043,7 +70167,7 @@ function HomeContent(): React.JSX.Element {
             const socialSnapshot = coffeeConversation?.coffeeBotSocialById?.[bot.id];
             const heuristicMood = coffeeSeatSocialHeuristicMood(socialSnapshot);
             const moodDevSlot = COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex];
-            const prismSeatMood =
+            const basePrismSeatMood =
               moodDevSlot === "live"
                 ? normalizeAssistantMoodKey(
                     isTableTypingThisSeat
@@ -70051,29 +70175,57 @@ function HomeContent(): React.JSX.Element {
                       : lastBotMood ?? heuristicMood
                   )
                 : moodDevSlot;
-            const mouthOpenWhileTyping = isTableTypingThisSeat
-              ? coffeeSeatMouthOpenFromVisibleLength(activeTypewriterLength)
-              : false;
+            const prismSeatMood =
+              moodDevSlot === "live"
+                ? coffeeSeatLiveMood({
+                    baseMood: basePrismSeatMood,
+                    social: socialSnapshot,
+                    botId: bot.id,
+                    nowMs: coffeeSessionClockMs,
+                    isSpeaking: isTableTypingThisSeat,
+                    sessionLive: coffeeSessionPhase === "live",
+                  })
+                : basePrismSeatMood;
+            const mouthShapeWhileTyping = isTableTypingThisSeat
+              ? coffeeSeatMouthShapeFromVisibleLength(
+                  activeTypewriterLength,
+                  tableTypingAssistantDisplayText || bot.name
+                )
+              : "closed";
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
-            const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, mouthOpenWhileTyping);
-            const replayCupProgress =
-              coffeeReplayActive && messages.length > 1
-                ? clampedReplayMessageIndex / Math.max(1, messages.length - 1)
-                : coffeeReplayActive
-                  ? 0
-                  : null;
+            const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+            const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
+            const seatSipInProgress =
+              seatTypingActionState != null &&
+              coffeeActionIsSip(seatTypingActionState.current);
+            const coffeeCupSeed = `${coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft"}:${bot.id}:${seatIndex}:${layoutIndex}`;
+            const completedSipAnimation = coffeeCupLastSipAnimationByBotId.get(bot.id) ?? null;
+            const completedSipAnimationTiming = completedSipAnimation
+              ? coffeeCupSipAnimationTiming({
+                  seed: coffeeCupSeed,
+                  sipCount: completedSipAnimation.sipCount,
+                })
+              : null;
+            const completedSipAnimationAgeMs = completedSipAnimation
+              ? coffeeSessionClockMs - completedSipAnimation.startedAtMs
+              : Number.POSITIVE_INFINITY;
+            const completedSipAnimationActive =
+              !seatSipInProgress &&
+              completedSipAnimationTiming != null &&
+              completedSipAnimationAgeMs >= 0 &&
+              completedSipAnimationAgeMs <= completedSipAnimationTiming.durationMs;
+            const cupSipCount =
+              (coffeeCupSipCountByBotId.get(bot.id) ?? 0) +
+              (seatSipInProgress ? 1 : 0);
             const coffeeCupVisual = buildCoffeeCupVisualState({
-              seed: `${coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft"}:${bot.id}:${seatIndex}:${layoutIndex}`,
+              seed: coffeeCupSeed,
               botColor: bot.color,
+              theme: resolvedTheme,
               nowMs: coffeeSessionClockMs,
-              sessionStartedAtMs: coffeeSessionStartedAtRef.current,
-              sessionEndsAtMs: coffeeSessionEndsAtMs,
-              durationMinutes:
-                coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes,
-              progressOverride: replayCupProgress,
+              sipCount: cupSipCount,
+              sippingOverride: seatSipInProgress || completedSipAnimationActive,
               speaking: isTableTypingThisSeat,
-              forceEmpty: coffeeSessionPhase === "finished" && !coffeeReplayActive,
             });
             const coffeeCupSide = coffeeCupSideForSeat({
               compact: compactCoffeeStage,
@@ -70095,27 +70247,32 @@ function HomeContent(): React.JSX.Element {
               layoutIndex,
               seatIndex
             );
+            const seatHorizontalSide = coffeeSeatHorizontalTableSide(
+              compactCoffeeStage,
+              seatIndex,
+              visibleCoffeeSeats.length,
+              layoutIndex
+            );
             const seatInteractive = directorTapEnabled || replayActionReviewEnabled;
-            const coffeeHeadPlateStyle = isTopHeadSeat
-              ? ({
-                  ["--coffee-plate-emoji-face-scale-y" as string]:
-                    coffeeHeadPlateFaceScaleYFromGazeTargetSide(
-                      coffeeHeadGazeHorizontalSign({
-                        compact: compactCoffeeStage,
-                        seatCount: visibleCoffeeSeats.length,
-                        visibleSeats: coffeeGazeVisibleSeats,
-                        headBotId: bot.id,
-                        coffeeTurnRhythmState: tableTypingBot
-                          ? "tableTyping"
-                          : coffeeTurnRhythmState,
-                        coffeePendingSpeakerBotId: tableTypingBot?.id ?? coffeePendingSpeakerBotId,
-                        headIsSpeaking: isTableTypingThisSeat,
-                        messages: tableTimelineMessages,
-                        botNameToId: coffeeGazeNameToId,
-                      })
-                    ),
-                } as React.CSSProperties)
-              : undefined;
+            const coffeeHeadPlateStyle = {
+              ["--coffee-plate-emoji-face-scale-y" as string]: isTopHeadSeat
+                ? coffeeHeadPlateFaceScaleYFromGazeTargetSide(
+                    coffeeHeadGazeHorizontalSign({
+                      compact: compactCoffeeStage,
+                      seatCount: visibleCoffeeSeats.length,
+                      visibleSeats: coffeeGazeVisibleSeats,
+                      headBotId: bot.id,
+                      coffeeTurnRhythmState: tableTypingBot
+                        ? "tableTyping"
+                        : coffeeTurnRhythmState,
+                      coffeePendingSpeakerBotId: tableTypingBot?.id ?? coffeePendingSpeakerBotId,
+                      headIsSpeaking: isTableTypingThisSeat,
+                      messages: tableTimelineMessages,
+                      botNameToId: coffeeGazeNameToId,
+                    })
+                  )
+                : coffeePlateFaceScaleYFromSeatHorizontalSide(seatHorizontalSide),
+            } as React.CSSProperties;
             return (
               <button
                 type="button"

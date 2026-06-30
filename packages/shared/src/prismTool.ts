@@ -75,6 +75,14 @@ export interface WebSearchPayload {
   results: WebSearchResult[];
 }
 
+export interface CoffeeAmbientActionPayload {
+  v: 1;
+  name: "coffeeAmbientAction";
+  source: "scripted";
+  category: "sip" | "cup";
+  action: string;
+}
+
 export type ZenDisplayAlign = "start" | "center" | "end";
 
 export interface ZenDisplayPlacement {
@@ -129,6 +137,8 @@ export interface StoredAssistantToolEnvelope {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** Persisted web results shown as an assistant-side source card. */
   webSearch?: WebSearchPayload;
+  /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -161,6 +171,7 @@ export interface ParsedStoredAssistantToolPayload {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -423,6 +434,26 @@ function normalizeStoredWebSearchPayload(value: unknown): WebSearchPayload | und
     provider,
     fetchedAt,
     results,
+  };
+}
+
+function normalizeCoffeeAmbientActionPayload(
+  value: unknown
+): CoffeeAmbientActionPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (row.v !== 1 || row.name !== "coffeeAmbientAction" || row.source !== "scripted") {
+    return undefined;
+  }
+  const category = row.category === "sip" || row.category === "cup" ? row.category : undefined;
+  const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";
+  if (!category || !action || action.length > 80) return undefined;
+  return {
+    v: 1,
+    name: "coffeeAmbientAction",
+    source: "scripted",
+    category,
+    action,
   };
 }
 
@@ -981,6 +1012,9 @@ export function parseStoredAssistantToolPayload(
       const webSearch = root
         ? normalizeStoredWebSearchPayload(root.webSearch)
         : undefined;
+      const coffeeAmbientAction = root
+        ? normalizeCoffeeAmbientActionPayload(root.coffeeAmbientAction)
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -988,6 +1022,7 @@ export function parseStoredAssistantToolPayload(
         ...(webSearch ? { webSearch } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
+        ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -998,6 +1033,7 @@ export function parseStoredAssistantToolPayload(
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
+    const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(row.coffeeAmbientAction);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1027,6 +1063,7 @@ export function parseStoredAssistantToolPayload(
       ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
     };
   } catch {
     return {};
@@ -1045,6 +1082,7 @@ export function hydrateAssistantMessageParts(args: {
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1062,6 +1100,9 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
     ...(stored.webSearch ? { webSearch: stored.webSearch } : {}),
+    ...(stored.coffeeAmbientAction
+      ? { coffeeAmbientAction: stored.coffeeAmbientAction }
+      : {}),
   };
 }
 
@@ -1080,6 +1121,7 @@ export function serializeAssistantToolPayload(args: {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1091,14 +1133,43 @@ export function serializeAssistantToolPayload(args: {
   const hasZenDisplay = zenDisplay !== undefined;
   const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
   const hasZenTurn = zenTurn !== undefined;
-  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
+  const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(args.coffeeAmbientAction);
+  const hasCoffeeAmbientAction = coffeeAmbientAction !== undefined;
+  if (
+    !hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasImage &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction
+  ) {
     return null;
   }
 
-  if (!hasAsk && !hasStory && !hasMood && !hasWebSearch && !hasZenDisplay && !hasZenTurn && hasImage) {
+  if (
+    !hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction &&
+    hasImage
+  ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
+  if (
+    hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasImage &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction
+  ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
@@ -1121,6 +1192,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
     ...(hasWebSearch ? { webSearch } : {}),
+    ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
   };
   return JSON.stringify(payload);
 }

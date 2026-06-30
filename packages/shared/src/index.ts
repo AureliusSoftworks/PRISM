@@ -105,6 +105,7 @@ export {
   serializeAskQuestionTool,
   type AskQuestionOption,
   type AskQuestionPayload,
+  type CoffeeAmbientActionPayload,
   type ParsedAssistantTurn,
   type ParsedStoredAssistantToolPayload,
   type SentGeneratedImagePayload,
@@ -298,6 +299,7 @@ export {
 
 import type {
   AskQuestionPayload,
+  CoffeeAmbientActionPayload,
   SentGeneratedImagePayload,
   ZenDisplayMetadata,
 } from "./prismTool.js";
@@ -363,6 +365,8 @@ export interface ChatMessage {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** When this assistant turn included web search results shown as a source card. */
   webSearch?: WebSearchPayload;
+  /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -600,16 +604,57 @@ export function coffeeCupSipBias(seed: string): number {
   return coffeeCupStableUnitValue(`${seed}:sip-bias`);
 }
 
-export function coffeeCupSipCycleMs(seed: string): number {
-  return 92_000 - Math.round(coffeeCupSipBias(seed) * 40_000);
+export function coffeeCupSessionDurationPaceMultiplier(
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const minutes =
+    typeof durationMinutes === "number" &&
+    Number.isFinite(durationMinutes) &&
+    durationMinutes > 0
+      ? durationMinutes
+      : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  const extraMinutes = Math.max(0, minutes - COFFEE_SESSION_DURATION_MINUTES_MIN);
+  return 1 + extraMinutes * 0.02;
 }
 
-export function coffeeCupConsumptionRate(seed: string): number {
-  return 0.82 + coffeeCupSipBias(seed) * 0.48;
+export function coffeeCupSipMessageGapForDuration(
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
+  baseGap = 5
+): number {
+  const safeBaseGap =
+    typeof baseGap === "number" && Number.isFinite(baseGap)
+      ? Math.max(1, Math.floor(baseGap))
+      : 5;
+  return Math.max(
+    safeBaseGap,
+    Math.ceil(safeBaseGap * coffeeCupSessionDurationPaceMultiplier(durationMinutes))
+  );
 }
 
-export function coffeeCupPacedProgress(progress: number, seed: string): number {
-  return clampCoffeeCupProgress(progress * coffeeCupConsumptionRate(seed));
+export function coffeeCupSipCycleMs(
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const baseCycleMs = 92_000 - Math.round(coffeeCupSipBias(seed) * 40_000);
+  return Math.round(baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes));
+}
+
+export function coffeeCupConsumptionRate(
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const baseRate = 0.82 + coffeeCupSipBias(seed) * 0.48;
+  return baseRate / coffeeCupSessionDurationPaceMultiplier(durationMinutes);
+}
+
+export function coffeeCupPacedProgress(
+  progress: number,
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  return clampCoffeeCupProgress(
+    progress * coffeeCupConsumptionRate(seed, durationMinutes)
+  );
 }
 
 export function coffeeCupFrameIndexForProgress(progress: number): number {
@@ -695,6 +740,9 @@ export type CoffeePresetMode = "manual" | "auto";
 /** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
 export type CoffeeTopicSelectionMode = "manual" | "auto";
 
+/** Stored Coffee Group starter topics keyed by bot id. */
+export type CoffeeGroupStarterTopicsByBotId = Record<string, string[]>;
+
 export interface CoffeePreset {
   id: string;
   name: string;
@@ -741,6 +789,8 @@ export interface CoffeeGroup {
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty = Auto. */
   modelChoiceByProvider?: CoffeeGroupModelChoice;
+  /** Coffee-only persisted topic pool generated from each seated bot. */
+  starterTopicsByBotId?: CoffeeGroupStarterTopicsByBotId;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

@@ -4872,6 +4872,9 @@ function hydrateMessages(
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
         : {}),
       ...(assembled.webSearch ? { webSearch: assembled.webSearch } : {}),
+      ...(assembled.coffeeAmbientAction
+        ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
+        : {}),
     };
   });
 }

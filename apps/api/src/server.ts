@@ -2204,6 +2204,9 @@ function buildRoutes(): RouteDefinition[] {
             ? { sentGeneratedImage: assembled.sentGeneratedImage }
             : {}),
           ...(assembled.webSearch ? { webSearch: assembled.webSearch } : {}),
+          ...(assembled.coffeeAmbientAction
+            ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
+            : {}),
         };
       });
       const opinionRow = db

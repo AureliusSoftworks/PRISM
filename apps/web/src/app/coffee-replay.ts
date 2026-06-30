@@ -1,4 +1,8 @@
 import { extractStageDirections } from "./botMention.ts";
+import {
+  coffeeCupSipMessageGapForDuration,
+  type CoffeeAmbientActionPayload,
+} from "@localai/shared";
 
 const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
@@ -22,6 +26,7 @@ export interface CoffeeReplayMessageLike {
   content: string;
   botName?: string;
   createdAt?: string;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
 }
 
 export interface CoffeeReplayAction {
@@ -88,6 +93,15 @@ export function coffeeActionCanDisplayWhileSpeaking(
   return !coffeeActionIsSip(action) || spokenText.trim().length === 0;
 }
 
+export function coffeeActionSipMessageGapForDuration(
+  durationMinutes?: number | null
+): number {
+  return coffeeCupSipMessageGapForDuration(
+    durationMinutes,
+    COFFEE_SIP_ACTION_MIN_MESSAGE_GAP
+  );
+}
+
 export function coffeeActionPassesSipCadence(
   action: string,
   messageIndex: number,
@@ -132,6 +146,17 @@ export function coffeeTranscriptVisibleMessages<T extends { role: string; conten
   });
 }
 
+export function coffeeActionsForMessage(message: CoffeeReplayMessageLike): string[] {
+  const actions = extractStageDirections(message.content).actions
+    .map((action) => action.replace(/\s+/g, " ").trim())
+    .filter((action) => action.length > 0);
+  const ambientAction =
+    message.coffeeAmbientAction?.source === "scripted"
+      ? message.coffeeAmbientAction.action.replace(/\s+/g, " ").trim()
+      : "";
+  return ambientAction ? [...actions, ambientAction] : actions;
+}
+
 export function collectCoffeeReplayActionsForBot(
   messages: readonly CoffeeReplayMessageLike[],
   botName: string
@@ -141,8 +166,7 @@ export function collectCoffeeReplayActionsForBot(
   const out: CoffeeReplayAction[] = [];
   messages.forEach((message, messageIndex) => {
     if (message.role !== "assistant" || message.botName !== normalizedBotName) return;
-    const { actions } = extractStageDirections(message.content);
-    for (const action of actions) {
+    for (const action of coffeeActionsForMessage(message)) {
       const trimmed = action.replace(/\s+/g, " ").trim();
       if (!trimmed) continue;
       out.push({

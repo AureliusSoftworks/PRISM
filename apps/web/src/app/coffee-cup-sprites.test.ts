@@ -5,8 +5,11 @@ import {
   coffeeCupColorForBotColor,
   coffeeCupConsumptionRate,
   coffeeCupFramePosition,
+  coffeeCupProgressForSipCount,
   coffeeCupPrismFamilyForBotColor,
+  coffeeCupSessionDurationPaceMultiplier,
   coffeeCupSipCycleMs,
+  coffeeCupSipAnimationTiming,
   coffeeCupShouldMirrorForSeat,
   coffeeCupSideForSeat,
   coffeeCupSippingActive,
@@ -55,6 +58,85 @@ describe("coffee cup sprites", () => {
     assert.equal(finished.amount, "empty");
   });
 
+  it("selects light-mode cup sprites when requested", () => {
+    const dark = buildCoffeeCupVisualState({
+      seed: "session:bot-red",
+      botColor: "#ff4d6d",
+      nowMs: 1_000,
+      theme: "dark",
+    });
+    const light = buildCoffeeCupVisualState({
+      seed: "session:bot-red",
+      botColor: "#ff4d6d",
+      nowMs: 1_000,
+      theme: "light",
+    });
+
+    assert.match(dark.restImageUrl, /coffee_red\.png$/);
+    assert.match(dark.sipImageUrl, /coffee_red_sip\.png$/);
+    assert.match(light.restImageUrl, /coffee_light_red\.png$/);
+    assert.match(light.sipImageUrl, /coffee_light_red_sip\.png$/);
+  });
+
+  it("maps accepted sip counts to deterministic visual depletion", () => {
+    assert.equal(coffeeCupProgressForSipCount(0), 0);
+    assert.equal(coffeeCupProgressForSipCount(1), 0.2);
+    assert.equal(coffeeCupProgressForSipCount(4), 0.8);
+    assert.equal(coffeeCupProgressForSipCount(9), 0.96);
+
+    const untouched = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 300_000,
+      sessionStartedAtMs: 1_000,
+      sessionEndsAtMs: 301_000,
+      durationMinutes: 5,
+      sipCount: 0,
+      sippingOverride: false,
+    });
+    const afterTwoSips = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 300_000,
+      sessionStartedAtMs: 1_000,
+      sessionEndsAtMs: 301_000,
+      durationMinutes: 5,
+      sipCount: 2,
+      sippingOverride: false,
+    });
+
+    assert.equal(untouched.frameIndex, 0);
+    assert.equal(untouched.progress, 0);
+    assert.ok(afterTwoSips.progress > untouched.progress);
+    assert.equal(afterTwoSips.frameIndex, 2);
+  });
+
+  it("uses explicit sip animation only when provided for sip-count cups", () => {
+    const notSipping = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 1_000,
+      sipCount: 1,
+      sippingOverride: false,
+    });
+    const sipping = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 1_000,
+      sipCount: 1,
+      sippingOverride: true,
+    });
+    const emptySipping = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 1_000,
+      sipCount: 8,
+      sippingOverride: true,
+    });
+
+    assert.equal(notSipping.sipping, false);
+    assert.equal(sipping.sipping, true);
+    assert.equal(emptySipping.sipping, false);
+    assert.ok(sipping.sipAnimationMs > sipping.sipHoldMs);
+    assert.ok(sipping.sipHoldMs >= 500);
+    assert.ok(sipping.sipHoldMs <= 2_200);
+  });
+
   it("correlates faster sip cadence with faster depletion", () => {
     const seeds = Array.from({ length: 80 }, (_, index) => `session:bot-${index}`);
     const slowSeed = seeds.reduce((slowest, seed) =>
@@ -78,6 +160,48 @@ describe("coffee cup sprites", () => {
     assert.ok(coffeeCupSipCycleMs(fastSeed) < coffeeCupSipCycleMs(slowSeed));
     assert.ok(fast.progress > slow.progress);
     assert.ok(fast.frameIndex >= slow.frameIndex);
+  });
+
+  it("paces cup consumption more slowly for longer sessions", () => {
+    const seed = "session:bot-alice";
+    const short = buildCoffeeCupVisualState({
+      seed,
+      nowMs: 180_000,
+      sessionStartedAtMs: 0,
+      sessionEndsAtMs: 0,
+      durationMinutes: 3,
+    });
+    const long = buildCoffeeCupVisualState({
+      seed,
+      nowMs: 1_800_000,
+      sessionStartedAtMs: 0,
+      sessionEndsAtMs: 0,
+      durationMinutes: 30,
+    });
+
+    assert.equal(coffeeCupSessionDurationPaceMultiplier(3), 1);
+    assert.ok(coffeeCupSessionDurationPaceMultiplier(30) > 1);
+    assert.ok(coffeeCupSipCycleMs(seed, 30) > coffeeCupSipCycleMs(seed, 3));
+    assert.ok(coffeeCupConsumptionRate(seed, 30) < coffeeCupConsumptionRate(seed, 3));
+    assert.ok(long.progress < 1);
+    assert.ok(short.progress >= long.progress);
+  });
+
+  it("varies sip hold timing by sip count", () => {
+    const first = coffeeCupSipAnimationTiming({
+      seed: "session:bot-alice",
+      sipCount: 1,
+    });
+    const second = coffeeCupSipAnimationTiming({
+      seed: "session:bot-alice",
+      sipCount: 2,
+    });
+
+    assert.ok(first.holdMs >= 500);
+    assert.ok(first.holdMs <= 2_200);
+    assert.ok(second.holdMs >= 500);
+    assert.ok(second.holdMs <= 2_200);
+    assert.notEqual(first.holdMs, second.holdMs);
   });
 
   it("shows sip art only in short ambient windows", () => {

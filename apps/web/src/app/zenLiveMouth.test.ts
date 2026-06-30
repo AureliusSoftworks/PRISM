@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   zenLiveBotMouthOpenFromRevealProgress,
+  zenLiveBotMouthShapeFromSpeechPhase,
   zenLiveBotMouthShapeFromRevealProgress,
 } from "./zenLiveMouth.ts";
 
@@ -135,4 +136,23 @@ test("Zen live mouth waits until spoken content is visible", () => {
     }),
     null
   );
+});
+
+test("Zen live mouth exposes speech phase shapes for Coffee seats", () => {
+  const shapes = Array.from({ length: 24 }, (_, phaseIndex) =>
+    zenLiveBotMouthShapeFromSpeechPhase({
+      speechSeedText: "Coffee can reuse the Zen mouth rhythm",
+      phaseIndex,
+    })
+  );
+
+  assert.equal(shapes[0], "closed");
+  assert.ok(shapes.some((shape) => shape === "open-small"));
+  assert.ok(shapes.some((shape) => shape === "open-wide"));
+  assert.ok(shapes.every((shape) =>
+    shape === "closed" ||
+    shape === "open-small" ||
+    shape === "open-wide" ||
+    shape === "open-round"
+  ));
 });
