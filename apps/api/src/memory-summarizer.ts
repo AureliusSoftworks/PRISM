@@ -697,6 +697,7 @@ export async function summarizeSandboxBotStatus(
   if (options?.userKey) {
     const memories = retrieveRecentMemoriesForStarter(db, userId, options.userKey, botId, 5);
     for (const memory of memories) {
+      if (memory.source === "about_you") continue;
       const fact = memory.text.replace(/\s+/g, " ").trim();
       if (fact && !rememberedFactLines.includes(fact)) {
         rememberedFactLines.push(fact);

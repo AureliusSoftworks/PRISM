@@ -5,9 +5,9 @@
 
 export type CoffeeResponseLengthPreset = "brief" | "balanced" | "detailed" | "roomy";
 
-export type CoffeeTableEnergy = "still" | "relaxed" | "buzzy" | "theatre";
+export type CoffeeTableEnergy = "still" | "relaxed" | "buzzy" | "theatre" | "afterparty";
 
-export type CoffeeCrossTalkLevel = "rare" | "normal" | "chatty";
+export type CoffeeCrossTalkLevel = "rare" | "normal" | "chatty" | "pileup";
 
 /** How much transcript the models may lean on. `recent` is alias for this-session until cross-thread recall exists. */
 export type CoffeeMemoryCallbacks = "now" | "this-session" | "recent";
@@ -25,15 +25,15 @@ export interface CoffeeSessionSettings {
   memoryCallbacks: CoffeeMemoryCallbacks;
 }
 
-/** Defaults match the pre-settings Coffee pipeline and the UI mock defaults. */
+/** Defaults are the lively middle-ground Coffee table, with chaos still opt-in. */
 export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
-  responseLength: "balanced",
-  responseDelayBias: 38,
-  tableEnergy: "relaxed",
-  crossTalk: "normal",
-  breathingRoom: 48,
+  responseLength: "detailed",
+  responseDelayBias: 76,
+  tableEnergy: "theatre",
+  crossTalk: "chatty",
+  breathingRoom: 24,
   stayOnThread: true,
-  givePlayerLastWord: true,
+  givePlayerLastWord: false,
   memoryCallbacks: "this-session",
 };
 
@@ -41,7 +41,7 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
 export const COFFEE_TABLE_REPLY_MAX_CHARS_HARD = 240;
 
 /** Absolute ceiling for speaker decode tokens. */
-export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 160;
+export const COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD = 180;
 
 /** Max messages loaded from DB / forwarded window (plan: cap at 32). */
 export const COFFEE_HISTORY_WINDOW_HARD_CAP = 32;
@@ -53,9 +53,15 @@ const RESPONSE_LENGTH_SET = new Set<CoffeeResponseLengthPreset>([
   "roomy",
 ]);
 
-const TABLE_ENERGY_SET = new Set<CoffeeTableEnergy>(["still", "relaxed", "buzzy", "theatre"]);
+const TABLE_ENERGY_SET = new Set<CoffeeTableEnergy>([
+  "still",
+  "relaxed",
+  "buzzy",
+  "theatre",
+  "afterparty",
+]);
 
-const CROSS_TALK_SET = new Set<CoffeeCrossTalkLevel>(["rare", "normal", "chatty"]);
+const CROSS_TALK_SET = new Set<CoffeeCrossTalkLevel>(["rare", "normal", "chatty", "pileup"]);
 
 const MEMORY_SET = new Set<CoffeeMemoryCallbacks>(["now", "this-session", "recent"]);
 
@@ -126,8 +132,9 @@ export function coffeeEffectiveMemoryCallbacks(settings: CoffeeSessionSettings):
 }
 
 /**
- * Table card character cap and speaker max tokens from response length preset,
- * clamped to hard ceilings.
+ * Table card character target and speaker decode headroom from response length
+ * preset, clamped to hard ceilings. The character cap is prompt-side guidance;
+ * the token cap should leave enough room for the model to finish a sentence.
  */
 export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
   tableReplyMaxChars: number;
@@ -139,20 +146,20 @@ export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
   switch (preset) {
     case "brief":
       tableReplyMaxChars = 60;
-      speakerMaxOutputTokens = 32;
+      speakerMaxOutputTokens = 72;
       break;
     case "detailed":
       tableReplyMaxChars = 160;
-      speakerMaxOutputTokens = 96;
+      speakerMaxOutputTokens = 132;
       break;
     case "roomy":
       tableReplyMaxChars = 220;
-      speakerMaxOutputTokens = 140;
+      speakerMaxOutputTokens = 180;
       break;
     case "balanced":
     default:
       tableReplyMaxChars = 110;
-      speakerMaxOutputTokens = 64;
+      speakerMaxOutputTokens = 104;
       break;
   }
   return {
@@ -176,6 +183,7 @@ export function coffeeRouterTailMessageCount(settings: CoffeeSessionSettings): n
   const mem = coffeeEffectiveMemoryCallbacks(settings);
   if (mem === "now") return 3;
   const cross = settings.crossTalk;
+  if (cross === "pileup") return Math.min(12, coffeeEffectiveHistoryLimit(settings));
   if (cross === "chatty") return Math.min(10, coffeeEffectiveHistoryLimit(settings));
   if (cross === "rare") return 5;
   return 8;
@@ -188,6 +196,17 @@ const ROUTER_TEMPERATURE_BASE = 0.2;
  */
 export function coffeeRouterTemperature(settings: CoffeeSessionSettings): number {
   const bias = (settings.responseDelayBias - 50) / 50;
-  const delta = bias * 0.08;
-  return Math.min(0.45, Math.max(0.05, ROUTER_TEMPERATURE_BASE + delta));
+  const delayDelta = bias * 0.08;
+  const crossTalkDelta =
+    settings.crossTalk === "pileup"
+      ? 0.06
+      : settings.crossTalk === "chatty"
+        ? 0.03
+        : settings.crossTalk === "rare"
+          ? -0.02
+          : 0;
+  return Math.min(
+    0.45,
+    Math.max(0.05, ROUTER_TEMPERATURE_BASE + delayDelta + crossTalkDelta)
+  );
 }

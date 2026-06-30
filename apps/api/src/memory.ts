@@ -557,9 +557,9 @@ export function buildInitialAboutYouMemoryText(
 ): string {
   const firstName = firstNameFromDisplayName(displayName);
   if (firstName) {
-    return `You prefer to be called ${firstName}.`;
+    return `Your account display name is ${firstName}.`;
   }
-  return "You prefer to be called by your first name.";
+  return "Your account has not provided a display name yet.";
 }
 
 export function listMemoryIdsLinkedToMessages(

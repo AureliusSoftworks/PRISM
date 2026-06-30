@@ -50,6 +50,7 @@ import type {
   ChatMessage,
   ChatMode,
   Conversation,
+  ManualAskQuestionResultPayload,
   MemoryCategory,
   MemoryTier,
   OpinionBand,
@@ -63,6 +64,8 @@ import type {
   SessionOpinion,
   SentGeneratedImagePayload,
   TellFictionalStoryPayload,
+  WebSearchPayload,
+  WebSearchRequestPayload,
   ZenAskQuestionPatienceInput,
   ZenAutonomyDecision,
   ZenAutonomyInput,
@@ -93,6 +96,7 @@ import {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   parseAssistantPrismTools,
+  parseStoredManualAskQuestionPayload,
   parseStoredPsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
@@ -134,6 +138,10 @@ import {
   pruneExpiredZenSessionMemories,
   userMessageRequestsZenSessionMemory,
 } from "./zen-session-memory.ts";
+import {
+  formatWebSearchForModel,
+  searchWebWithBrave,
+} from "./web-search.ts";
 
 const config = getAppConfig();
 
@@ -160,6 +168,7 @@ function assistantImagePrefsForTurn(
 export type ChatToolCallEventName =
   | "sendGeneratedImage"
   | "askQuestion"
+  | "webSearch"
   | "unknown";
 
 export type ChatToolCallEventStatus =
@@ -169,6 +178,10 @@ export type ChatToolCallEventStatus =
   | "acquired"
   /** Image-pipeline was busy; the assistant got the "pipeline busy" note appended. */
   | "busy"
+  /** Tool execution was blocked by provider/privacy rules. */
+  | "blocked"
+  /** Tool execution completed and results were attached. */
+  | "completed"
   /** Raw reply looked tool-shaped but no envelope could be parsed (regression smell). */
   | "dropped";
 
@@ -2676,17 +2689,28 @@ export interface UserChatSettings {
   promptInputOverride?: string;
   /** Optional Zen interruption metadata supplied by the composer send path. */
   prismInterruption?: PrismMoodInterruptionInput;
+  /** Explicit user-armed tool from the composer tool picker. */
+  manualTool?: ManualChatToolRequest;
   /** Saved Zen setting: how sharply Prism reacts to irritation cues. */
   zenMoodSensitivity?: number | null;
   /** Cancels provider/tool work when the originating HTTP request is interrupted. */
   signal?: AbortSignal;
 }
 
+export type ManualChatToolRequest =
+  | { name: "webSearch"; query?: string }
+  | { name: "imageGen"; prompt?: string }
+  | { name: "askQuestion"; question?: string; options?: string[] };
+
 /** How long (ms) to wait on cross-thread memory retrieval before skipping hints. */
 const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 const ZEN_RESTORE_MESSAGE_LIMIT = 80;
 const SESSION_RESUME_SUMMARY_MAX_CHARS = 700;
 const SESSION_RESUME_GAP_MAX_MS = 1000 * 60 * 60 * 24 * 45;
+const COFFEE_CONTINUITY_DEFAULT_LIMIT = 2;
+const COFFEE_CONTINUITY_QUERY_LIMIT = 100;
+const COFFEE_CONTINUITY_SUMMARY_MAX_CHARS = 700;
+const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
 function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return "zen";
@@ -2770,6 +2794,170 @@ function buildSessionResumePromptContext(
   if (context.resumedAt) lines.push(`Resume moment: ${context.resumedAt}.`);
   if (context.summary) lines.push(`Friendly recap shown to the user: ${context.summary}`);
   return lines.join("\n");
+}
+
+export interface CoffeeContinuityContext {
+  conversationId: string;
+  title: string;
+  topic: string | null;
+  summary: string;
+  updatedAt: string;
+}
+
+function parseCoffeeContinuityBotIds(raw: string | null | undefined): string[] {
+  if (typeof raw !== "string" || raw.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function coffeeContinuityMentionsInternalAccountMetadata(text: string): boolean {
+  return /\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/i.test(
+    text
+  );
+}
+
+function normalizeCoffeeContinuityText(
+  value: string | null | undefined,
+  maxChars = COFFEE_CONTINUITY_SUMMARY_MAX_CHARS
+): string | null {
+  const collapsed = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!collapsed) return null;
+  const withoutSynopsisPrefix = collapsed
+    .replace(/^#{1,6}\s*session synopsis\s*[:\-]?\s*/i, "")
+    .replace(/^\*\*session synopsis\*\*\s*[:\-]?\s*/i, "")
+    .replace(/^session synopsis\s*[:\-]\s*/i, "")
+    .trim();
+  if (!withoutSynopsisPrefix) return null;
+  if (coffeeContinuityMentionsInternalAccountMetadata(withoutSynopsisPrefix)) return null;
+  if (withoutSynopsisPrefix.length <= maxChars) return withoutSynopsisPrefix;
+  return `${withoutSynopsisPrefix.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function normalizeCoffeeContinuityTopic(value: string | null | undefined): string | null {
+  return normalizeCoffeeContinuityText(value, 140);
+}
+
+export function loadRecentCoffeeContinuityContexts(args: {
+  db: DatabaseSync;
+  userId: string;
+  botId: string | null | undefined;
+  limit?: number;
+}): CoffeeContinuityContext[] {
+  const botId = normalizeChatBotId(args.botId);
+  if (!botId) return [];
+  const limit = Math.max(0, Math.min(10, Math.floor(args.limit ?? COFFEE_CONTINUITY_DEFAULT_LIMIT)));
+  if (limit === 0) return [];
+  const rows = args.db
+    .prepare(
+      `SELECT c.id, c.title, c.bot_group_ids, c.coffee_topic, c.coffee_meeting_summary,
+              c.updated_at,
+              (SELECT m.content
+                 FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.user_id = c.user_id
+                  AND m.role = 'system'
+                  AND m.content LIKE ?
+                ORDER BY m.created_at DESC
+                LIMIT 1) AS session_synopsis,
+              EXISTS (
+                SELECT 1
+                  FROM messages m_spoke
+                 WHERE m_spoke.conversation_id = c.id
+                   AND m_spoke.user_id = c.user_id
+                   AND m_spoke.role = 'assistant'
+                   AND m_spoke.bot_id = ?
+              ) AS bot_spoke
+         FROM conversations c
+        WHERE c.user_id = ?
+          AND c.conversation_mode = 'coffee'
+          AND COALESCE(c.incognito, 0) = 0
+          AND (
+            c.bot_group_ids LIKE ?
+            OR EXISTS (
+              SELECT 1
+                FROM messages m_filter
+               WHERE m_filter.conversation_id = c.id
+                 AND m_filter.user_id = c.user_id
+                 AND m_filter.role = 'assistant'
+                 AND m_filter.bot_id = ?
+            )
+          )
+          AND (
+            COALESCE(c.coffee_meeting_summary, '') != ''
+            OR EXISTS (
+              SELECT 1
+                FROM messages m_summary
+               WHERE m_summary.conversation_id = c.id
+                 AND m_summary.user_id = c.user_id
+                 AND m_summary.role = 'system'
+                 AND m_summary.content LIKE ?
+            )
+          )
+        ORDER BY c.updated_at DESC
+        LIMIT ?`
+    )
+    .all(
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      botId,
+      args.userId,
+      `%${botId}%`,
+      botId,
+      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
+      COFFEE_CONTINUITY_QUERY_LIMIT
+    ) as Array<{
+      id: string;
+      title: string | null;
+      bot_group_ids: string | null;
+      coffee_topic: string | null;
+      coffee_meeting_summary: string | null;
+      session_synopsis: string | null;
+      bot_spoke: number;
+      updated_at: string;
+    }>;
+
+  const contexts: CoffeeContinuityContext[] = [];
+  for (const row of rows) {
+    const groupBotIds = parseCoffeeContinuityBotIds(row.bot_group_ids);
+    const participated = groupBotIds.includes(botId) || row.bot_spoke === 1;
+    if (!participated) continue;
+    const summary =
+      normalizeCoffeeContinuityText(row.session_synopsis) ??
+      normalizeCoffeeContinuityText(row.coffee_meeting_summary);
+    if (!summary) continue;
+    contexts.push({
+      conversationId: row.id,
+      title: normalizeCoffeeContinuityText(row.title, 90) ?? "Coffee Session",
+      topic: normalizeCoffeeContinuityTopic(row.coffee_topic),
+      summary,
+      updatedAt: row.updated_at,
+    });
+    if (contexts.length >= limit) break;
+  }
+  return contexts;
+}
+
+export function buildCoffeeContinuityPromptContext(
+  contexts: readonly CoffeeContinuityContext[]
+): string | null {
+  if (contexts.length === 0) return null;
+  return [
+    "Recent Coffee session context for this bot:",
+    "These are summary-level notes from the most recent Coffee sessions this bot participated in. Use them only as lightweight continuity when the user follows up on a Coffee-session remark. Do not invent exact quotes; if the user supplies a quote, use it as their reference point.",
+    ...contexts.map((context, index) => {
+      const label = context.topic
+        ? `${context.title} - topic: ${context.topic}`
+        : context.title;
+      return `- ${index + 1}. ${label}: ${context.summary}`;
+    }),
+  ].join("\n");
 }
 
 function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
@@ -2923,7 +3111,9 @@ function truncateToolCallPreview(text: string, max = TOOL_CALL_DIAG_PREVIEW_CAP)
 const TOOL_CALL_RAW_HINT_PATTERNS: ReadonlyArray<RegExp> = [
   /"\s*sendGeneratedImage\s*"\s*:/i,
   /"\s*askQuestion\s*"\s*:/i,
+  /"\s*webSearch\s*"\s*:/i,
   /"\s*name\s*"\s*:\s*"\s*AskQuestion\s*"/i,
+  /"\s*name\s*"\s*:\s*"\s*WebSearch\s*"/i,
   /<\|\s*send\s*_?\s*generated\s*_?\s*image\s*\|>/i,
   /<<<\s*PRISM\s*_?\s*TOOL\s*>>>/i,
 ];
@@ -2938,12 +3128,20 @@ const ASK_QUESTION_NAME_HINTS: ReadonlyArray<RegExp> = [
   /"\s*name\s*"\s*:\s*"\s*AskQuestion\s*"/i,
 ];
 
+const WEB_SEARCH_NAME_HINTS: ReadonlyArray<RegExp> = [
+  /"\s*webSearch\s*"\s*:/i,
+  /"\s*name\s*"\s*:\s*"\s*WebSearch\s*"/i,
+];
+
 function inferDroppedToolNameFromRaw(raw: string): ChatToolCallEventName {
   if (SEND_GENERATED_IMAGE_NAME_HINTS.some((rx) => rx.test(raw))) {
     return "sendGeneratedImage";
   }
   if (ASK_QUESTION_NAME_HINTS.some((rx) => rx.test(raw))) {
     return "askQuestion";
+  }
+  if (WEB_SEARCH_NAME_HINTS.some((rx) => rx.test(raw))) {
+    return "webSearch";
   }
   return "unknown";
 }
@@ -2959,6 +3157,8 @@ interface BuildAssistantToolCallEventsArgs {
   rawReply: string;
   parsedSendGeneratedImage?: { prompt: string };
   parsedAskQuestion?: AskQuestionPayload;
+  parsedWebSearch?: WebSearchRequestPayload;
+  webSearchStatus?: "blocked" | "completed" | "none";
   /**
    * What happened on the image-slot acquisition path for this turn:
    *  - "acquired" → we scheduled a background job (use `imageJobId`)
@@ -2986,6 +3186,29 @@ export function buildAssistantToolCallEvents(
       prompt: truncateToolCallPreview(args.parsedAskQuestion.prompt),
       detail: `${args.parsedAskQuestion.options.length} option(s)`,
     });
+  }
+
+  if (args.parsedWebSearch) {
+    const promptPreview = truncateToolCallPreview(args.parsedWebSearch.query);
+    events.push({
+      name: "webSearch",
+      status: "detected",
+      prompt: promptPreview,
+    });
+    if (args.webSearchStatus === "blocked") {
+      events.push({
+        name: "webSearch",
+        status: "blocked",
+        prompt: promptPreview,
+        detail: "automatic web search is disabled in LOCAL mode",
+      });
+    } else if (args.webSearchStatus === "completed") {
+      events.push({
+        name: "webSearch",
+        status: "completed",
+        prompt: promptPreview,
+      });
+    }
   }
 
   if (args.parsedSendGeneratedImage) {
@@ -3067,6 +3290,13 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Or image-only: {\"v\":1,\"sendGeneratedImage\":{\"prompt\":\"...\"}}.",
   "- After you write your visible prose, Prism shows the picture as a separate follow-up bubble (so the user reads your message first, then sees the image).",
   "- Use sparingly when a picture truly helps; never use for every turn.",
+  "",
+  "Optional — search the web for fresh/current information:",
+  "- Use WebSearch when the user asks for current, recent, live, or web-specific facts and the answer would benefit from fresh sources.",
+  "- Add a `webSearch` object with one concise `query` field. Prism will fetch results, show a source card, and give you the results before you answer.",
+  "- Do not use WebSearch for stable facts, private/local knowledge, or when the user explicitly asks to stay offline.",
+  "- WebSearch example: {\"v\":1,\"webSearch\":{\"query\":\"latest OpenAI API model documentation June 2026\"}}.",
+  "- Never emit more than one WebSearch request in a turn.",
   "",
   "Optional — Zen display hint (hidden, visual-only, used only by Zen surfaces):",
   "- Use `zenDisplay` sparingly for very short, dramatic replies where placement matters; never use it for ordinary paragraphs, lists, or code.",
@@ -3353,6 +3583,149 @@ const ASKQUESTION_REQUEST_PATTERN =
 
 function userExplicitlyRequestedAskQuestion(userMessage: string): boolean {
   return ASKQUESTION_REQUEST_PATTERN.test(userMessage);
+}
+
+type ManualAskQuestionAnswerConstraint = {
+  question: string;
+  options: string[];
+};
+
+function readManualAskQuestionAnswerConstraint(
+  raw: ManualChatToolRequest | undefined
+): ManualAskQuestionAnswerConstraint | undefined {
+  if (!raw || raw.name !== "askQuestion") return undefined;
+  const question =
+    typeof raw.question === "string" && raw.question.trim()
+      ? normalizeAskQuestionText(raw.question).slice(0, ASKQUESTION_CLOSED_QUESTION_MAX_CHARS)
+      : "";
+  const optionLabels = Array.isArray(raw.options)
+    ? raw.options
+        .map((option) => normalizeAskQuestionText(option).slice(0, ASKQUESTION_OPTION_MAX_CHARS))
+        .filter((option) => option.length > 0)
+    : [];
+  const distinct: string[] = [];
+  const seen = new Set<string>();
+  for (const option of optionLabels) {
+    const key = normalizeAskQuestionComparisonText(option);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    distinct.push(option);
+    if (distinct.length >= 4) break;
+  }
+  if (!question) return undefined;
+  return { question, options: distinct.length >= 2 ? distinct : [] };
+}
+
+function formatManualAskQuestionForModel(
+  constraint: ManualAskQuestionAnswerConstraint
+): string {
+  if (constraint.options.length >= 2) {
+    return [
+      "The user is using Prism's AskQuestion tool to ask you a constrained question.",
+      `Question: ${constraint.question}`,
+      "You must choose exactly one of the answers below. Start your reply with that answer exactly as written, then you may add a brief explanation.",
+      "If none of the answers is perfect, still choose the closest available answer; do not answer with “none” unless “none” is one of the answers.",
+      ...constraint.options.map((option, index) => `${index + 1}. ${option}`),
+      "Do not emit an AskQuestion tool card for this request.",
+    ].join("\n");
+  }
+  return [
+    "The user is using Prism's AskQuestion tool to ask you directly.",
+    `Question: ${constraint.question}`,
+    "Answer the question directly. Do not turn it back into an AskQuestion tool card unless the user explicitly asks you to ask them something.",
+  ].join("\n");
+}
+
+function firstNonEmptyAssistantLine(text: string): string {
+  return text
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) ?? "";
+}
+
+function escapeAskQuestionRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveManualAskQuestionSelectedOptionIndex(
+  constraint: ManualAskQuestionAnswerConstraint,
+  assistantDisplay: string
+): number | undefined {
+  if (constraint.options.length < 2) return undefined;
+  const firstLineNorm = normalizeAskQuestionComparisonText(
+    firstNonEmptyAssistantLine(assistantDisplay)
+  );
+  if (!firstLineNorm) return undefined;
+  const optionNorms = constraint.options.map((option) =>
+    normalizeAskQuestionComparisonText(option)
+  );
+  for (let index = 0; index < optionNorms.length; index += 1) {
+    const optionNorm = optionNorms[index];
+    if (!optionNorm) continue;
+    if (
+      firstLineNorm === optionNorm ||
+      firstLineNorm.startsWith(`${optionNorm} `) ||
+      firstLineNorm.startsWith(`${optionNorm}-`) ||
+      firstLineNorm.startsWith(`${optionNorm}:`)
+    ) {
+      return index;
+    }
+  }
+  const mentionedOptionIndexes = optionNorms
+    .map((optionNorm, index) => {
+      if (!optionNorm) return -1;
+      const pattern = new RegExp(
+        `(?:^|[^\\p{L}\\p{N}])${escapeAskQuestionRegexLiteral(optionNorm)}(?:$|[^\\p{L}\\p{N}])`,
+        "u"
+      );
+      return pattern.test(firstLineNorm) ? index : -1;
+    })
+    .filter((index) => index >= 0);
+  return mentionedOptionIndexes.length === 1 ? mentionedOptionIndexes[0] : undefined;
+}
+
+function buildManualAskQuestionResultPayload(args: {
+  constraint: ManualAskQuestionAnswerConstraint | undefined;
+  assistantDisplay: string;
+}): ManualAskQuestionResultPayload | undefined {
+  const { constraint } = args;
+  if (!constraint || constraint.options.length < 2) return undefined;
+  const options = constraint.options.map((label, index) => ({
+    id: String.fromCharCode(97 + index),
+    label,
+  }));
+  const selectedOptionIndex = resolveManualAskQuestionSelectedOptionIndex(
+    constraint,
+    args.assistantDisplay
+  );
+  const selectedOption =
+    selectedOptionIndex !== undefined ? options[selectedOptionIndex] : undefined;
+  return {
+    v: 1,
+    name: "AskQuestion",
+    question: constraint.question,
+    options,
+    ...(selectedOption && selectedOptionIndex !== undefined
+      ? {
+          selectedOptionId: selectedOption.id,
+          selectedOptionIndex,
+          selectedOptionLabel: selectedOption.label,
+        }
+      : {}),
+  };
+}
+
+function manualToolQueryOrMessage(
+  tool: ManualChatToolRequest | undefined,
+  fallback: string
+): string {
+  const candidate =
+    tool?.name === "webSearch"
+      ? tool.query
+      : tool?.name === "imageGen"
+        ? tool.prompt
+        : undefined;
+  return (typeof candidate === "string" && candidate.trim() ? candidate : fallback).trim();
 }
 
 const ASKQUESTION_CLOSED_QUESTION_LOOKBACK_LINES = 3;
@@ -4460,6 +4833,7 @@ function hydrateMessages(
         promptWildcards?.resolvedPrompt ?? row.content
       );
       const psychicThought = parseStoredPsychicThoughtPayload(row.tool_payload);
+      const manualAskQuestion = parseStoredManualAskQuestionPayload(row.tool_payload);
       return {
         ...base,
         ...(promptShortcutWithResolvedPrompt
@@ -4468,6 +4842,7 @@ function hydrateMessages(
         ...(promptWildcardsWithResolvedPrompt
           ? { promptWildcards: promptWildcardsWithResolvedPrompt }
           : {}),
+        ...(manualAskQuestion ? { manualAskQuestion } : {}),
         ...(psychicThought ? { psychicThought } : {}),
       };
     }
@@ -4496,6 +4871,7 @@ function hydrateMessages(
       ...(assembled.sentGeneratedImage
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
         : {}),
+      ...(assembled.webSearch ? { webSearch: assembled.webSearch } : {}),
     };
   });
 }
@@ -5231,6 +5607,7 @@ function buildPromptMessages(args: {
   zenSessionMemoryContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityContext?: ZenSessionMemoryOverview | null;
   zenPersonaContinuityLabel?: string | null;
+  coffeeContinuityContexts?: CoffeeContinuityContext[];
   memoryLines: string[];
   mentionedBotContexts?: string[];
   memoryClarification?: string | null;
@@ -5261,7 +5638,7 @@ function buildPromptMessages(args: {
   ) {
     promptMessages.push({
       role: "system",
-      content: `The user's preferred name is "${trimmedDisplayName}". Use it naturally when it helps, but do not overuse it.`,
+      content: `The user's account display name is "${trimmedDisplayName}". Use it naturally when it helps, but do not treat it as an explicitly stated preferred name.`,
     });
   }
   if (args.devMemoriesEnabled) {
@@ -5325,6 +5702,12 @@ function buildPromptMessages(args: {
   );
   if (zenPersonaContinuityHint) {
     promptMessages.push({ role: "system", content: zenPersonaContinuityHint });
+  }
+  const coffeeContinuityHint = buildCoffeeContinuityPromptContext(
+    args.coffeeContinuityContexts ?? []
+  );
+  if (coffeeContinuityHint) {
+    promptMessages.push({ role: "system", content: coffeeContinuityHint });
   }
   if (args.mentionedBotContexts && args.mentionedBotContexts.length > 0) {
     promptMessages.push({
@@ -5853,6 +6236,10 @@ export async function processChatMessage(
       ? settings.promptInputOverride.trim()
       : "";
   const modelUserMessage = promptInputOverride || message;
+  const manualTool = !isStarterPrompt ? settings.manualTool : undefined;
+  const manualWebSearchRequested = manualTool?.name === "webSearch";
+  const manualImageGenRequested = manualTool?.name === "imageGen";
+  const manualAskQuestionConstraint = readManualAskQuestionAnswerConstraint(manualTool);
   const explicitAskQuestionRequest =
     !isStarterPrompt &&
     !personaTransitionTurn &&
@@ -5909,10 +6296,30 @@ export async function processChatMessage(
     secondaryOllamaHost: settings.secondaryOllamaHost,
     experimentalDualOllama: settings.experimentalDualOllamaEnabled === true,
   });
+  const executeWebSearch = async (query: string, source: "manual" | "automatic"): Promise<WebSearchPayload> => {
+    pushBackendEvent("tool", "Running WebSearch", `source=${source}; query=${truncateToolCallPreview(query)}`);
+    const payload = await searchWebWithBrave({
+      query,
+      apiKey: config.braveSearchApiKey,
+      signal: settings.signal,
+    });
+    pushBackendEvent(
+      "tool",
+      "WebSearch completed",
+      `source=${source}; results=${payload.results.length}`
+    );
+    return payload;
+  };
 
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
+    const manualWebSearchPayload = manualWebSearchRequested
+      ? await executeWebSearch(
+          manualToolQueryOrMessage(manualTool, modelUserMessage),
+          "manual"
+        )
+      : undefined;
     // A selected AskQuestion option is now treated as ordinary prose.
     // Only an explicit user request should start another AskQuestion turn.
     const askQuestionMode: "off" | "explicit" | "continuation" =
@@ -5926,6 +6333,7 @@ export async function processChatMessage(
       botOpinion: null,
       prismMood: null,
       threadSummary: null,
+      coffeeContinuityContexts: [],
       memoryLines: [],
       memoryClarification: null,
       sessionResumeContext: settings.sessionResumeContext,
@@ -5937,6 +6345,18 @@ export async function processChatMessage(
       interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
+    if (manualWebSearchPayload) {
+      promptMessages.push({
+        role: "system",
+        content: formatWebSearchForModel(manualWebSearchPayload),
+      });
+    }
+    if (manualAskQuestionConstraint) {
+      promptMessages.push({
+        role: "system",
+        content: formatManualAskQuestionForModel(manualAskQuestionConstraint),
+      });
+    }
     pushBackendEvent(
       "context",
       "Prepared private chat prompt",
@@ -6008,9 +6428,60 @@ export async function processChatMessage(
       providerNameUsed = boundary.providerNameUsed;
       modelUsed = boundary.modelUsed;
     }
-    throwIfChatRequestCancelled(settings.signal);
-    const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-      const shouldBackfillAskQuestion =
+	    throwIfChatRequestCancelled(settings.signal);
+	    let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+	    let requestedWebSearchForTurn = parsedAssistant.webSearch;
+	    let webSearchForTurn = manualWebSearchPayload;
+	    let webSearchStatus: "blocked" | "completed" | "none" =
+	      manualWebSearchPayload ? "completed" : "none";
+	    if (!webSearchForTurn && requestedWebSearchForTurn) {
+	      if (effectiveProvider === "local") {
+	        webSearchStatus = "blocked";
+	      } else {
+	        webSearchForTurn = await executeWebSearch(requestedWebSearchForTurn.query, "automatic");
+	        webSearchStatus = "completed";
+	        ({
+          assistantReplyRaw,
+          providerNameUsed,
+          modelUsed,
+          fallbackInvocation,
+          psychicThought,
+          psychicDebug,
+        } = await generateWithLenientLocalFallback({
+          provider: primaryProvider,
+          promptMessages: [
+            ...promptMessages,
+            {
+              role: "assistant",
+              content:
+                parsedAssistant.displayContent.trim() ||
+                "I need fresh web context before answering.",
+            },
+            {
+              role: "system",
+              content: formatWebSearchForModel(webSearchForTurn),
+            },
+            {
+              role: "user",
+              content:
+                "Using the web search results above, answer the user's latest message now. Do not request WebSearch again.",
+            },
+          ],
+          botOverrides: primaryBotOverrides,
+          secondaryOllamaHost: settings.secondaryOllamaHost,
+          lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+          experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+          psychicModeEnabled: settings.psychicModeEnabled,
+          denialBoundaryProvider: auxiliaryProvider,
+          denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+          botSystemPrompt: effectiveBotSystemPrompt,
+          userMessage: modelUserMessage,
+          signal: settings.signal,
+        }));
+        parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+      }
+    }
+    const shouldBackfillAskQuestion =
         explicitAskQuestionRequest ||
         assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
     const askQuestionRaw =
@@ -6024,10 +6495,14 @@ export async function processChatMessage(
           askQuestionRaw
         )
       : undefined;
-    const assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
-      parsedAssistant.displayContent,
-      askQuestionForTurn
-    );
+	    let assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
+	      parsedAssistant.displayContent,
+	      askQuestionForTurn
+	    );
+	    if (webSearchStatus === "blocked" && assistantDisplayRaw.trim().length === 0) {
+	      assistantDisplayRaw =
+	        "I can only run automatic web searches in ONLINE mode. Use the ? tool picker to search the web explicitly from LOCAL mode.";
+	    }
     const starterSendGeneratedImageRequested =
       isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
     let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
@@ -6044,7 +6519,9 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
-    const sendImgPromptIncRaw = parsedAssistant.sendGeneratedImage?.prompt?.trim();
+    const sendImgPromptIncRaw = manualImageGenRequested
+      ? manualToolQueryOrMessage(manualTool, modelUserMessage)
+      : parsedAssistant.sendGeneratedImage?.prompt?.trim();
     let sendImgPromptInc = autoBackfillSendGeneratedImagePrompt({
       isStarterPrompt,
       userMessage: modelUserMessage,
@@ -6130,8 +6607,24 @@ export async function processChatMessage(
       parsed: parsedAssistant.tellFictionalStory,
       askQuestion: assistantAskQuestionForTurn,
     });
+    const manualAskQuestionForTurn = buildManualAskQuestionResultPayload({
+      constraint: manualAskQuestionConstraint,
+      assistantDisplay,
+    });
     const incognitoToolCallEvents = buildAssistantToolCallEvents({
-      rawReply: assistantReplyRaw,
+	      rawReply: assistantReplyRaw,
+	      ...(requestedWebSearchForTurn
+	        ? { parsedWebSearch: requestedWebSearchForTurn, webSearchStatus }
+	        : manualWebSearchPayload
+	          ? {
+	              parsedWebSearch: {
+                v: 1,
+                name: "WebSearch" as const,
+                query: manualWebSearchPayload.query,
+              },
+              webSearchStatus,
+            }
+          : {}),
       ...((parsedAssistant.sendGeneratedImage ||
         sendImgPromptIncRaw !== sendImgPromptIncRequested) &&
       sendImgPromptIncRequested
@@ -6166,6 +6659,7 @@ export async function processChatMessage(
         ? { tellFictionalStory: tellFictionalStoryForTurn }
         : {}),
       ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
+      ...(webSearchForTurn ? { webSearch: webSearchForTurn } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
@@ -6185,6 +6679,9 @@ export async function processChatMessage(
             botId: activeBotId ?? null,
             ...(promptShortcutWithResolvedPrompt
               ? { promptShortcut: promptShortcutWithResolvedPrompt }
+              : {}),
+            ...(manualAskQuestionForTurn
+              ? { manualAskQuestion: manualAskQuestionForTurn }
               : {}),
             ...(psychicThought ? { psychicThought } : {}),
           }]
@@ -6596,6 +7093,7 @@ export async function processChatMessage(
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
+  let coffeeContinuityContexts: CoffeeContinuityContext[] = [];
   if (
     !incognitoForTurn &&
     !personaTransitionTurn &&
@@ -6634,20 +7132,41 @@ export async function processChatMessage(
     memoryLines = pipelineResult.memoryLines;
     mentionedBotContexts = pipelineResult.mentionedBotContexts;
   }
+  if (
+    isZenMode(mode) &&
+    !incognitoForTurn &&
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
+    !commandCenterPromptTurn &&
+    !skipMemoryForMoodCooldownTurn &&
+    !prismMoodIgnoreTurn &&
+    activeMemoryBotId
+  ) {
+    coffeeContinuityContexts = loadRecentCoffeeContinuityContexts({
+      db,
+      userId,
+      botId: activeMemoryBotId,
+    });
+  }
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; coffeeContinuity=${coffeeContinuityContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
   );
 
   let userMessageId: string | null = null;
   const buildUserMessageToolPayload = (
-    psychicThought?: PsychicThoughtPayload
+    psychicThought?: PsychicThoughtPayload,
+    manualAskQuestion?: ManualAskQuestionResultPayload
   ): string | null =>
     serializePromptToolPayload({
       promptShortcut: withPromptShortcutResolvedPrompt(settings.promptShortcut, modelUserMessage),
       promptWildcards: withPromptWildcardResolvedPrompt(settings.promptWildcards, modelUserMessage),
       ...(psychicThought ? { psychicThought } : {}),
+      ...(manualAskQuestion ? { manualAskQuestion } : {}),
     });
   const insertUserMessageForTurn = (): void => {
     if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || userMessageId !== null) return;
@@ -6771,14 +7290,25 @@ export async function processChatMessage(
       `previousContext=${zenSessionMemoryContext.previousContext ? "yes" : "no"}; checkpoints=${zenSessionMemoryContext.sessionMemories.length}`
     );
   }
-  if (zenPersonaContinuityContext?.sessionMemories.length) {
-    pushBackendEvent(
-      "context",
-      "Loaded Zen Persona continuity",
-      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
-    );
-  }
-  const promptMessages = buildPromptMessages({
+	  if (zenPersonaContinuityContext?.sessionMemories.length) {
+	    pushBackendEvent(
+	      "context",
+	      "Loaded Zen Persona continuity",
+	      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
+	    );
+	  }
+	  const manualWebSearchPayload =
+	    manualWebSearchRequested &&
+	    !personaTransitionTurn &&
+	    !zenAutonomyTurn &&
+	    !zenAskQuestionPatienceTurn &&
+	    !zenLiveActionInterruptTurn
+	      ? await executeWebSearch(
+	          manualToolQueryOrMessage(manualTool, modelUserMessage),
+	          "manual"
+	        )
+	      : undefined;
+	  const promptMessages = buildPromptMessages({
     botSystemPrompt: effectiveBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
     suppressDisplayNameHint: isStarterPrompt,
@@ -6791,6 +7321,7 @@ export async function processChatMessage(
     zenSessionMemoryContext,
     zenPersonaContinuityContext,
     zenPersonaContinuityLabel: settings.starterPromptLabel,
+    coffeeContinuityContexts,
     memoryLines,
     mentionedBotContexts,
     memoryClarification,
@@ -6800,10 +7331,22 @@ export async function processChatMessage(
     userMessage: promptUserMessage,
     mode,
     askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
-    interruptedContent: settings.prismInterruption?.interruptedContent,
-    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
-  });
-  pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
+	    interruptedContent: settings.prismInterruption?.interruptedContent,
+	    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
+	  });
+	  if (manualWebSearchPayload) {
+	    promptMessages.push({
+	      role: "system",
+	      content: formatWebSearchForModel(manualWebSearchPayload),
+	    });
+	  }
+	  if (manualAskQuestionConstraint) {
+	    promptMessages.push({
+	      role: "system",
+	      content: formatManualAskQuestionForModel(manualAskQuestionConstraint),
+	    });
+	  }
+	  pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
   insertUserMessageForTurn();
   let cancelledPersistedTurnRolledBack = false;
   const rollbackIfCancelledBeforeAssistantReply = (error: unknown): void => {
@@ -6829,29 +7372,32 @@ export async function processChatMessage(
 
   let assistantReplyRaw = "";
   let providerNameUsed: ProviderName = provider.name;
-  let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
-  let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
-  let psychicThoughtForTurn: PsychicThoughtPayload | undefined;
-  let psychicDebugForTurn: PsychicDebugPayload | undefined;
-  if (prismMoodPauseTurn) {
+	  let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
+	  let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+	  let psychicThoughtForTurn: PsychicThoughtPayload | undefined;
+	  let psychicDebugForTurn: PsychicDebugPayload | undefined;
+	  let primaryProvider: LlmProvider = provider;
+	  let primaryBotOverrides: GenerateOptions | undefined = settings.botOverrides;
+	  if (prismMoodPauseTurn) {
     assistantReplyRaw = ZEN_MOOD_PAUSE_REPLY;
     pushBackendEvent(
       "model",
       "Skipped chat model",
       `reason=prism-mood-pause; mood=${prismMood.moodKey}; annoyance=${prismMood.annoyance}; warmth=${prismMood.warmth}`
     );
-  } else {
-    const { provider: primaryProvider, botOverrides: primaryBotOverrides } =
-      resolvePrimaryChatProviderForPossibleImageToolTurn({
-        isStarterPrompt,
-        rawUserMessage: modelUserMessage,
-        baseProvider: provider,
-        botOverrides: settings.botOverrides,
-        secondaryOllamaHost: settings.secondaryOllamaHost,
-        prismImageToolLlmModel: settings.prismImageToolLlmModel,
-        recentMessages: history,
-      });
-    providerNameUsed = primaryProvider.name;
+	  } else {
+	    const primaryRoute = resolvePrimaryChatProviderForPossibleImageToolTurn({
+	        isStarterPrompt,
+	        rawUserMessage: modelUserMessage,
+	        baseProvider: provider,
+	        botOverrides: settings.botOverrides,
+	        secondaryOllamaHost: settings.secondaryOllamaHost,
+	        prismImageToolLlmModel: settings.prismImageToolLlmModel,
+	        recentMessages: history,
+	      });
+	    primaryProvider = primaryRoute.provider;
+	    primaryBotOverrides = primaryRoute.botOverrides;
+	    providerNameUsed = primaryProvider.name;
     pushBackendEvent(
       "model",
       "Calling chat model",
@@ -6930,7 +7476,71 @@ export async function processChatMessage(
       userId
     );
   }
-  const parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+  let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+  const requestedWebSearchForTurn: WebSearchRequestPayload | undefined =
+    manualWebSearchPayload
+      ? {
+          v: 1,
+          name: "WebSearch",
+          query: manualWebSearchPayload.query,
+        }
+      : parsedAssistant.webSearch;
+  let webSearchForTurn = manualWebSearchPayload;
+  let webSearchStatus: "blocked" | "completed" | "none" =
+    manualWebSearchPayload ? "completed" : "none";
+  if (!webSearchForTurn && requestedWebSearchForTurn) {
+    if (effectiveProvider === "local") {
+      webSearchStatus = "blocked";
+    } else {
+      try {
+        webSearchForTurn = await executeWebSearch(requestedWebSearchForTurn.query, "automatic");
+        webSearchStatus = "completed";
+        ({
+          assistantReplyRaw,
+          providerNameUsed,
+          modelUsed,
+          fallbackInvocation,
+          psychicThought: psychicThoughtForTurn,
+          psychicDebug: psychicDebugForTurn,
+        } = await generateWithLenientLocalFallback({
+          provider: primaryProvider,
+          promptMessages: [
+            ...promptMessages,
+            {
+              role: "assistant",
+              content:
+                parsedAssistant.displayContent.trim() ||
+                "I need fresh web context before answering.",
+            },
+            {
+              role: "system",
+              content: formatWebSearchForModel(webSearchForTurn),
+            },
+            {
+              role: "user",
+              content:
+                "Using the web search results above, answer the user's latest message now. Do not request WebSearch again.",
+            },
+          ],
+          botOverrides: primaryBotOverrides,
+          secondaryOllamaHost: settings.secondaryOllamaHost,
+          lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+          experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+          psychicModeEnabled: settings.psychicModeEnabled,
+          denialBoundaryProvider: auxiliaryProvider,
+          denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+          botSystemPrompt: effectiveBotSystemPrompt,
+          userMessage: modelUserMessage,
+          signal: settings.signal,
+        }));
+        parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+      } catch (error) {
+        rollbackIfCancelledBeforeAssistantReply(error);
+        throw error;
+      }
+      throwIfCancelledBeforeAssistantReply();
+    }
+  }
   const shouldBackfillAskQuestion =
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
@@ -6950,10 +7560,14 @@ export async function processChatMessage(
         askQuestionRaw
       )
     : undefined;
-  const assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
+  let assistantDisplayRaw = stripAskQuestionDuplicatesFromDisplay(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
+  if (webSearchStatus === "blocked" && assistantDisplayRaw.trim().length === 0) {
+    assistantDisplayRaw =
+      "I can only run automatic web searches in ONLINE mode. Use the ? tool picker to search the web explicitly from LOCAL mode.";
+  }
   const starterSendGeneratedImageRequested =
     isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
   let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
@@ -6963,11 +7577,11 @@ export async function processChatMessage(
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
-  const assistantMood = prismMoodPauseTurn
-    ? {
-        key: prismMood.moodKey,
-        confidence: prismMood.confidence,
-      }
+	  const assistantMood = prismMoodPauseTurn
+	    ? {
+	        key: prismMood.moodKey,
+	        confidence: prismMood.confidence,
+	      }
     : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn || zenLiveActionInterruptTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
@@ -6975,11 +7589,27 @@ export async function processChatMessage(
         toneDelta: turnEvaluation?.delta,
         sessionOpinion: existingSessionOpinion,
         botOpinion: existingBotOpinion,
-        repairSignal,
-      });
-  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
-    ? undefined
-    : parsedAssistant.sendGeneratedImage?.prompt?.trim();
+	        repairSignal,
+	      });
+  const manualAskQuestionForTurn = buildManualAskQuestionResultPayload({
+    constraint: manualAskQuestionConstraint,
+    assistantDisplay,
+  });
+  if (userMessageId && (psychicThoughtForTurn || manualAskQuestionForTurn)) {
+    db.prepare(
+      "UPDATE messages SET tool_payload = ? WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'user'"
+    ).run(
+      buildUserMessageToolPayload(psychicThoughtForTurn, manualAskQuestionForTurn),
+      userMessageId,
+      activeConversationId,
+      userId
+    );
+  }
+	  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	    ? undefined
+	    : manualImageGenRequested
+      ? manualToolQueryOrMessage(manualTool, modelUserMessage)
+      : parsedAssistant.sendGeneratedImage?.prompt?.trim();
   let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
     isStarterPrompt,
     userMessage: modelUserMessage,
@@ -7079,11 +7709,14 @@ export async function processChatMessage(
         parsed: parsedAssistant.tellFictionalStory,
         askQuestion: assistantAskQuestionForTurn,
       });
-  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
-    ? []
-    : buildAssistantToolCallEvents({
-        rawReply: assistantReplyRaw,
-        ...((parsedAssistant.sendGeneratedImage ||
+	  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	    ? []
+	    : buildAssistantToolCallEvents({
+	        rawReply: assistantReplyRaw,
+	        ...(requestedWebSearchForTurn
+	          ? { parsedWebSearch: requestedWebSearchForTurn, webSearchStatus }
+	          : {}),
+	        ...((parsedAssistant.sendGeneratedImage ||
           sendImgPromptPersistedRaw !== sendImgPromptPersistedRequested) &&
         sendImgPromptPersistedRequested
           ? {
@@ -7118,11 +7751,12 @@ export async function processChatMessage(
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
     tellFictionalStory: tellFictionalStoryForTurn,
-    moodKey: assistantMood.key,
-    moodConfidence: assistantMood.confidence,
-    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
-    zenTurn: zenTurnMarker,
-  });
+	    moodKey: assistantMood.key,
+	    moodConfidence: assistantMood.confidence,
+	    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
+	    zenTurn: zenTurnMarker,
+	    webSearch: webSearchForTurn,
+	  });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
     : null;

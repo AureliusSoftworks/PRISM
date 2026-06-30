@@ -2,23 +2,24 @@
 export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
 
 /**
- * `scaleY` for a seat on the oval: left of center stays normal; right of center flips
- * so the plate face reads toward the table (after the 90° plate rotation, `scaleX` was the wrong axis).
+ * `scaleY` for a seat on the oval: after the 90° plate rotation, `scaleY`
+ * controls the face's screen-horizontal direction. Left-side seats flip so
+ * they read toward the table; right-side seats stay normal.
  */
 export function coffeePlateFaceScaleYFromSeatHorizontalSide(
   side: CoffeeSeatHorizontalSide
 ): string {
-  return side === 1 ? "-1" : "1";
+  return side === -1 ? "-1" : "1";
 }
 
 /**
- * Top seat faces a target on the right half of the table with the same flip as
- * right-side seats; targets on the left stay unflipped.
+ * Top seat faces a target on the left half of the table with the same flip as
+ * left-side seats; targets on the right stay unflipped.
  */
 export function coffeeHeadPlateFaceScaleYFromGazeTargetSide(
   targetSide: CoffeeSeatHorizontalSide
 ): string {
-  return targetSide === 1 ? "-1" : "1";
+  return targetSide === -1 ? "-1" : "1";
 }
 
 /**
@@ -53,9 +54,9 @@ export function coffeeSeatHorizontalTableSide(
     "3:0": 50,
     "3:1": 26,
     "3:2": 74,
-    "4:0": 50,
+    "4:0": 24,
     "4:1": 76,
-    "4:2": 50,
+    "4:2": 76,
     "4:3": 24,
     "5:0": 50,
     "5:1": 21,
@@ -69,7 +70,7 @@ export function coffeeSeatHorizontalTableSide(
   return 0;
 }
 
-/** Top-of-table head seat: compact `seatIndex === 0`, or full ring `layoutIndex === 0` with 3+ bots. */
+/** Top-of-table head seat: compact `seatIndex === 0`, or the centered full-ring top seat. */
 export function coffeeSeatIsTopHead(
   compact: boolean,
   seatCount: number,
@@ -77,7 +78,7 @@ export function coffeeSeatIsTopHead(
   seatIndex: number
 ): boolean {
   if (compact) return seatIndex === 0;
-  return seatCount >= 3 && layoutIndex === 0;
+  return (seatCount === 3 || seatCount === 5) && layoutIndex === 0;
 }
 
 export interface CoffeeGazeMessage {

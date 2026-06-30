@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveLeadingDevCommandTextRanges,
+  resolveLeadingToolShortcutTextRange,
   resolvePendingWildcardSlotTextRanges,
   resolvePromptShortcutTextRanges,
   resolveWildcardDeckTextRanges,
@@ -222,6 +223,26 @@ describe("resolveLeadingDevCommandTextRanges", () => {
       quotedStringRanges: [{ start: 6, end: 28 }],
       actionTokenRanges: [{ start: 13, end: 21 }],
     });
+  });
+});
+
+describe("resolveLeadingToolShortcutTextRange", () => {
+  it("recognizes configured question-mark tool shortcuts", () => {
+    assert.deepEqual(
+      resolveLeadingToolShortcutTextRange("?web-search", {
+        toolNames: ["web-search", "ask-question"],
+      }),
+      { start: 0, end: 11, name: "web-search" }
+    );
+  });
+
+  it("does not treat slash-help syntax as a tool shortcut", () => {
+    assert.equal(
+      resolveLeadingToolShortcutTextRange("/?", {
+        toolNames: ["web-search"],
+      }),
+      null
+    );
   });
 });
 

@@ -359,6 +359,14 @@ function seedResetFixture(db: DatabaseSync): void {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
+    "INSERT INTO bot_relationships (user_id, source_bot_id, target_bot_id, updated_at) VALUES (?, ?, ?, ?)"
+  ).run(
+    "user-1",
+    "bot-1",
+    "bot-2",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
     "INSERT INTO coffee_bot_social_state (user_id, conversation_id, bot_id, updated_at) VALUES (?, ?, ?, ?)"
   ).run(
     "user-1",

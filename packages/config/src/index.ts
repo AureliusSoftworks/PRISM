@@ -162,6 +162,7 @@ export interface AppConfig {
   openAiApiKey?: string;
   anthropicApiKey?: string;
   elevenLabsApiKey?: string;
+  braveSearchApiKey?: string;
   qdrantUrl: string;
   /** Optional default ComfyUI base URL from env (per-user setting overrides in practice). */
   comfyUiHost: string;
@@ -188,6 +189,7 @@ export function getAppConfig(): AppConfig {
     openAiApiKey: process.env.OPENAI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
+    braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY ?? process.env.BRAVE_API_KEY,
     qdrantUrl: normalizeQdrantUrl(process.env.QDRANT_URL),
     comfyUiHost: normalizeComfyUiHost(process.env.COMFYUI_HOST),
   };

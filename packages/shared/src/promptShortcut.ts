@@ -21,6 +21,21 @@ export interface PromptShortcutRunMetadata {
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
+export interface ManualAskQuestionResultOption {
+  id: string;
+  label: string;
+}
+
+export interface ManualAskQuestionResultPayload {
+  v: 1;
+  name: "AskQuestion";
+  question: string;
+  options: ManualAskQuestionResultOption[];
+  selectedOptionId?: string;
+  selectedOptionIndex?: number;
+  selectedOptionLabel?: string;
+}
+
 export interface BuiltInPromptWildcardSlot {
   key: string;
   label: string;
@@ -562,6 +577,74 @@ function readPromptShortcutRange(value: unknown): number | undefined {
   return normalized >= 0 && normalized <= 20000 ? normalized : undefined;
 }
 
+function normalizeManualAskQuestionOptionId(value: unknown, fallback: string): string {
+  const id = readPromptShortcutString(value, 24).replace(/\s+/g, "-");
+  return id || fallback;
+}
+
+function normalizeManualAskQuestionResultOptions(
+  value: unknown
+): ManualAskQuestionResultOption[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const options: ManualAskQuestionResultOption[] = [];
+  for (const item of value) {
+    const row: Record<string, unknown> =
+      item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const rawLabel =
+      typeof item === "string" ? item : row.label ?? row.text ?? row.title ?? row.value;
+    const label = readPromptShortcutString(rawLabel, 140);
+    if (!label) continue;
+    const id = normalizeManualAskQuestionOptionId(row.id, String.fromCharCode(97 + options.length));
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push({ id, label });
+    if (options.length >= 4) break;
+  }
+  return options.length >= 2 ? options : [];
+}
+
+export function normalizeManualAskQuestionResultPayload(
+  value: unknown
+): ManualAskQuestionResultPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const rawName = readPromptShortcutString(row.name, 48).toLowerCase();
+  if (rawName && rawName !== "askquestion") return undefined;
+  const question = readPromptShortcutString(row.question ?? row.prompt, 500);
+  const options = normalizeManualAskQuestionResultOptions(row.options);
+  if (!question || options.length < 2) return undefined;
+
+  const selectedIdRaw = readPromptShortcutString(row.selectedOptionId, 24);
+  const selectedIndexRaw = row.selectedOptionIndex;
+  const selectedOptionIndex =
+    typeof selectedIndexRaw === "number" &&
+    Number.isInteger(selectedIndexRaw) &&
+    selectedIndexRaw >= 0 &&
+    selectedIndexRaw < options.length
+      ? selectedIndexRaw
+      : selectedIdRaw
+        ? options.findIndex((option) => option.id === selectedIdRaw)
+        : -1;
+  const selectedOption =
+    selectedOptionIndex >= 0 ? options[selectedOptionIndex] : undefined;
+
+  return {
+    v: 1,
+    name: "AskQuestion",
+    question,
+    options,
+    ...(selectedOption
+      ? {
+          selectedOptionId: selectedOption.id,
+          selectedOptionIndex,
+          selectedOptionLabel: selectedOption.label,
+        }
+      : {}),
+  };
+}
+
 export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutMetadata | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
@@ -755,6 +838,20 @@ export function parseStoredPsychicThoughtPayload(
   }
 }
 
+export function parseStoredManualAskQuestionPayload(
+  raw: string | null | undefined
+): ManualAskQuestionResultPayload | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const row = parsed as Record<string, unknown>;
+    return normalizeManualAskQuestionResultPayload(row.manualAskQuestion ?? parsed);
+  } catch {
+    return undefined;
+  }
+}
+
 export function withPromptShortcutResolvedPrompt(
   promptShortcut: PromptShortcutMetadata | undefined,
   resolvedPrompt: unknown
@@ -786,15 +883,18 @@ export function serializePromptToolPayload(options: {
   promptShortcut?: PromptShortcutMetadata;
   promptWildcards?: PromptWildcardRunMetadata;
   psychicThought?: PsychicThoughtPayload;
+  manualAskQuestion?: ManualAskQuestionResultPayload;
 }): string | null {
   const promptShortcut = normalizePromptShortcutMetadata(options.promptShortcut);
   const promptWildcards = normalizePromptWildcardRunMetadata(options.promptWildcards);
   const psychicThought = normalizePsychicThoughtPayload(options.psychicThought);
-  if (!promptShortcut && !promptWildcards && !psychicThought) return null;
+  const manualAskQuestion = normalizeManualAskQuestionResultPayload(options.manualAskQuestion);
+  if (!promptShortcut && !promptWildcards && !psychicThought && !manualAskQuestion) return null;
   return JSON.stringify({
     v: 1 as const,
     ...(promptShortcut ? { promptShortcut } : {}),
     ...(promptWildcards ? { promptWildcards } : {}),
     ...(psychicThought ? { psychicThought } : {}),
+    ...(manualAskQuestion ? { manualAskQuestion } : {}),
   });
 }

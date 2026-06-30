@@ -10,7 +10,7 @@ import {
   summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "../memory-summarizer.ts";
-import { persistMemoryCandidates } from "../memory.ts";
+import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import type { LlmProvider, ProviderMessage } from "../providers.ts";
 
 /**
@@ -587,6 +587,17 @@ describe("summarizeSandboxBotStatus", () => {
       [{ text: "Jared likes surreal but calming fidget-toy interfaces.", confidence: 0.9 }],
       userKey
     );
+    await restoreMemory(db, "user-1", userKey, {
+      conversationId: "default-memory-source",
+      botId: "bot-1",
+      text: "Your account display name is Jared.",
+      confidence: 0.96,
+      certainty: 0.96,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "about_you",
+    });
     db.prepare(
       "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, NULL, ?, ?)"
     ).run(
@@ -610,8 +621,37 @@ describe("summarizeSandboxBotStatus", () => {
     assert.equal(result.triggered, true);
     const prompt = calls[0]?.find((message) => message.role === "user")?.content ?? "";
     assert.match(prompt, /surreal but calming fidget-toy interfaces/);
+    assert.doesNotMatch(prompt, /account display name is Jared/i);
+    assert.doesNotMatch(prompt, /prefer(?:s)? to be called Jared/i);
     assert.doesNotMatch(prompt, /Rick James/);
     assert.doesNotMatch(prompt, /Dev tools repeated/);
+  });
+
+  it("does not build a bot-status summary from only protected account bootstrap memory", async () => {
+    const db = createTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    seedUser(db, "user-1", "Jared");
+    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)")
+      .run("bot-1", "user-1", "Sandy");
+    await restoreMemory(db, "user-1", userKey, {
+      botId: "bot-1",
+      text: "Your account display name is Jared.",
+      confidence: 0.96,
+      certainty: 0.96,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "about_you",
+    });
+    const { provider, calls } = stubProvider("unused");
+
+    const result = await summarizeSandboxBotStatus(db, provider, "user-1", "bot-1", {
+      userKey,
+    });
+
+    assert.equal(result.triggered, false);
+    assert.equal(calls.length, 0);
+    assert.equal(getLatestSandboxBotStatusSummary(db, "user-1", "bot-1"), null);
   });
 
   it("no-ops when there is no sandbox conversation context for the bot", async () => {

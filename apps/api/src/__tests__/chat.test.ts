@@ -9,6 +9,8 @@ import {
   decideZenAutonomyTurn,
   extractPrismBotMentionIdsFromMessage,
   inferChatToolRequestedImageSize,
+  buildCoffeeContinuityPromptContext,
+  loadRecentCoffeeContinuityContexts,
   parseTitleResponse,
   processChatMessage,
   refreshConversationTitle,
@@ -43,6 +45,10 @@ function createChatTestDb(): DatabaseSync {
       title TEXT NOT NULL,
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
+      bot_group_ids TEXT,
+      coffee_topic TEXT,
+      coffee_meeting_summary TEXT,
+      coffee_meeting_summary_updated_at TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_image_id TEXT,
@@ -190,7 +196,8 @@ async function flushBackgroundTitleJobs(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-function installChatFetchStub(reply = "Memory-aware reply"): void {
+function installChatFetchStub(reply = "Memory-aware reply"): Array<Array<{ content: string }>> {
+  const chatCalls: Array<Array<{ content: string }>> = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -224,11 +231,64 @@ function installChatFetchStub(reply = "Memory-aware reply"): void {
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }
+    if (Array.isArray(body.messages)) {
+      chatCalls.push(body.messages);
+    }
     return new Response(
       JSON.stringify({ message: { content: reply } }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
   }) as typeof fetch;
+  return chatCalls;
+}
+
+function seedCoffeeContinuityConversation(
+  db: DatabaseSync,
+  options: {
+    id: string;
+    userId?: string;
+    botIds: string[];
+    title?: string;
+    topic?: string | null;
+    meetingSummary?: string | null;
+    sessionSynopsis?: string | null;
+    incognito?: boolean;
+    updatedAt: string;
+  }
+): void {
+  const userId = options.userId ?? "user-1";
+  db.prepare(
+    `INSERT INTO conversations (
+       id, user_id, title, conversation_mode, bot_group_ids, coffee_topic,
+       coffee_meeting_summary, coffee_meeting_summary_updated_at, incognito,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, 'coffee', ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    options.id,
+    userId,
+    options.title ?? "Coffee Session",
+    JSON.stringify(options.botIds),
+    options.topic ?? null,
+    options.meetingSummary ?? null,
+    options.meetingSummary ? options.updatedAt : null,
+    options.incognito ? 1 : 0,
+    options.updatedAt,
+    options.updatedAt
+  );
+  if (options.sessionSynopsis) {
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'system', ?, 'local', NULL, NULL, ?, ?)`
+    ).run(
+      `${options.id}-synopsis`,
+      options.id,
+      userId,
+      options.sessionSynopsis,
+      JSON.stringify({ coffeeSynopsis: true }),
+      options.updatedAt
+    );
+  }
 }
 
 describe("conversation title inference helpers", () => {
@@ -262,6 +322,124 @@ describe("conversation title inference helpers", () => {
       sanitizeConversationTitle("A".repeat(80)),
       `${"A".repeat(57)}...`
     );
+  });
+});
+
+describe("Coffee continuity context for private chats", () => {
+  it("loads the last two non-incognito Coffee summaries for a participating bot", () => {
+    const db = createChatTestDb();
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-new",
+      botIds: ["bot-1", "bot-2"],
+      topic: "Krabby Patty evidence",
+      meetingSummary: "Rolling summary should lose to final synopsis.",
+      sessionSynopsis:
+        "Session synopsis: SpongeBob argued that the crab meat poll needed better evidence before anyone changed their mind.",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-mid",
+      botIds: ["bot-1", "bot-3"],
+      topic: "Coffee cup lighting",
+      meetingSummary:
+        "Squidward and SpongeBob disagreed about whether the lighting made everyone suspicious.",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-old",
+      botIds: ["bot-1", "bot-4"],
+      meetingSummary: "This older participating session should fall outside the two-session limit.",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-incognito",
+      botIds: ["bot-1", "bot-5"],
+      meetingSummary: "Incognito Coffee should never be reused.",
+      incognito: true,
+      updatedAt: "2026-01-05T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-other-bot",
+      botIds: ["bot-10", "bot-2"],
+      meetingSummary: "A substring match on bot-1 must not count bot-10.",
+      updatedAt: "2026-01-06T00:00:00.000Z",
+    });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-leaked",
+      botIds: ["bot-1", "bot-2"],
+      sessionSynopsis:
+        "Session synopsis: The table ended and the system noted your account display name is admin.",
+      updatedAt: "2026-01-07T00:00:00.000Z",
+    });
+
+    const contexts = loadRecentCoffeeContinuityContexts({
+      db,
+      userId: "user-1",
+      botId: "bot-1",
+    });
+
+    assert.deepEqual(
+      contexts.map((context) => context.conversationId),
+      ["coffee-new", "coffee-mid"]
+    );
+    assert.match(contexts[0]?.summary ?? "", /crab meat poll needed better evidence/);
+    assert.doesNotMatch(contexts[0]?.summary ?? "", /^Session synopsis:/);
+    assert.match(contexts[1]?.summary ?? "", /lighting made everyone suspicious/);
+  });
+
+  it("injects recent Coffee summaries into private bot chat prompts", async () => {
+    const db = createChatTestDb();
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-followup",
+      botIds: ["bot-1", "bot-2"],
+      topic: "Crab meat poll",
+      sessionSynopsis:
+        "Session synopsis: SpongeBob said the poll had teeth only if someone named the cost of being wrong.",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    });
+    const chatCalls = installChatFetchStub("I meant the risk had to be named.");
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "What did you mean when you said the poll had teeth?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are SpongeBob.",
+      }
+    );
+
+    assert.equal(
+      chatCalls.some((messages) =>
+        messages.some(
+          (message) =>
+            message.content.includes("Recent Coffee session context for this bot") &&
+            message.content.includes("the poll had teeth only if someone named the cost")
+        )
+      ),
+      true
+    );
+  });
+
+  it("formats Coffee continuity as summary-level context, not transcript recall", () => {
+    const prompt = buildCoffeeContinuityPromptContext([
+      {
+        conversationId: "coffee-1",
+        title: "Coffee Session",
+        topic: "Crab meat poll",
+        summary: "SpongeBob treated the poll as evidence, not proof.",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    assert.match(prompt ?? "", /summary-level notes/);
+    assert.match(prompt ?? "", /Do not invent exact quotes/);
+    assert.match(prompt ?? "", /Crab meat poll/);
   });
 });
 
@@ -2497,6 +2675,52 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.equal(typeof storedToolPayload.mood?.key, "string");
   });
 
+  it("blocks automatic WebSearch tool calls in LOCAL mode", async () => {
+    const db = createChatTestDb();
+    const seenUrls: string[] = [];
+    const webSearchTool = {
+      v: 1,
+      webSearch: { query: "latest Prism release news" },
+    };
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seenUrls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              `I should check fresh sources.\n<<<PRISM_TOOL>>>\n${JSON.stringify(webSearchTool)}\n<<<END_PRISM_TOOL>>>`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What is the latest?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.webSearch, undefined);
+    assert.ok(seenUrls.every((url) => !url.includes("api.search.brave.com")));
+    const webSearchStatuses =
+      result.toolCalls
+        ?.filter((event) => event.name === "webSearch")
+        .map((event) => event.status) ?? [];
+    assert.ok(webSearchStatuses.includes("detected"));
+    assert.ok(webSearchStatuses.includes("blocked"));
+    assert.equal(webSearchStatuses.includes("completed"), false);
+  });
+
   it("persists binary yes/no AskQuestion choices", async () => {
     const db = createChatTestDb();
     const askPayload = {
@@ -2535,6 +2759,148 @@ describe("processChatMessage AskQuestion tool", () => {
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
     assert.equal(lastAssistant?.content, "I can package that for you.");
     assert.deepEqual(lastAssistant?.askQuestion, askPayload);
+  });
+
+  it("uses manual AskQuestion choices as answer constraints and persists a completed result card", async () => {
+    const db = createChatTestDb();
+    const promptTexts: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/chat")) {
+        promptTexts.push((body.messages ?? [])
+          .map((message) => `${message.role}: ${message.content}`)
+          .join("\n"));
+        if (promptTexts.length > 1) {
+          return new Response(JSON.stringify({ message: { content: '{"title":"Lemon Pick"}' } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: "lemons\n\nI'd pick lemons: sharp, bright, and at least memorable.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Would you rather eat:",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        manualTool: {
+          name: "askQuestion",
+          question: "Would you rather eat:",
+          options: ["Potatoes", "lemons", "lemons", "chicken", "broccoli", "carrots"],
+        },
+      }
+    );
+
+    const promptText = promptTexts[0] ?? "";
+    assert.match(promptText, /using Prism's AskQuestion tool/i);
+    assert.match(promptText, /must choose exactly one/i);
+    assert.match(promptText, /choose the closest available answer/i);
+    assert.match(promptText, /1\. Potatoes/);
+    assert.match(promptText, /2\. lemons/);
+    assert.match(promptText, /3\. chicken/);
+    assert.match(promptText, /4\. broccoli/);
+    assert.doesNotMatch(promptText, /carrots/);
+    const userMessage = result.conversation.messages.find((m) => m.role === "user");
+    assert.deepEqual(userMessage?.manualAskQuestion, {
+      v: 1,
+      name: "AskQuestion",
+      question: "Would you rather eat:",
+      options: [
+        { id: "a", label: "Potatoes" },
+        { id: "b", label: "lemons" },
+        { id: "c", label: "chicken" },
+        { id: "d", label: "broccoli" },
+      ],
+      selectedOptionId: "b",
+      selectedOptionIndex: 1,
+      selectedOptionLabel: "lemons",
+    });
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(
+      lastAssistant?.content,
+      "lemons\n\nI'd pick lemons: sharp, bright, and at least memorable."
+    );
+    assert.equal(lastAssistant?.askQuestion, undefined);
+  });
+
+  it("uses open-ended manual AskQuestion as a direct-answer hint", async () => {
+    const db = createChatTestDb();
+    const promptTexts: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (url.includes("/api/chat")) {
+        promptTexts.push((body.messages ?? [])
+          .map((message) => `${message.role}: ${message.content}`)
+          .join("\n"));
+        if (promptTexts.length > 1) {
+          return new Response(JSON.stringify({ message: { content: '{"title":"Warmer Wording"}' } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            message: { content: "It reads warmer when the first option is shorter." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Which wording feels warmer?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        manualTool: {
+          name: "askQuestion",
+          question: "Which wording feels warmer?",
+        },
+      }
+    );
+
+    const promptText = promptTexts[0] ?? "";
+    assert.match(promptText, /ask you directly/i);
+    assert.match(promptText, /Answer the question directly/i);
+    assert.doesNotMatch(promptText, /must choose exactly one/i);
+    const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.equal(lastAssistant?.content, "It reads warmer when the first option is shorter.");
+    assert.equal(lastAssistant?.askQuestion, undefined);
   });
 
   it("drops story action rails from story setup questions", async () => {

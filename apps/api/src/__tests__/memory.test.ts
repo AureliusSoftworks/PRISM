@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
+  buildInitialAboutYouMemoryText,
   createDevSeedMemories,
   deleteMemoriesForBotScope,
   deleteMemoryById,
@@ -72,6 +73,16 @@ function memoryCandidateCore(candidates: Array<{ text: string; confidence: numbe
     confidence: candidate.confidence,
   }));
 }
+
+describe("buildInitialAboutYouMemoryText", () => {
+  it("records account display-name metadata without inferring a preferred-name instruction", () => {
+    assert.equal(buildInitialAboutYouMemoryText("Jared Dunn"), "Your account display name is Jared.");
+    assert.equal(
+      buildInitialAboutYouMemoryText("   "),
+      "Your account has not provided a display name yet."
+    );
+  });
+});
 
 function seedMemoryRow(
   db: DatabaseSync,

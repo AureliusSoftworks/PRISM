@@ -1,4 +1,4 @@
-import type { TellFictionalStoryPayload } from "./prismTool.js";
+import type { TellFictionalStoryPayload, WebSearchPayload } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 
 export {
@@ -109,6 +109,9 @@ export {
   type ParsedStoredAssistantToolPayload,
   type SentGeneratedImagePayload,
   type TellFictionalStoryPayload,
+  type WebSearchPayload,
+  type WebSearchRequestPayload,
+  type WebSearchResult,
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
@@ -124,8 +127,10 @@ export {
   normalizePromptShortcutMetadata,
   isDisabledPromptWildcardToken,
   normalizeBuiltInPromptWildcardSlotKey,
+  normalizeManualAskQuestionResultPayload,
   normalizePromptWildcardRunMetadata,
   parseBuiltInPromptWildcardReference,
+  parseStoredManualAskQuestionPayload,
   normalizePsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
@@ -139,6 +144,8 @@ export {
   type BuiltInPromptWildcardReference,
   type BuiltInPromptWildcardSlot,
   type BuiltInPromptWildcardSlotKey,
+  type ManualAskQuestionResultOption,
+  type ManualAskQuestionResultPayload,
   type PromptShortcutFlag,
   type PromptShortcutMetadata,
   type PromptShortcutRunMetadata,
@@ -295,6 +302,7 @@ import type {
   ZenDisplayMetadata,
 } from "./prismTool.js";
 import type {
+  ManualAskQuestionResultPayload,
   PromptShortcutMetadata,
   PromptWildcardRunMetadata,
   PsychicThoughtPayload,
@@ -353,10 +361,14 @@ export interface ChatMessage {
   tellFictionalStory?: TellFictionalStoryPayload;
   /** When this assistant turn included a generated image shown in chat and the library. */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** When this assistant turn included web search results shown as a source card. */
+  webSearch?: WebSearchPayload;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
   promptWildcards?: PromptWildcardRunMetadata;
+  /** User-entered AskQuestion tool result completed by the assistant's selected choice. */
+  manualAskQuestion?: ManualAskQuestionResultPayload;
   /** Concise visible summary from Psychic mode for this user turn. */
   psychicThought?: PsychicThoughtPayload;
 }
@@ -454,10 +466,223 @@ export interface CoffeePoll {
   tallies: CoffeePollOptionTally[];
 }
 
-export type CoffeeSessionDurationMinutes = 2 | 3 | 5;
+export type CoffeeTeamId = "left" | "undecided" | "right";
 
-export const COFFEE_SESSION_DURATION_MINUTES = [2, 3, 5] as const;
-export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 5;
+export type CoffeeWinningTeamId = "left" | "right";
+
+export interface CoffeeTeamDefinition {
+  id: CoffeeWinningTeamId;
+  name: string;
+  description: string;
+}
+
+export interface CoffeeTeamSessionConfig {
+  left: Omit<CoffeeTeamDefinition, "id">;
+  right: Omit<CoffeeTeamDefinition, "id">;
+  assignments: Record<string, CoffeeTeamId>;
+  playerTeamId?: CoffeeTeamId;
+}
+
+export interface CoffeeTeamBotState {
+  botId: string;
+  originalTeamId: CoffeeTeamId;
+  currentTeamId: CoffeeTeamId;
+  satisfaction: number;
+  conviction: number;
+  pendingSwitchTeamId?: CoffeeWinningTeamId | null;
+  pendingSwitchReason?: string | null;
+  lastSwitchReason?: string | null;
+  updatedAt: string;
+}
+
+export interface CoffeeTeamCounts {
+  left: number;
+  undecided: number;
+  right: number;
+}
+
+export interface CoffeeTeamPlayerState {
+  originalTeamId: CoffeeTeamId;
+  currentTeamId: CoffeeTeamId;
+  lastSwitchReason?: string | null;
+  updatedAt: string;
+}
+
+export type CoffeeTeamsStatus =
+  | "active"
+  | "left_won"
+  | "right_won"
+  | "tiebreaker"
+  | "tie_resolved";
+
+export interface CoffeeTeamState {
+  left: CoffeeTeamDefinition;
+  right: CoffeeTeamDefinition;
+  undecidedLabel: "Undecided";
+  bots: Record<string, CoffeeTeamBotState>;
+  player?: CoffeeTeamPlayerState | null;
+  counts: CoffeeTeamCounts;
+  status: CoffeeTeamsStatus;
+  winnerTeamId?: CoffeeWinningTeamId | null;
+  tiebreakerPitches?: Record<CoffeeWinningTeamId, string> | null;
+  tiebreakerPromptedAt?: string | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CoffeeSessionDurationMinutes = number;
+
+export const COFFEE_SESSION_DURATION_MINUTES_MIN = 3;
+export const COFFEE_SESSION_DURATION_MINUTES_MAX = 30;
+export const COFFEE_SESSION_DURATION_MINUTES_STEP = 1;
+export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 10;
+
+export type CoffeeCupAmountStage =
+  | "full"
+  | "mostly-full"
+  | "half"
+  | "low"
+  | "dregs"
+  | "empty";
+
+export interface CoffeeCupStatus {
+  progress: number;
+  frameIndex: number;
+  amount: CoffeeCupAmountStage;
+  amountLabel: string;
+  temperatureLabel: string;
+  tasteLabel: string;
+}
+
+const COFFEE_CUP_AMOUNT_LABELS: Record<CoffeeCupAmountStage, string> = {
+  full: "full",
+  "mostly-full": "mostly full",
+  half: "about half full",
+  low: "running low",
+  dregs: "down to the last dregs",
+  empty: "empty",
+};
+
+const COFFEE_CUP_TASTE_LABELS = [
+  "bright",
+  "smooth",
+  "strong",
+  "toasty",
+  "slightly bitter",
+  "mellow",
+] as const;
+
+function clampCoffeeCupProgress(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function coffeeCupStableIndex(seed: string, modulo: number): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0) % Math.max(1, modulo);
+}
+
+function coffeeCupStableUnitValue(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
+export function coffeeCupSipBias(seed: string): number {
+  return coffeeCupStableUnitValue(`${seed}:sip-bias`);
+}
+
+export function coffeeCupSipCycleMs(seed: string): number {
+  return 92_000 - Math.round(coffeeCupSipBias(seed) * 40_000);
+}
+
+export function coffeeCupConsumptionRate(seed: string): number {
+  return 0.82 + coffeeCupSipBias(seed) * 0.48;
+}
+
+export function coffeeCupPacedProgress(progress: number, seed: string): number {
+  return clampCoffeeCupProgress(progress * coffeeCupConsumptionRate(seed));
+}
+
+export function coffeeCupFrameIndexForProgress(progress: number): number {
+  const clamped = clampCoffeeCupProgress(progress);
+  if (clamped >= 0.96) return 5;
+  if (clamped >= 0.78) return 4;
+  if (clamped >= 0.58) return 3;
+  if (clamped >= 0.38) return 2;
+  if (clamped >= 0.18) return 1;
+  return 0;
+}
+
+export function coffeeCupStatusForProgress(
+  progress: number,
+  seed = "coffee"
+): CoffeeCupStatus {
+  const clamped = clampCoffeeCupProgress(progress);
+  const frameIndex = coffeeCupFrameIndexForProgress(clamped);
+  const amount: CoffeeCupAmountStage =
+    frameIndex === 0
+      ? "full"
+      : frameIndex === 1
+        ? "mostly-full"
+        : frameIndex === 2
+          ? "half"
+          : frameIndex === 3
+            ? "low"
+            : frameIndex === 4
+              ? "dregs"
+              : "empty";
+  const temperatureLabel =
+    clamped < 0.16
+      ? "hot"
+      : clamped < 0.42
+        ? "warm"
+        : clamped < 0.75
+          ? "cooling"
+          : clamped < 0.96
+            ? "lukewarm"
+            : "cold";
+  const tasteLabel = COFFEE_CUP_TASTE_LABELS[
+    coffeeCupStableIndex(seed, COFFEE_CUP_TASTE_LABELS.length)
+  ]!;
+  return {
+    progress: clamped,
+    frameIndex,
+    amount,
+    amountLabel: COFFEE_CUP_AMOUNT_LABELS[amount],
+    temperatureLabel,
+    tasteLabel,
+  };
+}
+
+export function coffeeCupProgressFromSessionTiming(args: {
+  sessionRemainingMs?: number | null;
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
+}): number | null {
+  const remainingMs = args.sessionRemainingMs;
+  if (typeof remainingMs !== "number" || !Number.isFinite(remainingMs)) return null;
+  const durationMinutes =
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+      ? args.durationMinutes
+      : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  const durationMs = durationMinutes * 60 * 1000;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+  return clampCoffeeCupProgress(1 - Math.max(0, remainingMs) / durationMs);
+}
+
+export function coffeeCupPromptCueForStatus(status: CoffeeCupStatus): string {
+  return `Your coffee is ${status.amountLabel}, ${status.temperatureLabel}, and tastes ${status.tasteLabel}. You may naturally reference sipping it, the amount left, its temperature, or its taste when that fits the moment, but do not force a coffee comment every turn.`;
+}
 /** Bots may hold their Coffee poll vote until this close to session end. */
 export const COFFEE_POLL_FINALIZE_REMAINING_MS = 30_000;
 /** Minimum answer choices when the player starts a Coffee poll. */
@@ -573,6 +798,11 @@ export interface Conversation {
    */
   coffeeSeatBotIds?: Array<string | null>;
   /**
+   * Coffee-only — bot ids from the parent Coffee Group that were invited but
+   * marked away for this specific session.
+   */
+  coffeeAbsentBotIds?: string[];
+  /**
    * Coffee-only hidden social values keyed by bot id for this conversation.
    * This is primarily consumed by dev diagnostics and prompt shaping.
    */
@@ -592,6 +822,8 @@ export interface Conversation {
   coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   /** Coffee-only — shared anchor topic for this session (null until chosen). */
   coffeeTopic?: string | null;
+  /** Coffee-only — optional team-mode social state for this timed session. */
+  coffeeTeams?: CoffeeTeamState | null;
   /**
    * Private chat marker — once `true`, accent styling is suppressed to
    * grayscale, the thread stays client-held, and nothing is written to
@@ -793,6 +1025,11 @@ export interface SandboxRuntimeControls {
   botId?: string | null;
 }
 
+export type ChatManualToolRequest =
+  | { name: "webSearch"; query?: string }
+  | { name: "imageGen"; prompt?: string }
+  | { name: "askQuestion"; question?: string; options?: string[] };
+
 export interface ChatRequestPayload {
   conversationId?: string;
   /** When true, bypass "reuse latest chat" and start a fresh conversation row. */
@@ -829,6 +1066,8 @@ export interface ChatRequestPayload {
   topicReset?: boolean;
   /** Optional metadata when the latest Zen send interrupted Prism. */
   prismInterruption?: PrismMoodInterruptionInput;
+  /** Explicit user-selected composer tool. */
+  manualTool?: ChatManualToolRequest;
 }
 
 export type ZenPersonaTransitionStyle = "new-speaks" | "previous-introduces";
@@ -1030,8 +1269,28 @@ export interface CoffeeSessionCreateRequest {
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
+  /** Optional timed session length in whole minutes, from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes;
   /** Optional opening poll that seeds the initial table topic. */
   initialPoll?: CoffeePollCreateRequest;
+  /** Optional opening teams mode that seeds left/right social dynamics. */
+  initialTeams?: CoffeeTeamSessionConfig;
+}
+
+/** Request body for `POST /api/coffee/groups/:id/sessions`. */
+export interface CoffeeGroupSessionCreateRequest {
+  /** Optional session tuning; omitted rows use Coffee Group defaults. */
+  coffeeSettings?: unknown;
+  /** Optional timed session length in whole minutes, from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Optional preset id, or `__auto__` for auto preset selection. */
+  presetId?: string;
+  /** Bot ids from this Coffee Group that should sit out this one session. */
+  excludedBotIds?: string[];
+  /** Optional opening poll that seeds the initial table topic. */
+  initialPoll?: CoffeePollCreateRequest;
+  /** Optional opening teams mode that seeds left/right social dynamics. */
+  initialTeams?: CoffeeTeamSessionConfig;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -1046,6 +1305,8 @@ export interface CoffeeSessionCreateResponse {
   coffeeStarterTopics?: string[];
   /** Present when the session started with an opening poll. */
   poll?: CoffeePoll;
+  /** Present when the session started with Coffee Teams. */
+  teams?: CoffeeTeamState;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
@@ -1098,10 +1359,12 @@ export interface CoffeeTurnRequest {
 /** Response body for `POST /api/coffee/turn`. */
 export interface CoffeeTurnResponse {
   conversation: Conversation;
-  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). */
-  speakerBotId: string;
+  /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). Null only for stale no-op turns. */
+  speakerBotId: string | null;
   /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
   routerReason?: string;
+  /** True when an obsolete autonomous turn was safely discarded without inserting a reply. */
+  stale?: boolean;
   /** Optional interruption event payload for live Coffee table presentation. */
   interruption?: CoffeeInterruptionEvent;
   /** Present when a Coffee user turn started an async image generation job. */

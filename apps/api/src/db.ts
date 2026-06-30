@@ -8,13 +8,18 @@ import type {
   Conversation,
   MemoryCategory,
   MemoryTier,
+  OpinionTrend,
+  PrismMoodKey,
   PrismMoodMode,
   PrismMoodSnapshot,
   UserMemory,
   UserProfile,
 } from "@localai/shared";
 import {
+  COFFEE_SESSION_DURATION_MINUTES_MAX,
+  COFFEE_SESSION_DURATION_MINUTES_MIN,
   sanitizePrismMoodState,
+  type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
 
 export interface DbUserRecord {
@@ -73,6 +78,32 @@ interface DbCoffeeBotSocialRow {
   restraint: number;
   engagement: number;
   leave_pressure: number;
+}
+
+type DbBotRelationshipRow = {
+  source_bot_id: string;
+  target_bot_id: string;
+  score: number;
+  band: string;
+  mood_key: string;
+  trend: string;
+  last_reason: string;
+  recent_reasons: string;
+  updated_at: string;
+};
+
+export type BotRelationshipBand = "tense" | "neutral" | "warm";
+
+export interface BotRelationshipSnapshot {
+  sourceBotId: string;
+  targetBotId: string;
+  score: number;
+  band: BotRelationshipBand;
+  moodKey: PrismMoodKey;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  updatedAt: string;
 }
 
 interface DbPrismMoodRow {
@@ -212,6 +243,8 @@ export function createDatabase(): DatabaseSync {
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
       coffee_topic TEXT,
+      coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]',
+      coffee_team_mode_json TEXT,
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
@@ -391,6 +424,20 @@ export function createDatabase(): DatabaseSync {
       repair_count INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, bot_scope_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS bot_relationships (
+      user_id TEXT NOT NULL,
+      source_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'neutral',
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_bot_id, target_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS coffee_bot_social_state (
@@ -913,6 +960,18 @@ export function createDatabase(): DatabaseSync {
   if (!hasConversationCoffeeTopicColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_topic TEXT;");
   }
+  const hasConversationCoffeeAbsentBotIdsColumn = conversationColumns.some(
+    (column) => column.name === "coffee_absent_bot_ids"
+  );
+  if (!hasConversationCoffeeAbsentBotIdsColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]';");
+  }
+  const hasConversationCoffeeTeamModeColumn = conversationColumns.some(
+    (column) => column.name === "coffee_team_mode_json"
+  );
+  if (!hasConversationCoffeeTeamModeColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_team_mode_json TEXT;");
+  }
   const hasConversationCoffeeMeetingSummaryColumn = conversationColumns.some(
     (column) => column.name === "coffee_meeting_summary"
   );
@@ -1302,6 +1361,12 @@ export function createDatabase(): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);"
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_target ON bot_relationships (user_id, target_bot_id);"
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
   );
   db.exec(
@@ -1362,6 +1427,7 @@ export function mapConversation(
     bot_id: string | null;
     bot_group_ids?: string | null;
     coffee_group_id?: string | null;
+    coffee_absent_bot_ids?: string | null;
     coffee_duration_minutes?: number | null;
     incognito: number;
     last_bot_id?: string | null;
@@ -1379,6 +1445,7 @@ export function mapConversation(
         ? "coffee"
         : "sandbox";
   const botGroupIds = parseBotGroupIds(row.bot_group_ids);
+  const coffeeAbsentBotIds = parseBotGroupIds(row.coffee_absent_bot_ids);
   return {
     id: row.id,
     userId: row.user_id,
@@ -1387,6 +1454,9 @@ export function mapConversation(
     botId: conversationMode === "zen" ? null : row.bot_id ?? null,
     ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
     ...(conversationMode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
+    ...(conversationMode === "coffee" && coffeeAbsentBotIds.length > 0
+      ? { coffeeAbsentBotIds }
+      : {}),
     ...(conversationMode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
       ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
       : {}),
@@ -1400,8 +1470,13 @@ export function mapConversation(
   };
 }
 
-function isCoffeeSessionDurationMinutes(value: unknown): value is 2 | 3 | 5 {
-  return value === 2 || value === 3 || value === 5;
+function isCoffeeSessionDurationMinutes(value: unknown): value is CoffeeSessionDurationMinutes {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= COFFEE_SESSION_DURATION_MINUTES_MIN &&
+    value <= COFFEE_SESSION_DURATION_MINUTES_MAX
+  );
 }
 
 function parseBotGroupIds(raw: string | null | undefined): string[] {
@@ -1442,6 +1517,191 @@ function parseMemorySourceMessageIds(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+const BOT_RELATIONSHIP_REASON_LIMIT = 4;
+
+function clampBotRelationshipScore(score: number): number {
+  return Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 50;
+}
+
+function botRelationshipBandFromScore(score: number): BotRelationshipBand {
+  const clamped = clampBotRelationshipScore(score);
+  if (clamped >= 66) return "warm";
+  if (clamped <= 34) return "tense";
+  return "neutral";
+}
+
+function botRelationshipMoodKeyFromScore(score: number): PrismMoodKey {
+  const clamped = clampBotRelationshipScore(score);
+  if (clamped >= 76) return "joyful";
+  if (clamped >= 60) return "warm";
+  if (clamped <= 24) return "strained";
+  if (clamped <= 40) return "guarded";
+  return "neutral";
+}
+
+function normalizeBotRelationshipBand(value: string, score: number): BotRelationshipBand {
+  if (value === "tense" || value === "neutral" || value === "warm") return value;
+  return botRelationshipBandFromScore(score);
+}
+
+function normalizeBotRelationshipMoodKey(value: string, score: number): PrismMoodKey {
+  if (
+    value === "joyful" ||
+    value === "warm" ||
+    value === "neutral" ||
+    value === "guarded" ||
+    value === "strained"
+  ) {
+    return value;
+  }
+  return botRelationshipMoodKeyFromScore(score);
+}
+
+function normalizeBotRelationshipTrend(value: string): OpinionTrend {
+  if (value === "up" || value === "down" || value === "steady") return value;
+  return "steady";
+}
+
+function parseBotRelationshipReasons(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.replace(/\s+/g, " ").trim())
+      .filter((value) => value.length > 0)
+      .slice(0, BOT_RELATIONSHIP_REASON_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function botRelationshipFromRow(row: DbBotRelationshipRow): BotRelationshipSnapshot {
+  const score = Math.round(clampBotRelationshipScore(row.score));
+  return {
+    sourceBotId: row.source_bot_id,
+    targetBotId: row.target_bot_id,
+    score,
+    band: normalizeBotRelationshipBand(row.band, score),
+    moodKey: normalizeBotRelationshipMoodKey(row.mood_key, score),
+    trend: normalizeBotRelationshipTrend(row.trend),
+    lastReason: row.last_reason || "No durable bot-to-bot relationship shift yet.",
+    recentReasons: parseBotRelationshipReasons(row.recent_reasons),
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Loads directed pair relationships among a set of bots. Result is keyed
+ * source -> target so Alice's read on Boris can differ from Boris's read.
+ */
+export function loadBotRelationshipsForBots(
+  db: DatabaseSync,
+  userId: string,
+  botIds: readonly string[]
+): Record<string, Record<string, BotRelationshipSnapshot>> {
+  const uniqueBotIds = [...new Set(botIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueBotIds.length < 2) return {};
+  const placeholders = uniqueBotIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT source_bot_id, target_bot_id, score, band, mood_key, trend,
+              last_reason, recent_reasons, updated_at
+         FROM bot_relationships
+        WHERE user_id = ?
+          AND source_bot_id IN (${placeholders})
+          AND target_bot_id IN (${placeholders})`
+    )
+    .all(userId, ...uniqueBotIds, ...uniqueBotIds) as unknown as DbBotRelationshipRow[];
+  const bySource: Record<string, Record<string, BotRelationshipSnapshot>> = {};
+  for (const row of rows) {
+    if (row.source_bot_id === row.target_bot_id) continue;
+    bySource[row.source_bot_id] ??= {};
+    bySource[row.source_bot_id]![row.target_bot_id] = botRelationshipFromRow(row);
+  }
+  return bySource;
+}
+
+export function readBotRelationship(
+  db: DatabaseSync,
+  userId: string,
+  sourceBotId: string,
+  targetBotId: string
+): BotRelationshipSnapshot | null {
+  if (!sourceBotId.trim() || !targetBotId.trim() || sourceBotId === targetBotId) {
+    return null;
+  }
+  const row = db
+    .prepare(
+      `SELECT source_bot_id, target_bot_id, score, band, mood_key, trend,
+              last_reason, recent_reasons, updated_at
+         FROM bot_relationships
+        WHERE user_id = ? AND source_bot_id = ? AND target_bot_id = ?`
+    )
+    .get(userId, sourceBotId, targetBotId) as DbBotRelationshipRow | undefined;
+  return row ? botRelationshipFromRow(row) : null;
+}
+
+export function upsertBotRelationship(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+  score: number;
+  trend: OpinionTrend;
+  lastReason: string;
+  recentReasons: string[];
+  updatedAt: string;
+}): BotRelationshipSnapshot | null {
+  const sourceBotId = args.sourceBotId.trim();
+  const targetBotId = args.targetBotId.trim();
+  if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return null;
+  const score = Math.round(clampBotRelationshipScore(args.score));
+  const relationship: BotRelationshipSnapshot = {
+    sourceBotId,
+    targetBotId,
+    score,
+    band: botRelationshipBandFromScore(score),
+    moodKey: botRelationshipMoodKeyFromScore(score),
+    trend: args.trend,
+    lastReason: args.lastReason.replace(/\s+/g, " ").trim() ||
+      "No durable bot-to-bot relationship shift yet.",
+    recentReasons: args.recentReasons
+      .map((reason) => reason.replace(/\s+/g, " ").trim())
+      .filter((reason) => reason.length > 0)
+      .slice(0, BOT_RELATIONSHIP_REASON_LIMIT),
+    updatedAt: args.updatedAt,
+  };
+  args.db
+    .prepare(
+      `INSERT INTO bot_relationships (
+        user_id, source_bot_id, target_bot_id, score, band, mood_key,
+        trend, last_reason, recent_reasons, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, source_bot_id, target_bot_id) DO UPDATE SET
+        score = excluded.score,
+        band = excluded.band,
+        mood_key = excluded.mood_key,
+        trend = excluded.trend,
+        last_reason = excluded.last_reason,
+        recent_reasons = excluded.recent_reasons,
+        updated_at = excluded.updated_at`
+    )
+    .run(
+      args.userId,
+      relationship.sourceBotId,
+      relationship.targetBotId,
+      relationship.score,
+      relationship.band,
+      relationship.moodKey,
+      relationship.trend,
+      relationship.lastReason,
+      JSON.stringify(relationship.recentReasons),
+      relationship.updatedAt
+    );
+  return relationship;
 }
 
 /**
