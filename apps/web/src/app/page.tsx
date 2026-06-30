@@ -10624,6 +10624,7 @@ function compareBotsByColor(
 // no separate neutral group.
 type PrismGroupId = "p" | "r" | "i" | "s" | "m";
 type BotLibraryFilterId = "all" | PrismGroupId;
+type BotPanelView = "home" | "create" | "library" | "botHub" | "customize" | "settings";
 const BOT_LIBRARY_FILTER_ALL = "all" as const;
 const BOT_LIBRARY_DRAWER_ANIMATION_MS = 220;
 const PANEL_CLOSE_ANIMATION_MS = 180;
@@ -27108,9 +27109,10 @@ function HomeContent(): React.JSX.Element {
   const [botPanelGroup, setBotPanelGroup] = useState<BotLibraryFilterId>(
     BOT_LIBRARY_FILTER_ALL
   );
+  const [botPanelView, setBotPanelView] = useState<BotPanelView>("home");
+  const [selectedBotPanelBotId, setSelectedBotPanelBotId] = useState<string | null>(null);
   const [botLibraryExpanded, setBotLibraryExpanded] = useState(false);
   const [botLibraryClosing, setBotLibraryClosing] = useState(false);
-  const [botPanelLibraryEnabled, setBotPanelLibraryEnabled] = useState(true);
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
@@ -29343,8 +29345,9 @@ function HomeContent(): React.JSX.Element {
     setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
     setCommandCenterSelectedCommandId(null);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setBotPanelView("home");
+    setSelectedBotPanelBotId(null);
     setBotLibraryExpanded(false);
-    setBotPanelLibraryEnabled(true);
     setPanelBotDeleteConfirm(null);
     setSelectedBotDeleteConfirm(null);
     setMemoryPanelLoading(false);
@@ -29383,7 +29386,6 @@ function HomeContent(): React.JSX.Element {
       setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
     }
     if (nextPanel === "bots") {
-      setBotPanelLibraryEnabled(true);
     }
     if (nextPanel === "memories") {
       setMemoryPhysicsSeed((seed) => seed + 1);
@@ -50241,10 +50243,7 @@ function HomeContent(): React.JSX.Element {
     editOriginalRef.current = null;
   }, []);
 
-  // Opens the Bots panel in global/create context (Default or zoomed-out view).
-  // Always starts from a fresh draft so metadata from the last edited bot
-  // never bleeds into the "new bot" form.
-  function openFreshBotCustomizer(): void {
+  function resetBotPanelDraftNavigation(): void {
     disarmDelete();
     setPanelError(null);
     setPanelNotice(null);
@@ -50254,7 +50253,43 @@ function HomeContent(): React.JSX.Element {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
-    setBotPanelLibraryEnabled(true);
+    setBotPreferredModelsModalOpen(false);
+    setActiveFieldHelp(null);
+    setSelectedBotPanelBotId(null);
+  }
+
+  function openBotPanelHome(): void {
+    resetBotPanelDraftNavigation();
+    setBotPanelView("home");
+    resetBotForm();
+    openRightPanel("bots");
+  }
+
+  // Opens the Bots panel in global/create context. Always starts from a
+  // fresh draft so metadata from the last edited bot never bleeds into the
+  // "new bot" form.
+  function openNewBotCreator(): void {
+    resetBotPanelDraftNavigation();
+    setBotPanelView("create");
+    resetBotForm();
+    openRightPanel("bots");
+  }
+
+  function openFreshBotCustomizer(): void {
+    openBotPanelHome();
+  }
+
+  function openExistingBotLibrary(): void {
+    resetBotPanelDraftNavigation();
+    setBotPanelView("library");
+    setBotLibraryExpanded(true);
+    openRightPanel("bots");
+  }
+
+  function openBotPanelHub(bot: Bot): void {
+    resetBotPanelDraftNavigation();
+    setSelectedBotPanelBotId(bot.id);
+    setBotPanelView("botHub");
     resetBotForm();
     openRightPanel("bots");
   }
@@ -50318,6 +50353,10 @@ function HomeContent(): React.JSX.Element {
       setEditingBotId(null);
       resetBotForm();
     }
+    if (selectedBotPanelBotId === id) {
+      setSelectedBotPanelBotId(null);
+      setBotPanelView("library");
+    }
     // Optimistic update: drop the bot from the panel immediately, and if the
     // user had it selected in the sidebar clear that too so subsequent chats
     // don't try to reference a bot that's already gone. Roll back on failure.
@@ -50366,11 +50405,12 @@ function HomeContent(): React.JSX.Element {
       await refreshBots();
       if (result.bot?.id) {
         setEditingBotId(result.bot.id);
+        setSelectedBotPanelBotId(result.bot.id);
+        setBotPanelView("customize");
         openRightPanel("bots");
         setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
         setBotLibraryExpanded(false);
         setBotLibraryClosing(false);
-        setBotPanelLibraryEnabled(false);
       }
       setPanelNotice(`${bot.name} cloned.`);
     } catch (err) {
@@ -50472,11 +50512,12 @@ function HomeContent(): React.JSX.Element {
       };
       if (result.bot?.id) {
         setEditingBotId(result.bot.id);
+        setSelectedBotPanelBotId(result.bot.id);
       }
+      setBotPanelView("customize");
       setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
       setBotLibraryExpanded(false);
       setBotLibraryClosing(false);
-      setBotPanelLibraryEnabled(false);
       setColorWheelOpen(false);
       setPanelNotice(`${copiedName} duplicated.`);
       await refreshBots();
@@ -50616,6 +50657,10 @@ function HomeContent(): React.JSX.Element {
     if (previousSelectedBotId && !protectedBotIds.has(previousSelectedBotId)) {
       setSelectedBotId(null);
     }
+    if (selectedBotPanelBotId && !protectedBotIds.has(selectedBotPanelBotId)) {
+      setSelectedBotPanelBotId(null);
+      setBotPanelView("library");
+    }
     try {
       await api("/api/bots", { method: "DELETE" });
       await refreshBots();
@@ -50650,6 +50695,10 @@ function HomeContent(): React.JSX.Element {
       setBots(previousBots.filter((bot) => !deletedIdSet.has(bot.id)));
       if (previousSelectedBotId && deletedIdSet.has(previousSelectedBotId)) {
         setSelectedBotId(null);
+      }
+      if (selectedBotPanelBotId && deletedIdSet.has(selectedBotPanelBotId)) {
+        setSelectedBotPanelBotId(null);
+        setBotPanelView("library");
       }
       setCanvasSelectedBotIds(
         new Set(
@@ -51389,15 +51438,27 @@ function HomeContent(): React.JSX.Element {
 
   function openBotCustomizer(bot: Bot) {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setSelectedBotPanelBotId(bot.id);
+    setBotPanelView("customize");
     startEditBot(bot);
     openRightPanel("bots");
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
-    setBotPanelLibraryEnabled(false);
+  }
+
+  function openBotSettings(bot: Bot) {
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setSelectedBotPanelBotId(bot.id);
+    setBotPanelView("settings");
+    startEditBot(bot);
+    openRightPanel("bots");
+    setBotLibraryExpanded(false);
+    setBotLibraryClosing(false);
   }
 
   /** Leave single-bot edit mode and return to the bot library list (panel stays open). */
   function exitBotEditorToLibrary() {
+    const returnBotId = selectedBotPanelBotId ?? editingBotId;
     disarmDelete();
     setPanelError(null);
     setPanelNotice(null);
@@ -51405,7 +51466,13 @@ function HomeContent(): React.JSX.Element {
     setSelectedBotDeleteConfirm(null);
     setEditingBotId(null);
     resetBotForm();
-    setBotPanelLibraryEnabled(true);
+    if (returnBotId && bots.some((bot) => bot.id === returnBotId)) {
+      setSelectedBotPanelBotId(returnBotId);
+      setBotPanelView("botHub");
+      return;
+    }
+    setSelectedBotPanelBotId(null);
+    setBotPanelView("library");
   }
 
   /** Opens the customizer focused on the Facts page so the Memories panel
@@ -63858,6 +63925,19 @@ function HomeContent(): React.JSX.Element {
         const editingBot = editingBotId
           ? bots.find(b => b.id === editingBotId) ?? null
           : null;
+        const selectedBotPanelBot = selectedBotPanelBotId
+          ? bots.find((bot) => bot.id === selectedBotPanelBotId) ?? null
+          : null;
+        const botPanelTargetBot = editingBot ?? selectedBotPanelBot;
+        const botPanelFormActive =
+          botPanelView === "create" ||
+          botPanelView === "customize" ||
+          botPanelView === "settings";
+        const botPanelShowPersonaFields =
+          botPanelView === "create" || botPanelView === "customize";
+        const botPanelShowResponseSettings =
+          botPanelView === "create" || botPanelView === "settings";
+        const botPanelCanSave = botPanelFormActive;
         const trimmedName = newBotName.trim();
         const nameIsPresent = trimmedName.length > 0;
 
@@ -63904,9 +63984,9 @@ function HomeContent(): React.JSX.Element {
         // Drives BOTH the enabled/disabled flag AND whether the bot
         // color leaks into the button styling (so the picker feels
         // live as you type a name / tweak the swatch).
-        const primaryActive = editingBotId
+        const primaryActive = botPanelCanSave && (editingBotId
           ? (nameIsPresent && hasEditChanges && !busy)
-          : (nameIsPresent && !busy);
+          : (nameIsPresent && !busy));
 
         // Edit mode locks the label to "Save changes" from the moment edit
         // starts (even before any field changes) so the user's intent
@@ -63914,7 +63994,12 @@ function HomeContent(): React.JSX.Element {
         // bot-color styling still hinges on hasEditChanges below, so
         // the inert "Save changes" button remains visually identical to the
         // inert "Create bot" button — same chrome, different word.
-        const primaryLabel = editingBotId ? "Save changes" : "Create bot";
+        const primaryLabel =
+          botPanelView === "settings"
+            ? "Save settings"
+            : editingBotId
+              ? "Save changes"
+              : "Create bot";
 
         // Derive the inline --accent / --accent-text / --accent-ink
         // triad from the currently-picked color so the primary button
@@ -63989,7 +64074,11 @@ function HomeContent(): React.JSX.Element {
         const botLibrarySummary =
           botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
         const editorPanelStyle = (() => {
-          const accentNormalized = normalizeAccentForTheme(newBotColor, resolvedTheme);
+          const panelAccentColor =
+            botPanelView === "botHub" && selectedBotPanelBot?.color
+              ? selectedBotPanelBot.color
+              : newBotColor;
+          const accentNormalized = normalizeAccentForTheme(panelAccentColor, resolvedTheme);
           const base = deriveAccentStyle(accentNormalized, resolvedTheme);
           return {
             ["--editor-bot-color" as string]: accentNormalized,
@@ -64021,18 +64110,30 @@ function HomeContent(): React.JSX.Element {
             ? "Ready"
             : "Draft";
         const botPanelMode = editingBotId ? "edit" : "create";
-        const botPanelTitle = botLibraryExpanded
-          ? "Bot library"
-          : editingBotId
-            ? "Edit bot"
-            : "Create bot";
-        const botPanelSubtitle = botLibraryExpanded
-          ? editingBotId
-            ? `Return to ${botIdentityDisplayName}`
-            : botLibrarySummary
-          : editingBotId
-            ? botIdentityDisplayName
-            : "New custom bot";
+        const botPanelTitle =
+          botPanelView === "home"
+            ? "Bots"
+            : botPanelView === "library"
+              ? "Bot library"
+              : botPanelView === "botHub"
+                ? selectedBotPanelBot?.name ?? "Bot"
+                : botPanelView === "settings"
+                  ? "Bot settings"
+                  : editingBotId
+                    ? "Customize bot"
+                    : "Create bot";
+        const botPanelSubtitle =
+          botPanelView === "home"
+            ? "Create or manage your cast"
+            : botPanelView === "library"
+              ? botLibrarySummary
+              : botPanelView === "botHub"
+                ? "Choose what to manage"
+                : botPanelView === "settings"
+                  ? botIdentityDisplayName
+                  : editingBotId
+                    ? botIdentityDisplayName
+                    : "New custom bot";
         const botIdentityKicker = editingBotId ? "Editing existing bot" : "New bot";
         const botIdentityActionHint = editingBotId
           ? hasEditChanges
@@ -64064,25 +64165,57 @@ function HomeContent(): React.JSX.Element {
             : botLibrarySummary
           : botLibrarySummary;
 
+        const botPanelBackLabel =
+          botPanelView === "botHub"
+            ? "Back to bot library"
+            : botPanelView === "library" || botPanelView === "create"
+              ? "Back to Bots"
+              : selectedBotPanelBot || editingBot
+                ? "Back to bot options"
+                : "Back to bot library";
+        const goBackInBotPanel = (): void => {
+          if (botPanelView === "library" || botPanelView === "create") {
+            resetBotPanelDraftNavigation();
+            resetBotForm();
+            setBotPanelView("home");
+            return;
+          }
+          if (botPanelView === "botHub") {
+            resetBotPanelDraftNavigation();
+            setBotPanelView("library");
+            setBotLibraryExpanded(true);
+            return;
+          }
+          exitBotEditorToLibrary();
+        };
+        const showBotPanelBack =
+          botPanelView !== "home" &&
+          (botPanelView !== "customize" || Boolean(editingBotId || selectedBotPanelBot));
+        const headerTrashTargetBot = botPanelTargetBot;
         const headerTrashEnabled =
           !busy &&
-          (!editingBotId || (editingBot && editingBot.delete_protected !== 1));
+          (botPanelView === "create" ||
+            Boolean(headerTrashTargetBot && headerTrashTargetBot.delete_protected !== 1));
         const headerTrashAriaLabel = busy
           ? "Wait for the current action to finish"
-          : !editingBotId
+          : botPanelView === "create"
             ? "Clear all fields in the new bot form"
-            : editingBot && editingBot.delete_protected === 1
+            : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
               ? "Delete bot — protected; turn off delete protection first"
-              : `Delete ${editingBot?.name ?? "bot"}`;
+              : headerTrashTargetBot
+                ? `Delete ${headerTrashTargetBot.name}`
+                : "Delete bot";
         const headerTrashTitle = busy
           ? "Wait for the current action to finish"
-          : !editingBotId
+          : botPanelView === "create"
             ? "Clear the customizer and start a fresh new bot"
-            : editingBot && editingBot.delete_protected === 1
-              ? "Protected bot — toggle delete protection off in the form"
-              : `Delete ${editingBot?.name ?? "bot"}`;
-        const editorMode = !botPanelLibraryEnabled;
-        const saveExportDisabled = busy || botTransferBusy || !editingBotId || !editingBot;
+            : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
+              ? "Protected bot — toggle delete protection off in Settings"
+              : headerTrashTargetBot
+                ? `Delete ${headerTrashTargetBot.name}`
+                : "Delete bot";
+        const editorMode = botPanelView === "customize" || botPanelView === "settings";
+        const saveExportDisabled = busy || botTransferBusy || !headerTrashTargetBot;
         const importFromBotFileDisabled =
           busy || botTransferBusy || (editorMode && editingBotId !== null);
 
@@ -64093,24 +64226,25 @@ function HomeContent(): React.JSX.Element {
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={botProfileBuilderOpen ? "true" : undefined}
-            data-global-customizer={editorMode && !editingBotId ? "true" : undefined}
+            data-global-customizer={botPanelView === "create" ? "true" : undefined}
             data-library-expanded={
-              botPanelLibraryEnabled && botLibraryExpanded ? "true" : undefined
+              botPanelView === "library" ? "true" : undefined
             }
-            data-editor-only={!botPanelLibraryEnabled ? "true" : undefined}
+            data-editor-only={editorMode || botPanelView === "botHub" ? "true" : undefined}
             data-bot-editor-mode={botPanelMode}
             data-bot-editor-dirty={hasEditChanges ? "true" : undefined}
+            data-bot-panel-view={botPanelView}
             style={editorPanelStyle}
           >
             <div className={styles.panelHeader}>
               <div className={styles.panelHeaderTitle}>
-                {!botPanelLibraryEnabled ? (
+                {showBotPanelBack ? (
                   <button
                     type="button"
                     className={styles.panelBack}
-                    onClick={exitBotEditorToLibrary}
-                    aria-label="Back to bot list"
-                    data-glyph-tooltip="Back to bot list"
+                    onClick={goBackInBotPanel}
+                    aria-label={botPanelBackLabel}
+                    data-glyph-tooltip={botPanelBackLabel}
                   >
                     ←
                   </button>
@@ -64121,13 +64255,13 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </div>
               <div className={styles.panelHeaderActions}>
-                {!botPanelLibraryEnabled ? (
+                {headerTrashTargetBot ? (
                   <button
                     type="button"
                     className={`${styles.panelHeaderIconButton} ${styles.panelHeaderSaveButton}`}
                     onClick={() => {
-                      if (!editingBot) return;
-                      void exportBotProfile(editingBot);
+                      if (!headerTrashTargetBot) return;
+                      void exportBotProfile(headerTrashTargetBot);
                     }}
                     disabled={saveExportDisabled}
                     aria-label={
@@ -64135,18 +64269,14 @@ function HomeContent(): React.JSX.Element {
                         ? "Wait for the current action to finish"
                         : botTransferBusy
                           ? "Wait for the current bot import or export to finish"
-                        : !editingBotId || !editingBot
-                          ? "Export bot — available after you create this bot"
-                          : "Export bot profile as .bot (JSON)"
+                        : "Export bot profile as .bot (JSON)"
                     }
                     data-glyph-tooltip={
                       busy
                         ? "Wait for the current action to finish"
                         : botTransferBusy
                           ? "Wait for the current bot import or export to finish"
-                        : !editingBotId || !editingBot
-                          ? "Save the bot first, then you can export a .bot file"
-                          : "Export bot profile as .bot (JSON)"
+                        : "Export bot profile as .bot (JSON)"
                     }
                   >
                     <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
@@ -64182,35 +64312,38 @@ function HomeContent(): React.JSX.Element {
                     <IconUpload />
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className={`${styles.panelHeaderIconButton} ${styles.panelHeaderDangerTrashButton}`}
-                  data-delete-affordance="true"
-                  disabled={!headerTrashEnabled}
-                  aria-label={headerTrashAriaLabel}
-                  data-glyph-tooltip={headerTrashTitle}
-                  onClick={() => {
-                    if (busy) return;
-                    if (!editingBotId) {
+                {botPanelView === "create" || headerTrashTargetBot ? (
+                  <button
+                    type="button"
+                    className={`${styles.panelHeaderIconButton} ${styles.panelHeaderDangerTrashButton}`}
+                    data-delete-affordance="true"
+                    disabled={!headerTrashEnabled}
+                    aria-label={headerTrashAriaLabel}
+                    data-glyph-tooltip={headerTrashTitle}
+                    onClick={() => {
+                      if (busy) return;
+                      if (botPanelView === "create") {
+                        disarmDelete();
+                        setPanelError(null);
+                        setPanelNotice(null);
+                        resetBotForm();
+                        return;
+                      }
+                      if (!headerTrashTargetBot || headerTrashTargetBot.delete_protected === 1) return;
                       disarmDelete();
-                      setPanelError(null);
-                      setPanelNotice(null);
-                      resetBotForm();
-                      return;
-                    }
-                    if (!editingBot || editingBot.delete_protected === 1) return;
-                    disarmDelete();
-                    setPanelBotDeleteConfirm({
-                      id: editingBot.id,
-                      name: editingBot.name,
-                      hadUnsavedChanges: hasEditChanges,
-                    });
-                  }}
-                >
-                  <span className={styles.panelHeaderDangerTrashGlyph} aria-hidden="true">
-                    <IconTrash />
-                  </span>
-                </button>
+                      setPanelBotDeleteConfirm({
+                        id: headerTrashTargetBot.id,
+                        name: headerTrashTargetBot.name,
+                        hadUnsavedChanges:
+                          editingBotId === headerTrashTargetBot.id ? hasEditChanges : false,
+                      });
+                    }}
+                  >
+                    <span className={styles.panelHeaderDangerTrashGlyph} aria-hidden="true">
+                      <IconTrash />
+                    </span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={styles.panelClose}
@@ -64235,15 +64368,119 @@ function HomeContent(): React.JSX.Element {
                 {activeFieldHelp.text}
               </div>
             )}
+            {botPanelView === "home" ? (
+              <section className={styles.botPanelHome} aria-label="Bot panel choices">
+                <button
+                  type="button"
+                  className={styles.botPanelChoiceCard}
+                  onClick={openNewBotCreator}
+                >
+                  <span className={styles.botPanelChoiceGlyph} aria-hidden="true">
+                    <Sparkles size={22} strokeWidth={1.9} />
+                  </span>
+                  <span className={styles.botPanelChoiceCopy}>
+                    <strong>Create new bot</strong>
+                    <small>Build a bot from a fresh customizer draft.</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.botPanelChoiceCard}
+                  onClick={openExistingBotLibrary}
+                >
+                  <span className={styles.botPanelChoiceGlyph} aria-hidden="true">
+                    <BotsGlyph />
+                  </span>
+                  <span className={styles.botPanelChoiceCopy}>
+                    <strong>Browse bots</strong>
+                    <small>Open your library and choose a bot to manage.</small>
+                  </span>
+                </button>
+              </section>
+            ) : null}
+            {botPanelView === "botHub" && selectedBotPanelBot ? (
+              <section className={styles.botPanelHub} aria-label={`${selectedBotPanelBot.name} options`}>
+                <div className={styles.botPanelHubHero}>
+                  <span className={styles.botPanelHubGlyph} aria-hidden="true">
+                    <BotGlyph
+                      name={
+                        isBotGlyphName(selectedBotPanelBot.glyph)
+                          ? selectedBotPanelBot.glyph
+                          : DEFAULT_BOT_GLYPH
+                      }
+                      size={28}
+                      strokeWidth={1.9}
+                    />
+                  </span>
+                  <div className={styles.botPanelHubCopy}>
+                    <span>Selected bot</span>
+                    <strong>{selectedBotPanelBot.name}</strong>
+                    <small>
+                      {stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim()
+                        ? stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim().slice(0, 96)
+                        : "No personality copy yet"}
+                    </small>
+                  </div>
+                </div>
+                <div className={styles.botPanelHubActions}>
+                  <button
+                    type="button"
+                    className={styles.botPanelHubAction}
+                    onClick={() => openBotCustomizer(selectedBotPanelBot)}
+                  >
+                    <Brush size={18} strokeWidth={1.9} aria-hidden="true" />
+                    <span>
+                      <strong>Customize</strong>
+                      <small>Identity, appearance, and persona profile.</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.botPanelHubAction}
+                    onClick={() => void openMemoriesPanelForBot(selectedBotPanelBot)}
+                  >
+                    <BookmarkGlyph />
+                    <span>
+                      <strong>Memories</strong>
+                      <small>Review what this bot remembers.</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.botPanelHubAction}
+                    onClick={() => void openImagesPanelForBot(selectedBotPanelBot)}
+                  >
+                    <ImagesGlyph />
+                    <span>
+                      <strong>Images</strong>
+                      <small>Open this bot&apos;s image gallery.</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.botPanelHubAction}
+                    onClick={() => openBotSettings(selectedBotPanelBot)}
+                  >
+                    <WrenchGlyph />
+                    <span>
+                      <strong>Settings</strong>
+                      <small>Models, reply style, and protection.</small>
+                    </span>
+                  </button>
+                </div>
+              </section>
+            ) : null}
             {/* One form, two modes. editingBotId hydrates the fields
                 with the target bot's values but the layout itself
                 doesn't fork — the primary button simply switches
                 label + color based on hasEditChanges above. */}
-            {!botLibraryExpanded && (
+            {botPanelFormActive && (
               <form
                 className={styles.form}
                 onSubmit={(e) => void submitBotForm(e)}
               >
+              {botPanelShowPersonaFields ? (
+                <>
               <section
                 className={styles.botIdentityCard}
                 data-mode={botPanelMode}
@@ -64393,6 +64630,9 @@ function HomeContent(): React.JSX.Element {
                 onProfileChange={setBotProfile}
                 onClose={() => setBotProfileBuilderOpen(false)}
               />
+                </>
+              ) : null}
+              {botPanelShowResponseSettings ? (
               <section className={styles.botParameterCard} aria-label="Response settings">
                 <div className={styles.botParameterHeader}>
                   <small>Plain-language choices for model routing, creativity, and answer size.</small>
@@ -64568,7 +64808,8 @@ function HomeContent(): React.JSX.Element {
                   </>
                 ) : null}
               </section>
-              {botPreferredModelsModalOpen && importBotModalPhase === "closed" && (
+              ) : null}
+              {botPanelShowResponseSettings && botPreferredModelsModalOpen && importBotModalPhase === "closed" && (
                 mobileBotsPanel ? (
                 <div
                   className={styles.botPreferredModelsModalBackdrop}
@@ -65053,10 +65294,10 @@ function HomeContent(): React.JSX.Element {
               </form>
             )}
 
-            {botPanelLibraryEnabled && (
+            {botPanelView === "library" && (
             <section
               className={styles.botLibraryDrawer}
-              data-expanded={botLibraryExpanded ? "true" : undefined}
+              data-expanded="true"
               aria-label="Bot library"
             >
               <button
@@ -65082,7 +65323,7 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </button>
 
-              {botLibraryExpanded && (
+              {botPanelView === "library" && (
                 <div
                   id="bot-library-drawer-content"
                   className={`${styles.botsScrollArea} ${styles.botLibraryContent}`}
@@ -65244,11 +65485,8 @@ function HomeContent(): React.JSX.Element {
                           <button
                             type="button"
                             className={styles.botCardTile}
-                            onClick={() => {
-                              startEditBot(b);
-                              closeBotLibraryDrawer();
-                            }}
-                            aria-label={`Edit ${b.name}`}
+                            onClick={() => openBotPanelHub(b)}
+                            aria-label={`Open options for ${b.name}`}
                             aria-pressed={isEditing}
                           >
                             <span className={styles.botCardGlyph} aria-hidden="true">
@@ -65297,7 +65535,13 @@ function HomeContent(): React.JSX.Element {
                 >
                   <header className={styles.botPreferredModelsModalHeader}>
                     <div>
-                      <span>{botPanelLibraryEnabled ? "Bot library" : "Edit bot"}</span>
+                      <span>
+                        {editorMode
+                          ? "Edit bot"
+                          : botPanelView === "create"
+                            ? "Create bot"
+                            : "Bot library"}
+                      </span>
                       <h4 id="import-bot-modal-title">
                         {importBotModalPhase === "choose" ? "Import bot" : "Paste JSON"}
                       </h4>
