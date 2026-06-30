@@ -227,6 +227,9 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     ...(assembled.moodConfidence !== undefined ? { moodConfidence: assembled.moodConfidence } : {}),
     ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
     ...(assembled.sentGeneratedImage ? { sentGeneratedImage: assembled.sentGeneratedImage } : {}),
+    ...(assembled.coffeeAmbientAction
+      ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
+      : {}),
   };
 }
 

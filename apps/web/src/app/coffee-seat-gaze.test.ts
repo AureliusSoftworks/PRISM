@@ -16,6 +16,13 @@ describe("coffeeSeatHorizontalTableSide", () => {
     assert.equal(coffeeSeatHorizontalTableSide(true, 2, 5, 0), 1);
   });
 
+  it("classifies compact 4-seat preview by visual layout slot", () => {
+    assert.equal(coffeeSeatHorizontalTableSide(true, 0, 4, 0), -1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 1, 4, 1), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 2, 4, 2), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 3, 4, 3), -1);
+  });
+
   it("classifies full-stage 5-seat ring", () => {
     assert.equal(coffeeSeatHorizontalTableSide(false, 0, 5, 0), 0);
     assert.equal(coffeeSeatHorizontalTableSide(false, 0, 5, 1), -1);
@@ -41,6 +48,7 @@ describe("coffeeSeatIsTopHead", () => {
   it("identifies compact top as head", () => {
     assert.equal(coffeeSeatIsTopHead(true, 5, 0, 0), true);
     assert.equal(coffeeSeatIsTopHead(true, 5, 1, 1), false);
+    assert.equal(coffeeSeatIsTopHead(true, 4, 0, 0), false);
   });
 
   it("identifies only centered full-stage top seats as head", () => {

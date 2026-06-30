@@ -32,6 +32,14 @@ export function coffeeSeatHorizontalTableSide(
   seatCount: number,
   layoutIndex: number
 ): CoffeeSeatHorizontalSide {
+  if (compact && seatCount === 4) {
+    const left = ({ 0: 22, 1: 78, 2: 78, 3: 22 } as Record<number, number>)[
+      layoutIndex
+    ] ?? 50;
+    if (left < 50) return -1;
+    if (left > 50) return 1;
+    return 0;
+  }
   if (compact) {
     const leftBySeat: Record<number, number> = {
       0: 50,
@@ -77,7 +85,7 @@ export function coffeeSeatIsTopHead(
   layoutIndex: number,
   seatIndex: number
 ): boolean {
-  if (compact) return seatIndex === 0;
+  if (compact) return seatCount !== 4 && seatIndex === 0;
   return (seatCount === 3 || seatCount === 5) && layoutIndex === 0;
 }
 
