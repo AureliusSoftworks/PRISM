@@ -612,6 +612,19 @@ describe("extractStageDirections", () => {
     ]);
   });
 
+  it("lifts narrows-eyes actions before honest spoken prose", () => {
+    const out = extractStageDirections(
+      "narrows eyes at the coffee cup, then back at SpongeBob Honest and consistent aren't the same thing though—you can mean every word and still contradict yourself tomorrow."
+    );
+    assert.equal(
+      out.mainText,
+      "Honest and consistent aren't the same thing though—you can mean every word and still contradict yourself tomorrow."
+    );
+    assert.deepEqual(out.actions, [
+      "narrows eyes at the coffee cup, then back at SpongeBob",
+    ]);
+  });
+
   it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {
     const out = extractStageDirections(
       "Marcus Aurelius, picks up an acorn from the table Consider this acorn: it already contains the potential of the entire tree."
@@ -668,6 +681,12 @@ describe("extractStageDirections", () => {
   it("does not turn ordinary leading prose into an action", () => {
     const out = extractStageDirections("Looks like rain today.");
     assert.equal(out.mainText, "Looks like rain today.");
+    assert.deepEqual(out.actions, []);
+  });
+
+  it("does not turn ordinary narrowing prose into an action", () => {
+    const out = extractStageDirections("Narrowing the scope helps us focus.");
+    assert.equal(out.mainText, "Narrowing the scope helps us focus.");
     assert.deepEqual(out.actions, []);
   });
 

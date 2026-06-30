@@ -54,9 +54,9 @@ export function coffeeSeatHorizontalTableSide(
     "3:0": 50,
     "3:1": 26,
     "3:2": 74,
-    "4:0": 50,
+    "4:0": 24,
     "4:1": 76,
-    "4:2": 50,
+    "4:2": 76,
     "4:3": 24,
     "5:0": 50,
     "5:1": 21,
@@ -70,7 +70,7 @@ export function coffeeSeatHorizontalTableSide(
   return 0;
 }
 
-/** Top-of-table head seat: compact `seatIndex === 0`, or full ring `layoutIndex === 0` with 3+ bots. */
+/** Top-of-table head seat: compact `seatIndex === 0`, or the centered full-ring top seat. */
 export function coffeeSeatIsTopHead(
   compact: boolean,
   seatCount: number,
@@ -78,7 +78,7 @@ export function coffeeSeatIsTopHead(
   seatIndex: number
 ): boolean {
   if (compact) return seatIndex === 0;
-  return seatCount >= 3 && layoutIndex === 0;
+  return (seatCount === 3 || seatCount === 5) && layoutIndex === 0;
 }
 
 export interface CoffeeGazeMessage {
