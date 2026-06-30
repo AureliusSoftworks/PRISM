@@ -23,9 +23,11 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { loadDevSecretDefaults } from "./dev-secrets.mjs";
 
 const SHUTDOWN_GRACE_MS = 3000;
 const IS_POSIX = process.platform !== "win32";
+loadDevSecretDefaults();
 const apiPort = process.env.API_PORT?.trim() || "18787";
 
 // Mirror the API's resolution so the web server binds the same way: an explicit

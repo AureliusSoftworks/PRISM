@@ -599,6 +599,19 @@ describe("extractStageDirections", () => {
     assert.deepEqual(shifts.actions, ["shifts in chair with a long, theatrical sigh"]);
   });
 
+  it("lifts long takes-style coffee actions before spoken prose", () => {
+    const out = extractStageDirections(
+      "takes a long, deliberate sip of coffee, then sets the cup down with precision A roof and a job he loves—sure, but does he love the work?"
+    );
+    assert.equal(
+      out.mainText,
+      "A roof and a job he loves—sure, but does he love the work?"
+    );
+    assert.deepEqual(out.actions, [
+      "takes a long, deliberate sip of coffee, then sets the cup down with precision",
+    ]);
+  });
+
   it("lifts unmarked action clauses before a 'Consider' spoken handoff", () => {
     const out = extractStageDirections(
       "Marcus Aurelius, picks up an acorn from the table Consider this acorn: it already contains the potential of the entire tree."
@@ -608,6 +621,19 @@ describe("extractStageDirections", () => {
       "Consider this acorn: it already contains the potential of the entire tree."
     );
     assert.deepEqual(out.actions, ["Marcus Aurelius, picks up an acorn from the table"]);
+  });
+
+  it("lifts speaker-prefixed unmarked actions before character interjections", () => {
+    const out = extractStageDirections(
+      "Plankton, pushes coffee cup aside with a sharp clink and drums claws on the table Ar ar ar! You're all getting philosophical on me, but I'll tell"
+    );
+    assert.equal(
+      out.mainText,
+      "Ar ar ar! You're all getting philosophical on me, but I'll tell"
+    );
+    assert.deepEqual(out.actions, [
+      "Plankton, pushes coffee cup aside with a sharp clink and drums claws on the table",
+    ]);
   });
 
   it("lifts unmarked actions after an addressed bot mention", () => {

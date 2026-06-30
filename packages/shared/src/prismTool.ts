@@ -49,6 +49,32 @@ export interface SentGeneratedImagePayload {
   imageModel?: string;
 }
 
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  displayUrl?: string;
+  source?: string;
+  snippet?: string;
+  thumbnailUrl?: string;
+  faviconUrl?: string;
+  publishedAt?: string;
+}
+
+export interface WebSearchRequestPayload {
+  v: 1;
+  name: "WebSearch";
+  query: string;
+}
+
+export interface WebSearchPayload {
+  v: 1;
+  name: "WebSearch";
+  query: string;
+  provider: "brave";
+  fetchedAt: string;
+  results: WebSearchResult[];
+}
+
 export type ZenDisplayAlign = "start" | "center" | "end";
 
 export interface ZenDisplayPlacement {
@@ -101,6 +127,8 @@ export interface StoredAssistantToolEnvelope {
   zenTurn?: StoredZenAssistantTurnPayload;
   /** Persisted assistant-generated image attachment (never the raw model stub). */
   sentGeneratedImage?: SentGeneratedImagePayload;
+  /** Persisted web results shown as an assistant-side source card. */
+  webSearch?: WebSearchPayload;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -120,6 +148,8 @@ export interface ParsedAssistantTurn {
    * Server runs generation and persists `SentGeneratedImagePayload` on `tool_payload`.
    */
   sendGeneratedImage?: { prompt: string };
+  /** Model asked Prism to fetch fresh web context before answering. */
+  webSearch?: WebSearchRequestPayload;
 }
 
 export interface ParsedStoredAssistantToolPayload {
@@ -130,6 +160,7 @@ export interface ParsedStoredAssistantToolPayload {
   zenDisplay?: ZenDisplayMetadata;
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
+  webSearch?: WebSearchPayload;
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -289,6 +320,112 @@ function normalizeStoredSentGeneratedImagePayload(
   };
 }
 
+const WEB_SEARCH_QUERY_CAP = 500;
+const WEB_SEARCH_TEXT_CAP = 500;
+const WEB_SEARCH_RESULT_CAP = 5;
+
+function truncateWebSearchText(text: string, maxLength = WEB_SEARCH_TEXT_CAP): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > maxLength ? collapsed.slice(0, maxLength).trimEnd() : collapsed;
+}
+
+function normalizeWebSearchUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeWebSearchRequestFromRecord(
+  row: Record<string, unknown>
+): WebSearchRequestPayload | undefined {
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  const raw =
+    rawName === "websearch"
+      ? row
+      : row.webSearch && typeof row.webSearch === "object"
+        ? (row.webSearch as Record<string, unknown>)
+        : undefined;
+  if (!raw) return undefined;
+  const query = truncateWebSearchText(
+    typeof raw.query === "string" ? String(raw.query) : "",
+    WEB_SEARCH_QUERY_CAP
+  );
+  if (!query) return undefined;
+  return { v: 1, name: "WebSearch", query };
+}
+
+function normalizeStoredWebSearchPayload(value: unknown): WebSearchPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  if (rawName && rawName !== "websearch") return undefined;
+  const query = truncateWebSearchText(
+    typeof row.query === "string" ? row.query : "",
+    WEB_SEARCH_QUERY_CAP
+  );
+  const provider = row.provider === "brave" ? "brave" : undefined;
+  const fetchedAt = typeof row.fetchedAt === "string" ? row.fetchedAt.trim() : "";
+  const results = Array.isArray(row.results)
+    ? row.results
+        .map((item): WebSearchResult | null => {
+          if (!item || typeof item !== "object") return null;
+          const result = item as Record<string, unknown>;
+          const title = truncateWebSearchText(
+            typeof result.title === "string" ? result.title : "",
+            140
+          );
+          const url = normalizeWebSearchUrl(result.url);
+          if (!title || !url) return null;
+          const displayUrl = truncateWebSearchText(
+            typeof result.displayUrl === "string" ? result.displayUrl : "",
+            160
+          );
+          const source = truncateWebSearchText(
+            typeof result.source === "string" ? result.source : "",
+            120
+          );
+          const snippet = truncateWebSearchText(
+            typeof result.snippet === "string" ? result.snippet : "",
+            360
+          );
+          const thumbnailUrl = normalizeWebSearchUrl(result.thumbnailUrl);
+          const faviconUrl = normalizeWebSearchUrl(result.faviconUrl);
+          const publishedAt = truncateWebSearchText(
+            typeof result.publishedAt === "string" ? result.publishedAt : "",
+            80
+          );
+          return {
+            title,
+            url,
+            ...(displayUrl ? { displayUrl } : {}),
+            ...(source ? { source } : {}),
+            ...(snippet ? { snippet } : {}),
+            ...(thumbnailUrl ? { thumbnailUrl } : {}),
+            ...(faviconUrl ? { faviconUrl } : {}),
+            ...(publishedAt ? { publishedAt } : {}),
+          };
+        })
+        .filter((item): item is WebSearchResult => Boolean(item))
+        .slice(0, WEB_SEARCH_RESULT_CAP)
+    : [];
+  if (!query || provider !== "brave" || !fetchedAt || results.length === 0) return undefined;
+  return {
+    v: 1,
+    name: "WebSearch",
+    query,
+    provider,
+    fetchedAt,
+    results,
+  };
+}
+
 function parseVersion(value: unknown): number {
   return typeof value === "number"
     ? value
@@ -416,15 +553,18 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   askQuestion?: AskQuestionPayload;
   tellFictionalStory?: TellFictionalStoryPayload;
   sendGeneratedImage?: { prompt: string };
+  webSearch?: WebSearchRequestPayload;
   zenDisplay?: ZenDisplayMetadata;
 } {
   const askFlat = normalizeAskQuestionEnvelope(parsed);
   const storyFlat = normalizeTellFictionalStoryEnvelope(parsed);
   let pairSend: { prompt: string } | undefined;
+  let webSearch: WebSearchRequestPayload | undefined;
   let zenDisplay: ZenDisplayMetadata | undefined;
   if (parsed && typeof parsed === "object") {
     const row = parsed as Record<string, unknown>;
     pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
+    webSearch = normalizeWebSearchRequestFromRecord(row);
     zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
   }
   if (askFlat || storyFlat) {
@@ -432,6 +572,7 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
       ...(askFlat ? { askQuestion: askFlat } : {}),
       ...(storyFlat ? { tellFictionalStory: storyFlat } : {}),
       ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
+      ...(webSearch ? { webSearch } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
     };
   }
@@ -447,11 +588,13 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
     askQuestion?: AskQuestionPayload;
     tellFictionalStory?: TellFictionalStoryPayload;
     sendGeneratedImage?: { prompt: string };
+    webSearch?: WebSearchRequestPayload;
     zenDisplay?: ZenDisplayMetadata;
   } = {};
   if (askNested) out.askQuestion = askNested;
   if (storyNested) out.tellFictionalStory = storyNested;
   if (pairSend) out.sendGeneratedImage = pairSend;
+  if (webSearch) out.webSearch = webSearch;
   if (zenDisplay) out.zenDisplay = zenDisplay;
   return out;
 }
@@ -790,7 +933,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const jsonText = stripMarkdownFences(innerJson);
   try {
     const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
-    if (!block.askQuestion && !block.tellFictionalStory && !block.sendGeneratedImage && !block.zenDisplay) {
+    if (!block.askQuestion && !block.tellFictionalStory && !block.sendGeneratedImage && !block.webSearch && !block.zenDisplay) {
       return { displayContent: cleanedProse };
     }
     return {
@@ -798,6 +941,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
       ...(block.askQuestion ? { askQuestion: block.askQuestion } : {}),
       ...(block.tellFictionalStory ? { tellFictionalStory: block.tellFictionalStory } : {}),
       ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
+      ...(block.webSearch ? { webSearch: block.webSearch } : {}),
       ...(block.zenDisplay ? { zenDisplay: block.zenDisplay } : {}),
     };
   } catch {
@@ -834,10 +978,14 @@ export function parseStoredAssistantToolPayload(
       const story = root
         ? normalizeTellFictionalStoryEnvelope(root.tellFictionalStory)
         : undefined;
+      const webSearch = root
+        ? normalizeStoredWebSearchPayload(root.webSearch)
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
         ...(story ? { tellFictionalStory: story } : {}),
+        ...(webSearch ? { webSearch } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
       };
@@ -846,6 +994,7 @@ export function parseStoredAssistantToolPayload(
     const row = parsed as Record<string, unknown>;
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
+    const webSearch = normalizeStoredWebSearchPayload(row.webSearch);
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
@@ -877,6 +1026,7 @@ export function parseStoredAssistantToolPayload(
       ...(zenDisplay ? { zenDisplay } : {}),
       ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
+      ...(webSearch ? { webSearch } : {}),
     };
   } catch {
     return {};
@@ -894,6 +1044,7 @@ export function hydrateAssistantMessageParts(args: {
   moodConfidence?: number;
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
+  webSearch?: WebSearchPayload;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -910,6 +1061,7 @@ export function hydrateAssistantMessageParts(args: {
       : {}),
     ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
+    ...(stored.webSearch ? { webSearch: stored.webSearch } : {}),
   };
 }
 
@@ -927,23 +1079,26 @@ export function serializeAssistantToolPayload(args: {
   zenDisplay?: ZenDisplayMetadata;
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
+  webSearch?: WebSearchPayload;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
   const hasMood = args.moodKey !== undefined;
   const hasImage = args.sentGeneratedImage !== undefined;
+  const webSearch = normalizeStoredWebSearchPayload(args.webSearch);
+  const hasWebSearch = webSearch !== undefined;
   const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
   const hasZenDisplay = zenDisplay !== undefined;
   const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
   const hasZenTurn = zenTurn !== undefined;
-  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasZenDisplay && !hasZenTurn) {
+  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
     return null;
   }
 
-  if (!hasAsk && !hasStory && !hasMood && !hasZenDisplay && !hasZenTurn && hasImage) {
+  if (!hasAsk && !hasStory && !hasMood && !hasWebSearch && !hasZenDisplay && !hasZenTurn && hasImage) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasZenDisplay && !hasZenTurn) {
+  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
@@ -965,6 +1120,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasZenDisplay ? { zenDisplay } : {}),
     ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
+    ...(hasWebSearch ? { webSearch } : {}),
   };
   return JSON.stringify(payload);
 }

@@ -214,6 +214,19 @@ function createTestDb(): DatabaseSync {
       source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE bot_relationships (
+      user_id TEXT NOT NULL,
+      source_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      score REAL NOT NULL DEFAULT 50,
+      band TEXT NOT NULL DEFAULT 'neutral',
+      mood_key TEXT NOT NULL DEFAULT 'neutral',
+      trend TEXT NOT NULL DEFAULT 'steady',
+      last_reason TEXT NOT NULL DEFAULT '',
+      recent_reasons TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_bot_id, target_bot_id)
+    );
   `);
   return db;
 }
@@ -274,6 +287,17 @@ function seedMemory(
   );
 }
 
+function seedRelationship(
+  db: DatabaseSync,
+  userId: string,
+  sourceBotId: string,
+  targetBotId: string
+): void {
+  db.prepare(
+    "INSERT INTO bot_relationships (user_id, source_bot_id, target_bot_id, updated_at) VALUES (?, ?, ?, ?)"
+  ).run(userId, sourceBotId, targetBotId, new Date().toISOString());
+}
+
 describe("deleteBot", () => {
   it("removes the bot row", () => {
     const db = createTestDb();
@@ -324,6 +348,29 @@ describe("deleteBot", () => {
     assert.deepEqual(
       rows.map((row) => row.id),
       ["memory-global", "memory-other-bot", "memory-other-user"]
+    );
+  });
+
+  it("deletes directed relationship rows involving the deleted bot", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1");
+    seedBot(db, "user-1", "bot-2");
+    seedBot(db, "user-1", "bot-3");
+    seedRelationship(db, "user-1", "bot-1", "bot-2");
+    seedRelationship(db, "user-1", "bot-2", "bot-1");
+    seedRelationship(db, "user-1", "bot-2", "bot-3");
+
+    deleteBot(db, "user-1", "bot-1");
+
+    const rows = db
+      .prepare("SELECT source_bot_id, target_bot_id FROM bot_relationships")
+      .all() as Array<{ source_bot_id: string; target_bot_id: string }>;
+    assert.deepEqual(
+      rows.map((row) => ({
+        source_bot_id: row.source_bot_id,
+        target_bot_id: row.target_bot_id,
+      })),
+      [{ source_bot_id: "bot-2", target_bot_id: "bot-3" }]
     );
   });
 

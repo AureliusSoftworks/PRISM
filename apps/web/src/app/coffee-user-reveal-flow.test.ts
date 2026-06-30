@@ -4,6 +4,7 @@ import {
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
+  coffeeTableTalkAutoplayDeferralMs,
 } from "./coffee-user-reveal-flow.ts";
 
 describe("coffee user reveal flow", () => {
@@ -46,5 +47,41 @@ describe("coffee user reveal flow", () => {
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ stale: true, speakerBotId: null }), true);
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: null }), true);
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: "bot-vader" }), false);
+  });
+
+  it("defers Coffee autoplay while Table talk is active or freshly edited", () => {
+    assert.equal(
+      coffeeTableTalkAutoplayDeferralMs({
+        conversationId: "coffee-1",
+        draft: "wait",
+        lastTypedAtMs: 1000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 10_000,
+        graceMs: 5200,
+      }),
+      5200
+    );
+    assert.equal(
+      coffeeTableTalkAutoplayDeferralMs({
+        conversationId: "coffee-1",
+        draft: "",
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      3200
+    );
+    assert.equal(
+      coffeeTableTalkAutoplayDeferralMs({
+        conversationId: "coffee-2",
+        draft: "wait",
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      0
+    );
   });
 });

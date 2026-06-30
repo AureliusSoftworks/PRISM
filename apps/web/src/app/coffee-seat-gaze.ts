@@ -2,23 +2,24 @@
 export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
 
 /**
- * `scaleY` for a seat on the oval: left of center stays normal; right of center flips
- * so the plate face reads toward the table (after the 90° plate rotation, `scaleX` was the wrong axis).
+ * `scaleY` for a seat on the oval: after the 90° plate rotation, `scaleY`
+ * controls the face's screen-horizontal direction. Left-side seats flip so
+ * they read toward the table; right-side seats stay normal.
  */
 export function coffeePlateFaceScaleYFromSeatHorizontalSide(
   side: CoffeeSeatHorizontalSide
 ): string {
-  return side === 1 ? "-1" : "1";
+  return side === -1 ? "-1" : "1";
 }
 
 /**
- * Top seat faces a target on the right half of the table with the same flip as
- * right-side seats; targets on the left stay unflipped.
+ * Top seat faces a target on the left half of the table with the same flip as
+ * left-side seats; targets on the right stay unflipped.
  */
 export function coffeeHeadPlateFaceScaleYFromGazeTargetSide(
   targetSide: CoffeeSeatHorizontalSide
 ): string {
-  return targetSide === 1 ? "-1" : "1";
+  return targetSide === -1 ? "-1" : "1";
 }
 
 /**

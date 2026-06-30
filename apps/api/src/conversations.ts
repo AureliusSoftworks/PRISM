@@ -7,9 +7,12 @@ import {
   applyPrismMoodInterruption,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  COFFEE_SESSION_DURATION_MINUTES_MAX,
+  COFFEE_SESSION_DURATION_MINUTES_MIN,
   createDefaultPrismMoodState,
   decayPrismMood,
   shouldPrismMoodStartIgnoreCooldown,
+  type CoffeeSessionDurationMinutes,
   type PrismMoodIgnoredQuestionPenaltyLevel,
   type PrismMoodInterruptionInput,
   type PrismMoodMode,
@@ -52,7 +55,7 @@ export interface ConversationSummary {
   /** Coffee-only — durable parent group for recurring table sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only — timed session duration once group-owned sessions are used. */
-  coffeeSessionDurationMinutes?: 2 | 3 | 5;
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
   incognito: boolean;
   lastBotId: string | null;
   lastBotColor: string | null;
@@ -1142,8 +1145,13 @@ export function listConversationSummaries(
   });
 }
 
-function isCoffeeSessionDurationMinutes(value: unknown): value is 2 | 3 | 5 {
-  return value === 2 || value === 3 || value === 5;
+function isCoffeeSessionDurationMinutes(value: unknown): value is CoffeeSessionDurationMinutes {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= COFFEE_SESSION_DURATION_MINUTES_MIN &&
+    value <= COFFEE_SESSION_DURATION_MINUTES_MAX
+  );
 }
 
 function parseBotGroupIdsForSummary(raw: string | null): string[] {

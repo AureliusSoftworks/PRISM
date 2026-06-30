@@ -24,6 +24,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "prism_mood_state",
   "session_opinions",
   "bot_opinions",
+  "bot_relationships",
   "conversation_exports",
   "conversation_sweep_batches",
   "zen_session_memories",

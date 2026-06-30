@@ -4,6 +4,7 @@ export type ComposerChipActivationSurface = "editor" | "textarea";
 
 export type ComposerChipActivationKind =
   | "command"
+  | "tool"
   | "prompt"
   | "wildcard"
   | "wildcard-slot";
@@ -53,6 +54,7 @@ export function shouldResolveComposerChipActivation(
   if (pending === null) return false;
   if (
     target.kind === "command" ||
+    target.kind === "tool" ||
     target.kind === "wildcard" ||
     target.kind === "wildcard-slot"
   ) {

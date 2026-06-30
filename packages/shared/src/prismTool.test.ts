@@ -10,6 +10,7 @@ import {
   serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionPayload,
+  type WebSearchPayload,
 } from "./prismTool.ts";
 
 function validAskJson(): AskQuestionPayload {
@@ -21,6 +22,28 @@ function validAskJson(): AskQuestionPayload {
       { id: "a", label: "🟢 Bright" },
       { id: "b", label: "🟡 Moody" },
       { id: "c", label: "🔴 Raw" },
+    ],
+  };
+}
+
+function validWebSearchPayload(): WebSearchPayload {
+  return {
+    v: 1,
+    name: "WebSearch",
+    provider: "brave",
+    query: "latest local-first AI workspace news",
+    fetchedAt: "2026-06-29T20:00:00.000Z",
+    results: [
+      {
+        title: "Local-first AI workspaces gain traction",
+        url: "https://example.com/local-first-ai",
+        displayUrl: "example.com/local-first-ai",
+        source: "Example News",
+        snippet: "Teams are blending local models with optional online search.",
+        thumbnailUrl: "https://example.com/thumb.jpg",
+        faviconUrl: "https://example.com/favicon.ico",
+        publishedAt: "2026-06-29",
+      },
     ],
   };
 }
@@ -220,6 +243,36 @@ describe("parseAssistantPrismTools", () => {
     const out = parseAssistantPrismTools(raw);
     assert.deepEqual(out.askQuestion, validAskJson());
     assert.deepEqual(out.sendGeneratedImage, { prompt: "Soft watercolor hillside." });
+  });
+
+  it("parses a WebSearch request from assistant tool JSON", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      webSearch: { query: "latest Brave Search API docs" },
+    });
+    const raw = `Let me check.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Let me check.");
+    assert.deepEqual(out.webSearch, {
+      v: 1,
+      name: "WebSearch",
+      query: "latest Brave Search API docs",
+    });
+  });
+
+  it("parses flat WebSearch tool JSON for model compatibility", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      name: "WebSearch",
+      query: "current OpenAI API models",
+    });
+    const raw = `Checking.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.deepEqual(out.webSearch, {
+      v: 1,
+      name: "WebSearch",
+      query: "current OpenAI API models",
+    });
   });
 
   it("parses tellFictionalStory story action rail metadata", () => {
@@ -530,6 +583,17 @@ describe("hydrateAssistantMessageParts", () => {
       placement: { x: 0.3, y: 0.62, align: "end" },
     });
   });
+
+  it("hydrates persisted WebSearch result cards from tool_payload", () => {
+    const webSearch = validWebSearchPayload();
+    const stored = serializeAssistantToolPayload({ webSearch });
+    const h = hydrateAssistantMessageParts({
+      content: "Fresh context.",
+      toolPayload: stored,
+    });
+    assert.equal(h.content, "Fresh context.");
+    assert.deepEqual(h.webSearch, webSearch);
+  });
 });
 
 describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
@@ -574,5 +638,20 @@ describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
       name: "tellFictionalStory",
       continueLabel: "Yes, then what?",
     });
+  });
+
+  it("rejects malformed stored WebSearch payloads", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      webSearch: {
+        v: 1,
+        name: "WebSearch",
+        provider: "brave",
+        query: "news",
+        fetchedAt: "2026-06-29T20:00:00.000Z",
+        results: [{ title: "No URL" }],
+      },
+    });
+    assert.equal(parseStoredAssistantToolPayload(stored).webSearch, undefined);
   });
 });
