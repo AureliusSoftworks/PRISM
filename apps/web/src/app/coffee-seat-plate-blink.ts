@@ -1,5 +1,6 @@
 /**
- * Coffee seat plate glyphs use a leading ASCII eye (`:`, `;`, or `>`).
+ * Coffee seat plate glyphs use a leading colon eye. Keep legacy `;` and `>`
+ * strings blink-safe for older face snapshots.
  * Blinking swaps that character for non-collapsing whitespace so the face
  * reads as eyes closed without shifting the mouth.
  */

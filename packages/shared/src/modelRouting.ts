@@ -14,7 +14,7 @@ const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LO
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 3;
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 4;
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
@@ -134,6 +134,24 @@ export function defaultHiddenModelIdsForCatalog(catalog: {
   );
 }
 
+export function reconcileHiddenModelIdsForCatalog(
+  ids: string[],
+  catalog: {
+    local?: readonly ModelForDefaultVisibility[];
+    online: readonly ModelForDefaultVisibility[];
+  }
+): string[] {
+  const defaultHidden = new Set(defaultHiddenModelIdsForCatalog(catalog));
+  const catalogIds = new Set(
+    [...(catalog.local ?? []), ...catalog.online]
+      .map((model) => model.id.trim())
+      .filter(Boolean)
+  );
+  return sanitizeHiddenModelIds(ids).filter(
+    (id) => !catalogIds.has(id) || defaultHidden.has(id)
+  );
+}
+
 function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelProvider): string[] {
   if (provider === "local") {
     return catalog.local.map((model) => model.id);
@@ -204,11 +222,13 @@ export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoMode
   const explicit = input.explicitModelOverride?.trim() || null;
   const botPreferred = input.botPreferredModel?.trim() || null;
   const providerCatalog = providerCatalogIds(input.catalog, input.provider);
-  const providerCatalogIdSet = new Set(providerCatalog);
+  const leadingCandidates = [explicit, botPreferred].filter(
+    (model): model is string => Boolean(model)
+  );
+  const leadingCandidateSet = new Set(leadingCandidates);
   const providerCandidates = [
-    ...(explicit && providerCatalogIdSet.has(explicit) ? [explicit] : []),
-    ...(botPreferred && providerCatalogIdSet.has(botPreferred) ? [botPreferred] : []),
-    ...providerCatalog,
+    ...leadingCandidates,
+    ...providerCatalog.filter((model) => !leadingCandidateSet.has(model)),
   ];
   const providerModel = firstVisibleRoutableModel(
     providerCandidates,

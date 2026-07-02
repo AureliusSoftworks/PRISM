@@ -690,6 +690,20 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, []);
   });
 
+  it("keeps first-person and conditional table speech out of the action layer", () => {
+    const samples = [
+      "If we look at the menu, everything is so much more delicious and...",
+      "We look at the menu and everything suddenly seems possible.",
+      "I look at the menu and still cannot choose.",
+    ];
+
+    for (const sample of samples) {
+      const out = extractStageDirections(sample);
+      assert.equal(out.mainText, sample);
+      assert.deepEqual(out.actions, []);
+    }
+  });
+
   it("lifts unmarked strokes actions after a bot mention", () => {
     const out = extractStageDirections(
       "[SpongeBob](prism-bot://bot-sponge), strokes chin thoughtfully Now that's a true statement indeed."
@@ -750,6 +764,40 @@ describe("extractStageDirections", () => {
     );
     assert.deepEqual(out.actions, [
       "reaches across and straightens the cup with quiet deliberateness",
+    ]);
+  });
+
+  it("lifts prop-manipulation actions before spoken table text", () => {
+    const shaker = extractStageDirections(
+      "eyes the sugar shaker like it's a cash register, nudges it an inch to center it Now that shaker there — that's the most artistic price adjustment I ever pulled."
+    );
+    assert.equal(
+      shaker.mainText,
+      "Now that shaker there — that's the most artistic price adjustment I ever pulled."
+    );
+    assert.deepEqual(shaker.actions, [
+      "eyes the sugar shaker like it's a cash register, nudges it an inch to center it",
+    ]);
+
+    const napkin = extractStageDirections(
+      "pulls a napkin over, folds it into a tiny hat for a nickel, sets it down proud Every prop earns its keep here."
+    );
+    assert.equal(napkin.mainText, "Every prop earns its keep here.");
+    assert.deepEqual(napkin.actions, [
+      "pulls a napkin over, folds it into a tiny hat for a nickel, sets it down proud",
+    ]);
+  });
+
+  it("lifts eyes-as-verb actions before article-led spoken prose", () => {
+    const out = extractStageDirections(
+      "eyes the tiny napkin hat with visible disdain A nickel wearing a hat doesn't change what it's worth, Mr. Krabs — that's just origami with delusions of grandeur."
+    );
+    assert.equal(
+      out.mainText,
+      "A nickel wearing a hat doesn't change what it's worth, Mr. Krabs — that's just origami with delusions of grandeur."
+    );
+    assert.deepEqual(out.actions, [
+      "eyes the tiny napkin hat with visible disdain",
     ]);
   });
 });

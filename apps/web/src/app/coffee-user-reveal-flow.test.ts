@@ -1,9 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  coffeeDirectedMentionBotIds,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
+  coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeTableTalkAutoplayDeferralMs,
 } from "./coffee-user-reveal-flow.ts";
 
@@ -11,6 +13,12 @@ describe("coffee user reveal flow", () => {
   it("queues assistant reveal while the user line is still typing", () => {
     assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("userTableTyping"), true);
     assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("botThinking"), false);
+  });
+
+  it("waits before starting another bot turn while a bot line is still revealing", () => {
+    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("tableTyping"), true);
+    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("userTableTyping"), false);
+    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("botThinking"), false);
   });
 
   it("keeps a submitted user line visible after typing while the bot is thinking", () => {
@@ -83,5 +91,21 @@ describe("coffee user reveal flow", () => {
       }),
       0
     );
+  });
+
+  it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {
+    const text = [
+      "[SpongeBob](prism-bot://bot-sponge)",
+      "and",
+      "[Patrick Star](prism-bot://bot-patrick),",
+      "haven't you guys gone to Weenie Hut General?",
+      "[SpongeBob](prism-bot://bot-sponge)",
+      "[Squidward](prism-bot://bot-squidward)",
+    ].join(" ");
+
+    assert.deepEqual(coffeeDirectedMentionBotIds(text, ["bot-patrick", "bot-sponge"]), [
+      "bot-sponge",
+      "bot-patrick",
+    ]);
   });
 });

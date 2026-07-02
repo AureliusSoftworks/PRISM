@@ -120,6 +120,42 @@ function roundedUnit(value: number): number {
   return Math.round(clampPrismMoodValue(value) * 1000) / 1000;
 }
 
+export const COFFEE_NEAR_DESATURATED_SATURATION = 0.18;
+
+export function coffeeMoodSaturationFromSocial(
+  social: CoffeeSocialLikeSnapshot
+): number {
+  const disposition = clampPrismMoodValue(social.disposition);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const valuesFriction = clampPrismMoodValue(social.valuesFriction);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const socialHealth =
+    disposition * 0.34 +
+    engagement * 0.24 +
+    (1 - valuesFriction) * 0.24 +
+    (1 - leavePressure) * 0.14 +
+    restraint * 0.04;
+  const strain = Math.max(
+    valuesFriction * 0.48 + leavePressure * 0.52,
+    (1 - disposition) * 0.54 + (1 - engagement) * 0.46
+  );
+  const saturation = 0.08 + socialHealth * 1.3 - Math.max(0, strain - 0.64) * 0.72;
+  return Math.round(Math.max(0.06, Math.min(1.38, saturation)) * 1000) / 1000;
+}
+
+export function coffeeSocialSnapshotIsNearDesaturated(
+  social: CoffeeSocialLikeSnapshot
+): boolean {
+  return (
+    coffeeMoodSaturationFromSocial(social) <= COFFEE_NEAR_DESATURATED_SATURATION ||
+    (clampPrismMoodValue(social.leavePressure) >= 0.88 &&
+      clampPrismMoodValue(social.valuesFriction) >= 0.72) ||
+    (clampPrismMoodValue(social.disposition) <= 0.16 &&
+      clampPrismMoodValue(social.engagement) <= 0.22)
+  );
+}
+
 function roundedDelta(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 1000) / 1000;

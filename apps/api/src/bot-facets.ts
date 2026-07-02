@@ -9,6 +9,7 @@ import {
   type LlmProvider,
   type ProviderMessage,
 } from "./providers.ts";
+import { runWithUsageSession } from "./usage.ts";
 
 export const BOT_SEMANTIC_FACETS_VERSION = 1;
 const BOT_SEMANTIC_FACET_ARRAY_LIMIT = 12;
@@ -423,6 +424,7 @@ export async function inferBotSemanticFacets(args: {
   const raw = await args.provider.generateResponse(messages, {
     temperature: 0.2,
     maxTokens: BOT_SEMANTIC_FACET_MAX_TOKENS,
+    usagePurpose: "memory_inference",
   });
   return mergeBotSemanticFacets(deterministic, parseBotSemanticFacetsPayload(raw));
 }
@@ -507,7 +509,19 @@ export function queueBotSemanticFacetsRefresh(args: {
   if (queuedFacetRefreshes.has(key)) return;
   queuedFacetRefreshes.add(key);
   queueMicrotask(() => {
-    void refreshBotSemanticFacets(args)
+    void Promise.resolve(
+      runWithUsageSession(
+        {
+          db: args.db,
+          userId: args.userId,
+          privacyScope: "normal",
+          mode: "system",
+          surface: "bots",
+          botId: args.botId,
+        },
+        () => refreshBotSemanticFacets(args)
+      )
+    )
       .catch((error) => {
         console.error(
           `[bot-facets] refresh failed botId=${args.botId}: ${

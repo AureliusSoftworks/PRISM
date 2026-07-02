@@ -328,7 +328,7 @@ export async function inferAndStoreBotMemories(
   const response = await auxiliaryProvider.generateResponse([
     { role: "system", content: MEMORY_INFERENCE_PROMPT },
     { role: "user", content: buildInferenceRequest(candidates) },
-  ]);
+  ], { usagePurpose: "memory_inference" });
   const parsed = parseJsonPayload(response);
   if (!parsed || !Array.isArray(parsed.merges)) return [];
 

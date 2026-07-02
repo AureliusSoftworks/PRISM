@@ -1,10 +1,16 @@
 import {
+  coffeeCupColdnessForProgress,
+  coffeeCupFillRatioForProgress,
+  coffeeCupProgressAfterTopOff,
   coffeeCupProgressFromSessionTiming,
   coffeeCupSipCycleMs,
   coffeeCupPacedProgress,
+  coffeeCupShouldFinishAfterSip,
+  coffeeCupSipLikelihoodForProgress,
   coffeeCupStatusForProgress,
   hexToHsl,
   type CoffeeCupStatus,
+  type CoffeeCupTopOffSnapshot,
 } from "@localai/shared";
 
 export {
@@ -13,6 +19,12 @@ export {
   coffeeCupSipMessageGapForDuration,
   coffeeCupSipBias,
   coffeeCupSipCycleMs,
+  coffeeCupShouldFinishAfterSip,
+  coffeeCupSipLikelihoodForProgress,
+  coffeeCupCanTopOff,
+  coffeeCupProgressAfterTopOff,
+  coffeeCupTopOffSnapshotForProgress,
+  type CoffeeCupTopOffSnapshot,
 } from "@localai/shared";
 
 export const COFFEE_CUP_SPRITE_COLORS = [
@@ -45,7 +57,21 @@ export interface CoffeeCupVisualState extends CoffeeCupStatus {
   sipping: boolean;
   sipAnimationMs: number;
   sipHoldMs: number;
+  steamAlpha: number;
+  steamRateMs: number;
+  finished: boolean;
   label: string;
+}
+
+const COFFEE_STEAM_GONE_AFTER_MS = 25 * 60 * 1000;
+const COFFEE_STEAM_BASE_RATE_MS = 3450;
+const COFFEE_STEAM_COOLED_RATE_MS = 6800;
+const COFFEE_CUP_SIP_WINDOW_BASE_MS = 1_300;
+const COFFEE_CUP_MIN_SIP_WINDOW_MS = 650;
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function stableUnitValue(seed: string): number {
@@ -55,6 +81,13 @@ function stableUnitValue(seed: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0) / 0xffffffff;
+}
+
+function positiveModulo(value: number, modulo: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(modulo) || modulo <= 0) {
+    return 0;
+  }
+  return ((value % modulo) + modulo) % modulo;
 }
 
 function hasSixDigitHexColor(value: string | null | undefined): value is string {
@@ -112,10 +145,15 @@ export function coffeeCupSippingActive(args: {
   if (args.progress >= 0.96) return false;
   if (args.speaking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
+  const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
+  if (sipLikelihood <= 0) return false;
   const cycleMs = coffeeCupSipCycleMs(args.seed, args.durationMinutes);
-  const sipWindowMs = 1_300;
+  const sipWindowMs = Math.max(
+    COFFEE_CUP_MIN_SIP_WINDOW_MS,
+    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood)
+  );
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
-  return (args.nowMs + offsetMs) % cycleMs < sipWindowMs;
+  return positiveModulo(args.nowMs + offsetMs, cycleMs) < sipWindowMs;
 }
 
 export function coffeeCupSipAnimationTiming(args: {
@@ -134,11 +172,261 @@ export function coffeeCupSipAnimationTiming(args: {
   };
 }
 
+const COFFEE_CUP_SIP_POST_FRAME_PROGRESS = 0.82;
+
+export function coffeeCupVisualSipCountForAnimation(args: {
+  totalSipCount: number;
+  activeSipAnimationCount?: number | null;
+  animationAgeMs?: number | null;
+  animationDurationMs?: number | null;
+}): number {
+  const totalSipCount = Number.isFinite(args.totalSipCount)
+    ? Math.max(0, Math.floor(args.totalSipCount))
+    : 0;
+  const activeSipAnimationCount =
+    typeof args.activeSipAnimationCount === "number" &&
+    Number.isFinite(args.activeSipAnimationCount)
+      ? Math.max(0, Math.floor(args.activeSipAnimationCount))
+      : null;
+  if (activeSipAnimationCount === null) return totalSipCount;
+  const durationMs =
+    typeof args.animationDurationMs === "number" && Number.isFinite(args.animationDurationMs)
+      ? args.animationDurationMs
+      : null;
+  const ageMs =
+    typeof args.animationAgeMs === "number" && Number.isFinite(args.animationAgeMs)
+      ? args.animationAgeMs
+      : null;
+  const revealPostSipFrame =
+    durationMs !== null &&
+    durationMs > 0 &&
+    ageMs !== null &&
+    ageMs >= durationMs * COFFEE_CUP_SIP_POST_FRAME_PROGRESS;
+  if (revealPostSipFrame) return Math.max(totalSipCount, activeSipAnimationCount);
+  return Math.max(0, activeSipAnimationCount - 1);
+}
+
 export function coffeeCupProgressForSipCount(sipCount: number): number {
   if (!Number.isFinite(sipCount)) return 0;
   const wholeSips = Math.max(0, Math.floor(sipCount));
   if (wholeSips <= 0) return 0;
-  return Math.min(0.96, wholeSips * 0.2);
+  return Math.min(0.96, wholeSips * 0.1);
+}
+
+function coffeeCupFinishedForSipCount(args: {
+  seed: string;
+  sipCount?: number | null;
+}): boolean {
+  if (typeof args.sipCount !== "number" || !Number.isFinite(args.sipCount)) {
+    return false;
+  }
+  const wholeSips = Math.max(0, Math.floor(args.sipCount));
+  if (wholeSips <= 0) return false;
+  return coffeeCupShouldFinishAfterSip({
+    seed: args.seed,
+    previousProgress: coffeeCupProgressForSipCount(wholeSips - 1),
+    nextProgress: coffeeCupProgressForSipCount(wholeSips),
+    sipCount: wholeSips,
+  });
+}
+
+function coffeeCupSteamBaseAlphaForFrame(frameIndex: number): number {
+  if (frameIndex >= 5) return 0;
+  if (frameIndex >= 4) return 0.16;
+  if (frameIndex >= 3) return 0.28;
+  if (frameIndex >= 2) return 0.4;
+  return 0.52;
+}
+
+function coffeeCupElapsedSessionMs(args: {
+  nowMs: number;
+  sessionStartedAtMs?: number | null;
+  sessionEndsAtMs?: number | null;
+  durationMinutes?: number | null;
+}): number | null {
+  if (!Number.isFinite(args.nowMs)) return null;
+  if (
+    typeof args.sessionStartedAtMs === "number" &&
+    Number.isFinite(args.sessionStartedAtMs)
+  ) {
+    return Math.max(0, args.nowMs - args.sessionStartedAtMs);
+  }
+  if (
+    typeof args.sessionEndsAtMs === "number" &&
+    Number.isFinite(args.sessionEndsAtMs) &&
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+  ) {
+    const durationMs = args.durationMinutes * 60 * 1000;
+    const remainingMs = Math.max(0, args.sessionEndsAtMs - args.nowMs);
+    return Math.max(0, durationMs - remainingMs);
+  }
+  return null;
+}
+
+function coffeeCupTimedProgressAtMs(args: {
+  nowMs: number;
+  sessionStartedAtMs?: number | null;
+  sessionEndsAtMs?: number | null;
+  durationMinutes?: number | null;
+}): number | null {
+  if (!Number.isFinite(args.nowMs)) return null;
+  const durationMinutes =
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+      ? args.durationMinutes
+      : null;
+  if (
+    typeof args.sessionEndsAtMs === "number" &&
+    Number.isFinite(args.sessionEndsAtMs) &&
+    durationMinutes != null
+  ) {
+    return coffeeCupProgressFromSessionTiming({
+      sessionRemainingMs: Math.max(0, args.sessionEndsAtMs - args.nowMs),
+      durationMinutes,
+    });
+  }
+  if (
+    typeof args.sessionStartedAtMs === "number" &&
+    Number.isFinite(args.sessionStartedAtMs) &&
+    durationMinutes != null
+  ) {
+    const durationMs = durationMinutes * 60 * 1000;
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+    return clampUnit((args.nowMs - args.sessionStartedAtMs) / durationMs);
+  }
+  return null;
+}
+
+function coffeeCupSipGateTimes(args: {
+  seed: string;
+  nowMs: number;
+  progress: number;
+  durationMinutes?: number | null;
+  speaking?: boolean | null;
+  sessionStartedAtMs?: number | null;
+  sessionEndsAtMs?: number | null;
+}): { currentGateMs: number; previousGateMs: number } | null {
+  if (!Number.isFinite(args.nowMs)) return null;
+  const cycleMs = coffeeCupSipCycleMs(args.seed, args.durationMinutes);
+  if (!Number.isFinite(cycleMs) || cycleMs <= 0) return null;
+  const sipLikelihood = coffeeCupSipLikelihoodForProgress(
+    Math.min(clampUnit(args.progress), 0.959)
+  );
+  if (sipLikelihood <= 0) return null;
+  const sipWindowMs = Math.max(
+    COFFEE_CUP_MIN_SIP_WINDOW_MS,
+    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood)
+  );
+  const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
+  const cyclePositionMs = positiveModulo(args.nowMs + offsetMs, cycleMs);
+  const currentCycleStartMs = args.nowMs - cyclePositionMs;
+  const currentSipVisible =
+    args.speaking !== true && cyclePositionMs < sipWindowMs;
+  const currentGateMs = currentSipVisible ? args.nowMs : currentCycleStartMs;
+  const previousGateMs = currentCycleStartMs - cycleMs;
+  const sessionStartedAtMs =
+    typeof args.sessionStartedAtMs === "number" &&
+    Number.isFinite(args.sessionStartedAtMs)
+      ? args.sessionStartedAtMs
+      : typeof args.sessionEndsAtMs === "number" &&
+          Number.isFinite(args.sessionEndsAtMs) &&
+          typeof args.durationMinutes === "number" &&
+          Number.isFinite(args.durationMinutes) &&
+          args.durationMinutes > 0
+        ? args.sessionEndsAtMs - args.durationMinutes * 60 * 1000
+        : null;
+  return {
+    currentGateMs:
+      sessionStartedAtMs != null
+        ? Math.max(sessionStartedAtMs, currentGateMs)
+        : currentGateMs,
+    previousGateMs:
+      sessionStartedAtMs != null
+        ? Math.max(sessionStartedAtMs, previousGateMs)
+        : previousGateMs,
+  };
+}
+
+export function coffeeCupSipGatedTimedProgress(args: {
+  seed: string;
+  nowMs: number;
+  progress: number;
+  sipProgress?: number | null;
+  sessionStartedAtMs?: number | null;
+  sessionEndsAtMs?: number | null;
+  durationMinutes?: number | null;
+  speaking?: boolean | null;
+}): number {
+  const rawProgress = clampUnit(args.progress);
+  if (rawProgress <= 0) return 0;
+  if (!Number.isFinite(args.nowMs)) return rawProgress;
+  const progressForSip =
+    typeof args.sipProgress === "number" && Number.isFinite(args.sipProgress)
+      ? clampUnit(args.sipProgress)
+      : rawProgress;
+  const gateTimes = coffeeCupSipGateTimes({
+    seed: args.seed,
+    nowMs: args.nowMs,
+    progress: progressForSip,
+    durationMinutes: args.durationMinutes,
+    speaking: args.speaking,
+    sessionStartedAtMs: args.sessionStartedAtMs,
+    sessionEndsAtMs: args.sessionEndsAtMs,
+  });
+  if (!gateTimes) return rawProgress;
+  const gatedProgress = coffeeCupTimedProgressAtMs({
+    nowMs: gateTimes.currentGateMs,
+    sessionStartedAtMs: args.sessionStartedAtMs,
+    sessionEndsAtMs: args.sessionEndsAtMs,
+    durationMinutes: args.durationMinutes,
+  });
+  return Math.min(rawProgress, gatedProgress ?? rawProgress);
+}
+
+export function coffeeCupSteamVisualState(args: {
+  nowMs: number;
+  frameIndex: number;
+  progress: number;
+  sessionStartedAtMs?: number | null;
+  sessionEndsAtMs?: number | null;
+  durationMinutes?: number | null;
+  forceEmpty?: boolean;
+}): Pick<CoffeeCupVisualState, "steamAlpha" | "steamRateMs"> {
+  const baseAlpha =
+    args.forceEmpty === true ? 0 : coffeeCupSteamBaseAlphaForFrame(args.frameIndex);
+  if (baseAlpha <= 0) {
+    return { steamAlpha: 0, steamRateMs: COFFEE_STEAM_COOLED_RATE_MS };
+  }
+  const fillRatio = coffeeCupFillRatioForProgress(args.progress);
+  const coldness = coffeeCupColdnessForProgress(args.progress);
+  if (fillRatio <= 0.12 || coldness >= 0.9) {
+    return { steamAlpha: 0, steamRateMs: COFFEE_STEAM_COOLED_RATE_MS };
+  }
+  const fillAlpha = Math.max(0, Math.min(1, (fillRatio - 0.12) / 0.38));
+  const temperatureAlpha = Math.max(0, Math.min(1, (0.9 - coldness) / 0.9));
+  const elapsedMs = coffeeCupElapsedSessionMs(args);
+  if (elapsedMs == null) {
+    return {
+      steamAlpha: baseAlpha * fillAlpha * temperatureAlpha,
+      steamRateMs: COFFEE_STEAM_BASE_RATE_MS,
+    };
+  }
+  const coolingProgress = Math.max(
+    0,
+    Math.min(1, elapsedMs / COFFEE_STEAM_GONE_AFTER_MS)
+  );
+  const remainingHeat = 1 - coolingProgress;
+  const sessionAlpha = Math.pow(remainingHeat, 1.45);
+  return {
+    steamAlpha: baseAlpha * fillAlpha * temperatureAlpha * sessionAlpha,
+    steamRateMs: Math.round(
+      COFFEE_STEAM_BASE_RATE_MS +
+        (COFFEE_STEAM_COOLED_RATE_MS - COFFEE_STEAM_BASE_RATE_MS) * coolingProgress
+    ),
+  };
 }
 
 function coffeeCupSeatLeftPercent(args: CoffeeCupSeatPlacementArgs): number {
@@ -205,57 +493,174 @@ export function buildCoffeeCupVisualState(args: {
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
   progressOverride?: number | null;
+  topOff?: CoffeeCupTopOffSnapshot | null;
   sipCount?: number | null;
   sippingOverride?: boolean | null;
   speaking?: boolean;
   forceEmpty?: boolean;
+  finished?: boolean;
+  finishSeed?: string | null;
 }): CoffeeCupVisualState {
   const color = coffeeCupColorForBotColor(args.botColor);
+  const finishSeed = args.finishSeed?.trim() || args.seed;
+  const finishedBySip =
+    args.forceEmpty !== true &&
+    coffeeCupFinishedForSipCount({
+      seed: finishSeed,
+      sipCount: args.sipCount,
+    });
+  const finished = args.finished === true || finishedBySip;
+  const finishingSipActive =
+    finishedBySip && args.sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
   const sipProgress =
-    args.forceEmpty === true
+    args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
       : typeof args.sipCount === "number" && Number.isFinite(args.sipCount)
         ? coffeeCupProgressForSipCount(args.sipCount)
         : null;
   const timedProgress =
-    args.forceEmpty === true
+    args.forceEmpty === true || finished
       ? 1
       : sipProgress != null
         ? sipProgress
       : typeof args.progressOverride === "number" &&
           Number.isFinite(args.progressOverride)
         ? args.progressOverride
-      : typeof args.sessionStartedAtMs === "number" &&
-          Number.isFinite(args.sessionStartedAtMs) &&
-          typeof args.sessionEndsAtMs === "number" &&
-          Number.isFinite(args.sessionEndsAtMs)
-        ? coffeeCupProgressFromSessionTiming({
-            sessionRemainingMs: Math.max(0, args.sessionEndsAtMs - args.nowMs),
-            durationMinutes: args.durationMinutes,
-          })
-        : null;
-  const pacedProgress =
-    args.forceEmpty === true
+      : coffeeCupTimedProgressAtMs({
+          nowMs: args.nowMs,
+          sessionStartedAtMs: args.sessionStartedAtMs,
+          sessionEndsAtMs: args.sessionEndsAtMs,
+          durationMinutes: args.durationMinutes,
+        });
+  const explicitProgress =
+    typeof args.progressOverride === "number" && Number.isFinite(args.progressOverride)
+      ? args.progressOverride
+      : null;
+  const rawPacedProgress =
+    args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
       : sipProgress != null
         ? sipProgress
         : coffeeCupPacedProgress(timedProgress ?? 0, args.seed, args.durationMinutes);
-  const status = coffeeCupStatusForProgress(pacedProgress, args.seed);
+  const gatedTimedProgress =
+    sipProgress == null && explicitProgress == null && timedProgress != null
+      ? coffeeCupSipGatedTimedProgress({
+          seed: args.seed,
+          nowMs: args.nowMs,
+          progress: timedProgress,
+          sipProgress: rawPacedProgress,
+          sessionStartedAtMs: args.sessionStartedAtMs,
+          sessionEndsAtMs: args.sessionEndsAtMs,
+          durationMinutes: args.durationMinutes,
+          speaking: args.speaking,
+        })
+      : timedProgress;
+  const previousTimedSipGateProgress =
+    sipProgress == null && explicitProgress == null && timedProgress != null
+      ? (() => {
+          const gateTimes = coffeeCupSipGateTimes({
+            seed: args.seed,
+            nowMs: args.nowMs,
+            progress: rawPacedProgress,
+            durationMinutes: args.durationMinutes,
+            speaking: args.speaking,
+            sessionStartedAtMs: args.sessionStartedAtMs,
+            sessionEndsAtMs: args.sessionEndsAtMs,
+          });
+          return gateTimes
+            ? coffeeCupTimedProgressAtMs({
+                nowMs: gateTimes.previousGateMs,
+                sessionStartedAtMs: args.sessionStartedAtMs,
+                sessionEndsAtMs: args.sessionEndsAtMs,
+                durationMinutes: args.durationMinutes,
+              })
+            : null;
+        })()
+      : null;
+  const pacedProgress =
+    args.forceEmpty === true || (finished && !finishingSipActive)
+      ? 1
+      : sipProgress != null
+        ? sipProgress
+        : coffeeCupPacedProgress(gatedTimedProgress ?? 0, args.seed, args.durationMinutes);
+  const topOffBaseProgress =
+    args.topOff && explicitProgress != null ? explicitProgress : pacedProgress;
+  const visibleProgress = coffeeCupProgressAfterTopOff({
+    progress: topOffBaseProgress,
+    topOff: args.topOff,
+    nowMs: args.nowMs,
+    durationMinutes: args.durationMinutes,
+    lowerProgressMeansConsumption: sipProgress != null,
+  });
+  const rawTopOffBaseProgress =
+    args.topOff && explicitProgress != null ? explicitProgress : rawPacedProgress;
+  const sipTriggerProgress = coffeeCupProgressAfterTopOff({
+    progress: rawTopOffBaseProgress,
+    topOff: args.topOff,
+    nowMs: args.nowMs,
+    durationMinutes: args.durationMinutes,
+    lowerProgressMeansConsumption: sipProgress != null,
+  });
+  const status = coffeeCupStatusForProgress(visibleProgress, args.seed);
+  const previousSipGateProgress =
+    previousTimedSipGateProgress != null
+      ? coffeeCupProgressAfterTopOff({
+          progress: coffeeCupPacedProgress(
+            previousTimedSipGateProgress,
+            args.seed,
+            args.durationMinutes
+          ),
+          topOff: args.topOff,
+          nowMs: args.nowMs,
+          durationMinutes: args.durationMinutes,
+          lowerProgressMeansConsumption: false,
+        })
+      : null;
+  const previousSipGateFrameIndex =
+    previousSipGateProgress != null
+      ? coffeeCupStatusForProgress(previousSipGateProgress, args.seed).frameIndex
+      : null;
+  const finalFrameReachedByThisSip =
+    status.frameIndex >= 5 &&
+    previousSipGateFrameIndex !== null &&
+    previousSipGateFrameIndex < 5;
   const position = coffeeCupFramePosition(status.frameIndex);
+  const topOffHeatStartedAtMs =
+    args.topOff && Number.isFinite(Date.parse(args.topOff.toppedOffAt))
+      ? Date.parse(args.topOff.toppedOffAt)
+      : null;
   const sipTiming = coffeeCupSipAnimationTiming({
     seed: args.seed,
     sipCount: args.sipCount,
   });
   const sipping =
-    typeof args.sippingOverride === "boolean"
-      ? args.sippingOverride && status.progress < 0.96
+    args.forceEmpty === true || args.finished === true
+      ? false
+      : typeof args.sippingOverride === "boolean"
+      ? args.sippingOverride && (status.progress < 0.96 || finishingSipActive)
       : coffeeCupSippingActive({
           seed: args.seed,
           nowMs: args.nowMs,
-          progress: status.progress,
+          progress: finalFrameReachedByThisSip
+            ? Math.min(sipTriggerProgress, 0.959)
+            : sipTriggerProgress,
           durationMinutes: args.durationMinutes,
           speaking: args.speaking === true,
         });
+  const steam = coffeeCupSteamVisualState({
+    nowMs: args.nowMs,
+    frameIndex: status.frameIndex,
+    progress: status.progress,
+    sessionStartedAtMs:
+      topOffHeatStartedAtMs != null &&
+      Number.isFinite(args.nowMs) &&
+      args.nowMs >= topOffHeatStartedAtMs
+        ? topOffHeatStartedAtMs
+        : args.sessionStartedAtMs,
+    sessionEndsAtMs: args.sessionEndsAtMs,
+    durationMinutes: args.durationMinutes,
+    forceEmpty: args.forceEmpty || finished,
+  });
   return {
     ...status,
     ...position,
@@ -265,6 +670,9 @@ export function buildCoffeeCupVisualState(args: {
     sipping,
     sipAnimationMs: sipTiming.durationMs,
     sipHoldMs: sipTiming.holdMs,
+    steamAlpha: steam.steamAlpha,
+    steamRateMs: steam.steamRateMs,
+    finished,
     label: `${color} coffee cup, ${status.amountLabel}, ${status.temperatureLabel}`,
   };
 }

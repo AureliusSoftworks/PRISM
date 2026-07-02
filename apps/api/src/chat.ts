@@ -142,6 +142,7 @@ import {
   formatWebSearchForModel,
   searchWebWithBrave,
 } from "./web-search.ts";
+import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
 
 const config = getAppConfig();
 
@@ -906,6 +907,7 @@ async function generateOrganicTextBoundaryReply(args: {
         {
           temperature: 0.7,
           maxTokens: 90,
+          usagePurpose: "chat_boundary",
         },
         args.signal
       )
@@ -1499,6 +1501,7 @@ async function runPsychicPrivateTextPass(args: {
         jsonMode: false,
         jsonSchema: undefined,
         jsonSchemaName: undefined,
+        usagePurpose: "psychic_planning",
         ...(args.signal ? { signal: args.signal } : {}),
       }
     );
@@ -1635,6 +1638,7 @@ async function runPsychicPlanningPass(args: {
       jsonMode: true,
       jsonSchema: PSYCHIC_PLANNING_JSON_SCHEMA,
       jsonSchemaName: "psychic_planning",
+      usagePurpose: "psychic_planning",
       ...(args.signal ? { signal: args.signal } : {}),
     });
     throwIfChatRequestCancelled(args.signal);
@@ -1865,6 +1869,7 @@ async function generateWithLenientLocalFallback(args: {
       reply = await fallbackProvider.generateResponse(promptMessagesForFinalAnswer, {
         ...args.botOverrides,
         model: fallbackModel,
+        usagePurpose: "chat_fallback",
         ...(args.signal ? { signal: args.signal } : {}),
       });
     } catch (error) {
@@ -1896,7 +1901,10 @@ async function generateWithLenientLocalFallback(args: {
   try {
     const assistantReplyRaw = await args.provider.generateResponse(
       promptMessagesForFinalAnswer,
-      withGenerationSignal(args.botOverrides, args.signal)
+      withGenerationSignal(
+        { ...args.botOverrides, usagePurpose: "chat_reply" },
+        args.signal
+      )
     );
     if (shouldSuppressAssistantReply(assistantReplyRaw)) {
       const trigger = isCopyrightRefusalText(assistantReplyRaw)
@@ -2274,6 +2282,7 @@ async function inferConversationStarters(
     ...baseOverrides,
     temperature: INFER_STARTER_TEMPERATURE,
     maxTokens: INFER_STARTER_MAX_TOKENS,
+    usagePurpose: "chat_reply",
   };
 
   const messages: ProviderMessage[] = [
@@ -2377,6 +2386,7 @@ async function inferConversationTitle(
     ...baseOverrides,
     temperature: INFER_TITLE_TEMPERATURE,
     maxTokens: INFER_TITLE_MAX_TOKENS,
+    usagePurpose: "conversation_title",
   };
   const label = personaLabel?.trim() || "Prism";
   const messages: ProviderMessage[] = [
@@ -2447,6 +2457,7 @@ async function inferRefreshedConversationTitle(
   const inferOverrides: GenerateOptions = {
     temperature: INFER_TITLE_TEMPERATURE,
     maxTokens: INFER_TITLE_MAX_TOKENS,
+    usagePurpose: "conversation_title",
   };
   const label = personaLabel?.trim() || "Prism";
   const promptMessages: ProviderMessage[] = [
@@ -5089,6 +5100,7 @@ export async function decideZenAutonomyTurn(args: {
       temperature: 0.25,
       maxTokens: 120,
       jsonMode: true,
+      usagePurpose: "zen_live_action",
       signal: args.signal,
     });
     return parseZenAutonomyDecision(raw, candidates);
@@ -6905,6 +6917,12 @@ export async function processChatMessage(
       throw new Error("Conversation not found for this user.");
     }
   }
+  patchUsageSession({
+    conversationId: activeConversationId,
+    botId: assistantMemoryBotId ?? activeBotId ?? null,
+    mode,
+    surface: isZenMode(mode) ? "zen" : mode,
+  });
   if (isZenMode(mode)) {
     pruneExpiredZenSessionMemories(db, userId);
   }
@@ -7792,6 +7810,11 @@ export async function processChatMessage(
     toolPayloadProseOnly,
     assistantCreatedAt
   );
+  attachUsageEventsToMessage({
+    conversationId: activeConversationId,
+    messageId: assistantProseMessageId,
+    botId: assistantBotId ?? null,
+  });
 
   if (sentGeneratedImagePersisted && toolPayloadImageOnly) {
     db.prepare(

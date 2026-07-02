@@ -45,6 +45,24 @@ export type ZenLiveActionMouthShape =
   | "open-small"
   | "open-round";
 
+export type ZenLiveBotCanvasSide = "left" | "right";
+
+export function zenLiveBotCanvasSideFromCenterX(
+  centerX: number,
+  viewportWidth: number
+): ZenLiveBotCanvasSide {
+  if (!Number.isFinite(centerX) || !Number.isFinite(viewportWidth) || viewportWidth <= 0) {
+    return "left";
+  }
+  return centerX < viewportWidth / 2 ? "left" : "right";
+}
+
+export function zenLiveBotFaceScaleYForCanvasSide(
+  side: ZenLiveBotCanvasSide
+): string {
+  return side === "left" ? "-1" : "1";
+}
+
 function normalizeZenLiveActionMouthShape(
   mouthShape: boolean | ZenLiveActionMouthShape | undefined
 ): ZenLiveActionMouthShape {

@@ -5,6 +5,7 @@ export {
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   defaultHiddenModelIdsForCatalog,
   isDisabledModelChoice,
+  reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
   resolveAutoModel,
 } from "@localai/shared";

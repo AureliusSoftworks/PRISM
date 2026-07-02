@@ -644,7 +644,7 @@
 
 .storySceneTopline {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   left: 18px;
   right: 18px;
   top: 16px;
@@ -3141,6 +3141,10 @@
 
 .settingsSection[data-settings-section="behavior"] {
   --settings-section-color: #36d399;
+}
+
+.settingsSection[data-settings-section="coffee"] {
+  --settings-section-color: #d69a3a;
 }
 
 .settingsSection[data-settings-section="about"] {
@@ -22156,7 +22160,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 10;
   min-width: max(100%, 260px);
   max-width: min(360px, calc(100vw - 24px));
-  max-height: min(420px, calc(100vh - 160px));
+  max-height: min(420px, var(--compose-menu-available-height, calc(100vh - 160px)));
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--line-strong);
@@ -24048,6 +24052,337 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterPanelMessages .panelNotice,
 .promptCenterPanelMessages .error {
   margin-top: 0;
+}
+
+.panelUsage {
+  --panel-width: min(560px, calc(100vw - 32px));
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+  border-left: 0;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #2fd3e3 7%, transparent),
+      transparent 240px
+    ),
+    var(--bg-surface);
+}
+
+.panelUsage::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  pointer-events: none;
+  background: linear-gradient(180deg, #2fd3e3, #b7e63a 42%, #ff9f1c 72%, #7b5cff);
+  box-shadow: 0 0 18px color-mix(in srgb, #2fd3e3 22%, transparent);
+}
+
+.usageWorkspace {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 2px 2px max(14px, env(safe-area-inset-bottom)) 0;
+  overscroll-behavior-y: contain;
+}
+
+.usageHero {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 65%, var(--line));
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #2fd3e3 12%, transparent),
+      color-mix(in srgb, #ff9f1c 8%, transparent)
+    ),
+    color-mix(in srgb, var(--bg-elevated) 86%, var(--bg-surface));
+}
+
+.usageHero span,
+.usageMetric span,
+.usageBreakdownMeta,
+.usageRecentItem span,
+.usageHero small,
+.usageMetric small {
+  color: var(--fg-muted);
+}
+
+.usageHero strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg);
+  font-size: clamp(28px, 5vw, 40px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.usageHero small {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.usageHeroGlyph {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid color-mix(in srgb, #2fd3e3 38%, var(--line));
+  border-radius: 8px;
+  color: color-mix(in srgb, #2fd3e3 82%, var(--fg));
+  background: color-mix(in srgb, #2fd3e3 12%, transparent);
+}
+
+.usageControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.usageSegmentedControl {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 76%, var(--bg-surface));
+}
+
+.usageSegmentedControl button {
+  border: 0;
+  border-radius: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--fg-muted);
+  background: transparent;
+  font: 760 12px/1 var(--font-ui-sans), system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.usageSegmentedControl button:hover:not(:disabled),
+.usageSegmentedControl button:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.usageSegmentedControl button[data-active="true"] {
+  color: var(--fg);
+  background: color-mix(in srgb, #2fd3e3 18%, var(--bg-surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #2fd3e3 28%, transparent) inset;
+}
+
+.usageSegmentedControl button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.usageMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.usageMetric {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 76%, var(--bg-surface));
+}
+
+.usageMetric strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.usageMetric span,
+.usageMetric small {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.usageHistoryNotice,
+.usageEmptyState {
+  border: 1px dashed color-mix(in srgb, var(--line-strong) 70%, var(--line));
+  border-radius: 8px;
+  padding: 11px 12px;
+  display: grid;
+  gap: 4px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--bg-elevated) 54%, transparent);
+}
+
+.usageHistoryNotice strong,
+.usageEmptyState strong {
+  color: var(--fg);
+}
+
+.usageEmptyState {
+  justify-items: center;
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.usageBreakdownGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.usageBreakdownSection,
+.usageRecentSection {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 78%, var(--bg-surface));
+}
+
+.usageBreakdownHeader,
+.usageBreakdownItemTop,
+.usageBreakdownMeta,
+.usageRecentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usageBreakdownHeader h4 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.usageBreakdownHeader span {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.usageBreakdownList,
+.usageRecentList {
+  list-style: none;
+  display: grid;
+  gap: 9px;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.usageBreakdownItem {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usageBreakdownItemTop strong,
+.usageRecentItem strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageBreakdownItemTop span {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.usageBreakdownTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.usageBreakdownTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2fd3e3, #b7e63a);
+}
+
+.usageBreakdownMeta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.usageRecentItem {
+  align-items: start;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  padding-top: 9px;
+}
+
+.usageRecentItem:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.usageRecentItem > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.usageRecentItem > div:last-child {
+  text-align: right;
+}
+
+.usageRecentItem span {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.usageEmptyLine {
+  margin: 10px 0 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+
+@media (max-width: 620px) {
+  .usageControls {
+    grid-template-columns: 1fr;
+  }
+
+  .usageSegmentedControl {
+    width: 100%;
+  }
+
+  .usageSegmentedControl button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .usageMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .usageRecentItem {
+    display: grid;
+  }
+
+  .usageRecentItem > div:last-child {
+    text-align: left;
+  }
 }
 
 .promptCenterWorkspace {
@@ -26939,6 +27274,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 12px 26px -22px color-mix(in srgb, var(--accent) 82%, #000000);
 }
 
+.botPanelChoiceGlyph .headerIconGlyph {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.9;
+}
+
 .botPanelChoiceCopy,
 .botPanelHubAction span,
 .botPanelHubCopy {
@@ -29355,6 +29696,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg);
 }
 
+.panelHeaderIconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.panelHeaderIconButton:disabled:hover {
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+
 /* Panel header traffic lights mirror the conversation-panel action buttons. */
 .panelHeaderIconButton.panelHeaderSaveButton,
 .panelHeaderIconButton.panelHeaderImportButton,
@@ -29692,6 +30043,487 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg-muted);
   font-size: 11.5px;
   line-height: 1.35;
+}
+
+.botAvatarCard {
+  gap: 10px;
+}
+
+.botAvatarSummaryCard {
+  padding-bottom: 10px;
+}
+
+.form button.botAvatarSummaryButton,
+.botAvatarSummaryButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent),
+      transparent 64%
+    ),
+    color-mix(in srgb, var(--bg) 94%, transparent);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 80ms ease;
+}
+
+.form button.botAvatarSummaryButton:hover,
+.form button.botAvatarSummaryButton:focus-visible,
+.botAvatarSummaryButton:hover,
+.botAvatarSummaryButton:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 48%, var(--line-strong));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, var(--bg-hover) 94%, transparent);
+  outline: none;
+}
+
+.botAvatarSummaryButton:active {
+  transform: translateY(1px);
+}
+
+.botAvatarSummaryFace,
+.botAvatarSummaryProfile {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.botAvatarSummaryButton .botAvatarFacePlate {
+  width: 58px;
+  height: 58px;
+}
+
+.botAvatarSummaryButton .botAvatarFaceGlyph {
+  --coffee-seat-emotion-face-scale: 1.04;
+}
+
+.botAvatarSummaryButton .botAvatarProfilePreview {
+  width: 58px;
+  border-radius: 14px;
+}
+
+.botAvatarSummaryButton .botAvatarProfileEmpty {
+  width: 34px;
+  height: 34px;
+}
+
+.botAvatarSummaryCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botAvatarSummaryCopy strong {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.botAvatarSummaryCopy small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botAvatarGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(116px, 0.85fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.botAvatarFaceArea,
+.botAvatarProfileArea {
+  min-width: 0;
+  display: grid;
+  gap: 11px;
+}
+
+.botAvatarProfileArea {
+  align-content: start;
+}
+
+.botAvatarPreviewRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 11px;
+  align-items: center;
+}
+
+.botAvatarFacePlate {
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 36% 28%,
+      color-mix(in srgb, #ffffff 38%, transparent) 0 7%,
+      transparent 22%
+    ),
+    radial-gradient(
+      circle at 50% 58%,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent),
+      transparent 64%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-surface) 92%, #ffffff 8%),
+      color-mix(in srgb, var(--bg-deep) 82%, #000000 18%)
+    );
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, var(--line));
+  box-shadow:
+    0 14px 28px -24px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, #000000),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent),
+    inset 0 -14px 24px -20px color-mix(in srgb, #000000 70%, transparent);
+}
+
+.botAvatarFaceGlyph {
+  --coffee-seat-emotion-face-scale: 1.5;
+  --coffee-plate-emoji-nudge-y: 0px;
+  color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 82%, var(--fg));
+  text-shadow: 0 1px 5px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, transparent);
+}
+
+.botAvatarCustomizer {
+  width: min(620px, calc(100vw - var(--panel-width) - 56px));
+  grid-template-columns: 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.botAvatarCustomizerBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(150px, 0.72fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.botAvatarModalFacePanel,
+.botAvatarModalProfilePanel {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+
+.botAvatarModalPreview {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.botAvatarModalPreview .botAvatarFacePlate {
+  width: 112px;
+  height: 112px;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, #ffffff 7%, transparent),
+      transparent 48%
+    ),
+    #080808;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 54%, rgba(255, 255, 255, 0.22));
+  box-shadow:
+    0 0 0 8px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, transparent),
+    0 0 24px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, transparent),
+    0 14px 26px rgba(0, 0, 0, 0.42);
+}
+
+.botAvatarModalPreview .botAvatarFaceGlyph {
+  --coffee-seat-emotion-face-scale: 1.1;
+  --coffee-plate-emoji-nudge-y: -5px;
+}
+
+.botAvatarModalProfilePanel {
+  justify-items: center;
+}
+
+.botAvatarPreviewCopy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.botAvatarPreviewCopy span,
+.botAvatarProfileCopy span,
+.botAvatarFontControl legend,
+.botAvatarWeightControl > span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.botAvatarPreviewCopy small,
+.botAvatarProfileCopy small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.botAvatarFontControls {
+  display: grid;
+  gap: 9px;
+}
+
+.botAvatarFontControl {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.botAvatarFontOptions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px;
+}
+
+.form button.botAvatarFontOption,
+.botAvatarFontOption {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 7px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+}
+
+.form button.botAvatarFontOption:hover,
+.form button.botAvatarFontOption:focus-visible,
+.botAvatarFontOption:hover,
+.botAvatarFontOption:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, var(--line-strong));
+  color: var(--fg);
+  outline: none;
+}
+
+.form button.botAvatarFontOption[data-selected="true"],
+.botAvatarFontOption[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, var(--bg));
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, transparent);
+}
+
+.botAvatarFontOptionSample {
+  display: inline-block;
+  min-width: 34px;
+  text-align: center;
+  color: var(--fg);
+  font-size: 21px;
+  line-height: 1;
+  transform-origin: center center;
+}
+
+.botAvatarFontOptionSample[data-face-font="neutral"] {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 820;
+  letter-spacing: 0.03em;
+}
+
+.botAvatarFontOptionSample[data-face-font="warm"] {
+  font-family: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.07em;
+  transform: scaleX(1.22) scaleY(0.92);
+}
+
+.botAvatarFontOptionSample[data-face-font="concise"] {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 860;
+  letter-spacing: 0.04em;
+}
+
+.botAvatarFontOptionSample[data-face-font="playful"] {
+  font-family: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transform: rotate(-3deg) scale(1.08);
+}
+
+.botAvatarFontOptionSample[data-face-font="formal"] {
+  font-family: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  font-style: normal;
+}
+
+.botAvatarWeightControl {
+  display: grid;
+  gap: 6px;
+}
+
+.botAvatarWeightControl > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.botAvatarWeightControl strong {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.botAvatarWeightControl input[type="range"] {
+  width: 100%;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.botAvatarWeightEnds {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.botAvatarProfilePreview {
+  width: 112px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-deep) 82%, var(--bg) 18%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 16px 30px -28px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, #000000);
+}
+
+.botAvatarProfilePreview[data-empty="true"] {
+  border-style: dashed;
+}
+
+.botAvatarProfileImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.botAvatarProfileEmpty {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 52%, var(--fg-muted));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
+}
+
+.botAvatarProfileCopy {
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+
+.botAvatarProfileActions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.form .botAvatarProfileActions button,
+.botAvatarProfileActions button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.form .botAvatarProfileActions button:hover:not(:disabled),
+.form .botAvatarProfileActions button:focus-visible,
+.botAvatarProfileActions button:hover:not(:disabled),
+.botAvatarProfileActions button:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--line-strong));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
+  outline: none;
+}
+
+.form .botAvatarProfileActions button:disabled,
+.botAvatarProfileActions button:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+.botAvatarFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Wide-screen affordance: when there's room to the left of the bot
@@ -37409,6 +38241,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-rows: auto auto minmax(0, 1fr);
   }
 
+  .botAvatarCustomizer {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .botProfileBuilderHeader {
     padding:
       calc(env(safe-area-inset-top) + 12px)
@@ -37444,6 +38280,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
   .botProfileBuilderBody {
     padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
+  }
+
+  .botAvatarCustomizerBody {
+    grid-template-columns: 1fr;
+    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
+  }
+
+  .botAvatarModalPreview {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .botAvatarModalPreview .botAvatarFacePlate {
+    width: 84px;
+    height: 84px;
+  }
+
+  .botAvatarModalPreview .botAvatarFaceGlyph {
+    --coffee-seat-emotion-face-scale: 1.05;
+    --coffee-plate-emoji-nudge-y: -3px;
   }
 
   .botProfileCustomFactsScroll {
@@ -37514,6 +38369,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .botParameterCard {
     gap: 6px;
     padding: 8px;
+  }
+
+  .botAvatarGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .botAvatarPreviewRow {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .botAvatarFacePlate {
+    width: 72px;
+    height: 72px;
+  }
+
+  .botAvatarFaceGlyph {
+    --coffee-seat-emotion-face-scale: 1.28;
+  }
+
+  .botAvatarFontOptions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .botAvatarProfilePreview {
+    width: 96px;
+  }
+
+  .botAvatarProfileActions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .form .botAvatarProfileActions button,
+  .botAvatarProfileActions button {
+    min-width: 0;
+    padding-inline: 6px;
   }
 
   .panelBots .form > button[type="submit"]:last-child {
@@ -38831,11 +39722,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSessionDot {
+  box-sizing: border-box;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--coffee-bot-color);
   box-shadow: 0 0 12px color-mix(in srgb, var(--coffee-bot-color) 60%, transparent);
+}
+
+.coffeeSessionDot[data-absent="true"] {
+  opacity: 0.46;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 70%, transparent);
+  box-shadow: none;
 }
 
 .coffeeSessionTitle {
@@ -38854,13 +39753,41 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 790;
 }
 
+.coffeeGroupSessionListViewport {
+  margin: 0 0 2px 12px;
+  padding: 0 2px 0 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  max-height: min(344px, 42vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.coffeeGroupSessionListViewport:focus-visible {
+  outline: 1px solid rgba(120, 200, 255, 0.42);
+  outline-offset: 3px;
+}
+
+.coffeeGroupSessionListViewport::-webkit-scrollbar {
+  width: 6px;
+}
+
+.coffeeGroupSessionListViewport::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.coffeeGroupSessionListViewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .coffeeGroupSessionList {
   list-style: none;
   display: grid;
   gap: 4px;
-  margin: 0 0 2px 12px;
-  padding: 0 0 0 10px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0;
+  padding: 0;
 }
 
 /*
@@ -39001,6 +39928,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeMain {
+  --coffee-stage-max-width: 1320px;
+  --coffee-stage-max-height: 780px;
   min-width: 0;
   min-height: 100dvh;
   display: grid;
@@ -39113,6 +40042,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
+  justify-self: center;
+  width: min(100%, var(--coffee-stage-max-width));
+  max-height: var(--coffee-stage-max-height);
   min-height: 0;
   overflow: hidden;
   border-radius: 26px;
@@ -39124,6 +40056,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: clamp(16px, 2vw, 24px);
 }
 
+.coffeeStage[data-phase="arriving"],
 .coffeeStage[data-phase="live"],
 .coffeeStage[data-phase="finished"] {
   --coffee-canvas-y: clamp(18px, 3vh, 30px);
@@ -39142,24 +40075,37 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px 14px;
-  width: 100%;
+  justify-self: center;
+  gap: 5px 10px;
+  width: fit-content;
+  max-width: min(560px, calc(100% - 28px));
   min-width: 0;
+  min-height: 44px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035)),
+    rgba(0, 0, 0, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 38px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(14px);
 }
 
 .coffeeAutoplayDockCaption {
   margin: 0;
   text-align: center;
-  font-size: clamp(0.78rem, 2.1vw, 0.88rem);
-  line-height: 1.35;
+  font-size: clamp(0.7rem, 1.8vw, 0.78rem);
+  line-height: 1.25;
   color: var(--coffee-muted);
-  max-width: min(36rem, 100%);
+  max-width: min(24rem, 100%);
 }
 
 .coffeeAutoplayDockTimer {
   margin: 0;
   text-align: center;
-  font-size: clamp(0.92rem, 2.4vw, 1.05rem);
+  font-size: clamp(0.82rem, 2vw, 0.96rem);
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
@@ -39185,10 +40131,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
-  min-width: 56px;
-  min-height: 56px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -39239,8 +40185,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeAutoplayDockGlyph {
-  width: 26px;
-  height: 26px;
+  width: 21px;
+  height: 21px;
   flex-shrink: 0;
   stroke: currentColor;
   stroke-width: 1.55;
@@ -39268,6 +40214,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-height: 100%;
   justify-content: center;
   transform: translateY(clamp(10px, 1.4vh, 18px));
+}
+
+.coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"]) {
+  min-height: clamp(360px, 46vh, 560px);
 }
 
 .coffeeStage[data-compact="true"] .coffeeTableDisk {
@@ -39490,13 +40440,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowPill {
+  --coffee-seat-glyph-slot-width: 28px;
+  --coffee-seat-name-plate-y: clamp(-24px, -3vw, -12px);
   max-width: min(148px, 58vw);
   min-width: min(96px, 44vw);
   padding: 4px 8px;
   column-gap: 6px;
   border-radius: 10px;
   margin-top: clamp(-3px, -0.35vw, 1px);
-  transform: translateX(-50%) translateY(clamp(-24px, -3vw, -12px));
 }
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowText {
@@ -39544,6 +40495,139 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 10;
 }
 
+.coffeePotLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+
+.coffeePotTray {
+  position: absolute;
+  left: clamp(18px, 2.2vw, 30px);
+  bottom: clamp(18px, 2.4vw, 34px);
+  z-index: 1;
+  width: clamp(54px, 6.6vw, 84px);
+  height: clamp(46px, 5.4vw, 70px);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(0, 0, 0, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 16px 30px rgba(0, 0, 0, 0.28);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.coffeePotTray:hover:not(:disabled),
+.coffeePotTray:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.055)),
+    rgba(0, 0, 0, 0.38);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.coffeePotTray:active:not(:disabled),
+.coffeePotTray[data-dragging="true"] {
+  cursor: grabbing;
+  opacity: 0.42;
+  transform: translateY(1px) scale(0.98);
+}
+
+.coffeePotTray:disabled {
+  opacity: 0.46;
+  cursor: wait;
+}
+
+.coffeePotTray img {
+  width: 116%;
+  height: 116%;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.46));
+}
+
+.coffeePotDrag {
+  position: absolute;
+  left: var(--coffee-pot-drag-x);
+  top: var(--coffee-pot-drag-y);
+  z-index: 5;
+  --coffee-pot-drag-size: clamp(63px, 7.65vw, 97px);
+  --coffee-pot-pour-stream-top: 36%;
+  --coffee-pot-pour-stream-height: 200%;
+  --coffee-pot-pour-cursor-x: -95%;
+  --coffee-pot-pour-cursor-y: -236%;
+  width: var(--coffee-pot-drag-size);
+  height: var(--coffee-pot-drag-size);
+  pointer-events: none;
+  transform: translate(-52%, -55%);
+  transform-origin: center;
+  transition:
+    transform 190ms cubic-bezier(0.22, 0.78, 0.24, 1),
+    filter 190ms ease;
+  filter:
+    drop-shadow(0 12px 14px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 12px rgba(95, 235, 255, 0.18));
+}
+
+.coffeePotDrag[data-pour-target="true"] {
+  transform: translate(var(--coffee-pot-pour-cursor-x), var(--coffee-pot-pour-cursor-y));
+}
+
+.coffeePotDragImage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.coffeePotPourStream {
+  position: absolute;
+  z-index: 1;
+  right: -6%;
+  top: var(--coffee-pot-pour-stream-top);
+  width: var(--coffee-pot-drag-size);
+  height: var(--coffee-pot-pour-stream-height);
+  object-fit: contain;
+  object-position: right top;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter:
+    saturate(1.18)
+    drop-shadow(0 0 8px rgba(255, 116, 36, 0.42));
+  animation: coffeePotPourStreamAppear 140ms ease-out both;
+}
+
+@keyframes coffeePotPourStreamAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scaleY(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
 .coffeeEyebrow {
   margin: 0 0 4px;
   color: rgba(255, 255, 255, 0.54);
@@ -39581,6 +40665,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTableScene {
+  --coffee-table-asset: url("/coffee-table/table_dark.png");
+  --coffee-table-asset-y: clamp(34px, 6.5vh, 74px);
+  --coffee-table-asset-width: min(91%, 1110px);
   position: relative;
   /* Flex centers the focal stack as a unit on the disk; seats/disk stay position:absolute. */
   display: flex;
@@ -39623,15 +40710,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: clamp(28px, 6.5vh, 80px);
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] {
   --coffee-live-table-y: clamp(28px, 5vh, 42px);
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"] .coffeeTableGlow,
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"] .coffeeTableDisk,
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableGlow,
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableDisk {
   transform: translate(-50%, calc(-50% + var(--coffee-live-table-y)));
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"] .coffeeTableFocalColumn,
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] .coffeeTableFocalColumn {
   transform: translateY(var(--coffee-live-table-y));
 }
@@ -39717,6 +40808,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform: translate(-50%, -50%);
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"] {
+  --coffee-walk-in-x: 0px;
+  --coffee-walk-in-y: 0px;
+  --coffee-meander-x: 18px;
+  --coffee-meander-y: -8px;
+  pointer-events: none;
+  animation: coffeeSeatWalkIn 3600ms cubic-bezier(0.16, 0.84, 0.26, 1) both;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"] .coffeeSeatGlowPill {
+  opacity: 0;
+  animation: coffeeSeatNamePlateArrive 520ms cubic-bezier(0.22, 1, 0.36, 1) 2300ms both;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="0"] {
+  --coffee-walk-in-x: 0px;
+  --coffee-walk-in-y: -15%;
+  --coffee-meander-x: -14px;
+  --coffee-meander-y: -10px;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="1"] {
+  --coffee-walk-in-x: -15vw;
+  --coffee-walk-in-y: -5%;
+  --coffee-meander-x: 20px;
+  --coffee-meander-y: -14px;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="2"] {
+  --coffee-walk-in-x: 15vw;
+  --coffee-walk-in-y: -5%;
+  --coffee-meander-x: -20px;
+  --coffee-meander-y: -14px;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="3"] {
+  --coffee-walk-in-x: -13vw;
+  --coffee-walk-in-y: 10%;
+  --coffee-meander-x: 18px;
+  --coffee-meander-y: 12px;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="4"] {
+  --coffee-walk-in-x: 13vw;
+  --coffee-walk-in-y: 10%;
+  --coffee-meander-x: -18px;
+  --coffee-meander-y: 12px;
+}
+
 @keyframes coffeeSeatWalkAway {
   0% {
     opacity: 1;
@@ -39740,6 +40880,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 }
 
+@keyframes coffeeSeatWalkIn {
+  0% {
+    opacity: 0;
+    transform: translate(
+        calc(-50% + var(--coffee-walk-in-x)),
+        calc(-50% + var(--coffee-walk-in-y))
+      )
+      scale(0.94)
+      rotate(-1.4deg);
+  }
+
+  34% {
+    opacity: 0.42;
+    transform: translate(
+        calc(-50% + var(--coffee-walk-in-x) * 0.6 + var(--coffee-meander-x)),
+        calc(-50% + var(--coffee-walk-in-y) * 0.64 + var(--coffee-meander-y))
+      )
+      scale(0.97)
+      rotate(0.8deg);
+  }
+
+  72% {
+    opacity: 0.82;
+    transform: translate(
+        calc(-50% + var(--coffee-walk-in-x) * 0.18 - var(--coffee-meander-x) * 0.32),
+        calc(-50% + var(--coffee-walk-in-y) * 0.2 - var(--coffee-meander-y) * 0.2)
+      )
+      scale(1.01)
+      rotate(-0.35deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes coffeeSeatNamePlateArrive {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(calc(var(--coffee-seat-name-plate-y) + 6px)) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(var(--coffee-seat-name-plate-y)) scale(1);
+  }
+}
+
 /* In-card recap (replaces the bottom dock when the session is finished). */
 .coffeeFinishedRecap {
   display: flex;
@@ -39759,15 +40948,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   max-width: 32ch;
 }
 
+.coffeeReplayStageCaption {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(42px, 6vh, 72px);
+  z-index: 6;
+  width: min(460px, calc(100% - 72px));
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: clamp(0.78rem, 1.4vw, 0.92rem);
+  line-height: 1.3;
+  text-align: center;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.68);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
 .coffeeFinishedRecapControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   width: 100%;
   justify-content: center;
 }
 
+.coffeeFinishedRecapControls .coffeeJoinSessionButton,
+.coffeeFinishedRecapControls .coffeeTableStartButton {
+  margin-top: 0;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeatPlate,
 .coffeeStage[data-phase="live"] .coffeeSeatPlate {
   --coffee-plate-emoji-nudge-y: clamp(0px, 1.4%, 5px);
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeCenterMessage,
 .coffeeStage[data-phase="live"] .coffeeCenterMessage,
 .coffeeStage[data-phase="finished"] .coffeeCenterMessage {
   width: min(276px, 42vmin);
@@ -39777,6 +40993,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   max-height: min(360px, 48vmin);
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeCenterMessageScroll,
 .coffeeStage[data-phase="live"] .coffeeCenterMessageScroll,
 .coffeeStage[data-phase="finished"] .coffeeCenterMessageScroll {
   flex: 1 1 auto;
@@ -39808,17 +41025,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeCenterFeedLine,
 .coffeeStage[data-phase="live"] .coffeeCenterFeedLine,
 .coffeeStage[data-phase="finished"] .coffeeCenterFeedLine {
   font-size: clamp(0.9rem, 1.5vw, 1.15rem);
   line-height: 1.32;
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeCenterFeedLine[data-speaker-break="true"],
 .coffeeStage[data-phase="live"] .coffeeCenterFeedLine[data-speaker-break="true"],
 .coffeeStage[data-phase="finished"] .coffeeCenterFeedLine[data-speaker-break="true"] {
   margin-top: 14px;
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeCenterFeed,
 .coffeeStage[data-phase="live"] .coffeeCenterFeed,
 .coffeeStage[data-phase="finished"] .coffeeCenterFeed {
   /* Extra scroll runway so lines stay readable past the top/bottom fade mask. */
@@ -39831,54 +41051,70 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-top: 8px;
 }
 
+.coffeeStage[data-phase="arriving"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster,
 .coffeeStage[data-phase="live"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster,
 .coffeeStage[data-phase="finished"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster {
   opacity: 1;
-  filter: none;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
   left: 30%;
   top: 42%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="1"][data-layout-seat="1"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
   left: 30%;
   top: 42%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
   left: 70%;
   top: 42%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="2"][data-layout-seat="2"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
   left: 70%;
   top: 42%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
   left: 31%;
   top: 79%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="3"][data-layout-seat="3"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
   left: 31%;
   top: 79%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
   left: 69%;
   top: 79%;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="4"][data-layout-seat="4"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
   left: 69%;
@@ -39996,6 +41232,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 0;
 }
 
+.coffeeTableAsset {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: none;
+  width: var(--coffee-table-asset-width);
+  max-width: calc(100% - 28px);
+  aspect-ratio: 1490 / 1056;
+  transform: translate(-50%, calc(-50% + var(--coffee-table-asset-y)));
+  z-index: 2;
+  pointer-events: none;
+  background: var(--coffee-table-asset) center / contain no-repeat;
+  filter: drop-shadow(0 30px 70px rgba(0, 0, 0, 0.5));
+  opacity: 0.96;
+}
+
 .coffeeTableDisk {
   position: absolute;
   left: 50%;
@@ -40014,6 +41266,77 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 0 34px rgba(255, 255, 255, 0.05),
     inset 0 -38px 80px rgba(0, 0, 0, 0.72),
     0 26px 72px rgba(0, 0, 0, 0.62);
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableScene,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableScene {
+  --coffee-experimental-table-lift: clamp(-150px, -15vh, -92px);
+  --coffee-experimental-seat-lift: 18%;
+  --coffee-experimental-seat-extra-lift: 4%;
+  min-height: clamp(560px, min(76vh, 82dvh), 820px);
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"],
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] {
+  --coffee-stage-max-width: 1640px;
+  --coffee-stage-max-height: 880px;
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableGlow,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableGlow {
+  width: min(89%, 980px);
+  aspect-ratio: 1490 / 1056;
+  border-radius: 42%;
+  transform: translate(
+    -50%,
+    calc(-50% + var(--coffee-table-asset-y) + var(--coffee-experimental-table-lift))
+  );
+  filter: blur(46px) saturate(1.08);
+  opacity: 0.7;
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableAsset,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableAsset {
+  display: block;
+  transform: translate(
+    -50%,
+    calc(-50% + var(--coffee-table-asset-y) + var(--coffee-experimental-table-lift))
+  );
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableDisk,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableDisk {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableFocalColumn,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableFocalColumn {
+  width: min(72vw, 860px);
+  max-width: calc(100% - 72px);
+  transform: translateY(clamp(42px, 6vh, 74px));
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableFocalColumn {
+  transform: translateY(clamp(86px, 11vh, 124px));
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessage,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeCenterMessage {
+  width: min(780px, 64vw);
+  min-height: clamp(200px, 28vh, 320px);
+  max-width: calc(100% - 24px);
+  max-height: clamp(320px, 44vh, 440px);
+  padding-inline: clamp(14px, 2vw, 28px);
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessage {
+  margin-top: clamp(34px, 5.2vh, 52px);
+}
+
+.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessageScroll,
+.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeCenterMessageScroll {
+  max-height: clamp(230px, 35vh, 380px);
 }
 
 .coffeeCenterMessage {
@@ -40209,6 +41532,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-emotion-face-scale: 1;
   --coffee-seat-emotion-glow-strength: 32%;
   --coffee-seat-emotion-ring-alpha: 0.035;
+  --coffee-seat-mood-saturation: 1;
+  --coffee-seat-mood-grayscale: 0;
+  --coffee-seat-mood-contrast: 1;
+  --coffee-seat-mood-brightness: 1;
   --coffee-plate-emoji-face-scale-y: 1;
   appearance: none;
   position: absolute;
@@ -40543,6 +41870,90 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform-origin: left center;
 }
 
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="0"] {
+  left: 18%;
+  top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="1"] {
+  left: 82%;
+  top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="0"] {
+  left: 50%;
+  top: calc(26% - var(--coffee-experimental-seat-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="1"] {
+  left: 22%;
+  top: calc(72% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="2"] {
+  left: 78%;
+  top: calc(72% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="0"] {
+  left: 18%;
+  top: calc(40% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="1"] {
+  left: 82%;
+  top: calc(40% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="2"] {
+  left: 78%;
+  top: calc(73% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="3"] {
+  left: 22%;
+  top: calc(73% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="0"] {
+  left: 50%;
+  top: calc(45% - var(--coffee-experimental-seat-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="1"] {
+  left: 14%;
+  top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="2"] {
+  left: 86%;
+  top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="3"] {
+  left: 16%;
+  top: calc(88% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="4"] {
+  left: 84%;
+  top: calc(88% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
+}
+
 .coffeeStage[data-compact="true"] .coffeeSeat[data-seat="0"] {
   --coffee-cup-x: calc(50% + 22px);
   --coffee-cup-y: calc(50% + 50px);
@@ -40610,6 +42021,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: transform 140ms ease;
 }
 
+.coffeeSeatPlate,
+.coffeeSeatGlowPill {
+  filter:
+    saturate(var(--coffee-seat-mood-saturation))
+    grayscale(var(--coffee-seat-mood-grayscale))
+    contrast(var(--coffee-seat-mood-contrast))
+    brightness(var(--coffee-seat-mood-brightness));
+}
+
 .coffeeSeatPlate {
   --coffee-seat-plate-shift-x: clamp(-13px, -0.82vw, -8px);
   position: absolute;
@@ -40633,7 +42053,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 28px color-mix(in srgb, var(--coffee-seat-emotion-color) var(--coffee-seat-emotion-glow-strength), transparent),
     0 18px 30px rgba(0, 0, 0, 0.52);
   transform: translateX(var(--coffee-seat-plate-shift-x));
-  transition: box-shadow 140ms ease, border-color 140ms ease, transform 140ms ease;
+  transition:
+    filter 280ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
 }
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatPlate {
@@ -40641,13 +42065,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatGlowPill {
+  --coffee-seat-name-plate-y: clamp(-30px, -3.8vw, -16px);
+  --coffee-seat-glyph-slot-width: 31px;
   position: absolute;
   left: 50%;
   /* Entire chip sits below the plate box so it never covers the seat emoji. */
   top: 100%;
   bottom: auto;
   margin-top: clamp(-3px, -0.35vw, 1px);
-  transform: translateX(-50%) translateY(clamp(-30px, -3.8vw, -16px));
+  transform: translateX(-50%) translateY(var(--coffee-seat-name-plate-y));
   z-index: 3;
   box-sizing: border-box;
   width: min(220px, calc(100% + 72px));
@@ -40656,7 +42082,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 6px 11px;
   border-radius: 13px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: var(--coffee-seat-glyph-slot-width) minmax(0, 1fr) var(--coffee-seat-glyph-slot-width);
   align-items: center;
   column-gap: 8px;
   pointer-events: none;
@@ -40668,10 +42094,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 26px color-mix(in srgb, var(--coffee-seat-emotion-color) 44%, transparent),
     0 0 52px color-mix(in srgb, var(--coffee-seat-emotion-color) 24%, transparent),
     0 14px 30px rgba(0, 0, 0, 0.5);
-  transition: box-shadow 140ms ease, border-color 140ms ease;
+  transition:
+    filter 280ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
 }
 
 .coffeeSeatGlowGlyph {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -40680,16 +42111,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--coffee-seat-emotion-color);
 }
 
+.coffeeSeat[data-cup-side="left"] .coffeeSeatGlowGlyph {
+  grid-column: 3;
+}
+
 .coffeeSeatGlowText {
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 3px;
-  justify-items: start;
+  justify-items: center;
   min-width: 0;
   max-width: none;
   overflow: hidden;
   box-sizing: border-box;
-  text-align: left;
+  text-align: center;
   font-size: 0.84rem;
   line-height: 1.22;
   font-weight: 600;
@@ -40707,33 +42144,83 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
   word-break: normal;
   overflow-wrap: normal;
-  text-align: left;
+  text-align: center;
   color: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
   text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 36%, transparent);
+}
+
+.coffeeSeat[data-roster-preview="true"] .coffeeSeatPlate {
+  --coffee-seat-plate-shift-x: 0px;
+  --coffee-roster-preview-plate-lift: clamp(11px, 1.08vw, 16px);
+  --coffee-roster-preview-plate-scale: 0.92;
+  place-items: center;
+  padding-top: 0;
+  transform: translateY(calc(-1 * var(--coffee-roster-preview-plate-lift)))
+    scale(var(--coffee-roster-preview-plate-scale));
+}
+
+.coffeeSeatPlateGlyph {
+  display: grid;
+  place-items: center;
+  width: 58%;
+  height: 58%;
+  color: color-mix(in srgb, var(--coffee-seat-emotion-color) 84%, #ffffff 16%);
+  filter: drop-shadow(
+    0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 42%, transparent)
+  );
+}
+
+.coffeeSeatPlateGlyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+.coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowPill {
+  --coffee-seat-glyph-slot-width: 0px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowText {
+  grid-column: 1;
 }
 
 .coffeeSeatTeamBadge {
   position: absolute;
   left: 50%;
-  bottom: clamp(8px, 10%, 14px);
-  z-index: 2;
+  top: clamp(-11px, -1.1vw, -6px);
+  z-index: 5;
   transform: translateX(-50%);
   box-sizing: border-box;
-  max-width: calc(100% - 18px);
-  min-width: 0;
+  max-width: min(152px, calc(100% + 74px));
+  min-width: min(74px, calc(100% + 28px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 3px 7px;
+  padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.88);
   background: rgba(255, 255, 255, 0.08);
-  font-size: clamp(0.48rem, 0.68vw, 0.58rem);
-  font-weight: 800;
+  font-size: clamp(0.62rem, 0.84vw, 0.74rem);
+  font-weight: 860;
   line-height: 1;
   pointer-events: none;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.28),
+    0 8px 18px rgba(0, 0, 0, 0.32);
+}
+
+.coffeeSeatTeamBadgeMark {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
 }
 
 .coffeeSeatTeamBadge[data-team-id="left"] {
@@ -40755,6 +42242,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlateEmoji {
+  --coffee-face-eye-track: 0.4em;
+  --coffee-face-mouth-track: 0.4em;
+  --coffee-face-gap: 0em;
   display: block;
   font-family: var(--prism-face-font);
   font-size: clamp(1.97rem, 5.87vw, 2.93rem);
@@ -40769,10 +42259,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: color 160ms ease, filter 160ms ease, transform 140ms ease;
 }
 
-.coffeeSeatPlateEmoji span {
-  display: inline-block;
+.coffeeSeat[data-top-head-seat="true"] .coffeeSeatPlateEmoji {
+  transition: color 160ms ease, filter 160ms ease;
+}
+
+.coffeeSeatPlateEmoji,
+.messageMoodCoffeeFace,
+.zenLiveBotPresenceFaceGlyph {
+  display: inline-grid;
+  grid-template-columns: var(--coffee-face-eye-track, 0.4em) var(--coffee-face-mouth-track, 0.4em);
+  grid-template-rows: 1em;
+  column-gap: var(--coffee-face-gap, 0em);
+  align-items: center;
+  justify-items: center;
+  inline-size: calc(
+    var(--coffee-face-eye-track, 0.4em) +
+    var(--coffee-face-mouth-track, 0.4em) +
+    var(--coffee-face-gap, 0em)
+  );
+  block-size: 1em;
+  overflow: visible;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] {
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 1em;
+  line-height: 1;
   transform-origin: center center;
   transition: transform 160ms ease;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"] {
+  transition: none;
 }
 
 .coffeeSeatPlateEmoji[data-voice-preset="warm"] {
@@ -40800,11 +42322,63 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-variant-numeric: lining-nums;
 }
 
+.coffeeSeatPlateEmoji[data-face-custom="true"],
+.messageMoodCoffeeFace[data-face-custom="true"],
+.zenLiveBotPresenceFaceGlyph[data-face-custom="true"] {
+  font-weight: var(--bot-face-font-weight, var(--prism-face-weight));
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="neutral"] {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: inherit;
+  letter-spacing: 0.016em;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="warm"] {
+  font-family: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: inherit;
+  letter-spacing: -0.04em;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="concise"] {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: inherit;
+  letter-spacing: 0.035em;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="playful"] {
+  font-family: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 520;
+  letter-spacing: 0.02em;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="formal"] {
+  font-family: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
+  font-weight: 640;
+  letter-spacing: 0.015em;
+  font-style: normal;
+  font-variant-numeric: lining-nums;
+}
+
 .coffeeSeat[data-prism-mood="joyful"] {
   --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 70%, #ffd35f 30%);
   --coffee-seat-emotion-face-scale: 1.07;
   --coffee-seat-emotion-glow-strength: 48%;
   --coffee-seat-emotion-ring-alpha: 0.055;
+  --coffee-seat-mood-saturation: 1.32;
+  --coffee-seat-mood-grayscale: 0;
+  --coffee-seat-mood-contrast: 1.05;
+  --coffee-seat-mood-brightness: 1.04;
 }
 
 .coffeeSeat[data-prism-mood="warm"] {
@@ -40812,20 +42386,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-emotion-face-scale: 1.04;
   --coffee-seat-emotion-glow-strength: 42%;
   --coffee-seat-emotion-ring-alpha: 0.048;
+  --coffee-seat-mood-saturation: 1.12;
+  --coffee-seat-mood-grayscale: 0;
+  --coffee-seat-mood-contrast: 1.02;
+  --coffee-seat-mood-brightness: 1.02;
 }
 
 .coffeeSeat[data-prism-mood="guarded"] {
-  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 58%, #ff5f7e 42%);
+  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 44%, #9fa3aa 56%);
   --coffee-seat-emotion-face-scale: 1.06;
-  --coffee-seat-emotion-glow-strength: 52%;
-  --coffee-seat-emotion-ring-alpha: 0.058;
+  --coffee-seat-emotion-glow-strength: 30%;
+  --coffee-seat-emotion-ring-alpha: 0.038;
+  --coffee-seat-mood-saturation: 0.48;
+  --coffee-seat-mood-grayscale: 0.42;
+  --coffee-seat-mood-contrast: 0.97;
+  --coffee-seat-mood-brightness: 0.95;
 }
 
 .coffeeSeat[data-prism-mood="strained"] {
-  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 58%, #8bb6ff 42%);
+  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 24%, #9ca1a8 76%);
   --coffee-seat-emotion-face-scale: 1.03;
-  --coffee-seat-emotion-glow-strength: 50%;
-  --coffee-seat-emotion-ring-alpha: 0.052;
+  --coffee-seat-emotion-glow-strength: 20%;
+  --coffee-seat-emotion-ring-alpha: 0.028;
+  --coffee-seat-mood-saturation: 0.16;
+  --coffee-seat-mood-grayscale: 0.78;
+  --coffee-seat-mood-contrast: 0.95;
+  --coffee-seat-mood-brightness: 0.9;
+}
+
+.coffeeSeat[data-mood-near-desaturated="true"] {
+  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 16%, #9a9da2 84%);
+  --coffee-seat-emotion-glow-strength: 16%;
+  --coffee-seat-emotion-ring-alpha: 0.022;
+  --coffee-seat-mood-saturation: 0.1;
+  --coffee-seat-mood-grayscale: 0.86;
+  --coffee-seat-mood-contrast: 0.94;
+  --coffee-seat-mood-brightness: 0.86;
 }
 
 .coffeeSeat[data-table-speaking="true"] {
@@ -40845,6 +42441,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeat[data-prism-mood="strained"] .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"] {
   transform: translateY(0.025em) scaleX(0.92);
+}
+
+.coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="*"] {
+  transform: translateY(var(--coffee-seat-sip-mouth-offset-y, 0.44em));
 }
 
 .coffeeSeat[data-table-speaking="true"] .coffeeSeatPlateEmoji {
@@ -40903,13 +42504,35 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-cup-frame-y: 0%;
   --coffee-cup-side-offset: clamp(-26px, -2.25vw, -15px);
   --coffee-cup-facing-scale-x: 1;
-  --coffee-cup-sip-x: -7px;
+  --coffee-cup-sip-x: -34px;
+  --coffee-cup-sip-y: 2px;
   --coffee-cup-sip-duration-ms: 1400ms;
   --coffee-cup-sip-hold-ms: 500ms;
+  --coffee-cup-sip-rest-scale: 0.84;
+  --coffee-cup-sip-active-scale: 0.98;
+  --coffee-cup-rest-sip-opacity: 0;
+  --coffee-steam-alpha: 0.52;
+  --coffee-steam-height: 48px;
+  --coffee-steam-mid-drift: -5px;
+  --coffee-steam-end-drift: 8px;
+  --coffee-steam-mid-rise: -26px;
+  --coffee-steam-end-rise: -50px;
+  --coffee-steam-scale: 1;
+  --coffee-steam-mid-scale: 1.28;
+  --coffee-steam-end-scale: 1.58;
+  --coffee-steam-rate: 3.45s;
+  --coffee-steam-rate-secondary: 3.7s;
+  --coffee-steam-rate-tertiary: 4.15s;
+  --coffee-steam-blend-mode: screen;
+  --coffee-steam-shadow: rgba(142, 243, 233, 0.35);
+  --coffee-steam-highlight: rgba(233, 255, 251, 0.92);
+  --coffee-steam-trail-soft: rgba(165, 250, 240, 0.22);
+  --coffee-steam-trail-core: rgba(230, 255, 251, 0.52);
+  --coffee-steam-trail-end: rgba(178, 252, 244, 0.2);
   position: absolute;
   right: var(--coffee-cup-side-offset);
   bottom: clamp(8px, 1.05vw, 16px);
-  z-index: 2;
+  z-index: 4;
   width: clamp(46px, 5.35vw, 62px);
   height: clamp(53px, 6.15vw, 72px);
   border-radius: 3px;
@@ -40925,7 +42548,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeCup[data-cup-side="left"] {
-  --coffee-cup-sip-x: 7px;
+  --coffee-cup-sip-x: 22px;
   right: auto;
   left: var(--coffee-cup-side-offset);
 }
@@ -40935,15 +42558,36 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   left: auto;
 }
 
+.coffeeStage:not([data-compact="true"]) .coffeeSeat[data-seat-count="4"]:is(
+  [data-layout-seat="0"],
+  [data-layout-seat="1"]
+) .coffeeCup {
+  bottom: clamp(30px, 3vw, 40px);
+}
+
+.coffeeStage[data-compact="true"] .coffeeSeat[data-seat-count="4"]:is(
+  [data-layout-seat="0"],
+  [data-layout-seat="1"]
+) .coffeeCup {
+  bottom: clamp(22px, 3.8vw, 32px);
+}
+
 .coffeeCup[data-cup-mirrored="true"] {
   --coffee-cup-facing-scale-x: -1;
+}
+
+.coffeeCup[data-cup-pot-target="true"] {
+  transform: translateY(-2px) scale(1.07);
+  filter:
+    drop-shadow(0 8px 8px rgba(0, 0, 0, 0.48))
+    drop-shadow(0 0 14px rgba(255, 198, 86, 0.34));
 }
 
 .coffeeCup::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   background-image: var(--coffee-cup-sprite);
   background-repeat: no-repeat;
   background-position: var(--coffee-cup-frame-x) var(--coffee-cup-frame-y);
@@ -40951,86 +42595,234 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   transform-origin: center;
   transition:
-    background-position 360ms steps(1, end),
     opacity 180ms ease,
     transform 180ms ease;
   pointer-events: none;
+}
+
+.coffeeCup[data-cup-filling="true"]::after {
+  opacity: 0;
 }
 
 .coffeeCup::before {
   content: "";
   position: absolute;
   inset: -11px -9px -8px -9px;
-  z-index: 1;
+  z-index: 3;
   opacity: 0;
   background-image: var(--coffee-cup-sip-sprite);
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
-  transform: translate(0, 5px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.88);
+  transform: translate(0, 5px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   transform-origin: 58% 52%;
   filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.4));
   pointer-events: none;
 }
 
+.coffeeCupFillAnimation {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.coffeeCupFillAnimationFrame {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  background-image: var(--coffee-cup-fill-sprite);
+  background-repeat: no-repeat;
+  background-position: var(--coffee-cup-fill-frame-x) var(--coffee-cup-fill-frame-y);
+  background-size: 300% 200%;
+  transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+  transform-origin: center;
+}
+
+.coffeeCupSteam {
+  position: absolute;
+  left: 50%;
+  top: -8%;
+  z-index: 1;
+  width: 34px;
+  height: var(--coffee-steam-height);
+  opacity: var(--coffee-steam-alpha);
+  transform: translateX(-48%) scaleX(var(--coffee-cup-facing-scale-x));
+  transform-origin: center bottom;
+  mix-blend-mode: var(--coffee-steam-blend-mode);
+  filter:
+    blur(0.32px)
+    drop-shadow(0 0 8px var(--coffee-steam-shadow));
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.coffeeCupSteamWisp {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 7px;
+  height: 23px;
+  border-radius: 999px;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at 50% 16%, var(--coffee-steam-highlight), transparent 38%),
+    linear-gradient(
+      to top,
+      transparent 0%,
+      var(--coffee-steam-trail-soft) 18%,
+      var(--coffee-steam-trail-core) 48%,
+      var(--coffee-steam-trail-end) 78%,
+      transparent 100%
+    );
+  transform: translateX(-50%) scale(var(--coffee-steam-scale));
+  animation: coffeeCupSteamRise var(--coffee-steam-rate) ease-in-out infinite;
+}
+
+.coffeeCupSteamWisp:nth-child(1) {
+  margin-left: -8px;
+  animation-delay: -0.35s;
+}
+
+.coffeeCupSteamWisp:nth-child(2) {
+  height: 28px;
+  width: 6px;
+  animation-delay: -1.55s;
+  animation-duration: var(--coffee-steam-rate-secondary);
+}
+
+.coffeeCupSteamWisp:nth-child(3) {
+  margin-left: 8px;
+  height: 22px;
+  animation-delay: -2.45s;
+  animation-duration: var(--coffee-steam-rate-tertiary);
+}
+
+.coffeeCup[data-cup-frame="2"] {
+  --coffee-steam-alpha: 0.4;
+}
+
+.coffeeCup[data-cup-frame="3"] {
+  --coffee-steam-alpha: 0.28;
+}
+
+.coffeeCup[data-cup-frame="4"] {
+  --coffee-steam-alpha: 0.16;
+}
+
+.coffeeCup[data-cup-frame="5"],
+.coffeeCup[data-cup-sipping="true"] {
+  --coffee-steam-alpha: 0;
+}
+
+.coffeeCup[data-cup-sipping="true"] .coffeeCupSteam {
+  opacity: 0;
+}
+
 .coffeeCup[data-cup-sipping="true"]::after {
-  animation: coffeeCupRestDuringSip var(--coffee-cup-sip-duration-ms) ease-in-out 1;
+  transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+  animation: coffeeCupRestDuringSip var(--coffee-cup-sip-duration-ms) ease-in-out 1 both;
+  transition: none;
 }
 
 .coffeeCup[data-cup-sipping="true"]::before {
-  animation: coffeeCupSip var(--coffee-cup-sip-duration-ms) ease-in-out 1;
+  animation: coffeeCupSip var(--coffee-cup-sip-duration-ms) ease-in-out 1 both;
 }
 
 @keyframes coffeeCupRestDuringSip {
   0% {
     opacity: 1;
-    transform: translateY(0) scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 
-  6%,
+  6% {
+    opacity: 1;
+    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+  }
+
   14% {
-    opacity: 0.1;
-    transform: translateY(0) scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+    opacity: var(--coffee-cup-rest-sip-opacity);
+    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 
   22%,
   82% {
-    opacity: 0.08;
-    transform: translateY(-4px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.88);
+    opacity: var(--coffee-cup-rest-sip-opacity);
+    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 
   94%,
+  99%,
   100% {
     opacity: 1;
-    transform: translateY(0) scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
+    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 }
 
 @keyframes coffeeCupSip {
   0% {
     opacity: 0;
-    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.92);
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   }
 
   6% {
-    opacity: 1;
-    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.92);
+    opacity: 0;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   }
 
   18%,
   82% {
     opacity: 1;
-    transform: translate(var(--coffee-cup-sip-x), -14px) scaleX(var(--coffee-cup-facing-scale-x)) scale(1.08);
+    transform: translate(var(--coffee-cup-sip-x), var(--coffee-cup-sip-y)) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-active-scale));
   }
 
   94% {
-    opacity: 1;
-    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.92);
+    opacity: 0;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   }
 
   100% {
     opacity: 0;
-    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(0.92);
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
+  }
+}
+
+@keyframes coffeeCupSteamRise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(var(--coffee-steam-scale));
+  }
+
+  18% {
+    opacity: 0.72;
+  }
+
+  54% {
+    opacity: 0.42;
+    transform:
+      translate(
+        calc(-50% + var(--coffee-steam-mid-drift)),
+        var(--coffee-steam-mid-rise)
+      )
+      scale(var(--coffee-steam-mid-scale));
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--coffee-steam-end-drift)),
+        var(--coffee-steam-end-rise)
+      )
+      scale(var(--coffee-steam-end-scale));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeCupSteamWisp {
+    animation: none;
+    opacity: 0.36;
+    transform: translate(-50%, -14px) scale(1.15);
   }
 }
 
@@ -41222,6 +43014,65 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform-origin: left center;
 }
 
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="2"][data-layout-seat="0"],
+    [data-seat-count="2"][data-layout-seat="1"],
+    [data-seat-count="3"][data-layout-seat="0"],
+    [data-seat-count="4"][data-layout-seat="0"],
+    [data-seat-count="4"][data-layout-seat="1"],
+    [data-seat-count="5"][data-layout-seat="0"],
+    [data-seat-count="5"][data-layout-seat="1"],
+    [data-seat-count="5"][data-layout-seat="2"]
+  ) .coffeeSeatActionBadgeStack {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + clamp(8px, 1.2vw, 16px));
+  left: 50%;
+  width: min(320px, 24vw, calc(100vw - 56px));
+  min-width: min(160px, calc(100vw - 56px));
+  flex-direction: column-reverse;
+  --coffee-action-quote-x: -50%;
+  --coffee-action-quote-y: 0px;
+  transform-origin: bottom center;
+  text-align: center;
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="3"][data-layout-seat="1"],
+    [data-seat-count="3"][data-layout-seat="2"],
+    [data-seat-count="4"][data-layout-seat="2"],
+    [data-seat-count="4"][data-layout-seat="3"],
+    [data-seat-count="5"][data-layout-seat="3"],
+    [data-seat-count="5"][data-layout-seat="4"]
+  ) .coffeeSeatActionBadgeStack {
+  top: calc(100% + clamp(8px, 1.2vw, 16px));
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(320px, 24vw, calc(100vw - 56px));
+  min-width: min(160px, calc(100vw - 56px));
+  flex-direction: column;
+  --coffee-action-quote-x: -50%;
+  --coffee-action-quote-y: 0px;
+  transform-origin: top center;
+  text-align: center;
+}
+
+.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="2"],
+    [data-seat-count="3"],
+    [data-seat-count="4"],
+    [data-seat-count="5"]
+  ) .coffeeSeatActionBadge {
+  justify-content: center;
+  padding-inline: 0;
+  border-left: 0;
+  text-align: center;
+}
+
 .coffeeSeatActionBadgeText {
   position: relative;
   z-index: 1;
@@ -41229,12 +43080,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  max-height: 3.55em;
+  max-height: 2.44em;
   overflow: hidden;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: color-mix(in srgb, var(--coffee-bot-color) 72%, #ffffff 28%);
   font-size: clamp(1.02rem, 1.18vw, 1.28rem);
   line-height: 1.18;
@@ -41250,7 +43101,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatActionBadge[data-action-verbose="true"] .coffeeSeatActionBadgeText {
-  max-height: 3.62em;
+  max-height: 3.66em;
   -webkit-line-clamp: 3;
   line-clamp: 3;
   line-height: 1.2;
@@ -41448,6 +43299,251 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 0.86rem;
 }
 
+.coffeeStage[data-coffee-dev-mode="true"] .coffeeSeat[data-coffee-dev-seat="true"] {
+  cursor: grab;
+}
+
+.coffeeStage[data-coffee-dev-mode="true"] .coffeeSeat[data-coffee-dev-seat="true"]:active {
+  cursor: grabbing;
+}
+
+.coffeeDevBotPanel,
+.coffeeDevCoordinatePanel {
+  position: absolute;
+  z-index: 11;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color, #ffffff) 48%, rgba(255, 255, 255, 0.18));
+  background: rgba(7, 7, 7, 0.9);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.5),
+    0 0 30px color-mix(in srgb, var(--coffee-bot-color, #ffffff) 18%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.coffeeDevBotPanel {
+  right: clamp(12px, 2.4vw, 26px);
+  top: clamp(48px, 8vh, 76px);
+  width: min(288px, calc(100% - 24px));
+  max-height: min(520px, calc(100% - 72px));
+  overflow: hidden auto;
+  border-radius: 12px;
+}
+
+.coffeeDevBotPanel header,
+.coffeeDevCoordinatePanel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.coffeeDevBotPanel header {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.coffeeDevBotPanel header:active {
+  cursor: grabbing;
+}
+
+.coffeeDevBotPanel header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coffeeDevBotPanel header span,
+.coffeeDevRecentContext > span {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.62rem;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coffeeDevBotPanel header strong {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--coffee-bot-color, #ffffff) 84%, #fff);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeDevBotPanel header button,
+.coffeeDevCoordinatePanel header button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+}
+
+.coffeeDevBotStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px 0;
+}
+
+.coffeeDevBotStats span,
+.coffeeDevMoodPresets button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.66rem;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.coffeeDevBotStats span {
+  padding: 5px 7px;
+}
+
+.coffeeDevMoodPresets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 10px;
+}
+
+.coffeeDevMoodPresets button {
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.coffeeDevMoodPresets button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--coffee-bot-color, #ffffff) 68%, rgba(255, 255, 255, 0.2));
+  background: color-mix(in srgb, var(--coffee-bot-color, #ffffff) 24%, rgba(255, 255, 255, 0.08));
+  color: #ffffff;
+}
+
+.coffeeDevSocialSliders {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 9px;
+}
+
+.coffeeDevSocialSliders label {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.78fr) minmax(0, 1fr) 24px;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.69rem;
+}
+
+.coffeeDevSocialSliders input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--coffee-bot-color, #ffffff);
+}
+
+.coffeeDevSocialSliders small {
+  color: rgba(255, 255, 255, 0.54);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.coffeeDevRecentContext {
+  display: grid;
+  gap: 5px;
+  padding: 0 10px 9px;
+}
+
+.coffeeDevRecentContext p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.7rem;
+  line-height: 1.28;
+}
+
+.coffeeDevRecentContext ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coffeeDevRecentContext li {
+  padding: 5px 6px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.69rem;
+  line-height: 1.25;
+}
+
+.coffeeDevBotPanel footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 0 10px 10px;
+}
+
+.coffeeDevBotPanel footer button {
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color, #ffffff) 52%, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--coffee-bot-color, #ffffff) 22%, rgba(255, 255, 255, 0.08));
+  color: #ffffff;
+  padding: 7px 10px;
+  font-size: 0.72rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.coffeeDevBotPanel footer button:disabled {
+  cursor: wait;
+  opacity: 0.56;
+}
+
+.coffeeDevCoordinatePanel {
+  left: clamp(12px, 2.4vw, 26px);
+  bottom: clamp(12px, 3vh, 28px);
+  width: min(440px, calc(100% - 24px));
+  border-radius: 12px;
+  --coffee-bot-color: #7bdcff;
+}
+
+.coffeeDevCoordinatePanel header strong {
+  font-size: 0.82rem;
+}
+
+.coffeeDevCoordinatePanel textarea {
+  display: block;
+  width: calc(100% - 20px);
+  min-height: 104px;
+  margin: 10px;
+  padding: 9px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.86);
+  font: 0.76rem/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.coffeeDevCoordinatePanel code {
+  display: block;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Picker — empty state before a thread exists. */
 .coffeePicker {
   display: grid;
@@ -41640,9 +43736,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow-y: hidden;
   overscroll-behavior: contain;
   display: grid;
-  gap: 8px;
-  padding: clamp(10px, 1.45vw, 14px);
-  max-height: min(380px, 48vh);
+  gap: 6px;
+  padding: clamp(7px, 0.85vw, 9px);
+  max-height: none;
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   background:
@@ -41669,10 +43765,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeGroupOverviewHeader {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(460px, 0.92fr);
+  grid-template-columns: minmax(220px, 0.58fr) minmax(0, 1fr);
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
 }
 
 .coffeeGroupOverviewNameInput {
@@ -41689,7 +43785,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: clamp(1rem, 1.75vw, 1.42rem);
   font-weight: 780;
   line-height: 1.08;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .coffeeGroupOverviewNameInput::placeholder {
@@ -41716,10 +43812,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeGroupStartPanel {
   display: grid;
-  grid-template-columns: minmax(112px, 0.78fr) minmax(132px, 1fr);
+  grid-template-columns: minmax(166px, 0.64fr) minmax(160px, 0.64fr) minmax(260px, 1.05fr);
   align-items: end;
-  gap: 5px 8px;
-  min-width: min(380px, 48vw);
+  gap: 3px 7px;
+  min-width: 0;
+  width: 100%;
 }
 
 .coffeeGroupStartLabel {
@@ -41735,6 +43832,29 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.coffeeSessionModelSetup {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.coffeeGroupOverview .coffeeSessionModelSetup {
+  grid-column: 3;
+}
+
+.coffeeSessionModelSetupControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.coffeeSessionModelSetupControls .composeModelControl {
+  flex: 1 1 auto;
+  min-width: min(172px, 100%);
 }
 
 .coffeeGroupStartControlLabel {
@@ -41760,13 +43880,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeGroupOverview .coffeeAutoTopicToggle {
-  grid-column: 1 / span 2;
+  grid-column: 1;
+  align-self: stretch;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: 7px;
+  padding: 3px 7px;
   border-radius: 10px;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   line-height: 1.2;
+  min-height: 26px;
 }
 
 .coffeeGroupOverview .coffeeAutoTopicToggleHint {
@@ -41988,32 +44110,30 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTeamsStatusPanel {
-  position: absolute;
-  z-index: 10;
-  top: clamp(10px, 2.8vw, 22px);
-  left: clamp(10px, 2.8vw, 24px);
-  width: min(300px, calc(100% - 20px));
-  min-width: min(172px, calc(100% - 20px));
-  min-height: 106px;
-  max-width: calc(100% - 20px);
-  max-height: min(64vh, 420px);
+  position: fixed;
+  z-index: 145;
+  width: min(376px, calc(100vw - 24px));
+  min-width: min(230px, calc(100vw - 24px));
+  min-height: 190px;
+  max-width: calc(100vw - 24px);
+  max-height: min(74vh, 600px);
   display: grid;
   gap: 9px;
   overflow: auto;
   resize: both;
-  padding: 11px;
+  padding: 12px;
   box-sizing: border-box;
   container-type: inline-size;
-  border-radius: 14px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background:
     radial-gradient(circle at 10% 0%, rgba(255, 180, 96, 0.12), transparent 45%),
     radial-gradient(circle at 95% 100%, rgba(92, 190, 255, 0.12), transparent 45%),
-    rgba(9, 10, 13, 0.78);
+    rgba(9, 10, 13, 0.92);
   box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.32),
+    0 18px 52px rgba(0, 0, 0, 0.46),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(16px);
   pointer-events: auto;
   scrollbar-gutter: stable;
 }
@@ -42037,6 +44157,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.coffeeTeamsStatusHeader:active {
+  cursor: grabbing;
+}
+
+.coffeeTeamsStatusHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .coffeeTeamsStatusHeader span {
@@ -42054,6 +44187,28 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
   color: rgba(255, 255, 255, 0.92);
   font-size: 0.8rem;
+}
+
+.coffeeTeamsStatusHeader button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.coffeeTeamsStatusHeader button:hover,
+.coffeeTeamsStatusHeader button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
 }
 
 .coffeeTeamsScoreRow {
@@ -42093,6 +44248,117 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeTeamsScoreRow span[data-team-id="undecided"] {
   border-color: rgba(166, 230, 184, 0.2);
   background: rgba(104, 190, 142, 0.08);
+}
+
+.coffeeTeamsRosterGrid {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.coffeeTeamsRosterCard {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.coffeeTeamsRosterCard[data-team-id="left"] {
+  border-color: rgba(255, 190, 112, 0.24);
+  background: rgba(255, 170, 82, 0.075);
+}
+
+.coffeeTeamsRosterCard[data-team-id="right"] {
+  border-color: rgba(112, 210, 255, 0.24);
+  background: rgba(80, 185, 255, 0.075);
+}
+
+.coffeeTeamsRosterCard[data-team-id="undecided"] {
+  border-color: rgba(166, 230, 184, 0.18);
+  background: rgba(104, 190, 142, 0.06);
+}
+
+.coffeeTeamsRosterCard header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.coffeeTeamsRosterCard header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  font-weight: 840;
+}
+
+.coffeeTeamsRosterCard header b {
+  min-width: 1.4em;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.coffeeTeamsRosterCard ul {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coffeeTeamsRosterCard li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.coffeeTeamsRosterCard li[data-member-kind="player"] {
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.coffeeTeamsRosterCard li[data-empty="true"] {
+  display: block;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.68rem;
+}
+
+.coffeeTeamsRosterCard li > div {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.coffeeTeamsRosterCard strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.coffeeTeamsRosterCard small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.62rem;
 }
 
 .coffeeTeamsPlayerControl,
@@ -42267,6 +44533,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     font-size: 0.86rem;
   }
 
+  .coffeeTeamsRosterGrid {
+    gap: 5px;
+  }
+
+  .coffeeTeamsRosterCard {
+    gap: 5px;
+    padding: 6px;
+    border-radius: 9px;
+  }
+
+  .coffeeTeamsRosterCard header span,
+  .coffeeTeamsRosterCard strong {
+    font-size: 0.64rem;
+  }
+
+  .coffeeTeamsRosterCard li {
+    gap: 5px;
+    padding: 4px 5px;
+    border-radius: 7px;
+  }
+
   .coffeeTeamsPlayerControl {
     gap: 5px;
     padding: 6px;
@@ -42314,6 +44601,62 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     border-radius: 8px;
     font-size: 0.64rem;
   }
+}
+
+.coffeeTeamsBubble {
+  position: fixed;
+  z-index: 145;
+  min-width: 74px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 112, 0.36);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.26), transparent 24%),
+    radial-gradient(circle at 24% 78%, rgba(255, 176, 86, 0.28), transparent 44%),
+    radial-gradient(circle at 78% 72%, rgba(92, 190, 255, 0.24), transparent 46%),
+    rgba(12, 13, 16, 0.9);
+  color: rgba(255, 241, 218, 0.96);
+  font: inherit;
+  line-height: 1;
+  box-shadow:
+    0 16px 42px rgba(0, 0, 0, 0.38),
+    0 0 38px rgba(255, 176, 86, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(14px);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.coffeeTeamsBubble:active {
+  cursor: grabbing;
+}
+
+.coffeeTeamsBubble:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(255, 190, 112, 0.18),
+    0 16px 42px rgba(0, 0, 0, 0.38),
+    0 0 42px rgba(92, 190, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.coffeeTeamsBubble span {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.58rem;
+  font-weight: 840;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeeTeamsBubble strong {
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 1rem;
+  font-weight: 860;
 }
 
 .coffeePollResultsPanel {
@@ -43286,6 +45629,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeGroupOverview .coffeeDurationPicker {
   grid-column: 1;
+  min-width: 0;
+  gap: 4px;
+}
+
+.coffeeGroupOverview .coffeeDurationPicker input[type="range"] {
+  height: 18px;
 }
 
 .coffeeDurationSliderHeader,
@@ -43563,16 +45912,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeGroupOverviewGrid {
   display: grid;
   grid-template-columns: minmax(158px, 0.82fr) minmax(210px, 1fr) minmax(220px, 1.1fr);
-  gap: 8px;
+  gap: 6px;
 }
 
 .coffeeGroupOverviewCard {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   align-content: start;
   min-height: 0;
   overflow: hidden;
-  padding: 8px;
+  padding: 6px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   background: rgba(0, 0, 0, 0.34);
@@ -43590,7 +45939,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeGroupRecentSessions {
   list-style: none;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   margin: 0;
   padding: 0;
 }
@@ -43844,6 +46193,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 0.76rem;
 }
 
+.coffeeGroupOverview .coffeeGroupPresetField .coffeeSettingsSelect {
+  grid-column: 1;
+}
+
 .coffeeGroupOverview .coffeeGroupToolButtonIcon {
   width: 30px;
   height: 30px;
@@ -43969,6 +46322,26 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 12px;
 }
 
+.coffeeTranscriptHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coffeeTranscriptHeaderActions .headerIconButton svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
+.coffeeTranscriptHeaderActions .headerIconButton[data-copy-state="copied"] {
+  color: var(--accent);
+}
+
+.coffeeTranscriptHeaderActions .headerIconButton[data-copy-state="failed"] {
+  color: var(--danger);
+}
+
 .coffeeTranscriptHeader p {
   margin: 4px 0 0;
   color: var(--coffee-muted);
@@ -44036,6 +46409,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(255, 255, 255, 0.74);
   font-size: 0.72rem;
   line-height: 1.35;
+}
+
+.coffeeGroupOverview .coffeeModelQualityHint {
+  grid-column: 2 / -1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 3px 7px;
+  font-size: 0.64rem;
+  line-height: 1.18;
 }
 
 .coffeeSettingsSelect {
@@ -44325,9 +46709,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 /* Composer — bottom of the shell. */
 .coffeeComposer {
   display: flex;
+  justify-self: center;
   gap: 12px;
   align-items: flex-end;
-  width: 100%;
+  width: min(100%, var(--coffee-stage-max-width));
   padding: 12px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.055);
@@ -44417,6 +46802,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: 0 12px 32px rgba(255, 255, 255, 0.08);
 }
 
+@media (max-width: 1220px) {
+  .coffeeGroupOverviewHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .coffeeGroupStartPanel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coffeeGroupOverview .coffeeSessionModelSetup,
+  .coffeeGroupOverview .coffeeAutoTopicToggle,
+  .coffeeGroupOverview .coffeeModelQualityHint {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 900px) {
   .coffeeShell {
     grid-template-columns: 1fr;
@@ -44464,7 +46865,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeGroupOverview {
-    max-height: min(360px, 52vh);
+    max-height: none;
   }
 
   .coffeeStage[data-compact="true"] .coffeeTableDisk {
@@ -44501,6 +46902,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     min-width: 0;
   }
 
+  .coffeeSessionModelSetupControls {
+    flex-wrap: wrap;
+  }
+
   .coffeeGroupOverview .coffeeAutoTopicToggle,
   .coffeeGroupOverview .coffeeSend {
     grid-column: 1 / -1;
@@ -44515,10 +46920,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeTeamsStatusPanel {
-    top: 10px;
-    left: 10px;
-    right: auto;
-    width: min(300px, calc(100% - 20px));
+    width: min(340px, calc(100vw - 20px));
+    min-width: min(220px, calc(100vw - 20px));
   }
 
   .coffeeTeamsScoreRow {
@@ -44588,12 +46991,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeSeatGlowPill {
+    --coffee-seat-name-plate-y: clamp(-28px, -3.4vw, -14px);
     max-width: min(180px, 70vw);
     min-width: min(108px, 54vw);
     border-radius: 12px;
     padding: 5px 9px;
     margin-top: clamp(-3px, -0.35vw, 1px);
-    transform: translateX(-50%) translateY(clamp(-28px, -3.4vw, -14px));
   }
 
   .coffeeSeatGlowText {
@@ -44663,14 +47066,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeSeatActionBadgeText {
-    max-height: 3.55em;
+    max-height: 2.44em;
     font-size: 0.92rem;
   }
 
   .coffeeSeatActionBadge[data-action-verbose="true"] .coffeeSeatActionBadgeText {
-    max-height: 3.62em;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    max-height: 2.44em;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     font-size: 0.92rem;
   }
 
@@ -44779,8 +47182,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeePollResultsVote small,
   .coffeePollPlayerVoteHeader small,
   .coffeeTeamsStatusHeader span,
+  .coffeeTeamsBubble span,
   .coffeeTeamsPlayerControl > span,
   .coffeeTeamsPlayerPicker > span,
+  .coffeeTeamsRosterCard small,
+  .coffeeTeamsRosterCard li[data-empty="true"],
   .coffeeTeamsTiebreaker p,
   .coffeeTeamsSetupColumns p,
   .coffeePollModalHeader span,
@@ -44823,6 +47229,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeePollOptionAddChip,
   .coffeePollModalActions button,
   .coffeeTeamsStatusPanel,
+  .coffeeTeamsStatusHeader button,
+  .coffeeTeamsBubble,
+  .coffeeTeamsRosterCard,
   .coffeeTeamsPlayerControl,
   .coffeeTeamsPlayerControl button,
   .coffeeTeamsPlayerPicker,
@@ -44868,6 +47277,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeGroupSessionButton[data-current="true"],
   .coffeeTopicChip:hover:not(:disabled),
   .coffeePollPlayerOption:hover:not(:disabled),
+  .coffeeTeamsStatusHeader button:hover,
+  .coffeeTeamsStatusHeader button:focus-visible,
+  .coffeeTeamsBubble:focus-visible,
   .coffeeTeamsPlayerControl button:hover:not(:disabled),
   .coffeeTeamsPlayerControl button:focus-visible,
   .coffeeTeamsPlayerPicker button:hover:not(:disabled),
@@ -45012,7 +47424,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 18px 34px rgba(39, 31, 23, 0.1);
 }
 
-.themeLight.coffeeShell .coffeeGroupSessionList {
+.themeLight.coffeeShell .coffeeGroupSessionListViewport {
   border-left-color: color-mix(in srgb, var(--line) 88%, transparent);
 }
 
@@ -45035,6 +47447,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight.coffeeShell .coffeeTableGlow {
   opacity: 0.42;
   filter: blur(38px) saturate(0.82);
+}
+
+.themeLight.coffeeShell .coffeeTableScene {
+  --coffee-table-asset: url("/coffee-table/table_light.png");
+}
+
+.themeLight.coffeeShell .coffeeTableAsset {
+  filter: drop-shadow(0 24px 58px rgba(76, 56, 38, 0.18));
 }
 
 .themeLight.coffeeShell .coffeeTableDisk {
@@ -45061,6 +47481,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeCenterFeedLine[data-role="assistant"],
   .coffeeCenterFeedLineTyping,
   .coffeeFinishedRecapCaption,
+  .coffeeReplayStageCaption,
   .coffeeCenterMessage[data-empty="true"] .coffeeCenterFeedLine,
   .coffeeTableTypingLine,
   .coffeeTypewriterCaret
@@ -45147,6 +47568,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeCup {
+  --coffee-steam-blend-mode: multiply;
+  --coffee-steam-shadow: rgba(35, 72, 70, 0.22);
+  --coffee-steam-highlight: rgba(30, 66, 65, 0.58);
+  --coffee-steam-trail-soft: rgba(42, 83, 78, 0.18);
+  --coffee-steam-trail-core: rgba(33, 70, 68, 0.36);
+  --coffee-steam-trail-end: rgba(55, 93, 86, 0.12);
   filter: drop-shadow(0 6px 7px rgba(75, 54, 34, 0.24));
 }
 
@@ -45250,6 +47677,26 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 1px 0 rgba(255, 255, 255, 0.76);
 }
 
+.themeLight.coffeeShell :where(
+  .coffeeTopicChip[data-kind="teams"],
+  .coffeeTeamsStatusPanel,
+  .coffeeTeamsBubble
+) {
+  border-color: color-mix(in srgb, #c46f24 28%, var(--line));
+  background:
+    radial-gradient(circle at 14% 0%, rgba(210, 122, 42, 0.12), transparent 44%),
+    radial-gradient(circle at 90% 100%, rgba(44, 157, 200, 0.1), transparent 46%),
+    rgba(255, 255, 255, 0.9);
+}
+
+.themeLight.coffeeShell .coffeeTeamsBubble {
+  color: #473017;
+  box-shadow:
+    0 16px 36px rgba(39, 31, 23, 0.16),
+    0 0 30px rgba(210, 122, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
 .themeLight.coffeeShell :where(.coffeePollResultsPanel, .coffeeTeamsStatusPanel)::after {
   background:
     linear-gradient(135deg, transparent 50%, rgba(11, 49, 68, 0.58) 50%) 8px 8px / 4px 4px no-repeat,
@@ -45262,6 +47709,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeePollResultsVote strong,
   .coffeePollPlayerVoteHeader strong,
   .coffeePollModalHeader h4,
+  .coffeeTeamsBubble strong,
+  .coffeeTeamsRosterCard header span,
+  .coffeeTeamsRosterCard strong,
   .coffeeGroupOverviewCard h3,
   .coffeeGroupBotList li,
   .coffeeGroupGuestButton,
@@ -45274,6 +47724,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeePollResultsBar,
   .coffeePollPlayerVoteBlock,
   .coffeePollResultsVote,
+  .coffeeTeamsRosterCard,
+  .coffeeTeamsRosterCard li,
   .coffeeGroupOverviewCard,
   .coffeeGroupMoodMeter
 ) {

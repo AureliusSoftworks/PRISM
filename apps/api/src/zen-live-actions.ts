@@ -255,6 +255,7 @@ export async function generateZenLiveActionReaction(args: {
     maxTokens: 180,
     jsonMode: true,
     signal: args.signal,
+    usagePurpose: "zen_live_action",
   });
   return parseZenLiveActionReactionResponse(raw, args.request);
 }
