@@ -6503,7 +6503,7 @@ const PRISM_BOT_MARKDOWN_LINK_RE =
 
 /** Router/speaker appendix only when table text includes prism-bot markdown links. */
 const PRISM_BOT_MENTION_COFFEE_APPENDIX =
-  "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Prefer the mentioned bot as the next speaker when that fits the table.";
+  "The user may @-mention bots with markdown like [Label](prism-bot://botId) (botId may be URL-encoded). Plain exact bot names in Coffee table replies are also treated as attention cues. Prefer the mentioned bot as the next speaker when that fits the table.";
 
 const COFFEE_ORGANIC_SEED_LINES_BY_STYLE: Record<BotVoicePreset, readonly string[]> = {
   neutral: [
@@ -6751,12 +6751,11 @@ function resolveAssistantSpeakerBotId(
 }
 
 /**
- * Post-process a bot's reply to upgrade explicit `@Name` mentions into the
- * canonical `[Name](prism-bot://botId)` markdown link. Skips text that already
- * sits inside a prism-bot link, and only matches names that exactly correspond
- * to seated bots (case-insensitive). Plain bare-name references intentionally
- * stay as prose; the web renderer soft-colors them without creating a full
- * chip/tag.
+ * Post-process a bot's reply to upgrade explicit `@Name` and bare `Name`
+ * peer mentions into canonical `[Name](prism-bot://botId)` markdown links.
+ * Skips text that already sits inside a prism-bot link, and only matches names
+ * that exactly correspond to seated bots or learned preferred labels
+ * (case-insensitive).
  */
 export function autoTagPeerMentionsInCoffeeReply(
   reply: string,
@@ -6767,49 +6766,59 @@ export function autoTagPeerMentionsInCoffeeReply(
   if (!reply || reply.length === 0) return reply;
   const peers = group.filter((bot) => bot.id !== speaker.id && bot.name.trim().length > 0);
   if (peers.length === 0) return reply;
-  // Sort longest names first so e.g. "Patrick Star" wins over "Patrick".
-  const sorted = [...peers].sort((a, b) => b.name.length - a.name.length);
-
-  // Locate every existing prism-bot link span so we can avoid touching them.
-  const lockedRanges: Array<[number, number]> = [];
-  const lockRe = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
-  for (const match of reply.matchAll(lockRe)) {
-    const start = match.index ?? 0;
-    lockedRanges.push([start, start + match[0].length]);
+  const targets: Array<{ peer: { id: string; name: string }; alias: string }> = [];
+  for (const peer of peers) {
+    const aliases = [peerAddressByBotId?.get(peer.id)?.trim() ?? "", peer.name.trim()];
+    const seenAliases = new Set<string>();
+    for (const alias of aliases) {
+      const key = alias.toLocaleLowerCase();
+      if (!key || seenAliases.has(key)) continue;
+      seenAliases.add(key);
+      targets.push({ peer, alias });
+    }
   }
-  const inLockedRange = (index: number): boolean =>
-    lockedRanges.some(([from, to]) => index >= from && index < to);
+  // Sort longest aliases first so e.g. "Patrick Star" wins over "Patrick".
+  targets.sort((a, b) => b.alias.length - a.alias.length);
+
+  const collectLockedRanges = (source: string): Array<[number, number]> => {
+    const lockedRanges: Array<[number, number]> = [];
+    const lockRe = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
+    for (const match of source.matchAll(lockRe)) {
+      const start = match.index ?? 0;
+      lockedRanges.push([start, start + match[0].length]);
+    }
+    return lockedRanges;
+  };
 
   let out = reply;
-  for (const peer of sorted) {
-    const aliases = [
-      peerAddressByBotId?.get(peer.id)?.trim() ?? "",
-      peer.name.trim(),
-    ].filter((name, index, all) => name.length > 0 && all.indexOf(name) === index);
-    for (const alias of aliases) {
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Explicit @, then exact name as a whole word.
-      const pattern = new RegExp(`(?<![\\w\\-])@${escaped}(?![\\w\\-])`, "g");
-      let cursor = 0;
-      let assembled = "";
-      let m: RegExpExecArray | null;
-      while ((m = pattern.exec(out)) !== null) {
-        const start = m.index;
-        const end = start + m[0].length;
-        if (inLockedRange(start) || inLockedRange(end - 1)) {
-          continue;
-        }
-        const replacement = formatBotMentionMarkdownInline(peer, peerAddressByBotId);
-        assembled += out.slice(cursor, start) + replacement;
-        cursor = end;
-        // Re-tag this region as locked so subsequent peers don't re-process it.
-        const newStart = assembled.length - replacement.length;
-        lockedRanges.push([newStart, newStart + replacement.length]);
+  for (const { peer, alias } of targets) {
+    const lockedRanges = collectLockedRanges(out);
+    const inLockedRange = (index: number): boolean =>
+      lockedRanges.some(([from, to]) => index >= from && index < to);
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}_])@?${escaped}(['’]s)?(?=$|[^\\p{L}\\p{N}_])`,
+      "giu"
+    );
+    let cursor = 0;
+    let assembled = "";
+    let changed = false;
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(out)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (inLockedRange(start) || inLockedRange(end - 1)) {
+        continue;
       }
-      if (cursor > 0) {
-        assembled += out.slice(cursor);
-        out = assembled;
-      }
+      const suffix = m[1] ?? "";
+      const replacement = `${formatBotMentionMarkdownInline(peer, peerAddressByBotId)}${suffix}`;
+      assembled += out.slice(cursor, start) + replacement;
+      cursor = end;
+      changed = true;
+    }
+    if (changed) {
+      assembled += out.slice(cursor);
+      out = assembled;
     }
   }
   return out;
@@ -6876,17 +6885,15 @@ export function repairBotMentionBrackets(
 }
 
 /**
- * Peer-roster appendix that teaches the speaker how to chip-format a direct,
- * second-person address to another bot at the table.
+ * Peer-roster appendix that teaches the speaker how bot-name attention cues
+ * work, plus the exact chip markdown for rare deliberate direct address.
  *
- * Goals (tuned after observing tag ping-pong on the live table):
- * - The chip format is a *rare* dramatic device, not a default opener.
- * - Third-person references stay as plain prose — the renderer auto-colors
- *   bot names in their identity color regardless, so plain references still
- *   read as recognizable callouts visually.
- * - The bot must use the verbatim markdown from the roster — never the
- *   `[Name]`-only bracket label (which produces a visible `[Name]` artifact
- *   on the table) and never an invented botId.
+ * Goals:
+ * - Bot names stay natural for models; `@` is optional for bots.
+ * - Any exact peer name now counts as a visible attention cue, so bots should
+ *   use names sparingly unless they mean to call someone into the exchange.
+ * - If the model emits markdown, it must use the verbatim roster form — never
+ *   an orphan `[Name]` bracket and never an invented botId.
  */
 function buildCoffeeSpeakerMentionRosterAppendix(
   peers: readonly { id: string; name: string }[],
@@ -6900,11 +6907,11 @@ function buildCoffeeSpeakerMentionRosterAppendix(
     return `- ${p.name}${hint} → ${coffeeFormatBotMentionMarkdown(p, peerAddressByBotId)}`;
   });
   return [
-    "Direct-address chip format (use sparingly):",
-    "Most of your lines should NOT call anyone out by name — react to the room, agree, disagree, pivot. Constant `[Name]`-style call-outs make the table feel like ping-pong and break the conversation flow.",
-    "ONLY when you are speaking directly TO one specific bot at this table — second-person address, like \"Squidward, that's a stretch\" or \"Plankton, why?\" — wrap that name with the exact markdown below (it renders as a styled chip):",
+    "Bot-name attention cues (use sparingly):",
+    "Any exact peer name you include is treated as an attention cue and may invite that bot to respond. You do not need @; plain names like \"Squidward, that's a stretch\" or \"Plankton might object\" are enough.",
+    "Most of your lines should NOT call anyone out by name — react to the room, agree, disagree, pivot. Constant name call-outs make the table feel like ping-pong and break the conversation flow.",
+    "If you intentionally want to emit the rendered chip yourself, copy the exact markdown below:",
     ...rosterLines,
-    "Third-person references — describing another bot, agreeing with what they said, narrating about them — must stay as plain prose with no markdown around the name. The table will still render the name in their identity color automatically.",
     "Never write a `[Name]` bracket without the matching `(prism-bot://…)` href; orphan brackets show up as a visible glitch on the table. Never invent a botId; only copy from the roster above. Never chip-format your own name.",
   ].join("\n");
 }
