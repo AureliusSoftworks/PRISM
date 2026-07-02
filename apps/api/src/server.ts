@@ -16,6 +16,14 @@ import { clearCookie, html, HttpError, json, readJsonBody, setCookie, setCorsHea
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
+  enterUsageSession,
+  getUsageReport,
+  parseUsageRange,
+  patchUsageSession,
+  recordImageUsage,
+  runWithUsageSession,
+} from "./usage.ts";
+import {
   requireValidSession,
   resolveSessionToken,
 } from "./auth.ts";
@@ -87,12 +95,16 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
   setCoffeePlayerTeam,
   setCoffeePollPlayerVote,
+  topOffCoffeeCupForBot,
+  undoLatestCoffeeDebugMessage,
   updateCoffeePreset,
   updateCoffeeGroup,
+  updateCoffeeBotSocialDebug,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
@@ -163,6 +175,16 @@ import {
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
+  BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
+  BOT_PROFILE_PICTURE_SIZE,
+  GALLERY_EXCLUDED_PURPOSE_SQL,
+  clearBotProfilePictureReference,
+  deleteBotProfilePictureImageIfOwned,
+  normalizeBotProfilePicturePngBytes,
+  parseBotProfilePictureDataUrl,
+  readProfilePictureImageIdForBot,
+} from "./bot-profile-pictures.ts";
+import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
   normalizeZenAskQuestionPatienceEnabled,
@@ -209,6 +231,7 @@ import {
 import {
   defaultHiddenModelIdsForCatalog,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
+  reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
 } from "./model-routing.ts";
@@ -218,6 +241,8 @@ import {
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  normalizeBotFaceFontId,
+  normalizeBotFaceFontWeight,
   encodeComfyUiRemoteWorkflowModelId,
   formatComfyUiRemoteWorkflowLabel,
   hydrateAssistantMessageParts,
@@ -247,6 +272,7 @@ import {
   type BotOpinion,
   type BotOpinionBoundaryLevel,
   type ChatMessage,
+  type BotFaceFontId,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -493,6 +519,7 @@ interface UserDbRow {
   secondary_ollama_host: string | null;
   experimental_dual_ollama_enabled: number;
   experimental_all_model_effort_enabled: number;
+  coffee_experimental_table_angle_enabled: number;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -677,7 +704,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -753,9 +780,10 @@ function seedModelVisibilityDefaultsIfNeeded(
   }
 
   const currentHidden = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const reconciledHidden = reconcileHiddenModelIdsForCatalog(currentHidden, catalog);
   const defaultHidden = defaultHiddenModelIdsForCatalog(catalog);
-  if (currentHidden.length > 0) {
-    const mergedHidden = Array.from(new Set([...currentHidden, ...defaultHidden]));
+  if (reconciledHidden.length > 0) {
+    const mergedHidden = Array.from(new Set([...reconciledHidden, ...defaultHidden]));
     db.prepare(
       "UPDATE users SET hidden_bot_model_ids = ?, model_visibility_defaults_version = ? WHERE id = ?"
     ).run(
@@ -769,7 +797,21 @@ function seedModelVisibilityDefaultsIfNeeded(
   }
 
   if (defaultHidden.length === 0) {
-    return currentHidden;
+    if (
+      user.model_visibility_defaults_version !== MODEL_VISIBILITY_DEFAULTS_VERSION ||
+      reconciledHidden.length !== currentHidden.length
+    ) {
+      db.prepare(
+        "UPDATE users SET hidden_bot_model_ids = ?, model_visibility_defaults_version = ? WHERE id = ?"
+      ).run(
+        JSON.stringify(reconciledHidden),
+        MODEL_VISIBILITY_DEFAULTS_VERSION,
+        user.id
+      );
+      user.hidden_bot_model_ids = JSON.stringify(reconciledHidden);
+      user.model_visibility_defaults_version = MODEL_VISIBILITY_DEFAULTS_VERSION;
+    }
+    return reconciledHidden;
   }
 
   db.prepare(
@@ -930,6 +972,11 @@ function readModelOverride(value: unknown): string | null {
     throw new HttpError(400, "This model lane is disabled. Choose Auto or a model before sending.");
   }
   return model;
+}
+
+function readCoffeeSessionSpeakerModel(value: unknown): string | null {
+  const model = readModelOverride(value);
+  return model?.toLowerCase() === "auto" ? null : model;
 }
 
 function readCoffeeTeamCreateInput(value: unknown):
@@ -1371,6 +1418,14 @@ function mapImageRowToClient(row: {
   };
 }
 
+function readBotFaceFontForStorage(value: unknown): BotFaceFontId | null {
+  return normalizeBotFaceFontId(value);
+}
+
+function readBotFaceWeightForStorage(value: unknown): number | null {
+  return normalizeBotFaceFontWeight(value);
+}
+
 type ZenWallpaperDbRow = {
   zen_wallpaper_enabled?: number | null;
   zen_wallpaper_image_id?: string | null;
@@ -1488,6 +1543,9 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     imageBytes: Buffer;
     modelUsed: string;
     provider: "comfyui" | "ollama";
+    purpose?: string;
+    profilePictureBotId?: string | null;
+    previousProfilePictureImageId?: string | null;
   }
 ): Promise<void> {
   try {
@@ -1502,8 +1560,9 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
   const storedUrl = `/api/images/${encodeURIComponent(args.imageId)}/file`;
 
   try {
+    const createdAt = new Date().toISOString();
     db.prepare(
-      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       args.imageId,
       args.userId,
@@ -1517,8 +1576,31 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       args.provider,
       args.modelUsed,
       args.localRelPath,
-      new Date().toISOString()
+      args.purpose ?? "gallery",
+      createdAt
     );
+    if (args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && args.profilePictureBotId) {
+      db.prepare(
+        "UPDATE bots SET profile_picture_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+      ).run(args.imageId, createdAt, args.profilePictureBotId, args.userId);
+      deleteBotProfilePictureImageIfOwned(
+        db,
+        args.userId,
+        args.profilePictureBotId,
+        args.previousProfilePictureImageId
+      );
+    }
+    recordImageUsage({
+      provider: args.provider,
+      model: args.modelUsed,
+      purpose: args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+        ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+        : "image_generation",
+      imageCount: 1,
+      imageSize: args.size,
+      imageQuality: args.quality,
+      createdAt,
+    });
   } catch (error) {
     tryUnlinkGeneratedImageFile(args.localRelPath);
     throw error;
@@ -1534,6 +1616,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       displayUrl,
       hasLocalFile: true,
       model: args.modelUsed,
+      purpose: args.purpose ?? "gallery",
     },
   });
 }
@@ -1882,14 +1965,26 @@ function buildRoutes(): RouteDefinition[] {
         provider: effectiveProvider,
         model: resolvedAuto.model,
       });
-      void generateStorySessionEpisode(db, userId, session.id, {
-        provider,
-        providerName: effectiveProvider,
-        model: resolvedAuto.model,
-        bots: storyBots,
-        premise: readOptionalString(body.premise),
-        ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
-      }).catch((error) => {
+      void Promise.resolve(
+        runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "story",
+            surface: "story",
+          },
+          () =>
+            generateStorySessionEpisode(db, userId, session.id, {
+              provider,
+              providerName: effectiveProvider,
+              model: resolvedAuto.model,
+              bots: storyBots,
+              premise: readOptionalString(body.premise),
+              ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
+            })
+        )
+      ).catch((error) => {
         console.warn("[story] generation job failed", error);
       });
       json(ctx.res, 200, { ok: true, session });
@@ -3588,6 +3683,8 @@ function buildRoutes(): RouteDefinition[] {
           : body.botId === null
             ? null
             : undefined;
+      const composerConversationId =
+        typeof body.conversationId === "string" ? body.conversationId : null;
       const effectiveBotId = botId;
       const recentMessages = readComposerRecentMessages(body.recentMessages);
       const user = getUserRow(userId);
@@ -3751,13 +3848,26 @@ function buildRoutes(): RouteDefinition[] {
           ].join("\n\n"),
         },
       ];
-      const raw = await provider.generateResponse(promptMessages, {
-        ...generationOverrides,
-        model: resolvedAuto.model,
-        temperature: Math.max(0.72, generationOverrides.temperature ?? 0.78),
-        maxTokens: 220,
-        jsonMode: true,
-      });
+      const raw = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode,
+          surface: mode,
+          conversationId: composerConversationId,
+          botId: typeof effectiveBotId === "string" ? effectiveBotId : null,
+        },
+        () =>
+          provider.generateResponse(promptMessages, {
+            ...generationOverrides,
+            model: resolvedAuto.model,
+            temperature: Math.max(0.72, generationOverrides.temperature ?? 0.78),
+            maxTokens: 220,
+            jsonMode: true,
+            usagePurpose: "composer_cleanup",
+          })
+      );
       const prompt = normalizeComposerRandomPromptResponse(raw);
       json(ctx.res, 200, {
         ok: true,
@@ -3810,13 +3920,24 @@ function buildRoutes(): RouteDefinition[] {
           user.prism_default_llm_model,
           dualOllamaWorkloadOptions(user)
         );
-        const reaction = await generateZenLiveActionReaction({
-          provider,
-          request,
-          personaName,
-          personaSystemPrompt,
-          signal: liveActionAbort.signal,
-        });
+        const reaction = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "zen",
+            surface: "zen",
+            botId: request.activeBotId ?? null,
+          },
+          () =>
+            generateZenLiveActionReaction({
+              provider,
+              request,
+              personaName,
+              personaSystemPrompt,
+              signal: liveActionAbort.signal,
+            })
+        );
         json(ctx.res, 200, { ok: true, reaction });
       } finally {
         ctx.req.off("close", onLiveActionClientClose);
@@ -3898,6 +4019,15 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
       let effectiveBotId = botId;
+      enterUsageSession({
+        db,
+        userId,
+        privacyScope: incognito ? "private" : "normal",
+        mode,
+        surface: mode === "zen" ? "zen" : "sandbox",
+        conversationId: conversationId ?? null,
+        botId: effectiveBotId ?? null,
+      });
       let zenAutonomyDecision: Awaited<ReturnType<typeof decideZenAutonomyTurn>> | undefined;
       const ephemeralMessages = Array.isArray(body.ephemeralMessages)
         ? body.ephemeralMessages as ChatMessage[]
@@ -3971,6 +4101,7 @@ function buildRoutes(): RouteDefinition[] {
             ? personaTransition.fromBotId
             : personaTransition.toBotId
           : effectiveBotId;
+      patchUsageSession({ botId: runtimeBotId ?? null });
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
@@ -4451,6 +4582,26 @@ function buildRoutes(): RouteDefinition[] {
         ...result,
       });
     }),
+    route("POST", "/api/coffee/sessions/:id/restart", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const result = await restartCoffeeConversationFromSession(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+          userKey,
+        }
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        ...result,
+      });
+    }),
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -4513,6 +4664,21 @@ function buildRoutes(): RouteDefinition[] {
         ...result,
       });
     }),
+    route("POST", "/api/coffee/sessions/:id/bots/:botId/top-off", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = topOffCoffeeCupForBot(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.botId,
+        body.progress
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+      });
+    }),
     route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -4525,6 +4691,33 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         coffeeSettings,
+      });
+    }),
+    route("PATCH", "/api/coffee/sessions/:id/debug/bots/:botId/social", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = updateCoffeeBotSocialDebug(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.botId,
+        body.social ?? body
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/debug/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const result = undoLatestCoffeeDebugMessage(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        conversation: result.conversation,
+        undone: {
+          count: result.deletedMessages,
+          messageIds: result.messageIds,
+        },
       });
     }),
     route("GET", "/api/coffee/sessions/:id/polls/active", async (ctx) => {
@@ -4573,7 +4766,7 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readModelOverride(body.modelOverride);
+      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(body.modelOverride);
       const result = await collectCoffeePollVotes(
         db,
         userId,
@@ -4635,13 +4828,22 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
           : undefined;
+      const directedUserMessage =
+        typeof body.directedUserMessage === "string"
+          ? body.directedUserMessage
+          : undefined;
       const userIsComposing = body.userIsComposing === true;
+      const presentBotIds = Array.isArray(body.presentBotIds)
+        ? body.presentBotIds.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0
+          )
+        : undefined;
       const sessionRemainingMs =
         typeof body.sessionRemainingMs === "number" &&
         Number.isFinite(body.sessionRemainingMs)
           ? Math.max(0, body.sessionRemainingMs)
           : null;
-      const sessionSpeakerModel = readModelOverride(body.modelOverride);
+      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -4650,33 +4852,47 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const result = await processCoffeeAutonomousTurn(
-        db,
-        userId,
-        ctx.params.id,
+      const result = await runWithUsageSession(
         {
-          preferredProvider: effectiveProvider,
-          openAiApiKey,
-          anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
-          userDisplayName: user.display_name,
-          userKey,
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          assistantImageUserPrefs: {
-            preferredLocalImageModel: user.preferred_local_image_model,
-            preferredOpenAiImageModel: user.preferred_openai_image_model,
-            lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
-            comfyuiHost: user.comfyui_host,
-            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
-            secondaryOllamaHost: user.secondary_ollama_host,
-          },
-          sessionRemainingMs,
-          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee",
+          conversationId: ctx.params.id,
+          botId: directedSpeakerBotId ?? null,
         },
-        userIsComposing,
-        directedSpeakerBotId
+        () =>
+          processCoffeeAutonomousTurn(
+            db,
+            userId,
+            ctx.params.id,
+            {
+              preferredProvider: effectiveProvider,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              userDisplayName: user.display_name,
+              userKey,
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              assistantImageUserPrefs: {
+                preferredLocalImageModel: user.preferred_local_image_model,
+                preferredOpenAiImageModel: user.preferred_openai_image_model,
+                lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+                comfyuiHost: user.comfyui_host,
+                comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+                secondaryOllamaHost: user.secondary_ollama_host,
+              },
+              sessionRemainingMs,
+              ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+              ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
+            },
+            userIsComposing,
+            directedSpeakerBotId,
+            directedUserMessage,
+            presentBotIds
+          )
       );
       json(ctx.res, 200, {
         ok: true,
@@ -4687,7 +4903,6 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = readProvider(body.preferredProvider);
-      const sessionSpeakerModel = readModelOverride(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -4696,22 +4911,32 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const conversation = await generateCoffeeSessionSynopsis(
-        db,
-        userId,
-        ctx.params.id,
+      const conversation = await runWithUsageSession(
         {
-          preferredProvider: effectiveProvider,
-          openAiApiKey,
-          anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
-          userDisplayName: user.display_name,
-          userKey,
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
-        }
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee",
+          conversationId: ctx.params.id,
+        },
+        () =>
+          generateCoffeeSessionSynopsis(
+            db,
+            userId,
+            ctx.params.id,
+            {
+              preferredProvider: effectiveProvider,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              userDisplayName: user.display_name,
+              userKey,
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
+            }
+          )
       );
       json(ctx.res, 200, {
         ok: true,
@@ -4748,6 +4973,11 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.directedSpeakerBotId === "string"
           ? body.directedSpeakerBotId
           : undefined;
+      const presentBotIds = Array.isArray(body.presentBotIds)
+        ? body.presentBotIds.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0
+          )
+        : undefined;
       const sessionRemainingMs =
         typeof body.sessionRemainingMs === "number" &&
         Number.isFinite(body.sessionRemainingMs)
@@ -4765,39 +4995,52 @@ function buildRoutes(): RouteDefinition[] {
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readModelOverride(body.modelOverride);
+      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(body.modelOverride);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
-      const result = await processCoffeeTurn(
-        db,
-        userId,
+      const result = await runWithUsageSession(
         {
-          conversationId,
-          groupBotIds,
-          message,
-          playerInterruption,
-          directedSpeakerBotId,
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee",
+          conversationId: conversationId ?? null,
+          botId: directedSpeakerBotId ?? null,
         },
-        {
-          preferredProvider: effectiveProvider,
-          openAiApiKey,
-          anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
-          userDisplayName: user.display_name,
-          userKey,
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          assistantImageUserPrefs: {
-            preferredLocalImageModel: user.preferred_local_image_model,
-            preferredOpenAiImageModel: user.preferred_openai_image_model,
-            lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
-            comfyuiHost: user.comfyui_host,
-            comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
-            secondaryOllamaHost: user.secondary_ollama_host,
-          },
-          sessionRemainingMs,
-          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-          ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
-        }
+        () =>
+          processCoffeeTurn(
+            db,
+            userId,
+            {
+              conversationId,
+              groupBotIds,
+              message,
+              playerInterruption,
+              directedSpeakerBotId,
+              presentBotIds,
+            },
+            {
+              preferredProvider: effectiveProvider,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              userDisplayName: user.display_name,
+              userKey,
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              assistantImageUserPrefs: {
+                preferredLocalImageModel: user.preferred_local_image_model,
+                preferredOpenAiImageModel: user.preferred_openai_image_model,
+                lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+                comfyuiHost: user.comfyui_host,
+                comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+                secondaryOllamaHost: user.secondary_ollama_host,
+              },
+              sessionRemainingMs,
+              ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+              ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
+            }
+          )
       );
       json(ctx.res, 200, {
         ok: true,
@@ -4811,7 +5054,17 @@ function buildRoutes(): RouteDefinition[] {
         parseMemoryListQueryOptions(ctx.query);
       deleteOrphanedBotMemories(db, userId);
       if (botId && inferBotMemories) {
-        await inferBotMemoriesIfNeeded(userId, botId, userKey);
+        await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "system",
+            surface: "memories",
+            botId,
+          },
+          () => inferBotMemoriesIfNeeded(userId, botId, userKey)
+        );
       }
       type MemoryRow = {
         id: string;
@@ -5421,6 +5674,8 @@ function buildRoutes(): RouteDefinition[] {
           experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
           experimentalAllModelEffortEnabled:
             user.experimental_all_model_effort_enabled === 1,
+          coffeeExperimentalTableAngleEnabled:
+            user.coffee_experimental_table_angle_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
@@ -5611,6 +5866,12 @@ function buildRoutes(): RouteDefinition[] {
         ),
       });
     }),
+    route("GET", "/api/usage", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const range = parseUsageRange(ctx.query.get("range"));
+      const conversationId = ctx.query.get("conversationId")?.trim() || null;
+      json(ctx.res, 200, { ...getUsageReport({ db, userId, range, conversationId }) });
+    }),
     route("GET", "/api/settings/secondary-ollama-status", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -5690,6 +5951,8 @@ function buildRoutes(): RouteDefinition[] {
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled,
         experimentalAllModelEffortEnabled:
           user.experimental_all_model_effort_enabled,
+        coffeeExperimentalTableAngleEnabled:
+          user.coffee_experimental_table_angle_enabled,
         psychicModeEnabled: user.psychic_mode_enabled,
         fallbackModelMessageStripe: user.fallback_model_message_stripe,
         hiddenBotModelIds: user.hidden_bot_model_ids,
@@ -5785,7 +6048,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(`
         UPDATE users
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
@@ -5807,6 +6070,7 @@ function buildRoutes(): RouteDefinition[] {
         modelVisibilityDefaultsVersion,
         next.experimentalDualOllamaEnabled,
         next.experimentalAllModelEffortEnabled,
+        next.coffeeExperimentalTableAngleEnabled,
         next.psychicModeEnabled,
         next.preferredLocalModel,
         next.preferredOnlineModel,
@@ -5858,6 +6122,8 @@ function buildRoutes(): RouteDefinition[] {
           displayName: next.displayName,
           experimentalAllModelEffortEnabled:
             next.experimentalAllModelEffortEnabled === 1,
+          coffeeExperimentalTableAngleEnabled:
+            next.coffeeExperimentalTableAngleEnabled === 1,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
@@ -5909,12 +6175,23 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Bot not found.");
       }
       const user = getUserRow(userId);
-      const suggestions = await inferBotImagePromptSuggestions(
-        getAuxiliaryProvider(
-          user.prism_default_llm_model,
-          dualOllamaWorkloadOptions(user)
-        ),
-        { botName: row.name, systemPrompt: row.system_prompt }
+      const suggestions = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "system",
+          surface: "images",
+          botId,
+        },
+        () =>
+          inferBotImagePromptSuggestions(
+            getAuxiliaryProvider(
+              user.prism_default_llm_model,
+              dualOllamaWorkloadOptions(user)
+            ),
+            { botName: row.name, systemPrompt: row.system_prompt }
+          )
       );
       json(ctx.res, 200, { ok: true, suggestions });
     }),
@@ -5940,15 +6217,26 @@ function buildRoutes(): RouteDefinition[] {
         systemPrompt = row.system_prompt;
       }
       const user = getUserRow(userId);
-      const prompt = await inferRandomImageSceneLine(
-        getAuxiliaryProvider(
-          user.prism_default_llm_model,
-          dualOllamaWorkloadOptions(user)
-        ),
+      const prompt = await runWithUsageSession(
         {
-          botName,
-          systemPrompt,
-        }
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "system",
+          surface: "images",
+          botId: botIdRaw || null,
+        },
+        () =>
+          inferRandomImageSceneLine(
+            getAuxiliaryProvider(
+              user.prism_default_llm_model,
+              dualOllamaWorkloadOptions(user)
+            ),
+            {
+              botName,
+              systemPrompt,
+            }
+          )
       );
       json(ctx.res, 200, { ok: true, prompt });
     }),
@@ -5978,6 +6266,14 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.botId === "string" && body.botId.trim().length > 0
           ? body.botId.trim()
           : undefined;
+      const rawImagePurpose = body.purpose ?? body.imagePurpose;
+      const imagePurpose =
+        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          : "gallery";
+      if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && !bodyBotId) {
+        throw new Error("Profile picture generation requires a bot.");
+      }
 
       // ONLINE → OpenAI Images API; LOCAL → Ollama image checkpoint on this Mac.
       // Body may override `preferredProvider` for this request (same pattern as chat).
@@ -5998,6 +6294,33 @@ function buildRoutes(): RouteDefinition[] {
       if (!persistence.ok) {
         throw new Error(persistence.message);
       }
+      if (
+        imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
+        (!persistence.persistedBotId || persistence.persistedBotId !== bodyBotId)
+      ) {
+        throw new Error("Profile picture generation requires a bot-owned image.");
+      }
+      const previousProfilePictureImageId =
+        imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId
+          ? (
+              db
+                .prepare(
+                  "SELECT profile_picture_image_id FROM bots WHERE id = ? AND user_id = ?"
+                )
+                .get(bodyBotId, userId) as
+                | { profile_picture_image_id: string | null }
+                | undefined
+            )?.profile_picture_image_id ?? null
+          : null;
+      enterUsageSession({
+        db,
+        userId,
+        privacyScope: "normal",
+        mode: "sandbox",
+        surface: "images",
+        conversationId: persistence.conversationIdForInsert,
+        botId: persistence.persistedBotId,
+      });
 
       let promptForModel = prompt;
       const personaBotId = persistence.personaBotId;
@@ -6131,6 +6454,10 @@ function buildRoutes(): RouteDefinition[] {
           imageBytes: localOut.imageBytes,
           modelUsed: localOut.modelUsed,
           provider: localOut.provider,
+          purpose: imagePurpose,
+          profilePictureBotId:
+            imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
+          previousProfilePictureImageId,
         });
         return;
       }
@@ -6176,6 +6503,10 @@ function buildRoutes(): RouteDefinition[] {
             imageBytes: localOut.imageBytes,
             modelUsed: localOut.modelUsed,
             provider: localOut.provider,
+            purpose: imagePurpose,
+            profilePictureBotId:
+              imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
+            previousProfilePictureImageId,
           });
           return;
         }
@@ -6206,9 +6537,10 @@ function buildRoutes(): RouteDefinition[] {
       const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
       const storedUrl = result.url || displayUrl;
 
+      const createdAt = new Date().toISOString();
       try {
         db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?)"
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)"
         ).run(
           imageId,
           userId,
@@ -6221,8 +6553,31 @@ function buildRoutes(): RouteDefinition[] {
           quality,
           result.model,
           localRelPath,
-          new Date().toISOString()
+          imagePurpose,
+          createdAt
         );
+        if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId) {
+          db.prepare(
+            "UPDATE bots SET profile_picture_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+          ).run(imageId, createdAt, bodyBotId, userId);
+          deleteBotProfilePictureImageIfOwned(
+            db,
+            userId,
+            bodyBotId,
+            previousProfilePictureImageId
+          );
+        }
+        recordImageUsage({
+          provider: "openai",
+          model: result.model,
+          purpose: imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+            ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+            : "image_generation",
+          imageCount: 1,
+          imageSize: size,
+          imageQuality: quality,
+          createdAt,
+        });
       } catch (error) {
         tryUnlinkGeneratedImageFile(localRelPath);
         throw error;
@@ -6237,6 +6592,7 @@ function buildRoutes(): RouteDefinition[] {
           displayUrl,
           hasLocalFile: true,
           model: result.model,
+          purpose: imagePurpose,
         },
       });
       } finally {
@@ -6322,7 +6678,7 @@ function buildRoutes(): RouteDefinition[] {
         ? db
             .prepare(
               `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-               FROM images WHERE user_id = ? AND bot_id IS NULL AND COALESCE(purpose, 'gallery') != 'wallpaper'
+               FROM images WHERE user_id = ? AND bot_id IS NULL AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                ORDER BY created_at DESC LIMIT ?`
             )
             .all(userId, limit)
@@ -6330,14 +6686,14 @@ function buildRoutes(): RouteDefinition[] {
           ? db
               .prepare(
                 `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'
+                 FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
               .all(userId, filterBotId, limit)
           : db
               .prepare(
                 `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'
+                 FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
               .all(userId, limit);
@@ -6418,11 +6774,11 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                "SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'"
+                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
               )
               .all(userId, filterBotId)
           : db
-              .prepare("SELECT id, local_rel_path FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'")
+              .prepare(`SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`)
               .all(userId)
       ) as Array<{ id: string; local_rel_path: string | null }>;
       if (rows.length === 0) {
@@ -6431,13 +6787,13 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (filterBotId) {
         db.prepare(
-          "DELETE FROM images WHERE user_id = ? AND bot_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'"
+          `DELETE FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
         ).run(
           userId,
           filterBotId
         );
       } else {
-        db.prepare("DELETE FROM images WHERE user_id = ? AND COALESCE(purpose, 'gallery') != 'wallpaper'").run(userId);
+        db.prepare(`DELETE FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`).run(userId);
       }
       for (const row of rows) {
         const rel = row.local_rel_path?.trim();
@@ -6467,6 +6823,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!row) {
         throw new HttpError(404, "Image not found.");
       }
+      clearBotProfilePictureReference(db, userId, imageId);
       db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
         imageId,
         userId
@@ -6485,6 +6842,91 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true });
     }),
+    route("POST", "/api/bots/:id/profile-picture/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id;
+      const existing = db
+        .prepare(
+          "SELECT id, profile_picture_image_id FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId) as
+        | { id?: string; profile_picture_image_id?: string | null }
+        | undefined;
+      if (!existing?.id) {
+        throw new Error("Bot not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const sourceBytes = parseBotProfilePictureDataUrl(body.dataUrl);
+      let pngBytes: Buffer;
+      try {
+        pngBytes = await normalizeBotProfilePicturePngBytes(sourceBytes);
+      } catch {
+        throw new Error("Could not read that profile picture image.");
+      }
+
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      try {
+        writeGeneratedImageBytes(localRelPath, pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        const detail = error instanceof Error ? error.message : "write failed";
+        throw new Error(`Could not save profile picture (${detail}).`);
+      }
+
+      const now = new Date().toISOString();
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      try {
+        db.prepare(
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          imageId,
+          userId,
+          botId,
+          "Uploaded bot profile picture",
+          "Uploaded bot profile picture",
+          displayUrl,
+          BOT_PROFILE_PICTURE_SIZE,
+          "upload",
+          "upload",
+          "upload",
+          localRelPath,
+          BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
+          now
+        );
+        db.prepare(
+          "UPDATE bots SET profile_picture_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+        ).run(imageId, now, botId, userId);
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      deleteBotProfilePictureImageIfOwned(
+        db,
+        userId,
+        botId,
+        existing.profile_picture_image_id
+      );
+
+      const updatedBot = db
+        .prepare(
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        bot: updatedBot,
+        image: {
+          id: imageId,
+          url: displayUrl,
+          displayUrl,
+          hasLocalFile: true,
+          purpose: BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
+          model: "upload",
+        },
+      });
+    }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -6501,6 +6943,9 @@ function buildRoutes(): RouteDefinition[] {
       const flirtEnabled = body.flirtEnabled === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
+      const faceEyesFont = readBotFaceFontForStorage(body.faceEyesFont);
+      const faceMouthFont = readBotFaceFontForStorage(body.faceMouthFont);
+      const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
       const exportHash = resolveBotExportHashForCreate({
         incomingHash: body.exportHash,
         hasExistingHash: (hash) => {
@@ -6527,7 +6972,7 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', ?, ?)"
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
       ).run(
         botId,
         userId,
@@ -6546,6 +6991,9 @@ function buildRoutes(): RouteDefinition[] {
         maxTokens,
         color,
         glyph,
+        faceEyesFont,
+        faceMouthFont,
+        faceFontWeight,
         chatEnabled,
         now,
         now
@@ -6575,6 +7023,10 @@ function buildRoutes(): RouteDefinition[] {
           maxTokens,
           color,
           glyph,
+          face_eyes_font: faceEyesFont,
+          face_mouth_font: faceMouthFont,
+          face_font_weight: faceFontWeight,
+          profile_picture_image_id: null,
           chat_enabled: chatEnabled,
         },
       });
@@ -6582,7 +7034,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -6609,7 +7061,11 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const botId = ctx.params.id;
-      const existing = db.prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?").get(botId, userId) as { id?: string } | undefined;
+      const existing = db
+        .prepare("SELECT id, profile_picture_image_id FROM bots WHERE id = ? AND user_id = ?")
+        .get(botId, userId) as
+        | { id?: string; profile_picture_image_id?: string | null }
+        | undefined;
       if (!existing?.id) {
         throw new Error("Bot not found.");
       }
@@ -6617,6 +7073,7 @@ function buildRoutes(): RouteDefinition[] {
       const fields: string[] = [];
       const values: Array<string | number | null> = [];
       let shouldRefreshFacets = false;
+      let shouldDeletePreviousProfilePicture = false;
       if (typeof body.name === "string") {
         fields.push("name = ?");
         values.push(body.name);
@@ -6662,6 +7119,52 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
+      if (body.faceEyesFont !== undefined) {
+        if (body.faceEyesFont === null) {
+          fields.push("face_eyes_font = ?");
+          values.push(null);
+        } else {
+          const faceEyesFont = readBotFaceFontForStorage(body.faceEyesFont);
+          if (!faceEyesFont) throw new Error("Invalid face eyes font.");
+          fields.push("face_eyes_font = ?");
+          values.push(faceEyesFont);
+        }
+      }
+      if (body.faceMouthFont !== undefined) {
+        if (body.faceMouthFont === null) {
+          fields.push("face_mouth_font = ?");
+          values.push(null);
+        } else {
+          const faceMouthFont = readBotFaceFontForStorage(body.faceMouthFont);
+          if (!faceMouthFont) throw new Error("Invalid face mouth font.");
+          fields.push("face_mouth_font = ?");
+          values.push(faceMouthFont);
+        }
+      }
+      if (body.faceFontWeight !== undefined) {
+        if (body.faceFontWeight === null) {
+          fields.push("face_font_weight = ?");
+          values.push(null);
+        } else {
+          const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
+          if (faceFontWeight === null) throw new Error("Invalid face font weight.");
+          fields.push("face_font_weight = ?");
+          values.push(faceFontWeight);
+        }
+      }
+      if (body.profilePictureImageId !== undefined) {
+        const profilePictureImageId = readProfilePictureImageIdForBot(
+          db,
+          body.profilePictureImageId,
+          userId,
+          botId
+        );
+        fields.push("profile_picture_image_id = ?");
+        values.push(profilePictureImageId);
+        shouldDeletePreviousProfilePicture =
+          profilePictureImageId === null &&
+          Boolean(existing.profile_picture_image_id?.trim());
+      }
       // Color update semantics: non-empty string updates, explicit null clears,
       // empty string or missing field leaves it unchanged.
       if (typeof body.color === "string" && body.color.trim().length > 0) {
@@ -6708,6 +7211,14 @@ function buildRoutes(): RouteDefinition[] {
         values.push(new Date().toISOString());
         values.push(botId, userId);
         db.prepare(`UPDATE bots SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
+        if (shouldDeletePreviousProfilePicture) {
+          deleteBotProfilePictureImageIfOwned(
+            db,
+            userId,
+            botId,
+            existing.profile_picture_image_id
+          );
+        }
       }
       if (shouldRefreshFacets) {
         queueBotSemanticFacetsRefresh({
@@ -6719,7 +7230,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, { ok: true, bot: updatedBot });

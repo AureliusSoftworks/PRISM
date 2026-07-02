@@ -663,6 +663,7 @@ export async function resolvePromptWildcardsWithModel(args: {
       temperature: Math.max(0.6, args.generationOverrides.temperature ?? 0.72),
       maxTokens: Math.min(900, Math.max(160, providerOccurrences.length * 70)),
       jsonMode: true,
+      usagePurpose: "prompt_wildcard",
       signal: args.signal,
     });
     const values = extractPromptWildcardValues(raw, providerOccurrences);

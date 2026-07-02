@@ -1,6 +1,17 @@
 /** Horizontal band of the table oval: left of center, center column, or right. */
 export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
 
+const COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE = 4;
+
+export function coffeeSeatHorizontalSideFromLeftPercent(
+  leftPercent: number
+): CoffeeSeatHorizontalSide {
+  if (!Number.isFinite(leftPercent)) return 0;
+  if (leftPercent < 50 - COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return -1;
+  if (leftPercent > 50 + COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return 1;
+  return 0;
+}
+
 /**
  * `scaleY` for a seat on the oval: after the 90° plate rotation, `scaleY`
  * controls the face's screen-horizontal direction. Left-side seats flip so
@@ -13,13 +24,13 @@ export function coffeePlateFaceScaleYFromSeatHorizontalSide(
 }
 
 /**
- * Top seat faces a target on the left half of the table with the same flip as
- * left-side seats; targets on the right stay unflipped.
+ * Top seat reads from the opposite side of the table. A left-side target should
+ * keep the head unflipped; a right-side target should flip it toward the speaker.
  */
 export function coffeeHeadPlateFaceScaleYFromGazeTargetSide(
   targetSide: CoffeeSeatHorizontalSide
 ): string {
-  return targetSide === -1 ? "-1" : "1";
+  return targetSide === 1 ? "-1" : "1";
 }
 
 /**

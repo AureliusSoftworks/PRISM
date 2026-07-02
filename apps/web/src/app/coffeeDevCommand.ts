@@ -1,6 +1,7 @@
 export type ParsedCoffeeDevCommand =
   | { kind: "none" }
   | { kind: "error"; error: string }
+  | { kind: "toggleDev" }
   | {
       kind: "ok";
       message: string;
@@ -82,6 +83,11 @@ export function parseCoffeeDevCommand(
   _unusedRandomForBackCompat?: unknown
 ): ParsedCoffeeDevCommand {
   const trimmed = text.trim();
+  if (/^\/dev(?:\s|$)/i.test(trimmed)) {
+    return trimmed.replace(/^\/dev/i, "").trim().length === 0
+      ? { kind: "toggleDev" }
+      : { kind: "error", error: "Use `/dev` by itself to toggle Coffee debug mode." };
+  }
   const match = /^\/echo(?:\s|$)/i.exec(trimmed);
   if (!match) return { kind: "none" };
 

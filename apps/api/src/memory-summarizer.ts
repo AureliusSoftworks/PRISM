@@ -285,7 +285,7 @@ export async function summarizeAndStoreMemories(
   const summary = await auxiliaryProvider.generateResponse([
     { role: "system", content: FACT_EXTRACTION_PROMPT },
     { role: "user", content: thread },
-  ]);
+  ], { usagePurpose: "memory_summary" });
 
   if (!summary || summary.trim().toUpperCase() === "NONE") {
     return;
@@ -456,7 +456,7 @@ export async function summarizeThreadCompact(
         role: "user",
         content: `${priorBlock}[Earlier messages to fold in]\n${messagesBlock}`,
       },
-    ]);
+    ], { usagePurpose: "memory_summary" });
   } finally {
     threadSummaryInFlight.delete(key);
   }
@@ -470,7 +470,7 @@ export async function summarizeThreadCompact(
       const recapRaw = await auxiliaryProvider.generateResponse([
         { role: "system", content: CHAT_VISIBLE_RECAP_PROMPT },
         { role: "user", content: compact.trim() },
-      ]);
+      ], { usagePurpose: "memory_summary" });
       const recap = recapRaw.trim();
       if (recap.length > 0) {
         displaySummary = normalizeDisplaySummary(
@@ -809,7 +809,7 @@ export async function summarizeSandboxBotStatus(
           : "",
       ].join(""),
     },
-  ]);
+  ], { usagePurpose: "memory_summary" });
   const recap = recapRaw.trim();
   const userDirectionPhrase =
     userName.toLowerCase() === "you" ? "your" : possessiveName(userName);

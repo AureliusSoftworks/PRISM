@@ -18,6 +18,7 @@ import {
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
 import { tryGenerateThumbAfterPngWrite } from "./image-thumb.ts";
+import { recordImageUsage } from "./usage.ts";
 
 const config = getAppConfig();
 
@@ -524,6 +525,19 @@ export async function runAssistantSentImageGeneration(args: {
         localRelPath,
         new Date().toISOString()
       );
+    recordImageUsage({
+      provider:
+        argsInsert.providerTag === "openai" ||
+        argsInsert.providerTag === "ollama" ||
+        argsInsert.providerTag === "comfyui"
+          ? argsInsert.providerTag
+          : "unknown",
+      model: argsInsert.modelUsed,
+      purpose: "image_generation",
+      imageCount: 1,
+      imageSize: requestedSize,
+      imageQuality: ASSISTANT_SENT_IMAGE_QUALITY,
+    });
   };
 
   const successPayload = (

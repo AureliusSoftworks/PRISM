@@ -371,7 +371,7 @@ export async function createZenSessionMemoryCheckpoint(args: {
     const raw = await provider.generateResponse([
       { role: "system", content: ZEN_SESSION_MEMORY_EXTRACT_PROMPT },
       { role: "user", content: `[Visible transcript]\n${transcript}` },
-    ]);
+    ], { usagePurpose: "memory_summary" });
     const parsed = parseCheckpointJson(raw);
     if (parsed?.text && parsed.text.trim().length > 0) {
       text = parsed.text;
@@ -569,7 +569,7 @@ export async function createZenPersonaSessionMemoryCheckpoint(args: {
           checkpointTranscript.transcript,
         ].join("\n"),
       },
-    ]);
+    ], { usagePurpose: "memory_summary" });
     const parsed = parseCheckpointJson(raw);
     if (parsed?.text && parsed.text.trim().length > 0) {
       text = parsed.text;

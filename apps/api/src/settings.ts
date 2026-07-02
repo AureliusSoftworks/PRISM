@@ -90,6 +90,7 @@ export interface CurrentSettings {
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
+  coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
   /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
   fallbackModelMessageStripe: number;
@@ -142,6 +143,7 @@ export interface NextSettings {
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
+  coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
   fallbackModelMessageStripe: number;
   hiddenBotModelIds: string[];
@@ -773,6 +775,10 @@ export function resolveNextSettings(
     typeof body.experimentalAllModelEffortEnabled === "boolean"
       ? Number(body.experimentalAllModelEffortEnabled)
       : current.experimentalAllModelEffortEnabled;
+  const coffeeExperimentalTableAngleEnabled =
+    typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
+      ? Number(body.coffeeExperimentalTableAngleEnabled)
+      : current.coffeeExperimentalTableAngleEnabled;
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1082,6 +1088,7 @@ export function resolveNextSettings(
     composerWritingAssist,
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
+    coffeeExperimentalTableAngleEnabled,
     psychicModeEnabled,
     fallbackModelMessageStripe,
     hiddenBotModelIds,

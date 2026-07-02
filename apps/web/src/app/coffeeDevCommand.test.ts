@@ -22,6 +22,23 @@ describe("parseCoffeeDevCommand", () => {
     }
   });
 
+  it("parses /dev as a Coffee debug toggle", () => {
+    assert.deepEqual(parseCoffeeDevCommand("/dev", BOTS, () => 0.5), {
+      kind: "toggleDev",
+    });
+    assert.deepEqual(parseCoffeeDevCommand("  /DEV  ", BOTS, () => 0.5), {
+      kind: "toggleDev",
+    });
+  });
+
+  it("rejects /dev with extra text", () => {
+    const out = parseCoffeeDevCommand("/dev please", BOTS, () => 0.5);
+    assert.equal(out.kind, "error");
+    if (out.kind === "error") {
+      assert.match(out.error, /Use `\/dev` by itself/i);
+    }
+  });
+
   it("parses /echo with --wait seconds", () => {
     const out = parseCoffeeDevCommand('/echo "hello there" --wait 5', BOTS, () => 0.99);
     assert.equal(out.kind, "ok");

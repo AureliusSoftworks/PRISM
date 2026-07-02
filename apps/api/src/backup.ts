@@ -3,6 +3,11 @@ import { decryptJson, decryptText, encryptJson, encryptText } from "./security.t
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
+  normalizeBotFaceFontId,
+  normalizeBotFaceFontWeight,
+  type BotFaceFontId,
+} from "@localai/shared";
+import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
   normalizeZenAutonomyEnabled,
@@ -23,6 +28,7 @@ export interface BackupUserSettings {
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
+  coffeeExperimentalTableAngleEnabled?: boolean;
   psychicModeEnabled?: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
@@ -74,6 +80,9 @@ export interface BackupBotSnapshot {
   maxTokens: number;
   color?: string | null;
   glyph?: string | null;
+  faceEyesFont?: BotFaceFontId | null;
+  faceMouthFont?: BotFaceFontId | null;
+  faceFontWeight?: number | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -156,6 +165,7 @@ export function exportUserSnapshot(
          composer_writing_assist,
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
+         coffee_experimental_table_angle_enabled,
          psychic_mode_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
@@ -206,6 +216,7 @@ export function exportUserSnapshot(
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
+        coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
@@ -256,6 +267,8 @@ export function exportUserSnapshot(
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
         experimentalAllModelEffortEnabled:
           user.experimental_all_model_effort_enabled === 1,
+        coffeeExperimentalTableAngleEnabled:
+          user.coffee_experimental_table_angle_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
@@ -370,6 +383,9 @@ export function exportUserSnapshot(
          max_tokens,
          color,
          glyph,
+         face_eyes_font,
+         face_mouth_font,
+         face_font_weight,
          chat_enabled,
          visibility,
          created_at,
@@ -395,6 +411,9 @@ export function exportUserSnapshot(
     max_tokens: number | null;
     color: string | null;
     glyph: string | null;
+    face_eyes_font: string | null;
+    face_mouth_font: string | null;
+    face_font_weight: number | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -498,6 +517,9 @@ export function exportUserSnapshot(
       maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
       color: bot.color,
       glyph: bot.glyph,
+      faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
+      faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
+      faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
       chatEnabled: bot.chat_enabled !== 0,
       visibility: bot.visibility === "public" ? "public" : "private",
       createdAt: bot.created_at,
@@ -570,6 +592,7 @@ export function importUserSnapshot(
         composer_writing_assist = ?,
         experimental_dual_ollama_enabled = ?,
         experimental_all_model_effort_enabled = ?,
+        coffee_experimental_table_angle_enabled = ?,
         psychic_mode_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
@@ -619,6 +642,7 @@ export function importUserSnapshot(
       settings.composerWritingAssist ? 1 : 0,
       settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
+      settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
@@ -695,11 +719,14 @@ export function importUserSnapshot(
         max_tokens,
         color,
         glyph,
+        face_eyes_font,
+        face_mouth_font,
+        face_font_weight,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -732,6 +759,9 @@ export function importUserSnapshot(
         typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
         typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0 ? bot.glyph.trim() : null,
+        normalizeBotFaceFontId(bot.faceEyesFont),
+        normalizeBotFaceFontId(bot.faceMouthFont),
+        normalizeBotFaceFontWeight(bot.faceFontWeight),
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,

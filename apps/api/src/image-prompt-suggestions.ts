@@ -116,6 +116,7 @@ export async function inferRandomImageSceneLine(
     const raw = await auxiliaryProvider.generateResponse(messages, {
       temperature: RANDOM_SCENE_TEMPERATURE,
       maxTokens: RANDOM_SCENE_MAX_TOKENS,
+      usagePurpose: "image_prompt",
     });
     return parseRandomImagePromptPayload(raw);
   } catch {
@@ -182,6 +183,7 @@ export async function inferBotImagePromptSuggestions(
     const raw = await auxiliaryProvider.generateResponse(messages, {
       temperature: INFER_TEMPERATURE,
       maxTokens: INFER_MAX_TOKENS,
+      usagePurpose: "image_prompt",
     });
     const parsed = parseImagePromptSuggestionsPayload(raw);
     return parsed;

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   COFFEE_SIP_ACTION_MIN_MESSAGE_GAP,
   clampCoffeeReplayMessageIndex,
+  coffeeActionAnimationStartedAtMs,
   coffeeActionsForMessage,
   coffeeActionCanDisplayWhileSpeaking,
   coffeeActionIsSip,
@@ -100,6 +101,28 @@ describe("coffee replay helpers", () => {
     );
   });
 
+  it("removes visible double quote marks from Coffee actions", () => {
+    const message = {
+      id: "m1",
+      role: "assistant",
+      botName: "Nova",
+      content: '*stares at "truth"* That tracks.',
+      coffeeAmbientAction: {
+        v: 1 as const,
+        name: "coffeeAmbientAction" as const,
+        source: "scripted" as const,
+        category: "cup" as const,
+        action: 'sets the "cup" down',
+      },
+    };
+
+    assert.deepEqual(coffeeActionsForMessage(message), [
+      "stares at truth",
+      "sets the cup down",
+    ]);
+    assert.equal(sanitizeCoffeeActionForBot('"strokes beard" thoughtfully'), "strokes beard thoughtfully");
+  });
+
   it("does not make metadata-only ambience a visible transcript row", () => {
     const messages = [
       {
@@ -163,6 +186,25 @@ describe("coffee replay helpers", () => {
       true
     );
     assert.equal(coffeeActionPassesSipCadence("nods slowly", 11, 10), true);
+  });
+
+  it("prefers first-visible timestamps for Coffee action animations", () => {
+    const firstVisibleAtMsByMessageId = new Map([["m1", 2_500]]);
+
+    assert.equal(
+      coffeeActionAnimationStartedAtMs(
+        { id: "m1", createdAt: "1970-01-01T00:00:01.000Z" },
+        firstVisibleAtMsByMessageId
+      ),
+      2_500
+    );
+    assert.equal(
+      coffeeActionAnimationStartedAtMs({
+        id: "m2",
+        createdAt: "1970-01-01T00:00:01.000Z",
+      }),
+      1_000
+    );
   });
 
   it("scales sip action throttling with Coffee session duration", () => {

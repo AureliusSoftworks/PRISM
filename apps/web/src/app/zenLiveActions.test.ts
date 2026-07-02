@@ -4,6 +4,8 @@ import {
   isZenLiveBotPresenceActionVerbose,
   resolveZenLiveBotPresenceActionText,
   sanitizeZenLiveBotActionText,
+  zenLiveBotCanvasSideFromCenterX,
+  zenLiveBotFaceScaleYForCanvasSide,
   zenLiveActionPlateFace,
 } from "./zenLiveActions.ts";
 
@@ -116,5 +118,25 @@ describe("zenLiveActionPlateFace", () => {
       text: ":]",
       rotateDeg: 90,
     });
+  });
+});
+
+describe("zenLiveBotCanvasSideFromCenterX", () => {
+  it("classifies the live avatar by screen half", () => {
+    assert.equal(zenLiveBotCanvasSideFromCenterX(240, 1000), "left");
+    assert.equal(zenLiveBotCanvasSideFromCenterX(760, 1000), "right");
+    assert.equal(zenLiveBotCanvasSideFromCenterX(500, 1000), "right");
+  });
+
+  it("falls back to left when geometry is unavailable", () => {
+    assert.equal(zenLiveBotCanvasSideFromCenterX(Number.NaN, 1000), "left");
+    assert.equal(zenLiveBotCanvasSideFromCenterX(240, 0), "left");
+  });
+});
+
+describe("zenLiveBotFaceScaleYForCanvasSide", () => {
+  it("flips left-side Zen bots to face right and leaves right-side bots facing left", () => {
+    assert.equal(zenLiveBotFaceScaleYForCanvasSide("left"), "-1");
+    assert.equal(zenLiveBotFaceScaleYForCanvasSide("right"), "1");
   });
 });

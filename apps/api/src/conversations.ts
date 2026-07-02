@@ -52,6 +52,8 @@ export interface ConversationSummary {
   botId: string | null;
   /** Coffee-only — the 2-5 bot ids participating in this group thread. */
   botGroupIds?: string[];
+  /** Coffee-only — invited bot ids that did not attend this session. */
+  coffeeAbsentBotIds?: string[];
   /** Coffee-only — durable parent group for recurring table sessions. */
   coffeeGroupId?: string | null;
   /** Coffee-only — timed session duration once group-owned sessions are used. */
@@ -872,12 +874,21 @@ export function deleteCoffeePollsForConversations(
   conversationIds: string[]
 ): void {
   if (conversationIds.length === 0) return;
+  const placeholders = inClausePlaceholders(conversationIds.length);
+  const topOffTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'coffee_cup_top_offs'")
+    .get() as { name?: string } | undefined;
+  if (topOffTable?.name) {
+    db.prepare(
+      `DELETE FROM coffee_cup_top_offs WHERE user_id = ? AND conversation_id IN (${placeholders})`
+    ).run(userId, ...conversationIds);
+  }
+
   const table = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'coffee_polls'")
     .get() as { name?: string } | undefined;
   if (!table?.name) return;
 
-  const placeholders = inClausePlaceholders(conversationIds.length);
   db.prepare(
     `DELETE FROM coffee_poll_votes WHERE user_id = ? AND conversation_id IN (${placeholders})`
   ).run(userId, ...conversationIds);
@@ -1067,10 +1078,13 @@ export function listConversationSummaries(
               'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
   // last_bot_id / last_bot_color come from the MOST RECENT assistant message on
   // the conversation, regardless of the conversation's locked bot_id.
+  const coffeeAbsentBotIdsSelect = conversationColumnNames.has("coffee_absent_bot_ids")
+    ? "c.coffee_absent_bot_ids"
+    : "'[]' AS coffee_absent_bot_ids";
   const rows = db
     .prepare(
       `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
-              c.coffee_group_id, c.coffee_duration_minutes,
+              c.coffee_group_id, c.coffee_duration_minutes, ${coffeeAbsentBotIdsSelect},
               c.incognito, c.created_at, c.updated_at,
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
@@ -1098,6 +1112,7 @@ export function listConversationSummaries(
     conversation_mode: string | null;
     bot_id: string | null;
     bot_group_ids: string | null;
+    coffee_absent_bot_ids: string | null;
     coffee_group_id: string | null;
     coffee_duration_minutes: number | null;
     incognito: number;
@@ -1124,12 +1139,16 @@ export function listConversationSummaries(
             ? "coffee"
             : "sandbox";
     const botGroupIds = parseBotGroupIdsForSummary(row.bot_group_ids);
+    const coffeeAbsentBotIds = parseBotGroupIdsForSummary(row.coffee_absent_bot_ids);
     return {
       id: row.id,
       title: row.title,
       mode,
       botId: row.bot_id ?? null,
       ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
+      ...(mode === "coffee" && coffeeAbsentBotIds.length > 0
+        ? { coffeeAbsentBotIds }
+        : {}),
       ...(mode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
       ...(mode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
         ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
