@@ -6,8 +6,22 @@ export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":*", rotateDeg: 90 } as cons
 export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.78;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
-const COFFEE_SEAT_SIP_MOUTH_LIFT_EM = -0.17;
-const COFFEE_SEAT_CENTER_SIP_MOUTH_LIFT_EM = -0.13;
+const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
+const COFFEE_SEAT_CENTER_SIP_MOUTH_DROP_EM = 0.13;
+
+export type CoffeeSeatSipPresentationReason =
+  | "explicit-sip"
+  | "completed-sip-hold"
+  | "cup-visual-sip"
+  | "none";
+
+export interface CoffeeSeatSipPresentation {
+  active: boolean;
+  reason: CoffeeSeatSipPresentationReason;
+  glyph: typeof COFFEE_SEAT_SIP_PLATE_GLYPH | null;
+  mouthOffsetX: string;
+  mouthOffsetY: string;
+}
 
 function coffeeSeatTimedSipFaceActive(args: {
   ageMs: number;
@@ -26,22 +40,35 @@ function coffeeSeatTimedSipFaceActive(args: {
   return args.ageMs <= durationMs * COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS;
 }
 
+function coffeeSeatSipPresentationReason(args: {
+  sipInProgress: boolean;
+  completedSipAnimationAgeMs: number;
+  completedSipAnimationDurationMs?: number | null;
+  cupSipping?: boolean | null;
+  seatIsFirmlySeated?: boolean | null;
+  isSpeaking?: boolean | null;
+}): CoffeeSeatSipPresentationReason {
+  if (args.seatIsFirmlySeated === false || args.isSpeaking === true) return "none";
+  if (args.sipInProgress) return "explicit-sip";
+  const timedSipFaceActive = coffeeSeatTimedSipFaceActive({
+    ageMs: args.completedSipAnimationAgeMs,
+    durationMs: args.completedSipAnimationDurationMs,
+  });
+  if (timedSipFaceActive === true) return "completed-sip-hold";
+  if (timedSipFaceActive === false) return "none";
+  if (args.cupSipping === true) return "cup-visual-sip";
+  return "none";
+}
+
 export function coffeeSeatSipFaceActive(args: {
   sipInProgress: boolean;
   completedSipAnimationAgeMs: number;
   completedSipAnimationDurationMs?: number | null;
   cupSipping?: boolean | null;
+  seatIsFirmlySeated?: boolean | null;
+  isSpeaking?: boolean | null;
 }): boolean {
-  if (args.sipInProgress) return true;
-  const timedSipFaceActive = coffeeSeatTimedSipFaceActive({
-    ageMs: args.completedSipAnimationAgeMs,
-    durationMs: args.completedSipAnimationDurationMs,
-  });
-  if (timedSipFaceActive != null) {
-    return timedSipFaceActive;
-  }
-  if (args.cupSipping === true) return true;
-  return false;
+  return coffeeSeatSipPresentationReason(args) !== "none";
 }
 
 export function coffeeSeatSipMouthOffsetY(args: {
@@ -66,10 +93,40 @@ export function coffeeSeatSipMouthOffsetY(args: {
 export function coffeeSeatSipMouthOffsetX(args: {
   seatHorizontalSide?: -1 | 0 | 1;
 }): string {
-  const liftEm = args.seatHorizontalSide === 0
-    ? COFFEE_SEAT_CENTER_SIP_MOUTH_LIFT_EM
-    : COFFEE_SEAT_SIP_MOUTH_LIFT_EM;
-  return `${liftEm.toFixed(2)}em`;
+  // After the 90deg parent face rotation, positive local X reads as screen-down,
+  // which puts the pucker closer to the lower cup rim.
+  const dropEm = args.seatHorizontalSide === 0
+    ? COFFEE_SEAT_CENTER_SIP_MOUTH_DROP_EM
+    : COFFEE_SEAT_SIP_MOUTH_DROP_EM;
+  return `${dropEm.toFixed(2)}em`;
+}
+
+export function resolveCoffeeSeatSipFacePresentation(args: {
+  sipInProgress: boolean;
+  completedSipAnimationAgeMs: number;
+  completedSipAnimationDurationMs?: number | null;
+  cupSipping?: boolean | null;
+  seatIsFirmlySeated?: boolean | null;
+  isSpeaking?: boolean | null;
+  cupSide: "left" | "right";
+  faceScaleY: string | number;
+  seatHorizontalSide?: -1 | 0 | 1;
+}): CoffeeSeatSipPresentation {
+  const reason = coffeeSeatSipPresentationReason(args);
+  const active = reason !== "none";
+  return {
+    active,
+    reason,
+    glyph: active ? COFFEE_SEAT_SIP_PLATE_GLYPH : null,
+    mouthOffsetX: coffeeSeatSipMouthOffsetX({
+      seatHorizontalSide: args.seatHorizontalSide,
+    }),
+    mouthOffsetY: coffeeSeatSipMouthOffsetY({
+      cupSide: args.cupSide,
+      faceScaleY: args.faceScaleY,
+      seatHorizontalSide: args.seatHorizontalSide,
+    }),
+  };
 }
 
 function coffeeSeatOpenMouthGlyph(mouthShape: ZenLiveBotMouthShape): string | null {

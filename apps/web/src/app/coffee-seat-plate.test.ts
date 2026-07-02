@@ -7,6 +7,7 @@ import {
   coffeeSeatSipFaceActive,
   coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
+  resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
 
 describe("coffeeSeatPlateGlyph", () => {
@@ -62,6 +63,74 @@ describe("coffeeSeatPlateGlyph", () => {
     });
   });
 
+  it("resolves explicit sips into one active presentation contract", () => {
+    const presentation = resolveCoffeeSeatSipFacePresentation({
+      sipInProgress: true,
+      completedSipAnimationAgeMs: Number.POSITIVE_INFINITY,
+      completedSipAnimationDurationMs: null,
+      cupSipping: false,
+      seatIsFirmlySeated: true,
+      isSpeaking: false,
+      cupSide: "left",
+      faceScaleY: "1",
+      seatHorizontalSide: -1,
+    });
+
+    assert.equal(presentation.active, true);
+    assert.equal(presentation.reason, "explicit-sip");
+    assert.deepEqual(presentation.glyph, COFFEE_SEAT_SIP_PLATE_GLYPH);
+    assert.equal(presentation.mouthOffsetX, "0.17em");
+    assert.equal(presentation.mouthOffsetY, "0.48em");
+  });
+
+  it("uses cup-visual sipping only when no explicit sip hold has decided the face", () => {
+    assert.equal(
+      resolveCoffeeSeatSipFacePresentation({
+        sipInProgress: false,
+        completedSipAnimationAgeMs: Number.POSITIVE_INFINITY,
+        completedSipAnimationDurationMs: null,
+        cupSipping: true,
+        cupSide: "right",
+        faceScaleY: "1",
+        seatHorizontalSide: 1,
+      }).reason,
+      "cup-visual-sip"
+    );
+    assert.equal(
+      resolveCoffeeSeatSipFacePresentation({
+        sipInProgress: false,
+        completedSipAnimationAgeMs: 790,
+        completedSipAnimationDurationMs: 1000,
+        cupSipping: true,
+        cupSide: "right",
+        faceScaleY: "1",
+        seatHorizontalSide: 1,
+      }).reason,
+      "none"
+    );
+  });
+
+  it("suppresses sip face presentation while speaking or before the seat is firm", () => {
+    for (const blocked of [
+      { seatIsFirmlySeated: false, isSpeaking: false },
+      { seatIsFirmlySeated: true, isSpeaking: true },
+    ]) {
+      const presentation = resolveCoffeeSeatSipFacePresentation({
+        sipInProgress: true,
+        completedSipAnimationAgeMs: 0,
+        completedSipAnimationDurationMs: 1000,
+        cupSipping: true,
+        cupSide: "left",
+        faceScaleY: "1",
+        seatHorizontalSide: -1,
+        ...blocked,
+      });
+      assert.equal(presentation.active, false);
+      assert.equal(presentation.reason, "none");
+      assert.equal(presentation.glyph, null);
+    }
+  });
+
   it("keeps the sip face active whenever the cup visual is sipping", () => {
     assert.equal(
       coffeeSeatSipFaceActive({
@@ -115,29 +184,36 @@ describe("coffeeSeatPlateGlyph", () => {
     );
   });
 
-  it("places the sip mouth toward the rendered cup rim after face flipping", () => {
-    assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "1", seatHorizontalSide: -1 }),
-      "0.48em"
-    );
-    assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "1", seatHorizontalSide: 1 }),
-      "-0.48em"
-    );
-    assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "-1", seatHorizontalSide: -1 }),
-      "-0.48em"
-    );
-    assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 1 }),
-      "0.48em"
-    );
+  it("places the sip mouth on the correct side of the bot plate after face flipping", () => {
+    for (const [cupSide, faceScaleY, seatHorizontalSide, expected] of [
+      ["left", "1", -1, "0.48em"],
+      ["right", "1", 1, "-0.48em"],
+      ["left", "-1", -1, "-0.48em"],
+      ["right", "-1", 1, "0.48em"],
+    ] as const) {
+      assert.equal(
+        coffeeSeatSipMouthOffsetY({ cupSide, faceScaleY, seatHorizontalSide }),
+        expected
+      );
+      assert.equal(
+        resolveCoffeeSeatSipFacePresentation({
+          sipInProgress: true,
+          completedSipAnimationAgeMs: 0,
+          completedSipAnimationDurationMs: 1000,
+          cupSipping: false,
+          cupSide,
+          faceScaleY,
+          seatHorizontalSide,
+        }).mouthOffsetY,
+        expected
+      );
+    }
   });
 
-  it("lifts the sip mouth toward the cup rim instead of the normal mouth row", () => {
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: -1 }), "-0.17em");
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 1 }), "-0.17em");
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }), "-0.13em");
+  it("drops the sip mouth toward the cup rim instead of lifting it away", () => {
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: -1 }), "0.17em");
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 1 }), "0.17em");
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }), "0.13em");
   });
 
   it("centers center-band sip mouths closer to the face", () => {

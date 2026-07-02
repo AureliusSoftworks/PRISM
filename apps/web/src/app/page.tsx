@@ -73,11 +73,8 @@ import {
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
 import {
-  COFFEE_SEAT_SIP_PLATE_GLYPH,
-  coffeeSeatSipFaceActive,
-  coffeeSeatSipMouthOffsetX,
-  coffeeSeatSipMouthOffsetY,
   coffeeSeatPlateGlyph,
+  resolveCoffeeSeatSipFacePresentation,
   type CoffeeSeatEmojiMood,
 } from "./coffee-seat-plate";
 import {
@@ -73593,16 +73590,19 @@ function HomeContent(): React.JSX.Element {
               speaking: isTableTypingThisSeat,
               finishSeed: coffeeCupFinishSeed,
             });
-            const seatSipFaceActive = coffeeSeatSipFaceActive({
+            const seatSipPresentation = resolveCoffeeSeatSipFacePresentation({
               sipInProgress: seatSipInProgress,
               completedSipAnimationAgeMs,
               completedSipAnimationDurationMs: completedSipAnimationTiming?.durationMs ?? null,
               cupSipping: coffeeCupVisual.sipping,
+              isSpeaking: isTableTypingThisSeat,
+              cupSide: coffeeCupSide,
+              faceScaleY: coffeePlateFaceScaleY,
+              seatHorizontalSide: resolvedSeatHorizontalSide,
             });
             const seatPlateGlyph =
-              seatSipFaceActive
-                ? COFFEE_SEAT_SIP_PLATE_GLYPH
-                : coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+              seatSipPresentation.glyph ??
+              coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
             const activeCoffeeCupTopOffAnimation =
               coffeeCupTopOffAnimation?.botId === bot.id ? coffeeCupTopOffAnimation : null;
             const coffeeCupTopOffActiveFillFrameIndex =
@@ -73628,14 +73628,8 @@ function HomeContent(): React.JSX.Element {
             } as React.CSSProperties;
             const coffeeHeadPlateStyle = {
               ["--coffee-plate-emoji-face-scale-y" as string]: coffeePlateFaceScaleY,
-              ["--coffee-seat-sip-mouth-offset-x" as string]: coffeeSeatSipMouthOffsetX({
-                seatHorizontalSide: resolvedSeatHorizontalSide,
-              }),
-              ["--coffee-seat-sip-mouth-offset-y" as string]: coffeeSeatSipMouthOffsetY({
-                cupSide: coffeeCupSide,
-                faceScaleY: coffeePlateFaceScaleY,
-                seatHorizontalSide: resolvedSeatHorizontalSide,
-              }),
+              ["--coffee-seat-sip-mouth-offset-x" as string]: seatSipPresentation.mouthOffsetX,
+              ["--coffee-seat-sip-mouth-offset-y" as string]: seatSipPresentation.mouthOffsetY,
             } as React.CSSProperties;
             return (
               <button
@@ -73659,6 +73653,9 @@ function HomeContent(): React.JSX.Element {
                 data-roster-preview={rosterPreviewSeat ? "true" : undefined}
                 data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
                 data-top-head-seat={isTopHeadSeat ? "true" : undefined}
+                data-sip-face-reason={
+                  seatSipPresentation.active ? seatSipPresentation.reason : undefined
+                }
                 style={seatStyle}
                 disabled={!seatInteractive}
                 onPointerDown={(event) =>
