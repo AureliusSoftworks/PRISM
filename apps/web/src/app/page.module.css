@@ -42445,7 +42445,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="*"] {
-  transform: translateY(var(--coffee-seat-sip-mouth-offset-y, 0.44em));
+  transform: translate(
+    var(--coffee-seat-sip-mouth-offset-x, -0.17em),
+    var(--coffee-seat-sip-mouth-offset-y, 0.48em)
+  );
 }
 
 .coffeeSeat[data-table-speaking="true"] .coffeeSeatPlateEmoji {

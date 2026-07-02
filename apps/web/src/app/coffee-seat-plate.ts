@@ -4,8 +4,10 @@ export type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry"
 
 export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":*", rotateDeg: 90 } as const;
 export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.78;
-const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.44;
-const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.26;
+const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
+const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
+const COFFEE_SEAT_SIP_MOUTH_LIFT_EM = -0.17;
+const COFFEE_SEAT_CENTER_SIP_MOUTH_LIFT_EM = -0.13;
 
 function coffeeSeatTimedSipFaceActive(args: {
   ageMs: number;
@@ -59,6 +61,15 @@ export function coffeeSeatSipMouthOffsetY(args: {
     ? COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM
     : COFFEE_SEAT_SIP_MOUTH_OFFSET_EM;
   return `${(offsetEm * rimDirection).toFixed(2)}em`;
+}
+
+export function coffeeSeatSipMouthOffsetX(args: {
+  seatHorizontalSide?: -1 | 0 | 1;
+}): string {
+  const liftEm = args.seatHorizontalSide === 0
+    ? COFFEE_SEAT_CENTER_SIP_MOUTH_LIFT_EM
+    : COFFEE_SEAT_SIP_MOUTH_LIFT_EM;
+  return `${liftEm.toFixed(2)}em`;
 }
 
 function coffeeSeatOpenMouthGlyph(mouthShape: ZenLiveBotMouthShape): string | null {

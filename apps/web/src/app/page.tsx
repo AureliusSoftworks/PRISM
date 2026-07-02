@@ -57,6 +57,14 @@ import {
   type CoffeeCupVisualState,
 } from "./coffee-cup-sprites";
 import {
+  COFFEE_POT_FILL_CLEAR_MS,
+  COFFEE_POT_FINAL_POUR_FRAME_INDEX,
+  COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS,
+  coffeePotPourFrameDelayMs,
+  coffeePotRefillCanComplete,
+  coffeePotRefillTargetState,
+} from "./coffee-pot-refill";
+import {
   coffeePlateFaceScaleYFromSeatHorizontalSide,
   coffeeHeadGazeHorizontalSign,
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
@@ -67,6 +75,7 @@ import {
 import {
   COFFEE_SEAT_SIP_PLATE_GLYPH,
   coffeeSeatSipFaceActive,
+  coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
   coffeeSeatPlateGlyph,
   type CoffeeSeatEmojiMood,
@@ -4722,6 +4731,7 @@ interface CoffeeSeatDebugDragState {
 interface CoffeePotDragRuntimeState {
   pointerId: number;
   stageRect: DOMRect;
+  completedBotIds: Set<string>;
 }
 
 interface CoffeePotDragState {
@@ -4738,9 +4748,6 @@ interface CoffeeCupTopOffAnimationState {
   key: string;
   fromFrameIndex: number;
 }
-
-const COFFEE_POT_LIFT_BEFORE_POUR_MS = 190;
-const COFFEE_POT_FINAL_POUR_FRAME_INDEX = 4;
 
 interface CoffeeDevCopiedCoordinates {
   text: string;
@@ -36325,6 +36332,9 @@ function HomeContent(): React.JSX.Element {
   const coffeePotDragRef = useRef<CoffeePotDragState | null>(null);
   const coffeePotPourFrameIndexRef = useRef(0);
   const coffeePotPourReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const topOffCoffeeCupFromPotRef = useRef<(botId: string, progress: number) => void>(
+    () => {}
+  );
   const coffeeCupTopOffAnimationActiveBotIdRef = useRef<string | null>(null);
   const coffeeCupTopOffAnimationActiveKeyRef = useRef<string | null>(null);
   const coffeeCupTopOffAnimationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -36332,7 +36342,14 @@ function HomeContent(): React.JSX.Element {
   );
   const [coffeePotDrag, setCoffeePotDrag] = useState<CoffeePotDragState | null>(null);
   const [coffeePotPourFrameIndex, setCoffeePotPourFrameIndex] = useState(0);
-  const [coffeePotTopOffBusyBotId, setCoffeePotTopOffBusyBotId] = useState<string | null>(null);
+  const coffeePotTopOffBusyBotIdRef = useRef<string | null>(null);
+  const [coffeePotTopOffBusyBotIdState, setCoffeePotTopOffBusyBotIdState] =
+    useState<string | null>(null);
+  const setCoffeePotTopOffBusyBotId = useCallback((botId: string | null): void => {
+    coffeePotTopOffBusyBotIdRef.current = botId;
+    setCoffeePotTopOffBusyBotIdState(botId);
+  }, []);
+  const coffeePotTopOffBusyBotId = coffeePotTopOffBusyBotIdState;
   const [coffeeCupTopOffAnimation, setCoffeeCupTopOffAnimation] =
     useState<CoffeeCupTopOffAnimationState | null>(null);
   const clearCoffeeCupTopOffFillAnimation = useCallback(() => {
@@ -36496,23 +36513,74 @@ function HomeContent(): React.JSX.Element {
       setCoffeePotPourFrame(0);
       return;
     }
+    const pointerId = coffeePotDrag.pointerId;
+    const pouringBotId = coffeePotDrag.pouringBotId;
+    const pourProgress = coffeePotDrag.pourProgress;
+    const completeRefillIfReady = (frameIndex: number): void => {
+      const latest = coffeePotDragRef.current;
+      const completion = {
+        pouringBotId: latest?.pouringBotId ?? null,
+        pourProgress: latest?.pourProgress ?? null,
+        pourReady: latest?.pourReady ?? false,
+        pourFrameIndex: frameIndex,
+        busyBotId: coffeePotTopOffBusyBotIdRef.current,
+      };
+      if (
+        !latest ||
+        latest.pointerId !== pointerId ||
+        latest.pouringBotId !== pouringBotId ||
+        latest.pourProgress !== pourProgress ||
+        !coffeePotRefillCanComplete(completion)
+      ) {
+        return;
+      }
+      coffeePotDragRuntimeRef.current?.completedBotIds.add(completion.pouringBotId);
+      const next = {
+        ...latest,
+        pouringBotId: null,
+        pourProgress: null,
+        pourReady: false,
+      };
+      coffeePotDragRef.current = next;
+      setCoffeePotDrag(next);
+      topOffCoffeeCupFromPotRef.current(completion.pouringBotId, completion.pourProgress);
+    };
     if (
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       setCoffeePotPourFrame(COFFEE_POT_FINAL_POUR_FRAME_INDEX);
+      const timeout = window.setTimeout(() => {
+        completeRefillIfReady(COFFEE_POT_FINAL_POUR_FRAME_INDEX);
+      }, 0);
+      return () => {
+        window.clearTimeout(timeout);
+      };
+    }
+    if (!pouringBotId || pourProgress == null) {
+      setCoffeePotPourFrame(0);
       return;
     }
     setCoffeePotPourFrame(0);
     const timeouts = [1, 2, 3, 4].map((frame) =>
       window.setTimeout(() => {
         setCoffeePotPourFrame(frame);
-      }, frame * 86)
+        if (frame >= COFFEE_POT_FINAL_POUR_FRAME_INDEX) {
+          completeRefillIfReady(frame);
+        }
+      }, coffeePotPourFrameDelayMs(frame))
     );
     return () => {
       timeouts.forEach((timeout) => window.clearTimeout(timeout));
     };
-  }, [coffeePotDrag?.pourReady, setCoffeePotPourFrame]);
+  }, [
+    coffeePotDrag?.pointerId,
+    coffeePotDrag?.pouringBotId,
+    coffeePotDrag?.pourProgress,
+    coffeePotDrag?.pourReady,
+    coffeePotTopOffBusyBotId,
+    setCoffeePotPourFrame,
+  ]);
   useEffect(() => {
     if (
       !coffeePotDrag?.pourReady ||
@@ -36555,7 +36623,7 @@ function HomeContent(): React.JSX.Element {
         coffeePotDragRef.current = next;
         return next;
       });
-    }, COFFEE_POT_LIFT_BEFORE_POUR_MS);
+    }, COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS);
     return () => {
       if (coffeePotPourReadyTimerRef.current) {
         clearTimeout(coffeePotPourReadyTimerRef.current);
@@ -69041,13 +69109,15 @@ function HomeContent(): React.JSX.Element {
   };
   const coffeeCupTopOffTargetAtPoint = (
     clientX: number,
-    clientY: number
+    clientY: number,
+    excludedBotIds?: ReadonlySet<string>
   ): { botId: string; progress: number } | null => {
     for (const [botId, node] of coffeeCupElementByBotIdRef.current.entries()) {
       if (!node.isConnected) {
         coffeeCupElementByBotIdRef.current.delete(botId);
         continue;
       }
+      if (excludedBotIds?.has(botId)) continue;
       if (node.dataset.cupTopOffEligible !== "true") continue;
       const rect = node.getBoundingClientRect();
       if (
@@ -69072,20 +69142,26 @@ function HomeContent(): React.JSX.Element {
     }
   };
   const startCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
-    if (event.button !== 0 || coffeePotTopOffBusyBotId) return;
+    if (event.button !== 0 || coffeePotTopOffBusyBotIdRef.current) return;
     const stage = coffeeStageRef.current;
     if (!stage) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const stageRect = stage.getBoundingClientRect();
-    coffeePotDragRuntimeRef.current = {
+    const runtime: CoffeePotDragRuntimeState = {
       pointerId: event.pointerId,
       stageRect,
+      completedBotIds: new Set(),
     };
+    coffeePotDragRuntimeRef.current = runtime;
     const x = Math.max(0, Math.min(stageRect.width, event.clientX - stageRect.left));
     const y = Math.max(0, Math.min(stageRect.height, event.clientY - stageRect.top));
-    const target = coffeeCupTopOffTargetAtPoint(event.clientX, event.clientY);
+    const target = coffeeCupTopOffTargetAtPoint(
+      event.clientX,
+      event.clientY,
+      runtime.completedBotIds
+    );
     clearCoffeeCupTopOffFillAnimation();
     const nextDrag = {
       pointerId: event.pointerId,
@@ -69105,20 +69181,29 @@ function HomeContent(): React.JSX.Element {
     const { stageRect } = runtime;
     const x = Math.max(0, Math.min(stageRect.width, event.clientX - stageRect.left));
     const y = Math.max(0, Math.min(stageRect.height, event.clientY - stageRect.top));
-    const target = coffeeCupTopOffTargetAtPoint(event.clientX, event.clientY);
+    const target =
+      coffeePotTopOffBusyBotIdRef.current == null
+        ? coffeeCupTopOffTargetAtPoint(event.clientX, event.clientY, runtime.completedBotIds)
+        : null;
     const current = coffeePotDragRef.current;
     if (!current || current.pointerId !== event.pointerId) return;
-    const nextPouringBotId = target?.botId ?? null;
-    if (current.pouringBotId !== nextPouringBotId) {
+    const targetState = coffeePotRefillTargetState({
+      currentBotId: current.pouringBotId,
+      currentPourReady: current.pourReady,
+      target,
+    });
+    if (
+      current.pourReady &&
+      current.pouringBotId !== null &&
+      current.pouringBotId !== targetState.pouringBotId
+    ) {
       clearCoffeeCupTopOffFillAnimation();
     }
     const nextDrag = {
       pointerId: event.pointerId,
       x,
       y,
-      pouringBotId: nextPouringBotId,
-      pourProgress: target?.progress ?? null,
-      pourReady: current.pouringBotId === nextPouringBotId ? current.pourReady : false,
+      ...targetState,
     };
     coffeePotDragRef.current = nextDrag;
     setCoffeePotDrag(nextDrag);
@@ -69126,16 +69211,10 @@ function HomeContent(): React.JSX.Element {
   const finishCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
     const runtime = coffeePotDragRuntimeRef.current;
     if (!runtime || runtime.pointerId !== event.pointerId) return;
-    const drag = coffeePotDragRef.current;
-    const completedPourBotId =
-      event.type === "pointerup" &&
-      drag?.pointerId === event.pointerId &&
-      drag.pourReady &&
-      coffeePotPourFrameIndexRef.current >= COFFEE_POT_FINAL_POUR_FRAME_INDEX
-        ? drag.pouringBotId
-        : null;
-    const completedPourProgress =
-      completedPourBotId && drag?.pourProgress != null ? drag.pourProgress : null;
+    const activeTopOffBotId = coffeeCupTopOffAnimationActiveBotIdRef.current;
+    const keepFillAnimation =
+      coffeePotTopOffBusyBotIdRef.current !== null ||
+      (activeTopOffBotId !== null && runtime.completedBotIds.has(activeTopOffBotId));
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -69146,15 +69225,13 @@ function HomeContent(): React.JSX.Element {
       coffeePotPourReadyTimerRef.current = null;
     }
     setCoffeePotDrag(null);
-    if (completedPourBotId && completedPourProgress != null) {
-      void topOffCoffeeCupFromPot(completedPourBotId, completedPourProgress);
-    } else {
+    if (!keepFillAnimation) {
       clearCoffeeCupTopOffFillAnimation();
     }
   };
   const topOffCoffeeCupFromPot = async (botId: string, progress: number): Promise<void> => {
     const conversation = coffeeConversationRef.current ?? coffeeConversation;
-    if (!conversation || coffeePotTopOffBusyBotId) return;
+    if (!conversation || coffeePotTopOffBusyBotIdRef.current) return;
     setCoffeePotTopOffBusyBotId(botId);
     setCoffeeError(null);
     try {
@@ -69174,7 +69251,7 @@ function HomeContent(): React.JSX.Element {
       }
       coffeeCupTopOffAnimationClearTimerRef.current = setTimeout(() => {
         clearCoffeeCupTopOffFillAnimation();
-      }, 220);
+      }, COFFEE_POT_FILL_CLEAR_MS);
       void refreshConversations();
     } catch (err) {
       clearCoffeeCupTopOffFillAnimation();
@@ -69182,6 +69259,9 @@ function HomeContent(): React.JSX.Element {
     } finally {
       setCoffeePotTopOffBusyBotId(null);
     }
+  };
+  topOffCoffeeCupFromPotRef.current = (botId, progress) => {
+    void topOffCoffeeCupFromPot(botId, progress);
   };
   const copyCoffeeSeatDebugCoordinates = async (text: string) => {
     try {
@@ -73548,6 +73628,9 @@ function HomeContent(): React.JSX.Element {
             } as React.CSSProperties;
             const coffeeHeadPlateStyle = {
               ["--coffee-plate-emoji-face-scale-y" as string]: coffeePlateFaceScaleY,
+              ["--coffee-seat-sip-mouth-offset-x" as string]: coffeeSeatSipMouthOffsetX({
+                seatHorizontalSide: resolvedSeatHorizontalSide,
+              }),
               ["--coffee-seat-sip-mouth-offset-y" as string]: coffeeSeatSipMouthOffsetY({
                 cupSide: coffeeCupSide,
                 faceScaleY: coffeePlateFaceScaleY,
