@@ -4835,7 +4835,7 @@ describe("buildSpeakerPrompt", () => {
     assert.doesNotMatch(combined, /wind down organically/);
   });
 
-  it("teaches the speaker to chip-format direct address with peer-only roster markdown", () => {
+  it("teaches the speaker that plain peer names are attention cues", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS, CARA],
@@ -4848,12 +4848,14 @@ describe("buildSpeakerPrompt", () => {
       },
     });
     const combined = messages.map((m) => m.content).join("\n");
-    assert.match(combined, /Direct-address chip format \(use sparingly\)/);
+    assert.match(combined, /Bot-name attention cues \(use sparingly\)/);
     assert.match(combined, /\[Boris\]\(prism-bot:\/\/bot-boris\)/);
     assert.match(combined, /\[Cara\]\(prism-bot:\/\/bot-cara\)/);
     assert.doesNotMatch(combined, /\[Alice\]\(prism-bot:\/\/bot-alice\)/);
     assert.match(combined, /Most of your lines should NOT call anyone out by name/);
-    assert.match(combined, /Third-person references/);
+    assert.match(combined, /plain names like/);
+    assert.match(combined, /treated as an attention cue/);
+    assert.match(combined, /You do not need @/);
     assert.match(combined, /Never invent a botId/);
     assert.match(combined, /orphan brackets show up as a visible glitch/);
   });
@@ -7047,13 +7049,13 @@ describe("buildCoffeeTableTuningAppendix", () => {
 });
 
 describe("autoTagPeerMentionsInCoffeeReply", () => {
-  it("leaves a bare peer name as prose for client-side soft coloring", () => {
+  it("upgrades a bare peer name into an attention mention", () => {
     const out = autoTagPeerMentionsInCoffeeReply(
       "I think Boris is overreacting.",
       ALICE,
       [ALICE, BORIS, CARA]
     );
-    assert.equal(out, "I think Boris is overreacting.");
+    assert.equal(out, "I think [Boris](prism-bot://bot-boris) is overreacting.");
   });
 
   it("upgrades an @-prefixed peer name", () => {
@@ -7078,9 +7080,10 @@ describe("autoTagPeerMentionsInCoffeeReply", () => {
   it("leaves text inside an existing prism-bot link untouched", () => {
     const original = "[Boris](prism-bot://bot-boris) said it best — Boris is right.";
     const out = autoTagPeerMentionsInCoffeeReply(original, ALICE, [ALICE, BORIS, CARA]);
-    // The existing link stays a link; the second bare "Boris" stays prose for
-    // client-side soft coloring.
-    assert.equal(out, original);
+    assert.equal(
+      out,
+      "[Boris](prism-bot://bot-boris) said it best — [Boris](prism-bot://bot-boris) is right."
+    );
   });
 
   it("does not split a peer name that is part of a longer word", () => {
@@ -7090,6 +7093,15 @@ describe("autoTagPeerMentionsInCoffeeReply", () => {
       [ALICE, BORIS, CARA]
     );
     assert.equal(out, "Borisland is not a place.");
+  });
+
+  it("folds possessive suffixes after the attention mention", () => {
+    const out = autoTagPeerMentionsInCoffeeReply(
+      "Boris's point still lands.",
+      ALICE,
+      [ALICE, BORIS, CARA]
+    );
+    assert.equal(out, "[Boris](prism-bot://bot-boris)'s point still lands.");
   });
 
   it("returns the input unchanged when no peers match", () => {
