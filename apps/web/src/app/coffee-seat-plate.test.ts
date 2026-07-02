@@ -5,6 +5,7 @@ import {
   COFFEE_SEAT_SIP_PLATE_GLYPH,
   coffeeSeatPlateGlyph,
   coffeeSeatSipFaceActive,
+  coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
 } from "./coffee-seat-plate.ts";
 
@@ -117,30 +118,36 @@ describe("coffeeSeatPlateGlyph", () => {
   it("places the sip mouth toward the rendered cup rim after face flipping", () => {
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "1", seatHorizontalSide: -1 }),
-      "0.44em"
+      "0.48em"
     );
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "1", seatHorizontalSide: 1 }),
-      "-0.44em"
+      "-0.48em"
     );
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "-1", seatHorizontalSide: -1 }),
-      "-0.44em"
+      "-0.48em"
     );
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 1 }),
-      "0.44em"
+      "0.48em"
     );
+  });
+
+  it("lifts the sip mouth toward the cup rim instead of the normal mouth row", () => {
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: -1 }), "-0.17em");
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 1 }), "-0.17em");
+    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }), "-0.13em");
   });
 
   it("centers center-band sip mouths closer to the face", () => {
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "1", seatHorizontalSide: 0 }),
-      "0.26em"
+      "0.36em"
     );
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 0 }),
-      "0.26em"
+      "0.36em"
     );
   });
 });
