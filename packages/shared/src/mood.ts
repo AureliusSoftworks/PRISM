@@ -122,6 +122,23 @@ function roundedUnit(value: number): number {
 
 export const COFFEE_NEAR_DESATURATED_SATURATION = 0.18;
 
+export function coffeeDepartureChanceFromSocial(
+  social: CoffeeSocialLikeSnapshot
+): number {
+  const disposition = clampPrismMoodValue(social.disposition);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const valuesFriction = clampPrismMoodValue(social.valuesFriction);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const chance =
+    leavePressure * 0.5 +
+    (1 - engagement) * 0.22 +
+    valuesFriction * 0.14 +
+    (1 - disposition) * 0.1 +
+    (1 - restraint) * 0.04;
+  return Math.round(Math.max(0, Math.min(1, chance)) * 1000) / 1000;
+}
+
 export function coffeeMoodSaturationFromSocial(
   social: CoffeeSocialLikeSnapshot
 ): number {
@@ -134,13 +151,20 @@ export function coffeeMoodSaturationFromSocial(
     disposition * 0.34 +
     engagement * 0.24 +
     (1 - valuesFriction) * 0.24 +
-    (1 - leavePressure) * 0.14 +
-    restraint * 0.04;
+    (1 - leavePressure) * 0.08 +
+    restraint * 0.1;
   const strain = Math.max(
-    valuesFriction * 0.48 + leavePressure * 0.52,
-    (1 - disposition) * 0.54 + (1 - engagement) * 0.46
+    valuesFriction * 0.42 + leavePressure * 0.32,
+    (1 - disposition) * 0.56 + (1 - engagement) * 0.44
   );
-  const saturation = 0.08 + socialHealth * 1.3 - Math.max(0, strain - 0.64) * 0.72;
+  const departureChance = coffeeDepartureChanceFromSocial(social);
+  const departureFadeBase = Math.max(0, (departureChance - 0.62) / 0.38);
+  const departureFade = Math.pow(departureFadeBase, 1.35) * 0.52;
+  const saturation =
+    0.12 +
+    socialHealth * 1.22 -
+    Math.max(0, strain - 0.72) * 0.7 -
+    departureFade;
   return Math.round(Math.max(0.06, Math.min(1.38, saturation)) * 1000) / 1000;
 }
 
@@ -149,8 +173,7 @@ export function coffeeSocialSnapshotIsNearDesaturated(
 ): boolean {
   return (
     coffeeMoodSaturationFromSocial(social) <= COFFEE_NEAR_DESATURATED_SATURATION ||
-    (clampPrismMoodValue(social.leavePressure) >= 0.88 &&
-      clampPrismMoodValue(social.valuesFriction) >= 0.72) ||
+    coffeeDepartureChanceFromSocial(social) >= 0.82 ||
     (clampPrismMoodValue(social.disposition) <= 0.16 &&
       clampPrismMoodValue(social.engagement) <= 0.22)
   );

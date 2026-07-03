@@ -144,7 +144,7 @@ export function deleteBot(
     throw new Error("Bot not found.");
   }
   if (existing.delete_protected === 1) {
-    throw new Error("This bot is protected. Toggle delete protection off first.");
+    throw new Error("This bot is protected. Allow deletion from its group dashboard first.");
   }
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");

@@ -3,15 +3,12 @@ import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
 import {
   analyzeMemoryIntent,
-  hasAboutYouMemoryForBot,
-  buildInitialAboutYouMemoryText,
   extractBotJudgmentMemoryCandidates,
   demoteMemoryToShortTerm,
   deleteMemoryById,
   findMemoryByCue,
   memoryQualifiesLongTerm,
   persistMemoryCandidates,
-  restoreMemory,
   retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
 } from "./memory.ts";
@@ -5993,41 +5990,6 @@ async function handleSandboxTurn(args: {
   return { threadSummary, memoryLines: [], mentionedBotContexts };
 }
 
-async function ensureAboutYouMemory(args: {
-  db: DatabaseSync;
-  userId: string;
-  userKey: Buffer;
-  conversationId: string;
-  botId: string | null;
-  sourceMessageId: string | null;
-  userDisplayName?: string;
-}): Promise<Awaited<ReturnType<typeof restoreMemory>> | null> {
-  const {
-    db,
-    userId,
-    userKey,
-    conversationId,
-    botId,
-    sourceMessageId,
-    userDisplayName,
-  } = args;
-  if (!botId) return null;
-  if (hasAboutYouMemoryForBot(db, userId, botId)) return null;
-  const aboutYouText = buildInitialAboutYouMemoryText(userDisplayName);
-  return restoreMemory(db, userId, userKey, {
-    conversationId,
-    botId,
-    text: aboutYouText,
-    confidence: 0.96,
-    certainty: 0.96,
-    category: "user",
-    tier: "long_term",
-    durability: 1,
-    source: "about_you",
-    sourceMessageIds: sourceMessageId ? [sourceMessageId] : [],
-  });
-}
-
 export function loadPersistedConversationForChatResponse(args: {
   db: DatabaseSync;
   userId: string;
@@ -8203,27 +8165,6 @@ export async function processChatMessage(
       `intent=${memoryIntent?.kind ?? "none"}; created=${createdMemories.length}; retracted=${retractedMemories.length}; rejected=${rejectedMemories.length}`
     );
   }
-  if (
-    !skipPersonalFacts &&
-    !skipMemoryForMoodCooldownTurn &&
-    !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
-    !commandCenterPromptTurn
-  ) {
-    await ensureAboutYouMemory({
-      db,
-      userId,
-      userKey,
-      conversationId: activeConversationId,
-      botId: activeMemoryBotId,
-      sourceMessageId: userMessageId,
-      userDisplayName: settings.userDisplayName,
-    });
-  }
-
   let summaryCompaction: ProcessChatMessageResult["summaryCompaction"];
   const shouldCompactAtMilestone = !skipSummarization && shouldSummarizeAtMilestone(totalMessages);
   const shouldCompactAtSessionEnd = !skipSummarization && settings.sessionEnding === true;

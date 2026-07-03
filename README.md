@@ -50,18 +50,20 @@ Experiment quickly with bots, model behavior, and memory-aware conversations.
 
 ### Available now
 
-- `Chat` - full playground with bots, model/provider controls, image tools, and export.
-- `Zen` - calmer 1:1 lane for continuity.
-- `Coffee` - group chat with 2-5 reactive bots.
+- `Chat v0.5` - full playground with bots, model/provider controls, image tools, and export.
+- `Zen v0.3` - calmer 1:1 lane for continuity.
+- `Coffee v0.6` - group chat with 2-5 reactive bots.
+- `Story v0.1` - preview visual-novel episodes with bots, choices, and maps.
 - Account login, per-user isolation, encrypted key handling, and memory features.
 
 ### Planned
 
 - `Core` as a first-class operations module (routing, policy, budgets, model usage visibility, external API gateway behavior).
-- `Pseudo` and `Gym` as dedicated modules.
+- `Slate v0.0`, `Pseudo v0.0`, and `Gym v0.0` as dedicated modules.
 - Additional exploratory modes as explicitly announced in release notes.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for release-level updates.
+See [`docs/applets.md`](docs/applets.md) for applet-level versions and
+[`CHANGELOG.md`](CHANGELOG.md) for release-level updates.
 
 ---
 
@@ -204,6 +206,7 @@ prism reset --force
 ## Documentation Map
 
 - Product/architecture: [`DESIGN.md`](DESIGN.md)
+- Applet versions and ethos: [`docs/applets.md`](docs/applets.md)
 - Release runbook: [`docs/release-process.md`](docs/release-process.md)
 - Desktop packaging: [`docs/prism-desktop-app.md`](docs/prism-desktop-app.md)
 - iPhone (PWA) path: [`docs/prism-ios-client.md`](docs/prism-ios-client.md)

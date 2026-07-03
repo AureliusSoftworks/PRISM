@@ -53,15 +53,31 @@ import {
   coffeeCupShouldMirrorForSeat,
   coffeeCupSideForSeat,
   coffeeCupSipAnimationTiming,
+  coffeeCupSipBelongsToCurrentFill,
   coffeeCupVisualSipCountForAnimation,
   type CoffeeCupVisualState,
 } from "./coffee-cup-sprites";
 import {
+  buildCoffeeArrivalMotionProfile,
+  buildCoffeeArrivalPlan,
+  COFFEE_ARRIVAL_WALK_MAX_MS,
+  type CoffeeArrivalMotionProfile,
+} from "./coffee-arrivals";
+import {
   COFFEE_POT_FILL_CLEAR_MS,
   COFFEE_POT_FINAL_POUR_FRAME_INDEX,
   COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS,
+  COFFEE_POT_POUR_FRAME_INDICES,
+  coffeeCupTopOffFillFrameIndices,
+  coffeeCupTopOffFrameIndexForPour,
+  coffeeCupTopOffProgressAfterForPour,
+  coffeePotPointerIsInsideTarget,
+  coffeePotFillFrameDelayMs,
   coffeePotPourFrameDelayMs,
+  coffeePotPourFrameImageUrl,
+  coffeePotPourImageUrl,
   coffeePotRefillCanComplete,
+  coffeePotRestImageUrl,
   coffeePotRefillTargetState,
 } from "./coffee-pot-refill";
 import {
@@ -78,13 +94,20 @@ import {
   type CoffeeSeatEmojiMood,
 } from "./coffee-seat-plate";
 import {
+  coffeeArrivalAutoplayCanScheduleNow,
+  coffeeArrivalAutoplayRetryDelayMs,
   coffeeDirectedMentionBotIds,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeTableTalkAutoplayDeferralMs,
+  coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow";
+import {
+  coffeeSessionClockShouldTick,
+  coffeeSessionEndsAtAfterPausedClockTick,
+} from "./coffee-session-clock";
 import { coffeePollTurnUpdateFromResponse } from "./coffee-poll-turn-response";
 import {
   coffeeGroupAttendanceCanStart,
@@ -132,10 +155,14 @@ import {
   coffeeActionIsSip,
   coffeeActionPassesSipCadence,
   coffeeActionSipMessageGapForDuration,
+  coffeeReplayMessageHasStateEvent,
+  coffeeReplayStateAt,
   coffeeReplayVisibleMessages,
+  coffeeStageActionTimelineMessages,
   coffeeSystemSynopsisIsDisplayable,
   coffeeTranscriptVisibleMessages,
   collectCoffeeReplayActionsForBot,
+  formatCoffeeReviewClipboardText,
   sanitizeCoffeeActionForBot,
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
@@ -182,7 +209,9 @@ import {
 import {
   applyOnlineModelChoice,
   combinedOnlineModelOptions,
+  fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
+  isOnlineProvider,
   nextResponseMode,
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
@@ -194,6 +223,36 @@ import {
 } from "./chatZenReasoningEffort";
 import { shouldChoiceChipRailControlViewport } from "./choiceChipRailAnchor";
 import { rewriteWildcardSlotTokenReference } from "./wildcardReferenceBadge";
+import {
+  BOT_MARKETPLACE_MANIFEST_PATH,
+  marketplaceLensEntriesForCategory,
+  marketplaceLensInstallState,
+  marketplaceEntriesForTheme,
+  marketplaceEntryInstallState,
+  marketplaceInstalledHashSet,
+  marketplaceThemeInstallState,
+  marketplaceMissingEntries,
+  marketplaceVisibleBotEntries,
+  marketplaceVisibleLensEntries,
+  normalizeBotMarketplaceManifest,
+  validateMarketplaceSelectionBundles,
+  type BotMarketplaceEntry,
+  type BotMarketplaceManifest,
+  type BotMarketplacePreparedBundle,
+  type BotMarketplaceTheme,
+  type BotMarketplaceThemeInstallState,
+  type MarketplaceContentType,
+  type MarketplaceLensCategory,
+  type MarketplaceLensEntry,
+} from "./botMarketplace";
+import { buildBotMarketplaceThemeVisualStyle } from "./botMarketplaceThemeGradient";
+import {
+  buildRandomizerPersonaDraft,
+  generatedBotMemorySeedsForCreate,
+  type GeneratedBotMemorySeedSet,
+} from "./botRandomizer";
+import { filterBotsByLibraryGroup } from "./botLibraryGroupFilter";
+import { LensTile } from "./LensTile";
 import {
   CircleHelp,
   BarChart3,
@@ -208,19 +267,24 @@ import {
   Menu as MenuIcon,
   Maximize2,
   Minimize2,
-  Pause,
-  Play,
-  RotateCcw,
+	  Pause,
+	  PencilLine,
+	  Play,
+	  Plus,
+	  RotateCcw,
   ScanLine,
   SkipBack,
   SkipForward,
   Sparkles,
+  Store,
   Timer,
+  Trash2,
   Waves,
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
 import { NetworkAccessPanel } from "./NetworkAccessPanel";
+import { SettingsPanel, type SettingsLeafScope, type SettingsScope } from "./SettingsPanel";
 import {
   BOT_FACT_KEY_LABELS,
   BOT_FACE_FONT_IDS,
@@ -241,7 +305,6 @@ import {
   parseAssistantPrismTools,
   parseStoredBotPrompt,
   prismMoodDeclineReason,
-  randomBotProfile,
   serializeStoredBotPrompt,
   stripBotProfileMetaSuffix,
   stripPurposeStatementPrefixes,
@@ -277,10 +340,12 @@ import {
   COFFEE_POLL_OPTION_COUNT_MAX,
   COFFEE_POLL_OPTION_COUNT_MIN,
   COFFEE_POLL_PLAYER_VOTER_ID,
+  type CoffeeArrivalScenario,
   STORY_BOT_COUNT_MAX,
   STORY_BOT_COUNT_MIN,
   getStoryCurrentScene,
   getStoryLocation,
+  COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
@@ -292,6 +357,8 @@ import {
   type CoffeeBotSocialSnapshot,
   type CoffeeCupTopOffSnapshot,
   type CoffeeAmbientActionPayload,
+  type CoffeeReplayEventPayload,
+  type CoffeeUserActionPayload,
   type CoffeeSessionDurationMinutes,
   type CoffeeSessionSettings,
   type CoffeeTeamId,
@@ -343,6 +410,18 @@ import {
   coffeeCupStatusForProgress,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
+import {
+  PRISM_APPLETS,
+  prismPlannedRoadmapApplets,
+  prismAppletVersionLabel,
+  prismPlayableHubApplets,
+  type PrismAppletId,
+} from "./appletVersions";
+import {
+  prismHrefForSurfaceView,
+  prismSurfaceViewForRouteParam,
+  type PrismSurfaceView,
+} from "./viewRouting";
 import {
   normalizeComposerSlashCommandLine,
   parsePrismDevChatCommand,
@@ -427,7 +506,6 @@ import {
   type CommandCenterWildcardDeckDraft,
 } from "./wildcardDecks";
 import {
-  PRISM_BOT_MARKDOWN_LINK_RE,
   composeMentionPersonaPlainTextAction,
   composeMentionTabPlainTextAction,
   escapeMarkdownLinkLabel,
@@ -634,7 +712,7 @@ function ZenPersonaTransitionChoiceControl({
     "new-speaks": compact ? "New" : "New speaks",
     "previous-introduces": compact ? "Intro" : "Introduce",
   };
-  return (
+	                        return (
     <div
       className={styles.zenPersonaTransitionControl}
       data-compact={compact ? "true" : undefined}
@@ -676,8 +754,14 @@ const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 const CONVERSATION_GROUP_ORDER_STORAGE_KEY = "prism_conversation_group_order";
 const BOT_LIBRARY_GROUPS_STORAGE_KEY = "prism_bot_library_groups";
+const BOT_MARKETPLACE_LENSES_STORAGE_KEY = "prism_marketplace_lenses";
+const PRISM_LENS_DRAG_MIME = "application/x-prism-lens-id";
 const ZEN_INITIAL_STARTER_CACHE_STORAGE_KEY = "prism_zen_initial_starter_cache_v1";
 const BOT_LIBRARY_FAVORITES_GROUP_ID = "builtin:favorites";
+const BOT_LIBRARY_STARTER_GROUP_ID = "starter:prism";
+const BOT_LIBRARY_STARTER_GROUP_NAME = "Prism Starter Pack";
+const BOT_LIBRARY_STARTER_GROUP_DESCRIPTION =
+  "The five original PRISM bots. Edit or delete this starter group whenever you like.";
 const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
 const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
 const COMMAND_CENTER_WILDCARD_DELETE_KEY_PREFIX = "cmdwildcard:";
@@ -778,9 +862,8 @@ function normalizeTutorialProgress(value: unknown): TutorialProgress {
   }
   const record = value as Record<string, unknown>;
   return {
-    zen: record.zen === true,
-    chat: record.chat === true,
-    sandbox: record.sandbox === true,
+    zen: record.zen === true || record.chat === true,
+    chat: record.chat === true || record.sandbox === true,
     coffee: record.coffee === true,
   };
 }
@@ -804,14 +887,13 @@ const DESKTOP_FIRST_RUN_CHECKLIST_KEY = "prism_desktop_first_run_complete_v2";
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
 
-type TutorialMode = "zen" | "chat" | "sandbox" | "coffee";
+type TutorialMode = "zen" | "chat" | "coffee";
 
 type TutorialProgress = Record<TutorialMode, boolean>;
 
 const DEFAULT_TUTORIAL_PROGRESS: TutorialProgress = {
   zen: false,
   chat: false,
-  sandbox: false,
   coffee: false,
 };
 
@@ -2383,6 +2465,38 @@ function PrismWordmarkWithVersion({
   );
 }
 
+interface AppletLabelProps {
+  appletId: PrismAppletId;
+  className?: string;
+  versionClassName?: string;
+}
+
+function AppletLabel({
+  appletId,
+  className,
+  versionClassName,
+}: AppletLabelProps): React.JSX.Element {
+  const applet = PRISM_APPLETS[appletId];
+  const labelClasses = [styles.appletLabel, className].filter(Boolean).join(" ");
+  const versionClasses = [styles.appletVersion, versionClassName].filter(Boolean).join(" ");
+  return (
+    <span className={labelClasses} aria-label={`${applet.name} ${prismAppletVersionLabel(appletId)}`}>
+      <span>{applet.name}</span>
+      <span className={versionClasses}>{prismAppletVersionLabel(appletId)}</span>
+    </span>
+  );
+}
+
+function AppletHeaderLabel({ appletId }: { appletId: PrismAppletId }): React.JSX.Element {
+  return (
+    <AppletLabel
+      appletId={appletId}
+      className={styles.appletHeaderLabel}
+      versionClassName={styles.appletHeaderVersion}
+    />
+  );
+}
+
 interface PrismTriangleMarkProps {
   className?: string;
 }
@@ -3739,17 +3853,16 @@ type PanelView =
   | "memories"
   | "usage"
   | "command-center";
-type SettingsScope = "chooser" | "zen" | "coffee" | "system";
 type MemoryPanelScope = "bot" | "default" | "session" | "all";
 type ClientAccessState = "checking" | "allowed" | "blocked";
 const AUTO_TITLE_REFRESH_DELAYS_MS = [1500, 4000, 8000] as const;
 const VIEW_SWITCH_OVERLAY_MIN_VISIBLE_MS = 320;
 const VIEW_SWITCH_OVERLAY_FADE_OUT_MS = 280;
-// Which post-auth surface is currently rendered. "hub" is the landing
-// screen shown after login; each mode tile navigates to a specific
-// experience. Future modes can be advertised as disabled Hub tiles
-// without entering this route union until their shells actually exist.
-type View = "hub" | "chat" | "sandbox" | "coffee" | "story";
+// Which post-auth surface is currently rendered. The "chat" and "sandbox"
+// members are legacy internal names: product Chat renders through "sandbox",
+// while product Zen renders through "chat". Route helpers keep public URLs
+// and hub labels product-facing until the internals can be renamed safely.
+type View = PrismSurfaceView;
 
 const USAGE_RANGE_OPTIONS: Array<{ value: UsageRange; label: string }> = [
   { value: "24h", label: "24h" },
@@ -3998,9 +4111,7 @@ const COFFEE_REPLY_DELAY_MIN_MS = 12000;
 const COFFEE_REPLY_DELAY_MAX_MS = 28000;
 const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
 const COFFEE_REPLY_DELAY_FAST_MAX_MS = 2600;
-const COFFEE_ARRIVAL_WINDOW_MS = 60_000;
-const COFFEE_ARRIVAL_MIN_GAP_MS = 4_000;
-const COFFEE_ARRIVAL_SETTLE_MS = 1_400;
+const COFFEE_ARRIVAL_NAMEPLATE_SETTLE_MS = 2_000;
 const COFFEE_POLL_REFRESH_MS = 4_000;
 const COFFEE_POLL_OPTION_PLACEHOLDERS = ["Choice A", "Choice B", "Choice C", "Choice D"] as const;
 const COFFEE_TEAM_SIDE_MIN_SIZE_CLIENT = 1;
@@ -4293,57 +4404,51 @@ function coffeeSessionDurationMs(
   return COFFEE_SESSION_DURATION_MS;
 }
 
-type CoffeeArrivalPlanEntry = {
-  botId: string;
-  delayMs: number;
-};
-
-function coffeeArrivalDelayClamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, Math.round(value)));
+function coffeeArrivalMotionDurationMs(durationMs: number): number {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    return 1;
+  }
+  return durationMs;
 }
 
-function buildCoffeeArrivalPlan(
-  conversation: Pick<CoffeeConversationState, "id" | "botGroupIds" | "coffeeSessionDurationMinutes">,
-  scenario: CoffeeArrivalScenario
-): CoffeeArrivalPlanEntry[] {
-  const botIds = (conversation.botGroupIds ?? []).filter(
-    (id): id is string => typeof id === "string" && id.trim().length > 0
+function coffeeArrivalMotionProfileForBot(
+  conversationId: string | null | undefined,
+  botId: string
+): CoffeeArrivalMotionProfile {
+  const sessionSeed = conversationId?.trim() || "draft";
+  return buildCoffeeArrivalMotionProfile(`${sessionSeed}:${botId}:seat-arrival`);
+}
+
+function coffeeArrivalWalkDurationMs(profile: CoffeeArrivalMotionProfile): number {
+  return coffeeArrivalMotionDurationMs(profile.walkDurationMs);
+}
+
+function coffeeArrivalFirmSeatDelayMs(profile: CoffeeArrivalMotionProfile): number {
+  return coffeeArrivalMotionDurationMs(
+    profile.walkDurationMs + COFFEE_ARRIVAL_NAMEPLATE_SETTLE_MS
   );
-  if (botIds.length === 0) return [];
-  const seeded = botIds.map((botId, index) => ({
-    botId,
-    index,
-    rank: stableUnitValue(`${conversation.id}:${scenario}:arrival:${botId}`),
-  }));
-  seeded.sort((a, b) => a.rank - b.rank || a.index - b.index);
-  const windowMs = Math.min(
-    COFFEE_ARRIVAL_WINDOW_MS,
-    Math.max(COFFEE_ARRIVAL_MIN_GAP_MS, coffeeSessionDurationMs(conversation) - 30_000)
+}
+
+function coffeeArrivalMaxFirmSeatDelayMs(): number {
+  return coffeeArrivalMotionDurationMs(
+    COFFEE_ARRIVAL_WALK_MAX_MS + COFFEE_ARRIVAL_NAMEPLATE_SETTLE_MS
   );
-  return seeded
-    .map(({ botId }, index) => {
-      if (index === 0) {
-        return {
-          botId,
-          delayMs: 0,
-        };
-      }
-      const progress = index / Math.max(1, seeded.length - 1);
-      const baseDelay = progress * windowMs;
-      const jitter =
-        (stableUnitValue(`${conversation.id}:${botId}:arrival-jitter`) - 0.5) *
-        COFFEE_ARRIVAL_MIN_GAP_MS;
-      return {
-        botId,
-        delayMs: coffeeArrivalDelayClamp(
-          baseDelay + jitter,
-          COFFEE_ARRIVAL_MIN_GAP_MS * index,
-          windowMs
-        ),
-      };
-    })
-    .sort((a, b) => a.delayMs - b.delayMs);
+}
+
+function coffeeArrivalMotionStyle(
+  profile: CoffeeArrivalMotionProfile,
+  walkDurationMs = profile.walkDurationMs
+): CSSProperties {
+  return {
+    "--coffee-arrival-walk-duration": `${Math.max(1, Math.round(walkDurationMs))}ms`,
+    "--coffee-arrival-walk-easing": profile.walkEasing,
+    "--coffee-seat-offset-x": `${profile.seatOffsetX}px`,
+    "--coffee-seat-offset-y": `${profile.seatOffsetY}px`,
+  } as CSSProperties;
 }
 
 function clampCoffeeSessionDurationMinutes(value: unknown): CoffeeSessionDurationMinutes {
@@ -4504,6 +4609,32 @@ function coffeeSeatsFromBotIds(botIds: readonly string[] | undefined): Array<str
   return seats;
 }
 
+function coffeeGroupRosterSignature(botIds: readonly (string | null | undefined)[]): string {
+  const normalized = Array.from(
+    new Set(
+      botIds
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter((id) => id.length > 0)
+    )
+  ).sort();
+  return JSON.stringify(normalized);
+}
+
+function findDuplicateCoffeeGroupByRoster(
+  groups: readonly Pick<CoffeeGroupState, "id" | "name" | "botGroupIds">[],
+  botIds: readonly (string | null | undefined)[],
+  excludeGroupId?: string | null
+): Pick<CoffeeGroupState, "id" | "name"> | null {
+  const targetSignature = coffeeGroupRosterSignature(botIds);
+  for (const group of groups) {
+    if (excludeGroupId && group.id === excludeGroupId) continue;
+    if (coffeeGroupRosterSignature(group.botGroupIds) === targetSignature) {
+      return group;
+    }
+  }
+  return null;
+}
+
 function coffeeCupSpriteStyle(state: CoffeeCupVisualState): React.CSSProperties {
   const steamRateMs = Math.max(1, Math.round(state.steamRateMs));
   return {
@@ -4520,39 +4651,29 @@ function coffeeCupSpriteStyle(state: CoffeeCupVisualState): React.CSSProperties 
   } as React.CSSProperties;
 }
 
-function coffeeCupTopOffFrameIndexForPour(
-  fromFrameIndex: number,
-  pourFrameIndex: number
-): number | null {
-  const startFrame = Math.max(0, Math.min(5, Math.round(fromFrameIndex)));
-  if (startFrame <= 0) return null;
-  const pourFrame = Math.max(
-    0,
-    Math.min(COFFEE_POT_FINAL_POUR_FRAME_INDEX, Math.round(pourFrameIndex))
-  );
-  const fillStep = Math.min(
-    startFrame,
-    Math.floor((pourFrame / COFFEE_POT_FINAL_POUR_FRAME_INDEX) * (startFrame + 1))
-  );
-  return startFrame - fillStep;
-}
-
 function coffeeCupTopOffFillFrameStyle(
   state: CoffeeCupVisualState,
-  frameIndex: number
+  frameIndex: number,
+  activeFrameIndex: number
 ): React.CSSProperties {
   const position = coffeeCupFramePosition(frameIndex);
   return {
     "--coffee-cup-fill-sprite": `url("${state.restImageUrl}")`,
     "--coffee-cup-fill-frame-x": position.frameX,
     "--coffee-cup-fill-frame-y": position.frameY,
+    "--coffee-cup-fill-frame-opacity": frameIndex === activeFrameIndex ? "1" : "0",
   } as React.CSSProperties;
 }
 
-type CoffeeArrivalScenario =
-  | "user-first"
-  | "partial-table-in-progress"
-  | "full-table-present";
+function coffeePotPourStreamFrameStyle(
+  frameIndex: number,
+  activeFrameIndex: number
+): React.CSSProperties {
+  return {
+    "--coffee-pot-pour-frame-opacity": frameIndex === activeFrameIndex ? "1" : "0",
+  } as React.CSSProperties;
+}
+
 type CoffeeSessionPhase = "selecting" | "preview" | "topic" | "arriving" | "live" | "finished";
 type CoffeeTurnRhythmState =
   | "idle"
@@ -4579,14 +4700,64 @@ interface CoffeeConversationMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  botId?: string | null;
   botName?: string;
   botColor?: string;
   botGlyph?: string;
+  provider?: Provider | string;
+  model?: string | null;
   /** When present (future API / hydrated rows), drives seat-plate emoji mood. */
   moodKey?: BotMoodKey;
   moodConfidence?: number;
   /** Coffee-only scripted ambience shown as table UI, not transcript text. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only user action cue shown as ambient context, not transcript text. */
+  coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only hidden replay state beats; not transcript text. */
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
+}
+
+type CoffeeUserActionPullQuote = CoffeeUserActionPayload & {
+  conversationId: string;
+};
+
+function latestSavedCoffeeUserActionPullQuote(
+  conversation: CoffeeConversationState | null | undefined
+): CoffeeUserActionPullQuote | null {
+  if (!conversation) return null;
+  let latestActionIndex = -1;
+  let latestAction: CoffeeUserActionPayload | null = null;
+  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+    const action = conversation.messages[index]?.coffeeUserAction;
+    if (action) {
+      latestActionIndex = index;
+      latestAction = action;
+      break;
+    }
+  }
+  if (!latestAction) return null;
+  const assistantAfterAction = conversation.messages
+    .slice(latestActionIndex + 1)
+    .some((message) => message.role === "assistant");
+  if (assistantAfterAction) return null;
+  return {
+    ...latestAction,
+    conversationId: conversation.id,
+  };
+}
+
+function coffeeConversationHasAssistantAfterUserAction(
+  conversation: CoffeeConversationState | null | undefined,
+  quote: CoffeeUserActionPullQuote | null
+): boolean {
+  if (!conversation || !quote || conversation.id !== quote.conversationId) return false;
+  const quoteMs = Date.parse(quote.occurredAt);
+  if (!Number.isFinite(quoteMs)) return false;
+  return conversation.messages.some((message) => {
+    if (message.role !== "assistant") return false;
+    const messageMs = Date.parse(message.createdAt);
+    return Number.isFinite(messageMs) && messageMs > quoteMs;
+  });
 }
 
 interface CoffeePlayerInterruptionInput {
@@ -4723,6 +4894,11 @@ interface CoffeeSeatDebugDragState {
   startLeftPct: number;
   startTopPct: number;
   moved: boolean;
+}
+
+interface CoffeeArrivalSeatTimers {
+  walkTimer: ReturnType<typeof setTimeout> | null;
+  nameplateTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface CoffeePotDragRuntimeState {
@@ -4885,25 +5061,16 @@ function coffeeTableDisplayText(text: string): string {
   return stripCoffeeVisibleQuoteMarks(extractStageDirections(clampCoffeeTableText(text)).mainText);
 }
 
-function formatCoffeeTranscriptClipboardText(
-  messages: readonly CoffeeConversationMessage[]
-): string {
-  return coffeeTranscriptVisibleMessages(messages)
-    .map((message) => {
-      const content =
-        message.role === "assistant" ? coffeeTableDisplayText(message.content) : message.content;
-      const text = content.replace(/\s+/g, " ").trim();
-      if (!text) return null;
-      const speaker =
-        message.role === "assistant"
-          ? message.botName?.trim() || "Bot"
-          : message.role === "user"
-            ? "You"
-            : "Session";
-      return `${speaker}: ${text}`;
-    })
-    .filter((line): line is string => line !== null)
-    .join("\n");
+function mergeCoffeeTranscriptMessageSources(
+  fullHistory: readonly CoffeeConversationMessage[] | undefined,
+  liveMessages: readonly CoffeeConversationMessage[]
+): CoffeeConversationMessage[] {
+  if (!fullHistory) return [...liveMessages];
+  const seenMessageIds = new Set(fullHistory.map((message) => message.id));
+  return [
+    ...fullHistory,
+    ...liveMessages.filter((message) => !seenMessageIds.has(message.id)),
+  ];
 }
 
 function normalizeCoffeeSeatActionBadgeText(
@@ -4976,7 +5143,9 @@ function coffeeReplayMessageKey(message: CoffeeConversationMessage, index: numbe
 }
 
 function coffeeReplayDisplayLengthForMessage(message: CoffeeConversationMessage): number {
-  if (!coffeeMessageHasTableText(message)) return 0;
+  if (!coffeeMessageHasTableText(message)) {
+    return coffeeReplayMessageHasStateEvent(message) ? 12 : 0;
+  }
   return getBotMentionDisplayLength(coffeeTableDisplayText(message.content));
 }
 
@@ -5463,12 +5632,12 @@ function coffeeSeatFallbackSaturationForMood(mood: BotMoodKey): number {
     case "warm":
       return 1.12;
     case "guarded":
-      return 0.48;
+      return 0.72;
     case "strained":
-      return 0.16;
+      return 0.56;
     case "neutral":
     default:
-      return 0.88;
+      return 0.92;
   }
 }
 
@@ -5481,14 +5650,21 @@ function coffeeSeatMoodVisualMetrics(
   contrast: number;
   brightness: number;
 } {
-  const saturation = social
+  const rawSaturation = social
     ? coffeeMoodSaturationFromSocial(social)
     : coffeeSeatFallbackSaturationForMood(mood);
+  const nearDesaturated =
+    social != null && coffeeSocialSnapshotIsNearDesaturated(social);
+  const saturation = nearDesaturated
+    ? Math.min(rawSaturation, COFFEE_NEAR_DESATURATED_SATURATION)
+    : Math.max(rawSaturation, 0.54);
   const belowNeutral = Math.max(0, 1 - Math.min(1, saturation));
   const aboveNeutral = Math.max(0, saturation - 1);
+  const grayscaleLimit = nearDesaturated ? 0.86 : 0.38;
+  const grayscaleWeight = nearDesaturated ? 0.9 : 0.55;
   return {
     saturation: Number(saturation.toFixed(3)),
-    grayscale: Number(Math.min(0.86, belowNeutral * 0.9).toFixed(3)),
+    grayscale: Number(Math.min(grayscaleLimit, belowNeutral * grayscaleWeight).toFixed(3)),
     contrast: Number((1 + Math.min(0.08, aboveNeutral * 0.16) - belowNeutral * 0.06).toFixed(3)),
     brightness: Number((1 + Math.min(0.08, aboveNeutral * 0.14) - belowNeutral * 0.1).toFixed(3)),
   };
@@ -7618,6 +7794,7 @@ interface ModelCatalog {
     online: string;
   };
 }
+type ModelCatalogRefreshStatus = "idle" | "checking" | "ready" | "error";
 
 /** Used when `/api/models` fails so dropdowns fall back instead of crashing the client. */
 const FALLBACK_EMPTY_MODEL_CATALOG: ModelCatalog = {
@@ -7728,6 +7905,9 @@ interface Bot {
   flirt_enabled?: number | null;
   temperature: number;
   max_tokens: number;
+  top_p?: number | null;
+  top_k?: number | null;
+  repetition_penalty?: number | null;
   color: string | null;
   glyph: string | null;
   face_eyes_font?: string | null;
@@ -7765,6 +7945,9 @@ interface BotExportPayloadV1 {
     glyph?: string | null;
     temperature?: number;
     maxTokens?: number;
+    topP?: number;
+    topK?: number;
+    repetitionPenalty?: number;
     localModel?: string | null;
     onlineModel?: string | null;
     localImageModel?: string | null;
@@ -7798,6 +7981,23 @@ interface BotLibraryGroup {
   createdAt: string;
   updatedAt: string;
 }
+
+type BotLibraryGroupDetailsDialogState =
+  | {
+      mode: "create";
+      name: string;
+      description: string;
+      botIds: string[];
+      targetGroupId: string;
+      error: string | null;
+    }
+  | {
+      mode: "edit";
+      groupId: string;
+      name: string;
+      description: string;
+      error: string | null;
+    };
 
 interface CommandCenterArgument {
   key: string;
@@ -7924,6 +8124,8 @@ interface ImportBotOptions {
   suppressPanelReset?: boolean;
   selectInChat?: boolean;
   deferRefresh?: boolean;
+  keepBotsPanelOpen?: boolean;
+  openImportedBotInEditor?: boolean;
   onProgress?: (event: ImportBotProgressEvent) => void;
 }
 
@@ -7941,7 +8143,7 @@ interface ImportBotProgressEvent {
   totalMemories: number;
 }
 
-type BotTransferMode = "import" | "export";
+type BotTransferMode = "import" | "export" | "generate";
 
 interface BotTransferStats {
   totalBots?: number;
@@ -7950,6 +8152,7 @@ interface BotTransferStats {
   completedMemories?: number;
   imported?: number;
   exported?: number;
+  generated?: number;
   overwritten?: number;
   skipped?: number;
   failed?: number;
@@ -7995,6 +8198,34 @@ function createFavoritesBotGroup(): BotLibraryGroup {
   };
 }
 
+function createPrismStarterBotGroup(
+  botIds: readonly string[],
+  now = new Date().toISOString()
+): BotLibraryGroup | null {
+  const uniqueBotIds = Array.from(
+    new Set(botIds.filter((botId) => typeof botId === "string" && botId.trim().length > 0))
+  );
+  if (uniqueBotIds.length === 0) return null;
+  return {
+    id: BOT_LIBRARY_STARTER_GROUP_ID,
+    name: BOT_LIBRARY_STARTER_GROUP_NAME,
+    description: BOT_LIBRARY_STARTER_GROUP_DESCRIPTION,
+    botIds: uniqueBotIds,
+    builtIn: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createFactoryResetBotLibraryGroups(starterBotIds: readonly string[]): BotLibraryGroup[] {
+  const now = new Date().toISOString();
+  const starterGroup = createPrismStarterBotGroup(starterBotIds, now);
+  return normalizeBotLibraryGroups([
+    createFavoritesBotGroup(),
+    ...(starterGroup ? [starterGroup] : []),
+  ]);
+}
+
 function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
   const normalized = Array.isArray(raw)
     ? raw
@@ -8036,6 +8267,12 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
     if (b.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+function createBotLibraryGroupId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `group:${crypto.randomUUID()}`
+    : `group:${Date.now().toString(36)}`;
 }
 
 function createBuiltInHelpCommand(): CommandCenterCommand {
@@ -9065,6 +9302,19 @@ function normalizeImportedBotHash(value: unknown): string | null {
   return /^[a-f0-9]{32}$/.test(trimmed) ? trimmed : null;
 }
 
+const MARKETPLACE_BOT_GLYPH_REPAIRS = [
+  {
+    exportHash: "5cee780cf56881b1912d742555d258ea",
+    legacyGlyph: "lucideLandmark",
+    nextGlyph: "fish",
+  },
+  {
+    exportHash: "5c787b7808ee4318bc2469f7898a002b",
+    legacyGlyph: "moon",
+    nextGlyph: "yinYang",
+  },
+] as const;
+
 function normalizeImportedMemorySource(
   source: BotExportMemory["source"] | undefined
 ): "direct" | "inferred" | "compiled" {
@@ -9351,29 +9601,15 @@ const NO_LOCAL_IMAGE_MODEL_CHOICE = "__prism_no_local_image__";
 const BOT_TEMPERATURE_DEFAULT = 0.7;
 const BOT_TEMPERATURE_MIN = 0;
 const BOT_TEMPERATURE_MAX = 1.2;
-const BOT_TEMPERATURE_STEP = "any";
-const BOT_REPLY_LENGTH_PRESETS = [
-  {
-    id: "short",
-    label: "Quick",
-    tokens: 768,
-    description: "Best for fast, low-friction replies.",
-  },
-  {
-    id: "medium",
-    label: "Roomy",
-    tokens: 2048,
-    description: "Enough space for detail without turning every answer into an essay.",
-  },
-  {
-    id: "long",
-    label: "Deep dive",
-    tokens: 4096,
-    description: "Gives the bot room to reason, explain, and explore.",
-  },
-] as const;
 const BOT_REPLY_LENGTH_DEFAULT_TOKENS = 2048;
-const BOT_RANDOM_TEMPERATURES = [0.25, 0.45, 0.7, 0.95, 1.1] as const;
+const BOT_TOP_P_DEFAULT = 1;
+const BOT_TOP_P_MIN = 0;
+const BOT_TOP_P_MAX = 1;
+const BOT_TOP_K_DEFAULT = 40;
+const BOT_TOP_K_MIN = 0;
+const BOT_REPETITION_PENALTY_DEFAULT = 1.1;
+const BOT_REPETITION_PENALTY_MIN = 0.5;
+const BOT_REPETITION_PENALTY_MAX = 2;
 const BOT_BIRTH_YEAR_MAX_DIGITS = 6;
 const HTML_DATE_YEAR_DIGITS = 4;
 
@@ -9429,14 +9665,6 @@ function blankBotProfile(): BotProfileFields {
 
 function randomArrayItem<T>(values: readonly T[]): T {
   return values[Math.floor(Math.random() * values.length)] ?? values[0];
-}
-
-function randomBotTemperatureSetting(): number {
-  return randomArrayItem(BOT_RANDOM_TEMPERATURES);
-}
-
-function randomBotReplyLengthTokens(): number {
-  return randomArrayItem(BOT_REPLY_LENGTH_PRESETS).tokens;
 }
 
 function profileTextFilled(...values: Array<string | null | undefined>): number {
@@ -9550,27 +9778,37 @@ function botProfileCompletionCount(profile: BotProfileFields): number {
 function createBotFormHasEnteredData(options: {
   name: string;
   profile: BotProfileFields;
+  advancedMode?: boolean;
   localModel: string;
   onlineModel: string;
   onlineEnabled: boolean;
   deleteProtected: boolean;
   flirtEnabled: boolean;
-  temperature: number;
-  maxTokens: number;
-  faceEyesFont?: BotFaceFontId;
+	  lensId?: string;
+	  temperature: number;
+	  maxTokens: number;
+	  topP: number;
+	  topK: number;
+	  repetitionPenalty: number;
+	  faceEyesFont?: BotFaceFontId;
   faceMouthFont?: BotFaceFontId;
   faceFontWeight?: number;
 }): boolean {
   if (options.name.trim().length > 0) return true;
+  if (options.advancedMode) return true;
   if (botProfileCompletionCount(options.profile) > 0) return true;
   if (options.localModel !== DEFAULT_BOT_CHAT_MODEL_CHOICE) return true;
   if (options.onlineModel !== DEFAULT_BOT_CHAT_MODEL_CHOICE) return true;
   if (!options.onlineEnabled) return true;
   if (options.deleteProtected) return true;
   if (options.flirtEnabled) return true;
-  if (options.temperature !== BOT_TEMPERATURE_DEFAULT) return true;
-  if (options.maxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS) return true;
-  if ((options.faceEyesFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
+  if ((options.lensId ?? "").trim().length > 0) return true;
+	  if (options.temperature !== BOT_TEMPERATURE_DEFAULT) return true;
+	  if (options.maxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS) return true;
+	  if (options.topP !== BOT_TOP_P_DEFAULT) return true;
+	  if (options.topK !== BOT_TOP_K_DEFAULT) return true;
+	  if (options.repetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT) return true;
+	  if ((options.faceEyesFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
   if ((options.faceMouthFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
   if ((options.faceFontWeight ?? DEFAULT_BOT_FACE_FONT_WEIGHT) !== DEFAULT_BOT_FACE_FONT_WEIGHT) return true;
   return false;
@@ -9587,22 +9825,6 @@ function normalizeBotTemperature(value: number | null | undefined): number {
   return Number(clamped.toFixed(2));
 }
 
-function botTemperatureLabel(value: number): string {
-  if (value <= 0.35) return "Focused";
-  if (value >= 0.9) return "Adventurous";
-  return "Balanced";
-}
-
-function botTemperatureDescription(value: number): string {
-  if (value <= 0.35) {
-    return "Stays close to your instructions and repeats itself less.";
-  }
-  if (value >= 0.9) {
-    return "More willing to riff, surprise you, and try unusual phrasing.";
-  }
-  return "A middle path: steady enough for usefulness, lively enough for personality.";
-}
-
 function normalizeBotMaxTokens(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return BOT_REPLY_LENGTH_DEFAULT_TOKENS;
@@ -9610,8 +9832,37 @@ function normalizeBotMaxTokens(value: number | null | undefined): number {
   return Math.round(value);
 }
 
-function botReplyLengthPresetForTokens(tokens: number) {
-  return BOT_REPLY_LENGTH_PRESETS.find((preset) => preset.tokens === tokens) ?? null;
+function normalizeBotTopP(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return BOT_TOP_P_DEFAULT;
+  }
+  return Number(Math.min(BOT_TOP_P_MAX, Math.max(BOT_TOP_P_MIN, value)).toFixed(2));
+}
+
+function normalizeBotTopK(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return BOT_TOP_K_DEFAULT;
+  }
+  return Math.max(BOT_TOP_K_MIN, Math.floor(value));
+}
+
+function normalizeBotRepetitionPenalty(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return BOT_REPETITION_PENALTY_DEFAULT;
+  }
+  return Number(
+    Math.min(
+      BOT_REPETITION_PENALTY_MAX,
+      Math.max(BOT_REPETITION_PENALTY_MIN, value)
+    ).toFixed(2)
+  );
+}
+
+function formatBotParameterValue(value: number, digits = 2): string {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 function normalizeModelChoice(value: string | null | undefined): string {
@@ -10361,6 +10612,23 @@ function apiKeySourceAvailable(source: ApiKeySource | null | undefined): boolean
   return source === "saved" || source === "server";
 }
 
+function onlineProviderApiKeySource(
+  settings: UserSettings | null,
+  provider: Provider
+): ApiKeySource | null {
+  if (!settings) return null;
+  if (provider === "openai") return settings.openAiApiKeySource;
+  if (provider === "anthropic") return settings.anthropicApiKeySource;
+  return null;
+}
+
+function onlineProviderHasConfiguredKey(
+  settings: UserSettings | null,
+  provider: Provider
+): boolean {
+  return apiKeySourceAvailable(onlineProviderApiKeySource(settings, provider));
+}
+
 function apiKeySourceModelGroupMeta(source: ApiKeySource): string {
   return source === "server" ? "Server key connected" : "Saved key connected";
 }
@@ -10458,9 +10726,13 @@ function apiKeyConnectionDisplay(
 
 function onlineProviderCanPreserveModelChoice(
   catalog: ModelCatalog | null,
+  settings: UserSettings | null,
   provider: Provider
 ): boolean {
-  return (catalog?.online ?? []).some((model) => model.provider === provider);
+  return (
+    (catalog?.online ?? []).some((model) => model.provider === provider) ||
+    onlineProviderHasConfiguredKey(settings, provider)
+  );
 }
 
 function isHiddenBotModelId(
@@ -10501,13 +10773,40 @@ function modelOptionsForProvider(
   return [];
 }
 
+function fallbackChatModelOptionsForProvider(
+  settings: UserSettings | null,
+  provider: Provider
+): ModelCatalogEntry[] {
+  // Keep chat menus usable while online model discovery is still catching up.
+  if (!isOnlineProvider(provider) || !onlineProviderHasConfiguredKey(settings, provider)) {
+    return [];
+  }
+  return fallbackOnlineModelIdsForProvider(
+    provider,
+    settings?.preferredOnlineModel
+  ).map((id, index) => ({
+    id,
+    label: modelLabelFromId(id),
+    provider,
+    hostLabel: providerDisplayLabel(provider),
+    isDefault: index === 0,
+  }));
+}
+
 function chatModelOptionsForProvider(
   catalog: ModelCatalog | null,
   settings: UserSettings | null,
   provider: Provider
 ): ModelCatalogEntry[] {
-  return filterVisibleModelOptions(
+  const visibleCatalogOptions = filterVisibleModelOptions(
     modelOptionsForProvider(catalog, settings, provider),
+    settings?.hiddenBotModelIds ?? []
+  );
+  if (visibleCatalogOptions.length > 0 || provider === "local") {
+    return visibleCatalogOptions;
+  }
+  return filterVisibleModelOptions(
+    fallbackChatModelOptionsForProvider(settings, provider),
     settings?.hiddenBotModelIds ?? []
   );
 }
@@ -10587,7 +10886,7 @@ function visibleConcreteOnlineModelChoice(
   const options = onlineModelOptionsForPicker(catalog, settings);
   const provider = inferOnlineProviderForModelId(visibleChoice);
   return options.some((model) => model.id === visibleChoice) ||
-    onlineProviderCanPreserveModelChoice(catalog, provider)
+    onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? visibleChoice
     : defaultOnlineModelChoice(catalog, settings);
 }
@@ -10605,7 +10904,10 @@ function visibleModelChoiceForProvider(
   }
   return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice
-  )
+  ) ||
+    (provider !== "local" &&
+      !isHiddenBotModelId(settings, visibleChoice) &&
+      onlineProviderCanPreserveModelChoice(catalog, settings, provider))
     ? visibleChoice
     : AUTO_MODEL_CHOICE;
 }
@@ -10620,7 +10922,10 @@ function visibleOptionalModelChoiceForProvider(
   if (!visibleChoice) return "";
   return chatModelOptionsForProvider(catalog, settings, provider).some(
     (model) => model.id === visibleChoice
-  )
+  ) ||
+    (provider !== "local" &&
+      !isHiddenBotModelId(settings, visibleChoice) &&
+      onlineProviderCanPreserveModelChoice(catalog, settings, provider))
     ? visibleChoice
     : "";
 }
@@ -10635,7 +10940,7 @@ function visiblePreferredOnlineModelChoice(
   if (visibleChoice === AUTO_MODEL_CHOICE) return AUTO_MODEL_CHOICE;
   if (isHiddenBotModelId(settings, visibleChoice)) return AUTO_MODEL_CHOICE;
   const provider = inferOnlineProviderForModelId(visibleChoice);
-  return onlineProviderCanPreserveModelChoice(catalog, provider)
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? visibleChoice
     : AUTO_MODEL_CHOICE;
 }
@@ -10720,7 +11025,7 @@ function includeSelectedOnlineModelOption(
   }
   if (isHiddenBotModelId(settings, normalizedChoice)) return options;
   const provider = inferOnlineProviderForModelId(normalizedChoice);
-  return onlineProviderCanPreserveModelChoice(catalog, provider)
+  return onlineProviderCanPreserveModelChoice(catalog, settings, provider)
     ? includeSelectedModelOption(options, normalizedChoice, provider)
     : options;
 }
@@ -10774,6 +11079,8 @@ interface SettingsModelEligibilityGroup {
   label: string;
   meta: string;
   models: ModelCatalogEntry[];
+  notice?: string;
+  pending?: boolean;
 }
 
 function settingsModelGroupOptions(options: ModelCatalogEntry[]): ModelCatalogEntry[] {
@@ -10795,11 +11102,25 @@ function settingsOllamaGroupMeta(models: ModelCatalogEntry[]): string {
   return `${hostCount} connected Ollama hosts`;
 }
 
+function settingsModelDiscoveryNotice(
+  providerLabel: string,
+  status: ModelCatalogRefreshStatus
+): string {
+  if (status === "checking" || status === "idle") {
+    return `${providerLabel} chat models are still being checked. They may appear in a moment.`;
+  }
+  if (status === "error") {
+    return `${providerLabel} chat models could not be refreshed. Prism is keeping this provider visible and will try again when models refresh.`;
+  }
+  return `${providerLabel} chat models have not appeared yet. If the provider is still warming up, they may appear after the next refresh.`;
+}
+
 function settingsModelEligibilityGroups(args: {
   catalog: ModelCatalog | null;
   settings: UserSettings;
   openAiImageModels: ModelCatalogEntry[];
   elevenLabsImageModels: ModelCatalogEntry[];
+  modelCatalogStatus: ModelCatalogRefreshStatus;
 }): SettingsModelEligibilityGroup[] {
   const groups: SettingsModelEligibilityGroup[] = [];
   const ollama = settingsModelGroupOptions(
@@ -10815,16 +11136,23 @@ function settingsModelEligibilityGroups(args: {
   }
 
   if (apiKeySourceAvailable(args.settings.openAiApiKeySource)) {
-    const openAi = settingsModelGroupOptions([
-      ...modelOptionsForProvider(args.catalog, args.settings, "openai"),
-      ...args.openAiImageModels,
-    ]);
+    const openAiChat = settingsModelGroupOptions(
+      modelOptionsForProvider(args.catalog, args.settings, "openai")
+    );
+    const openAi = settingsModelGroupOptions([...openAiChat, ...args.openAiImageModels]);
     if (openAi.length > 0) {
+      const chatPending = openAiChat.length === 0;
       groups.push({
         id: "openai",
         label: "OpenAI",
-        meta: `${apiKeySourceModelGroupMeta(args.settings.openAiApiKeySource)} - Chat and image`,
+        meta: `${apiKeySourceModelGroupMeta(args.settings.openAiApiKeySource)} - ${
+          chatPending ? "Image models visible, chat pending" : "Chat and image"
+        }`,
         models: openAi,
+        notice: chatPending
+          ? settingsModelDiscoveryNotice("OpenAI", args.modelCatalogStatus)
+          : undefined,
+        pending: chatPending,
       });
     }
   }
@@ -10839,6 +11167,15 @@ function settingsModelEligibilityGroups(args: {
         label: "Anthropic",
         meta: `${apiKeySourceModelGroupMeta(args.settings.anthropicApiKeySource)} - Chat`,
         models: anthropic,
+      });
+    } else {
+      groups.push({
+        id: "anthropic",
+        label: "Anthropic",
+        meta: `${apiKeySourceModelGroupMeta(args.settings.anthropicApiKeySource)} - Chat pending`,
+        models: [],
+        notice: settingsModelDiscoveryNotice("Anthropic", args.modelCatalogStatus),
+        pending: true,
       });
     }
   }
@@ -11314,10 +11651,124 @@ function compareBotsByColor(
 // no separate neutral group.
 type PrismGroupId = "p" | "r" | "i" | "s" | "m";
 type BotLibraryFilterId = "all" | PrismGroupId;
-type BotPanelView = "home" | "create" | "library" | "botHub" | "customize" | "settings";
+type BotPanelView =
+  | "home"
+  | "create"
+  | "library"
+  | "marketplace"
+  | "botHub"
+  | "customize"
+  | "settings";
+
+function botMarketplaceThemeStateLabel(
+  state: BotMarketplaceThemeInstallState,
+  installedCount: number,
+  totalCount: number
+): string {
+  if (state === "installed") return "Installed";
+  if (state === "partial") return `${installedCount}/${totalCount} installed`;
+  return `${totalCount} bots`;
+}
+
+function botMarketplaceThemeActionLabel(
+  state: BotMarketplaceThemeInstallState,
+  installing: boolean
+): string {
+  if (installing) return "Installing";
+  if (state === "installed") return "Installed";
+  if (state === "partial") return "Install missing";
+  return "Install pack";
+}
+
+function marketplaceLensPreviewLine(lens: MarketplaceLensEntry): string {
+  if (lens.lensKind === "sacred_wisdom") {
+    return "Creates fictional bots inspired by this tradition. Does not impersonate sacred figures or religious authorities.";
+  }
+  if (lens.lensKind === "civic_perspective" || lens.lensKind === "research_persona") {
+    return "Creates fictional perspectives for brainstorming and audience modeling. Not real polling data.";
+  }
+  return lens.description;
+}
+
+async function fetchBotMarketplaceManifest(): Promise<BotMarketplaceManifest> {
+  const response = await fetch(BOT_MARKETPLACE_MANIFEST_PATH, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Marketplace catalog unavailable (${response.status}).`);
+  }
+  return normalizeBotMarketplaceManifest(await response.json());
+}
+
 const BOT_LIBRARY_FILTER_ALL = "all" as const;
+const BOT_LIBRARY_GROUP_FILTER_ALL = "all" as const;
+const BOT_LIBRARY_GROUP_CREATE_NEW = "create-new" as const;
+const BOT_LIBRARY_GROUP_BOT_CAP = 24;
+const BOT_MARKETPLACE_STARTER_THEME_ID = "originals";
+const BOT_MARKETPLACE_LENS_CATEGORY_PRISM_LANES: Record<string, PrismGroupId> = {
+  "sacred-wisdom": "p",
+  "adventure-roleplay": "r",
+  "creative-styles": "i",
+  "thinking-styles": "s",
+  "civic-perspectives": "m",
+};
+const BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX = "saved:";
 const BOT_LIBRARY_DRAWER_ANIMATION_MS = 220;
 const PANEL_CLOSE_ANIMATION_MS = 180;
+const STARTER_PACK_INSTALL_STORAGE_PREFIX = "prism_starter_pack_installed_v1";
+const PANEL_FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex=\"-1\"])",
+].join(",");
+
+function starterPackInstallStorageKey(userId: string): string {
+  return `${STARTER_PACK_INSTALL_STORAGE_PREFIX}:${userId}:${BOT_MARKETPLACE_STARTER_THEME_ID}`;
+}
+
+function starterPackInstallMarked(userId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(starterPackInstallStorageKey(userId)) === "done";
+  } catch {
+    return false;
+  }
+}
+
+function markStarterPackInstalled(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(starterPackInstallStorageKey(userId), "done");
+  } catch {
+    // Non-fatal: export-hash checks still prevent duplicate installs.
+  }
+}
+
+function clearStarterPackInstalledMarker(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(starterPackInstallStorageKey(userId));
+  } catch {
+    // Storage cleanup is best effort during factory reset.
+  }
+}
+
+function botMarketplaceLensCategoryPrismLane(categoryId: string | null | undefined): PrismGroupId {
+  if (!categoryId) return "p";
+  return BOT_MARKETPLACE_LENS_CATEGORY_PRISM_LANES[categoryId] ?? "p";
+}
+
+function panelFocusableElements(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(PANEL_FOCUSABLE_SELECTOR)).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      element.getAttribute("aria-hidden") !== "true" &&
+      element.getClientRects().length > 0
+  );
+}
 
 interface PrismGroupDef {
   id: PrismGroupId;
@@ -11333,24 +11784,6 @@ const PRISM_GROUPS: readonly PrismGroupDef[] = [
   { id: "s", letter: "S", label: "Cyan & blue", swatch: PRISM_COLORS.s },
   { id: "m", letter: "M", label: "Indigo & violet", swatch: PRISM_COLORS.m },
 ] as const;
-
-// The bot-library color-group dashboard renders the All-bots △ tile in
-// row 1 col 1, then the five PRISM_GROUPS in iteration order across a
-// 2-column grid: pink/red (r1c2), orange/yellow (r2c1), lime/green
-// (r2c2), cyan/blue (r3c1), indigo/violet (r3c2). Read column-major
-// (left col r2→r3, then right col r1→r3) the five color tiles arrive
-// in the sequence orange, cyan, pink, green, violet — so we override
-// each tile's displayed glyph below to spell the PRISM brand wordmark
-// in that reading order. The underlying group ids, labels, swatches,
-// and aria-labels still carry the canonical color identity; only the
-// visible letter glyph is remapped for the wordmark layout.
-const GROUP_LETTER_OVERRIDES: Record<PrismGroupId, string> = {
-  r: "P", // orange/yellow → 1st in column-major reading
-  s: "R", // cyan/blue     → 2nd
-  p: "I", // pink/red      → 3rd
-  i: "S", // lime/green    → 4th
-  m: "M", // indigo/violet → 5th
-};
 
 interface MemoryClusterInnerBubble {
   id: string;
@@ -11542,6 +11975,11 @@ function memoryCategory(memory: UserMemory): MemoryCategory {
   return memory.botId ? classifyMemoryCategoryFromText(memory.text) : "user";
 }
 
+function memoryLongTermCategory(memory: UserMemory): MemoryCategory {
+  if (memory.source === "about_you") return "user";
+  return memoryCategory(memory);
+}
+
 function toPossessiveLabel(label: string): string {
   const trimmed = label.trim();
   if (!trimmed) return "User's";
@@ -11715,35 +12153,72 @@ function buildFamilyDirectoryBotInnerBubbles(
   return bubbles;
 }
 
-// Build a left-to-right gradient from up to N bot colors in a group so
-// each editor dashboard button reads as an ordered slice of its bucket's
-// actual spectrum. Stops are color-mixed against `--bg` so the tile still
-// feels like a calm card.
-// Returns null when no bot has a usable color.
-function buildBotGroupGradient(
+function colorWithAlpha(rawColor: string, alpha: number): string {
+  const channels = hexChannels(rawColor);
+  if (!channels) return rawColor;
+  const [r, g, b] = channels;
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+}
+
+function buildBotLibraryGroupGradient(
+  groupId: string,
   groupBots: readonly Bot[],
-  theme: "light" | "dark",
-  harmonyActive: boolean,
-  mixPercent: number
-): string | null {
-  if (groupBots.length === 0) return null;
-  const sampleSize = Math.min(groupBots.length, 6);
-  const stride = groupBots.length / sampleSize;
-  const stops: string[] = [];
-  for (let i = 0; i < sampleSize; i++) {
-    const idx = Math.min(groupBots.length - 1, Math.floor(i * stride));
-    const bot = groupBots[idx];
-    const accent = bot.color
-      ? panelBotDisplayAccent(bot.color, theme, harmonyActive)
-      : null;
-    if (!accent) continue;
-    stops.push(
-      `color-mix(in srgb, ${accent} ${mixPercent}%, var(--bg) ${100 - mixPercent}%)`
+  theme: "light" | "dark"
+): string {
+  const colors = groupBots
+    .map((bot) => bot.color?.trim())
+    .filter((color): color is string => Boolean(color && hexChannels(color)))
+    .map((color) => normalizeAccentForTheme(color, theme));
+  const gradientColors =
+    colors.length > 0
+      ? colors
+      : theme === "dark"
+        ? ["#626875", "#24262d", "#a6a095"]
+        : ["#d9d5ca", "#f7f3ea", "#a9b0ba"];
+  const nodeCount = Math.min(9, Math.max(4, gradientColors.length * 2));
+  const nodeLayers: string[] = [];
+  for (let index = 0; index < nodeCount; index += 1) {
+    const color = gradientColors[index % gradientColors.length]!;
+    const seed = `bot-library-group:${groupId}:${theme}:gradient-node:${index}`;
+    const x = 8 + stableUnitValue(`${seed}:x`) * 84;
+    const y = 10 + stableUnitValue(`${seed}:y`) * 80;
+    const inner = 3 + stableUnitValue(`${seed}:inner`) * 12;
+    const fade = 34 + stableUnitValue(`${seed}:fade`) * 24;
+    const strength = colors.length > 0
+      ? 0.52 + stableUnitValue(`${seed}:strength`) * 0.32
+      : 0.24 + stableUnitValue(`${seed}:strength`) * 0.18;
+    nodeLayers.push(
+      `radial-gradient(circle at ${x.toFixed(1)}% ${y.toFixed(1)}%, ${colorWithAlpha(
+        color,
+        strength
+      )} ${inner.toFixed(1)}%, rgba(0, 0, 0, 0) ${fade.toFixed(1)}%)`
     );
   }
-  if (stops.length === 0) return null;
-  if (stops.length === 1) return stops[0];
-  return `linear-gradient(to right, ${stops.join(", ")})`;
+  const ambientA = gradientColors[0]!;
+  const ambientB = gradientColors[gradientColors.length - 1]!;
+  const ambientLayer = `radial-gradient(circle at 50% 50%, ${colorWithAlpha(
+    ambientA,
+    colors.length > 0 ? 0.24 : 0.16
+  )} 0%, ${colorWithAlpha(ambientB, colors.length > 0 ? 0.18 : 0.12)} 58%, rgba(0, 0, 0, 0) 100%)`;
+  const baseLayer =
+    theme === "dark"
+      ? "linear-gradient(145deg, rgba(255,255,255,0.075), rgba(255,255,255,0.018))"
+      : "linear-gradient(145deg, rgba(255,255,255,0.82), rgba(255,255,255,0.34))";
+  return `${nodeLayers.join(", ")}, ${ambientLayer}, ${baseLayer}`;
+}
+
+function botLibraryGroupVisualStyle(
+  group: Pick<BotLibraryGroup, "id">,
+  groupBots: readonly Bot[],
+  theme: "light" | "dark"
+): React.CSSProperties {
+  return {
+    ["--bot-library-group-gradient" as string]: buildBotLibraryGroupGradient(
+      group.id,
+      groupBots,
+      theme
+    ),
+  } as React.CSSProperties;
 }
 
 // Map a hex color to one of the five Prism letter buckets. Hue cuts
@@ -12171,6 +12646,10 @@ function botLibraryGroupsStorageKey(userId: string): string {
   return `${BOT_LIBRARY_GROUPS_STORAGE_KEY}:${userId}`;
 }
 
+function botMarketplaceLensesStorageKey(userId: string): string {
+  return `${BOT_MARKETPLACE_LENSES_STORAGE_KEY}:${userId}`;
+}
+
 function commandCenterStateStorageKey(userId: string): string {
   return `${COMMAND_CENTER_STATE_STORAGE_KEY}:${userId}`;
 }
@@ -12185,6 +12664,34 @@ function loadConversationGroupOrder(userId: string): string[] {
       : [];
   } catch {
     return [];
+  }
+}
+
+function loadInstalledMarketplaceLensIds(userId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(botMarketplaceLensesStorageKey(userId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed
+        .map((id) => (typeof id === "string" ? id.trim().toLowerCase() : ""))
+        .filter((id) => id.length > 0)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function saveInstalledMarketplaceLensIds(userId: string, lensIds: ReadonlySet<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      botMarketplaceLensesStorageKey(userId),
+      JSON.stringify(Array.from(lensIds).sort())
+    );
+  } catch {
+    // Non-fatal: keep the in-memory install state for this page session.
   }
 }
 
@@ -14813,6 +15320,7 @@ const COMPOSE_MENU_MAX_WIDTH_PX = 360;
 /** Minimum popover width when the trigger is very narrow (matches CSS floors). */
 const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;
 const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 300;
+const BOT_LIBRARY_GROUP_MENU_MIN_WIDTH_PX = 240;
 const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
 const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
 /** Slightly above bot menu so both open pickers stack predictably over the rail. */
@@ -14947,6 +15455,220 @@ function useComposeMenuPortalStyle(
   }, [menuOpen, floorMinWidth, placement, portalZIndex, triggerRef]);
 
   return menuOpen ? fixedStyle : undefined;
+}
+
+interface BotLibraryGroupPickerOption {
+  id: string;
+  name: string;
+  menuName?: string;
+  menuCountLabel?: string;
+  count: number;
+  cap?: number;
+  bots: readonly Bot[];
+}
+
+interface BotLibraryGroupPickerProps {
+  value: string;
+  options: readonly BotLibraryGroupPickerOption[];
+  onChange: (nextValue: string) => void;
+  resolvedTheme: "light" | "dark";
+  showCounts?: boolean;
+  disabled?: boolean;
+  dismissPopoversSignal?: number;
+}
+
+function botLibraryGroupCountLabel(count: number, cap?: number): string {
+  if (cap !== undefined) {
+    return `${count} / ${cap} bots`;
+  }
+  return count === 1 ? "1 bot" : `${count} bots`;
+}
+
+function botLibraryGroupCapError(count: number): string | null {
+  return count > BOT_LIBRARY_GROUP_BOT_CAP
+    ? `Custom bot groups can include up to ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`
+    : null;
+}
+
+function BotLibraryGroupPicker({
+  value,
+  options,
+  onChange,
+  resolvedTheme,
+  showCounts = true,
+  disabled = false,
+  dismissPopoversSignal,
+}: BotLibraryGroupPickerProps): React.JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const selectedOption =
+    options.find((option) => option.id === value) ?? options[0] ?? null;
+  const selectedStyle = selectedOption
+    ? botLibraryGroupVisualStyle(
+        { id: selectedOption.id },
+        selectedOption.bots,
+        resolvedTheme
+      )
+    : undefined;
+  const menuOptions =
+    selectedOption?.id === BOT_LIBRARY_GROUP_FILTER_ALL
+      ? options.filter((option) => option.id !== BOT_LIBRARY_GROUP_FILTER_ALL)
+      : options;
+  const menuOpen =
+    open && !disabled && menuOptions.length > 0 && selectedOption !== null;
+  const menuPortalStyle = useComposeMenuPortalStyle(
+    menuOpen,
+    triggerRef,
+    BOT_LIBRARY_GROUP_MENU_MIN_WIDTH_PX,
+    COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
+    "down"
+  );
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (dismissPopoversSignal === undefined) return;
+    setOpen(false);
+  }, [dismissPopoversSignal]);
+
+  if (!selectedOption) return null;
+
+  const pick = (nextValue: string): void => {
+    onChange(nextValue);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div
+      className={styles.botLibraryGroupControl}
+      data-open={menuOpen ? "true" : undefined}
+      data-filter-active={
+        selectedOption.id !== BOT_LIBRARY_GROUP_FILTER_ALL ? "true" : undefined
+      }
+      data-disabled={disabled ? "true" : undefined}
+      style={selectedStyle}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.botLibraryGroupTrigger}
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled || menuOptions.length === 0}
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+        aria-label={`Bot group filter: ${selectedOption.name}`}
+        title={`Bot group filter: ${selectedOption.name}`}
+      >
+        <span className={styles.botLibraryGroupTriggerSwatch} aria-hidden="true" />
+        <span className={styles.botLibraryGroupTriggerName}>{selectedOption.name}</span>
+        {showCounts ? (
+          <span className={styles.botLibraryGroupTriggerCount} aria-hidden="true">
+            {botLibraryGroupCountLabel(selectedOption.count, selectedOption.cap)}
+          </span>
+        ) : null}
+        <span className={styles.composeBotTriggerChevron} aria-hidden="true">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M2 3.5 L5 6.5 L8 3.5" />
+          </svg>
+        </span>
+      </button>
+      {menuOpen &&
+        menuPortalStyle &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`${styles.composeBotMenu} ${styles.botLibraryGroupMenu}`}
+            style={menuPortalStyle}
+          >
+            <div
+              className={styles.composeBotListbox}
+              role="listbox"
+              aria-label="Bot group filter"
+            >
+              {menuOptions.map((option) => {
+                const optionStyle = botLibraryGroupVisualStyle(
+                  { id: option.id },
+                  option.bots,
+                  resolvedTheme
+                );
+                const isSelected = option.id === selectedOption.id;
+                const optionName = option.menuName ?? option.name;
+                const optionCountLabel = showCounts
+                  ? option.menuCountLabel ??
+                    botLibraryGroupCountLabel(option.count, option.cap)
+                  : null;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={styles.botLibraryGroupOption}
+                    role="option"
+                    aria-selected={isSelected}
+                    data-default-option={
+                      option.id === BOT_LIBRARY_GROUP_FILTER_ALL ? "true" : undefined
+                    }
+                    style={optionStyle}
+                    onClick={() => pick(option.id)}
+                  >
+                    <span
+                      className={styles.botLibraryGroupOptionSwatch}
+                      aria-hidden="true"
+                    />
+                    <span className={styles.botLibraryGroupOptionCopy}>
+                      <span className={styles.botLibraryGroupOptionName}>
+                        {optionName}
+                      </span>
+                      {optionCountLabel ? (
+                        <span className={styles.botLibraryGroupOptionCount}>
+                          {optionCountLabel}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
 }
 
 function computeMentionMenuFixedStyle(
@@ -15779,6 +16501,11 @@ interface ComposerModelPickerEffortControl {
   disabledReason?: string;
 }
 
+interface ComposerModelPickerStatusMessage {
+  title: string;
+  detail?: string;
+}
+
 interface ComposerModelPickerProps {
   value: string;
   onChange: (nextValue: string) => void;
@@ -15813,6 +16540,7 @@ interface ComposerModelPickerProps {
    */
   settingsDefaultModelId?: string | null;
   effortControl?: ComposerModelPickerEffortControl;
+  statusMessage?: ComposerModelPickerStatusMessage;
   /** Increment to close floating picker menus from the parent shell. */
   dismissPopoversSignal?: number;
 }
@@ -15839,6 +16567,7 @@ function ComposerModelPicker({
   disabledOptionMetaOverride,
   settingsDefaultModelId,
   effortControl,
+  statusMessage,
   dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -16004,6 +16733,12 @@ function ComposerModelPicker({
             }`}
             style={menuPortalStyle}
           >
+          {statusMessage ? (
+            <div className={styles.composeModelStatusRow} role="status">
+              <span>{statusMessage.title}</span>
+              {statusMessage.detail ? <small>{statusMessage.detail}</small> : null}
+            </div>
+          ) : null}
           <div
             className={styles.composeBotListbox}
             role="listbox"
@@ -26198,6 +26933,24 @@ interface BotProfileBuilderProps {
   onClose: () => void;
 }
 
+interface BotAiParameterCustomizerProps {
+  open: boolean;
+  botName: string;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  topP: number;
+  topK: number;
+  repetitionPenalty: number;
+  onSystemPromptChange: (value: string) => void;
+  onTemperatureChange: (value: number) => void;
+  onMaxTokensChange: (value: number) => void;
+  onTopPChange: (value: number) => void;
+  onTopKChange: (value: number) => void;
+  onRepetitionPenaltyChange: (value: number) => void;
+  onClose: () => void;
+}
+
 interface BotAvatarCustomizerProps {
   open: boolean;
   botName: string;
@@ -26522,6 +27275,135 @@ function BotAvatarCustomizer({
               tabIndex={-1}
             />
           </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BotAiParameterCustomizer({
+  open,
+  botName,
+  systemPrompt,
+  temperature,
+  maxTokens,
+  topP,
+  topK,
+  repetitionPenalty,
+  onSystemPromptChange,
+  onTemperatureChange,
+  onMaxTokensChange,
+  onTopPChange,
+  onTopKChange,
+  onRepetitionPenaltyChange,
+  onClose,
+}: BotAiParameterCustomizerProps): React.JSX.Element | null {
+  if (!open) return null;
+  const titleName = botName.trim() || "Bot";
+
+  return (
+    <div
+      className={styles.botProfileBuilderBackdrop}
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
+        onClose();
+      }}
+    >
+      <section
+        className={`${styles.botProfileBuilder} ${styles.botAiParameterBuilder}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bot-ai-parameter-title"
+      >
+        <header className={styles.botProfileBuilderHeader}>
+          <div>
+            <span>AI Parameters</span>
+            <h4 id="bot-ai-parameter-title">{titleName}</h4>
+            <p>System prompt and sampler values for this bot.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close AI parameters">
+            ×
+          </button>
+        </header>
+        <div className={styles.botAiParameterBody}>
+          <label className={`${styles.botProfileField} ${styles.botAiPromptField}`}>
+            <span>System Prompt</span>
+            <textarea
+              spellCheck={false}
+              placeholder="You are..."
+              value={systemPrompt}
+              onChange={(event) => onSystemPromptChange(event.currentTarget.value)}
+            />
+          </label>
+          <div className={styles.botAiSamplerGrid}>
+            <label className={styles.botProfileField}>
+              <span>Temperature</span>
+              <input
+                type="number"
+                min={BOT_TEMPERATURE_MIN}
+                max={BOT_TEMPERATURE_MAX}
+                step="0.01"
+                value={temperature}
+                onChange={(event) =>
+                  onTemperatureChange(normalizeBotTemperature(Number(event.currentTarget.value)))
+                }
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Max Tokens</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={maxTokens}
+                onChange={(event) =>
+                  onMaxTokensChange(normalizeBotMaxTokens(Number(event.currentTarget.value)))
+                }
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Top P</span>
+              <input
+                type="number"
+                min={BOT_TOP_P_MIN}
+                max={BOT_TOP_P_MAX}
+                step="0.01"
+                value={topP}
+                onChange={(event) =>
+                  onTopPChange(normalizeBotTopP(Number(event.currentTarget.value)))
+                }
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Top K</span>
+              <input
+                type="number"
+                min={BOT_TOP_K_MIN}
+                step={1}
+                value={topK}
+                onChange={(event) =>
+                  onTopKChange(normalizeBotTopK(Number(event.currentTarget.value)))
+                }
+              />
+            </label>
+            <label className={styles.botProfileField}>
+              <span>Repetition Penalty</span>
+              <input
+                type="number"
+                min={BOT_REPETITION_PENALTY_MIN}
+                max={BOT_REPETITION_PENALTY_MAX}
+                step="0.01"
+                value={repetitionPenalty}
+                onChange={(event) =>
+                  onRepetitionPenaltyChange(
+                    normalizeBotRepetitionPenalty(Number(event.currentTarget.value))
+                  )
+                }
+              />
+            </label>
+          </div>
         </div>
       </section>
     </div>
@@ -27232,15 +28114,10 @@ function HomeContent(): React.JSX.Element {
   const requestedAuthMode = searchParams.get("mode") === "login" ? "login" : "register";
   // Post-auth surface is derived from the URL so refreshes preserve the
   // current mode and browser back/forward walk naturally between Hub,
-  // Chat, Sandbox, Coffee, and Story. Anything unrecognised (missing param,
+  // Chat, Zen, Coffee, and Story. Anything unrecognised (missing param,
   // stale values) resolves to the Hub.
   const viewParam = searchParams.get("view");
-  const view: View =
-    viewParam === "chat" ? "chat"
-      : viewParam === "sandbox" ? "sandbox"
-        : viewParam === "coffee" ? "coffee"
-          : viewParam === "story" ? "story"
-            : "hub";
+  const view: View = prismSurfaceViewForRouteParam(viewParam);
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] =
     useState<"hidden" | "entering" | "visible" | "fading">("hidden");
@@ -27400,7 +28277,7 @@ function HomeContent(): React.JSX.Element {
       setViewSwitchOverlayPhase("visible");
       viewSwitchOverlayEnterFrameRef.current = null;
     });
-    const href = next === "hub" ? "/" : `/?view=${next}`;
+    const href = prismHrefForSurfaceView(next);
     router.replace(href);
   }, [clearViewSwitchOverlayTimers, router, view, triggerModeExitCompaction]);
   useEffect(() => {
@@ -27637,6 +28514,9 @@ function HomeContent(): React.JSX.Element {
   const [apiKeyDraftValidation, setApiKeyDraftValidation] =
     useState<ApiKeyDraftValidationMap>(() => createApiKeyDraftValidationMap());
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
+  const [modelCatalogStatus, setModelCatalogStatus] =
+    useState<ModelCatalogRefreshStatus>("idle");
+  const modelCatalogRefreshTokenRef = useRef(0);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
     reachable: boolean;
@@ -27741,6 +28621,8 @@ function HomeContent(): React.JSX.Element {
   const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] = useState(false);
   const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] = useState<string[]>([]);
   const desktopFirstRunAutoSetupAttemptedRef = useRef(false);
+  const starterPackAutoInstallAttemptedUserRef = useRef<string | null>(null);
+  const starterPackFreshAccountEligibleUserRef = useRef<string | null>(null);
   const [preAuthChecklistComplete, setPreAuthChecklistComplete] = useState(false);
   const [desktopFirstRunHealth, setDesktopFirstRunHealth] = useState<{
     services?: {
@@ -28005,7 +28887,7 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const botContextSuppressClickRef = useRef(false);
   const [panel, setPanel] = useState<PanelView>(null);
-  const [settingsScope, setSettingsScope] = useState<SettingsScope>("chooser");
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>("entry");
   const [usageRange, setUsageRange] = useState<UsageRange>("7d");
   const [usageScope, setUsageScope] = useState<"all" | "conversation">("all");
   const [usageReport, setUsageReport] = useState<UsageResponse | null>(null);
@@ -28013,6 +28895,7 @@ function HomeContent(): React.JSX.Element {
   const panelRef = useRef<PanelView>(null);
   panelRef.current = panel;
   const panelPopupCleanupLastPanelRef = useRef<PanelView>(panel);
+  const panelFocusReturnRef = useRef<HTMLElement | null>(null);
   const [composerPopoverDismissSignal, setComposerPopoverDismissSignal] = useState(0);
   const [panelClosing, setPanelClosing] = useState(false);
   const panelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -28147,8 +29030,30 @@ function HomeContent(): React.JSX.Element {
   const [botPanelGroup, setBotPanelGroup] = useState<BotLibraryFilterId>(
     BOT_LIBRARY_FILTER_ALL
   );
+  const [botLibraryGroupFilterId, setBotLibraryGroupFilterId] = useState<string>(
+    BOT_LIBRARY_GROUP_FILTER_ALL
+  );
+  const [botLibraryGroupDetailsDialog, setBotLibraryGroupDetailsDialog] =
+    useState<BotLibraryGroupDetailsDialogState | null>(null);
+  const [botLibraryGroupDeleteConfirm, setBotLibraryGroupDeleteConfirm] =
+    useState<BotLibraryGroup | null>(null);
   const [botPanelView, setBotPanelView] = useState<BotPanelView>("home");
   const [selectedBotPanelBotId, setSelectedBotPanelBotId] = useState<string | null>(null);
+  const [botMarketplaceManifest, setBotMarketplaceManifest] =
+    useState<BotMarketplaceManifest | null>(null);
+  const [botMarketplaceLoading, setBotMarketplaceLoading] = useState(false);
+  const [botMarketplaceError, setBotMarketplaceError] = useState<string | null>(null);
+  const [botMarketplaceSection, setBotMarketplaceSection] =
+    useState<MarketplaceContentType>("bot");
+  const [botMarketplaceSelectedThemeId, setBotMarketplaceSelectedThemeId] =
+    useState<string | null>(null);
+  const [botMarketplaceSelectedLensCategoryId, setBotMarketplaceSelectedLensCategoryId] =
+    useState<string | null>(null);
+  const [botMarketplaceInstallingKey, setBotMarketplaceInstallingKey] =
+    useState<string | null>(null);
+  const [installedMarketplaceLensIds, setInstalledMarketplaceLensIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [botLibraryExpanded, setBotLibraryExpanded] = useState(false);
   const [botLibraryClosing, setBotLibraryClosing] = useState(false);
   const botLibraryCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -28318,6 +29223,7 @@ function HomeContent(): React.JSX.Element {
     botContextLongPressRef.current = null;
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
+  const marketplaceGlyphRepairAttemptedRef = useRef<Set<string>>(new Set());
   const [botLibraryGroups, setBotLibraryGroups] = useState<BotLibraryGroup[]>(() => [
     createFavoritesBotGroup(),
   ]);
@@ -28996,6 +29902,8 @@ function HomeContent(): React.JSX.Element {
   // into edit mode. No inline per-card edit form, no duplicated picker.
   const [newBotName, setNewBotName] = useState("");
   const [botProfile, setBotProfile] = useState<BotProfileFields>(() => blankBotProfile());
+  const [newBotSystemPrompt, setNewBotSystemPrompt] = useState("");
+  const [botEditorAdvancedMode, setBotEditorAdvancedMode] = useState(false);
   const [newBotLocalModel, setNewBotLocalModel] = useState(DEFAULT_BOT_CHAT_MODEL_CHOICE);
   const [newBotOnlineModel, setNewBotOnlineModel] = useState(DEFAULT_BOT_CHAT_MODEL_CHOICE);
   const [newBotLocalImageModel, setNewBotLocalImageModel] = useState(AUTO_MODEL_CHOICE);
@@ -29005,6 +29913,11 @@ function HomeContent(): React.JSX.Element {
   const [newBotFlirtEnabled, setNewBotFlirtEnabled] = useState(false);
   const [newBotTemperature, setNewBotTemperature] = useState(BOT_TEMPERATURE_DEFAULT);
   const [newBotMaxTokens, setNewBotMaxTokens] = useState(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+  const [newBotTopP, setNewBotTopP] = useState(BOT_TOP_P_DEFAULT);
+  const [newBotTopK, setNewBotTopK] = useState(BOT_TOP_K_DEFAULT);
+  const [newBotRepetitionPenalty, setNewBotRepetitionPenalty] = useState(
+    BOT_REPETITION_PENALTY_DEFAULT
+  );
   // Lazy initializers so the very first render already picks a random seed
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
@@ -29020,15 +29933,24 @@ function HomeContent(): React.JSX.Element {
   );
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
+  const [newBotLensId, setNewBotLensId] = useState<string>("");
+  const [newBotGeneratedMemorySeeds, setNewBotGeneratedMemorySeeds] =
+    useState<GeneratedBotMemorySeedSet | null>(null);
+  const [botLensDropActive, setBotLensDropActive] = useState(false);
+  const [botLensTooltip, setBotLensTooltip] = useState<{
+    label: string;
+    placement: "left" | "right";
+    x: number;
+    y: number;
+  } | null>(null);
   const [botProfilePictureBusy, setBotProfilePictureBusy] = useState(false);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
+  const [botAiParametersModalOpen, setBotAiParametersModalOpen] = useState(false);
   const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
   const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] = useState(false);
-  /** Which page is visible inside the bot model / image routing UI (chat + image + mobile tuning). */
-  const [botModelRoutingPage, setBotModelRoutingPage] = useState<
-    "chat" | "image" | "tuning"
-  >("chat");
+  /** Which page is visible inside the bot model / image routing UI. */
+  const [botModelRoutingPage, setBotModelRoutingPage] = useState<"chat" | "image">("chat");
   const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
   const [settingsHostsModalOpen, setSettingsHostsModalOpen] = useState(false);
   const [settingsDefaultsModalOpen, setSettingsDefaultsModalOpen] = useState(false);
@@ -29087,13 +30009,18 @@ function HomeContent(): React.JSX.Element {
   const latestCreateBotDraftRef = useRef({
     name: "",
     profile: blankBotProfile(),
+    advancedMode: false,
     localModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
     onlineModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
     onlineEnabled: true,
     deleteProtected: false,
     flirtEnabled: false,
+    lensId: "",
     temperature: BOT_TEMPERATURE_DEFAULT,
     maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+    topP: BOT_TOP_P_DEFAULT,
+    topK: BOT_TOP_K_DEFAULT,
+    repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
     faceEyesFont: DEFAULT_BOT_FACE_STYLE.eyesFont,
     faceMouthFont: DEFAULT_BOT_FACE_STYLE.mouthFont,
     faceFontWeight: DEFAULT_BOT_FACE_STYLE.weight,
@@ -29101,13 +30028,18 @@ function HomeContent(): React.JSX.Element {
   latestCreateBotDraftRef.current = {
     name: newBotName,
     profile: botProfile,
+    advancedMode: botEditorAdvancedMode,
     localModel: newBotLocalModel,
     onlineModel: newBotOnlineModel,
     onlineEnabled: newBotOnlineEnabled,
     deleteProtected: newBotDeleteProtected,
     flirtEnabled: newBotFlirtEnabled,
+    lensId: newBotLensId,
     temperature: newBotTemperature,
     maxTokens: newBotMaxTokens,
+    topP: newBotTopP,
+    topK: newBotTopK,
+    repetitionPenalty: newBotRepetitionPenalty,
     faceEyesFont: newBotFaceEyesFont,
     faceMouthFont: newBotFaceMouthFont,
     faceFontWeight: newBotFaceFontWeight,
@@ -29137,6 +30069,22 @@ function HomeContent(): React.JSX.Element {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceFontWeight(normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight);
   }, []);
+
+  const setBotEditorModeAdvanced = useCallback((advanced: boolean) => {
+    setActiveFieldHelp(null);
+    setColorWheelOpen(false);
+    setBotProfileBuilderOpen(false);
+    setBotAiParametersModalOpen(false);
+    setBotAvatarCustomizerOpen(false);
+    setBotPreferredModelsModalOpen(false);
+    setBotLensDropActive(false);
+    if (advanced) {
+      setNewBotSystemPrompt(serializeStoredBotPrompt(botProfile, newBotName.trim()));
+    } else {
+      setBotProfile(parseStoredBotPrompt(newBotSystemPrompt).fields);
+    }
+    setBotEditorAdvancedMode(advanced);
+  }, [botProfile, newBotName, newBotSystemPrompt]);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×), HEADER_DELETE_KEY (header button), or the
   // DELETE_ALL_KEY sentinel (reached by holding any × past the threshold).
@@ -29170,16 +30118,20 @@ function HomeContent(): React.JSX.Element {
   const editOriginalRef = useRef<{
     name: string;
     prompt: string;
+    rawPrompt?: string;
     localModel: string;
     onlineModel: string;
     localImageModel: string;
     openAiImageModel: string;
     onlineEnabled: boolean;
     deleteProtected: boolean;
-    flirtEnabled: boolean;
-    temperature: number;
-    maxTokens: number;
-    color: string;
+	    flirtEnabled: boolean;
+	    temperature: number;
+	    maxTokens: number;
+	    topP: number;
+	    topK: number;
+	    repetitionPenalty: number;
+	    color: string;
     glyph: BotGlyphName;
     faceEyesFont: BotFaceFontId;
     faceMouthFont: BotFaceFontId;
@@ -30450,7 +31402,7 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
-    setSettingsScope("chooser");
+    setSettingsScope("entry");
     setProfileNameModalOpen(false);
     setProfileNameDraft("");
     setOpenAiKey("");
@@ -30511,7 +31463,7 @@ function HomeContent(): React.JSX.Element {
     setPanelClosing(false);
     setPanel(nextPanel);
     if (nextPanel === "settings") {
-      setSettingsScope("chooser");
+      setSettingsScope("entry");
     }
     if (nextPanel === "usage" && !selectedId) {
       setUsageScope("all");
@@ -30527,6 +31479,11 @@ function HomeContent(): React.JSX.Element {
       setMemoryPhysicsSeed((seed) => seed + 1);
     }
   }, [selectedId]);
+
+  const openSettingsPanel = useCallback((initialScope: SettingsScope = "entry") => {
+    openRightPanel("settings");
+    setSettingsScope(initialScope);
+  }, [openRightPanel]);
 
   const openCommandCenterCommandEditor = useCallback(
     (commandId: string) => {
@@ -30784,9 +31741,9 @@ function HomeContent(): React.JSX.Element {
     if (completed) return;
     setDesktopFirstRunChecklistStepIndex(0);
     setDesktopFirstRunChecklistOpen(true);
-    openRightPanel("settings");
+    openSettingsPanel();
     void refreshDesktopFirstRunHealth();
-  }, [user, CLIENT_ACCESS_REQUIRED, hasAnyAccounts, openRightPanel, refreshDesktopFirstRunHealth]);
+  }, [user, CLIENT_ACCESS_REQUIRED, hasAnyAccounts, openSettingsPanel, refreshDesktopFirstRunHealth]);
 
   useEffect(() => {
     return () => {
@@ -30796,6 +31753,104 @@ function HomeContent(): React.JSX.Element {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!panel || panelClosing || typeof document === "undefined") return;
+    const panelNode = document.querySelector<HTMLElement>(
+      `[data-prism-panel="${panel}"]`
+    );
+    if (!panelNode) return;
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && !panelNode.contains(activeElement)) {
+      panelFocusReturnRef.current = activeElement;
+    }
+    const siblingStates =
+      panelNode.parentElement
+        ? Array.from(panelNode.parentElement.children)
+            .filter(
+              (node): node is HTMLElement =>
+                node instanceof HTMLElement &&
+                node !== panelNode &&
+                node.dataset.prismPanelLayer !== "true"
+            )
+            .map((node) => ({
+              node,
+              ariaHidden: node.getAttribute("aria-hidden"),
+              inert: node.hasAttribute("inert"),
+            }))
+        : [];
+    for (const { node } of siblingStates) {
+      node.setAttribute("aria-hidden", "true");
+      node.setAttribute("inert", "");
+    }
+    const focusFrame = window.requestAnimationFrame(() => {
+      const currentActiveElement = document.activeElement;
+      if (
+        currentActiveElement instanceof HTMLElement &&
+        panelNode.contains(currentActiveElement)
+      ) {
+        return;
+      }
+      const focusable = panelFocusableElements(panelNode);
+      (focusable[0] ?? panelNode).focus({ preventScroll: true });
+    });
+    const handlePanelKeyDown = (event: KeyboardEvent) => {
+      const eventTarget = event.target;
+      const activeModal =
+        eventTarget instanceof HTMLElement
+          ? eventTarget.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
+          : null;
+      if (activeModal && activeModal !== panelNode && !panelNode.contains(activeModal)) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePanel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = panelFocusableElements(panelNode);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panelNode.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      const current = document.activeElement;
+      if (event.shiftKey) {
+        if (current === first || !(current instanceof HTMLElement) || !panelNode.contains(current)) {
+          event.preventDefault();
+          last.focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (current === last || !(current instanceof HTMLElement) || !panelNode.contains(current)) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", handlePanelKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handlePanelKeyDown, true);
+      for (const { node, ariaHidden, inert } of siblingStates) {
+        if (ariaHidden === null) {
+          node.removeAttribute("aria-hidden");
+        } else {
+          node.setAttribute("aria-hidden", ariaHidden);
+        }
+        if (!inert) {
+          node.removeAttribute("inert");
+        }
+      }
+      const focusReturn = panelFocusReturnRef.current;
+      if (focusReturn && document.contains(focusReturn)) {
+        focusReturn.focus({ preventScroll: true });
+      }
+      panelFocusReturnRef.current = null;
+    };
+  }, [panel, panelClosing, closePanel]);
 
   const openBotLibraryDrawer = useCallback(() => {
     if (botLibraryCloseTimerRef.current) {
@@ -31795,9 +32850,8 @@ function HomeContent(): React.JSX.Element {
     glyph: BotGlyphName;
     color: string | null;
   } | null>(() => {
-    if (!detail) return null;
     const withPrivatePrefix = (name: string): string =>
-      detail.incognito ? `Private ${name}` : name;
+      detail?.incognito ? `Private ${name}` : name;
     if (activeBot) {
       return {
         name: withPrivatePrefix(activeBot.name),
@@ -31805,6 +32859,7 @@ function HomeContent(): React.JSX.Element {
         color: activeBot.color,
       };
     }
+    if (!detail) return null;
     if (defaultConversationUsesPrismIdentity) {
       return {
         name: withPrivatePrefix(DEFAULT_ASSISTANT_NAME),
@@ -32047,11 +33102,13 @@ function HomeContent(): React.JSX.Element {
             settings,
             openAiImageModels: openAiImageModelCatalogEntries,
             elevenLabsImageModels: elevenLabsImageModelCatalogEntries,
+            modelCatalogStatus,
           })
         : [],
     [
       elevenLabsImageModelCatalogEntries,
       modelCatalog,
+      modelCatalogStatus,
       openAiImageModelCatalogEntries,
       settings,
     ]
@@ -32840,6 +33897,21 @@ function HomeContent(): React.JSX.Element {
       visibleModelChoice,
       modelProvider
     );
+    const pickerStatusMessage: ComposerModelPickerStatusMessage | undefined =
+      modelCatalogStatus === "checking" ||
+      (modelCatalogStatus === "idle" && modelCatalog === null)
+        ? {
+            title: "Checking model providers",
+            detail: isLocal
+              ? "Local model choices may still be arriving."
+              : "Online chat models may still be arriving.",
+          }
+        : modelCatalogStatus === "error"
+          ? {
+              title: "Model refresh delayed",
+              detail: "Prism is keeping the current choices and will try again when models refresh.",
+            }
+          : undefined;
     return (
       <ComposerModelPicker
         value={visibleModelChoice}
@@ -32881,6 +33953,7 @@ function HomeContent(): React.JSX.Element {
         dismissPopoversSignal={composerPopoverDismissSignal}
         placement="down"
         minMenuWidthPx={180}
+        statusMessage={pickerStatusMessage}
         autoOptionLabel="Auto (per bot)"
         autoOptionMetaOverride="uses each bot's model preference"
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
@@ -33054,6 +34127,15 @@ function HomeContent(): React.JSX.Element {
               : undefined
           }
         />
+      {view === "sandbox" && !detail && bots.length > 0 && botLibraryGroupFilterOptions.length > 1 ? (
+        <BotLibraryGroupPicker
+          value={botLibraryGroupPickerValue}
+          options={botLibraryGroupFilterOptions}
+          onChange={applyBotLibraryHeaderFilter}
+          resolvedTheme={resolvedTheme}
+          dismissPopoversSignal={composerPopoverDismissSignal}
+        />
+      ) : null}
         {view === "chat" && zenPersonaPickerBots.length > 0 ? (
           <ComposerBotPicker
             value={zenPersonaBotId ?? ""}
@@ -33329,6 +34411,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!user) {
       setBotLibraryGroups([createFavoritesBotGroup()]);
+      setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
       return;
     }
     if (typeof window === "undefined") return;
@@ -33339,6 +34422,16 @@ function HomeContent(): React.JSX.Element {
     } catch {
       setBotLibraryGroups([createFavoritesBotGroup()]);
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setInstalledMarketplaceLensIds(new Set());
+      setNewBotLensId("");
+      setNewBotGeneratedMemorySeeds(null);
+      return;
+    }
+    setInstalledMarketplaceLensIds(loadInstalledMarketplaceLensIds(user.id));
   }, [user]);
 
   useEffect(() => {
@@ -33527,6 +34620,41 @@ function HomeContent(): React.JSX.Element {
       )
     );
   }, [bots]);
+
+  useEffect(() => {
+    if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (botLibraryGroups.some((group) => group.id === botLibraryGroupFilterId)) return;
+    setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+  }, [botLibraryGroupFilterId, botLibraryGroups]);
+
+  useEffect(() => {
+    if (!botLibraryGroupDetailsDialog) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setBotLibraryGroupDetailsDialog(null);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [botLibraryGroupDetailsDialog]);
+
+  useEffect(() => {
+    if (!botLibraryGroupDeleteConfirm) return;
+    if (botLibraryGroups.some((group) => group.id === botLibraryGroupDeleteConfirm.id)) return;
+    setBotLibraryGroupDeleteConfirm(null);
+  }, [botLibraryGroupDeleteConfirm, botLibraryGroups]);
+
+  useEffect(() => {
+    if (!botLibraryGroupDeleteConfirm) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setBotLibraryGroupDeleteConfirm(null);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [botLibraryGroupDeleteConfirm]);
 
   useEffect(() => {
     if (
@@ -33968,7 +35096,9 @@ function HomeContent(): React.JSX.Element {
     return (
       selectedBotId !== null ||
       composerPrimed ||
-      hueFilterCenter !== null
+      hueFilterCenter !== null ||
+      botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL ||
+      botPanelGroup !== BOT_LIBRARY_FILTER_ALL
     );
   }, [
     bots.length,
@@ -33977,6 +35107,8 @@ function HomeContent(): React.JSX.Element {
     selectedBotId,
     composerPrimed,
     hueFilterCenter,
+    botLibraryGroupFilterId,
+    botPanelGroup,
   ]);
   const hasLenientFallbackConfigured =
     typeof settings?.lenientLocalFallbackModel === "string" &&
@@ -36289,7 +37421,11 @@ function HomeContent(): React.JSX.Element {
   const [coffeeGroupOverviewRenameBusy, setCoffeeGroupOverviewRenameBusy] = useState(false);
   const [coffeeAutoTopicToggleBusy, setCoffeeAutoTopicToggleBusy] = useState(false);
   const [coffeeSearch, setCoffeeSearch] = useState("");
+  const [coffeeBotLibraryGroupFilterId, setCoffeeBotLibraryGroupFilterId] =
+    useState<string>(BOT_LIBRARY_GROUP_FILTER_ALL);
   const [coffeeDraft, setCoffeeDraft] = useState<string>("");
+  const [coffeeUserActionPullQuote, setCoffeeUserActionPullQuote] =
+    useState<CoffeeUserActionPullQuote | null>(null);
   const coffeeComposerRichRef = useRef<DesktopMarkdownComposerHandle | null>(null);
   const coffeeComposerFormRef = useRef<HTMLFormElement | null>(null);
   const coffeeLastSubmittedDraftRef = useRef<string | null>(null);
@@ -36307,8 +37443,14 @@ function HomeContent(): React.JSX.Element {
   const [coffeeTranscriptOpen, setCoffeeTranscriptOpen] = useState(false);
   const [coffeeTranscriptClosing, setCoffeeTranscriptClosing] = useState(false);
   const [coffeeTranscriptCopyState, setCoffeeTranscriptCopyState] = useState<
-    "idle" | "copied" | "failed"
+    "idle" | "copying" | "copied" | "failed"
   >("idle");
+  const [coffeeTranscriptMessagesByConversationId, setCoffeeTranscriptMessagesByConversationId] =
+    useState<Record<string, CoffeeConversationMessage[]>>({});
+  const [coffeeTranscriptLoadingConversationId, setCoffeeTranscriptLoadingConversationId] =
+    useState<string | null>(null);
+  const [coffeeTranscriptLoadError, setCoffeeTranscriptLoadError] =
+    useState<{ conversationId: string; message: string } | null>(null);
   const [coffeeDevModeEnabled, setCoffeeDevModeEnabled] = useState(false);
   const coffeeDevModeEnabledRef = useRef(false);
   const [coffeeDevPanelBotId, setCoffeeDevPanelBotId] = useState<string | null>(null);
@@ -36328,10 +37470,11 @@ function HomeContent(): React.JSX.Element {
   const coffeePotDragRuntimeRef = useRef<CoffeePotDragRuntimeState | null>(null);
   const coffeePotDragRef = useRef<CoffeePotDragState | null>(null);
   const coffeePotPourFrameIndexRef = useRef(0);
+  const coffeePotFillFrameIndexRef = useRef(0);
   const coffeePotPourReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const topOffCoffeeCupFromPotRef = useRef<(botId: string, progress: number) => void>(
-    () => {}
-  );
+  const topOffCoffeeCupFromPotRef = useRef<
+    (botId: string, progress: number, progressAfter?: number | null) => void
+  >(() => {});
   const coffeeCupTopOffAnimationActiveBotIdRef = useRef<string | null>(null);
   const coffeeCupTopOffAnimationActiveKeyRef = useRef<string | null>(null);
   const coffeeCupTopOffAnimationClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -36339,6 +37482,7 @@ function HomeContent(): React.JSX.Element {
   );
   const [coffeePotDrag, setCoffeePotDrag] = useState<CoffeePotDragState | null>(null);
   const [coffeePotPourFrameIndex, setCoffeePotPourFrameIndex] = useState(0);
+  const [coffeePotFillFrameIndex, setCoffeePotFillFrameIndex] = useState(0);
   const coffeePotTopOffBusyBotIdRef = useRef<string | null>(null);
   const [coffeePotTopOffBusyBotIdState, setCoffeePotTopOffBusyBotIdState] =
     useState<string | null>(null);
@@ -36399,7 +37543,18 @@ function HomeContent(): React.JSX.Element {
     useState<CoffeeArrivalScenario>("user-first");
   const [coffeeArrivedBotIds, setCoffeeArrivedBotIds] = useState<string[]>([]);
   const [coffeeWalkingInBotIds, setCoffeeWalkingInBotIds] = useState<string[]>([]);
+  const [coffeeNameplatePendingBotIds, setCoffeeNameplatePendingBotIds] =
+    useState<string[]>([]);
   const coffeeArrivedBotIdsRef = useRef<string[]>([]);
+  const coffeeWalkingInBotIdsRef = useRef<string[]>([]);
+  const coffeeNameplatePendingBotIdsRef = useRef<string[]>([]);
+  const coffeeReplayLoggedArrivalKeysRef = useRef<Set<string>>(new Set());
+  const scheduleCoffeeArrivalAutonomousTurnRef = useRef<
+    (conversationId: string, endsAtHint?: number | null, delayMs?: number) => void
+  >(() => {});
+  const coffeeArrivalSeatTimersRef = useRef<Map<string, CoffeeArrivalSeatTimers>>(
+    new Map()
+  );
   const [coffeeSessionEndsAtMs, setCoffeeSessionEndsAtMs] = useState<number | null>(null);
   /** Mirrors {@link coffeeSessionEndsAtMs} for timers/async paths (state alone can be stale in callbacks). */
   const coffeeSessionEndsAtRef = useRef<number | null>(null);
@@ -36413,6 +37568,150 @@ function HomeContent(): React.JSX.Element {
   const assignCoffeeArrivedBotIds = (botIds: string[]) => {
     coffeeArrivedBotIdsRef.current = botIds;
     setCoffeeArrivedBotIds(botIds);
+  };
+  const assignCoffeeWalkingInBotIds = (
+    next: string[] | ((current: string[]) => string[])
+  ) => {
+    const nextBotIds =
+      typeof next === "function" ? next(coffeeWalkingInBotIdsRef.current) : next;
+    coffeeWalkingInBotIdsRef.current = nextBotIds;
+    setCoffeeWalkingInBotIds(nextBotIds);
+  };
+  const assignCoffeeNameplatePendingBotIds = (
+    next: string[] | ((current: string[]) => string[])
+  ) => {
+    const nextBotIds =
+      typeof next === "function"
+        ? next(coffeeNameplatePendingBotIdsRef.current)
+        : next;
+    coffeeNameplatePendingBotIdsRef.current = nextBotIds;
+    setCoffeeNameplatePendingBotIds(nextBotIds);
+  };
+  const clearCoffeeSeatArrivalTimer = (botId: string): void => {
+    const timers = coffeeArrivalSeatTimersRef.current.get(botId);
+    if (!timers) return;
+    if (timers.walkTimer) clearTimeout(timers.walkTimer);
+    if (timers.nameplateTimer) clearTimeout(timers.nameplateTimer);
+    coffeeArrivalSeatTimersRef.current.delete(botId);
+  };
+  const clearCoffeeSeatArrivalTimers = (): void => {
+    for (const timers of coffeeArrivalSeatTimersRef.current.values()) {
+      if (timers.walkTimer) clearTimeout(timers.walkTimer);
+      if (timers.nameplateTimer) clearTimeout(timers.nameplateTimer);
+    }
+    coffeeArrivalSeatTimersRef.current.clear();
+    assignCoffeeWalkingInBotIds([]);
+    assignCoffeeNameplatePendingBotIds([]);
+  };
+  const coffeeFirmlySeatedBotIds = (
+    botIds: readonly string[] = coffeeArrivedBotIdsRef.current
+  ): string[] => {
+    const walking = new Set(coffeeWalkingInBotIdsRef.current);
+    const pendingNameplate = new Set(coffeeNameplatePendingBotIdsRef.current);
+    return botIds.filter((id) => !walking.has(id) && !pendingNameplate.has(id));
+  };
+  const coffeeBotIsFirmlySeated = (botId: string): boolean =>
+    coffeeArrivedBotIdsRef.current.includes(botId) &&
+    !coffeeWalkingInBotIdsRef.current.includes(botId) &&
+    !coffeeNameplatePendingBotIdsRef.current.includes(botId);
+  const waitForCoffeeBotToBeFirmlySeated = async (botId: string): Promise<void> => {
+    if (coffeeSessionPhaseRef.current !== "arriving") return;
+    if (coffeeBotIsFirmlySeated(botId)) return;
+    const waitMs =
+      coffeeArrivalFirmSeatDelayMs(
+        coffeeArrivalMotionProfileForBot(
+          coffeeConversationRef.current?.id ?? coffeeSelectedSessionId,
+          botId
+        )
+      ) + 80;
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, waitMs);
+    });
+  };
+  const recordCoffeeReplayEvent = (
+    conversationId: string,
+    event: CoffeeReplayEventPayload
+  ): void => {
+    void api<{ ok: true; conversation: CoffeeConversationState }>(
+      `/api/coffee/sessions/${encodeURIComponent(conversationId)}/replay-events`,
+      {
+        method: "POST",
+        body: JSON.stringify({ event }),
+      }
+    )
+      .then((response) => {
+        setCoffeeConversation((current) => {
+          if (!current || current.id !== response.conversation.id) return current;
+          coffeeConversationRef.current = response.conversation;
+          return response.conversation;
+        });
+      })
+      .catch(() => {
+        // Replay annotations are diagnostic metadata; never block a live session.
+      });
+  };
+  const startCoffeeSeatArrival = (botId: string): void => {
+    clearCoffeeSeatArrivalTimer(botId);
+    assignCoffeeWalkingInBotIds((current) =>
+      current.includes(botId) ? current : [...current, botId]
+    );
+    assignCoffeeNameplatePendingBotIds((current) =>
+      current.includes(botId) ? current : [...current, botId]
+    );
+
+    const conversationId = coffeeConversationRef.current?.id;
+    const motionProfile = coffeeArrivalMotionProfileForBot(
+      conversationId ?? coffeeSelectedSessionId,
+      botId
+    );
+    const walkDurationMs = coffeeArrivalWalkDurationMs(motionProfile);
+    const nameplateDelayMs = coffeeArrivalFirmSeatDelayMs(motionProfile);
+    const replayArrivalKey = conversationId ? `${conversationId}:${botId}:arrival` : "";
+    if (conversationId && !coffeeReplayLoggedArrivalKeysRef.current.has(replayArrivalKey)) {
+      coffeeReplayLoggedArrivalKeysRef.current.add(replayArrivalKey);
+      recordCoffeeReplayEvent(conversationId, {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "arrival",
+        botId,
+        occurredAt: new Date().toISOString(),
+        walkDurationMs,
+        nameplateDelayMs,
+      });
+    }
+    const timers: CoffeeArrivalSeatTimers = {
+      walkTimer: setTimeout(() => {
+        assignCoffeeWalkingInBotIds((current) =>
+          current.includes(botId) ? current.filter((id) => id !== botId) : current
+        );
+        const currentTimers = coffeeArrivalSeatTimersRef.current.get(botId);
+        if (currentTimers) currentTimers.walkTimer = null;
+      }, walkDurationMs),
+      nameplateTimer: setTimeout(() => {
+        assignCoffeeNameplatePendingBotIds((current) =>
+          current.includes(botId) ? current.filter((id) => id !== botId) : current
+        );
+        const currentTimers = coffeeArrivalSeatTimersRef.current.get(botId);
+        if (!currentTimers) return;
+        currentTimers.nameplateTimer = null;
+        if (!currentTimers.walkTimer) {
+          coffeeArrivalSeatTimersRef.current.delete(botId);
+        }
+        const conversationId = coffeeConversationRef.current?.id;
+        if (
+          conversationId &&
+          coffeeSessionPhaseRef.current === "arriving" &&
+          coffeeBotIsFirmlySeated(botId)
+        ) {
+          scheduleCoffeeArrivalAutonomousTurnRef.current(
+            conversationId,
+            coffeeSessionEndsAtRef.current,
+            180
+          );
+        }
+      }, nameplateDelayMs),
+    };
+    coffeeArrivalSeatTimersRef.current.set(botId, timers);
   };
   const coffeeArrivalSeatOrderFor = (
     conversation: CoffeeConversationState | null | undefined
@@ -36438,15 +37737,9 @@ function HomeContent(): React.JSX.Element {
     const validBotIds = new Set(seatOrder);
     const arrivingBotIds = botIds.filter((id) => validBotIds.has(id));
     if (arrivingBotIds.length === 0) return;
-    setCoffeeWalkingInBotIds((current) => {
-      const next = [...current];
-      for (const id of arrivingBotIds) {
-        if (!next.includes(id)) next.push(id);
-      }
-      return next.length === current.length ? current : next;
-    });
     const arrivedSet = new Set(coffeeArrivedBotIdsRef.current);
     for (const id of arrivingBotIds) {
+      if (!arrivedSet.has(id)) startCoffeeSeatArrival(id);
       arrivedSet.add(id);
     }
     assignCoffeeArrivedBotIds(seatOrder.filter((id) => arrivedSet.has(id)));
@@ -36505,9 +37798,14 @@ function HomeContent(): React.JSX.Element {
     coffeePotPourFrameIndexRef.current = frameIndex;
     setCoffeePotPourFrameIndex(frameIndex);
   }, []);
+  const setCoffeePotFillFrame = useCallback((frameIndex: number): void => {
+    coffeePotFillFrameIndexRef.current = frameIndex;
+    setCoffeePotFillFrameIndex(frameIndex);
+  }, []);
   useEffect(() => {
     if (!coffeePotDrag?.pourReady) {
       setCoffeePotPourFrame(0);
+      setCoffeePotFillFrame(0);
       return;
     }
     const pointerId = coffeePotDrag.pointerId;
@@ -36547,6 +37845,7 @@ function HomeContent(): React.JSX.Element {
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       setCoffeePotPourFrame(COFFEE_POT_FINAL_POUR_FRAME_INDEX);
+      setCoffeePotFillFrame(COFFEE_POT_FINAL_POUR_FRAME_INDEX);
       const timeout = window.setTimeout(() => {
         completeRefillIfReady(COFFEE_POT_FINAL_POUR_FRAME_INDEX);
       }, 0);
@@ -36556,19 +37855,27 @@ function HomeContent(): React.JSX.Element {
     }
     if (!pouringBotId || pourProgress == null) {
       setCoffeePotPourFrame(0);
+      setCoffeePotFillFrame(0);
       return;
     }
     setCoffeePotPourFrame(0);
-    const timeouts = [1, 2, 3, 4].map((frame) =>
+    setCoffeePotFillFrame(0);
+    const pourTimeouts = [1, 2, 3, 4].map((frame) =>
       window.setTimeout(() => {
         setCoffeePotPourFrame(frame);
+      }, coffeePotPourFrameDelayMs(frame))
+    );
+    const fillTimeouts = [1, 2, 3, 4].map((frame) =>
+      window.setTimeout(() => {
+        setCoffeePotFillFrame(frame);
         if (frame >= COFFEE_POT_FINAL_POUR_FRAME_INDEX) {
           completeRefillIfReady(frame);
         }
-      }, coffeePotPourFrameDelayMs(frame))
+      }, coffeePotFillFrameDelayMs(frame))
     );
     return () => {
-      timeouts.forEach((timeout) => window.clearTimeout(timeout));
+      pourTimeouts.forEach((timeout) => window.clearTimeout(timeout));
+      fillTimeouts.forEach((timeout) => window.clearTimeout(timeout));
     };
   }, [
     coffeePotDrag?.pointerId,
@@ -36576,6 +37883,7 @@ function HomeContent(): React.JSX.Element {
     coffeePotDrag?.pourProgress,
     coffeePotDrag?.pourReady,
     coffeePotTopOffBusyBotId,
+    setCoffeePotFillFrame,
     setCoffeePotPourFrame,
   ]);
   useEffect(() => {
@@ -36784,12 +38092,107 @@ function HomeContent(): React.JSX.Element {
       coffeeTranscriptCloseTimerRef.current = null;
     }, COFFEE_TRANSCRIPT_CLOSE_MS);
   };
+  useEffect(() => {
+    const conversationId = coffeeConversation?.id;
+    if (!coffeeTranscriptOpen || !conversationId) return;
+    if (coffeeTranscriptMessagesByConversationId[conversationId]) {
+      setCoffeeTranscriptLoadError((current) =>
+        current?.conversationId === conversationId ? null : current
+      );
+      return;
+    }
+    const abortController = new AbortController();
+    setCoffeeTranscriptLoadingConversationId(conversationId);
+    setCoffeeTranscriptLoadError(null);
+    void api<{ ok: true; messages: CoffeeConversationMessage[] }>(
+      `/api/coffee/sessions/${encodeURIComponent(conversationId)}/transcript`,
+      { signal: abortController.signal }
+    )
+      .then((response) => {
+        setCoffeeTranscriptMessagesByConversationId((current) => ({
+          ...current,
+          [conversationId]: response.messages,
+        }));
+      })
+      .catch((err) => {
+        if (isAbortLikeError(err)) return;
+        setCoffeeTranscriptLoadError({
+          conversationId,
+          message: err instanceof Error ? err.message : "Could not load full Table talk.",
+        });
+      })
+      .finally(() => {
+        if (abortController.signal.aborted) return;
+        setCoffeeTranscriptLoadingConversationId((current) =>
+          current === conversationId ? null : current
+        );
+      });
+    return () => {
+      abortController.abort();
+    };
+  }, [
+    coffeeConversation?.id,
+    coffeeTranscriptMessagesByConversationId,
+    coffeeTranscriptOpen,
+  ]);
+  const loadCoffeeTranscriptMessagesForClipboard = async (
+    conversation: CoffeeConversationState
+  ): Promise<CoffeeConversationMessage[]> => {
+    const cached = coffeeTranscriptMessagesByConversationId[conversation.id];
+    if (cached) {
+      return mergeCoffeeTranscriptMessageSources(cached, conversation.messages);
+    }
+    setCoffeeTranscriptLoadingConversationId(conversation.id);
+    setCoffeeTranscriptLoadError(null);
+    try {
+      const response = await api<{ ok: true; messages: CoffeeConversationMessage[] }>(
+        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/transcript`
+      );
+      setCoffeeTranscriptMessagesByConversationId((current) => ({
+        ...current,
+        [conversation.id]: response.messages,
+      }));
+      return mergeCoffeeTranscriptMessageSources(response.messages, conversation.messages);
+    } catch (err) {
+      setCoffeeTranscriptLoadError({
+        conversationId: conversation.id,
+        message: err instanceof Error ? err.message : "Could not load full Table talk.",
+      });
+      if (conversation.messages.length > 0) return [...conversation.messages];
+      throw err;
+    } finally {
+      setCoffeeTranscriptLoadingConversationId((current) =>
+        current === conversation.id ? null : current
+      );
+    }
+  };
   const copyCoffeeTranscriptToClipboard = async (): Promise<void> => {
     if (!coffeeConversation) return;
-    const transcriptText = formatCoffeeTranscriptClipboardText(coffeeConversation.messages);
-    if (!transcriptText.trim()) return;
     clearCoffeeTranscriptCopyResetTimer();
+    setCoffeeTranscriptCopyState("copying");
     try {
+      const transcriptMessages = await loadCoffeeTranscriptMessagesForClipboard(coffeeConversation);
+      const transcriptText = formatCoffeeReviewClipboardText({
+        messages: transcriptMessages,
+        context: {
+          conversationId: coffeeConversation.id,
+          title: coffeeConversation.title,
+          topic: coffeeConversation.coffeeTopic,
+          phase: coffeeSessionPhase,
+          createdAt: coffeeConversation.createdAt,
+          updatedAt: coffeeConversation.updatedAt,
+          durationMinutes: coffeeConversation.coffeeSessionDurationMinutes,
+          incognito: coffeeConversation.incognito,
+          groupId: coffeeConversation.coffeeGroupId,
+          bots: coffeeMentionBotPicks.map((bot) => ({
+            id: bot.id,
+            name: bot.name,
+          })),
+          absentBotIds: coffeeConversation.coffeeAbsentBotIds,
+          settings: coffeeConversation.coffeeSettings ?? coffeeSessionSettingsRef.current,
+        },
+      });
+      if (!transcriptText.trim()) return;
       await writeClipboardText(transcriptText);
       setCoffeeTranscriptCopyState("copied");
     } catch {
@@ -36836,6 +38239,12 @@ function HomeContent(): React.JSX.Element {
     coffeeArrivedBotIdsRef.current = coffeeArrivedBotIds;
   }, [coffeeArrivedBotIds]);
   useEffect(() => {
+    coffeeWalkingInBotIdsRef.current = coffeeWalkingInBotIds;
+  }, [coffeeWalkingInBotIds]);
+  useEffect(() => {
+    coffeeNameplatePendingBotIdsRef.current = coffeeNameplatePendingBotIds;
+  }, [coffeeNameplatePendingBotIds]);
+  useEffect(() => {
     if (
       !coffeeConversation ||
       (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") ||
@@ -36853,6 +38262,24 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     coffeeConversationRef.current = coffeeConversation;
   }, [coffeeConversation]);
+  const savedCoffeeUserActionPullQuote = useMemo(
+    () => latestSavedCoffeeUserActionPullQuote(coffeeConversation),
+    [coffeeConversation]
+  );
+  useEffect(() => {
+    setCoffeeUserActionPullQuote((current) => {
+      if (!current) return current;
+      if (current.conversationId !== (coffeeConversation?.id ?? null)) return null;
+      return coffeeConversationHasAssistantAfterUserAction(coffeeConversation, current)
+        ? null
+        : current;
+    });
+  }, [coffeeConversation]);
+  const visibleCoffeeUserActionPullQuote =
+    coffeeUserActionPullQuote &&
+    coffeeUserActionPullQuote.conversationId === (coffeeConversation?.id ?? coffeeSelectedSessionId)
+      ? coffeeUserActionPullQuote
+      : savedCoffeeUserActionPullQuote;
   useEffect(() => {
     coffeeTurnRhythmStateRef.current = coffeeTurnRhythmState;
   }, [coffeeTurnRhythmState]);
@@ -37008,11 +38435,13 @@ function HomeContent(): React.JSX.Element {
     if (coffeeSessionPhase !== "finished") return;
     markCoffeeSessionResumed(coffeeConversation.id);
   }, [coffeeConversation, coffeeSessionPhase, markCoffeeSessionResumed]);
+  const coffeeConversationClockId = coffeeConversation?.id ?? null;
   useEffect(() => {
     /** Wall-clock updates drive visual effects; countdown math still only runs when a timer exists. */
-    const shouldTick =
-      coffeeConversation != null &&
-      coffeeSessionPhase === "live";
+    const shouldTick = coffeeSessionClockShouldTick(
+      coffeeConversationClockId,
+      coffeeSessionPhase
+    );
     if (!shouldTick) return;
     setCoffeeSessionClockMs(Date.now());
     const id = window.setInterval(() => {
@@ -37025,14 +38454,14 @@ function HomeContent(): React.JSX.Element {
         coffeeSessionEndsAtRef.current != null
       ) {
         setCoffeeSessionEndsAtMs((prev) => {
-          const next = prev != null ? prev + 1000 : null;
+          const next = coffeeSessionEndsAtAfterPausedClockTick(prev);
           coffeeSessionEndsAtRef.current = next;
           return next;
         });
       }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [coffeeConversation, coffeeSessionPhase, coffeeSessionEndsAtMs]);
+  }, [coffeeConversationClockId, coffeeSessionPhase]);
   useEffect(() => {
     coffeeDraftRef.current = coffeeDraft;
   }, [coffeeDraft]);
@@ -37377,6 +38806,9 @@ function HomeContent(): React.JSX.Element {
       clearCoffeeTranscriptCloseTimer();
       setCoffeeTranscriptClosing(false);
       setCoffeeTranscriptOpen(false);
+      setCoffeeTranscriptMessagesByConversationId({});
+      setCoffeeTranscriptLoadingConversationId(null);
+      setCoffeeTranscriptLoadError(null);
       setCoffeeSessionPhase("selecting");
       assignCoffeeArrivedBotIds([]);
       assignCoffeeSessionEndsAtMs(null);
@@ -37430,6 +38862,11 @@ function HomeContent(): React.JSX.Element {
     () => new Map(coffeeBotsLibrary.map((bot) => [bot.id, bot])),
     [coffeeBotsLibrary]
   );
+  useEffect(() => {
+    if (coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (botLibraryGroups.some((group) => group.id === coffeeBotLibraryGroupFilterId)) return;
+    setCoffeeBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+  }, [botLibraryGroups, coffeeBotLibraryGroupFilterId]);
   const coffeeSelectedGroup = useMemo(
     () => coffeeGroups.find((group) => group.id === coffeeSelectedGroupId) ?? null,
     [coffeeGroups, coffeeSelectedGroupId]
@@ -37896,6 +39333,132 @@ function HomeContent(): React.JSX.Element {
     )),
     [bots, resolvedTheme, panelColorHarmonyActive]
   );
+  const existingBotIds = useMemo(() => new Set(bots.map((bot) => bot.id)), [bots]);
+  const favoriteBotIdSet = useMemo(() => {
+    const favorites = botLibraryGroups.find(
+      (group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID
+    );
+    return new Set(
+      (favorites?.botIds ?? []).filter((botId) => existingBotIds.has(botId))
+    );
+  }, [botLibraryGroups, existingBotIds]);
+  const customBotLibraryGroups = useMemo(
+    () => botLibraryGroups.filter((group) => !group.builtIn),
+    [botLibraryGroups]
+  );
+  const activeBotLibraryGroupFilter = useMemo(
+    () =>
+      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL
+        ? null
+        : botLibraryGroups.find((group) => group.id === botLibraryGroupFilterId) ?? null,
+    [botLibraryGroupFilterId, botLibraryGroups]
+  );
+  const baseFilteredPanelBots = useMemo<readonly Bot[]>(() => {
+    if (!activeBotLibraryGroupFilter) return sortedPanelBots;
+    const allowedBotIds = new Set(activeBotLibraryGroupFilter.botIds);
+    return sortedPanelBots.filter((bot) => allowedBotIds.has(bot.id));
+  }, [activeBotLibraryGroupFilter, sortedPanelBots]);
+  const botLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
+    const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
+      const allowedBotIds = new Set(group.botIds.filter((botId) => existingBotIds.has(botId)));
+      const groupBots = sortedPanelBots.filter((bot) => allowedBotIds.has(bot.id));
+      return {
+        id: `${BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX}${group.id}`,
+        name: group.name,
+        count: groupBots.length,
+        cap: group.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
+        bots: groupBots,
+      };
+    };
+    const favoritesGroup =
+      botLibraryGroups.find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID) ??
+      createFavoritesBotGroup();
+    return [
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_ALL,
+        name: "All bots",
+        menuName: "Show all bots",
+        menuCountLabel: "Default view",
+        count: sortedPanelBots.length,
+        bots: sortedPanelBots,
+      },
+      optionForGroup(favoritesGroup),
+      ...customBotLibraryGroups.map(optionForGroup),
+    ];
+  }, [botLibraryGroups, customBotLibraryGroups, existingBotIds, sortedPanelBots]);
+  const botLibraryGroupPickerValue = useMemo(() => {
+    if (activeBotLibraryGroupFilter) {
+      return `${BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX}${activeBotLibraryGroupFilter.id}`;
+    }
+    return BOT_LIBRARY_GROUP_FILTER_ALL;
+  }, [activeBotLibraryGroupFilter]);
+  const coffeeBotLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
+    const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
+      const allowedBotIds = new Set(group.botIds);
+      const groupBots = coffeeBotsLibrary.filter((bot) => allowedBotIds.has(bot.id));
+      return {
+        id: group.id,
+        name: group.name,
+        count: groupBots.length,
+        cap: group.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
+        bots: groupBots,
+      };
+    };
+    const favoritesGroup =
+      botLibraryGroups.find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID) ??
+      createFavoritesBotGroup();
+    return [
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_ALL,
+        name: "All bots",
+        menuName: "Show all bots",
+        menuCountLabel: "Default view",
+        count: coffeeBotsLibrary.length,
+        bots: coffeeBotsLibrary,
+      },
+      optionForGroup(favoritesGroup),
+      ...customBotLibraryGroups.map(optionForGroup),
+    ];
+  }, [botLibraryGroups, coffeeBotsLibrary, customBotLibraryGroups]);
+  const coffeeGroupFilteredBots = useMemo(
+    () =>
+      filterBotsByLibraryGroup(
+        coffeeBotsLibrary,
+        botLibraryGroups,
+        coffeeBotLibraryGroupFilterId,
+        BOT_LIBRARY_GROUP_FILTER_ALL
+      ),
+    [botLibraryGroups, coffeeBotLibraryGroupFilterId, coffeeBotsLibrary]
+  );
+  const coffeeActiveBotLibraryGroupOption = useMemo(
+    () =>
+      coffeeBotLibraryGroupFilterOptions.find(
+        (option) => option.id === coffeeBotLibraryGroupFilterId
+      ) ??
+      coffeeBotLibraryGroupFilterOptions.find(
+        (option) => option.id === BOT_LIBRARY_GROUP_FILTER_ALL
+      ) ??
+      null,
+    [coffeeBotLibraryGroupFilterId, coffeeBotLibraryGroupFilterOptions]
+  );
+  const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
+  const coffeeFilteredBots = useMemo(
+    () =>
+      coffeeGroupFilteredBots.filter((bot) => {
+        if (!coffeeSearchTerm) return true;
+        return (
+          bot.name.toLowerCase().includes(coffeeSearchTerm) ||
+          bot.system_prompt.toLowerCase().includes(coffeeSearchTerm)
+        );
+      }),
+    [coffeeGroupFilteredBots, coffeeSearchTerm]
+  );
+  const coffeePickerFilteredEmptyText =
+    coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL
+      ? coffeeSearchTerm
+        ? "Nothing in this group matches that search."
+        : "No chat-enabled bots live in this group yet."
+      : "No bots match that search.";
   const composeMentionBotPicks = useMemo(
     () =>
       [...bots]
@@ -38242,12 +39805,17 @@ function HomeContent(): React.JSX.Element {
     coffeeMentionBotsRef.current = coffeeMentionBotPicks;
   }, [coffeeMentionBotPicks]);
   const findCoffeeDirectedMentionBotIds = useCallback((text: string): string[] => {
-    return coffeeDirectedMentionBotIds(
+    const mentionedBotIds = coffeeDirectedMentionBotIds(
       text,
       coffeeMentionBotsRef.current.map((bot) => bot.id)
     );
+    if (coffeeSessionPhaseRef.current !== "arriving") return mentionedBotIds;
+    return mentionedBotIds.filter((botId) => coffeeBotIsFirmlySeated(botId));
   }, []);
-  const pickerSourceBots = bots;
+  const pickerSourceBots = useMemo(
+    () => [...baseFilteredPanelBots],
+    [baseFilteredPanelBots]
+  );
 
   const hueLensTrackSegments = useMemo(
     () => computeHueLensTrackSegments(pickerSourceBots),
@@ -38482,6 +40050,11 @@ function HomeContent(): React.JSX.Element {
     }
     return vars;
   }, [messagesFrameMode, hueLensTrackSegments]);
+  const messagesFrameBotLibraryGroupFocus =
+    view === "sandbox" &&
+    activeConversationIsEmpty &&
+    !selectedBotId &&
+    Boolean(activeBotLibraryGroupFilter && !activeBotLibraryGroupFilter.builtIn);
   const zenToneSpace = chatLikeSurface
     ? resolveZenToneSpaceFromAnnoyance(detail?.prismMood?.annoyance)
     : 0;
@@ -38499,12 +40072,30 @@ function HomeContent(): React.JSX.Element {
             "--zen-tone-scroll-margin-extra": `${Math.round(zenToneSpace * 112)}px`,
           }
         : {};
-      const merged = { ...lensThumb, ...homeVars, ...zenToneVars };
+      const groupVars =
+        messagesFrameBotLibraryGroupFocus && activeBotLibraryGroupFilter
+          ? botLibraryGroupVisualStyle(
+              activeBotLibraryGroupFilter,
+              baseFilteredPanelBots,
+              resolvedTheme
+            )
+          : {};
+      const merged = { ...lensThumb, ...homeVars, ...zenToneVars, ...groupVars };
       return Object.keys(merged).length > 0
         ? (merged as unknown as React.CSSProperties)
         : undefined;
     },
-    [chatLikeSurface, emptyStateLensVisible, lensThumbXPct, homeRainbowVars, zenToneSpace]
+    [
+      activeBotLibraryGroupFilter,
+      baseFilteredPanelBots,
+      chatLikeSurface,
+      emptyStateLensVisible,
+      homeRainbowVars,
+      lensThumbXPct,
+      messagesFrameBotLibraryGroupFocus,
+      resolvedTheme,
+      zenToneSpace,
+    ]
   );
   const showCanvasBotSwitchLoading =
     view === "sandbox" &&
@@ -38521,10 +40112,9 @@ function HomeContent(): React.JSX.Element {
   const showMessagesFrameStateLoadingOverlay = showConversationSurfaceLoading;
   const messagesFrameStateLoadingLabel = "Loading conversation...";
   const messagesFrameStateLoadingKind = "conversation";
-  // Hero override is drag-only — the Prism triangle replaces a bot glyph
-  // only while the user is actively pressing/touching the slider thumb.
-  // When a bot is committed, the lens unmounts and the bot accent takes
-  // over the shell.
+  // Slider interaction is only the transient part of the hue-lens hero
+  // preview. Once a hue is committed, the active filter itself keeps the
+  // tinted Prism triangle visible until the lens is cleared.
   const [lensInteracting, setLensInteracting] = useState(false);
   // Continuous-hue accent driven by the slider only while the lens is
   // visible. A selected bot hides the lens, making `shellStyle` below the
@@ -38632,20 +40222,20 @@ function HomeContent(): React.JSX.Element {
     setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
   }, [detail, pendingReplyVisible, view]);
 
-  // Bucket the already color-sorted list into the five Prism letters
+  // Bucket the active library filter into the five Prism letters
   // (plus an `other` bucket for grayscale/colorless bots). Rendered
-  // only at high bot counts; the underlying sortedPanelBots ordering
+  // only when the filtered list has bots; the underlying color ordering
   // is preserved inside each bucket so drilling into a group still
   // reads light-to-dark.
   const botGroupBuckets = useMemo(() => {
     const buckets: Record<PrismGroupId, Bot[]> = {
       p: [], r: [], i: [], s: [], m: [],
     };
-    for (const bot of sortedPanelBots) {
+    for (const bot of baseFilteredPanelBots) {
       buckets[botPrismGroup(bot.color)].push(bot);
     }
     return buckets;
-  }, [sortedPanelBots]);
+  }, [baseFilteredPanelBots]);
 
   // The library browser always starts with a neutral "all bots" filter,
   // followed by the five PRISM wordmark buckets.
@@ -38654,7 +40244,8 @@ function HomeContent(): React.JSX.Element {
   // PRISM categories are the default collapsed browsing surface for the
   // Bots drawer. Color harmony still waits for high-count libraries, but
   // the category dashboard itself appears as soon as the user has bots.
-  const botPanelDashboardActive = bots.length >= BOT_PANEL_DASHBOARD_MIN_BOTS;
+  const botPanelDashboardActive =
+    baseFilteredPanelBots.length >= BOT_PANEL_DASHBOARD_MIN_BOTS;
 
   // Filter safety: if the active group disappears (count dropped below
   // threshold OR the only bot in that group was deleted), bounce the user
@@ -38675,23 +40266,183 @@ function HomeContent(): React.JSX.Element {
   }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets]);
 
   const visibleBotPanelBots = useMemo<readonly Bot[]>(() => {
-    if (!botPanelDashboardActive) return sortedPanelBots;
-    if (botPanelGroup === BOT_LIBRARY_FILTER_ALL) return sortedPanelBots;
+    if (!botPanelDashboardActive) return baseFilteredPanelBots;
+    if (botPanelGroup === BOT_LIBRARY_FILTER_ALL) return baseFilteredPanelBots;
     return botGroupBuckets[botPanelGroup];
-  }, [botPanelDashboardActive, botPanelGroup, botGroupBuckets, sortedPanelBots]);
+  }, [baseFilteredPanelBots, botPanelDashboardActive, botPanelGroup, botGroupBuckets]);
 
   const activeBotPanelGroup = botPanelGroup !== BOT_LIBRARY_FILTER_ALL
     ? PRISM_GROUPS.find(g => g.id === botPanelGroup) ?? null
     : null;
   const activeBotPanelFilterLabel =
     botPanelGroup === BOT_LIBRARY_FILTER_ALL
-      ? "All bots"
-      : activeBotPanelGroup?.label ?? "Filtered bots";
+      ? activeBotLibraryGroupFilter?.name ?? "All bots"
+      : activeBotLibraryGroupFilter
+        ? `${activeBotLibraryGroupFilter.name} · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
+        : activeBotPanelGroup?.label ?? "Filtered bots";
   // Keep the library list visible for every active filter, including the
   // neutral "all bots" tile. Group tiles still narrow the same shared list.
   const botPanelListVisible = bots.length > 0;
 
-  const bootstrap = useCallback(async () => {
+  const botMarketplaceInstalledHashes = useMemo(
+    () => marketplaceInstalledHashSet(bots.map((bot) => bot.export_hash)),
+    [bots]
+  );
+  const botMarketplaceInstalledBotIdByHash = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const bot of bots) {
+      const hash = normalizeImportedBotHash(bot.export_hash);
+      if (hash) map.set(hash, bot.id);
+    }
+    return map;
+  }, [bots]);
+  const botMarketplaceThemes = botMarketplaceManifest?.themes ?? [];
+  const botMarketplaceVisibleBots = useMemo(
+    () => botMarketplaceManifest ? marketplaceVisibleBotEntries(botMarketplaceManifest) : [],
+    [botMarketplaceManifest]
+  );
+  const botMarketplaceVisibleLenses = useMemo(
+    () => botMarketplaceManifest ? marketplaceVisibleLensEntries(botMarketplaceManifest) : [],
+    [botMarketplaceManifest]
+  );
+  const botMarketplaceSelectedTheme = useMemo<BotMarketplaceTheme | null>(() => {
+    if (!botMarketplaceManifest || botMarketplaceThemes.length === 0) return null;
+    return (
+      botMarketplaceThemes.find((theme) => theme.id === botMarketplaceSelectedThemeId) ??
+      botMarketplaceThemes[0] ??
+      null
+    );
+  }, [botMarketplaceManifest, botMarketplaceSelectedThemeId, botMarketplaceThemes]);
+  const botMarketplaceSelectedEntries = useMemo<BotMarketplaceEntry[]>(() => {
+    if (!botMarketplaceManifest || !botMarketplaceSelectedTheme) return [];
+    return marketplaceEntriesForTheme(botMarketplaceManifest, botMarketplaceSelectedTheme.id);
+  }, [botMarketplaceManifest, botMarketplaceSelectedTheme]);
+  const botMarketplaceLensCategories = botMarketplaceManifest?.lensCategories ?? [];
+  const botMarketplaceSelectedLensCategory = useMemo<MarketplaceLensCategory | null>(() => {
+    if (!botMarketplaceManifest || botMarketplaceLensCategories.length === 0) return null;
+    return (
+      botMarketplaceLensCategories.find(
+        (category) => category.id === botMarketplaceSelectedLensCategoryId
+      ) ??
+      botMarketplaceLensCategories[0] ??
+      null
+    );
+  }, [
+    botMarketplaceLensCategories,
+    botMarketplaceManifest,
+    botMarketplaceSelectedLensCategoryId,
+  ]);
+  const botMarketplaceSelectedLensEntries = useMemo<MarketplaceLensEntry[]>(() => {
+    if (!botMarketplaceManifest || !botMarketplaceSelectedLensCategory) return [];
+    return marketplaceLensEntriesForCategory(
+      botMarketplaceManifest,
+      botMarketplaceSelectedLensCategory.id
+    );
+  }, [botMarketplaceManifest, botMarketplaceSelectedLensCategory]);
+  const installedMarketplaceLenses = useMemo(
+    () =>
+      botMarketplaceVisibleLenses.filter((lens) =>
+        marketplaceLensInstallState(lens, installedMarketplaceLensIds) === "installed"
+      ),
+    [botMarketplaceVisibleLenses, installedMarketplaceLensIds]
+  );
+  const newBotAppliedLens = useMemo(
+    () =>
+      newBotLensId
+        ? botMarketplaceVisibleLenses.find((lens) => lens.id === newBotLensId) ?? null
+        : null,
+    [botMarketplaceVisibleLenses, newBotLensId]
+  );
+  const installedMarketplaceLensTray = useMemo(
+    () => installedMarketplaceLenses.filter((lens) => lens.id !== newBotLensId),
+    [installedMarketplaceLenses, newBotLensId]
+  );
+
+  useEffect(() => {
+    for (const repair of MARKETPLACE_BOT_GLYPH_REPAIRS) {
+      const bot = bots.find(
+        (candidate) =>
+          normalizeImportedBotHash(candidate.export_hash) === repair.exportHash &&
+          candidate.glyph === repair.legacyGlyph
+      );
+      if (!bot) continue;
+
+      const attemptKey = `${bot.id}:${repair.nextGlyph}`;
+      if (marketplaceGlyphRepairAttemptedRef.current.has(attemptKey)) continue;
+      marketplaceGlyphRepairAttemptedRef.current.add(attemptKey);
+
+      void api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(bot.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ glyph: repair.nextGlyph }),
+      })
+        .then((result) => {
+          setBots((current) =>
+            current.map((candidate) =>
+              candidate.id === bot.id
+                ? {
+                    ...candidate,
+                    ...(result.bot ?? {}),
+                    glyph: result.bot?.glyph ?? repair.nextGlyph,
+                  }
+                : candidate
+            )
+          );
+        })
+        .catch(() => {
+          // Non-fatal: the marketplace copy can still be edited manually.
+        });
+    }
+  }, [bots]);
+
+  const loadBotMarketplaceManifest = useCallback(async () => {
+    if (botMarketplaceLoading) return;
+    setBotMarketplaceLoading(true);
+    setBotMarketplaceError(null);
+    try {
+      const manifest = await fetchBotMarketplaceManifest();
+      setBotMarketplaceManifest(manifest);
+      setBotMarketplaceSelectedThemeId((current) =>
+        current && manifest.themes.some((theme) => theme.id === current)
+          ? current
+          : manifest.themes[0]?.id ?? null
+      );
+      setBotMarketplaceSelectedLensCategoryId((current) =>
+        current && manifest.lensCategories.some((category) => category.id === current)
+          ? current
+          : manifest.lensCategories[0]?.id ?? null
+      );
+    } catch (err) {
+      setBotMarketplaceError(
+        err instanceof Error ? err.message : "Marketplace catalog could not load."
+      );
+    } finally {
+      setBotMarketplaceLoading(false);
+    }
+  }, [botMarketplaceLoading]);
+
+  useEffect(() => {
+    if (panel !== "bots" || (botPanelView !== "marketplace" && botPanelView !== "create")) return;
+    if (botMarketplaceManifest || botMarketplaceLoading) return;
+    void loadBotMarketplaceManifest();
+  }, [
+    botMarketplaceManifest,
+    botMarketplaceLoading,
+    botPanelView,
+    loadBotMarketplaceManifest,
+    panel,
+  ]);
+
+  useEffect(() => {
+    if (!newBotLensId) return;
+    const lensStillInstalled = installedMarketplaceLenses.some((lens) => lens.id === newBotLensId);
+    if (!lensStillInstalled) {
+      setNewBotLensId("");
+      setNewBotGeneratedMemorySeeds(null);
+      setBotLensDropActive(false);
+    }
+  }, [installedMarketplaceLenses, newBotLensId]);
+
+  const bootstrap = useCallback(async (): Promise<SessionUser | null> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     try {
@@ -38701,8 +40452,10 @@ function HomeContent(): React.JSX.Element {
       }>("/api/auth/me", { signal: controller.signal });
       setHasAnyAccounts(d.hasAnyAccounts !== false);
       setUser(d.user);
+      return d.user;
     } catch {
       setUser(null);
+      return null;
     } finally {
       clearTimeout(timeout);
     }
@@ -38775,8 +40528,12 @@ function HomeContent(): React.JSX.Element {
       setActiveTutorialMode(null);
       return;
     }
-    const mode: TutorialMode = view === "chat" ? "zen" : (view as TutorialMode);
-    if (!Object.prototype.hasOwnProperty.call(DEFAULT_TUTORIAL_PROGRESS, mode)) {
+    const mode: TutorialMode | null =
+      view === "chat" ? "zen"
+        : view === "sandbox" ? "chat"
+          : view === "coffee" ? "coffee"
+            : null;
+    if (!mode) {
       return;
     }
     if (tutorialProgress[mode]) {
@@ -40417,6 +42174,9 @@ function HomeContent(): React.JSX.Element {
     }
   }
   async function refreshModels(comfyUiHostOverride?: string) {
+    const refreshToken = modelCatalogRefreshTokenRef.current + 1;
+    modelCatalogRefreshTokenRef.current = refreshToken;
+    setModelCatalogStatus("checking");
     const trimmed =
       comfyUiHostOverride !== undefined
         ? comfyUiHostOverride.trim()
@@ -40435,7 +42195,9 @@ function HomeContent(): React.JSX.Element {
         hiddenBotModelIds?: string[];
         hiddenComfyUiWorkflowIds?: string[];
       }>(`/api/models${qs}`);
+      if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
       setModelCatalog(d.catalog);
+      setModelCatalogStatus("ready");
       const hiddenBotModelIds = Array.isArray(d.hiddenBotModelIds)
         ? d.hiddenBotModelIds
         : null;
@@ -40463,6 +42225,8 @@ function HomeContent(): React.JSX.Element {
       );
     } catch (err) {
       console.warn("[refreshModels]", err);
+      if (modelCatalogRefreshTokenRef.current !== refreshToken) return;
+      setModelCatalogStatus("error");
       setModelCatalog((previous) => previous ?? FALLBACK_EMPTY_MODEL_CATALOG);
       setComfyUiModelsPayload({
         configured: Boolean(trimmed.length > 0),
@@ -40804,7 +42568,11 @@ function HomeContent(): React.JSX.Element {
       return next;
     });
   }
-  async function refreshBots() { const d = await api<{ bots: Bot[] }>("/api/bots"); setBots(d.bots); }
+  async function refreshBots(): Promise<Bot[]> {
+    const d = await api<{ bots: Bot[] }>("/api/bots");
+    setBots(d.bots);
+    return d.bots;
+  }
   async function refreshImages(botFilter?: string | null) {
     const path =
       botFilter === "general"
@@ -41126,6 +42894,7 @@ function HomeContent(): React.JSX.Element {
       if (!normalizedUsername) {
         throw new Error("Username is required.");
       }
+      const isRegistering = authMode === "register";
       if (authMode === "register") {
         if (password !== confirmPassword) {
           throw new Error("Passwords do not match.");
@@ -41141,7 +42910,10 @@ function HomeContent(): React.JSX.Element {
         });
       }
       clearNativeSessionToken();
-      await bootstrap();
+      const bootstrappedUser = await bootstrap();
+      if (isRegistering && bootstrappedUser?.id) {
+        starterPackFreshAccountEligibleUserRef.current = bootstrappedUser.id;
+      }
       setUsername(normalizedUsername);
       setPassword("");
       setConfirmPassword("");
@@ -41153,6 +42925,7 @@ function HomeContent(): React.JSX.Element {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
     clearNativeSessionToken();
     setUser(null);
+    starterPackFreshAccountEligibleUserRef.current = null;
     setPreAuthChecklistComplete(false);
     setConversations([]);
     setDetail(null);
@@ -41201,6 +42974,7 @@ function HomeContent(): React.JSX.Element {
       window.localStorage.removeItem(tutorialStorageKeyForUser(userId));
       window.localStorage.removeItem(commandCenterStateStorageKey(userId));
       window.localStorage.removeItem(botLibraryGroupsStorageKey(userId));
+      window.localStorage.removeItem(botMarketplaceLensesStorageKey(userId));
       window.localStorage.removeItem(conversationGroupOrderStorageKey(userId));
       window.localStorage.removeItem(zenInitialStarterCacheKey(userId));
       window.localStorage.removeItem(PRISM_COFFEE_SESSION_SETTINGS_STORAGE_KEY);
@@ -41209,6 +42983,7 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Storage cleanup is best effort; in-memory state below still resets the current page.
     }
+    clearStarterPackInstalledMarker(userId);
 
     pendingReplyAbortControllerRef.current?.abort();
     pendingReplyAbortControllerRef.current = null;
@@ -41274,7 +43049,7 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterHelpModalOpen(false);
     setExpandedPromptShortcutTargetsByMessageId({});
     setConversationGroupOrder([]);
-    setBotLibraryGroups([createFavoritesBotGroup()]);
+    setBotLibraryGroups(createFactoryResetBotLibraryGroups([]));
     setConversations([]);
     setSelectedId(null);
     selectedIdRef.current = null;
@@ -41355,12 +43130,19 @@ function HomeContent(): React.JSX.Element {
     setNewBotOnlineEnabled(true);
     setNewBotDeleteProtected(false);
     setNewBotFlirtEnabled(false);
+    setNewBotLensId("");
+    setNewBotGeneratedMemorySeeds(null);
+    setBotLensDropActive(false);
     setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
     setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+    setNewBotTopP(BOT_TOP_P_DEFAULT);
+    setNewBotTopK(BOT_TOP_K_DEFAULT);
+    setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
+    setBotAiParametersModalOpen(false);
     setBotAvatarCustomizerOpen(false);
     setBotPreferredModelsModalOpen(false);
     setEditingBotId(null);
@@ -41473,9 +43255,12 @@ function HomeContent(): React.JSX.Element {
       setFactoryResetArmed(false);
       resetBrowserFactoryDefaultsForUser(user.id);
       navigateToView("hub");
+      const starterPackResult = await installPrismStarterPackFromMarketplace();
       await bootstrap();
       await refreshAll();
-      setPanelNotice("Factory defaults restored. Tutorials will run again when you enter each mode.");
+      setPanelNotice(
+        `Factory defaults restored with ${starterPackResult.starterBotCount} PRISM starter bots. Tutorials will run again when you enter each mode.`
+      );
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Factory reset failed.");
     } finally {
@@ -49236,11 +51021,14 @@ function HomeContent(): React.JSX.Element {
       botHash: exportHash ?? undefined,
       bot: {
         name: trimmedName,
-        color: bot.color ?? null,
-        glyph: bot.glyph ?? null,
-        temperature: bot.temperature,
-        maxTokens: bot.max_tokens,
-        localModel: bot.local_model ?? bot.model ?? null,
+	        color: bot.color ?? null,
+	        glyph: bot.glyph ?? null,
+	        temperature: bot.temperature,
+	        maxTokens: bot.max_tokens,
+	        topP: normalizeBotTopP(bot.top_p),
+	        topK: normalizeBotTopK(bot.top_k),
+	        repetitionPenalty: normalizeBotRepetitionPenalty(bot.repetition_penalty),
+	        localModel: bot.local_model ?? bot.model ?? null,
         onlineModel: bot.online_model ?? null,
         localImageModel: bot.local_image_model ?? null,
         openaiImageModel: bot.openai_image_model ?? null,
@@ -49763,15 +51551,27 @@ function HomeContent(): React.JSX.Element {
         flirtEnabled: parsedBot.flirtEnabled === true,
         chatEnabled: parsedBot.chatEnabled !== false,
         deleteProtected: parsedBot.deleteProtected === true,
-        temperature:
-          typeof parsedBot.temperature === "number"
-            ? normalizeBotTemperature(parsedBot.temperature)
-            : BOT_TEMPERATURE_DEFAULT,
-        maxTokens:
-          typeof parsedBot.maxTokens === "number"
-            ? normalizeBotMaxTokens(parsedBot.maxTokens)
-            : BOT_REPLY_LENGTH_DEFAULT_TOKENS,
-        color: typeof parsedBot.color === "string" && parsedBot.color.trim().length > 0
+	        temperature:
+	          typeof parsedBot.temperature === "number"
+	            ? normalizeBotTemperature(parsedBot.temperature)
+	            : BOT_TEMPERATURE_DEFAULT,
+	        maxTokens:
+	          typeof parsedBot.maxTokens === "number"
+	            ? normalizeBotMaxTokens(parsedBot.maxTokens)
+	            : BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+	        topP:
+	          typeof parsedBot.topP === "number"
+	            ? normalizeBotTopP(parsedBot.topP)
+	            : BOT_TOP_P_DEFAULT,
+	        topK:
+	          typeof parsedBot.topK === "number"
+	            ? normalizeBotTopK(parsedBot.topK)
+	            : BOT_TOP_K_DEFAULT,
+	        repetitionPenalty:
+	          typeof parsedBot.repetitionPenalty === "number"
+	            ? normalizeBotRepetitionPenalty(parsedBot.repetitionPenalty)
+	            : BOT_REPETITION_PENALTY_DEFAULT,
+	        color: typeof parsedBot.color === "string" && parsedBot.color.trim().length > 0
           ? parsedBot.color.trim()
           : null,
         glyph: typeof parsedBot.glyph === "string" && parsedBot.glyph.trim().length > 0
@@ -49831,13 +51631,22 @@ function HomeContent(): React.JSX.Element {
       });
     }
 
+    let refreshedBots: Bot[] | null = null;
     if (!options?.deferRefresh) {
-      await refreshBots();
+      refreshedBots = await refreshBots();
       await refreshMemories();
       await refreshBotMemories(createdBotId);
     }
     if (options?.selectInChat !== false) {
       selectImportedBotInChatMode(createdBotId);
+    }
+    if (options?.openImportedBotInEditor) {
+      const importedBot = refreshedBots?.find((bot) => bot.id === createdBotId) ?? null;
+      if (importedBot) {
+        setSelectedBotPanelBotId(importedBot.id);
+        setBotPanelView("customize");
+        startEditBot(importedBot);
+      }
     }
     if (!options?.suppressNotice) {
       setPanelNotice(
@@ -49846,7 +51655,7 @@ function HomeContent(): React.JSX.Element {
           : `${importedName} imported.`
       );
     }
-    if (panelRef.current === "bots") {
+    if (panelRef.current === "bots" && !options?.keepBotsPanelOpen) {
       closePanel();
     }
     return {
@@ -50217,6 +52026,400 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function fetchMarketplaceBotBundle(entry: BotMarketplaceEntry): Promise<string> {
+    const response = await fetch(entry.bundlePath, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Marketplace bundle unavailable for ${entry.name} (${response.status}).`);
+    }
+    return response.text();
+  }
+
+  function validateMarketplacePreparedBundle(prepared: BotMarketplacePreparedBundle): void {
+    const parsed = parseBotExportPayload(prepared.raw);
+    const parsedHash = normalizeImportedBotHash(parsed.botHash);
+    if (parsedHash !== prepared.entry.botHash) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has the wrong bot hash.`);
+    }
+    const parsedName = parsed.bot?.name?.trim();
+    if (!parsedName) {
+      throw new Error(`${prepared.entry.name} marketplace bundle is missing a bot name.`);
+    }
+    if (!normalizeBotFaceFontId(parsed.bot?.faceEyesFont)) {
+      throw new Error(`${prepared.entry.name} marketplace bundle is missing a valid eye face font.`);
+    }
+    if (!normalizeBotFaceFontId(parsed.bot?.faceMouthFont)) {
+      throw new Error(`${prepared.entry.name} marketplace bundle is missing a valid mouth face font.`);
+    }
+    if (normalizeBotFaceFontWeight(parsed.bot?.faceFontWeight) === null) {
+      throw new Error(`${prepared.entry.name} marketplace bundle is missing a valid face weight.`);
+    }
+  }
+
+  async function prepareMarketplaceBundles(
+    entries: readonly BotMarketplaceEntry[]
+  ): Promise<BotMarketplacePreparedBundle[]> {
+    const bundleRawByPath = new Map<string, string>();
+    await Promise.all(
+      entries.map(async (entry) => {
+        bundleRawByPath.set(entry.bundlePath, await fetchMarketplaceBotBundle(entry));
+      })
+    );
+    const prepared = validateMarketplaceSelectionBundles(entries, bundleRawByPath);
+    for (const bundle of prepared) {
+      validateMarketplacePreparedBundle(bundle);
+    }
+    return prepared;
+  }
+
+  async function installPrismStarterPackFromMarketplace(): Promise<{
+    installedCount: number;
+    starterBotCount: number;
+  }> {
+    const currentBots = await refreshBots();
+    const installedHashes = marketplaceInstalledHashSet(
+      currentBots.map((bot) => bot.export_hash)
+    );
+    const manifest = botMarketplaceManifest ?? (await fetchBotMarketplaceManifest());
+    setBotMarketplaceManifest(manifest);
+    setBotMarketplaceSelectedThemeId((current) =>
+      current && manifest.themes.some((theme) => theme.id === current)
+        ? current
+        : manifest.themes[0]?.id ?? null
+    );
+    setBotMarketplaceSelectedLensCategoryId((current) =>
+      current && manifest.lensCategories.some((category) => category.id === current)
+        ? current
+        : manifest.lensCategories[0]?.id ?? null
+    );
+
+    const entries = marketplaceEntriesForTheme(manifest, BOT_MARKETPLACE_STARTER_THEME_ID);
+    if (entries.length === 0) {
+      throw new Error("Prism starter pack is missing from the marketplace catalog.");
+    }
+
+    const missingEntries = marketplaceMissingEntries(entries, installedHashes);
+    const prepared = await prepareMarketplaceBundles(missingEntries);
+    for (const bundle of prepared) {
+      await importBotFromExportRawText(bundle.raw, {
+        suppressNotice: true,
+        suppressPanelReset: true,
+        selectInChat: false,
+        deferRefresh: true,
+        keepBotsPanelOpen: true,
+      });
+    }
+
+    const refreshedBots = prepared.length > 0 ? await refreshBots() : currentBots;
+    if (prepared.length > 0) {
+      await refreshMemories();
+    }
+    const refreshedIdByHash = new Map<string, string>();
+    for (const bot of refreshedBots) {
+      const hash = normalizeImportedBotHash(bot.export_hash);
+      if (hash) refreshedIdByHash.set(hash, bot.id);
+    }
+    const starterBotIds = entries
+      .map((entry) => refreshedIdByHash.get(entry.botHash) ?? null)
+      .filter((botId): botId is string => Boolean(botId));
+    const factoryGroups = createFactoryResetBotLibraryGroups(starterBotIds);
+    setBotLibraryGroups(factoryGroups);
+    if (user?.id && typeof window !== "undefined") {
+      try {
+        markStarterPackInstalled(user.id);
+        window.localStorage.setItem(
+          botLibraryGroupsStorageKey(user.id),
+          JSON.stringify(factoryGroups)
+        );
+      } catch {
+        // Non-fatal: the in-memory group state is already set for this page session.
+      }
+    }
+    return {
+      installedCount: prepared.length,
+      starterBotCount: starterBotIds.length,
+    };
+  }
+
+  async function installMarketplaceBot(entry: BotMarketplaceEntry): Promise<void> {
+    if (botMarketplaceInstallingKey || botTransferBusy) return;
+    const installedBotId = botMarketplaceInstalledBotIdByHash.get(entry.botHash);
+    const installedBot = installedBotId
+      ? bots.find((bot) => bot.id === installedBotId) ?? null
+      : null;
+    if (installedBot) {
+      openBotCustomizer(installedBot);
+      return;
+    }
+    setBotMarketplaceInstallingKey(`bot:${entry.id}`);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const [prepared] = await prepareMarketplaceBundles([entry]);
+      if (!prepared) throw new Error(`${entry.name} marketplace bundle could not be prepared.`);
+      const result = await importBotFromExportRawText(prepared.raw, {
+        suppressNotice: true,
+        suppressPanelReset: true,
+        selectInChat: false,
+        keepBotsPanelOpen: true,
+      });
+      setBotPanelView("marketplace");
+      setPanelNotice(
+        result.restoredMemories > 0
+          ? `${result.importedName} installed with ${result.restoredMemories} memories.`
+          : `${result.importedName} installed.`
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Marketplace install failed.");
+    } finally {
+      setBotMarketplaceInstallingKey(null);
+    }
+  }
+
+  async function installMarketplaceTheme(theme: BotMarketplaceTheme): Promise<void> {
+    if (!botMarketplaceManifest || botMarketplaceInstallingKey || botTransferBusy) return;
+    const entries = marketplaceEntriesForTheme(botMarketplaceManifest, theme.id);
+    if (entries.length === 0) return;
+    setBotMarketplaceInstallingKey(`theme:${theme.id}`);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const prepared = await prepareMarketplaceBundles(entries);
+      const missingPrepared = prepared.filter(
+        ({ entry }) => !botMarketplaceInstalledHashes.has(entry.botHash)
+      );
+      const importedIds: string[] = [];
+      let restoredTotal = 0;
+      for (const bundle of missingPrepared) {
+        const result = await importBotFromExportRawText(bundle.raw, {
+          suppressNotice: true,
+          suppressPanelReset: true,
+          selectInChat: false,
+          deferRefresh: true,
+          keepBotsPanelOpen: true,
+        });
+        importedIds.push(result.botId);
+        restoredTotal += result.restoredMemories;
+      }
+      await refreshBots();
+      await refreshMemories();
+      setBotPanelView("marketplace");
+      if (missingPrepared.length === 0) {
+        setPanelNotice(`${theme.name} is already installed.`);
+      } else {
+        setPanelNotice(
+          restoredTotal > 0
+            ? `${theme.name} installed: ${importedIds.length} bots and ${restoredTotal} memories.`
+            : `${theme.name} installed: ${importedIds.length} bots.`
+        );
+      }
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Marketplace theme install failed.");
+    } finally {
+      setBotMarketplaceInstallingKey(null);
+    }
+  }
+
+  async function installStarterBotsFromEmptyState(source: "coffee" | "story"): Promise<void> {
+    if (botMarketplaceInstallingKey || botTransferBusy) return;
+    setBotMarketplaceInstallingKey(`theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`);
+    setPanelError(null);
+    setPanelNotice(null);
+    setCoffeeError(null);
+    setStoryError(null);
+    try {
+      const result = await installPrismStarterPackFromMarketplace();
+      const message =
+        result.installedCount > 0
+          ? `Installed ${result.installedCount} Prism Originals starter bots.`
+          : `Prism Originals are already installed.`;
+      setPanelNotice(message);
+      if (source === "coffee") {
+        setCoffeeSearch("");
+      } else {
+        setStorySearch("");
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Prism Originals could not be installed.";
+      if (source === "coffee") {
+        setCoffeeError(message);
+      } else {
+        setStoryError(message);
+      }
+    } finally {
+      setBotMarketplaceInstallingKey(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const freshAccountEligible =
+      !hasAnyAccounts || starterPackFreshAccountEligibleUserRef.current === user.id;
+    if (!freshAccountEligible) return;
+    if (starterPackInstallMarked(user.id)) return;
+    if (starterPackAutoInstallAttemptedUserRef.current === user.id) return;
+    let cancelled = false;
+    starterPackAutoInstallAttemptedUserRef.current = user.id;
+    if (starterPackFreshAccountEligibleUserRef.current === user.id) {
+      starterPackFreshAccountEligibleUserRef.current = null;
+    }
+    setBotMarketplaceInstallingKey(`theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`);
+    setPanelError(null);
+    setPanelNotice("Installing Prism Originals starter bots...");
+    void (async () => {
+      try {
+        const result = await installPrismStarterPackFromMarketplace();
+        if (cancelled) return;
+        setPanelNotice(
+          result.installedCount > 0
+            ? `Installed ${result.installedCount} Prism Originals starter bots.`
+            : "Prism Originals are ready."
+        );
+      } catch (err) {
+        if (!cancelled) {
+          setPanelError(
+            err instanceof Error
+              ? `Starter bots could not be installed: ${err.message}`
+              : "Starter bots could not be installed."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setBotMarketplaceInstallingKey(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // The installer is a local workflow function; this effect is intentionally keyed to auth/install state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, hasAnyAccounts]);
+
+  function commitInstalledMarketplaceLensIds(nextLensIds: ReadonlySet<string>): void {
+    const normalized = new Set(
+      Array.from(nextLensIds)
+        .map((lensId) => lensId.trim().toLowerCase())
+        .filter((lensId) => lensId.length > 0)
+    );
+    setInstalledMarketplaceLensIds(normalized);
+    if (user?.id) {
+      saveInstalledMarketplaceLensIds(user.id, normalized);
+    }
+  }
+
+  function installMarketplaceLens(lens: MarketplaceLensEntry, options?: { quiet?: boolean }): void {
+    const next = new Set(installedMarketplaceLensIds);
+    next.add(lens.id);
+    commitInstalledMarketplaceLensIds(next);
+    if (!options?.quiet) {
+      setPanelError(null);
+      setPanelNotice(`${lens.displayName} installed.`);
+    }
+  }
+
+  function removeMarketplaceLens(lens: MarketplaceLensEntry): void {
+    const next = new Set(installedMarketplaceLensIds);
+    next.delete(lens.id);
+    commitInstalledMarketplaceLensIds(next);
+    if (newBotLensId === lens.id) {
+      setNewBotLensId("");
+      setNewBotGeneratedMemorySeeds(null);
+      setBotLensDropActive(false);
+    }
+    setPanelError(null);
+    setPanelNotice(`${lens.displayName} removed.`);
+  }
+
+  function applyMarketplaceLensToRandomizer(lens: MarketplaceLensEntry): void {
+    if (marketplaceLensInstallState(lens, installedMarketplaceLensIds) !== "installed") {
+      installMarketplaceLens(lens, { quiet: true });
+    }
+    setNewBotLensId(lens.id);
+    setNewBotGeneratedMemorySeeds(null);
+    setBotLensDropActive(false);
+    setPanelError(null);
+    setPanelNotice(null);
+  }
+
+	  function applyMarketplaceLensToGenerator(lens: MarketplaceLensEntry): void {
+	    applyMarketplaceLensToRandomizer(lens);
+	    setBotMarketplaceSection("lens");
+	    setBotPanelView("create");
+	  }
+
+	  function browseMarketplaceLenses(): void {
+	    setBotMarketplaceSection("lens");
+	    openBotMarketplace();
+	  }
+
+	  function marketplaceLensById(lensId: string): MarketplaceLensEntry | null {
+    const normalized = lensId.trim().toLowerCase();
+    if (!normalized) return null;
+    return botMarketplaceVisibleLenses.find((lens) => lens.id === normalized) ?? null;
+  }
+
+  function writeMarketplaceLensDragData(
+    event: React.DragEvent<HTMLElement>,
+    lens: MarketplaceLensEntry
+  ): void {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(PRISM_LENS_DRAG_MIME, lens.id);
+    event.dataTransfer.setData("text/plain", lens.id);
+  }
+
+  function readMarketplaceLensDragId(event: React.DragEvent<HTMLElement>): string {
+    return (
+      event.dataTransfer.getData(PRISM_LENS_DRAG_MIME) ||
+      event.dataTransfer.getData("text/plain")
+    ).trim().toLowerCase();
+  }
+
+  function dragEventHasMarketplaceLens(event: React.DragEvent<HTMLElement>): boolean {
+    return Array.from(event.dataTransfer.types).includes(PRISM_LENS_DRAG_MIME);
+  }
+
+  function handleRandomizerLensDragOver(event: React.DragEvent<HTMLElement>): void {
+    if (!dragEventHasMarketplaceLens(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setBotLensDropActive(true);
+  }
+
+  function handleRandomizerLensDragLeave(event: React.DragEvent<HTMLElement>): void {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+    setBotLensDropActive(false);
+  }
+
+  function handleRandomizerLensDrop(event: React.DragEvent<HTMLElement>): void {
+    const lens = marketplaceLensById(readMarketplaceLensDragId(event));
+    setBotLensDropActive(false);
+    if (!lens) return;
+    event.preventDefault();
+    applyMarketplaceLensToRandomizer(lens);
+  }
+
+  function showBotLensTileTooltip(
+    event: React.FocusEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>,
+    lens: MarketplaceLensEntry
+  ): void {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const tooltipWidth = 220;
+    const gap = 10;
+    const fitsRight = rect.right + gap + tooltipWidth < window.innerWidth - 12;
+    setBotLensTooltip({
+      label: lens.displayName,
+      placement: fitsRight ? "right" : "left",
+      x: fitsRight ? rect.right + gap : rect.left - gap,
+      y: rect.top + rect.height / 2,
+    });
+  }
+
+  function hideBotLensTileTooltip(): void {
+    setBotLensTooltip(null);
+  }
+
   async function handleBotImportFileSelection(
     event: React.ChangeEvent<HTMLInputElement>
   ): Promise<void> {
@@ -50552,6 +52755,32 @@ function HomeContent(): React.JSX.Element {
     setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
   }, [cancelPendingEmptyStateSearchOpen]);
 
+  function applyBotLibraryGroupFilter(nextFilterId: string): void {
+    setBotLibraryGroupFilterId(nextFilterId);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    if (
+      nextFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL &&
+      (view === "chat" || view === "sandbox") &&
+      !detail &&
+      !pendingReplyVisible
+    ) {
+      resetEmptyStateBotSelection();
+      setHueFilterCenter(null);
+    }
+  }
+
+  function applyBotLibraryHeaderFilter(nextValue: string): void {
+    if (nextValue === BOT_LIBRARY_GROUP_FILTER_ALL) {
+      performShowAllBotsView(null);
+      return;
+    }
+    if (nextValue.startsWith(BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX)) {
+      const groupId = nextValue.slice(BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX.length);
+      applyBotLibraryGroupFilter(groupId);
+      return;
+    }
+  }
+
   const handleEmptyStateBackgroundClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (canvasBotMarqueeSuppressClickRef.current) {
       canvasBotMarqueeSuppressClickRef.current = false;
@@ -50566,10 +52795,46 @@ function HomeContent(): React.JSX.Element {
       "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true'], [data-bot-picker-frame='true']"
     );
     if (interactiveTarget) return;
+    const shouldReturnToBotDirectory =
+      bots.length > 0 &&
+      !pendingReplyVisible &&
+      (
+        selectedBotId !== null ||
+        composerPrimed ||
+        hueFilterCenter !== null ||
+        botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL ||
+        botPanelGroup !== BOT_LIBRARY_FILTER_ALL
+      );
+    if (shouldReturnToBotDirectory) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedId(null);
+      setDetail(null);
+      setChatBotOverride(undefined);
+      setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      setEmptyStateSearchOpen(false);
+      setEmptyStateBotNameFilter("");
+      startBotPickerReturnToAll();
+      setSelectedBotId(null);
+      setSandboxGridSelectedBotId(null);
+      setComposerPrimed(false);
+      setConversationStarterPrompts(null);
+      setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
+      return;
+    }
     setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
   }, [
+    bots.length,
+    botLibraryGroupFilterId,
+    botPanelGroup,
+    composerPrimed,
     detail,
+    hueFilterCenter,
     pendingIncognito,
+    pendingReplyVisible,
+    selectedBotId,
+    startBotPickerReturnToAll,
   ]);
 
   const openEmptyStateBotSearch = useCallback(() => {
@@ -50607,6 +52872,8 @@ function HomeContent(): React.JSX.Element {
   function resetEmptyStateToPrismHome(): void {
     closeEmptyStateBotSearch();
     resetEmptyStateBotSelection();
+    setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setZenPersonaBotId(null);
     setPendingIncognito(false);
     if (hueFilterCenter !== null) {
@@ -50890,6 +53157,27 @@ function HomeContent(): React.JSX.Element {
     document.addEventListener("click", handleDocumentClick);
     return () => document.removeEventListener("click", handleDocumentClick);
   }, [closeEmptyStateBotSearch, emptyStateSearchActive]);
+
+  const toggleCanvasBotSelection = useCallback((botId: string) => {
+    setCanvasSelectedBotIds((current) => {
+      const next = new Set(current);
+      if (next.has(botId)) {
+        next.delete(botId);
+      } else {
+        next.add(botId);
+      }
+      return stringSetsEqual(current, next) ? current : next;
+    });
+  }, []);
+
+  const selectCanvasBot = useCallback((botId: string) => {
+    setCanvasSelectedBotIds((current) => {
+      if (current.has(botId)) return current;
+      const next = new Set(current);
+      next.add(botId);
+      return next;
+    });
+  }, []);
 
   const relocateHueLensToBot = useCallback(
     (botId: string, geom: PickerGeometry): boolean => {
@@ -51521,11 +53809,17 @@ function HomeContent(): React.JSX.Element {
     }
   }, [botProfileBuilderOpen, newBotName]);
 
-  useEffect(() => {
-    if (botAvatarCustomizerOpen && panel !== "bots") {
-      setBotAvatarCustomizerOpen(false);
-    }
-  }, [botAvatarCustomizerOpen, panel]);
+	  useEffect(() => {
+	    if (botAvatarCustomizerOpen && panel !== "bots") {
+	      setBotAvatarCustomizerOpen(false);
+	    }
+	  }, [botAvatarCustomizerOpen, panel]);
+
+	  useEffect(() => {
+	    if (botAiParametersModalOpen && panel !== "bots") {
+	      setBotAiParametersModalOpen(false);
+	    }
+	  }, [botAiParametersModalOpen, panel]);
 
   // Close the color/glyph popover on any outside click or Escape. Only
   // one picker ever lives on screen (the top form in the Bots panel), so
@@ -51809,18 +54103,32 @@ function HomeContent(): React.JSX.Element {
     setSweepConfirmOpen(true);
   }
 
-  function buildRandomBotDraft(name = randomBotName()) {
-    const faceStyle = randomBotFaceStyle();
+  function buildRandomBotDraft(name = randomBotName(), lens = newBotAppliedLens) {
+    const persona = buildRandomizerPersonaDraft({
+      lens,
+      fallbackName: name,
+    });
+    const faceStyle = persona.faceStyle ?? randomBotFaceStyle();
+    const suggestedGlyph =
+      persona.suggestedGlyph && isBotGlyphName(persona.suggestedGlyph)
+        ? persona.suggestedGlyph
+        : null;
     return {
-      name,
-      profile: randomBotProfile(name),
-      temperature: randomBotTemperatureSetting(),
-      maxTokens: randomBotReplyLengthTokens(),
-      color: randomHex(
+      name: persona.name,
+      profile: persona.profile,
+      temperature: BOT_TEMPERATURE_DEFAULT,
+      maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+      topP: BOT_TOP_P_DEFAULT,
+      topK: BOT_TOP_K_DEFAULT,
+      repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
+      color: persona.suggestedColor ?? randomHex(
         bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
       ),
-      glyph: randomBotGlyph(),
+      glyph: suggestedGlyph ?? randomBotGlyph(),
       faceStyle,
+      memorySeeds: persona.memories,
+      lensId: persona.lensId,
+      generationLabel: persona.generationLabel,
     };
   }
 
@@ -51829,8 +54137,12 @@ function HomeContent(): React.JSX.Element {
     setPanelNotice(null);
     setNewBotName(draft.name);
     setBotProfile(draft.profile);
+    setNewBotSystemPrompt(serializeStoredBotPrompt(draft.profile, draft.name));
     setNewBotTemperature(draft.temperature);
     setNewBotMaxTokens(draft.maxTokens);
+    setNewBotTopP(draft.topP);
+    setNewBotTopK(draft.topK);
+    setNewBotRepetitionPenalty(draft.repetitionPenalty);
     createBotAppearanceTouchedRef.current = true;
     setNewBotColor(draft.color);
     setNewBotGlyph(draft.glyph);
@@ -51838,10 +54150,20 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthFont(draft.faceStyle.mouthFont);
     setNewBotFaceFontWeight(draft.faceStyle.weight);
     setNewBotProfilePictureImageId(null);
+    setNewBotGeneratedMemorySeeds({
+      lensId: draft.lensId,
+      botName: draft.name,
+      memories: draft.memorySeeds,
+    });
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
+    setPanelNotice(
+      draft.memorySeeds.length > 0
+        ? `${draft.generationLabel}: ${draft.memorySeeds.length} memories ready to seed.`
+        : draft.generationLabel
+    );
   }
 
   // Reset the top form back to "create" mode with a fresh random
@@ -51851,6 +54173,8 @@ function HomeContent(): React.JSX.Element {
   const resetBotForm = useCallback(() => {
     setNewBotName("");
     setBotProfile(blankBotProfile());
+    setNewBotSystemPrompt("");
+    setBotEditorAdvancedMode(false);
     setNewBotLocalModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
     setNewBotOnlineModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
     setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
@@ -51858,8 +54182,13 @@ function HomeContent(): React.JSX.Element {
     setNewBotOnlineEnabled(true);
     setNewBotDeleteProtected(false);
     setNewBotFlirtEnabled(false);
+    setNewBotLensId("");
+    setNewBotGeneratedMemorySeeds(null);
     setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
     setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+    setNewBotTopP(BOT_TOP_P_DEFAULT);
+    setNewBotTopK(BOT_TOP_K_DEFAULT);
+    setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
     createBotAppearanceTouchedRef.current = false;
     setNewBotColor(randomHex(
       bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
@@ -51871,6 +54200,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotProfilePictureImageId(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
+    setBotAiParametersModalOpen(false);
     setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
     setBotPreferredModelsModalOpen(false);
@@ -51925,6 +54255,16 @@ function HomeContent(): React.JSX.Element {
     openRightPanel("bots");
   }
 
+  function openBotMarketplace(): void {
+    resetBotPanelDraftNavigation();
+    setBotPanelView("marketplace");
+    setBotLibraryExpanded(false);
+    openRightPanel("bots");
+    if (!botMarketplaceManifest && !botMarketplaceLoading) {
+      void loadBotMarketplaceManifest();
+    }
+  }
+
   function openBotPanelHub(bot: Bot): void {
     resetBotPanelDraftNavigation();
     setSelectedBotPanelBotId(bot.id);
@@ -51937,6 +54277,12 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     const createdBotName = newBotName.trim();
+    const activeLensId = newBotAppliedLens?.id ?? "";
+    const generatedMemorySeeds = generatedBotMemorySeedsForCreate(
+      newBotGeneratedMemorySeeds,
+      activeLensId,
+      createdBotName
+    );
     const localModel = visibleConcreteModelChoiceForProvider(
       modelCatalog,
       settings,
@@ -51954,33 +54300,153 @@ function HomeContent(): React.JSX.Element {
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
         : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
+    const storedSystemPrompt = botEditorAdvancedMode
+      ? newBotSystemPrompt
+      : serializeStoredBotPrompt(botProfile, createdBotName);
+    const transferTotalSteps = generatedMemorySeeds.length > 0
+      ? generatedMemorySeeds.length + 1
+      : 0;
+    let createdBotId: string | null = null;
+    let restoredGeneratedMemories = 0;
+    if (generatedMemorySeeds.length > 0) {
+      startBotTransferOverlay({
+        mode: "generate",
+        title: "Generating bot",
+        subject: createdBotName,
+        detail: newBotAppliedLens
+          ? `Creating ${createdBotName} through ${newBotAppliedLens.displayName}.`
+          : `Creating ${createdBotName} with generated memories.`,
+        currentStepLabel: "Creating profile",
+        completedSteps: 0,
+        totalSteps: transferTotalSteps,
+        accentColor: newBotColor,
+        glyph: isBotGlyphName(newBotGlyph) ? newBotGlyph : DEFAULT_BOT_GLYPH,
+        stats: {
+          totalBots: 1,
+          completedBots: 0,
+          totalMemories: generatedMemorySeeds.length,
+          completedMemories: 0,
+        },
+      });
+      await waitForBotTransferPaint();
+    }
     try {
-      await api("/api/bots", {
+      const created = await api<{ bot?: { id?: string } }>("/api/bots", {
         method: "POST",
         body: JSON.stringify({
           name: newBotName,
-          systemPrompt: serializeStoredBotPrompt(botProfile, newBotName),
+          systemPrompt: storedSystemPrompt,
           localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
           onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           localImageModel: localImageStored,
           openaiImageModel: openaiImageStored,
           onlineEnabled: newBotOnlineEnabled,
-          deleteProtected: newBotDeleteProtected,
-          flirtEnabled: newBotFlirtEnabled,
-          temperature: newBotTemperature,
-          maxTokens: newBotMaxTokens,
-          color: newBotColor,
+	          flirtEnabled: newBotFlirtEnabled,
+	          temperature: newBotTemperature,
+	          maxTokens: newBotMaxTokens,
+	          topP: newBotTopP,
+	          topK: newBotTopK,
+	          repetitionPenalty: newBotRepetitionPenalty,
+	          color: newBotColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceMouthFont: newBotFaceMouthFont,
           faceFontWeight: newBotFaceFontWeight,
         }),
       });
+      createdBotId = created.bot?.id ?? null;
+      if (generatedMemorySeeds.length > 0) {
+        const generatedBotId = createdBotId;
+        if (!generatedBotId) {
+          throw new Error("Generated bot was created without an id.");
+        }
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          detail:
+            generatedMemorySeeds.length > 0
+              ? `Seeding ${generatedMemorySeeds.length} generated memories.`
+              : "Profile created.",
+          currentStepLabel: "Profile created",
+          completedSteps: Math.min(1, current.totalSteps ?? 1),
+          stats: {
+            ...current.stats,
+            completedBots: 1,
+          },
+        }));
+        await waitForBotTransferPaint();
+
+        for (const memory of generatedMemorySeeds) {
+          await api("/api/memories/restore", {
+            method: "POST",
+            body: JSON.stringify({
+              text: memory.text.trim(),
+              botId: generatedBotId,
+              source: memory.source,
+              confidence: memory.confidence,
+              category: memory.category,
+              tier: memory.tier,
+              certainty: memory.certainty,
+              durability: memory.durability,
+              sourceMessageIds: memory.sourceMessageIds ?? [],
+            }),
+          });
+          restoredGeneratedMemories += 1;
+          updateBotTransferOverlay((current) => ({
+            ...current,
+            detail: `${restoredGeneratedMemories} of ${generatedMemorySeeds.length} generated memories seeded.`,
+            currentStepLabel: "Seeding memories",
+            completedSteps: Math.min(
+              1 + restoredGeneratedMemories,
+              current.totalSteps ?? 1 + restoredGeneratedMemories
+            ),
+            stats: {
+              ...current.stats,
+              completedMemories: restoredGeneratedMemories,
+            },
+          }));
+        }
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          detail: `${createdBotName} generated with ${restoredGeneratedMemories} memories.`,
+          currentStepLabel: "Complete",
+          completedSteps: current.totalSteps ?? transferTotalSteps,
+          stats: {
+            ...current.stats,
+            completedBots: 1,
+            completedMemories: restoredGeneratedMemories,
+            generated: 1,
+          },
+        }));
+        await waitForBotTransferPaint();
+      }
       resetBotForm();
-      setPanelNotice(`${createdBotName} created.`);
+      setPanelNotice(
+        restoredGeneratedMemories > 0
+          ? `${createdBotName} created with ${restoredGeneratedMemories} seeded memories.`
+          : `${createdBotName} created.`
+      );
       await refreshBots();
+      if (createdBotId && restoredGeneratedMemories > 0) {
+        await refreshMemories();
+        await refreshBotMemories(createdBotId);
+      }
     } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Create bot failed.");
+      if (createdBotId) {
+        resetBotForm();
+        await refreshBots().catch(() => undefined);
+        await refreshMemories().catch(() => undefined);
+        setPanelError(
+          err instanceof Error
+            ? `${createdBotName} was created, but generated memories could not be seeded: ${err.message}`
+            : `${createdBotName} was created, but generated memories could not be seeded.`
+        );
+      } else {
+        setPanelError(err instanceof Error ? err.message : "Create bot failed.");
+      }
+    } finally {
+      if (generatedMemorySeeds.length > 0) {
+        setBotTransferOverlay(null);
+      }
     }
   }
 
@@ -52037,11 +54503,13 @@ function HomeContent(): React.JSX.Element {
           localImageModel: bot.local_image_model ?? "",
           openaiImageModel: bot.openai_image_model ?? "",
           onlineEnabled: bot.online_enabled !== 0,
-          deleteProtected: bot.delete_protected === 1,
-          flirtEnabled: bot.flirt_enabled === 1,
-          temperature: normalizeBotTemperature(bot.temperature),
-          maxTokens: normalizeBotMaxTokens(bot.max_tokens),
-          color: bot.color,
+	          flirtEnabled: bot.flirt_enabled === 1,
+	          temperature: normalizeBotTemperature(bot.temperature),
+	          maxTokens: normalizeBotMaxTokens(bot.max_tokens),
+	          topP: normalizeBotTopP(bot.top_p),
+	          topK: normalizeBotTopK(bot.top_k),
+	          repetitionPenalty: normalizeBotRepetitionPenalty(bot.repetition_penalty),
+	          color: bot.color,
           glyph: bot.glyph,
           faceEyesFont: faceStyle.eyesFont,
           faceMouthFont: faceStyle.mouthFont,
@@ -52064,36 +54532,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function revertEditingBotDraft() {
-    const original = editOriginalRef.current;
-    if (!original || busy) return;
-    const { fields } = parseStoredBotPrompt(original.prompt);
-    setPanelError(null);
-    setPanelNotice(null);
-    setNewBotName(original.name);
-    setBotProfile(fields);
-    setNewBotLocalModel(original.localModel);
-    setNewBotOnlineModel(original.onlineModel);
-    setNewBotLocalImageModel(original.localImageModel);
-    setNewBotOpenAiImageModel(original.openAiImageModel);
-    setNewBotOnlineEnabled(original.onlineEnabled);
-    setNewBotDeleteProtected(original.deleteProtected);
-    setNewBotFlirtEnabled(original.flirtEnabled);
-    setNewBotTemperature(original.temperature);
-    setNewBotMaxTokens(original.maxTokens);
-    setNewBotColor(original.color);
-    setNewBotGlyph(original.glyph);
-    setNewBotFaceEyesFont(original.faceEyesFont);
-    setNewBotFaceMouthFont(original.faceMouthFont);
-    setNewBotFaceFontWeight(original.faceFontWeight);
-    setNewBotProfilePictureImageId(original.profilePictureImageId);
-    setColorWheelOpen(false);
-    setBotProfileBuilderOpen(false);
-    setBotAvatarCustomizerOpen(false);
-    setBotPreferredModelsModalOpen(false);
-    setBotModelRoutingPage("chat");
-  }
-
   async function duplicateCurrentBotDraft() {
     const copiedName = `${newBotName.trim() || "Untitled bot"} (copy)`;
     const localModel = visibleConcreteModelChoiceForProvider(
@@ -52113,7 +54551,9 @@ function HomeContent(): React.JSX.Element {
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
         : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
-    const copiedPrompt = serializeStoredBotPrompt(botProfile, copiedName);
+    const copiedPrompt = botEditorAdvancedMode
+      ? newBotSystemPrompt
+      : serializeStoredBotPrompt(botProfile, copiedName);
 
     setBusy(true);
     setPanelError(null);
@@ -52129,11 +54569,13 @@ function HomeContent(): React.JSX.Element {
           localImageModel: localImageStored,
           openaiImageModel: openaiImageStored,
           onlineEnabled: newBotOnlineEnabled,
-          deleteProtected: newBotDeleteProtected,
-          flirtEnabled: newBotFlirtEnabled,
-          temperature: newBotTemperature,
-          maxTokens: newBotMaxTokens,
-          color: newBotColor,
+	          flirtEnabled: newBotFlirtEnabled,
+	          temperature: newBotTemperature,
+	          maxTokens: newBotMaxTokens,
+	          topP: newBotTopP,
+	          topK: newBotTopK,
+	          repetitionPenalty: newBotRepetitionPenalty,
+	          color: newBotColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceMouthFont: newBotFaceMouthFont,
@@ -52141,6 +54583,7 @@ function HomeContent(): React.JSX.Element {
         }),
       });
       setNewBotName(copiedName);
+      setNewBotSystemPrompt(copiedPrompt);
       setNewBotLocalModel(localModel);
       setNewBotOnlineModel(onlineModel);
       setNewBotLocalImageModel(
@@ -52149,19 +54592,27 @@ function HomeContent(): React.JSX.Element {
       setNewBotOpenAiImageModel(
         openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
       );
+      setNewBotDeleteProtected(false);
       editOriginalRef.current = {
         name: copiedName,
-        prompt: copiedPrompt,
+        prompt: serializeStoredBotPrompt(
+          parseStoredBotPrompt(copiedPrompt).fields,
+          copiedName
+        ),
+        rawPrompt: copiedPrompt,
         localModel,
         onlineModel,
         localImageModel: localImageStored ? localImageStored : AUTO_MODEL_CHOICE,
         openAiImageModel: openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE,
         onlineEnabled: newBotOnlineEnabled,
-        deleteProtected: newBotDeleteProtected,
-        flirtEnabled: newBotFlirtEnabled,
-        temperature: newBotTemperature,
-        maxTokens: newBotMaxTokens,
-        color: newBotColor,
+        deleteProtected: false,
+	        flirtEnabled: newBotFlirtEnabled,
+	        temperature: newBotTemperature,
+	        maxTokens: newBotMaxTokens,
+	        topP: newBotTopP,
+	        topK: newBotTopK,
+	        repetitionPenalty: newBotRepetitionPenalty,
+	        color: newBotColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceMouthFont: newBotFaceMouthFont,
@@ -52214,55 +54665,267 @@ function HomeContent(): React.JSX.Element {
     return `Bot Group ${index}`;
   }
 
-  function groupSelectedBots(selectedBotIds: string[]): void {
-    if (selectedBotIds.length < 2) return;
-    const suggestedName = createDefaultBotGroupName();
-    const chosenNameRaw = window.prompt("Name this bot group:", suggestedName);
-    if (chosenNameRaw == null) return;
-    const chosenName = chosenNameRaw.trim();
-    if (!chosenName) {
-      setPanelError("Group name cannot be empty.");
-      return;
-    }
+  function botLibraryGroupNameError(name: string, exceptGroupId?: string): string | null {
+    const trimmedName = name.trim();
+    if (!trimmedName) return "Group name cannot be empty.";
+    const duplicate = botLibraryGroups.some(
+      (group) =>
+        group.id !== exceptGroupId &&
+        group.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicate) return `A bot group named "${trimmedName}" already exists.`;
+    return null;
+  }
+
+  function openCreateBotLibraryGroupDialog(selectedBotIds: string[]): void {
+    const uniqueSelected = Array.from(new Set(selectedBotIds));
+    if (uniqueSelected.length < 2) return;
     setPanelError(null);
     setPanelNotice(null);
-    const uniqueSelected = Array.from(new Set(selectedBotIds));
+    setBotLibraryGroupDetailsDialog({
+      mode: "create",
+      name: createDefaultBotGroupName(),
+      description: "",
+      botIds: uniqueSelected,
+      targetGroupId: BOT_LIBRARY_GROUP_CREATE_NEW,
+      error: botLibraryGroupCapError(uniqueSelected.length),
+    });
+  }
+
+  function openEditBotLibraryGroupDialog(groupId: string): void {
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!target || target.builtIn) return;
+    setPanelError(null);
+    setPanelNotice(null);
+    setBotLibraryGroupDetailsDialog({
+      mode: "edit",
+      groupId: target.id,
+      name: target.name,
+      description: target.description,
+      error: null,
+    });
+  }
+
+  function updateBotLibraryGroupDetailsDialog(
+    patch: Partial<{
+      name: string;
+      description: string;
+      targetGroupId: string;
+    }>
+  ): void {
+    setBotLibraryGroupDetailsDialog((current) => {
+      if (!current) return current;
+      if (current.mode === "create") {
+        return {
+          ...current,
+          ...patch,
+          error: null,
+        };
+      }
+      return {
+        ...current,
+        name: patch.name ?? current.name,
+        description: patch.description ?? current.description,
+        error: null,
+      };
+    });
+  }
+
+  function saveBotLibraryGroupDetailsDialog(): void {
+    const dialog = botLibraryGroupDetailsDialog;
+    if (!dialog) return;
+    const name = dialog.name.trim();
+    const description = dialog.description.trim();
+    const exceptGroupId = dialog.mode === "edit" ? dialog.groupId : undefined;
+    const creatingNewGroup =
+      dialog.mode === "create" && dialog.targetGroupId === BOT_LIBRARY_GROUP_CREATE_NEW;
+    const capValidationError =
+      dialog.mode === "create" && creatingNewGroup
+        ? botLibraryGroupCapError(dialog.botIds.length)
+        : null;
+    const validationError =
+      capValidationError ??
+      ((dialog.mode === "edit" || creatingNewGroup)
+        ? botLibraryGroupNameError(name, exceptGroupId)
+        : null);
+    if (validationError) {
+      setBotLibraryGroupDetailsDialog({
+        ...dialog,
+        error: validationError,
+      });
+      return;
+    }
+    const now = new Date().toISOString();
+    setPanelError(null);
+    setPanelNotice(null);
+    if (dialog.mode === "create") {
+      const uniqueSelected = Array.from(new Set(dialog.botIds));
+      if (!creatingNewGroup) {
+        const target = botLibraryGroups.find(
+          (group) => group.id === dialog.targetGroupId && !group.builtIn
+        );
+        if (!target) {
+          setBotLibraryGroupDetailsDialog({
+            ...dialog,
+            error: "Choose a group that still exists, or create a new one.",
+          });
+          return;
+        }
+        const targetBotIds = target.botIds.filter((botId) => existingBotIds.has(botId));
+        const mergedBotIds = Array.from(new Set([...targetBotIds, ...uniqueSelected]));
+        if (mergedBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP) {
+          setBotLibraryGroupDetailsDialog({
+            ...dialog,
+            error: `Adding these bots would put "${target.name}" at ${botLibraryGroupCountLabel(
+              mergedBotIds.length,
+              BOT_LIBRARY_GROUP_BOT_CAP
+            )}.`,
+          });
+          return;
+        }
+        const addedCount = mergedBotIds.length - targetBotIds.length;
+        setBotLibraryGroups((current) =>
+          normalizeBotLibraryGroups(
+            current.map((group) =>
+              group.id === target.id
+                ? {
+                    ...group,
+                    botIds: mergedBotIds,
+                    updatedAt: now,
+                  }
+                : group
+            )
+          )
+        );
+        setBotLibraryGroupFilterId(target.id);
+        setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+        if ((view === "chat" || view === "sandbox") && !detail && !pendingReplyVisible) {
+          resetEmptyStateBotSelection();
+          setHueFilterCenter(null);
+        }
+        setPanelNotice(
+          addedCount > 0
+            ? `Added ${addedCount === 1 ? "1 bot" : `${addedCount} bots`} to "${target.name}".`
+            : `"${target.name}" already has those bots.`
+        );
+        setBotLibraryGroupDetailsDialog(null);
+        return;
+      }
+
+      const groupId = createBotLibraryGroupId();
+      setBotLibraryGroups((current) =>
+        normalizeBotLibraryGroups([
+          ...current,
+          {
+            id: groupId,
+            name,
+            description,
+            botIds: uniqueSelected,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ])
+      );
+      setBotLibraryGroupFilterId(groupId);
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      if ((view === "chat" || view === "sandbox") && !detail && !pendingReplyVisible) {
+        resetEmptyStateBotSelection();
+        setHueFilterCenter(null);
+      }
+      setPanelNotice(
+        uniqueSelected.length === 2
+          ? `Created "${name}" with 2 bots.`
+          : `Created "${name}" with ${uniqueSelected.length} bots.`
+      );
+    } else {
+      const target = botLibraryGroups.find((group) => group.id === dialog.groupId);
+      if (!target || target.builtIn) {
+        setBotLibraryGroupDetailsDialog({
+          ...dialog,
+          error: "This group can no longer be edited.",
+        });
+        return;
+      }
+      setBotLibraryGroups((current) =>
+        normalizeBotLibraryGroups(
+          current.map((group) =>
+            group.id === dialog.groupId
+              ? {
+                  ...group,
+                  name,
+                  description,
+                  updatedAt: now,
+                }
+              : group
+          )
+        )
+      );
+      setPanelNotice(`Updated "${name}".`);
+    }
+    setBotLibraryGroupDetailsDialog(null);
+  }
+
+  function toggleBotFavorite(botId: string): void {
     setBotLibraryGroups((current) => {
       const normalized = normalizeBotLibraryGroups(current);
-      const existingIndex = normalized.findIndex(
-        (group) => group.name.trim().toLowerCase() === chosenName.toLowerCase()
-      );
-      if (existingIndex >= 0) {
-        const next = [...normalized];
-        const existing = next[existingIndex];
-        next[existingIndex] = {
-          ...existing,
-          botIds: Array.from(new Set([...existing.botIds, ...uniqueSelected])),
-          updatedAt: new Date().toISOString(),
+      const now = new Date().toISOString();
+      let found = false;
+      const next = normalized.map((group) => {
+        if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
+        found = true;
+        const hasBot = group.botIds.includes(botId);
+        return {
+          ...group,
+          botIds: hasBot
+            ? group.botIds.filter((id) => id !== botId)
+            : [...group.botIds, botId],
+          updatedAt: now,
         };
-        return normalizeBotLibraryGroups(next);
+      });
+      if (!found) {
+        const favorites = createFavoritesBotGroup();
+        next.push({
+          ...favorites,
+          botIds: [botId],
+          updatedAt: now,
+        });
       }
-      return normalizeBotLibraryGroups([
-        ...normalized,
-        {
-          id:
-            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-              ? `group:${crypto.randomUUID()}`
-              : `group:${Date.now().toString(36)}`,
-          name: chosenName,
-          description: "",
-          botIds: uniqueSelected,
-          builtIn: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ]);
+      return normalizeBotLibraryGroups(next);
     });
-    setPanelNotice(
-      uniqueSelected.length === 2
-        ? `Grouped 2 bots in "${chosenName}".`
-        : `Grouped ${uniqueSelected.length} bots in "${chosenName}".`
+  }
+
+  function groupSelectedBots(selectedBotIds: string[]): void {
+    openCreateBotLibraryGroupDialog(selectedBotIds);
+  }
+
+  function editBotLibraryGroup(groupId: string): void {
+    openEditBotLibraryGroupDialog(groupId);
+  }
+
+  function requestDeleteBotLibraryGroup(groupId: string): void {
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!target || target.builtIn) return;
+    setBotLibraryGroupDeleteConfirm(target);
+  }
+
+  function deleteBotLibraryGroup(groupId: string): void {
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!target || target.builtIn) {
+      setBotLibraryGroupDeleteConfirm(null);
+      return;
+    }
+    setBotLibraryGroups((current) =>
+      normalizeBotLibraryGroups(current.filter((group) => group.id !== groupId))
     );
+    if (botLibraryGroupFilterId === groupId) {
+      setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    }
+    setBotLibraryGroupDetailsDialog(null);
+    setBotLibraryGroupDeleteConfirm(null);
+    setPanelError(null);
+    setPanelNotice(`Deleted "${target.name}". Bots were kept.`);
   }
 
   function ungroupSelectedBots(groupId: string, selectedBotIds: string[]): void {
@@ -52383,7 +55046,8 @@ function HomeContent(): React.JSX.Element {
 
   async function setBotsDeleteProtection(
     targetBots: readonly Bot[],
-    deleteProtected: boolean
+    deleteProtected: boolean,
+    options: { groupName?: string } = {}
   ): Promise<void> {
     const uniqueBots = Array.from(
       new Map(
@@ -52434,6 +55098,12 @@ function HomeContent(): React.JSX.Element {
       const updated = typeof result.updated === "number" ? result.updated : ids.length;
       if (updated === 0) {
         setPanelNotice("No bots updated.");
+      } else if (options.groupName) {
+        setPanelNotice(
+          deleteProtected
+            ? `Protected "${options.groupName}" from bot deletion.`
+            : `Allowed deletion for "${options.groupName}".`
+        );
       } else if (uniqueBots.length === 1) {
         setPanelNotice(
           deleteProtected
@@ -52504,10 +55174,13 @@ function HomeContent(): React.JSX.Element {
             method: "POST",
             body: JSON.stringify({
               name: draft.name,
-              systemPrompt: serializeStoredBotPrompt(draft.profile, draft.name),
-              temperature: draft.temperature,
-              maxTokens: draft.maxTokens,
-              color: draft.color,
+	              systemPrompt: serializeStoredBotPrompt(draft.profile, draft.name),
+	              temperature: draft.temperature,
+	              maxTokens: draft.maxTokens,
+	              topP: draft.topP,
+	              topK: draft.topK,
+	              repetitionPenalty: draft.repetitionPenalty,
+	              color: draft.color,
               glyph: draft.glyph,
             }),
           });
@@ -53024,6 +55697,9 @@ function HomeContent(): React.JSX.Element {
     const rawStoredPrompt = bot.system_prompt ?? "";
     const { fields: seededProfile } = parseStoredBotPrompt(rawStoredPrompt);
     const normalizedStoredPrompt = serializeStoredBotPrompt(seededProfile, seededName);
+    setNewBotLensId("");
+    setNewBotGeneratedMemorySeeds(null);
+    setBotLensDropActive(false);
     const seededLocalModel = visibleConcreteModelChoiceForProvider(
       modelCatalog,
       settings,
@@ -53040,6 +55716,9 @@ function HomeContent(): React.JSX.Element {
     const seededFlirtEnabled = bot.flirt_enabled === 1;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
     const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
+    const seededTopP = normalizeBotTopP(bot.top_p);
+    const seededTopK = normalizeBotTopK(bot.top_k);
+    const seededRepetitionPenalty = normalizeBotRepetitionPenalty(bot.repetition_penalty);
     const seededColor = bot.color?.trim() || randomHex(
       bots
         .filter((candidate) => candidate.id !== bot.id)
@@ -53059,6 +55738,7 @@ function HomeContent(): React.JSX.Element {
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
     setNewBotName(seededName);
     setBotProfile(seededProfile);
+    setNewBotSystemPrompt(rawStoredPrompt);
     setNewBotLocalModel(seededLocalModel);
     setNewBotOnlineModel(seededOnlineModel);
     setNewBotLocalImageModel(seededLocalImageModel);
@@ -53068,19 +55748,24 @@ function HomeContent(): React.JSX.Element {
     setNewBotFlirtEnabled(seededFlirtEnabled);
     setNewBotTemperature(seededTemperature);
     setNewBotMaxTokens(seededMaxTokens);
+    setNewBotTopP(seededTopP);
+    setNewBotTopK(seededTopK);
+    setNewBotRepetitionPenalty(seededRepetitionPenalty);
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceStyle.eyesFont);
     setNewBotFaceMouthFont(seededFaceStyle.mouthFont);
     setNewBotFaceFontWeight(seededFaceStyle.weight);
-    setNewBotProfilePictureImageId(seededProfilePictureImageId);
-    setBotProfileBuilderOpen(false);
-    setBotAvatarCustomizerOpen(false);
+	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
+	    setBotProfileBuilderOpen(false);
+	    setBotAiParametersModalOpen(false);
+	    setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
     setEditingBotId(bot.id);
     editOriginalRef.current = {
       name: seededName,
       prompt: normalizedStoredPrompt,
+      rawPrompt: rawStoredPrompt,
       localModel: seededLocalModel,
       onlineModel: seededOnlineModel,
       localImageModel: seededLocalImageModel,
@@ -53090,6 +55775,9 @@ function HomeContent(): React.JSX.Element {
       flirtEnabled: seededFlirtEnabled,
       temperature: seededTemperature,
       maxTokens: seededMaxTokens,
+      topP: seededTopP,
+      topK: seededTopK,
+      repetitionPenalty: seededRepetitionPenalty,
       color: seededColor,
       glyph: seededGlyph,
       faceEyesFont: seededFaceStyle.eyesFont,
@@ -53290,6 +55978,8 @@ function HomeContent(): React.JSX.Element {
     setSelectedId(null);
     setDetail(null);
     setChatBotOverride(undefined);
+    setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     closeEmptyStateBotSearch();
     startBotPickerReturnToAll();
     setSelectedBotId(spotlightBotId);
@@ -53795,12 +56485,13 @@ function HomeContent(): React.JSX.Element {
   }, [memoryPanelScope, botMemories]);
 
   const visibleLongTermMemories = useMemo(
-    () => (
-      memoryPanelScope === "all"
-        ? []
-        : botMemories.filter((memory) => memoryTier(memory) === "long_term")
-    ),
-    [memoryPanelScope, botMemories]
+    () => {
+      if (memoryPanelScope === "all") return [];
+      const memories = botMemories.filter((memory) => memoryTier(memory) === "long_term");
+      if (memoryPanelScope !== "bot") return memories;
+      return [...memories, ...botAboutYouMemories];
+    },
+    [memoryPanelScope, botAboutYouMemories, botMemories]
   );
   const lastLearnedVisibleMemoryId = useMemo(() => {
     let lastLearnedMemory: UserMemory | null = null;
@@ -53832,13 +56523,13 @@ function HomeContent(): React.JSX.Element {
       bot_relation: 0,
     };
     for (const memory of visibleLongTermMemories) {
-      counts[memoryCategory(memory)] += 1;
+      counts[memoryLongTermCategory(memory)] += 1;
     }
     return counts;
   }, [visibleLongTermMemories]);
 
   const selectedLongTermMemories = useMemo(
-    () => visibleLongTermMemories.filter((memory) => memoryCategory(memory) === longTermMemoryCategory),
+    () => visibleLongTermMemories.filter((memory) => memoryLongTermCategory(memory) === longTermMemoryCategory),
     [longTermMemoryCategory, visibleLongTermMemories]
   );
   const memoryPanelWidthPx = Math.min(479, Math.max(0, viewportWidth - 32));
@@ -54688,6 +57379,9 @@ function HomeContent(): React.JSX.Element {
   async function saveBot(id: string) {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return;
+    const storedSystemPrompt = botEditorAdvancedMode
+      ? newBotSystemPrompt
+      : serializeStoredBotPrompt(botProfile, trimmedName);
     const localModel = visibleConcreteModelChoiceForProvider(
       modelCatalog,
       settings,
@@ -54713,17 +57407,19 @@ function HomeContent(): React.JSX.Element {
         method: "PATCH",
         body: JSON.stringify({
           name: trimmedName,
-          systemPrompt: serializeStoredBotPrompt(botProfile, trimmedName),
+          systemPrompt: storedSystemPrompt,
           localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
           onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
           localImageModel: localImageStored,
           openaiImageModel: openaiImageStored,
           onlineEnabled: newBotOnlineEnabled,
-          deleteProtected: newBotDeleteProtected,
-          flirtEnabled: newBotFlirtEnabled,
-          temperature: newBotTemperature,
-          maxTokens: newBotMaxTokens,
-          color: newBotColor,
+	          flirtEnabled: newBotFlirtEnabled,
+	          temperature: newBotTemperature,
+	          maxTokens: newBotMaxTokens,
+	          topP: newBotTopP,
+	          topK: newBotTopK,
+	          repetitionPenalty: newBotRepetitionPenalty,
+	          color: newBotColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceMouthFont: newBotFaceMouthFont,
@@ -54733,6 +57429,8 @@ function HomeContent(): React.JSX.Element {
       });
       setNewBotLocalModel(localModel);
       setNewBotOnlineModel(onlineModel);
+      setBotProfile(parseStoredBotPrompt(storedSystemPrompt).fields);
+      setNewBotSystemPrompt(storedSystemPrompt);
       setNewBotLocalImageModel(
         localImageStored ? localImageStored : AUTO_MODEL_CHOICE
       );
@@ -54741,17 +57439,24 @@ function HomeContent(): React.JSX.Element {
       );
       editOriginalRef.current = {
         name: trimmedName,
-        prompt: serializeStoredBotPrompt(botProfile, trimmedName),
+        prompt: serializeStoredBotPrompt(
+          parseStoredBotPrompt(storedSystemPrompt).fields,
+          trimmedName
+        ),
+        rawPrompt: storedSystemPrompt,
         localModel,
         onlineModel,
         localImageModel: localImageStored ? localImageStored : AUTO_MODEL_CHOICE,
         openAiImageModel: openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE,
         onlineEnabled: newBotOnlineEnabled,
         deleteProtected: newBotDeleteProtected,
-        flirtEnabled: newBotFlirtEnabled,
-        temperature: newBotTemperature,
-        maxTokens: newBotMaxTokens,
-        color: newBotColor,
+	        flirtEnabled: newBotFlirtEnabled,
+	        temperature: newBotTemperature,
+	        maxTokens: newBotMaxTokens,
+	        topP: newBotTopP,
+	        topK: newBotTopK,
+	        repetitionPenalty: newBotRepetitionPenalty,
+	        color: newBotColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceMouthFont: newBotFaceMouthFont,
@@ -55852,23 +58557,6 @@ function HomeContent(): React.JSX.Element {
           },
         ],
       },
-      sandbox: {
-        title: "Sandbox mode walkthrough",
-        steps: [
-          {
-            heading: "Explore freely",
-            body: "Sandbox lets you test bots and prompts without affecting your main Chat rhythm.",
-          },
-          {
-            heading: "Use selection tools",
-            body: "Drag to select multiple bots, then right-click to group, export, or manage them together.",
-          },
-          {
-            heading: "Switch to Zen",
-            body: "Use Zen from the Hub when you want the calmer, ambient conversation surface.",
-          },
-        ],
-      },
       coffee: {
         title: "Coffee mode walkthrough",
         steps: [
@@ -56048,7 +58736,7 @@ function HomeContent(): React.JSX.Element {
                 <button
                   type="button"
                   className={styles.linkButton}
-                  onClick={() => openRightPanel("settings")}
+                  onClick={() => openSettingsPanel("connections")}
                 >
                   Open Settings
                 </button>
@@ -56237,17 +58925,7 @@ function HomeContent(): React.JSX.Element {
     const commonGroup = isMultiSelectionMenu
       ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
       : null;
-    const multiProtectionTargetsLocked = isMultiSelectionMenu
-      ? multiSelectedBots.every((candidate) => candidate.delete_protected === 1)
-      : false;
-    const nextMultiDeleteProtected = !multiProtectionTargetsLocked;
-    const multiProtectionLabel = nextMultiDeleteProtected
-      ? "Protect selected"
-      : "Allow selected deletion";
-    const nextSingleDeleteProtected = bot.delete_protected !== 1;
-    const singleProtectionLabel = nextSingleDeleteProtected
-      ? "Protect from deletion"
-      : "Allow deletion";
+    const singleBotIsGridSelected = canvasSelectedBotIds.has(bot.id);
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -56306,25 +58984,6 @@ function HomeContent(): React.JSX.Element {
               role="menuitem"
               onClick={() => {
                 closeBotContextMenu();
-                void setBotsDeleteProtection(multiSelectedBots, nextMultiDeleteProtected);
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">
-                  <BotGlyph
-                    name={nextMultiDeleteProtected ? "lock" : "key"}
-                    size={14}
-                    strokeWidth={2.05}
-                  />
-                </span>
-                <span>{multiProtectionLabel}</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                closeBotContextMenu();
                 const protectedCount = multiSelectedBots.filter(
                   (candidate) => candidate.delete_protected === 1
                 ).length;
@@ -56342,6 +59001,25 @@ function HomeContent(): React.JSX.Element {
           </>
         ) : (
           <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                if (singleBotIsGridSelected) {
+                  toggleCanvasBotSelection(bot.id);
+                } else {
+                  selectCanvasBot(bot.id);
+                }
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">
+                  {singleBotIsGridSelected ? "−" : "✓"}
+                </span>
+                <span>{singleBotIsGridSelected ? "Deselect" : "Select"}</span>
+              </span>
+            </button>
             <button
               type="button"
               role="menuitem"
@@ -56376,25 +59054,6 @@ function HomeContent(): React.JSX.Element {
               <span className={styles.contextMenuItemLabel}>
                 <span className={styles.contextMenuGlyph} aria-hidden="true">◉</span>
                 <span>View memories</span>
-              </span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                closeBotContextMenu();
-                void setBotsDeleteProtection([bot], nextSingleDeleteProtected);
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">
-                  <BotGlyph
-                    name={nextSingleDeleteProtected ? "lock" : "key"}
-                    size={14}
-                    strokeWidth={2.05}
-                  />
-                </span>
-                <span>{singleProtectionLabel}</span>
               </span>
             </button>
             {bot.delete_protected !== 1 ? (
@@ -57359,6 +60018,227 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderBotLibraryGroupDetailsDialog = (): React.JSX.Element | null => {
+    if (!botLibraryGroupDetailsDialog) return null;
+    const dialog = botLibraryGroupDetailsDialog;
+    const createBotCount = dialog.mode === "create" ? dialog.botIds.length : 0;
+    const createDestinationGroup =
+      dialog.mode === "create" && dialog.targetGroupId !== BOT_LIBRARY_GROUP_CREATE_NEW
+        ? customBotLibraryGroups.find((group) => group.id === dialog.targetGroupId) ?? null
+        : null;
+    const createUsesExistingGroup = dialog.mode === "create" && createDestinationGroup !== null;
+    const createDestinationMergedCount =
+      dialog.mode === "create" && createDestinationGroup
+        ? new Set([
+            ...createDestinationGroup.botIds.filter((botId) => existingBotIds.has(botId)),
+            ...dialog.botIds,
+          ]).size
+        : 0;
+    const createSummary =
+      dialog.mode !== "create"
+        ? "Update the title and optional dashboard description."
+        : customBotLibraryGroups.length > 0
+          ? createBotCount === 2
+            ? `Create a new group or add these 2 bots to one you already saved. Custom groups cap at ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`
+            : `Create a new group or add these ${createBotCount} bots to one you already saved. Custom groups cap at ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`
+          : createBotCount === 2
+            ? `Name this group and optionally describe when you would reach for these 2 bots. Custom groups cap at ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`
+            : `Name this group and optionally describe when you would reach for these ${createBotCount} bots. Custom groups cap at ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`;
+    const submitLabel = createUsesExistingGroup ? "Add bots" : "Save";
+    return (
+      <div
+        className={styles.botPreferredModelsModalBackdrop}
+        role="presentation"
+        onClick={() => setBotLibraryGroupDetailsDialog(null)}
+      >
+        <form
+          className={`${styles.botPreferredModelsModal} ${styles.botLibraryGroupDialog}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bot-library-group-dialog-title"
+          aria-describedby={
+            dialog.error
+              ? "bot-library-group-dialog-summary bot-library-group-dialog-error"
+              : "bot-library-group-dialog-summary"
+          }
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveBotLibraryGroupDetailsDialog();
+          }}
+        >
+          <header className={styles.botPreferredModelsModalHeader}>
+            <div>
+              <span>
+                {dialog.mode === "create"
+                  ? "New bot group"
+                  : "Bot group"}
+              </span>
+              <h4 id="bot-library-group-dialog-title">
+                {dialog.mode === "create"
+                  ? "Group details"
+                  : `Edit ${dialog.name.trim() || "group"}`}
+              </h4>
+              <p id="bot-library-group-dialog-summary">{createSummary}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBotLibraryGroupDetailsDialog(null)}
+              aria-label="Close group details dialog"
+            >
+              ×
+            </button>
+          </header>
+          <div className={styles.botPreferredModelsModalBody}>
+            {dialog.mode === "create" && customBotLibraryGroups.length > 0 ? (
+              <label className={styles.botLibraryGroupDialogField}>
+                <span>Destination</span>
+                <select
+                  value={dialog.targetGroupId}
+                  onChange={(event) =>
+                    updateBotLibraryGroupDetailsDialog({
+                      targetGroupId: event.currentTarget.value,
+                    })
+                  }
+                >
+                  <option value={BOT_LIBRARY_GROUP_CREATE_NEW}>Create a new group</option>
+                  {customBotLibraryGroups.map((group) => {
+                    const existingGroupBotIds = group.botIds.filter((botId) =>
+                      existingBotIds.has(botId)
+                    );
+                    const count = existingGroupBotIds.length;
+                    const mergedCount = new Set([...existingGroupBotIds, ...dialog.botIds]).size;
+                    const wouldOverflow = mergedCount > BOT_LIBRARY_GROUP_BOT_CAP;
+                    return (
+                      <option key={group.id} value={group.id} disabled={wouldOverflow}>
+                        {group.name} ({botLibraryGroupCountLabel(
+                          count,
+                          BOT_LIBRARY_GROUP_BOT_CAP
+                        )}{wouldOverflow ? " - too full" : ""})
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            ) : null}
+            {createUsesExistingGroup ? (
+              <p className={styles.botLibraryGroupDialogHint}>
+                These bots will be added to {createDestinationGroup.name}. Result:{" "}
+                {botLibraryGroupCountLabel(
+                  createDestinationMergedCount,
+                  BOT_LIBRARY_GROUP_BOT_CAP
+                )}.
+              </p>
+            ) : (
+              <>
+                <label className={styles.botLibraryGroupDialogField}>
+                  <span>Name</span>
+                  <input
+                    value={dialog.name}
+                    onChange={(event) =>
+                      updateBotLibraryGroupDetailsDialog({
+                        name: event.currentTarget.value,
+                      })
+                    }
+                    autoFocus
+                    autoComplete="off"
+                    aria-invalid={dialog.error ? "true" : undefined}
+                  />
+                </label>
+                <label className={styles.botLibraryGroupDialogField}>
+                  <span>Description</span>
+                  <textarea
+                    value={dialog.description}
+                    onChange={(event) =>
+                      updateBotLibraryGroupDetailsDialog({
+                        description: event.currentTarget.value,
+                      })
+                    }
+                    rows={4}
+                    placeholder="Optional"
+                  />
+                </label>
+              </>
+            )}
+            {dialog.error ? (
+              <p
+                id="bot-library-group-dialog-error"
+                className={styles.error}
+                role="alert"
+              >
+                {dialog.error}
+              </p>
+            ) : null}
+            <div className={styles.importBotModalPasteActions}>
+              <button
+                type="button"
+                className={styles.deleteAllModalCancel}
+                onClick={() => setBotLibraryGroupDetailsDialog(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className={styles.deleteAllModalConfirm}>
+                {submitLabel}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
+  const renderBotLibraryGroupDeleteModal = (): React.JSX.Element | null => {
+    if (!botLibraryGroupDeleteConfirm) return null;
+    const group = botLibraryGroupDeleteConfirm;
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        data-delete-affordance="true"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setBotLibraryGroupDeleteConfirm(null);
+        }}
+      >
+        <div
+          className={styles.deleteAllModalPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-bot-library-group-title"
+          aria-describedby="delete-bot-library-group-desc"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h2 id="delete-bot-library-group-title" className={styles.deleteAllModalTitle}>
+            Delete {group.name}?
+          </h2>
+          <p id="delete-bot-library-group-desc" className={styles.deleteAllModalBody}>
+            This removes the saved group dashboard only. The bots stay in your library.
+          </p>
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              ref={(node) => {
+                if (node) queueMicrotask(() => {
+                  try { node.focus({ preventScroll: true }); } catch { /* ignore */ }
+                });
+              }}
+              onClick={() => setBotLibraryGroupDeleteConfirm(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={styles.deleteAllModalConfirm}
+              aria-label={`Delete bot group ${group.name}`}
+              onClick={() => deleteBotLibraryGroup(group.id)}
+            >
+              Delete group
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   /** Centered alertdialog for deleting every image in the global Images view. */
   const renderImagesDeleteAllModal = () => {
     if (!imagesDeleteAllConfirmOpen) return null;
@@ -57537,7 +60417,7 @@ function HomeContent(): React.JSX.Element {
                 )
               );
             }}
-            title={toast.kind === "rejected" ? "Tap to dismiss" : "Tap to undo"}
+            title={toast.kind === "rejected" ? "Click to dismiss" : "Click to undo"}
           >
             <span aria-hidden="true">
               {zenVariant && toast.kind === "created"
@@ -57774,7 +60654,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           className={styles.headerIconButton}
-          onClick={() => runAction(() => openRightPanel("settings"))}
+          onClick={() => runAction(() => openSettingsPanel())}
           aria-label="Open settings"
           data-glyph-tooltip="Settings"
           disabled={disabled}
@@ -58010,7 +60890,7 @@ function HomeContent(): React.JSX.Element {
 
     const handleSettings = () => {
       closeMenu();
-      openRightPanel("settings");
+      openSettingsPanel();
     };
     const handleImages = () => {
       closeMenu();
@@ -58031,40 +60911,12 @@ function HomeContent(): React.JSX.Element {
     };
     const activeBotIsFavorite = Boolean(
       activeBot &&
-      botLibraryGroups
-        .find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID)
-        ?.botIds.includes(activeBot.id)
+      favoriteBotIdSet.has(activeBot.id)
     );
     const handleToggleFavorite = () => {
       if (!activeBot) return;
       closeMenu();
-      const targetBotId = activeBot.id;
-      setBotLibraryGroups((current) => {
-        const normalized = normalizeBotLibraryGroups(current);
-        const now = new Date().toISOString();
-        let found = false;
-        const next = normalized.map((group) => {
-          if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
-          found = true;
-          const hasBot = group.botIds.includes(targetBotId);
-          return {
-            ...group,
-            botIds: hasBot
-              ? group.botIds.filter((id) => id !== targetBotId)
-              : [...group.botIds, targetBotId],
-            updatedAt: now,
-          };
-        });
-        if (!found) {
-          const favorites = createFavoritesBotGroup();
-          next.push({
-            ...favorites,
-            botIds: [targetBotId],
-            updatedAt: now,
-          });
-        }
-        return normalizeBotLibraryGroups(next);
-      });
+      toggleBotFavorite(activeBot.id);
     };
     const handleOpenCommandCenter = () => {
       closeMenu();
@@ -58173,6 +61025,7 @@ function HomeContent(): React.JSX.Element {
                   : "Favorites unavailable until a bot is selected"
               }
               aria-pressed={activeBot ? activeBotIsFavorite : undefined}
+              data-favorite={activeBotIsFavorite ? "true" : undefined}
               data-glyph-tooltip={
                 activeBot
                   ? activeBotIsFavorite
@@ -58451,9 +61304,7 @@ function HomeContent(): React.JSX.Element {
     const canFavoriteActions = !isZenSurface && Boolean(activeBot);
     const activeBotIsFavorite = Boolean(
       activeBot &&
-      botLibraryGroups
-        .find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID)
-        ?.botIds.includes(activeBot.id)
+      favoriteBotIdSet.has(activeBot.id)
     );
     const canMemoryActions = true;
     /** Keep in sync with `renderChatOverflowGear` — header tools stay enabled during pending / first reply. */
@@ -58508,7 +61359,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
-          onClick={() => runAndClose(() => openRightPanel("settings"))}
+          onClick={() => runAndClose(() => openSettingsPanel())}
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⚙</span>
@@ -58523,33 +61374,7 @@ function HomeContent(): React.JSX.Element {
             onClick={() =>
               runAndClose(() => {
                 if (!activeBot) return;
-                const targetBotId = activeBot.id;
-                setBotLibraryGroups((current) => {
-                  const normalized = normalizeBotLibraryGroups(current);
-                  const now = new Date().toISOString();
-                  let found = false;
-                  const next = normalized.map((group) => {
-                    if (group.id !== BOT_LIBRARY_FAVORITES_GROUP_ID) return group;
-                    found = true;
-                    const hasBot = group.botIds.includes(targetBotId);
-                    return {
-                      ...group,
-                      botIds: hasBot
-                        ? group.botIds.filter((id) => id !== targetBotId)
-                        : [...group.botIds, targetBotId],
-                      updatedAt: now,
-                    };
-                  });
-                  if (!found) {
-                    const favorites = createFavoritesBotGroup();
-                    next.push({
-                      ...favorites,
-                      botIds: [targetBotId],
-                      updatedAt: now,
-                    });
-                  }
-                  return normalizeBotLibraryGroups(next);
-                });
+                toggleBotFavorite(activeBot.id);
               })
             }
           >
@@ -58720,6 +61545,7 @@ function HomeContent(): React.JSX.Element {
     const resultCounts = [
       transfer.stats.imported ? `${transfer.stats.imported} imported` : null,
       transfer.stats.exported ? `${transfer.stats.exported} exported` : null,
+      transfer.stats.generated ? `${transfer.stats.generated} generated` : null,
       transfer.stats.overwritten ? `${transfer.stats.overwritten} overwritten` : null,
       transfer.stats.skipped ? `${transfer.stats.skipped} skipped` : null,
       transfer.stats.failed ? `${transfer.stats.failed} failed` : null,
@@ -58829,7 +61655,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
-          onClick={() => runAndClose(() => openRightPanel("settings"))}
+          onClick={() => runAndClose(() => openSettingsPanel())}
         >
           <span className={styles.contextMenuItemLabel}>
             <span className={styles.contextMenuGlyph} aria-hidden="true">⚙</span>
@@ -59021,7 +61847,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           role="menuitem"
-          onClick={() => runAndClose(() => openRightPanel("settings"))}
+          onClick={() => runAndClose(() => openSettingsPanel())}
         >
           Settings
         </button>
@@ -59081,7 +61907,7 @@ function HomeContent(): React.JSX.Element {
         }
         data-glyph-tooltip={
           isProtected
-            ? "Protected bot · toggle delete protection off to delete"
+            ? "Protected bot · allow deletion from its group dashboard"
             : isArmedSingle
               ? `Confirm delete ${bot.name}`
               : "Delete bot · hold for all"
@@ -59120,7 +61946,7 @@ function HomeContent(): React.JSX.Element {
           // Cancel / backdrop / Esc handle dismissal).
           if (armedAll) return;
           if (isProtected) {
-            setPanelError("This bot is protected. Toggle delete protection off first.");
+            setPanelError("This bot is protected. Allow deletion from its group dashboard first.");
             return;
           }
           if (isArmedSingle) {
@@ -60988,67 +63814,6 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderProtectedAboutYouSection = (): React.JSX.Element | null => {
-    if (memoryPanelScope !== "bot" || botAboutYouMemories.length === 0) return null;
-    return (
-      <section className={styles.protectedAboutYouSection} aria-label="Protected about-you memories">
-        <div className={styles.longTermMemoryHeader}>
-          <div>
-            <strong>About you</strong>
-            <span>Protected user facts this bot can use.</span>
-          </div>
-        </div>
-        <ul className={styles.longTermMemoryList}>
-          {botAboutYouMemories.map((memory) => {
-            const actionKey = longTermMemoryActionKey(memory.id);
-            const isArmed = pendingDeleteKey === actionKey;
-            const text = renderMemoryPanelText(memory);
-            return (
-              <li key={`about-you:${memory.id}`}>
-                <div>
-                  <p>{text}</p>
-                  {renderMemoryDetailMeta(memory)}
-                </div>
-                <button
-                  type="button"
-                  className={[
-                    styles.conversationDelete,
-                    styles.longTermMemoryRowAction,
-                    isArmed ? styles.conversationDeleteArmed : "",
-                  ].filter(Boolean).join(" ")}
-                  data-delete-affordance="true"
-                  aria-label={isArmed ? `Confirm remove memory: ${text}` : `Remove memory: ${text}`}
-                  data-glyph-tooltip={isArmed ? `Confirm remove: ${text}` : "Remove memory"}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (isArmed) {
-                      disarmDelete();
-                      void deleteMemory(memory.id, {
-                        allowLongTerm: true,
-                        allowAboutYou: true,
-                      });
-                      return;
-                    }
-                    armDelete(actionKey);
-                  }}
-                >
-                  {isArmed && (
-                    <span className={styles.conversationDeletePrompt}>
-                      Are you sure?
-                    </span>
-                  )}
-                  <span className={styles.conversationDeleteGlyph}>
-                    {isArmed ? "✓" : "×"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-    );
-  };
-
   const renderMemoryConnectionMeter = (
     opinion: SessionOpinion | null = sessionOpinion
   ): React.JSX.Element => {
@@ -61168,13 +63933,19 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={`${styles.panel} ${styles.panelUsage}`}
+        data-prism-panel="usage"
+        data-prism-panel-layer="true"
         data-dev-panel-safe-area="right"
         data-closing={panelClosing ? "true" : undefined}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="usage-panel-title"
+        tabIndex={-1}
       >
         <div className={styles.panelHeader}>
           <div className={styles.panelHeaderTitle}>
             <span className={styles.panelHeaderKicker}>Usage</span>
-            <h3>Usage</h3>
+            <h3 id="usage-panel-title">Usage</h3>
           </div>
           <div className={styles.panelHeaderActions}>
             <button
@@ -61364,6 +64135,8 @@ function HomeContent(): React.JSX.Element {
   // would perturb CSS grid/flex layout in the parent <main>.
   const renderSharedPanels = (): React.JSX.Element => (
     <>
+      {renderBotLibraryGroupDetailsDialog()}
+      {renderBotLibraryGroupDeleteModal()}
       {manualAskQuestionModal ? (
         <div
           className={styles.coffeePollModalBackdrop}
@@ -61494,6 +64267,7 @@ function HomeContent(): React.JSX.Element {
       {panel && (
         <div
           className={styles.panelOverlay}
+          data-prism-panel-layer="true"
           data-closing={panelClosing ? "true" : undefined}
           onClick={(event) => {
             if (event.button !== 0 || event.ctrlKey) return;
@@ -61510,6 +64284,8 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={memoryPanelRef}
           className={`${styles.panel} ${styles.panelMemories}`}
+          data-prism-panel="memories"
+          data-prism-panel-layer="true"
           data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           data-memory-scope={memoryPanelScope}
@@ -61520,6 +64296,10 @@ function HomeContent(): React.JSX.Element {
               : undefined
           }
           style={memoryPanelStyle}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="memories-panel-title"
+          tabIndex={-1}
         >
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderTitle}>
@@ -61568,7 +64348,7 @@ function HomeContent(): React.JSX.Element {
                 </button>
               ) : null
               ) : null}
-              <h3>
+              <h3 id="memories-panel-title">
                 {memoryPanelScope === "all"
                   ? "All memories"
                   : memoryPanelScope === "default"
@@ -61653,15 +64433,101 @@ function HomeContent(): React.JSX.Element {
             {memoryPanelScope === "all"
               ? memoryPanelSelectedFamily
                 ? `${selectedMemoryFamilyDirectory?.letter ?? "?"} family: each orb is a bot; orbit dots indicate saved memories.`
-                : "PRISM directories and your shared Prism memory. Tap to drill in."
+                : "PRISM directories and your shared Prism memory. Select a directory to drill in."
               : memoryPanelScope === "default"
                 ? showZenSessionMemoryInPrismPanel
                   ? "Zen session context sits with Prism memories here; protected long-term memories stack below by category."
                   : "Prism short-term memories float here; protected long-term memories stack below by category."
                 : memoryPanelScope === "session"
                   ? "Previous context stays; session checkpoints fade after about four days."
-                  : "Short-term memories float here; protected long-term memories stack below by category."}
+                : "Short-term memories float here; protected long-term memories stack below by category."}
           </p>
+          {memoryPanelScope === "default" ? (
+            <div className={styles.memoryPanelRouteActions}>
+              <button
+                type="button"
+                className={styles.memoryDirectoryIndexItem}
+                data-default="true"
+                onClick={() => void runMemoryTransition(openAllMemoriesPanel, "forward")}
+              >
+                <span className={styles.memoryDirectoryIndexGlyph} aria-hidden="true">
+                  <PrismTriangleMark />
+                </span>
+                <span>
+                  <strong>Open PRISM directories</strong>
+                  <small>Browse P/R/I/S/M memory families</small>
+                </span>
+              </button>
+            </div>
+          ) : null}
+          {memoryPanelScope === "all" && !memoryPanelSelectedFamily ? (
+            <div className={styles.memoryDirectoryIndex} aria-label="Memory directory list">
+              <button
+                type="button"
+                className={styles.memoryDirectoryIndexItem}
+                data-default="true"
+                onClick={() => void runMemoryTransition(openDefaultMemoriesPanel, "forward")}
+              >
+                <span className={styles.memoryDirectoryIndexGlyph} aria-hidden="true">
+                  <PrismTriangleMark />
+                </span>
+                <span>
+                  <strong>Prism</strong>
+                  <small>{defaultDirectMemoryCount} shared memories</small>
+                </span>
+              </button>
+              {memoryFamilyDirectories.map((family) => (
+                <button
+                  key={`memory-index-${family.id}`}
+                  type="button"
+                  className={styles.memoryDirectoryIndexItem}
+                  style={
+                    {
+                      "--memory-directory-color": family.color,
+                    } as React.CSSProperties
+                  }
+                  onClick={() => void runMemoryTransition(() => {
+                    setMemoryPanelSelectedFamily(family.id);
+                    setFocusedMemoryId(null);
+                  }, "forward")}
+                  disabled={family.itemCount === 0}
+                >
+                  <span className={styles.memoryDirectoryIndexGlyph} aria-hidden="true">
+                    {family.letter}
+                  </span>
+                  <span>
+                    <strong>{family.label}</strong>
+                    <small>
+                      {family.itemCount} bots · {family.memoryCount} memories
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {memoryPanelScope === "all" &&
+          memoryPanelSelectedFamily &&
+          selectedMemoryFamilyDirectory ? (
+            <div
+              className={styles.memoryDirectoryDetail}
+              style={
+                {
+                  "--memory-directory-color": selectedMemoryFamilyDirectory.color,
+                } as React.CSSProperties
+              }
+            >
+              <span className={styles.memoryDirectoryIndexGlyph} aria-hidden="true">
+                {selectedMemoryFamilyDirectory.letter}
+              </span>
+              <div>
+                <strong>{selectedMemoryFamilyDirectory.label}</strong>
+                <small>
+                  {selectedMemoryFamilyDirectory.itemCount} bots ·{" "}
+                  {selectedMemoryFamilyDirectory.memoryCount} memories
+                </small>
+              </div>
+            </div>
+          ) : null}
           {memoryPanelScope === "bot" ? renderBotMemoryDossierStats() : null}
           {memoryPanelScope === "bot" ? renderBotMemoryFactsSection() : null}
           {memoryPanelScope === "bot" ? renderBotMemoryRelationshipSection() : null}
@@ -61810,7 +64676,6 @@ function HomeContent(): React.JSX.Element {
             </div>
           ) : visibleMemoryBubbles.length > 0 ||
               visibleLongTermMemories.length > 0 ||
-              botAboutYouMemories.length > 0 ||
               showZenSessionMemoryInPrismPanel ? (
             <div className={styles.memoryPanelMemoryStacks}>
               {showZenSessionMemoryInPrismPanel ? renderZenSessionMemorySection() : null}
@@ -62123,7 +64988,6 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </section>
               )}
-              {renderProtectedAboutYouSection()}
             </div>
           ) : (
             <div className={styles.memoryEmptyState}>
@@ -62155,14 +65019,20 @@ function HomeContent(): React.JSX.Element {
       {panel === "command-center" && (
         <div
           className={`${styles.panel} ${styles.panelPromptCenter}`}
+          data-prism-panel="command-center"
+          data-prism-panel-layer="true"
           data-dev-panel-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="command-center-panel-title"
+          tabIndex={-1}
         >
           <div className={styles.promptCenterPanelTop}>
             <div className={styles.panelHeader}>
               <div className={styles.panelHeaderTitle}>
                 <span className={styles.panelHeaderKicker}>Prompt Center</span>
-                <h3>Commands</h3>
+                <h3 id="command-center-panel-title">Commands</h3>
               </div>
               <div className={styles.panelHeaderActions}>
                 <input
@@ -64035,221 +66905,58 @@ function HomeContent(): React.JSX.Element {
 
       {/* ── Settings panel ── */}
       {panel === "settings" && (
-        <div
-          className={`${styles.panel} ${styles.panelSettings}`}
-          data-dev-panel-safe-area="right"
-          data-closing={panelClosing ? "true" : undefined}
-        >
-          <div className={styles.panelHeader}>
-            <div className={styles.panelHeaderTitle}>
-              <h3>Settings</h3>
-            </div>
-            <div className={styles.panelHeaderActions}>
-              <input
-                ref={accountImportInputRef}
-                type="file"
-                accept=".prism"
-                className={styles.panelHiddenFileInput}
-                onChange={(event) => {
-                  void handleAccountImportFileSelection(event);
-                }}
-              />
-              <button
-                type="button"
-                className={`${styles.panelHeaderIconButton} ${styles.panelHeaderSaveButton}`}
-                onClick={() => {
-                  void exportAccountAsPrismArchive();
-                }}
-                disabled={busy || accountBackupBusy || accountRestoreBusy}
-                aria-label="Export account backup as .prism file"
-                data-glyph-tooltip="Export account backup as .prism"
-              >
-                <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
-                  <IconSave />
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`${styles.panelHeaderIconButton} ${styles.panelHeaderImportButton}`}
-                onClick={openAccountImportPicker}
-                disabled={busy || accountBackupBusy || accountRestoreBusy}
-                aria-label="Import account backup from .prism file"
-                data-glyph-tooltip="Import account backup from .prism"
-              >
-                <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
-                  <IconUpload />
-                </span>
-              </button>
-              {settingsScope === "chooser" ? (
-                <button
-                  type="button"
-                  className={styles.panelClose}
-                  onClick={closePanel}
-                  aria-label="Close panel"
-                  data-glyph-tooltip="Close panel"
-                >
-                  ×
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className={styles.panelBack}
-                    onClick={() => setSettingsScope("chooser")}
-                    aria-label="Back to settings menu"
-                    data-glyph-tooltip="Back to settings menu"
-                  >
-                    ←
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.panelClose}
-                    onClick={closePanel}
-                    aria-label="Close panel"
-                    data-glyph-tooltip="Close panel"
-                  >
-                    ×
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-          {settings && settingsScope === "chooser" && (
-            <div className={`${styles.form} ${styles.settingsWorkspace}`}>
-              <section className={styles.settingsOverview} aria-label="Settings chooser">
-                <div>
-                  <span className={styles.settingsEyebrow}>Settings</span>
-                  <h4>Choose a settings area</h4>
-                  <p>Zen preferences stay separate from account, keys, and system defaults.</p>
-                </div>
-                <div className={styles.settingsStatusPills} aria-label="Connection status">
-                  <span data-status={openAiKeyDisplay?.overviewStatus ?? "idle"}>
-                    {openAiKeyDisplay?.overviewText ?? "OpenAI unset"}
-                  </span>
-                  <span data-status={anthropicKeyDisplay?.overviewStatus ?? "idle"}>
-                    {anthropicKeyDisplay?.overviewText ?? "Anthropic unset"}
-                  </span>
-                  <span data-status={elevenLabsKeyDisplay?.overviewStatus ?? "idle"}>
-                    {elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset"}
-                  </span>
-                </div>
-              </section>
-              <div className={styles.settingsScopeGrid}>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  onClick={() => setSettingsScope("zen")}
-                >
-                  <strong>Zen Mode Settings</strong>
-                  <span>Session timing, mood sensitivity, recent context, and Atmosphere wallpaper.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  onClick={() => setSettingsScope("coffee")}
-                >
-                  <strong>Coffee Mode Settings</strong>
-                  <span>Table view experiments and session display preferences.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Story Mode settings are not available yet."
-                >
-                  <strong>Story Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Arena Mode settings are not available yet."
-                >
-                  <strong>Arena Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Polling Mode settings are not available yet."
-                >
-                  <strong>Polling Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Feed Mode settings are not available yet."
-                >
-                  <strong>Feed Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Games Mode settings are not available yet."
-                >
-                  <strong>Games Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Gym Mode settings are not available yet."
-                >
-                  <strong>Gym Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Slate Mode settings are not available yet."
-                >
-                  <strong>Slate Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Pseudo Mode settings are not available yet."
-                >
-                  <strong>Pseudo Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  disabled
-                  title="Surf Mode settings are not available yet."
-                >
-                  <strong>Surf Mode Settings</strong>
-                  <span>Coming soon.</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.settingsScopeButton}
-                  onClick={() => setSettingsScope("system")}
-                >
-                  <strong>System Settings</strong>
-                  <span>Connections, model defaults, memory, and account controls.</span>
-                </button>
-              </div>
-              {(panelNotice || panelError) && (
-                <div className={styles.settingsSaveDock}>
-                  {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
-                  {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-                </div>
-              )}
-            </div>
-          )}
-          {settings && settingsScope === "coffee" && (
+        <>
+          <SettingsPanel
+            scope={settingsScope}
+            settingsLoaded={Boolean(settings)}
+            panelClosing={panelClosing}
+            busy={busy}
+            accountBackupBusy={accountBackupBusy}
+            accountRestoreBusy={accountRestoreBusy}
+            panelNotice={panelNotice}
+            panelError={panelError}
+            accountImportInputRef={accountImportInputRef}
+            saveIcon={<IconSave />}
+            uploadIcon={<IconUpload />}
+            connectionStatusPills={[
+              {
+                key: "openai",
+                text: openAiKeyDisplay?.overviewText ?? "OpenAI unset",
+                status: openAiKeyDisplay?.overviewStatus ?? "idle",
+              },
+              {
+                key: "anthropic",
+                text: anthropicKeyDisplay?.overviewText ?? "Anthropic unset",
+                status: anthropicKeyDisplay?.overviewStatus ?? "idle",
+              },
+              {
+                key: "elevenlabs",
+                text: elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset",
+                status: elevenLabsKeyDisplay?.overviewStatus ?? "idle",
+              },
+              {
+                key: "secondary-ollama",
+                text: secondaryOllamaStatusText,
+                status: secondaryOllamaUiStatus,
+              },
+              {
+                key: "comfyui",
+                text: comfyUiStatusText,
+                status: comfyUiUiStatus,
+              },
+            ]}
+            onScopeChange={setSettingsScope}
+            onClose={closePanel}
+            onAccountImportFileSelection={(event) => {
+              void handleAccountImportFileSelection(event);
+            }}
+            onExportAccount={() => {
+              void exportAccountAsPrismArchive();
+            }}
+            onOpenAccountImportPicker={openAccountImportPicker}
+            renderScopeContent={(activeSettingsScope: SettingsLeafScope) => (
+              <>
+          {settings && activeSettingsScope === "coffee" && (
             <form
               className={`${styles.form} ${styles.settingsWorkspace}`}
               onSubmit={saveCoffeeModeSettings}
@@ -64326,7 +67033,7 @@ function HomeContent(): React.JSX.Element {
               </div>
             </form>
           )}
-          {settings && settingsScope === "zen" && (
+          {settings && activeSettingsScope === "zen" && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveZenModeSettings}>
               <section className={styles.settingsOverview} aria-label="Zen Mode settings overview">
                 <div>
@@ -64985,7 +67692,9 @@ function HomeContent(): React.JSX.Element {
               </div>
             </form>
           )}
-          {settings && settingsScope === "system" && (
+          {settings &&
+            activeSettingsScope !== "coffee" &&
+            activeSettingsScope !== "zen" && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
               <section className={styles.settingsOverview} aria-label="Settings overview">
                 <div>
@@ -65011,6 +67720,7 @@ function HomeContent(): React.JSX.Element {
               </section>
 
               <div className={styles.settingsSectionGrid}>
+                {activeSettingsScope === "connections" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                   aria-labelledby="settings-connections-title"
@@ -65211,9 +67921,13 @@ function HomeContent(): React.JSX.Element {
                     </label>
                   </div>
                 </section>
+                )}
 
-                <NetworkAccessPanel fetchAuthenticated={fetchAuthenticated} />
+                {activeSettingsScope === "network" && (
+                  <NetworkAccessPanel fetchAuthenticated={fetchAuthenticated} />
+                )}
 
+                {activeSettingsScope === "experimental" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                   aria-labelledby="settings-experimental-title"
@@ -65253,12 +67967,14 @@ function HomeContent(): React.JSX.Element {
                         Give local models simulated effort
                       </label>
                       <small className={styles.settingsHostHint}>
-                        Local models can use Prism's simulated effort; online models only show effort when they support it natively.
+                        Local models can use Prism&apos;s simulated effort; online models only show effort when they support it natively.
                       </small>
                     </div>
                   </div>
                 </section>
+                )}
 
+                {activeSettingsScope === "models" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                   data-settings-section="models"
@@ -65282,6 +67998,18 @@ function HomeContent(): React.JSX.Element {
                   {renderDefaultsAndFallbacksControls("settings", {
                     includeZenAtmosphere: false,
                   })}
+                  {modelCatalogStatus === "checking" ||
+                  (modelCatalogStatus === "idle" && modelCatalog === null) ? (
+                    <div className={styles.settingsModelDiscoveryNotice} role="status">
+                      Checking model providers. Some chat models may appear a moment after
+                      local or image models.
+                    </div>
+                  ) : modelCatalogStatus === "error" ? (
+                    <div className={styles.settingsModelDiscoveryNotice} role="status">
+                      Model refresh is delayed. Prism is keeping saved providers visible and
+                      will try again when models refresh.
+                    </div>
+                  ) : null}
                   <div
                     className={styles.settingsModelProviderStack}
                     aria-label="Bot customizer model visibility"
@@ -65293,11 +68021,18 @@ function HomeContent(): React.JSX.Element {
                           settings.hiddenBotModelIds.includes(model.id)
                       ).length;
                       const visibleInGroup = group.models.length - hiddenInGroup;
+                      const providerVisibilityMeta =
+                        group.models.length > 0
+                          ? `${group.meta} - ${visibleInGroup}/${group.models.length} visible${
+                              hiddenInGroup > 0 ? ` - ${hiddenInGroup} hidden` : ""
+                            }`
+                          : group.meta;
                       return (
                         <details
                           key={group.id}
                           className={`${styles.settingsModelDropdown} ${styles.settingsModelProviderDropdown}`}
                           data-model-provider={group.id}
+                          data-model-pending={group.pending ? "true" : undefined}
                         >
                           <summary>
                             <span className={styles.settingsDropdownSummaryRow}>
@@ -65316,12 +68051,17 @@ function HomeContent(): React.JSX.Element {
                                 Controls which models from this provider appear in bot customizers and model pickers.
                               </PanelSectionInfo>
                             </span>
-                            <small>
-                              {group.meta} - {visibleInGroup}/{group.models.length} visible
-                              {hiddenInGroup > 0 ? ` - ${hiddenInGroup} hidden` : ""}
-                            </small>
+                            <small>{providerVisibilityMeta}</small>
                           </summary>
                           <div className={styles.settingsModelList}>
+                            {group.notice ? (
+                              <div
+                                className={styles.settingsModelProviderNotice}
+                                role={group.pending ? "status" : undefined}
+                              >
+                                {group.notice}
+                              </div>
+                            ) : null}
                             {group.models.map((model) => {
                               const required = isRequiredPrimaryLocalModel(model);
                               const visible =
@@ -65412,7 +68152,9 @@ function HomeContent(): React.JSX.Element {
                     )}
                   </details>
                 </section>
+                )}
 
+                {activeSettingsScope === "behavior" && (
                 <section
                   className={styles.settingsSection}
                   data-settings-section="behavior"
@@ -65458,10 +68200,10 @@ function HomeContent(): React.JSX.Element {
                       <button type="button" className={styles.linkButton} onClick={resetAllModeTutorials}>
                         Reset all
                       </button>
-                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("chat")}>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("zen")}>
                         Zen
                       </button>
-                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("sandbox")}>
+                      <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("chat")}>
                         Chat
                       </button>
                       <button type="button" className={styles.linkButton} onClick={() => resetSingleModeTutorial("coffee")}>
@@ -65470,7 +68212,9 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </div>
                 </section>
+                )}
 
+                {activeSettingsScope === "about" && (
                 <section
                   className={styles.settingsSection}
                   data-settings-section="about"
@@ -65505,7 +68249,9 @@ function HomeContent(): React.JSX.Element {
                     <span>Version notes and control model.</span>
                   </button>
                 </section>
+                )}
 
+                {activeSettingsScope === "account" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                   aria-labelledby="settings-account-title"
@@ -65591,8 +68337,10 @@ function HomeContent(): React.JSX.Element {
                     </button>
                   </div>
                 </section>
+                )}
               </div>
 
+              {["connections", "experimental", "models", "behavior"].includes(activeSettingsScope) && (
               <div className={styles.settingsSaveDock}>
                 {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
@@ -65603,8 +68351,12 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 </div>
               </div>
+              )}
             </form>
           )}
+              </>
+            )}
+          />
           {settingsHostsModalOpen &&
             typeof document !== "undefined" &&
             createPortal(
@@ -65851,7 +68603,7 @@ function HomeContent(): React.JSX.Element {
                           Give local models simulated effort
                         </label>
                         <small className={styles.settingsHostHint}>
-                          Local models can use Prism's simulated effort; online models only show effort when they support it natively.
+                          Local models can use Prism&apos;s simulated effort; online models only show effort when they support it natively.
                         </small>
                       </div>
                       <p className={styles.muted} style={{ margin: "10px 0 0", maxWidth: 520 }}>
@@ -66104,7 +68856,7 @@ function HomeContent(): React.JSX.Element {
             </div>,
             document.body
           )}
-        </div>
+        </>
       )}
 
       {/* ── Bots panel ── */}
@@ -66138,6 +68890,10 @@ function HomeContent(): React.JSX.Element {
           botPanelView === "create" ||
           botPanelView === "customize" ||
           botPanelView === "settings";
+        const botPanelAdvancedEditorAvailable =
+          botPanelView === "create" || botPanelView === "customize";
+        const botPanelAdvancedEditorActive =
+          botPanelAdvancedEditorAvailable && botEditorAdvancedMode;
         const botPanelShowPersonaFields =
           botPanelView === "create" || botPanelView === "customize";
         const botPanelShowResponseSettings =
@@ -66169,19 +68925,28 @@ function HomeContent(): React.JSX.Element {
           settings,
           newBotOnlineModel
         );
+        const currentStoredSystemPrompt = botEditorAdvancedMode
+          ? newBotSystemPrompt
+          : serializeStoredBotPrompt(botProfile, trimmedName);
+        const pristineSystemPrompt = botEditorAdvancedMode
+          ? editPristine?.rawPrompt ?? editPristine?.prompt ?? ""
+          : editPristine?.prompt ?? "";
         const hasEditChanges = editPristine
           ? trimmedName !== editPristine.name
-            || serializeStoredBotPrompt(botProfile, trimmedName) !== editPristine.prompt
+            || currentStoredSystemPrompt !== pristineSystemPrompt
             || visibleLocalModelChoice !== editPristine.localModel
             || visibleOnlineModelChoice !== editPristine.onlineModel
             || newBotLocalImageModel !== editPristine.localImageModel
             || newBotOpenAiImageModel !== editPristine.openAiImageModel
             || newBotOnlineEnabled !== editPristine.onlineEnabled
             || newBotDeleteProtected !== editPristine.deleteProtected
-            || newBotFlirtEnabled !== editPristine.flirtEnabled
-            || newBotTemperature !== editPristine.temperature
-            || newBotMaxTokens !== editPristine.maxTokens
-            || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
+	            || newBotFlirtEnabled !== editPristine.flirtEnabled
+	            || newBotTemperature !== editPristine.temperature
+	            || newBotMaxTokens !== editPristine.maxTokens
+	            || newBotTopP !== editPristine.topP
+	            || newBotTopK !== editPristine.topK
+	            || newBotRepetitionPenalty !== editPristine.repetitionPenalty
+	            || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
             || newBotGlyph !== editPristine.glyph
             || newBotFaceEyesFont !== editPristine.faceEyesFont
             || newBotFaceMouthFont !== editPristine.faceMouthFont
@@ -66193,9 +68958,10 @@ function HomeContent(): React.JSX.Element {
         // Drives BOTH the enabled/disabled flag AND whether the bot
         // color leaks into the button styling (so the picker feels
         // live as you type a name / tweak the swatch).
+        const botPanelActionBusy = busy || botTransferBusy;
         const primaryActive = botPanelCanSave && (editingBotId
-          ? (nameIsPresent && hasEditChanges && !busy)
-          : (nameIsPresent && !busy));
+          ? (nameIsPresent && hasEditChanges && !botPanelActionBusy)
+          : (nameIsPresent && !botPanelActionBusy));
 
         // Edit mode locks the label to "Save changes" from the moment edit
         // starts (even before any field changes) so the user's intent
@@ -66227,7 +68993,6 @@ function HomeContent(): React.JSX.Element {
               return { ...base, ["--accent-hover" as string]: hoverMix } as React.CSSProperties;
             })()
           : undefined;
-        const selectedLengthPreset = botReplyLengthPresetForTokens(newBotMaxTokens);
         const localModelOptions = includeSelectedModelOption(
           botCustomizerModelOptionsForProvider(modelCatalog, settings, "local"),
           visibleLocalModelChoice,
@@ -66277,8 +69042,7 @@ function HomeContent(): React.JSX.Element {
           visibleOpenAiImageModelChoice,
           "openai"
         );
-        const effectiveBotModelRoutingPage =
-          !mobileBotsPanel && botModelRoutingPage === "tuning" ? "chat" : botModelRoutingPage;
+        const effectiveBotModelRoutingPage = botModelRoutingPage;
         const botLibraryTotal = bots.length + 1;
         const botLibrarySummary =
           botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
@@ -66309,21 +69073,28 @@ function HomeContent(): React.JSX.Element {
               (completedProfileCategories / BOT_PROFILE_BUILDER_PAGE_ORDER.length) * 100
             )
           : 0;
+        const systemPromptSummary = newBotSystemPrompt.trim();
+        const clippedSystemPromptSummary = systemPromptSummary
+          ? systemPromptSummary.length > 92
+            ? `${systemPromptSummary.slice(0, 92)}...`
+            : systemPromptSummary
+          : "No system prompt set";
+        const advancedSamplerChanged =
+          newBotTemperature !== BOT_TEMPERATURE_DEFAULT ||
+          newBotMaxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS ||
+          newBotTopP !== BOT_TOP_P_DEFAULT ||
+          newBotTopK !== BOT_TOP_K_DEFAULT ||
+          newBotRepetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT;
         const botIdentityDisplayName =
           trimmedName || editingBot?.name?.trim() || "Unnamed bot";
-        const botIdentityStatus = editingBotId
-          ? hasEditChanges
-            ? "Unsaved changes"
-            : "Saved"
-          : nameIsPresent
-            ? "Ready"
-            : "Draft";
         const botPanelMode = editingBotId ? "edit" : "create";
         const botPanelTitle =
           botPanelView === "home"
             ? "Bots"
             : botPanelView === "library"
               ? "Bot library"
+              : botPanelView === "marketplace"
+                ? "Marketplace"
               : botPanelView === "botHub"
                 ? selectedBotPanelBot?.name ?? "Bot"
                 : botPanelView === "settings"
@@ -66336,6 +69107,10 @@ function HomeContent(): React.JSX.Element {
             ? "Create or manage your cast"
             : botPanelView === "library"
               ? botLibrarySummary
+              : botPanelView === "marketplace"
+                ? botMarketplaceManifest
+                  ? `${botMarketplaceVisibleBots.length} bots · ${botMarketplaceVisibleLenses.length} Lenses`
+                  : "Bots and Lenses"
               : botPanelView === "botHub"
                 ? "Choose what to manage"
                 : botPanelView === "settings"
@@ -66343,24 +69118,6 @@ function HomeContent(): React.JSX.Element {
                   : editingBotId
                     ? botIdentityDisplayName
                     : "New custom bot";
-        const botIdentityKicker = editingBotId ? "Editing existing bot" : "New bot";
-        const botIdentityActionHint = editingBotId
-          ? hasEditChanges
-            ? "Review changes, then save this bot."
-            : "Make a change to save this bot."
-          : nameIsPresent
-            ? "Ready to create."
-            : "Start with a name.";
-        const botRoutingSummary =
-          `${botTemperatureLabel(newBotTemperature)} · ${selectedLengthPreset?.label ?? "Custom"}`;
-        const botIdentityProfileSummary = nameIsPresent ? profileSummary : "Name needed";
-        const botIdentityModeMessage = editingBotId
-          ? hasEditChanges
-            ? "Unsaved edits are local until you save."
-            : "You are editing a saved bot."
-          : nameIsPresent
-            ? "This will create a separate new bot."
-            : "Name the bot to unlock the editor.";
         const botAvatarPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
         const botAvatarProfilePictureUrl = botProfilePictureImageUrl(newBotProfilePictureImageId);
         const botProfilePictureActionsDisabled = !editingBotId || busy || botProfilePictureBusy;
@@ -66381,17 +69138,37 @@ function HomeContent(): React.JSX.Element {
             ? "Unsaved edits"
             : botLibrarySummary
           : botLibrarySummary;
+        const marketplaceThemeState = botMarketplaceSelectedTheme
+          ? marketplaceThemeInstallState(
+              botMarketplaceSelectedEntries,
+              botMarketplaceInstalledHashes
+            )
+          : "available";
+        const marketplaceThemeInstalling =
+          botMarketplaceSelectedTheme
+            ? botMarketplaceInstallingKey === `theme:${botMarketplaceSelectedTheme.id}`
+            : false;
+        const marketplaceActionBusy = Boolean(botMarketplaceInstallingKey) || botTransferBusy;
+        const marketplaceInstalledLensCount = botMarketplaceVisibleLenses.filter(
+          (lens) => marketplaceLensInstallState(lens, installedMarketplaceLensIds) === "installed"
+        ).length;
 
         const botPanelBackLabel =
           botPanelView === "botHub"
             ? "Back to bot library"
-            : botPanelView === "library" || botPanelView === "create"
+            : botPanelView === "library" ||
+                botPanelView === "marketplace" ||
+                botPanelView === "create"
               ? "Back to Bots"
               : selectedBotPanelBot || editingBot
                 ? "Back to bot options"
                 : "Back to bot library";
         const goBackInBotPanel = (): void => {
-          if (botPanelView === "library" || botPanelView === "create") {
+          if (
+            botPanelView === "library" ||
+            botPanelView === "marketplace" ||
+            botPanelView === "create"
+          ) {
             resetBotPanelDraftNavigation();
             resetBotForm();
             setBotPanelView("home");
@@ -66418,7 +69195,7 @@ function HomeContent(): React.JSX.Element {
           : botPanelView === "create"
             ? "Clear all fields in the new bot form"
             : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
-              ? "Delete bot — protected; turn off delete protection first"
+              ? "Delete bot — protected; allow deletion from its group dashboard first"
               : headerTrashTargetBot
                 ? `Delete ${headerTrashTargetBot.name}`
                 : "Delete bot";
@@ -66427,7 +69204,7 @@ function HomeContent(): React.JSX.Element {
           : botPanelView === "create"
             ? "Clear the customizer and start a fresh new bot"
             : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
-              ? "Protected bot — toggle delete protection off in Settings"
+              ? "Protected bot — allow deletion from its group dashboard"
               : headerTrashTargetBot
                 ? `Delete ${headerTrashTargetBot.name}`
                 : "Delete bot";
@@ -66439,11 +69216,15 @@ function HomeContent(): React.JSX.Element {
         return (
           <div
             className={`${styles.panel} ${styles.panelBots}`}
+            data-prism-panel="bots"
+            data-prism-panel-layer="true"
             data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={
-              botProfileBuilderOpen || botAvatarCustomizerOpen ? "true" : undefined
+              botProfileBuilderOpen || botAiParametersModalOpen || botAvatarCustomizerOpen
+                ? "true"
+                : undefined
             }
             data-global-customizer={botPanelView === "create" ? "true" : undefined}
             data-library-expanded={
@@ -66452,8 +69233,13 @@ function HomeContent(): React.JSX.Element {
             data-editor-only={editorMode || botPanelView === "botHub" ? "true" : undefined}
             data-bot-editor-mode={botPanelMode}
             data-bot-editor-dirty={hasEditChanges ? "true" : undefined}
+            data-bot-editor-advanced={botPanelAdvancedEditorActive ? "true" : undefined}
             data-bot-panel-view={botPanelView}
             style={editorPanelStyle}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bots-panel-title"
+            tabIndex={-1}
           >
             <div className={styles.panelHeader}>
               <div className={styles.panelHeaderTitle}>
@@ -66469,7 +69255,7 @@ function HomeContent(): React.JSX.Element {
                   </button>
                 ) : null}
                 <div className={styles.panelHeaderTitleText}>
-                  <h3>{botPanelTitle}</h3>
+                  <h3 id="bots-panel-title">{botPanelTitle}</h3>
                   <small>{botPanelSubtitle}</small>
                 </div>
               </div>
@@ -66615,6 +69401,382 @@ function HomeContent(): React.JSX.Element {
                     <small>Open your library and choose a bot to manage.</small>
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={styles.botPanelChoiceCard}
+                  onClick={openBotMarketplace}
+                >
+                  <span className={styles.botPanelChoiceGlyph} aria-hidden="true">
+                    <Store size={22} strokeWidth={1.9} />
+                  </span>
+	                  <span className={styles.botPanelChoiceCopy}>
+	                    <strong>Marketplace</strong>
+	                    <small>Install premade bots and reusable Lenses.</small>
+	                  </span>
+                </button>
+              </section>
+            ) : null}
+            {botPanelView === "marketplace" ? (
+              <section className={styles.botMarketplacePanel} aria-label="Bot marketplace">
+                {botMarketplaceLoading && !botMarketplaceManifest ? (
+                  <div className={styles.botMarketplaceState}>
+                    <Store size={24} strokeWidth={1.8} aria-hidden="true" />
+                    <strong>Loading marketplace</strong>
+                  </div>
+                ) : null}
+                {botMarketplaceError ? (
+                  <div className={styles.botMarketplaceState} data-state="error">
+                    <Store size={24} strokeWidth={1.8} aria-hidden="true" />
+                    <strong>{botMarketplaceError}</strong>
+                    <button
+                      type="button"
+                      onClick={() => void loadBotMarketplaceManifest()}
+                      disabled={botMarketplaceLoading}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
+                {botMarketplaceManifest && !botMarketplaceError ? (
+                  <>
+                    <div className={styles.botMarketplaceSectionTabs} role="tablist" aria-label="Marketplace sections">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={botMarketplaceSection === "bot"}
+                        data-active={botMarketplaceSection === "bot" ? "true" : undefined}
+                        onClick={() => setBotMarketplaceSection("bot")}
+                      >
+                        <strong>Bots</strong>
+                        <small>{botMarketplaceVisibleBots.length} ready-made</small>
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={botMarketplaceSection === "lens"}
+                        data-active={botMarketplaceSection === "lens" ? "true" : undefined}
+                        onClick={() => setBotMarketplaceSection("lens")}
+                      >
+                        <strong>Lenses</strong>
+                        <small>{marketplaceInstalledLensCount}/{botMarketplaceVisibleLenses.length} installed</small>
+                      </button>
+                    </div>
+
+	                    {botMarketplaceSection === "bot" ? (
+	                      <>
+	                        <div className={styles.botMarketplaceIntro}>
+	                          <strong>Bots bring ready-made voices into Prism.</strong>
+	                          <p>
+	                            Install complete personas with names, colors, glyphs, and starting
+	                            prompts. Packs give your library a strong cast before you customize
+	                            who they become.
+	                          </p>
+	                        </div>
+	                        <div className={styles.botMarketplaceThemeRail} role="tablist" aria-label="Marketplace themes">
+	                          {botMarketplaceThemes.map((theme) => {
+                            const themeEntries = marketplaceEntriesForTheme(
+                              botMarketplaceManifest,
+                              theme.id
+                            );
+                            const state = marketplaceThemeInstallState(
+                              themeEntries,
+                              botMarketplaceInstalledHashes
+                            );
+                            const installedCount = themeEntries.filter((entry) =>
+                              botMarketplaceInstalledHashes.has(entry.botHash)
+                            ).length;
+                            const themeStyle = buildBotMarketplaceThemeVisualStyle(
+                              theme.id,
+                              themeEntries,
+                              resolvedTheme
+                            ) as React.CSSProperties;
+                            return (
+                              <button
+                                key={theme.id}
+                                type="button"
+                                role="tab"
+                                className={styles.botMarketplaceThemeTab}
+                                style={themeStyle}
+                                data-active={
+                                  botMarketplaceSelectedTheme?.id === theme.id ? "true" : undefined
+                                }
+                                aria-selected={botMarketplaceSelectedTheme?.id === theme.id}
+                                onClick={() => setBotMarketplaceSelectedThemeId(theme.id)}
+                              >
+                                <strong>{theme.name}</strong>
+                                <small>
+                                  {botMarketplaceThemeStateLabel(
+                                    state,
+                                    installedCount,
+                                    themeEntries.length
+                                  )}
+                                </small>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {botMarketplaceSelectedTheme ? (
+                          <div className={styles.botMarketplaceThemeHeader}>
+                            <div>
+                              <h4>{botMarketplaceSelectedTheme.name}</h4>
+                              <p>{botMarketplaceSelectedTheme.description}</p>
+                            </div>
+                            <button
+                              type="button"
+                              className={styles.botMarketplaceInstallPackButton}
+                              onClick={() => void installMarketplaceTheme(botMarketplaceSelectedTheme)}
+                              disabled={marketplaceActionBusy || botMarketplaceSelectedEntries.length === 0}
+                              data-installed={
+                                marketplaceThemeState === "installed" ? "true" : undefined
+                              }
+                            >
+                              {marketplaceThemeState === "installed" ? (
+                                <Check size={15} strokeWidth={2.1} aria-hidden="true" />
+                              ) : (
+                                <Download size={15} strokeWidth={2.1} aria-hidden="true" />
+                              )}
+                              <span>
+                                {botMarketplaceThemeActionLabel(
+                                  marketplaceThemeState,
+                                  marketplaceThemeInstalling
+                                )}
+                              </span>
+                            </button>
+                          </div>
+                        ) : null}
+
+                        <div className={styles.botMarketplaceList}>
+                          {botMarketplaceSelectedEntries.map((entry) => {
+                            const entryState = marketplaceEntryInstallState(
+                              entry,
+                              botMarketplaceInstalledHashes
+                            );
+                            const installedBotId = botMarketplaceInstalledBotIdByHash.get(entry.botHash);
+                            const installedBot = installedBotId
+                              ? bots.find((bot) => bot.id === installedBotId) ?? null
+                              : null;
+                            const installing = botMarketplaceInstallingKey === `bot:${entry.id}`;
+                            const entryGlyph = isBotGlyphName(entry.glyph)
+                              ? entry.glyph
+                              : DEFAULT_BOT_GLYPH;
+                            const entryAccent = entry.color
+                              ? panelBotDisplayAccent(
+                                  entry.color,
+                                  resolvedTheme,
+                                  panelColorHarmonyActive
+                                )
+                              : null;
+                            const entryStyle = entryAccent
+                              ? ({
+                                  "--bot-color": entryAccent,
+                                  "--bot-tile-ink": pickReadableText(entryAccent),
+                                } as React.CSSProperties)
+                              : undefined;
+                            return (
+                              <article
+                                key={entry.id}
+                                className={styles.botMarketplaceCard}
+                                style={entryStyle}
+                                data-installed={entryState === "installed" ? "true" : undefined}
+                              >
+                                <span className={styles.botMarketplaceCardGlyph} aria-hidden="true">
+                                  <BotGlyph name={entryGlyph} />
+                                </span>
+                                <div className={styles.botMarketplaceCardBody}>
+                                  <div className={styles.botMarketplaceCardTitleRow}>
+                                    <div>
+                                      <strong>{entry.name}</strong>
+                                      <small>{entry.subtitle}</small>
+                                    </div>
+                                    {entryState === "installed" ? (
+                                      <span className={styles.botMarketplaceInstalledBadge}>
+                                        <Check size={12} strokeWidth={2.2} aria-hidden="true" />
+                                        Installed
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <p>{entry.description}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className={styles.botMarketplaceInstallButton}
+                                  onClick={() => {
+                                    if (installedBot) {
+                                      openBotCustomizer(installedBot);
+                                      return;
+                                    }
+                                    void installMarketplaceBot(entry);
+                                  }}
+                                  disabled={marketplaceActionBusy && !installing}
+                                >
+                                  {entryState === "installed" ? (
+                                    <Brush size={15} strokeWidth={2.1} aria-hidden="true" />
+                                  ) : installing ? (
+                                    <Download size={15} strokeWidth={2.1} aria-hidden="true" />
+                                  ) : (
+                                    <Download size={15} strokeWidth={2.1} aria-hidden="true" />
+                                  )}
+                                  <span>
+                                    {entryState === "installed"
+                                      ? "Edit"
+                                      : installing
+                                        ? "Installing"
+                                        : "Install"}
+                                  </span>
+                                </button>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </>
+	                    ) : (
+	                      <>
+	                        <div className={styles.botMarketplaceIntro}>
+	                          <strong>Lenses shape a bot&apos;s perspective.</strong>
+	                          <p>
+	                            Use Lenses as reusable worldview and style modifiers. Install one,
+	                            then apply it when creating a bot to tune how it thinks, speaks, and
+	                            interprets the world.
+	                          </p>
+	                        </div>
+                        <div className={styles.botMarketplaceThemeRail} role="tablist" aria-label="Lens categories">
+                          {botMarketplaceLensCategories.map((category) => {
+                            const categoryLenses = marketplaceLensEntriesForCategory(
+                              botMarketplaceManifest,
+                              category.id
+                            );
+                            const prismLane = botMarketplaceLensCategoryPrismLane(category.id);
+                            const installedCount = categoryLenses.filter(
+                              (lens) =>
+                                marketplaceLensInstallState(lens, installedMarketplaceLensIds) === "installed"
+                            ).length;
+                            return (
+                              <button
+                                key={category.id}
+                                type="button"
+                                role="tab"
+                                className={styles.botMarketplaceThemeTab}
+                                data-lens-category="true"
+                                data-prism-lane={prismLane}
+                                data-active={
+                                  botMarketplaceSelectedLensCategory?.id === category.id ? "true" : undefined
+                                }
+                                aria-selected={botMarketplaceSelectedLensCategory?.id === category.id}
+                                onClick={() => setBotMarketplaceSelectedLensCategoryId(category.id)}
+                              >
+                                <strong>{category.name}</strong>
+                                <small>
+                                  {installedCount > 0
+                                    ? `${installedCount}/${categoryLenses.length} installed`
+                                    : `${categoryLenses.length} Lenses`}
+                                </small>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {botMarketplaceSelectedLensCategory ? (
+                          <div className={styles.botMarketplaceThemeHeader}>
+                            <div>
+                              <h4>{botMarketplaceSelectedLensCategory.name}</h4>
+                              <p>{botMarketplaceSelectedLensCategory.description}</p>
+                              {botMarketplaceSelectedLensCategory.disclaimer ? (
+                                <p className={styles.botMarketplaceDisclaimer}>
+                                  {botMarketplaceSelectedLensCategory.disclaimer}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className={styles.botMarketplaceList}>
+                          {botMarketplaceSelectedLensEntries.map((lens) => {
+                            const lensState = marketplaceLensInstallState(
+                              lens,
+                              installedMarketplaceLensIds
+                            );
+                            const installed = lensState === "installed";
+                            const prismLane = botMarketplaceLensCategoryPrismLane(
+                              botMarketplaceSelectedLensCategory?.id
+                            );
+                            return (
+                              <article
+                                key={lens.id}
+                                className={`${styles.botMarketplaceCard} ${styles.botMarketplaceLensCard}`}
+                                data-prism-lane={prismLane}
+                                data-installed={installed ? "true" : undefined}
+                                draggable
+                                onDragStart={(event) => writeMarketplaceLensDragData(event, lens)}
+                              >
+                                <LensTile
+                                  lens={lens}
+                                  size="md"
+                                  className={styles.botMarketplaceLensTile}
+                                  title={lens.displayName}
+                                />
+                                <div className={styles.botMarketplaceCardBody}>
+                                  <div className={styles.botMarketplaceCardTitleRow}>
+                                    <div>
+                                      <strong>{lens.displayName}</strong>
+                                      <small>{lens.category}</small>
+                                    </div>
+                                    {installed ? (
+                                      <span className={styles.botMarketplaceInstalledBadge}>
+                                        <Check size={12} strokeWidth={2.2} aria-hidden="true" />
+                                        Installed
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <p>{lens.description}</p>
+                                  <div className={styles.botMarketplaceLensTags} aria-label={`${lens.displayName} tags`}>
+                                    {lens.tags.slice(0, 4).map((tag) => (
+                                      <span key={tag}>{tag}</span>
+                                    ))}
+                                  </div>
+                                  {lens.researchDisclaimer ? (
+                                    <p className={styles.botMarketplaceDisclaimer}>
+                                      {lens.researchDisclaimer}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className={styles.botMarketplaceCardActions}>
+                                  <button
+                                    type="button"
+                                    className={styles.botMarketplaceInstallButton}
+                                    onClick={() => {
+                                      if (installed) {
+                                        applyMarketplaceLensToGenerator(lens);
+                                        return;
+                                      }
+                                      installMarketplaceLens(lens);
+                                    }}
+                                  >
+                                    {installed ? (
+                                      <Sparkles size={15} strokeWidth={2.1} aria-hidden="true" />
+                                    ) : (
+                                      <Download size={15} strokeWidth={2.1} aria-hidden="true" />
+                                    )}
+                                    <span>{installed ? "Use for Generation" : "Install Lens"}</span>
+                                  </button>
+                                  {installed ? (
+                                    <button
+                                      type="button"
+                                      className={styles.botMarketplaceSecondaryButton}
+                                      onClick={() => removeMarketplaceLens(lens)}
+                                    >
+                                      Remove
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </>
+                ) : null}
               </section>
             ) : null}
             {botPanelView === "botHub" && selectedBotPanelBot ? (
@@ -66705,53 +69867,8 @@ function HomeContent(): React.JSX.Element {
                 data-mode={botPanelMode}
                 data-dirty={hasEditChanges ? "true" : undefined}
                 aria-label="Bot identity"
-              >
-                <div className={styles.botIdentityPreview}>
-                  <span className={styles.botIdentityGlyph} aria-hidden="true">
-                    <BotGlyph name={newBotGlyph} size={26} strokeWidth={1.8} />
-                  </span>
-                  <div className={styles.botIdentityCopy}>
-                    <span>{botIdentityKicker}</span>
-                    <strong>{botIdentityDisplayName}</strong>
-                    <small>{botIdentityActionHint}</small>
-                  </div>
-                  <span
-                    className={styles.botIdentityStatus}
-                    data-state={
-                      editingBotId
-                        ? hasEditChanges
-                          ? "dirty"
-                          : "saved"
-                        : nameIsPresent
-                          ? "ready"
-                          : "draft"
-                    }
-                  >
-                    {botIdentityStatus}
-                  </span>
-                </div>
-                <div className={styles.botIdentityPillRow} aria-label="Bot setup summary">
-                  <span>{botIdentityProfileSummary}</span>
-                  <span>{newBotOnlineEnabled ? "Online allowed" : "Offline only"}</span>
-                  <span>{botRoutingSummary}</span>
-                </div>
-                <div
-                  className={styles.botIdentityModeStrip}
-                  data-mode={botPanelMode}
-                  data-dirty={hasEditChanges ? "true" : undefined}
-                >
-                  <span>{botIdentityModeMessage}</span>
-                  {editingBotId ? (
-                    <button
-                      type="button"
-                      onClick={revertEditingBotDraft}
-                      disabled={!hasEditChanges || busy}
-                    >
-                      Revert
-                    </button>
-                  ) : null}
-                </div>
-                <div className={styles.botNameRow}>
+	              >
+	                <div className={styles.botNameRow}>
                   <ColorGlyphPicker
                     color={newBotColor}
                     glyph={newBotGlyph}
@@ -66772,22 +69889,172 @@ function HomeContent(): React.JSX.Element {
                     />
                   </label>
                   {!editingBotId ? (
-                  <button
-                    type="button"
-                    className={styles.botRandomizeButton}
-                    onClick={applyRandomBotDraft}
-                    aria-label="Randomize bot"
-                    title="Randomize bot"
-                  >
-                    <BotGlyph name="dice" size={20} strokeWidth={1.8} />
-                  </button>
-                  ) : null}
-                </div>
-              </section>
-              <section
-                className={`${styles.botParameterCard} ${styles.botAvatarCard} ${styles.botAvatarSummaryCard}`}
-                aria-label="Avatar"
-              >
+	                  <span
+	                    className={styles.botRandomizerSocket}
+	                    data-lens-applied={newBotAppliedLens ? "true" : undefined}
+	                    data-drop-active={botLensDropActive ? "true" : undefined}
+	                  >
+                    <button
+                      type="button"
+                      className={styles.botRandomizeButton}
+                      data-lens-applied={newBotAppliedLens ? "true" : undefined}
+                      data-drop-active={botLensDropActive ? "true" : undefined}
+                      onClick={applyRandomBotDraft}
+	                      disabled={botTransferBusy}
+	                      onDragOver={handleRandomizerLensDragOver}
+	                      onDragLeave={handleRandomizerLensDragLeave}
+	                      onDrop={handleRandomizerLensDrop}
+                      aria-label={
+                        newBotAppliedLens
+                          ? `Randomize through ${newBotAppliedLens.displayName}`
+                          : "Randomize bot"
+                      }
+		                    >
+		                      {newBotAppliedLens ? (
+		                        <LensTile
+		                          lens={newBotAppliedLens}
+		                          size="button"
+		                          className={styles.botRandomizerLensTile}
+		                        />
+		                      ) : (
+		                        <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+		                      )}
+		                    </button>
+		                  </span>
+	                  ) : null}
+	                </div>
+	              </section>
+	              {!editingBotId ? (
+	              <section
+	                className={`${styles.botParameterCard} ${styles.botLensPickerCard}`}
+	                aria-label="Generation Lens"
+		              >
+			                <div className={`${styles.botParameterHeader} ${styles.botLensHeader}`}>
+			                  <span>Generation Lens</span>
+			                  <small>Shape the next random bot.</small>
+			                  <button
+			                    type="button"
+			                    className={styles.botLensBrowseButton}
+			                    disabled={botTransferBusy}
+			                    aria-label="Browse Lenses"
+			                    title="Browse Lenses"
+			                    onClick={browseMarketplaceLenses}
+			                  >
+			                    <Plus size={14} strokeWidth={2} aria-hidden="true" />
+			                  </button>
+			                </div>
+			                <div
+			                  className={styles.botLensAppliedPanel}
+		                  data-applied={newBotAppliedLens ? "true" : undefined}
+		                  data-drop-active={botLensDropActive ? "true" : undefined}
+		                  onDragOver={handleRandomizerLensDragOver}
+		                  onDragLeave={handleRandomizerLensDragLeave}
+		                  onDrop={handleRandomizerLensDrop}
+		                >
+	                  {newBotAppliedLens ? (
+	                    <>
+	                      <LensTile
+	                        lens={newBotAppliedLens}
+	                        size="lg"
+	                        className={styles.botLensAppliedTile}
+	                      />
+	                      <span className={styles.botLensAppliedCopy}>
+	                        <strong>{newBotAppliedLens.displayName}</strong>
+	                        <small>{marketplaceLensPreviewLine(newBotAppliedLens)}</small>
+	                      </span>
+		                      <button
+		                        type="button"
+		                        className={styles.botLensRemoveButton}
+		                        disabled={botTransferBusy}
+		                        aria-label="Clear Generation Lens"
+		                        title="Clear Generation Lens"
+		                        onClick={() => {
+		                          setNewBotLensId("");
+		                          setNewBotGeneratedMemorySeeds(null);
+		                          setBotLensDropActive(false);
+		                        }}
+		                      >
+		                        <X size={14} strokeWidth={2} aria-hidden="true" />
+		                      </button>
+		                    </>
+		                  ) : (
+		                    <>
+		                      <span className={styles.botLensEmptySocket} aria-hidden="true">
+		                        <BotGlyph name="dice" size={18} strokeWidth={1.9} />
+		                      </span>
+		                      <span className={styles.botLensAppliedCopy}>
+		                        <strong>Plain randomizer</strong>
+		                        <small>No Lens is loaded.</small>
+		                      </span>
+		                    </>
+		                  )}
+	                </div>
+	                {botLensDropActive ? (
+	                  <p className={styles.botLensDropHint}>Release to use for the next random bot.</p>
+	                ) : null}
+		                {installedMarketplaceLensTray.length > 0 ? (
+		                  <div
+		                    className={styles.botLensTray}
+		                    aria-label="Installed Lenses"
+		                    onScroll={hideBotLensTileTooltip}
+		                  >
+		                    <div className={styles.botLensTileRow}>
+		                      {installedMarketplaceLensTray.map((lens) => (
+		                        <button
+		                          key={lens.id}
+		                          type="button"
+		                          className={styles.botLensTileButton}
+		                          data-active={newBotLensId === lens.id ? "true" : undefined}
+		                          disabled={botTransferBusy}
+		                          draggable
+		                          aria-label={`Use ${lens.displayName} for the next random bot`}
+		                          onMouseEnter={(event) => showBotLensTileTooltip(event, lens)}
+		                          onMouseLeave={hideBotLensTileTooltip}
+		                          onFocus={(event) => showBotLensTileTooltip(event, lens)}
+		                          onBlur={hideBotLensTileTooltip}
+		                          onDragStart={(event) => {
+		                            hideBotLensTileTooltip();
+		                            writeMarketplaceLensDragData(event, lens);
+		                          }}
+		                          onClick={() => {
+		                            hideBotLensTileTooltip();
+		                            applyMarketplaceLensToRandomizer(lens);
+		                          }}
+		                        >
+		                          <LensTile lens={lens} size="sm" />
+		                        </button>
+		                      ))}
+		                    </div>
+		                  </div>
+		                ) : (
+		                  <div className={styles.botLensTrayEmpty}>
+		                    <span>Installed Lenses will appear here.</span>
+		                  </div>
+		                )}
+		                {botLensTooltip && typeof document !== "undefined"
+		                  ? createPortal(
+		                      <div
+		                        className={styles.botLensFloatingTooltip}
+		                        data-placement={botLensTooltip.placement}
+		                        role="tooltip"
+		                        style={
+		                          {
+		                            "--bot-lens-tooltip-x": `${botLensTooltip.x}px`,
+		                            "--bot-lens-tooltip-y": `${botLensTooltip.y}px`,
+		                          } as CSSProperties
+		                        }
+		                      >
+		                        {botLensTooltip.label}
+		                      </div>,
+		                      document.body
+		                    )
+		                  : null}
+		              </section>
+	              ) : null}
+	              <section
+	                className={`${styles.botParameterCard} ${styles.botAvatarCard} ${styles.botAvatarSummaryCard}`}
+	                aria-label="Avatar"
+	              >
                 <div className={styles.botParameterHeader}>
                   <span>Avatar</span>
                   <small>Face glyph for in-person scenes, profile picture for online persona.</small>
@@ -66870,250 +70137,271 @@ function HomeContent(): React.JSX.Element {
                 onRemoveProfilePicture={() => void removeBotProfilePicture()}
                 onClose={() => setBotAvatarCustomizerOpen(false)}
               />
-              <section
-                className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
-                aria-label="Profile Builder"
-              >
-                <div className={styles.botParameterHeader}>
-                  <div className={styles.botProfileProgressHeader}>
-                    <span>Profile</span>
-                    <strong>{profileProgressPercent}%</strong>
-                  </div>
-                  <div
-                    className={styles.botProfileProgressTrack}
-                    aria-hidden="true"
-                    style={{
-                      ["--bot-profile-progress" as string]: `${profileProgressPercent}%`,
-                    }}
-                  />
-                  <small>
-                    {profileSummary}. These details shape how the bot behaves.
-                  </small>
-                </div>
-                <div className={styles.botProfileSummaryGrid}>
-                  {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => (
-                    (() => {
-                      const complete = botProfileCategoryComplete(
-                        botProfile,
-                        category,
-                        trimmedName
-                      );
-                      return (
-                        <button
-                          key={category}
-                          type="button"
-                          className={styles.botProfileSummaryButton}
-                          data-complete={complete ? "true" : undefined}
-                          data-locked={!nameIsPresent ? "true" : undefined}
-                          disabled={!nameIsPresent}
-                          onClick={() => {
-                            if (!nameIsPresent) return;
-                            setColorWheelOpen(false);
-                            setBotAvatarCustomizerOpen(false);
-                            setBotProfileActivePage(category);
-                            setBotProfileBuilderOpen(true);
-                          }}
-                        >
-                          <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
-                          <small>
-                            {nameIsPresent
-                              ? botProfileCategorySummary(botProfile, category, trimmedName)
-                              : "Enter a name first"}
-                          </small>
-                          <strong>{!nameIsPresent ? "Locked" : complete ? "Complete" : "Optional"}</strong>
-                        </button>
-                      );
-                    })()
-                  ))}
-                </div>
-              </section>
-              <BotProfileBuilder
-                open={botProfileBuilderOpen}
+	              <section
+	                className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
+	                aria-label={botEditorAdvancedMode ? "AI Parameters" : "Profile Builder"}
+	              >
+	                <div className={`${styles.botParameterHeader} ${styles.botProfileModeHeader}`}>
+	                  <div className={styles.botProfileModeHeaderTop}>
+	                    <div className={styles.botProfileProgressHeader}>
+	                      <span>{botEditorAdvancedMode ? "AI Parameters" : "Profile"}</span>
+	                      <strong>{botEditorAdvancedMode ? "ADV" : `${profileProgressPercent}%`}</strong>
+	                    </div>
+	                    {botPanelAdvancedEditorAvailable ? (
+	                      <div
+	                        className={styles.botEditorModeStrip}
+	                        role="radiogroup"
+	                        aria-label="Bot profile editor mode"
+	                      >
+	                        <button
+	                          type="button"
+	                          role="radio"
+	                          aria-checked={!botEditorAdvancedMode}
+	                          data-active={!botEditorAdvancedMode ? "true" : undefined}
+	                          onClick={() => {
+	                            if (botEditorAdvancedMode) {
+	                              setBotEditorModeAdvanced(false);
+	                            }
+	                          }}
+	                        >
+	                          Builder
+	                        </button>
+	                        <button
+	                          type="button"
+	                          role="radio"
+	                          aria-checked={botEditorAdvancedMode}
+	                          data-active={botEditorAdvancedMode ? "true" : undefined}
+	                          onClick={() => {
+	                            if (!botEditorAdvancedMode) {
+	                              setBotEditorModeAdvanced(true);
+	                            }
+	                          }}
+	                        >
+	                          Advanced
+	                        </button>
+	                      </div>
+	                    ) : null}
+	                  </div>
+	                  <div
+	                    className={styles.botProfileProgressTrack}
+	                    aria-hidden="true"
+	                    style={{
+	                      ["--bot-profile-progress" as string]: botEditorAdvancedMode
+	                        ? "100%"
+	                        : `${profileProgressPercent}%`,
+	                    }}
+	                  />
+	                  <small>
+	                    {botEditorAdvancedMode
+	                      ? "System prompt and sampler controls."
+	                      : `${profileSummary}. These details shape how the bot behaves.`}
+	                  </small>
+	                </div>
+	                {botEditorAdvancedMode ? (
+	                  <div className={styles.botProfileSummaryGrid}>
+	                    <button
+	                      type="button"
+	                      className={`${styles.botProfileSummaryButton} ${styles.botAiPromptSummaryButton}`}
+	                      data-complete={systemPromptSummary ? "true" : undefined}
+	                      onClick={() => {
+	                        setColorWheelOpen(false);
+	                        setBotAvatarCustomizerOpen(false);
+	                        setBotProfileBuilderOpen(false);
+	                        setBotAiParametersModalOpen(true);
+	                      }}
+	                    >
+	                      <span>System Prompt</span>
+	                      <small>{clippedSystemPromptSummary}</small>
+	                      <strong>{systemPromptSummary ? "Set" : "Blank"}</strong>
+	                    </button>
+	                    <div className={styles.botAiParameterSummaryGrid}>
+	                      <button
+	                        type="button"
+	                        className={styles.botAiParameterSummaryButton}
+	                        onClick={() => setBotAiParametersModalOpen(true)}
+	                      >
+	                        <span>Temperature</span>
+	                        <strong>{formatBotParameterValue(newBotTemperature)}</strong>
+	                      </button>
+	                      <button
+	                        type="button"
+	                        className={styles.botAiParameterSummaryButton}
+	                        onClick={() => setBotAiParametersModalOpen(true)}
+	                      >
+	                        <span>Top P</span>
+	                        <strong>{formatBotParameterValue(newBotTopP)}</strong>
+	                      </button>
+	                      <button
+	                        type="button"
+	                        className={styles.botAiParameterSummaryButton}
+	                        onClick={() => setBotAiParametersModalOpen(true)}
+	                      >
+	                        <span>Top K</span>
+	                        <strong>{newBotTopK}</strong>
+	                      </button>
+	                      <button
+	                        type="button"
+	                        className={styles.botAiParameterSummaryButton}
+	                        onClick={() => setBotAiParametersModalOpen(true)}
+	                      >
+	                        <span>Repeat Penalty</span>
+	                        <strong>{formatBotParameterValue(newBotRepetitionPenalty)}</strong>
+	                      </button>
+	                    </div>
+	                    <button
+	                      type="button"
+	                      className={`${styles.botProfileSummaryButton} ${styles.botAiPromptSummaryButton}`}
+	                      data-complete={advancedSamplerChanged ? "true" : undefined}
+	                      onClick={() => setBotAiParametersModalOpen(true)}
+	                    >
+	                      <span>Max Tokens</span>
+	                      <small>{newBotMaxTokens.toLocaleString()} token reply cap</small>
+	                      <strong>{advancedSamplerChanged ? "Tuned" : "Default"}</strong>
+	                    </button>
+	                  </div>
+	                ) : (
+	                  <div className={styles.botProfileSummaryGrid}>
+	                    {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => (
+	                      (() => {
+	                        const complete = botProfileCategoryComplete(
+	                          botProfile,
+	                          category,
+	                          trimmedName
+	                        );
+	                        return (
+	                          <button
+	                            key={category}
+	                            type="button"
+	                            className={styles.botProfileSummaryButton}
+	                            data-complete={complete ? "true" : undefined}
+	                            data-locked={!nameIsPresent ? "true" : undefined}
+	                            disabled={!nameIsPresent}
+	                            onClick={() => {
+	                              if (!nameIsPresent) return;
+	                              setColorWheelOpen(false);
+	                              setBotAvatarCustomizerOpen(false);
+	                              setBotAiParametersModalOpen(false);
+	                              setBotProfileActivePage(category);
+	                              setBotProfileBuilderOpen(true);
+	                            }}
+	                          >
+	                            <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
+	                            <small>
+	                              {nameIsPresent
+	                                ? botProfileCategorySummary(botProfile, category, trimmedName)
+	                                : "Enter a name first"}
+	                            </small>
+	                            <strong>{!nameIsPresent ? "Locked" : complete ? "Complete" : "Optional"}</strong>
+	                          </button>
+	                        );
+	                      })()
+	                    ))}
+	                  </div>
+	                )}
+	              </section>
+	              <BotProfileBuilder
+	                open={botProfileBuilderOpen}
                 activePage={botProfileActivePage}
                 profile={botProfile}
                 botName={trimmedName}
                 onActivePageChange={setBotProfileActivePage}
-                onProfileChange={setBotProfile}
-                onClose={() => setBotProfileBuilderOpen(false)}
-              />
+	                onProfileChange={setBotProfile}
+	                onClose={() => setBotProfileBuilderOpen(false)}
+	              />
+	              <BotAiParameterCustomizer
+	                open={botAiParametersModalOpen}
+	                botName={trimmedName}
+	                systemPrompt={newBotSystemPrompt}
+	                temperature={newBotTemperature}
+	                maxTokens={newBotMaxTokens}
+	                topP={newBotTopP}
+	                topK={newBotTopK}
+	                repetitionPenalty={newBotRepetitionPenalty}
+	                onSystemPromptChange={setNewBotSystemPrompt}
+	                onTemperatureChange={setNewBotTemperature}
+	                onMaxTokensChange={setNewBotMaxTokens}
+	                onTopPChange={setNewBotTopP}
+	                onTopKChange={setNewBotTopK}
+	                onRepetitionPenaltyChange={setNewBotRepetitionPenalty}
+	                onClose={() => setBotAiParametersModalOpen(false)}
+	              />
                 </>
               ) : null}
               {botPanelShowResponseSettings ? (
-              <section className={styles.botParameterCard} aria-label="Response settings">
-                <div className={styles.botParameterHeader}>
-                  <small>Plain-language choices for model routing, creativity, and answer size.</small>
-                </div>
-                <div className={styles.botParameterToggleRow}>
-                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
-                    <span>Delete protection</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={newBotDeleteProtected}
-                      data-enabled={newBotDeleteProtected ? "true" : undefined}
-                      onClick={() => setNewBotDeleteProtected((protectedNow) => !protectedNow)}
-                    >
-                      <strong>{newBotDeleteProtected ? "Protected" : "Deletes normally"}</strong>
-                      <small>
-                        {newBotDeleteProtected
-                          ? "This bot cannot be deleted by single or bulk delete."
-                          : "This bot can be deleted normally."}
-                      </small>
-                    </button>
-                  </label>
-                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
-                    <span>Online capability</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={newBotOnlineEnabled}
-                      data-enabled={newBotOnlineEnabled ? "true" : undefined}
-                      data-locked={!newBotOnlineEnabled ? "true" : undefined}
-                      onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
-                    >
-                      <strong>
-                        {newBotOnlineEnabled ? "Allowed" : "🔒 Offline only — Protected"}
-                      </strong>
-                      <small>
-                        {newBotOnlineEnabled
-                          ? "This bot may use its preferred online model."
-                          : "This bot will refuse online routing. Flip Allowed to lift the protection."}
-                      </small>
-                    </button>
-                  </label>
-                  <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
-                    <span>Flirt &amp; roleplay</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={newBotFlirtEnabled}
-                      data-enabled={newBotFlirtEnabled ? "true" : undefined}
-                      onClick={() => setNewBotFlirtEnabled((enabled) => !enabled)}
-                    >
-                      <strong>{newBotFlirtEnabled ? "Enabled" : "Disabled"}</strong>
-                      <small>
-                        {newBotFlirtEnabled
-                          ? "This bot may flirt or roleplay in-character when invited."
-                          : "This bot will politely reject romantic or sexual advances."}
-                      </small>
-                    </button>
-                  </label>
-                </div>
-                <div className={styles.botParameterField}>
-                  <span>Models & routing</span>
-                  <button
-                    type="button"
-                    className={styles.botPreferredModelsButton}
-                    aria-haspopup="dialog"
-                    aria-expanded={botPreferredModelsModalOpen ? "true" : undefined}
-                    onClick={() => {
-                      setActiveFieldHelp(null);
-                      setBotModelRoutingPage(mobileBotsPanel ? "tuning" : "chat");
-                      setBotPreferredModelsModalOpen(true);
-                    }}
-                  >
-                    <strong>
-                      {mobileBotsPanel
-                        ? "Open models & reply tuning"
-                        : "Open model & image routing"}
-                    </strong>
-                    <span>
-                      {mobileBotsPanel
-                        ? `${botTemperatureLabel(newBotTemperature)} · ${selectedLengthPreset?.label ?? "Custom"} — plus chat & image picks`
-                        : "Offline / online chat models and image-generation defaults"}
-                    </span>
-                  </button>
-                </div>
-                {!mobileBotsPanel ? (
-                  <>
-                    <div
-                      className={styles.botParameterField}
-                      onMouseEnter={(event) => showFieldHelp(
-                        botTemperatureDescription(newBotTemperature),
-                        event.currentTarget
-                      )}
-                      onMouseLeave={hideFieldHelp}
-                      onFocus={(event) => showFieldHelp(
-                        botTemperatureDescription(newBotTemperature),
-                        event.currentTarget
-                      )}
-                      onBlur={hideFieldHelp}
-                    >
-                      <div className={styles.botParameterQuestionRow}>
-                        <span className={styles.controlLabelWithInfo}>
-                          <span>Reply creativity</span>
-                          <PanelSectionInfo
-                            id="bot-parameter-info-reply-creativity-inline"
-                            label="About reply creativity"
-                            variant="control"
-                          >
-                            Controls how predictable or surprising this bot's replies should feel.
-                          </PanelSectionInfo>
-                        </span>
-                        <strong>{botTemperatureLabel(newBotTemperature)}</strong>
-                      </div>
-                      <small className={styles.botParameterInlineHelp}>
-                        Lower values keep answers predictable; higher values allow more surprise.
-                      </small>
-                      <input
-                        type="range"
-                        min={BOT_TEMPERATURE_MIN}
-                        max={BOT_TEMPERATURE_MAX}
-                        step={BOT_TEMPERATURE_STEP}
-                        value={newBotTemperature}
-                        onChange={event => setNewBotTemperature(
-                          normalizeBotTemperature(Number(event.currentTarget.value))
-                        )}
-                        className={styles.botParameterRange}
-                        aria-label="Reply creativity for this bot"
-                        style={{
-                          ["--slider-pos" as string]: String(
-                            (newBotTemperature - BOT_TEMPERATURE_MIN)
-                              / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
-                          ),
-                        } as React.CSSProperties}
-                      />
-                      <div className={styles.botParameterScale} aria-hidden="true">
-                        <span>Predictable</span>
-                        <span>Balanced</span>
-                        <span>Inventive</span>
-                      </div>
-                    </div>
-                    <fieldset
-                      className={styles.botParameterField}
-                      onMouseEnter={(event) => showFieldHelp(
-                        selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
-                        event.currentTarget
-                      )}
-                      onMouseLeave={hideFieldHelp}
-                      onFocus={(event) => showFieldHelp(
-                        selectedLengthPreset?.description ?? "A custom saved length. Pick a preset to change it.",
-                        event.currentTarget
-                      )}
-                      onBlur={hideFieldHelp}
-                    >
-                      <legend>Reply depth</legend>
-                      <small className={styles.botParameterInlineHelp}>
-                        Pick the size of answer this bot should naturally aim for.
-                      </small>
-                      <div className={styles.botLengthOptions}>
-                        {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
-                          <button
-                            key={preset.id}
-                            type="button"
-                            className={styles.botLengthOption}
-                            data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
-                            onClick={() => setNewBotMaxTokens(preset.tokens)}
-                          >
-                            <span>{preset.label}</span>
-                            <small>{preset.description}</small>
-                          </button>
-                        ))}
-                      </div>
-                    </fieldset>
-                  </>
-                ) : null}
-              </section>
+	              <section
+	                className={`${styles.botParameterCard} ${styles.botResponseSettingsCard}`}
+	                aria-label="Response settings"
+	              >
+	                <div className={styles.botParameterHeader}>
+	                  <small>Plain-language choices for permissions and model routing.</small>
+	                </div>
+	                <div className={styles.botResponseSettingsGrid}>
+	                  <div className={styles.botResponseSettingsColumn}>
+	                    <div className={styles.botParameterToggleRow}>
+	                      <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+	                        <span>Online capability</span>
+	                        <button
+	                          type="button"
+	                          role="switch"
+	                          aria-checked={newBotOnlineEnabled}
+	                          data-enabled={newBotOnlineEnabled ? "true" : undefined}
+	                          data-locked={!newBotOnlineEnabled ? "true" : undefined}
+	                          onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
+	                        >
+	                          <strong>
+	                            {newBotOnlineEnabled ? "Allowed" : "🔒 Offline only — Protected"}
+	                          </strong>
+	                          <small>
+	                            {newBotOnlineEnabled
+	                              ? "This bot may use its preferred online model."
+	                              : "This bot will refuse online routing. Flip Allowed to lift the protection."}
+	                          </small>
+	                        </button>
+	                      </label>
+	                      <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+	                        <span>Flirt &amp; roleplay</span>
+	                        <button
+	                          type="button"
+	                          role="switch"
+	                          aria-checked={newBotFlirtEnabled}
+	                          data-enabled={newBotFlirtEnabled ? "true" : undefined}
+	                          onClick={() => setNewBotFlirtEnabled((enabled) => !enabled)}
+	                        >
+	                          <strong>{newBotFlirtEnabled ? "Enabled" : "Disabled"}</strong>
+	                          <small>
+	                            {newBotFlirtEnabled
+	                              ? "This bot may flirt or roleplay in-character when invited."
+	                              : "This bot will politely reject romantic or sexual advances."}
+	                          </small>
+	                        </button>
+	                      </label>
+	                    </div>
+	                    <div className={styles.botParameterField}>
+	                      <span>Models & routing</span>
+	                      <button
+	                        type="button"
+	                        className={styles.botPreferredModelsButton}
+	                        aria-haspopup="dialog"
+	                        aria-expanded={botPreferredModelsModalOpen ? "true" : undefined}
+	                        onClick={() => {
+	                          setActiveFieldHelp(null);
+	                          setBotModelRoutingPage("chat");
+	                          setBotPreferredModelsModalOpen(true);
+	                        }}
+	                      >
+	                        <strong>
+	                          {mobileBotsPanel
+	                            ? "Open models & routing"
+	                            : "Open model & image routing"}
+	                        </strong>
+	                        <span>
+	                          Offline / online chat models and image-generation defaults
+	                        </span>
+	                      </button>
+	                    </div>
+	                  </div>
+	                </div>
+	              </section>
               ) : null}
               {botPanelShowResponseSettings && botPreferredModelsModalOpen && importBotModalPhase === "closed" && (
                 mobileBotsPanel ? (
@@ -67132,13 +70420,13 @@ function HomeContent(): React.JSX.Element {
                     <header className={styles.botPreferredModelsModalHeader}>
                       <div>
                         <span>Bot editor</span>
-                        <h4 id="bot-model-routing-title">Models & reply tuning</h4>
-                        <p>Chat routing, image defaults, and how this bot writes answers.</p>
+                        <h4 id="bot-model-routing-title">Models & routing</h4>
+                        <p>Chat routing and image defaults for this bot.</p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setBotPreferredModelsModalOpen(false)}
-                        aria-label="Close models and tuning"
+                        aria-label="Close models and routing"
                       >
                         ×
                       </button>
@@ -67163,14 +70451,6 @@ function HomeContent(): React.JSX.Element {
                         >
                           <span>Image models</span>
                           <small>Local & OpenAI</small>
-                        </button>
-                        <button
-                          type="button"
-                          data-active={botModelRoutingPage === "tuning" ? "true" : undefined}
-                          onClick={() => setBotModelRoutingPage("tuning")}
-                        >
-                          <span>Creativity</span>
-                          <small>Length & tone</small>
                         </button>
                       </nav>
                       <div className={styles.botPreferredModelsModalRoutingBody}>
@@ -67292,68 +70572,6 @@ function HomeContent(): React.JSX.Element {
                               </small>
                             </div>
                           </div>
-                        ) : null}
-                        {botModelRoutingPage === "tuning" ? (
-                          <>
-                            <div className={styles.botParameterField}>
-                              <div className={styles.botParameterQuestionRow}>
-                                <span className={styles.controlLabelWithInfo}>
-                                  <span>Reply creativity</span>
-                                  <PanelSectionInfo
-                                    id="bot-parameter-info-reply-creativity-tuning"
-                                    label="About reply creativity"
-                                    variant="control"
-                                  >
-                                    Controls how predictable or surprising this bot's replies should feel.
-                                  </PanelSectionInfo>
-                                </span>
-                                <strong>{botTemperatureLabel(newBotTemperature)}</strong>
-                              </div>
-                              <small className={styles.botParameterInlineHelp}>
-                                Lower values keep answers predictable; higher values allow more surprise.
-                              </small>
-                              <input
-                                type="range"
-                                min={BOT_TEMPERATURE_MIN}
-                                max={BOT_TEMPERATURE_MAX}
-                                step={BOT_TEMPERATURE_STEP}
-                                value={newBotTemperature}
-                                onChange={(event) =>
-                                  setNewBotTemperature(
-                                    normalizeBotTemperature(Number(event.currentTarget.value))
-                                  )
-                                }
-                                className={styles.botParameterRange}
-                                aria-label="Reply creativity for this bot"
-                                style={{
-                                  ["--slider-pos" as string]: String(
-                                    (newBotTemperature - BOT_TEMPERATURE_MIN)
-                                      / (BOT_TEMPERATURE_MAX - BOT_TEMPERATURE_MIN)
-                                  ),
-                                } as React.CSSProperties}
-                              />
-                            </div>
-                            <fieldset className={styles.botParameterField}>
-                              <legend>Reply depth</legend>
-                              <small className={styles.botParameterInlineHelp}>
-                                Pick the size of answer this bot should naturally aim for.
-                              </small>
-                              <div className={styles.botLengthOptions}>
-                                {BOT_REPLY_LENGTH_PRESETS.map((preset) => (
-                                  <button
-                                    key={preset.id}
-                                    type="button"
-                                    className={styles.botLengthOption}
-                                    data-selected={newBotMaxTokens === preset.tokens ? "true" : undefined}
-                                    onClick={() => setNewBotMaxTokens(preset.tokens)}
-                                  >
-                                    <span>{preset.label}</span>
-                                    <small>{preset.description}</small>
-                                  </button>
-                                ))}
-                              </div>
-                            </fieldset>
-                          </>
                         ) : null}
                       </div>
                     </div>
@@ -67656,7 +70874,7 @@ function HomeContent(): React.JSX.Element {
                 </div>
               </div>
 
-              {bots.length > 0 && botPanelDashboardActive && (
+              {baseFilteredPanelBots.length > 0 && botPanelDashboardActive && (
                 <div className={styles.botGroupGrid} role="list" aria-label="Bot color groups">
                   <button
                     type="button"
@@ -67664,36 +70882,26 @@ function HomeContent(): React.JSX.Element {
                     className={`${styles.botGroupTile} ${styles.botGroupTileNeutral}`}
                     data-selected={botPanelGroup === BOT_LIBRARY_FILTER_ALL ? "true" : undefined}
                     onClick={() => setBotPanelGroup(BOT_LIBRARY_FILTER_ALL)}
-                    aria-label={`Show all bots (${bots.length})`}
+                    aria-label={`Show all filtered bots (${baseFilteredPanelBots.length})`}
                   >
                     <span className={styles.botGroupTileLetter} aria-hidden="true">
                       <BotGlyph name="triangle" size={16} strokeWidth={2.3} />
                     </span>
                     <span className={styles.botGroupTileCount}>
-                      {bots.length === 1 ? "1 bot" : `${bots.length} bots`}
+                      {baseFilteredPanelBots.length === 1
+                        ? "1 bot"
+                        : `${baseFilteredPanelBots.length} bots`}
                     </span>
                   </button>
                   {botGroupOrder.map(group => {
                     const groupBots = botGroupBuckets[group.id];
                     const count = groupBots.length;
-                    // Build the rest/hover gradients from the actual
-                    // bot colors in this bucket so each tile reads as
-                    // its own spectrum slice while the prism border
-                    // still anchors the letter identity.
-                    const gradientRest = buildBotGroupGradient(
-                      groupBots, resolvedTheme, panelColorHarmonyActive, 22
-                    );
-                    const gradientHover = buildBotGroupGradient(
-                      groupBots, resolvedTheme, panelColorHarmonyActive, 32
-                    );
                     const tileStyle: React.CSSProperties = {
                       ["--group-color" as string]: group.swatch,
-                      ...(gradientRest
-                        ? { ["--group-gradient" as string]: gradientRest }
-                        : {}),
-                      ...(gradientHover
-                        ? { ["--group-gradient-hover" as string]: gradientHover }
-                        : {}),
+                      ["--group-gradient" as string]:
+                        `linear-gradient(145deg, color-mix(in srgb, ${group.swatch} 24%, var(--bg) 76%), color-mix(in srgb, ${group.swatch} 10%, var(--bg) 90%))`,
+                      ["--group-gradient-hover" as string]:
+                        `linear-gradient(145deg, color-mix(in srgb, ${group.swatch} 34%, var(--bg) 66%), color-mix(in srgb, ${group.swatch} 16%, var(--bg) 84%))`,
                     };
                     return (
                       <button
@@ -67708,7 +70916,7 @@ function HomeContent(): React.JSX.Element {
                         aria-label={`Open ${group.label} bots (${count})`}
                       >
                         <span className={styles.botGroupTileLetter} aria-hidden="true">
-                          {GROUP_LETTER_OVERRIDES[group.id]}
+                          {group.letter}
                         </span>
                         <span className={styles.botGroupTileCount}>
                           {count === 1 ? "1 bot" : `${count} bots`}
@@ -67723,11 +70931,57 @@ function HomeContent(): React.JSX.Element {
                 <div className={styles.botLibraryListArea}>
                   <div className={styles.botLibraryListHeader}>
                     <h4 className={styles.sectionLabel}>{activeBotPanelFilterLabel}</h4>
-                    <span className={styles.botGroupDrilldownCount}>
-                      {visibleBotPanelBots.length === 1
-                        ? "1 bot"
-                        : `${visibleBotPanelBots.length} bots`}
-                    </span>
+                    <div className={styles.botLibraryListHeaderActions}>
+                      <span className={styles.botGroupDrilldownCount}>
+                        {visibleBotPanelBots.length === 1
+                          ? "1 bot"
+                          : `${visibleBotPanelBots.length} bots`}
+                      </span>
+                      <div className={styles.botLibraryFilterControls}>
+                        <select
+                          className={styles.botLibraryFilterSelect}
+                          aria-label="Bot library filter"
+                          value={botLibraryGroupFilterId}
+                          onChange={(event) => {
+                            applyBotLibraryGroupFilter(event.currentTarget.value);
+                          }}
+                        >
+                          <option value={BOT_LIBRARY_GROUP_FILTER_ALL}>
+                            No group selected
+                          </option>
+                          <option value={BOT_LIBRARY_FAVORITES_GROUP_ID}>
+                            Favorites ({favoriteBotIdSet.size})
+                          </option>
+                          {customBotLibraryGroups.map((group) => {
+                            const count = group.botIds.filter((botId) =>
+                              existingBotIds.has(botId)
+                            ).length;
+                            return (
+                              <option key={group.id} value={group.id}>
+                                {group.name} ({botLibraryGroupCountLabel(
+                                  count,
+                                  BOT_LIBRARY_GROUP_BOT_CAP
+                                )})
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {activeBotLibraryGroupFilter &&
+                        !activeBotLibraryGroupFilter.builtIn ? (
+                          <button
+                            type="button"
+                            className={styles.botLibraryFilterRename}
+                            onClick={() =>
+                              editBotLibraryGroup(activeBotLibraryGroupFilter.id)
+                            }
+                            aria-label={`Edit ${activeBotLibraryGroupFilter.name}`}
+                            data-glyph-tooltip={`Edit ${activeBotLibraryGroupFilter.name}`}
+                          >
+                            <PencilLine size={14} strokeWidth={2.15} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                   {/* List-level data attrs mirror the sidebar conversation list:
                       `data-delete-holding` during a press-and-hold on any card ×,
@@ -67747,35 +71001,44 @@ function HomeContent(): React.JSX.Element {
                         pendingDeleteKey === DELETE_ALL_BOTS_KEY ? "true" : undefined
                       }
                     >
-                      {visibleBotPanelBots.map(b => {
-                      const isEditing = editingBotId === b.id;
-                      // Live preview during editing — the card mirrors the
-                      // values currently in the top form so color/glyph
-                      // changes are visible on the card itself before
-                      // "Update" commits.
-                      const liveColor = isEditing ? newBotColor : b.color;
-                      const liveGlyph = isEditing
-                        ? newBotGlyph
-                        : (isBotGlyphName(b.glyph) ? b.glyph : DEFAULT_BOT_GLYPH);
-                      // Adornments use a display-only harmony pass at large
-                      // counts so stacked card accents read as one spectrum;
-                      // the saved bot color and edit swatch stay exact.
-                      const cardAccent = liveColor
-                        ? panelBotDisplayAccent(
-                            liveColor,
-                            resolvedTheme,
-                            panelColorHarmonyActive
-                          )
-                        : null;
-                      const cardStyle = cardAccent
-                        ? ({
-                            "--bot-color": cardAccent,
-                            "--bot-tile-ink": pickReadableText(cardAccent),
-                          } as React.CSSProperties)
-                        : undefined;
-                      const cardClassName = isEditing
-                        ? `${styles.botCard} ${styles.botCardEditing}`
-                        : styles.botCard;
+                      {visibleBotPanelBots.length === 0 ? (
+                        <p className={styles.botLibraryEmptyFilter} role="status">
+                          {activeBotLibraryGroupFilter?.id === BOT_LIBRARY_FAVORITES_GROUP_ID
+                            ? "No favorite bots yet."
+                            : activeBotLibraryGroupFilter
+                              ? "No bots in this group."
+                              : "No bots match this filter."}
+                        </p>
+                      ) : visibleBotPanelBots.map((b) => {
+                        const isEditing = editingBotId === b.id;
+                        // Live preview during editing — the card mirrors the
+                        // values currently in the top form so color/glyph
+                        // changes are visible on the card itself before
+                        // "Update" commits.
+                        const liveColor = isEditing ? newBotColor : b.color;
+                        const liveGlyph = isEditing
+                          ? newBotGlyph
+                          : (isBotGlyphName(b.glyph) ? b.glyph : DEFAULT_BOT_GLYPH);
+                        const isFavorite = favoriteBotIdSet.has(b.id);
+                        // Adornments use a display-only harmony pass at large
+                        // counts so stacked card accents read as one spectrum;
+                        // the saved bot color and edit swatch stay exact.
+                        const cardAccent = liveColor
+                          ? panelBotDisplayAccent(
+                              liveColor,
+                              resolvedTheme,
+                              panelColorHarmonyActive
+                            )
+                          : null;
+                        const cardStyle = cardAccent
+                          ? ({
+                              "--bot-color": cardAccent,
+                              "--bot-tile-ink": pickReadableText(cardAccent),
+                            } as React.CSSProperties)
+                          : undefined;
+                        const cardClassName = isEditing
+                          ? `${styles.botCard} ${styles.botCardEditing}`
+                          : styles.botCard;
 
                       return (
                         // Two siblings inside a plain wrapper: the tile area
@@ -67787,12 +71050,17 @@ function HomeContent(): React.JSX.Element {
                         // pattern exactly. `draggable` lifts the wrapper for
                         // reorder; nested <button> children are drag-inert
                         // by default so the × and the edit-tap still work.
-                        <div key={b.id} className={cardClassName} style={cardStyle}>
+                        <div
+                          key={b.id}
+                          className={cardClassName}
+                          style={cardStyle}
+                          data-favorite={isFavorite ? "true" : undefined}
+                        >
                           <button
                             type="button"
                             className={styles.botCardTile}
                             onClick={() => openBotPanelHub(b)}
-                            aria-label={`Open options for ${b.name}`}
+                            aria-label={`Open options for ${b.name}${isFavorite ? ", favorite" : ""}`}
                             aria-pressed={isEditing}
                           >
                             <span className={styles.botCardGlyph} aria-hidden="true">
@@ -68185,11 +71453,17 @@ function HomeContent(): React.JSX.Element {
           <>
           <div
             className={`${styles.panel} ${styles.panelImages}`}
+            data-prism-panel="images"
+            data-prism-panel-layer="true"
             data-dev-panel-safe-area="right"
             data-closing={panelClosing ? "true" : undefined}
             data-image-scope={imagePanelScope}
             data-private-mode={appWidePrivateMode ? "true" : undefined}
             aria-busy={imageGenInflightHere > 0}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="images-panel-title"
+            tabIndex={-1}
             style={{
               ...(imagePanelBotThemeStyle ?? {}),
               ...(imagesPanelChromeStyle ?? {}),
@@ -68221,7 +71495,11 @@ function HomeContent(): React.JSX.Element {
                     ←
                   </button>
                 ) : null}
-                <h3 className={styles.panelImagesTitle} title={imagePanelTitleFull}>
+                <h3
+                  id="images-panel-title"
+                  className={styles.panelImagesTitle}
+                  title={imagePanelTitleFull}
+                >
                   <span
                     className={`${styles.panelImagesTitlePrimary} ${
                       imagePrivateMode ? styles.panelImagesTitlePrimaryPrivate : ""
@@ -68387,7 +71665,26 @@ function HomeContent(): React.JSX.Element {
                       : "Generating…"}
                 </button>
               </form>
-            ) : null}
+            ) : (
+              <div className={styles.imageUnavailableState} role="status">
+                <ImageGlyph size={22} aria-hidden="true" />
+                <div>
+                  <strong>Image generation needs a model</strong>
+                  <p>
+                    Add an online image key or configure a local image model, then this
+                    drawer will show the prompt controls here.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openSettingsPanel("models");
+                  }}
+                >
+                  Open Settings
+                </button>
+              </div>
+            )}
             {imageKeywordEditorOpen && (
               <div
                 className={styles.imageKeywordModalBackdrop}
@@ -68982,6 +72279,7 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeeArrivalTimerRef.current);
       coffeeArrivalTimerRef.current = null;
     }
+    clearCoffeeSeatArrivalTimers();
   };
   const abortCoffeeRequests = () => {
     coffeeTurnAbortRef.current?.abort();
@@ -69117,19 +72415,31 @@ function HomeContent(): React.JSX.Element {
       if (excludedBotIds?.has(botId)) continue;
       if (node.dataset.cupTopOffEligible !== "true") continue;
       const rect = node.getBoundingClientRect();
-      if (
-        clientX < rect.left ||
-        clientX > rect.right ||
-        clientY < rect.top ||
-        clientY > rect.bottom
-      ) {
-        continue;
-      }
+      if (!coffeePotPointerIsInsideTarget(clientX, clientY, rect)) continue;
       const progress = Number(node.dataset.cupProgress);
       if (!Number.isFinite(progress)) continue;
       return { botId, progress };
     }
     return null;
+  };
+  const coffeeCupFallbackTopOffTarget = (
+    excludedBotIds?: ReadonlySet<string>
+  ): { botId: string; progress: number } | null => {
+    let fallback: { botId: string; progress: number } | null = null;
+    for (const [botId, node] of coffeeCupElementByBotIdRef.current.entries()) {
+      if (!node.isConnected) {
+        coffeeCupElementByBotIdRef.current.delete(botId);
+        continue;
+      }
+      if (excludedBotIds?.has(botId)) continue;
+      if (node.dataset.cupTopOffEligible !== "true") continue;
+      const progress = Number(node.dataset.cupProgress);
+      if (!Number.isFinite(progress)) continue;
+      if (!fallback || progress > fallback.progress) {
+        fallback = { botId, progress };
+      }
+    }
+    return fallback;
   };
   const setCoffeeCupElement = (botId: string, node: HTMLDivElement | null): void => {
     if (node) {
@@ -69205,9 +72515,48 @@ function HomeContent(): React.JSX.Element {
     coffeePotDragRef.current = nextDrag;
     setCoffeePotDrag(nextDrag);
   };
+  const commitPartialCoffeePotRefill = (pointerId: number): boolean => {
+    const runtime = coffeePotDragRuntimeRef.current;
+    const latest = coffeePotDragRef.current;
+    if (
+      !runtime ||
+      runtime.pointerId !== pointerId ||
+      !latest ||
+      latest.pointerId !== pointerId ||
+      !latest.pourReady ||
+      !latest.pouringBotId ||
+      latest.pourProgress == null ||
+      runtime.completedBotIds.has(latest.pouringBotId) ||
+      coffeePotTopOffBusyBotIdRef.current !== null
+    ) {
+      return false;
+    }
+    const fromFrameIndex = coffeeCupStatusForProgress(
+      latest.pourProgress,
+      latest.pouringBotId
+    ).frameIndex;
+    const activeFrameIndex = coffeeCupTopOffFrameIndexForPour(
+      fromFrameIndex,
+      coffeePotFillFrameIndexRef.current
+    );
+    if (activeFrameIndex == null || activeFrameIndex >= fromFrameIndex) return false;
+    const progressAfter = coffeeCupTopOffProgressAfterForPour(
+      fromFrameIndex,
+      coffeePotFillFrameIndexRef.current
+    );
+    if (progressAfter == null || progressAfter >= latest.pourProgress) return false;
+    runtime.completedBotIds.add(latest.pouringBotId);
+    topOffCoffeeCupFromPotRef.current(
+      latest.pouringBotId,
+      latest.pourProgress,
+      progressAfter
+    );
+    return true;
+  };
   const finishCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
     const runtime = coffeePotDragRuntimeRef.current;
     if (!runtime || runtime.pointerId !== event.pointerId) return;
+    commitPartialCoffeePotRefill(event.pointerId);
     const activeTopOffBotId = coffeeCupTopOffAnimationActiveBotIdRef.current;
     const keepFillAnimation =
       coffeePotTopOffBusyBotIdRef.current !== null ||
@@ -69226,7 +72575,28 @@ function HomeContent(): React.JSX.Element {
       clearCoffeeCupTopOffFillAnimation();
     }
   };
-  const topOffCoffeeCupFromPot = async (botId: string, progress: number): Promise<void> => {
+  const refillFallbackCoffeeCupFromPot = (): void => {
+    if (coffeePotTopOffBusyBotIdRef.current) return;
+    const target = coffeeCupFallbackTopOffTarget();
+    if (!target) return;
+    showCoffeeCupTopOffFillAnimation(
+      target.botId,
+      target.progress,
+      `fallback:${target.botId}:${Date.now()}`
+    );
+    topOffCoffeeCupFromPotRef.current(target.botId, target.progress);
+  };
+  const handleCoffeePotKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    refillFallbackCoffeeCupFromPot();
+  };
+  const topOffCoffeeCupFromPot = async (
+    botId: string,
+    progress: number,
+    progressAfter?: number | null
+  ): Promise<void> => {
     const conversation = coffeeConversationRef.current ?? coffeeConversation;
     if (!conversation || coffeePotTopOffBusyBotIdRef.current) return;
     setCoffeePotTopOffBusyBotId(botId);
@@ -69238,7 +72608,7 @@ function HomeContent(): React.JSX.Element {
         )}/top-off`,
         {
           method: "POST",
-          body: JSON.stringify({ progress }),
+          body: JSON.stringify({ progress, progressAfter }),
         }
       );
       setCoffeeConversation(response.conversation);
@@ -69257,8 +72627,8 @@ function HomeContent(): React.JSX.Element {
       setCoffeePotTopOffBusyBotId(null);
     }
   };
-  topOffCoffeeCupFromPotRef.current = (botId, progress) => {
-    void topOffCoffeeCupFromPot(botId, progress);
+  topOffCoffeeCupFromPotRef.current = (botId, progress, progressAfter) => {
+    void topOffCoffeeCupFromPot(botId, progress, progressAfter);
   };
   const copyCoffeeSeatDebugCoordinates = async (text: string) => {
     try {
@@ -69686,14 +73056,6 @@ function HomeContent(): React.JSX.Element {
       playerTeamId: coffeeTeamsDraftPlayerTeamId,
     };
   };
-  const coffeeSearchTerm = coffeeSearch.trim().toLowerCase();
-  const coffeeFilteredBots = coffeeBotsLibrary.filter((bot) => {
-    if (!coffeeSearchTerm) return true;
-    return (
-      bot.name.toLowerCase().includes(coffeeSearchTerm) ||
-      bot.system_prompt.toLowerCase().includes(coffeeSearchTerm)
-    );
-  });
   const resetCoffeeToPicker = () => {
     clearCoffeeArrivalTimer();
     clearCoffeeLoopTimer();
@@ -69775,7 +73137,8 @@ function HomeContent(): React.JSX.Element {
     conversationId: string,
     endsAtHint?: number | null,
     ignoreDraft = false,
-    delayMultiplier = 1
+    delayMultiplier = 1,
+    delayOverrideMs?: number | null
   ) => {
     clearCoffeeLoopTimer();
     if (coffeeDevModeEnabledRef.current) return;
@@ -69790,7 +73153,10 @@ function HomeContent(): React.JSX.Element {
     }
     if (coffeeAutoplayPausedRef.current) return;
     if (!ignoreDraft && coffeeDraftRef.current.trim().length > 0) return;
-    const delay = randomCoffeeAutonomousDelayMs(coffeeSessionSettingsRef.current, delayMultiplier);
+    const delay =
+      typeof delayOverrideMs === "number" && Number.isFinite(delayOverrideMs)
+        ? Math.max(0, Math.round(delayOverrideMs))
+        : randomCoffeeAutonomousDelayMs(coffeeSessionSettingsRef.current, delayMultiplier);
     const sessionDeadline = effectiveEndsAt;
     const startAutonomousTurn = () => {
       const typingDeferralMs = coffeeTableTalkAutonomousDeferralMs(conversationId);
@@ -69805,6 +73171,55 @@ function HomeContent(): React.JSX.Element {
     };
     coffeeLoopTimerRef.current = setTimeout(startAutonomousTurn, delay);
   };
+  const scheduleCoffeeAutonomousTurnWhenRhythmReady = (
+    conversationId: string,
+    endsAtHint?: number | null,
+    delayMs = 850,
+    requireArrivalPhase = false
+  ) => {
+    if (requireArrivalPhase && coffeeSessionPhaseRef.current !== "arriving") return;
+    if (coffeeAutoplayPausedRef.current || coffeeDevModeEnabledRef.current) return;
+    if (coffeeDraftRef.current.trim().length > 0) return;
+    const effectiveEndsAt = coffeeSessionEndsAtRef.current ?? endsAtHint ?? null;
+    if (!effectiveEndsAt || Date.now() >= effectiveEndsAt) {
+      assignCoffeeSessionPhase("finished");
+      return;
+    }
+    const rhythm = coffeeTurnRhythmStateRef.current;
+    if (!coffeeArrivalAutoplayCanScheduleNow(rhythm)) {
+      clearCoffeeLoopTimer();
+      const retryDelayMs = coffeeArrivalAutoplayRetryDelayMs(rhythm, delayMs);
+      coffeeLoopTimerRef.current = setTimeout(() => {
+        scheduleCoffeeAutonomousTurnWhenRhythmReady(
+          conversationId,
+          effectiveEndsAt,
+          delayMs,
+          requireArrivalPhase
+        );
+      }, retryDelayMs);
+      return;
+    }
+    scheduleCoffeeAutonomousTurn(conversationId, effectiveEndsAt, true, 1, delayMs);
+  };
+  const scheduleCoffeeArrivalAutonomousTurn = (
+    conversationId: string,
+    endsAtHint?: number | null,
+    delayMs = 850
+  ) => {
+    if (coffeeSessionPhaseRef.current !== "arriving") return;
+    if (coffeeAutoplayPausedRef.current || coffeeDevModeEnabledRef.current) return;
+    if (coffeeDraftRef.current.trim().length > 0) return;
+    if (coffeeFirmlySeatedBotIds().length === 0) {
+      clearCoffeeLoopTimer();
+      const retryDelayMs = Math.max(120, Math.round(delayMs));
+      coffeeLoopTimerRef.current = setTimeout(() => {
+        scheduleCoffeeArrivalAutonomousTurn(conversationId, endsAtHint, 0);
+      }, retryDelayMs);
+      return;
+    }
+    scheduleCoffeeAutonomousTurnWhenRhythmReady(conversationId, endsAtHint, delayMs, true);
+  };
+  scheduleCoffeeArrivalAutonomousTurnRef.current = scheduleCoffeeArrivalAutonomousTurn;
   const currentCoffeeSessionRemainingMs = (): number | null => {
     if (coffeeDevModeEnabledRef.current) return null;
     const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
@@ -69815,7 +73230,8 @@ function HomeContent(): React.JSX.Element {
     if (coffeeSessionStartedAtRef.current == null) {
       coffeeSessionStartedAtRef.current = Date.now();
     }
-    setCoffeeWalkingInBotIds([]);
+    assignCoffeeWalkingInBotIds([]);
+    assignCoffeeNameplatePendingBotIds([]);
     assignCoffeeSessionPhase("live");
   };
   const currentCoffeePresentBotIdsForRequest = (
@@ -69836,7 +73252,7 @@ function HomeContent(): React.JSX.Element {
     if (directedSpeakerBotId && seated.includes(directedSpeakerBotId)) {
       arrivedSet.add(directedSpeakerBotId);
     }
-    const present = seated.filter((id) => arrivedSet.has(id));
+    const present = coffeeFirmlySeatedBotIds(seated.filter((id) => arrivedSet.has(id)));
     return present;
   };
   const startCoffeeArrivalSequence = (
@@ -69852,7 +73268,8 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionStartedAtRef.current = startedAt;
     assignCoffeeSessionEndsAtMs(endsAt);
     assignCoffeeSessionPhase("arriving");
-    setCoffeeWalkingInBotIds([]);
+    assignCoffeeWalkingInBotIds([]);
+    assignCoffeeNameplatePendingBotIds([]);
     assignCoffeeArrivedBotIds([]);
     let nextIndex = 0;
     const arrived: string[] = [];
@@ -69864,6 +73281,13 @@ function HomeContent(): React.JSX.Element {
       }
       const ordered = seatOrder.filter((id) => arrivedSet.has(id));
       assignCoffeeArrivedBotIds(ordered);
+      if (ordered.length > 0) {
+        const arrivalTurnDelayMs =
+          coffeeFirmlySeatedBotIds(ordered).length > 0
+            ? 850
+            : coffeeArrivalMaxFirmSeatDelayMs() + 120;
+        scheduleCoffeeArrivalAutonomousTurn(conversation.id, endsAt, arrivalTurnDelayMs);
+      }
     };
     const revealArrivals = () => {
       const elapsedMs = Date.now() - startedAt;
@@ -69874,11 +73298,11 @@ function HomeContent(): React.JSX.Element {
         nextIndex += 1;
         if (!arrived.includes(arrivingBotId)) {
           arrived.push(arrivingBotId);
-          newlyArrived.push(arrivingBotId);
-          changed = true;
-          setCoffeeWalkingInBotIds((current) =>
-            current.includes(arrivingBotId) ? current : [...current, arrivingBotId]
-          );
+          if (!coffeeArrivedBotIdsRef.current.includes(arrivingBotId)) {
+            newlyArrived.push(arrivingBotId);
+            changed = true;
+            startCoffeeSeatArrival(arrivingBotId);
+          }
         }
       }
       if (changed) {
@@ -69891,11 +73315,12 @@ function HomeContent(): React.JSX.Element {
       }
       coffeeArrivalTimerRef.current = setTimeout(() => {
         assignCoffeeArrivedBotIds(conversation.botGroupIds ?? arrived);
+        assignCoffeeNameplatePendingBotIds([]);
         enterCoffeeLivePhase();
-      }, COFFEE_ARRIVAL_SETTLE_MS);
+        scheduleCoffeeAutonomousTurnWhenRhythmReady(conversation.id, endsAt, 520);
+      }, coffeeArrivalMaxFirmSeatDelayMs());
     };
     revealArrivals();
-    scheduleCoffeeAutonomousTurn(conversation.id, endsAt, true, 0.35);
   };
   const persistCoffeeTopicToServer = async (
     topic: string,
@@ -70182,6 +73607,11 @@ function HomeContent(): React.JSX.Element {
   };
   const createCoffeeGroupFromSelection = async (): Promise<CoffeeGroupState | null> => {
     if (coffeeBusy || !coffeeSelectionValid) return null;
+    const duplicateGroup = findDuplicateCoffeeGroupByRoster(coffeeGroups, coffeeSelectedSeatBotIds);
+    if (duplicateGroup) {
+      setCoffeeError(`You already have a Coffee Group with these bots: ${duplicateGroup.name}.`);
+      return null;
+    }
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -70220,6 +73650,11 @@ function HomeContent(): React.JSX.Element {
       coffeeSeatsFromBotIds(coffeeConversation.botGroupIds ?? []);
     if (groupBotIds.filter((id): id is string => typeof id === "string").length < COFFEE_GROUP_MIN_SIZE_CLIENT) {
       setCoffeeError("This Coffee Session does not have enough seated bots to save as a group.");
+      return null;
+    }
+    const duplicateGroup = findDuplicateCoffeeGroupByRoster(coffeeGroups, groupBotIds);
+    if (duplicateGroup) {
+      setCoffeeError(`You already have a Coffee Group with these bots: ${duplicateGroup.name}.`);
       return null;
     }
     setCoffeeBusy(true);
@@ -70640,14 +74075,25 @@ function HomeContent(): React.JSX.Element {
     setCoffeeError(null);
     const abortController = new AbortController();
     coffeeContinueAbortRef.current = abortController;
-    if (directedSpeakerBotId) {
-      seatCoffeeArrivalBotIds(convSnap, [directedSpeakerBotId]);
-    }
-    const presentBotIds = currentCoffeePresentBotIdsForRequest(
-      conversationId,
-      directedSpeakerBotId
-    );
     try {
+      if (directedSpeakerBotId) {
+        await waitForCoffeeBotToBeFirmlySeated(directedSpeakerBotId);
+        if (
+          coffeeConversationRef.current?.id !== conversationId ||
+          !coffeeBotIsFirmlySeated(directedSpeakerBotId)
+        ) {
+          setCoffeePendingSpeakerBotId(null);
+          const nextRhythmState =
+            coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle";
+          coffeeTurnRhythmStateRef.current = nextRhythmState;
+          setCoffeeTurnRhythmState(nextRhythmState);
+          return;
+        }
+      }
+      const presentBotIds = currentCoffeePresentBotIdsForRequest(
+        conversationId,
+        directedSpeakerBotId
+      );
       const response = await api<{
         ok: true;
         conversation: CoffeeConversationState;
@@ -70685,8 +74131,20 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       const responseSpeakerBotId = response.speakerBotId;
-      if (!responseSpeakerBotId) return;
+      if (!responseSpeakerBotId) {
+        setCoffeePendingSpeakerBotId(null);
+        setCoffeePendingRevealConversation(null);
+        const nextRhythmState =
+          coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle";
+        coffeeTurnRhythmStateRef.current = nextRhythmState;
+        setCoffeeTurnRhythmState(nextRhythmState);
+        if (coffeeSessionPhaseRef.current === "arriving" && presentBotIds.length > 0) {
+          scheduleCoffeeArrivalAutonomousTurn(conversationId, endsAtLive, 1100);
+        }
+        return;
+      }
       seatCoffeeArrivalBotIds(response.conversation, [responseSpeakerBotId]);
+      await waitForCoffeeBotToBeFirmlySeated(responseSpeakerBotId);
       const pollUpdate = coffeePollTurnUpdateFromResponse(response);
       if (pollUpdate.hasPollUpdate) {
         setCoffeeActivePoll(pollUpdate.poll);
@@ -70963,6 +74421,70 @@ function HomeContent(): React.JSX.Element {
     }
     await continueCoffeeSession(coffeeConversation.id, undefined, botId);
   };
+  const submitCoffeeUserAction = async (
+    rawAction: string,
+    actionText: string
+  ): Promise<boolean> => {
+    const activeConversation = coffeeConversationRef.current ?? coffeeConversation;
+    if (!activeConversation?.id) return false;
+    const normalizedAction = actionText.replace(/\s+/g, " ").trim();
+    if (!normalizedAction) return false;
+
+    const optimisticAction: CoffeeUserActionPullQuote = {
+      v: 1,
+      name: "coffeeUserAction",
+      source: "user",
+      action: normalizedAction,
+      occurredAt: new Date().toISOString(),
+      conversationId: activeConversation.id,
+    };
+    coffeeLastSubmittedDraftRef.current = rawAction;
+    coffeeDraftRef.current = "";
+    setCoffeeDraft("");
+    coffeeComposerRichRef.current?.setValue("");
+    setCoffeeError(null);
+    setCoffeeUserActionPullQuote(optimisticAction);
+
+    try {
+      const response = await api<{
+        ok: true;
+        conversation: CoffeeConversationState;
+        coffeeUserAction: CoffeeUserActionPayload;
+      }>(`/api/coffee/sessions/${encodeURIComponent(activeConversation.id)}/user-action`, {
+        method: "POST",
+        body: JSON.stringify({ action: rawAction }),
+      });
+      if (coffeeConversationRef.current?.id === activeConversation.id) {
+        setCoffeeUserActionPullQuote({
+          ...response.coffeeUserAction,
+          conversationId: activeConversation.id,
+        });
+        const revealInProgress =
+          coffeePendingRevealConversation !== null ||
+          coffeeTurnRhythmStateRef.current === "tableTyping";
+        if (!revealInProgress) {
+          setCoffeeConversation(response.conversation);
+          coffeeConversationRef.current = response.conversation;
+        }
+      }
+      void refreshConversations().catch((err) => {
+        console.warn("[coffee] refreshConversations after user action failed", err);
+      });
+      return true;
+    } catch (err) {
+      setCoffeeUserActionPullQuote((current) =>
+        current?.conversationId === optimisticAction.conversationId &&
+        current.occurredAt === optimisticAction.occurredAt
+          ? null
+          : current
+      );
+      coffeeDraftRef.current = rawAction;
+      setCoffeeDraft(rawAction);
+      coffeeComposerRichRef.current?.setValue(rawAction);
+      setCoffeeError(err instanceof Error ? err.message : "Failed to save the table action.");
+      return false;
+    }
+  };
   const sendCoffeeTurn = async () => {
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmed = liveDraft.trim();
@@ -70986,13 +74508,24 @@ function HomeContent(): React.JSX.Element {
     }
     const draftStageDirections = extractStageDirections(trimmed);
     const draftTableText = draftStageDirections.mainText.trim();
+    const draftIsActionOnly =
+      draftTableText.length === 0 && draftStageDirections.actions.length > 0;
+    if (
+      draftIsActionOnly &&
+      (coffeeSessionPhaseRef.current === "live" || coffeeSessionPhaseRef.current === "arriving")
+    ) {
+      const actionText = draftStageDirections.actions
+        .map((action) => action.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join("; ");
+      await submitCoffeeUserAction(trimmed, actionText);
+      return;
+    }
     const pendingRevealMessages = coffeePendingRevealConversation?.messages ?? [];
     const pendingRevealLatestMessage =
       pendingRevealMessages.length > 0
         ? pendingRevealMessages[pendingRevealMessages.length - 1]
         : null;
-    const draftIsActionOnly =
-      draftTableText.length === 0 && draftStageDirections.actions.length > 0;
     const actionShouldWaitForBotReveal =
       draftIsActionOnly &&
       coffeeTurnRhythmState === "tableTyping" &&
@@ -71127,6 +74660,15 @@ function HomeContent(): React.JSX.Element {
         : activeEndsAt ?? Date.now() + coffeeSessionDurationMs(nextConversation);
       assignCoffeeSessionEndsAtMs(endsAt);
       seatCoffeeArrivalBotIds(nextConversation, [speaker.id]);
+      await waitForCoffeeBotToBeFirmlySeated(speaker.id);
+      if (
+        coffeeSessionPhaseRef.current === "arriving" &&
+        !coffeeBotIsFirmlySeated(speaker.id)
+      ) {
+        setCoffeePendingSpeakerBotId(null);
+        setCoffeeTurnRhythmState("idle");
+        return;
+      }
       if (coffeeSessionPhase !== "arriving") {
         enterCoffeeLivePhase();
       }
@@ -71147,9 +74689,6 @@ function HomeContent(): React.JSX.Element {
     const directedMentionBotIds = findCoffeeDirectedMentionBotIds(trimmed);
     const directedSpeakerBotId = directedMentionBotIds[0];
     const directedFollowupBotIds = directedMentionBotIds.slice(1);
-    if (directedSpeakerBotId) {
-      seatCoffeeArrivalBotIds(activeConversation, [directedSpeakerBotId]);
-    }
     setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
     coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
       trimmed,
@@ -71166,11 +74705,26 @@ function HomeContent(): React.JSX.Element {
     }
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
-    const presentBotIds = currentCoffeePresentBotIdsForRequest(
-      activeConversation.id,
-      directedSpeakerBotId
-    );
     try {
+      if (directedSpeakerBotId) {
+        await waitForCoffeeBotToBeFirmlySeated(directedSpeakerBotId);
+        if (
+          coffeeConversationRef.current?.id !== activeConversation.id ||
+          !coffeeBotIsFirmlySeated(directedSpeakerBotId)
+        ) {
+          setCoffeePendingSpeakerBotId(null);
+          setCoffeeUserRevealText("");
+          const nextRhythmState =
+            coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "idle";
+          coffeeTurnRhythmStateRef.current = nextRhythmState;
+          setCoffeeTurnRhythmState(nextRhythmState);
+          return;
+        }
+      }
+      const presentBotIds = currentCoffeePresentBotIdsForRequest(
+        activeConversation.id,
+        directedSpeakerBotId
+      );
       const response = await api<{
         ok: true;
         conversation: CoffeeConversationState;
@@ -71210,6 +74764,7 @@ function HomeContent(): React.JSX.Element {
       const responseSpeakerBotId = response.speakerBotId;
       if (!responseSpeakerBotId) return;
       seatCoffeeArrivalBotIds(response.conversation, [responseSpeakerBotId]);
+      await waitForCoffeeBotToBeFirmlySeated(responseSpeakerBotId);
       const pollUpdate = coffeePollTurnUpdateFromResponse(response);
       if (pollUpdate.hasPollUpdate) {
         setCoffeeActivePoll(pollUpdate.poll);
@@ -71934,13 +75489,31 @@ function HomeContent(): React.JSX.Element {
   );
   const renderCoffeeTranscriptPanel = (): React.JSX.Element | null => {
     if (!coffeeConversation) return null;
-    const transcriptMessages = coffeeTranscriptVisibleMessages(coffeeConversation.messages);
+    const transcriptHistoryLoaded = Object.prototype.hasOwnProperty.call(
+      coffeeTranscriptMessagesByConversationId,
+      coffeeConversation.id
+    );
+    const transcriptSourceMessages = mergeCoffeeTranscriptMessageSources(
+      coffeeTranscriptMessagesByConversationId[coffeeConversation.id],
+      coffeeConversation.messages
+    );
+    const transcriptMessages = coffeeTranscriptVisibleMessages(transcriptSourceMessages);
+    const transcriptLoading =
+      coffeeTranscriptLoadingConversationId === coffeeConversation.id && !transcriptHistoryLoaded;
+    const transcriptLoadError =
+      coffeeTranscriptLoadError?.conversationId === coffeeConversation.id
+        ? coffeeTranscriptLoadError.message
+        : null;
     const coffeeTranscriptCopyLabel =
-      coffeeTranscriptCopyState === "copied"
-        ? "Copied Table talk"
-        : coffeeTranscriptCopyState === "failed"
-          ? "Could not copy Table talk"
-          : "Copy Table talk";
+      transcriptLoading
+        ? "Loading Table talk"
+        : coffeeTranscriptCopyState === "copying"
+          ? "Copying review"
+        : coffeeTranscriptCopyState === "copied"
+          ? "Copied review"
+          : coffeeTranscriptCopyState === "failed"
+            ? "Could not copy review"
+            : "Copy review";
     return (
       <>
         <div
@@ -71961,14 +75534,23 @@ function HomeContent(): React.JSX.Element {
           <header className={styles.coffeeTranscriptHeader}>
             <div>
               <span className={styles.sectionLabel}>Table talk</span>
-              <p>{`${transcriptMessages.length} messages`}</p>
+              <p>
+                <span>{`${transcriptMessages.length} messages`}</span>
+                {transcriptLoading ? (
+                  <span className={styles.coffeeTranscriptStatus}>Loading full history...</span>
+                ) : null}
+              </p>
             </div>
             <div className={styles.coffeeTranscriptHeaderActions}>
               <button
                 type="button"
                 className={styles.headerIconButton}
                 onClick={() => void copyCoffeeTranscriptToClipboard()}
-                disabled={transcriptMessages.length === 0}
+                disabled={
+                  transcriptMessages.length === 0 ||
+                  transcriptLoading ||
+                  coffeeTranscriptCopyState === "copying"
+                }
                 aria-label={coffeeTranscriptCopyLabel}
                 title={coffeeTranscriptCopyLabel}
                 data-copy-state={
@@ -71993,6 +75575,11 @@ function HomeContent(): React.JSX.Element {
             </div>
           </header>
           <section className={styles.coffeeThread} aria-live="polite">
+            {transcriptLoadError ? (
+              <p className={styles.coffeeTranscriptNotice}>
+                Showing recent Table talk. Full history could not load.
+              </p>
+            ) : null}
             <ul className={styles.coffeeMessages}>
               {transcriptMessages.map((message) => {
                 const isAssistant = message.role === "assistant";
@@ -72202,6 +75789,7 @@ function HomeContent(): React.JSX.Element {
         : false;
     const arrivedBotIds = new Set(coffeeArrivedBotIds);
     const walkingInBotIds = new Set(coffeeWalkingInBotIds);
+    const nameplatePendingBotIds = new Set(coffeeNameplatePendingBotIds);
     const directorTapEnabled =
       conversationActive &&
       coffeeAutoplayPaused &&
@@ -72209,6 +75797,17 @@ function HomeContent(): React.JSX.Element {
       !coffeeBusy &&
       !coffeeAutoBusy;
     const messages = coffeeConversation?.messages ?? [];
+    const finishedReviewCopyBusy =
+      coffeeTranscriptCopyState === "copying" ||
+      (coffeeConversation != null && coffeeTranscriptLoadingConversationId === coffeeConversation.id);
+    const finishedReviewCopyLabel =
+      coffeeTranscriptCopyState === "copying"
+        ? "Copying review"
+        : coffeeTranscriptCopyState === "copied"
+          ? "Copied review"
+          : coffeeTranscriptCopyState === "failed"
+            ? "Copy failed"
+            : "Copy review";
     const clampedReplayMessageIndex = clampCoffeeReplayMessageIndex(
       messages.length,
       coffeeReplayMessageIndex
@@ -72221,6 +75820,24 @@ function HomeContent(): React.JSX.Element {
       coffeeReplayActive && messages.length > 0
         ? messages[clampedReplayMessageIndex]
         : null;
+    const replayState =
+      coffeeReplayActive && messages.length > 0
+        ? coffeeReplayStateAt(messages, clampedReplayMessageIndex)
+        : null;
+    const replayArrivalStateAvailable =
+      replayState != null && replayState.hasReplayEvents && replayState.arrivedBotIds.size > 0;
+    const effectiveArrivedBotIds =
+      coffeeReplayActive && replayArrivalStateAvailable
+        ? replayState.arrivedBotIds
+        : arrivedBotIds;
+    const effectiveWalkingInBotIds =
+      coffeeReplayActive && replayArrivalStateAvailable
+        ? replayState.walkingInBotIds
+        : walkingInBotIds;
+    const effectiveNameplatePendingBotIds =
+      coffeeReplayActive && replayArrivalStateAvailable
+        ? replayState.nameplatePendingBotIds
+        : nameplatePendingBotIds;
     const replayMessageDisplayLength = replayMessage
       ? coffeeReplayDisplayLengthForMessage(replayMessage)
       : 0;
@@ -72240,6 +75857,12 @@ function HomeContent(): React.JSX.Element {
         : [];
     const tableTimelineMessages =
       coffeeReplayActive && messages.length > 0 ? replayCompletedThreadMessages : messages;
+    const seatActionTimelineMessages = coffeeStageActionTimelineMessages({
+      messages,
+      replayMessages: tableTimelineMessages,
+      sessionFinished: coffeeSessionPhase === "finished",
+      replayActive: coffeeReplayActive,
+    });
     const replaySpeakerBot =
       replayMessage?.role === "assistant" && replayMessage.botName
         ? coffeeMentionBotPicks.find((bot) => bot.name === replayMessage.botName) ?? null
@@ -72433,24 +76056,30 @@ function HomeContent(): React.JSX.Element {
       if (!conversationActive || (coffeeSessionPhase === "finished" && !coffeeReplayActive)) {
         return out;
       }
-      const sources: string[] = [];
+      const activeSeatBotIds = coffeeActiveSeatBotIds.filter(
+        (id): id is string => typeof id === "string" && id.length > 0
+      );
       if (userLineTyping) {
-        const userSource = liveUserLineTyping ? coffeeUserRevealText : userTypingDisplayText;
-        if (userSource) sources.push(userSource);
+        for (const id of coffeeVisibleDirectedMentionBotIds(
+          userTypingDisplayText,
+          activeSeatBotIds,
+          activeTypewriterLength
+        )) {
+          out.add(id);
+        }
       }
-      if (tableTypingBot && tableTypingAssistantRawText) sources.push(tableTypingAssistantRawText);
-      if (centerMessageDisplayText) sources.push(centerMessageDisplayText);
-      const re = new RegExp(PRISM_BOT_MARKDOWN_LINK_RE.source, "gi");
-      for (const source of sources) {
-        for (const match of source.matchAll(re)) {
-          const idEnc = match[2] ?? "";
-          let id = idEnc;
-          try {
-            id = decodeURIComponent(idEnc);
-          } catch {
-            id = idEnc;
-          }
-          if (id) out.add(id);
+      if (tableTypingBot && tableTypingAssistantDisplayText) {
+        for (const id of coffeeVisibleDirectedMentionBotIds(
+          tableTypingAssistantDisplayText,
+          activeSeatBotIds,
+          activeTypewriterLength
+        )) {
+          out.add(id);
+        }
+      }
+      if (centerMessageDisplayText) {
+        for (const id of coffeeDirectedMentionBotIds(centerMessageDisplayText, activeSeatBotIds)) {
+          out.add(id);
         }
       }
       // Don't show "you were addressed" on the seat that's actively talking.
@@ -72483,49 +76112,61 @@ function HomeContent(): React.JSX.Element {
       const sessionSipMessageGap = coffeeActionSipMessageGapForDuration(
         coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes
       );
-      for (let messageIndex = 0; messageIndex < tableTimelineMessages.length; messageIndex += 1) {
-	        const message = tableTimelineMessages[messageIndex]!;
-	        if (message.role !== "assistant" || !message.botName) continue;
-	        const botId = botIdByName.get(message.botName);
-	        if (!botId) continue;
-	        const bot = coffeeBotsById.get(botId) ?? null;
-	        const forceSipForDebug =
-	          typeof message.id === "string" && message.id.startsWith("coffee-dev-sip-");
-	        const actionHistory: string[] = [];
-	        let acceptedSipForMessage = false;
-	        for (const action of coffeeActionsForMessage(message)) {
-	          const normalized = normalizeCoffeeSeatActionBadgeText(action, bot);
-	          if (!normalized) continue;
-	          if (coffeeActionIsSip(normalized)) {
-	            if (acceptedSipForMessage) continue;
-	            if (
-	              !forceSipForDebug &&
-	              !coffeeActionPassesSipCadence(
-	                normalized,
-	                messageIndex,
-	                lastSipMessageIndexByBotId.get(botId),
-	                sessionSipMessageGap
+      const topOffsByBotId =
+        coffeeReplayActive && replayState?.hasReplayEvents
+          ? replayState.topOffsByBotId
+          : coffeeConversation?.coffeeCupTopOffsByBotId ?? {};
+      for (let messageIndex = 0; messageIndex < seatActionTimelineMessages.length; messageIndex += 1) {
+        const message = seatActionTimelineMessages[messageIndex]!;
+        if (message.role !== "assistant" || !message.botName) continue;
+        const botId = botIdByName.get(message.botName);
+        if (!botId) continue;
+        const bot = coffeeBotsById.get(botId) ?? null;
+        const forceSipForDebug =
+          typeof message.id === "string" && message.id.startsWith("coffee-dev-sip-");
+        const actionHistory: string[] = [];
+        let acceptedSipForMessage = false;
+        for (const action of coffeeActionsForMessage(message)) {
+          const rawActionIsSip = coffeeActionIsSip(action);
+          const normalized = normalizeCoffeeSeatActionBadgeText(action, bot);
+          if (rawActionIsSip) {
+            if (acceptedSipForMessage) continue;
+            const sipBelongsToCurrentFill = coffeeCupSipBelongsToCurrentFill({
+              messageCreatedAt: message.createdAt,
+              topOff: topOffsByBotId[botId],
+            });
+            if (
+              !forceSipForDebug &&
+              sipBelongsToCurrentFill &&
+              !coffeeActionPassesSipCadence(
+                action,
+                messageIndex,
+                lastSipMessageIndexByBotId.get(botId),
+                sessionSipMessageGap
               )
             ) {
-	              continue;
-	            }
-	            acceptedSipForMessage = true;
-	            if (!forceSipForDebug) {
-	              lastSipMessageIndexByBotId.set(botId, messageIndex);
-	            }
-            const nextSipCount = (sipCountByBotId.get(botId) ?? 0) + 1;
-            sipCountByBotId.set(botId, nextSipCount);
-            const startedAtMs = coffeeActionAnimationStartedAtMs(
-              message,
-              coffeeMessageFirstVisibleAtMsRef.current
-            );
-            if (Number.isFinite(startedAtMs)) {
-              lastSipAnimationByBotId.set(botId, {
-                sipCount: nextSipCount,
-                startedAtMs,
-              });
+              continue;
+            }
+            acceptedSipForMessage = true;
+            if (!forceSipForDebug && sipBelongsToCurrentFill) {
+              lastSipMessageIndexByBotId.set(botId, messageIndex);
+            }
+            if (sipBelongsToCurrentFill) {
+              const nextSipCount = (sipCountByBotId.get(botId) ?? 0) + 1;
+              sipCountByBotId.set(botId, nextSipCount);
+              const startedAtMs = coffeeActionAnimationStartedAtMs(
+                message,
+                coffeeMessageFirstVisibleAtMsRef.current
+              );
+              if (Number.isFinite(startedAtMs)) {
+                lastSipAnimationByBotId.set(botId, {
+                  sipCount: nextSipCount,
+                  startedAtMs,
+                });
+              }
             }
           }
+          if (!normalized) continue;
           actionHistory.push(normalized);
         }
         if (actionHistory.length > 0) {
@@ -72612,10 +76253,18 @@ function HomeContent(): React.JSX.Element {
       .filter((entry): entry is { botId: string; seatIndex: number; layoutIndex: number; bot: Bot } => {
         if (!entry.botId || !entry.bot) return false;
         if (conversationActive && coffeeSessionPhase === "topic") return false;
+        if (
+          conversationActive &&
+          coffeeReplayActive &&
+          replayArrivalStateAvailable &&
+          !effectiveArrivedBotIds.has(entry.botId)
+        ) {
+          return false;
+        }
         return !(
           conversationActive &&
           coffeeSessionPhase === "arriving" &&
-          !arrivedBotIds.has(entry.botId)
+          !effectiveArrivedBotIds.has(entry.botId)
         );
       });
     const coffeeTeamsState = coffeeConversation?.coffeeTeams ?? null;
@@ -72694,6 +76343,7 @@ function HomeContent(): React.JSX.Element {
     /** Compact table only before a session exists — once a conversation is loaded, use full-size assets. */
     const compactCoffeeStage =
       coffeeSessionPhase === "selecting" && coffeeConversation === null;
+    const coffeeSessionVisualSeed = coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft";
     const coffeeGroupSelectedForStart =
       coffeeSessionPhase === "selecting" && coffeeConversation === null && coffeeSelectedGroup !== null;
     const coffeeGroupReadyToStart =
@@ -72750,6 +76400,10 @@ function HomeContent(): React.JSX.Element {
           seatActionPrimaryVerbose: displayPrimaryText
             ? isZenLiveBotPresenceActionVerbose(displayPrimaryText)
             : false,
+          seatArrivalMotionProfile: coffeeArrivalMotionProfileForBot(
+            coffeeSessionVisualSeed,
+            bot.id
+          ),
         };
       })
       .filter(
@@ -72871,7 +76525,6 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionPhase === "live" &&
       !previewingSession &&
       !coffeeReplayActive;
-    const coffeePotPourFrameSrc = `/coffee-pot/coffee_${coffeePotPourFrameIndex}.png`;
     return (
       <section
         ref={coffeeStageRef}
@@ -72882,6 +76535,7 @@ function HomeContent(): React.JSX.Element {
         data-preview={previewingSession ? "true" : undefined}
         data-replay-active={coffeeReplayActive ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
+        data-coffee-pot-dragging={coffeePotDrag ? "true" : undefined}
         data-team-mode={coffeeTeamsState ? "true" : undefined}
         data-coffee-dev-mode={coffeeDevModeEnabled ? "true" : undefined}
         data-experimental-table-angle={
@@ -72904,14 +76558,15 @@ function HomeContent(): React.JSX.Element {
               className={styles.coffeePotTray}
               data-dragging={coffeePotDrag ? "true" : undefined}
               disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
-              aria-label="Drag coffee pot"
+              aria-label="Drag coffee pot or press Enter to refill the lowest mug"
               title="Drag coffee pot"
               onPointerDown={startCoffeePotDrag}
               onPointerMove={moveCoffeePotDrag}
               onPointerUp={finishCoffeePotDrag}
               onPointerCancel={finishCoffeePotDrag}
+              onKeyDown={handleCoffeePotKeyDown}
             >
-              <img src="/coffee-pot/coffee_pot.png" alt="" draggable={false} />
+              <img src={coffeePotRestImageUrl(resolvedTheme)} alt="" draggable={false} />
             </button>
             {coffeePotDrag ? (
               <div
@@ -72927,22 +76582,33 @@ function HomeContent(): React.JSX.Element {
                 }
               >
                 <img
-                  className={styles.coffeePotDragImage}
-                  src={
-                    coffeePotDrag.pourReady
-                      ? "/coffee-pot/coffee_pot_pour.png"
-                      : "/coffee-pot/coffee_pot.png"
-                  }
+                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImageRest}`}
+                  src={coffeePotRestImageUrl(resolvedTheme)}
+                  alt=""
+                  draggable={false}
+                />
+                <img
+                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImagePour}`}
+                  src={coffeePotPourImageUrl(resolvedTheme)}
                   alt=""
                   draggable={false}
                 />
                 {coffeePotDrag.pourReady ? (
-                  <img
-                    className={styles.coffeePotPourStream}
-                    src={coffeePotPourFrameSrc}
-                    alt=""
-                    draggable={false}
-                  />
+                  <span className={styles.coffeePotPourStream} aria-hidden="true">
+                    {COFFEE_POT_POUR_FRAME_INDICES.map((frameIndex) => (
+                      <img
+                        key={frameIndex}
+                        className={styles.coffeePotPourStreamFrame}
+                        src={coffeePotPourFrameImageUrl(resolvedTheme, frameIndex)}
+                        alt=""
+                        draggable={false}
+                        style={coffeePotPourStreamFrameStyle(
+                          frameIndex,
+                          coffeePotPourFrameIndex
+                        )}
+                      />
+                    ))}
+                  </span>
                 ) : null}
               </div>
             ) : null}
@@ -73298,14 +76964,21 @@ function HomeContent(): React.JSX.Element {
                   </div>
                 </div>
                 {coffeeSessionPhase === "selecting" && !coffeeSelectedGroup && (
-                  <button
-                    type="button"
-                    className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
-                    disabled={coffeeBusy || !coffeeSelectionValid}
-                    onClick={() => void createCoffeeGroupFromSelection()}
-                  >
-                    {coffeeBusy ? "Creating group..." : "Create Coffee Group →"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={`${styles.coffeeSend} ${styles.coffeeTableStartButton}`}
+                      disabled={coffeeBusy || !coffeeSelectionValid}
+                      onClick={() => void createCoffeeGroupFromSelection()}
+                    >
+                      {coffeeBusy ? "Brewing topics..." : "Create Coffee Group →"}
+                    </button>
+                    {coffeeBusy ? (
+                      <p className={styles.coffeeGroupCreationStatus} role="status">
+                        Brewing 4 topic ideas per bot.
+                      </p>
+                    ) : null}
+                  </>
                 )}
                 {coffeeGroupSelectedForStart && (
                   <button
@@ -73330,7 +77003,7 @@ function HomeContent(): React.JSX.Element {
                         disabled={coffeeBusy}
                         onClick={() => void createCoffeeGroupFromCurrentSession()}
                       >
-                        {coffeeBusy ? "Saving..." : "Save as Coffee Group"}
+                        {coffeeBusy ? "Brewing topics..." : "Save as Coffee Group"}
                       </button>
                     ) : null}
                     <button
@@ -73369,6 +77042,26 @@ function HomeContent(): React.JSX.Element {
                       >
                         View replay
                       </button>
+                      <button
+                        type="button"
+                        className={`${styles.coffeeJoinSessionButton} ${styles.coffeeFinishedCopyButton}`}
+                        disabled={messages.length === 0 || finishedReviewCopyBusy}
+                        onClick={() => void copyCoffeeTranscriptToClipboard()}
+                        aria-label={finishedReviewCopyLabel}
+                        title={finishedReviewCopyLabel}
+                        data-copy-state={
+                          coffeeTranscriptCopyState !== "idle"
+                            ? coffeeTranscriptCopyState
+                            : undefined
+                        }
+                      >
+                        {coffeeTranscriptCopyState === "copied" ? (
+                          <Check aria-hidden="true" />
+                        ) : (
+                          <Copy aria-hidden="true" />
+                        )}
+                        <span>{finishedReviewCopyLabel}</span>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -73376,7 +77069,7 @@ function HomeContent(): React.JSX.Element {
               {coffeeSessionPhase === "topic" && coffeeConversation ? (
                 <div className={styles.coffeeTopicPickerWrap} aria-label="Pick a Coffee table topic">
                   <p className={styles.coffeeTopicPickerHint}>
-                    Tap a suggestion, or type your own below.
+                    Choose a suggestion, or type your own below.
                   </p>
                   <div className={styles.coffeeTopicChipRow}>
                     {coffeeStarterTopics.map((topic) => (
@@ -73425,17 +77118,20 @@ function HomeContent(): React.JSX.Element {
             </p>
           ) : null}
           {visibleCoffeeSeats.map(({ seatIndex, layoutIndex, bot }) => {
-            const rosterPreviewSeat = coffeeGroupReadyToStart;
+            const rosterPreviewSeat = compactCoffeeStage;
             const seatTeamState = coffeeTeamsState?.bots[bot.id] ?? null;
             const seatTeamId = seatTeamState?.currentTeamId ?? null;
             const seatTeamRank = seatTeamId ? coffeeTeamRankByBotId.get(bot.id) ?? 0 : null;
             const seatTeamLabel = seatTeamId ? coffeeTeamName(coffeeTeamsState, seatTeamId) : null;
             const seatArrivalState =
-              coffeeSessionPhase === "arriving"
-                ? walkingInBotIds.has(bot.id)
+              coffeeSessionPhase === "arriving" || (coffeeReplayActive && replayArrivalStateAvailable)
+                ? effectiveWalkingInBotIds.has(bot.id)
                   ? "walking-in"
                   : "seated"
                 : undefined;
+            const seatNameplatePending = effectiveNameplatePendingBotIds.has(bot.id);
+            const seatIsSeated = seatArrivalState !== "walking-in";
+            const seatIsFirmlySeated = seatIsSeated && !seatNameplatePending;
             const isTableTypingThisSeat = visibleTableTypingBot?.id === bot.id;
             const seatIsThinkingThisSeat = thinkingBotId === bot.id;
             const seatBadgeSide = coffeeSeatBadgeSide(coffeeSeatLayoutCount, layoutIndex);
@@ -73449,7 +77145,10 @@ function HomeContent(): React.JSX.Element {
               tableTimelineMessages,
               bot.name
             );
-            const socialSnapshot = coffeeConversation?.coffeeBotSocialById?.[bot.id];
+            const socialSnapshot =
+              coffeeReplayActive && replayState?.hasReplayEvents
+                ? replayState.socialByBotId[bot.id]
+                : coffeeConversation?.coffeeBotSocialById?.[bot.id];
             const heuristicMood = coffeeSeatSocialHeuristicMood(socialSnapshot);
             const moodDevSlot = COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex];
             const basePrismSeatMood =
@@ -73483,12 +77182,30 @@ function HomeContent(): React.JSX.Element {
             const seatFaceStyle = resolveBotFaceStyleForBot(bot);
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
             const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
-            const seatSipInProgress =
+            const seatSipActionInProgress =
               seatTypingActionState != null &&
               coffeeActionIsSip(seatTypingActionState.current);
-            const coffeeSessionSeed = coffeeConversation?.id ?? coffeeSelectedSessionId ?? "draft";
+            const seatSipInProgress =
+              seatIsFirmlySeated && !isTableTypingThisSeat && seatSipActionInProgress;
+            const coffeeSessionSeed = coffeeSessionVisualSeed;
             const coffeeCupSeed = `${coffeeSessionSeed}:${bot.id}:${seatIndex}:${layoutIndex}`;
             const coffeeCupFinishSeed = `${coffeeSessionSeed}:${bot.id}:coffee-cup-finished`;
+            const seatArrivalMotionProfile = coffeeArrivalMotionProfileForBot(
+              coffeeSessionSeed,
+              bot.id
+            );
+            const replayActiveArrivalEvent =
+              coffeeReplayActive && replayState?.hasReplayEvents
+                ? replayState.currentEvents.find(
+                    (event) => event.kind === "arrival" && event.botId === bot.id
+                  ) ?? null
+                : null;
+            const seatArrivalWalkDurationMs =
+              replayActiveArrivalEvent?.kind === "arrival" &&
+              typeof replayActiveArrivalEvent.walkDurationMs === "number" &&
+              Number.isFinite(replayActiveArrivalEvent.walkDurationMs)
+                ? replayActiveArrivalEvent.walkDurationMs
+                : seatArrivalMotionProfile.walkDurationMs;
             const coffeeCupSide = coffeeCupSideForSeat({
               compact: compactCoffeeStage,
               seatIndex,
@@ -73548,6 +77265,8 @@ function HomeContent(): React.JSX.Element {
               ? coffeeSessionClockMs - completedSipAnimation.startedAtMs
               : Number.POSITIVE_INFINITY;
             const completedSipAnimationActive =
+              seatIsFirmlySeated &&
+              !isTableTypingThisSeat &&
               !seatSipInProgress &&
               completedSipAnimationTiming != null &&
               completedSipAnimationAgeMs >= 0 &&
@@ -73569,24 +77288,28 @@ function HomeContent(): React.JSX.Element {
               animationDurationMs: completedSipAnimationTiming?.durationMs ?? null,
             });
             const coffeeCupTopOff =
-              coffeeConversation?.coffeeCupTopOffsByBotId?.[bot.id] ?? null;
+              coffeeReplayActive && replayState?.hasReplayEvents
+                ? replayState.topOffsByBotId[bot.id] ?? null
+                : coffeeConversation?.coffeeCupTopOffsByBotId?.[bot.id] ?? null;
             const coffeeCupVisual = buildCoffeeCupVisualState({
               seed: coffeeCupSeed,
               botColor: bot.color,
               theme: resolvedTheme,
               nowMs: coffeeSessionClockMs,
-              sessionStartedAtMs: coffeeSessionStartedAtRef.current,
-              sessionEndsAtMs: coffeeSessionEndsAtMs,
+              sessionStartedAtMs: seatIsFirmlySeated ? coffeeSessionStartedAtRef.current : null,
+              sessionEndsAtMs: seatIsFirmlySeated ? coffeeSessionEndsAtMs : null,
               durationMinutes:
                 coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes,
-              sipCount: hasExplicitCupSipState ? visualCupSipCount : null,
-              topOff: coffeeCupTopOff,
+              sipCount: seatIsFirmlySeated && hasExplicitCupSipState ? visualCupSipCount : null,
+              topOff: seatIsFirmlySeated ? coffeeCupTopOff : null,
               sippingOverride:
-                seatSipInProgress || completedSipAnimationActive
-                  ? true
-                  : hasExplicitCupSipState
-                    ? false
-                    : null,
+                !seatIsFirmlySeated
+                  ? false
+                  : seatSipInProgress || completedSipAnimationActive
+                    ? true
+                    : hasExplicitCupSipState
+                      ? false
+                      : null,
               speaking: isTableTypingThisSeat,
               finishSeed: coffeeCupFinishSeed,
             });
@@ -73595,22 +77318,39 @@ function HomeContent(): React.JSX.Element {
               completedSipAnimationAgeMs,
               completedSipAnimationDurationMs: completedSipAnimationTiming?.durationMs ?? null,
               cupSipping: coffeeCupVisual.sipping,
+              seatIsFirmlySeated,
               isSpeaking: isTableTypingThisSeat,
               cupSide: coffeeCupSide,
               faceScaleY: coffeePlateFaceScaleY,
               seatHorizontalSide: resolvedSeatHorizontalSide,
             });
             const seatPlateGlyph =
-              seatSipPresentation.glyph ??
-              coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+              seatSipPresentation.glyph ?? coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+            const replayActiveTopOffEvent =
+              coffeeReplayActive && replayState?.activeTopOffEvent?.botId === bot.id
+                ? replayState.activeTopOffEvent
+                : null;
+            const replayCoffeeCupTopOffAnimation =
+              replayActiveTopOffEvent != null
+                ? {
+                    botId: bot.id,
+                    key: `replay-${replayActiveTopOffEvent.occurredAt}-${bot.id}`,
+                    fromFrameIndex: coffeeCupStatusForProgress(
+                      replayActiveTopOffEvent.progressBefore,
+                      bot.id
+                    ).frameIndex,
+                  }
+                : null;
             const activeCoffeeCupTopOffAnimation =
-              coffeeCupTopOffAnimation?.botId === bot.id ? coffeeCupTopOffAnimation : null;
+              coffeeCupTopOffAnimation?.botId === bot.id
+                ? coffeeCupTopOffAnimation
+                : replayCoffeeCupTopOffAnimation;
             const coffeeCupTopOffActiveFillFrameIndex =
               activeCoffeeCupTopOffAnimation != null
                 ? coffeeCupTopOffFrameIndexForPour(
                     activeCoffeeCupTopOffAnimation.fromFrameIndex,
                     coffeePotDrag?.pouringBotId === bot.id && coffeePotDrag.pourReady
-                      ? coffeePotPourFrameIndex
+                      ? coffeePotFillFrameIndex
                       : COFFEE_POT_FINAL_POUR_FRAME_INDEX
                   )
                 : null;
@@ -73619,6 +77359,12 @@ function HomeContent(): React.JSX.Element {
               coffeeDevModeEnabled || directorTapEnabled || replayActionReviewEnabled;
             const seatStyle = {
               ...coffeeSeatVisualStyle(bot, prismSeatMood, socialSnapshot),
+              ...(rosterPreviewSeat
+                ? {}
+                : coffeeArrivalMotionStyle(
+                    seatArrivalMotionProfile,
+                    seatArrivalWalkDurationMs
+                  )),
               ...(seatDebugOverride
                 ? {
                     left: `${seatDebugOverride.leftPct}%`,
@@ -73631,6 +77377,10 @@ function HomeContent(): React.JSX.Element {
               ["--coffee-seat-sip-mouth-offset-x" as string]: seatSipPresentation.mouthOffsetX,
               ["--coffee-seat-sip-mouth-offset-y" as string]: seatSipPresentation.mouthOffsetY,
             } as React.CSSProperties;
+            const coffeeCupVisible =
+              !rosterPreviewSeat &&
+              seatIsFirmlySeated &&
+              !(coffeeCupVisual.finished && !coffeeCupVisual.sipping);
             return (
               <button
                 type="button"
@@ -73645,6 +77395,7 @@ function HomeContent(): React.JSX.Element {
                 data-team-rank={seatTeamRank ?? undefined}
                 data-team-pending={seatTeamState?.pendingSwitchTeamId ? "true" : undefined}
                 data-arrival-state={seatArrivalState}
+                data-nameplate-pending={seatNameplatePending ? "true" : undefined}
                 data-prism-mood={prismSeatMood}
                 data-mood-near-desaturated={seatNearDesaturated ? "true" : undefined}
                 data-coffee-dev-seat={coffeeDevModeEnabled ? "true" : undefined}
@@ -73708,7 +77459,7 @@ function HomeContent(): React.JSX.Element {
                   coffeeDevModeEnabled
                     ? `Debug ${bot.name}`
                     : directorTapEnabled
-                    ? `Tap to make ${bot.name} speak`
+                    ? `Click to make ${bot.name} speak`
                     : replayActionReviewEnabled
                       ? `Show ${bot.name} actions so far`
                     : "Pause autoplay to direct this bot"
@@ -73748,7 +77499,7 @@ function HomeContent(): React.JSX.Element {
                       ) : null}
                     </div>
                   )}
-                  {!rosterPreviewSeat && !(coffeeCupVisual.finished && !coffeeCupVisual.sipping) ? (
+                  {coffeeCupVisible ? (
                     <div
                       ref={(node) => setCoffeeCupElement(bot.id, node)}
                       className={styles.coffeeCup}
@@ -73776,17 +77527,34 @@ function HomeContent(): React.JSX.Element {
                       </span>
                       {coffeeCupTopOffActiveFillFrameIndex != null ? (
                         <span className={styles.coffeeCupFillAnimation} aria-hidden="true">
-                          <span
-                            key={`${activeCoffeeCupTopOffAnimation?.key ?? "fill"}-${coffeeCupTopOffActiveFillFrameIndex}`}
-                            className={styles.coffeeCupFillAnimationFrame}
-                            style={coffeeCupTopOffFillFrameStyle(
-                              coffeeCupVisual,
-                              coffeeCupTopOffActiveFillFrameIndex
-                            )}
-                          />
+                          {coffeeCupTopOffFillFrameIndices(
+                            activeCoffeeCupTopOffAnimation?.fromFrameIndex ?? 0
+                          ).map((frameIndex) => (
+                            <span
+                              key={`${activeCoffeeCupTopOffAnimation?.key ?? "fill"}-${frameIndex}`}
+                              className={styles.coffeeCupFillAnimationFrame}
+                              style={coffeeCupTopOffFillFrameStyle(
+                                coffeeCupVisual,
+                                frameIndex,
+                                coffeeCupTopOffActiveFillFrameIndex
+                              )}
+                            />
+                          ))}
                         </span>
                       ) : null}
                     </div>
+                  ) : null}
+                  {replayActiveTopOffEvent ? (
+                    <span
+                      className={styles.coffeeReplayRefillCourier}
+                      data-cup-side={coffeeCupSide}
+                      aria-hidden="true"
+                    >
+                      <span className={styles.coffeeReplayRefillBot}>
+                        <BotGlyph name="triangle" size={18} strokeWidth={2.1} />
+                      </span>
+                      <img src={coffeePotPourImageUrl(resolvedTheme)} alt="" draggable={false} />
+                    </span>
                   ) : null}
                   <div className={styles.coffeeSeatGlowPill}>
                     {rosterPreviewSeat ? null : (
@@ -73835,6 +77603,7 @@ function HomeContent(): React.JSX.Element {
                   const debugOverride = coffeeSeatDebugOverrides[display.bot.id];
                   const anchorStyle = {
                     ...coffeeBotVisualStyle(display.bot),
+                    ...coffeeArrivalMotionStyle(display.seatArrivalMotionProfile),
                     ...(debugOverride
                       ? {
                           left: `${debugOverride.leftPct}%`,
@@ -74134,10 +77903,12 @@ function HomeContent(): React.JSX.Element {
                 : coffeeReplayActive
                 ? "Replay mode — watching the saved session back with shorter pauses."
                 : coffeeAutoplayPaused
-                  ? "Director mode — tap a bot to choose who speaks next."
+                  ? "Director mode — click a bot to choose who speaks next."
                   : "Autoplay on — bots take timed turns automatically."}
             </p>
-            {!coffeeDevModeEnabled && coffeeSessionEndsAtMs != null && coffeeSessionPhase === "live" ? (
+            {!coffeeDevModeEnabled &&
+            coffeeSessionEndsAtMs != null &&
+            (coffeeSessionPhase === "live" || coffeeSessionPhase === "arriving") ? (
               <p
                 className={styles.coffeeAutoplayDockTimer}
                 role="timer"
@@ -74448,7 +78219,7 @@ function HomeContent(): React.JSX.Element {
                     ) : null}
                   </div>
                   <small className={styles.coffeePollModalOptionHint}>
-                    Tap + for up to {COFFEE_POLL_OPTION_COUNT_MAX} choices. Only filled chips become
+                    Click + for up to {COFFEE_POLL_OPTION_COUNT_MAX} choices. Only filled chips become
                     poll options — two choices reads as a binary 50/50 table question.
                   </small>
                 </div>
@@ -75012,7 +78783,10 @@ function HomeContent(): React.JSX.Element {
             aria-label="Back to Coffee start"
             title="Back to Coffee start"
           >
-            <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+            <span className={styles.chatHubWordmarkStack}>
+              <PrismWordmarkWithVersion size="sm" className={styles.hubHomeWordmark} />
+              <AppletHeaderLabel appletId="coffee" />
+            </span>
           </button>
           <div className={styles.coffeeSidebarHeader}>
             <span className={styles.sectionLabel}>Coffee Groups</span>
@@ -75069,7 +78843,6 @@ function HomeContent(): React.JSX.Element {
           <header className={styles.coffeeHeader} data-dev-panel-safe-area="top">
             <div className={styles.coffeeTitleBlock}>
               <div>
-                <p className={styles.coffeeEyebrow}>Coffee Mode</p>
                 <h1 className={styles.coffeeTitle}>{coffeeHeaderTitle}</h1>
                 <p>{coffeeStageSubtitle}</p>
               </div>
@@ -75155,19 +78928,56 @@ function HomeContent(): React.JSX.Element {
                   </p>
                 );
               })()}
-              <label className={styles.coffeeSearchBar}>
-                <span aria-hidden="true">⌕</span>
-                <input
-                  value={coffeeSearch}
-                  onChange={(event) => setCoffeeSearch(event.target.value)}
-                  placeholder="Search or add bots..."
-                  aria-label="Search bots for Coffee Session"
+              <div className={styles.coffeePickerControls}>
+                <label className={styles.coffeeSearchBar}>
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    value={coffeeSearch}
+                    onChange={(event) => setCoffeeSearch(event.target.value)}
+                    placeholder="Search or add bots..."
+                    aria-label="Search bots for Coffee Session"
+                  />
+                </label>
+                <BotLibraryGroupPicker
+                  value={coffeeActiveBotLibraryGroupOption?.id ?? BOT_LIBRARY_GROUP_FILTER_ALL}
+                  options={coffeeBotLibraryGroupFilterOptions}
+                  onChange={setCoffeeBotLibraryGroupFilterId}
+                  resolvedTheme={resolvedTheme}
+                  showCounts={false}
                 />
-              </label>
+              </div>
               {coffeeBotsLibrary.length === 0 ? (
+                <div className={styles.coffeePickerEmptyState}>
+                  <p className={styles.coffeePickerEmpty}>
+                    You don&apos;t have any chat-enabled bots yet. Install the starter
+                    cast or create your own table.
+                  </p>
+                  <div className={styles.appletEmptyActions}>
+                    <button
+                      type="button"
+                      className={styles.appletEmptyPrimaryAction}
+                      onClick={() => void installStarterBotsFromEmptyState("coffee")}
+                      disabled={
+                        botMarketplaceInstallingKey ===
+                        `theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`
+                      }
+                    >
+                      {botMarketplaceInstallingKey ===
+                      `theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`
+                        ? "Installing..."
+                        : "Install Prism Originals"}
+                    </button>
+                    <button type="button" onClick={openNewBotCreator}>
+                      Create bot
+                    </button>
+                    <button type="button" onClick={openBotMarketplace}>
+                      Marketplace
+                    </button>
+                  </div>
+                </div>
+              ) : coffeeFilteredBots.length === 0 ? (
                 <p className={styles.coffeePickerEmpty}>
-                  You don&apos;t have any chat-enabled bots yet. Open the Bots panel
-                  from the Hub to create some.
+                  {coffeePickerFilteredEmptyText}
                 </p>
               ) : (
                 <ul className={styles.coffeePickerGrid} role="listbox" aria-label="Bots available for Coffee">
@@ -75325,6 +79135,12 @@ function HomeContent(): React.JSX.Element {
             </section>
           )}
 
+          {coffeeComposerVisible && visibleCoffeeUserActionPullQuote ? (
+            <div className={styles.coffeeUserActionPullQuote} aria-live="polite">
+              <span>{`*${visibleCoffeeUserActionPullQuote.action}*`}</span>
+            </div>
+          ) : null}
+
           {coffeeComposerVisible && (
             <form
               ref={coffeeComposerFormRef}
@@ -75354,7 +79170,14 @@ function HomeContent(): React.JSX.Element {
                         activeCoffeeConversationId;
                     }
                     setCoffeeDraft(next);
-                    if (next.trim().length > 0) {
+                    const nextTrimmed = next.trim();
+                    const nextStageDirections =
+                      nextTrimmed.length > 0 ? extractStageDirections(nextTrimmed) : null;
+                    const nextIsActionOnly =
+                      nextStageDirections !== null &&
+                      nextStageDirections.mainText.trim().length === 0 &&
+                      nextStageDirections.actions.length > 0;
+                    if (nextTrimmed.length > 0 && !nextIsActionOnly) {
                       clearCoffeeLoopTimer();
                     }
                   }}
@@ -75616,9 +79439,34 @@ function HomeContent(): React.JSX.Element {
           />
         </label>
         {storyBotsLibrary.length === 0 ? (
-          <p className={styles.storyEmpty}>
-            No chat-enabled bots are available yet. Create one from the Bots panel.
-          </p>
+          <div className={styles.storyEmptyState}>
+            <p className={styles.storyEmpty}>
+              No chat-enabled bots are available yet. Install the starter cast or
+              create a custom NPC.
+            </p>
+            <div className={styles.appletEmptyActions}>
+              <button
+                type="button"
+                className={styles.appletEmptyPrimaryAction}
+                onClick={() => void installStarterBotsFromEmptyState("story")}
+                disabled={
+                  botMarketplaceInstallingKey ===
+                  `theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`
+                }
+              >
+                {botMarketplaceInstallingKey ===
+                `theme:${BOT_MARKETPLACE_STARTER_THEME_ID}`
+                  ? "Installing..."
+                  : "Install Prism Originals"}
+              </button>
+              <button type="button" onClick={openNewBotCreator}>
+                Create bot
+              </button>
+              <button type="button" onClick={openBotMarketplace}>
+                Marketplace
+              </button>
+            </div>
+          </div>
         ) : (
           <ul
             className={styles.storyBotGrid}
@@ -76077,7 +79925,9 @@ function HomeContent(): React.JSX.Element {
         <section className={styles.storyMain}>
           <header className={styles.storyHeader}>
             <div>
-              <p className={styles.storyEyebrow}>Story Mode</p>
+              <p className={styles.storyEyebrow}>
+                <AppletLabel appletId="story" />
+              </p>
               <h1>{storySession?.title ?? "Start a Story"}</h1>
               <p>
                 {storySession
@@ -76158,230 +80008,121 @@ function HomeContent(): React.JSX.Element {
   // ── Hub ──
   // Landing screen shown immediately after login. Reuses the auth
   // background verbatim so the visual transition from login to hub feels
-  // like a single continuous surface. Each tile represents a post-auth
-  // mode; Chat stays disabled in Phase 1 and lights up once the mode is
-  // built out.
+  // like a single continuous surface. Primary tiles stay limited to playable
+  // applets so the Steam/Desktop release reads like a product, not a roadmap.
   if (view === "coffee") return renderCoffeeShell();
   if (view === "story") return renderStoryShell();
-  if (view === "hub") return (
-    <main
-      className={`${styles.authLayout} ${themeClass}`}
-      onContextMenu={handleAppContextMenu}
-    >
-      <div className={styles.hubCard}>
-        <div className={`${styles.brandLockup} ${styles.hubBrandLockup}`}>
-          {/* Keep lockup behavior aligned with auth: boxed icon in dark mode,
-              hollow triangle in light mode. */}
-          <div className={styles.brandIconShell}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon.jpg"
-              alt=""
-              aria-hidden="true"
-              className={styles.brandIcon}
-            />
-            <PrismTriangleMark className={styles.brandIconLight} />
-          </div>
-          <PrismWordmarkWithVersion className={styles.brandWordmark} />
-          <div className={styles.hubFooter}>
-            <div
-              className={`${styles.chatHeaderActions} ${styles.hubUtilityActions}`}
-              aria-label="Navigation tools"
-            >
-              {renderUniversalNavbarButtons({
-                showAtmosphere: false,
-                showHub: false,
-              })}
+  if (view === "hub") {
+    const playableHubApplets = prismPlayableHubApplets();
+    const plannedRoadmapApplets = prismPlannedRoadmapApplets();
+    const hubTileConfigById: Partial<Record<
+      PrismAppletId,
+      {
+        glyph: React.ReactNode;
+        tagline: string;
+        onClick: () => void;
+      }
+    >> = {
+      chat: {
+        glyph: <GlyphChat size={88} />,
+        tagline: "Your main companion chat, memory, and images.",
+        onClick: () => navigateToView("sandbox"),
+      },
+      zen: {
+        glyph: <GlyphSandbox size={88} />,
+        tagline: "A calmer one-on-one lane. Just say hello.",
+        onClick: () => void openZenMode(),
+      },
+      coffee: {
+        glyph: <GlyphCoffee size={88} />,
+        tagline: "Group chat for 2-5 reactive bots.",
+        onClick: () => navigateToView("coffee"),
+      },
+      story: {
+        glyph: <GlyphStory size={88} />,
+        tagline: "Generated visual-novel episodes with bots and choices.",
+        onClick: () => navigateToView("story"),
+      },
+    };
+    return (
+      <main
+        className={`${styles.authLayout} ${themeClass}`}
+        onContextMenu={handleAppContextMenu}
+      >
+        <div className={styles.hubCard}>
+          <div className={`${styles.brandLockup} ${styles.hubBrandLockup}`}>
+            {/* Keep lockup behavior aligned with auth: boxed icon in dark mode,
+                hollow triangle in light mode. */}
+            <div className={styles.brandIconShell}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/icon.jpg"
+                alt=""
+                aria-hidden="true"
+                className={styles.brandIcon}
+              />
+              <PrismTriangleMark className={styles.brandIconLight} />
+            </div>
+            <PrismWordmarkWithVersion className={styles.brandWordmark} />
+            <div className={styles.hubFooter}>
+              <div
+                className={`${styles.chatHeaderActions} ${styles.hubUtilityActions}`}
+                aria-label="Navigation tools"
+              >
+                {renderUniversalNavbarButtons({
+                  showAtmosphere: false,
+                  showHub: false,
+                })}
+              </div>
             </div>
           </div>
+          <p className={styles.hubGreeting}>
+            Welcome back, <span className={styles.hubGreetingName}>{user?.displayName ?? "there"}</span>.
+          </p>
+          <div className={styles.hubTiles}>
+            {playableHubApplets.map((applet) => {
+              const config = hubTileConfigById[applet.id];
+              if (!config) return null;
+              return (
+                <button
+                  key={applet.id}
+                  type="button"
+                  className={styles.hubTile}
+                  onClick={config.onClick}
+                >
+                  <div className={styles.hubTileGlyph}>{config.glyph}</div>
+                  <div className={styles.hubTileLabel}>
+                    <AppletLabel appletId={applet.id} />
+                  </div>
+                  <div className={styles.hubTileTagline}>{config.tagline}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className={styles.hubAdvancedRow}>
+            {plannedRoadmapApplets.length > 0 ? (
+              <div className={styles.hubRoadmap} aria-label="Coming soon">
+                <span>Coming soon</span>
+                <ul>
+                  {plannedRoadmapApplets.map((applet) => (
+                    <li key={applet.id}>
+                      <AppletLabel appletId={applet.id} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         </div>
-        <p className={styles.hubGreeting}>
-          Welcome back, <span className={styles.hubGreetingName}>{user?.displayName ?? "there"}</span>.
-        </p>
-        <div className={styles.hubTiles}>
-          <button
-            type="button"
-            className={styles.hubTile}
-            onClick={() => navigateToView("sandbox")}
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphSandbox size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Chat</div>
-            <div className={styles.hubTileTagline}>
-              Full playground: bots, providers, memory, images, and more.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            onClick={() => void openZenMode()}
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphChat size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Zen</div>
-            <div className={styles.hubTileTagline}>
-              A calm, personal chat with your AI. Just say hello.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Arena mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphArena size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Arena</div>
-            <div className={styles.hubTileTagline}>
-              Moderated 1 v 1 debate between bots.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Polling mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphPolling size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Polling</div>
-            <div className={styles.hubTileTagline}>
-              AI-powered polls across full bot groups.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            onClick={() => navigateToView("coffee")}
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphCoffee size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Coffee</div>
-            <div className={styles.hubTileTagline}>
-              Group chat for 2-5 reactive bots.
-            </div>
-          </button>
-          {/* Feed — BotBook social platform. Disabled placeholder until the
-              real-time newsfeed surface is built; advertised here so the
-              Hub previews the full mode roadmap. Old-school nostalgic
-              social vibes; bots are "friends" who post to a shared feed. */}
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Feed mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphFeed size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Feed</div>
-            <div className={styles.hubTileTagline}>
-              BotBook — an old-school social feed where your bots hang out.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Games mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphGames size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Games</div>
-            <div className={styles.hubTileTagline}>
-              Boardgame-like bot matches: chess, four-in-a-row, and more.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            onClick={() => navigateToView("story")}
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphStory size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Story</div>
-            <div className={styles.hubTileTagline}>
-              Generated visual-novel episodes with bots, choices, and maps.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Gym mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphGym size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Gym</div>
-            <div className={styles.hubTileTagline}>
-              Where bots train to remember.
-            </div>
-          </button>
-          {/* Slate — bot-free document editor (akin to ChatGPT's canvas
-              minus the model). Disabled placeholder until the editor
-              shell is built; advertised here so the Hub previews the
-              full mode roadmap and the auto-fit grid keeps its rhythm
-              as future tiles are dropped in. */}
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Slate mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphSlate size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Slate</div>
-            <div className={styles.hubTileTagline}>
-              Distraction-free writing canvas — no bots, just words.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Pseudo mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphPseudo size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Pseudo</div>
-            <div className={styles.hubTileTagline}>
-              Half sketch, half system. A place for almost-code.
-            </div>
-          </button>
-          <button
-            type="button"
-            className={styles.hubTile}
-            disabled
-            title="Surf mode is not available yet."
-          >
-            <div className={styles.hubTileGlyph}>
-              <GlyphSurf size={88} />
-            </div>
-            <div className={styles.hubTileLabel}>Surf</div>
-            <div className={styles.hubTileTagline}>
-              Simple surfing, plus optional bot screen viewing.
-            </div>
-          </button>
-        </div>
-      </div>
-      {renderSharedPanels()}
-      {renderDevToolsPanel()}
-      {renderDevMoodVisual()}
-      {renderViewSwitchOverlay()}
-      {renderBackendUnavailableNotice("banner")}
-      <GlyphTooltipLayer />
-    </main>
-  );
+        {renderSharedPanels()}
+        {renderDevToolsPanel()}
+        {renderDevMoodVisual()}
+        {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
+        <GlyphTooltipLayer />
+      </main>
+    );
+  }
 
   // ── Chat mode ──
   // Personal Prism surface sharing the sandbox layout primitives
@@ -76552,6 +80293,7 @@ function HomeContent(): React.JSX.Element {
                     size="sm"
                     className={styles.hubHomeWordmark}
                   />
+                  <AppletHeaderLabel appletId="zen" />
                   {showHeaderShowAllBotsLink ? (
                     <span className={styles.wordmarkBackToAllBots} aria-hidden="true">
                       {"\u2190 show all bots"}
@@ -76741,6 +80483,9 @@ function HomeContent(): React.JSX.Element {
           data-chat-focus={chatLikeSurface ? "true" : undefined}
           data-replying-live={chatLikeSurface && replyInFlightSignals ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
+          data-bot-library-group-focus={
+            messagesFrameBotLibraryGroupFocus ? "true" : undefined
+          }
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
@@ -76929,8 +80674,8 @@ function HomeContent(): React.JSX.Element {
             // filtered group." Block the click + nudge them to pick a tile.
             const heroLensPlaceholder = false;
             const heroStartLabel = heroBotName
-              ? `Send a message below, or tap the symbol to have ${heroBotName} open.`
-              : "A continuous PRISM-only space for the present thread. Send a message below, or tap the symbol for a gentle opening prompt.";
+              ? `Send a message below, or select the symbol to have ${heroBotName} open.`
+              : "A continuous PRISM-only space for the present thread. Send a message below, or select the symbol for a gentle opening prompt.";
             const hint = (() => {
               if (chatStartupSummaryVisible && chatStartupSummary) {
                 return chatStartupSummary;
@@ -77753,8 +81498,6 @@ function HomeContent(): React.JSX.Element {
   // Reached when view !== "hub" and view !== "chat". Any stray ?view=
   // value falls through here so the user still sees a usable surface
   // instead of a blank page.
-  const sandboxShowHubReturnWordmark =
-    !detail && !pendingReplyVisible && selectedBotId === null;
   return (
     <main
       className={`${styles.appLayout} ${themeClass}`}
@@ -77858,7 +81601,7 @@ function HomeContent(): React.JSX.Element {
 
         {view !== "sandbox" && (
           <div className={styles.sidebarFooter}>
-            <button type="button" onClick={() => openRightPanel("settings")}>Settings</button>
+            <button type="button" onClick={() => openSettingsPanel()}>Settings</button>
             <button type="button" onClick={() => openRightPanel("usage")}>Usage</button>
             <button type="button" onClick={openFreshBotCustomizer}>Bots</button>
             <button type="button" onClick={openContextualMemoriesPanel}>Memories</button>
@@ -77940,6 +81683,7 @@ function HomeContent(): React.JSX.Element {
                       size="sm"
                       className={styles.hubHomeWordmark}
                     />
+                    <AppletHeaderLabel appletId="chat" />
                     {showHeaderShowAllBotsLink ? (
                       <span className={styles.wordmarkBackToAllBots} aria-hidden="true">
                         {"\u2190 show all bots"}
@@ -77998,6 +81742,9 @@ function HomeContent(): React.JSX.Element {
           data-chat-focus={chatLikeSurface ? "true" : undefined}
           data-replying-live={chatLikeSurface && replyInFlightSignals ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
+          data-bot-library-group-focus={
+            messagesFrameBotLibraryGroupFocus ? "true" : undefined
+          }
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
@@ -78123,17 +81870,19 @@ function HomeContent(): React.JSX.Element {
             // filtered group." Block the click + nudge them to pick a tile.
             const heroLensPlaceholder =
               hueFilterCenter !== null && !heroBot;
+            const forceHeroTrianglePreview =
+              heroLensPlaceholder || lensInteracting;
             const heroStartLabel = pendingIncognito
               ? privateBotName
-                ? `Tap the symbol above to begin a private chat with ${privateBotName}.`
-                : "Tap the symbol above to begin a private chat."
+                ? `Select the symbol above to begin a private chat with ${privateBotName}.`
+                : "Select the symbol above to begin a private chat."
               : heroLensPlaceholder
                 ? "Pick a bot from the filtered grid below to begin."
                 : heroBot?.name?.trim()
-                  ? `Tap the symbol above to have ${heroBot.name.trim()} start the conversation.`
+                  ? `Select the symbol above to have ${heroBot.name.trim()} start the conversation.`
                   : bots.length > 0
-                    ? "Tap the bot's glyph to begin, or pick a bot below."
-                    : "Tap the symbol above to create a bot to get started.";
+                    ? "Select the bot's glyph to begin, or pick a bot below."
+                    : "Select the symbol above to create a bot to get started.";
             const heroRecentConversations =
               !pendingIncognito && heroBot?.id
                 ? conversations
@@ -78168,10 +81917,10 @@ function HomeContent(): React.JSX.Element {
                 previewBot={isPreviewing ? heroBot : null}
                 previewAsBotGlyph={isPreviewing}
                 privateHero={privateChatActive}
-                /* Keep the hero icon aligned with Prism's canonical boxed
-                   app mark. Only swap to the bare triangle while actively
-                   dragging the hue lens preview. */
-                forceTrianglePreview={lensInteracting}
+                /* Keep the hue-lens preview visible after the thumb is
+                   released. It should return to the boxed app mark only
+                   when the user clears the lens / shows all bots. */
+                forceTrianglePreview={forceHeroTrianglePreview}
                 resolvedTheme={resolvedTheme}
               />
             );
@@ -78182,8 +81931,8 @@ function HomeContent(): React.JSX.Element {
             const heroStartTitle = heroLensPlaceholder
               ? "Pick a bot from the filtered grid to begin"
               : heroBot?.name?.trim()
-                ? `Tap to have ${heroBot.name.trim()} start the conversation`
-                : "Tap to start the conversation";
+                ? `Select to have ${heroBot.name.trim()} start the conversation`
+                : "Select to start the conversation";
             const heroStartAriaLabel = heroLensPlaceholder
               ? "Pick a bot from the filtered grid to begin"
               : heroBot?.name?.trim()
@@ -78191,7 +81940,7 @@ function HomeContent(): React.JSX.Element {
                 : "Start conversation";
             const heroStartCue =
               heroBot && !heroStartDisabled
-                ? "TAP THE SYMBOL TO START THE CHAT"
+                ? "SELECT THE SYMBOL TO START THE CHAT"
                 : null;
             const shouldShowHeroNudge =
               !heroStartDisabled &&
@@ -78203,6 +81952,187 @@ function HomeContent(): React.JSX.Element {
               !pendingIncognito &&
               Boolean(heroBot?.id) &&
               selectedBotId === heroBot?.id;
+            const focusedBotLibraryGroup = activeBotLibraryGroupFilter;
+            const showFocusedBotLibraryGroup =
+              Boolean(focusedBotLibraryGroup) &&
+              !pendingIncognito &&
+              !emptyStateSearchActive &&
+              !heroBot;
+            if (showFocusedBotLibraryGroup && focusedBotLibraryGroup) {
+              const groupDashboardBots = baseFilteredPanelBots;
+              const groupDescription = focusedBotLibraryGroup.description.trim();
+              const groupCountLabel = botLibraryGroupCountLabel(
+                groupDashboardBots.length,
+                focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP
+              );
+              const groupProtectedBotCount = groupDashboardBots.filter(
+                (bot) => bot.delete_protected === 1
+              ).length;
+              const groupDeleteProtected =
+                groupDashboardBots.length > 0 &&
+                groupProtectedBotCount === groupDashboardBots.length;
+              const groupPartiallyProtected =
+                groupProtectedBotCount > 0 &&
+                groupProtectedBotCount < groupDashboardBots.length;
+              const nextGroupDeleteProtected = !groupDeleteProtected;
+              const groupProtectionLabel = groupDeleteProtected
+                ? "Allow deletion"
+                : groupPartiallyProtected
+                  ? "Protect all"
+                  : "Protect group";
+              const groupProtectionTitle = groupDeleteProtected
+                ? `Allow deletion for all bots in ${focusedBotLibraryGroup.name}`
+                : `Protect all bots in ${focusedBotLibraryGroup.name} from deletion`;
+              const groupEyebrowLabel =
+                groupProtectedBotCount > 0
+                  ? `${groupCountLabel} · ${groupProtectedBotCount} protected`
+                  : groupCountLabel;
+              return (
+                <div
+                  className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
+                  onClick={handleEmptyStateBackgroundClick}
+                >
+                  <section
+                    className={styles.botGroupDashboard}
+                    style={botLibraryGroupVisualStyle(
+                      focusedBotLibraryGroup,
+                      groupDashboardBots,
+                      resolvedTheme
+                    )}
+                    data-starter-bot-affordance="true"
+                    aria-labelledby="bot-library-group-dashboard-title"
+                  >
+                    <header className={styles.botGroupDashboardHeader}>
+                      <div className={styles.botGroupDashboardCopy}>
+                        <span className={styles.botGroupDashboardEyebrow}>
+                          {groupEyebrowLabel}
+                        </span>
+                        <h2 id="bot-library-group-dashboard-title">
+                          {focusedBotLibraryGroup.name}
+                        </h2>
+                        {groupDescription ? (
+                          <p>{groupDescription}</p>
+                        ) : null}
+                      </div>
+                      <div className={styles.botGroupDashboardActions}>
+                        <button
+                          type="button"
+                          className={styles.botGroupDashboardAction}
+                          onClick={() => performShowAllBotsView(null)}
+                        >
+                          Show all bots
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
+                          data-active={groupDeleteProtected ? "true" : undefined}
+                          disabled={groupDashboardBots.length === 0}
+                          onClick={() =>
+                            void setBotsDeleteProtection(
+                              groupDashboardBots,
+                              nextGroupDeleteProtected,
+                              { groupName: focusedBotLibraryGroup.name }
+                            )
+                          }
+                          aria-label={groupProtectionTitle}
+                          title={groupProtectionTitle}
+                        >
+                          <BotGlyph
+                            name={groupDeleteProtected ? "key" : "lock"}
+                            size={14}
+                            strokeWidth={2.05}
+                          />
+                          <span>{groupProtectionLabel}</span>
+                        </button>
+                        {!focusedBotLibraryGroup.builtIn ? (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.botGroupDashboardAction}
+                              onClick={() => editBotLibraryGroup(focusedBotLibraryGroup.id)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardDangerAction}`}
+                              onClick={() => requestDeleteBotLibraryGroup(focusedBotLibraryGroup.id)}
+                              aria-label={`Delete ${focusedBotLibraryGroup.name}`}
+                            >
+                              <Trash2 size={14} strokeWidth={2.15} aria-hidden="true" />
+                              <span>Delete</span>
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </header>
+                    {groupDashboardBots.length > 0 ? (
+                      <div
+                        className={styles.botGroupDashboardBotGrid}
+                        role="list"
+                        aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
+                      >
+                        {groupDashboardBots.map((b) => {
+                          const isProtected = b.delete_protected === 1;
+                          const isFavorite = favoriteBotIdSet.has(b.id);
+                          const tileTraits = [
+                            isFavorite ? "favorite" : null,
+                            isProtected ? "protected" : null,
+                          ].filter(Boolean);
+                          const rawColor = b.color?.trim();
+                          const accent = rawColor
+                            ? displayAccentForMode(
+                                rawColor,
+                                resolvedTheme,
+                                appWidePrivateMode
+                              )
+                            : null;
+                          const tileStyle = accent
+                            ? ({ "--bot-color": accent } as React.CSSProperties)
+                            : undefined;
+                          const tileClassName = [
+                            styles.chatBotTile,
+                            styles.chatBotTileWithName,
+                            styles.botGroupDashboardBotTile,
+                            isProtected ? styles.chatBotTileProtected : null,
+                          ].filter(Boolean).join(" ");
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              className={tileClassName}
+                              style={tileStyle}
+                              onClick={() => commitEmptyStateBotSelection(b.id)}
+                              aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
+                              data-favorite={isFavorite ? "true" : undefined}
+                              data-delete-protected={isProtected ? "true" : undefined}
+                              title={b.name}
+                            >
+                              <span className={styles.chatBotTileBotGlyph}>
+                                <BotGlyph
+                                  name={b.glyph}
+                                  size={34}
+                                  strokeWidth={1.9}
+                                />
+                              </span>
+                              <span className={styles.chatBotTileFeaturedName}>
+                                {b.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.botGroupDashboardEmpty} role="status">
+                        {focusedBotLibraryGroup.id === BOT_LIBRARY_FAVORITES_GROUP_ID
+                          ? "No favorite bots yet."
+                          : "No bots in this group yet."}
+                      </p>
+                    )}
+                  </section>
+                </div>
+              );
+            }
             return (
               <div
                 className={emptyStateClassName}
@@ -78263,16 +82193,7 @@ function HomeContent(): React.JSX.Element {
                               <p className={styles.emptyStateHeroCue}>{heroStartCue}</p>
                             ) : null}
                           </div>
-                          <p className={styles.emptyStateHint}>
-                            {sandboxBotStatusBusy ? (
-                              <span className={styles.emptyStateHintLoading}>
-                                <span className={styles.summarySpinnerWheel} aria-hidden="true" />
-                                <span>{hint}</span>
-                              </span>
-                            ) : (
-                              hint
-                            )}
-                          </p>
+                          <p className={styles.emptyStateHint}>{hint}</p>
                         </div>
                       </div>
                     ) : null}
@@ -78465,92 +82386,98 @@ function HomeContent(): React.JSX.Element {
                         style={pickerStyle}
                       >
                         {pickerCells.map((b, cellIndex) => {
-                        if (!b) {
-                          if (
-                            hueFilterActive ||
-                            pickerBots.length < pickerSourceBots.length ||
-                            geom.threeBotStack ||
-                            geom.mobileColumnStack
-                          ) return null;
-                          return (
-                            <span
-                              key={`blank-${cellIndex}`}
-                              className={styles.chatBotTilePlaceholder}
-                              aria-hidden="true"
-                            />
-                          );
-                        }
-                        const isSelected = sandboxGridSelectedBotId === b.id;
-                        const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
-                        const isProtected = b.delete_protected === 1;
-                        const rawColor = b.color?.trim();
-                        const accent = rawColor
-                          ? displayAccentForMode(
-                              rawColor,
-                              resolvedTheme,
-                              appWidePrivateMode
-                            )
-                          : null;
-                        const tileStyle = accent
-                          ? ({ "--bot-color": accent } as React.CSSProperties)
-                          : undefined;
-                        // Six density levels: full card, flat card,
-                        // glyphless card, borderless square pixel, compact
-                        // gapless pixel grid, then selected-dot pixel grid.
-                        let tileClassName = styles.chatBotTile;
-                        if (isProtected) {
-                          tileClassName += ` ${styles.chatBotTileProtected}`;
-                        }
-                        if (isSelected) {
-                          tileClassName += ` ${styles.chatBotTileSelected}`;
-                        }
-                        if (isMarqueeSelected) {
-                          tileClassName += ` ${styles.chatBotTileMarqueeSelected}`;
-                        }
-                        if (geom.namedFlatTile || geom.flattenTile) {
-                          tileClassName += ` ${styles.chatBotTileFlat}`;
-                        }
-                        if (geom.solidSwatch) {
-                          tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
-                        } else if (geom.hideGlyphByDefault) {
-                          tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
-                        }
-                        const showPixelGridGlyph = geom.compactPixelGrid;
-                        const showSelectedDotGlyph =
-                          geom.selectedDotGlyph && isSelected;
-                        const showTileGlyph =
-                          !geom.hideGlyphByDefault || showPixelGridGlyph;
-                        const showFeaturedName =
-                          !geom.compactPixelGrid &&
-                          geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
-                        if (showFeaturedName) {
-                          tileClassName += ` ${styles.chatBotTileWithName}`;
-                          if (
-                            geom.namedFlatTile ||
-                            geom.flattenTile ||
-                            geom.tileSize <= PICKER_TILE_COMPACT_NAME_MAX_SIZE
-                          ) {
-                            tileClassName += ` ${styles.chatBotTileNamedFlat}`;
+                          if (!b) {
+                            if (
+                              hueFilterActive ||
+                              pickerBots.length < pickerSourceBots.length ||
+                              geom.threeBotStack ||
+                              geom.mobileColumnStack
+                            ) return null;
+                            return (
+                              <span
+                                key={`blank-${cellIndex}`}
+                                className={styles.chatBotTilePlaceholder}
+                                aria-hidden="true"
+                              />
+                            );
                           }
-                        }
-                        const tileGlyphSize = showPixelGridGlyph
-                          ? Math.max(
-                              PICKER_PIXEL_GLYPH_MIN_SIZE,
-                              Math.round(geom.tileSize * PICKER_PIXEL_GLYPH_RATIO)
-                            )
-                          : geom.glyphSize;
-                        const tileGlyphStroke = showPixelGridGlyph
-                          ? PICKER_PIXEL_GLYPH_STROKE
-                          : geom.glyphStroke;
-                        return (
-                          <button
+                          const isSelected = sandboxGridSelectedBotId === b.id;
+                          const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
+                          const isProtected = b.delete_protected === 1;
+                          const isFavorite = favoriteBotIdSet.has(b.id);
+                          const tileTraits = [
+                            isFavorite ? "favorite" : null,
+                            isProtected ? "protected" : null,
+                          ].filter(Boolean);
+                          const rawColor = b.color?.trim();
+                          const accent = rawColor
+                            ? displayAccentForMode(
+                                rawColor,
+                                resolvedTheme,
+                                appWidePrivateMode
+                              )
+                            : null;
+                          const tileStyle = accent
+                            ? ({ "--bot-color": accent } as React.CSSProperties)
+                            : undefined;
+                          // Six density levels: full card, flat card,
+                          // glyphless card, borderless square pixel, compact
+                          // gapless pixel grid, then selected-dot pixel grid.
+                          let tileClassName = styles.chatBotTile;
+                          if (isProtected) {
+                            tileClassName += ` ${styles.chatBotTileProtected}`;
+                          }
+                          if (isSelected) {
+                            tileClassName += ` ${styles.chatBotTileSelected}`;
+                          }
+                          if (isMarqueeSelected) {
+                            tileClassName += ` ${styles.chatBotTileMarqueeSelected}`;
+                          }
+                          if (geom.namedFlatTile || geom.flattenTile) {
+                            tileClassName += ` ${styles.chatBotTileFlat}`;
+                          }
+                          if (geom.solidSwatch) {
+                            tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
+                          } else if (geom.hideGlyphByDefault) {
+                            tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
+                          }
+                          const showPixelGridGlyph = geom.compactPixelGrid;
+                          const showSelectedDotGlyph =
+                            geom.selectedDotGlyph && isSelected;
+                          const showTileGlyph =
+                            !geom.hideGlyphByDefault || showPixelGridGlyph;
+                          const showFeaturedName =
+                            !geom.compactPixelGrid &&
+                            geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
+                          if (showFeaturedName) {
+                            tileClassName += ` ${styles.chatBotTileWithName}`;
+                            if (
+                              geom.namedFlatTile ||
+                              geom.flattenTile ||
+                              geom.tileSize <= PICKER_TILE_COMPACT_NAME_MAX_SIZE
+                            ) {
+                              tileClassName += ` ${styles.chatBotTileNamedFlat}`;
+                            }
+                          }
+                          const tileGlyphSize = showPixelGridGlyph
+                            ? Math.max(
+                                PICKER_PIXEL_GLYPH_MIN_SIZE,
+                                Math.round(geom.tileSize * PICKER_PIXEL_GLYPH_RATIO)
+                              )
+                            : geom.glyphSize;
+                          const tileGlyphStroke = showPixelGridGlyph
+                            ? PICKER_PIXEL_GLYPH_STROKE
+                            : geom.glyphStroke;
+                          return (
+                            <button
                             key={b.id}
                             type="button"
                             role="radio"
                             aria-checked={isSelected}
-                            aria-label={isProtected ? `${b.name}, protected` : b.name}
+                            aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
                             className={tileClassName}
                             data-bot-id={b.id}
+                            data-favorite={isFavorite ? "true" : undefined}
                             data-delete-protected={isProtected ? "true" : undefined}
                             onPointerDown={e => {
                               lastBotPickerPointerTypeRef.current = e.pointerType;
@@ -78570,6 +82497,10 @@ function HomeContent(): React.JSX.Element {
                             onContextMenu={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
+                              if (event.ctrlKey) {
+                                toggleCanvasBotSelection(b.id);
+                                return;
+                              }
                               const multiSelectionIds =
                                 canvasSelectedBotIds.size > 1 && canvasSelectedBotIds.has(b.id)
                                   ? Array.from(canvasSelectedBotIds)
@@ -78581,6 +82512,12 @@ function HomeContent(): React.JSX.Element {
                                 botContextSuppressClickRef.current = false;
                                 e.preventDefault();
                                 e.stopPropagation();
+                                return;
+                              }
+                              if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleCanvasBotSelection(b.id);
                                 return;
                               }
                               // Setting selectedBotId also makes the
@@ -78652,6 +82589,9 @@ function HomeContent(): React.JSX.Element {
                                 {b.name}
                               </span>
                             )}
+                            <span className={styles.chatBotTileHoverLabel} aria-hidden="true">
+                              {b.name}
+                            </span>
                           </button>
                         );
                         })}

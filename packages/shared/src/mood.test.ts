@@ -8,6 +8,7 @@ import {
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   COFFEE_NEAR_DESATURATED_SATURATION,
+  coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
@@ -300,9 +301,29 @@ test("coffee social snapshots map into mood saturation", () => {
     engagement: 0.2,
     leavePressure: 0.9,
   });
+  const sameMoodLowLeave = {
+    disposition: 0.82,
+    valuesFriction: 0.2,
+    restraint: 0.62,
+    engagement: 0.74,
+    leavePressure: 0.12,
+  };
+  const sameMoodHighLeave = {
+    ...sameMoodLowLeave,
+    leavePressure: 0.9,
+  };
 
   assert.ok(good > 1);
   assert.ok(strained < COFFEE_NEAR_DESATURATED_SATURATION);
+  assert.ok(
+    coffeeDepartureChanceFromSocial(sameMoodHighLeave) >
+      coffeeDepartureChanceFromSocial(sameMoodLowLeave)
+  );
+  const sameMoodLowLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodLowLeave);
+  const sameMoodHighLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodHighLeave);
+  assert.ok(sameMoodHighLeaveSaturation < sameMoodLowLeaveSaturation);
+  assert.ok(sameMoodHighLeaveSaturation > 0.74);
+  assert.equal(coffeeSocialSnapshotIsNearDesaturated(sameMoodHighLeave), false);
   assert.equal(
     coffeeSocialSnapshotIsNearDesaturated({
       disposition: 0.2,

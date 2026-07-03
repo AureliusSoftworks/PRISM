@@ -1,12 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  coffeeArrivalAutoplayCanScheduleNow,
+  coffeeArrivalAutoplayRetryDelayMs,
   coffeeDirectedMentionBotIds,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeTableTalkAutoplayDeferralMs,
+  coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow.ts";
 
 describe("coffee user reveal flow", () => {
@@ -19,6 +22,19 @@ describe("coffee user reveal flow", () => {
     assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("tableTyping"), true);
     assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("userTableTyping"), false);
     assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("botThinking"), false);
+  });
+
+  it("keeps arrival autoplay waking while the opener reveal is still busy", () => {
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("idle"), true);
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("playerComposing"), true);
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("tableTyping"), false);
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("cooldown"), false);
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("userTableTyping"), false);
+    assert.equal(coffeeArrivalAutoplayCanScheduleNow("botThinking"), false);
+    assert.equal(coffeeArrivalAutoplayRetryDelayMs("idle", 850), 0);
+    assert.equal(coffeeArrivalAutoplayRetryDelayMs("tableTyping", 850), 420);
+    assert.equal(coffeeArrivalAutoplayRetryDelayMs("cooldown", 0), 120);
+    assert.equal(coffeeArrivalAutoplayRetryDelayMs("botThinking", 1100), 900);
   });
 
   it("keeps a submitted user line visible after typing while the bot is thinking", () => {
@@ -107,5 +123,28 @@ describe("coffee user reveal flow", () => {
       "bot-sponge",
       "bot-patrick",
     ]);
+  });
+
+  it("reveals directed mention ids when the displayed bot name starts streaming", () => {
+    const text = [
+      "Hey",
+      "[Patrick Star](prism-bot://bot-patrick),",
+      "look at",
+      "[SpongeBob](prism-bot://bot-sponge).",
+    ].join(" ");
+    const seatedBotIds = ["bot-patrick", "bot-sponge"];
+
+    assert.deepEqual(coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey ".length), []);
+    assert.deepEqual(coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey P".length), [
+      "bot-patrick",
+    ]);
+    assert.deepEqual(
+      coffeeVisibleDirectedMentionBotIds(
+        text,
+        seatedBotIds,
+        "Hey Patrick Star, look at S".length
+      ),
+      ["bot-patrick", "bot-sponge"]
+    );
   });
 });

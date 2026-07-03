@@ -4,7 +4,6 @@ import { DatabaseSync } from "node:sqlite";
 import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
-  buildInitialAboutYouMemoryText,
   createDevSeedMemories,
   deleteMemoriesForBotScope,
   deleteMemoryById,
@@ -73,16 +72,6 @@ function memoryCandidateCore(candidates: Array<{ text: string; confidence: numbe
     confidence: candidate.confidence,
   }));
 }
-
-describe("buildInitialAboutYouMemoryText", () => {
-  it("records account display-name metadata without inferring a preferred-name instruction", () => {
-    assert.equal(buildInitialAboutYouMemoryText("Jared Dunn"), "Your account display name is Jared.");
-    assert.equal(
-      buildInitialAboutYouMemoryText("   "),
-      "Your account has not provided a display name yet."
-    );
-  });
-});
 
 function seedMemoryRow(
   db: DatabaseSync,
@@ -345,11 +334,45 @@ describe("extractCoffeeObserverMemoryCandidates", () => {
     assert.equal(candidates[0]?.category, "bot_relation");
   });
 
+  it("uses canonical bot names when Coffee dialogue uses short names", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "SpongeBob SquarePants",
+      assistantMessage: "Patrick, I agree with your gentle approach.",
+      seatedBotNames: [
+        "SpongeBob SquarePants",
+        "Patrick Star",
+        "Squidward Tentacles",
+      ],
+    });
+
+    assert.deepEqual(memoryCandidateCore(candidates), [
+      {
+        text: "SpongeBob SquarePants tended to agree with Patrick Star during Coffee.",
+        confidence: 0.56,
+      },
+    ]);
+    assert.equal(candidates[0]?.category, "bot_relation");
+  });
+
   it("does not mistake seated bot names for the user's likely name", () => {
     const candidates = extractCoffeeObserverMemoryCandidates({
       speakerName: "Alice",
       assistantMessage: "Boris, what do you think about the rain?",
       seatedBotNames: ["Alice", "Boris"],
+    });
+
+    assert.deepEqual(candidates, []);
+  });
+
+  it("does not mistake seated bot short names for the user's likely name", () => {
+    const candidates = extractCoffeeObserverMemoryCandidates({
+      speakerName: "SpongeBob SquarePants",
+      assistantMessage: "Patrick, what do you think about the rain?",
+      seatedBotNames: [
+        "SpongeBob SquarePants",
+        "Patrick Star",
+        "Squidward Tentacles",
+      ],
     });
 
     assert.deepEqual(candidates, []);
@@ -849,7 +872,7 @@ describe("persistMemoryCandidates", () => {
     assert.deepEqual(rows.map((row) => row.id), ["m-bot-1"]);
   });
 
-  it("replaces seeded about-you name memory with explicit preference", async () => {
+  it("replaces legacy about-you name memory with explicit preference", async () => {
     const db = createMemoryTestDb();
     const userKey = Buffer.alloc(32, 7);
     await restoreMemory(db, "user-1", userKey, {

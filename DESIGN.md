@@ -25,6 +25,25 @@ Prism should not split people into "users" (utility) versus "players"
 
 A design is incomplete if it serves only one side.
 
+## Applet Ethos and Versioning
+
+Prism applets are distinct experience modules, not just routes. Each applet
+should have a clear felt promise, a quiet version marker, and a short changelog
+for experience-level changes.
+
+- Applet versions track user-visible behavior: interaction model, memory
+  behavior, prompt behavior, visible controls, data shape, major fixes, and
+  creative direction.
+- Internal refactors do not bump an applet version unless they affect trust,
+  privacy, compatibility, or data.
+- Usable applets start at `v0.1`; planned concepts stay at `v0.0` until a real
+  surface exists.
+- The UI should present applet versions as small provenance beside the applet
+  name. They should never make Prism feel like a developer console.
+
+The current applet ledger lives in [`docs/applets.md`](docs/applets.md); the
+web UI registry lives in `apps/web/src/app/appletVersions.ts`.
+
 ## Stack
 
 - **Frontend:** Next.js (standalone output for Docker)

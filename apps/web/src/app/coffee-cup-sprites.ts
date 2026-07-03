@@ -206,28 +206,50 @@ export function coffeeCupVisualSipCountForAnimation(args: {
   return Math.max(0, activeSipAnimationCount - 1);
 }
 
-export function coffeeCupProgressForSipCount(sipCount: number): number {
+export function coffeeCupProgressForSipCount(
+  sipCount: number,
+  baseProgress = 0
+): number {
   if (!Number.isFinite(sipCount)) return 0;
+  const baseline = clampUnit(baseProgress);
   const wholeSips = Math.max(0, Math.floor(sipCount));
-  if (wholeSips <= 0) return 0;
-  return Math.min(0.96, wholeSips * 0.1);
+  if (wholeSips <= 0) return baseline;
+  return Math.min(0.96, baseline + wholeSips * 0.1);
 }
 
 function coffeeCupFinishedForSipCount(args: {
   seed: string;
   sipCount?: number | null;
+  baseProgress?: number | null;
 }): boolean {
   if (typeof args.sipCount !== "number" || !Number.isFinite(args.sipCount)) {
     return false;
   }
+  const baseProgress =
+    typeof args.baseProgress === "number" && Number.isFinite(args.baseProgress)
+      ? clampUnit(args.baseProgress)
+      : 0;
   const wholeSips = Math.max(0, Math.floor(args.sipCount));
   if (wholeSips <= 0) return false;
   return coffeeCupShouldFinishAfterSip({
     seed: args.seed,
-    previousProgress: coffeeCupProgressForSipCount(wholeSips - 1),
-    nextProgress: coffeeCupProgressForSipCount(wholeSips),
+    previousProgress: coffeeCupProgressForSipCount(wholeSips - 1, baseProgress),
+    nextProgress: coffeeCupProgressForSipCount(wholeSips, baseProgress),
     sipCount: wholeSips,
   });
+}
+
+export function coffeeCupSipBelongsToCurrentFill(args: {
+  messageCreatedAt?: string | null;
+  topOff?: CoffeeCupTopOffSnapshot | null;
+}): boolean {
+  if (!args.topOff) return true;
+  const toppedOffAtMs = Date.parse(args.topOff.toppedOffAt);
+  if (!Number.isFinite(toppedOffAtMs)) return true;
+  const messageCreatedAtMs =
+    typeof args.messageCreatedAt === "string" ? Date.parse(args.messageCreatedAt) : Number.NaN;
+  if (!Number.isFinite(messageCreatedAtMs)) return true;
+  return messageCreatedAtMs > toppedOffAtMs;
 }
 
 function coffeeCupSteamBaseAlphaForFrame(frameIndex: number): number {
@@ -503,11 +525,16 @@ export function buildCoffeeCupVisualState(args: {
 }): CoffeeCupVisualState {
   const color = coffeeCupColorForBotColor(args.botColor);
   const finishSeed = args.finishSeed?.trim() || args.seed;
+  const sipBaseProgress =
+    args.topOff && Number.isFinite(args.topOff.progressAfter)
+      ? clampUnit(args.topOff.progressAfter)
+      : 0;
   const finishedBySip =
     args.forceEmpty !== true &&
     coffeeCupFinishedForSipCount({
       seed: finishSeed,
       sipCount: args.sipCount,
+      baseProgress: sipBaseProgress,
     });
   const finished = args.finished === true || finishedBySip;
   const finishingSipActive =
@@ -516,7 +543,7 @@ export function buildCoffeeCupVisualState(args: {
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
       : typeof args.sipCount === "number" && Number.isFinite(args.sipCount)
-        ? coffeeCupProgressForSipCount(args.sipCount)
+        ? coffeeCupProgressForSipCount(args.sipCount, sipBaseProgress)
         : null;
   const timedProgress =
     args.forceEmpty === true || finished
@@ -583,11 +610,12 @@ export function buildCoffeeCupVisualState(args: {
       : sipProgress != null
         ? sipProgress
         : coffeeCupPacedProgress(gatedTimedProgress ?? 0, args.seed, args.durationMinutes);
+  const topOffForVisibleProgress = sipProgress != null ? null : args.topOff;
   const topOffBaseProgress =
     args.topOff && explicitProgress != null ? explicitProgress : pacedProgress;
   const visibleProgress = coffeeCupProgressAfterTopOff({
     progress: topOffBaseProgress,
-    topOff: args.topOff,
+    topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
     lowerProgressMeansConsumption: sipProgress != null,
@@ -596,7 +624,7 @@ export function buildCoffeeCupVisualState(args: {
     args.topOff && explicitProgress != null ? explicitProgress : rawPacedProgress;
   const sipTriggerProgress = coffeeCupProgressAfterTopOff({
     progress: rawTopOffBaseProgress,
-    topOff: args.topOff,
+    topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
     lowerProgressMeansConsumption: sipProgress != null,

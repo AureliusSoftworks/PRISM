@@ -544,24 +544,6 @@ export function deleteMemoriesForBotScope(
   return Number(result.changes ?? 0);
 }
 
-function firstNameFromDisplayName(displayName: string | null | undefined): string | null {
-  const trimmed = typeof displayName === "string" ? displayName.trim() : "";
-  if (!trimmed) return null;
-  const firstToken = trimmed.split(/\s+/)[0]?.trim() ?? "";
-  const cleaned = firstToken.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9'-]+$/g, "");
-  return cleaned.length > 0 ? cleaned : null;
-}
-
-export function buildInitialAboutYouMemoryText(
-  displayName: string | null | undefined
-): string {
-  const firstName = firstNameFromDisplayName(displayName);
-  if (firstName) {
-    return `Your account display name is ${firstName}.`;
-  }
-  return "Your account has not provided a display name yet.";
-}
-
 export function listMemoryIdsLinkedToMessages(
   db: DatabaseSync,
   userId: string,
