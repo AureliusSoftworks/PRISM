@@ -2972,17 +2972,106 @@
   gap: 14px;
 }
 
-.settingsOverview {
-  border: 1px solid color-mix(in srgb, #8c8bff 30%, var(--line));
+.settingsShell {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.settingsNav {
+  min-height: 0;
+  max-height: 100%;
+  align-self: start;
+  overflow-y: auto;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background:
-    linear-gradient(
-      110deg,
-      color-mix(in srgb, #ff4f85 10%, transparent),
-      color-mix(in srgb, #ffbd3a 7%, transparent) 46%,
-      color-mix(in srgb, #32dcff 9%, transparent)
-    ),
-    color-mix(in srgb, var(--bg) 80%, var(--bg-surface));
+  background: color-mix(in srgb, var(--bg-surface) 90%, var(--bg));
+  padding: 10px;
+  overscroll-behavior: contain;
+}
+
+.settingsNavGroup + .settingsNavGroup {
+  margin-top: 14px;
+}
+
+.settingsNavGroupLabel {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.settingsNavList {
+  display: grid;
+  gap: 4px;
+}
+
+.settingsNavItem {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.2;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.settingsNavItem:hover:not(:disabled),
+.settingsNavItem:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-hover));
+  color: var(--fg);
+  outline: none;
+}
+
+.settingsNavItem[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-surface));
+  color: var(--fg);
+}
+
+.settingsNavIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--accent) 62%, var(--fg-muted));
+  flex: 0 0 auto;
+}
+
+.settingsContent {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  overscroll-behavior-y: contain;
+}
+
+.settingsOverview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--bg));
   padding: 14px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2998,7 +3087,7 @@
 }
 
 .settingsOverview h4 {
-  color: color-mix(in srgb, #32dcff 16%, var(--fg));
+  color: var(--fg);
 }
 
 .settingsSectionHeader h4 {
@@ -3024,9 +3113,9 @@
 .settingsStatusPills {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
-  max-width: 360px;
+  max-width: none;
 }
 
 .settingsStatusPills span {
@@ -3331,18 +3420,10 @@
   --settings-section-quiet: color-mix(in srgb, var(--settings-section-color) 58%, var(--fg-muted));
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--settings-section-color) 32%, var(--line));
+  border: 1px solid color-mix(in srgb, var(--settings-section-color) 18%, var(--line));
   border-radius: 8px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--settings-section-color) 12%, transparent),
-      transparent 42%
-    ),
-    color-mix(in srgb, var(--bg-surface) 88%, var(--bg));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--settings-section-color) 12%, transparent),
-    0 12px 34px -30px color-mix(in srgb, var(--settings-section-color) 38%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent);
   padding: 14px 14px 14px 16px;
   display: grid;
   gap: 12px;
@@ -3382,6 +3463,10 @@
   --settings-section-color: #d69a3a;
 }
 
+.settingsSection[data-settings-section="zen"] {
+  --settings-section-color: #8c8bff;
+}
+
 .settingsSection[data-settings-section="about"] {
   --settings-section-color: #ffbd3a;
 }
@@ -3392,6 +3477,10 @@
 
 .settingsSection[data-settings-section="network"] {
   --settings-section-color: #4f9dff;
+}
+
+.settingsSection[data-settings-section="experimental"] {
+  --settings-section-color: #7abf7f;
 }
 
 .settingsSectionHeader {
@@ -3890,13 +3979,8 @@
 .settingsSection .settingsTutorialCard,
 .settingsSection .settingsModelDropdown,
 .settingsSection .settingsInfoButton {
-  border-color: color-mix(in srgb, var(--settings-section-color) 24%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--settings-section-color) 8%, var(--bg)),
-      var(--bg)
-    );
+  border-color: color-mix(in srgb, var(--settings-section-color) 16%, var(--line));
+  background: color-mix(in srgb, var(--bg) 92%, var(--bg-surface));
 }
 
 .settingsSection .settingsTutorialCard strong,
@@ -3925,8 +4009,8 @@
   z-index: 3;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
-  box-shadow: 0 -12px 28px -24px color-mix(in srgb, #000 72%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 96%, var(--bg));
+  box-shadow: 0 -10px 24px -22px color-mix(in srgb, #000 64%, transparent);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -3966,6 +4050,20 @@
   min-width: 132px;
 }
 
+.settingsAccountDataActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settingsAccountDataActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 150px;
+}
+
 @media (max-width: 980px) {
   .settingsOverview,
   .settingsSectionGrid,
@@ -3973,6 +4071,37 @@
   .settingsEntryGrid,
   .settingsScopeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .settingsShell {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .settingsNav {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    display: flex;
+    gap: 14px;
+    padding: 8px;
+  }
+
+  .settingsNavGroup {
+    flex: 0 0 auto;
+  }
+
+  .settingsNavGroup + .settingsNavGroup {
+    margin-top: 0;
+  }
+
+  .settingsNavList {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+  }
+
+  .settingsNavItem {
+    white-space: nowrap;
   }
 
   .zenWallpaperStyleOptionGrid {
@@ -8563,6 +8692,21 @@
   max-width: min(11ch, 20vw);
 }
 
+.botLibraryGroupControl,
+.botLibraryGroupOption {
+  --bot-library-all-bots-swatch:
+    linear-gradient(
+      135deg,
+      #ff3d6e 0%,
+      #ff8a2a 18%,
+      #ffd23f 34%,
+      #42d66b 51%,
+      #22b8ff 68%,
+      #7467ff 84%,
+      #d94cff 100%
+    );
+}
+
 .botLibraryGroupControl {
   --bot-library-group-gradient:
     linear-gradient(145deg, color-mix(in srgb, var(--fg) 12%, transparent), transparent);
@@ -8693,6 +8837,17 @@
   border-radius: 6px;
 }
 
+.botLibraryGroupControl[data-default-option="true"] .botLibraryGroupTriggerSwatch {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0) 42%),
+    var(--bot-library-all-bots-swatch);
+  border-color: rgba(255, 255, 255, 0.34);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 14px rgba(255, 92, 170, 0.22),
+    0 0 18px rgba(34, 184, 255, 0.14);
+}
+
 .botLibraryGroupTriggerName {
   min-width: 0;
   max-width: 11ch;
@@ -8769,13 +8924,15 @@
 }
 
 .botLibraryGroupOption[data-default-option="true"] .botLibraryGroupOptionSwatch {
-  border-radius: 999px;
+  border-radius: 8px;
   background:
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--fg) 26%, transparent) 0 35%, transparent 37%),
-    color-mix(in srgb, var(--bg-surface) 88%, transparent);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 42%),
+    var(--bot-library-all-bots-swatch);
+  border-color: color-mix(in srgb, #fff 28%, var(--line));
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--fg-muted) 18%, transparent),
-    0 0 10px color-mix(in srgb, var(--fg-muted) 7%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, #fff 16%, transparent),
+    0 0 12px rgba(255, 92, 170, 0.16),
+    0 0 16px rgba(34, 184, 255, 0.11);
 }
 
 .botLibraryGroupOption[data-default-option="true"] .botLibraryGroupOptionName {
@@ -25044,11 +25201,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 20px color-mix(in srgb, #2fd3e3 18%, transparent);
 }
 
+.panelSettings::before {
+  width: 1px;
+  background: color-mix(in srgb, var(--accent) 42%, var(--line));
+  box-shadow: none;
+  opacity: 0.72;
+}
+
 .panelSettings {
   --panel-width: min(1040px, calc(100vw - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
+}
+
+.panelSettings > .settingsShell {
+  min-height: 0;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
 .panelSettings > .settingsWorkspace {
@@ -31413,7 +31582,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAiParameterBuilder {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(640px, calc(100vw - var(--panel-width) - 56px));
+  width: min(600px, calc(100vw - var(--panel-width) - 56px));
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 98%, var(--editor-bot-color, var(--fg)) 2%),
+      color-mix(in srgb, var(--bg) 90%, var(--editor-bot-color, var(--fg)) 10%)
+    );
 }
 
 .botAiParameterBody {
@@ -31421,30 +31597,214 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow-y: auto;
   padding: 14px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
-  gap: 14px;
+  justify-items: stretch;
+  gap: 12px;
+}
+
+.botAiPromptField {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 22%, var(--line));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 8%, transparent),
+      transparent 72%
+    ),
+    var(--bg);
+  padding: 10px;
+  display: grid;
+  gap: 9px;
+}
+
+.botAiFieldHeader,
+.botAiSamplerHeader,
+.botAiControlHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.botAiFieldHeader span,
+.botAiSamplerHeader span,
+.botAiControlHeader span {
+  min-width: 0;
+  color: color-mix(in srgb, var(--fg) 84%, var(--fg-muted) 16%);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.15;
+}
+
+.botAiFieldHeader strong,
+.botAiSamplerHeader strong,
+.botAiControlHeader strong {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 34%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 10%, var(--bg-deep));
+  color: var(--fg);
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .botAiPromptField textarea {
-  min-height: 240px;
+  min-height: 220px;
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12.5px;
   line-height: 1.5;
   resize: vertical;
+  border-radius: 8px;
+}
+
+.botAiPromptField textarea:focus {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 58%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--fg)) 16%, transparent);
+}
+
+.botAiSamplerPanel {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, var(--line));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--fg)) 6%, transparent),
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg) 92%, var(--bg-surface) 8%);
+  padding: 10px;
+  display: grid;
+  gap: 9px;
 }
 
 .botAiSamplerGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
-.botAiSamplerGrid .botProfileField {
-  gap: 6px;
+.botAiControlField {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 76%, var(--bg) 24%);
+  padding: 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 8px 10px;
+  align-items: center;
 }
 
-.botAiSamplerGrid input {
+.botAiControlField:focus-within {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 50%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--fg)) 12%, transparent);
+}
+
+.botAiControlHeader {
+  grid-column: 1 / -1;
+}
+
+.botAiControlHeader strong {
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.panelBots .form input.botAiRange,
+.botAiRange {
+  -webkit-appearance: none;
+  appearance: none;
+  grid-column: 1;
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.panelBots .form input.botAiRange:focus,
+.botAiRange:focus {
+  box-shadow: none;
+}
+
+.panelBots .form input.botAiRange:focus-visible,
+.botAiRange:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 58%, transparent);
+  outline-offset: 3px;
+}
+
+.botAiRange::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 26%, var(--line));
+}
+
+.botAiRange::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 26%, var(--line));
+}
+
+.botAiRange::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5.5px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 72%, var(--line));
+  border-radius: 999px;
+  background: var(--fg);
+  box-shadow: 0 2px 9px -6px color-mix(in srgb, var(--editor-bot-color, var(--fg)) 70%, #000);
+}
+
+.botAiRange::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--fg)) 72%, var(--line));
+  border-radius: 999px;
+  background: var(--fg);
+  box-shadow: 0 2px 9px -6px color-mix(in srgb, var(--editor-bot-color, var(--fg)) 70%, #000);
+}
+
+.panelBots .form input.botAiNumberInput,
+.botAiNumberInput {
+  grid-column: 2;
+  width: 82px;
+  min-height: 36px;
+  border-radius: 8px;
+  text-align: center;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.botAiNumberField {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+
+.botAiNumberField .botAiControlHeader {
+  grid-column: 1;
+}
+
+.panelBots .form .botAiNumberField input.botAiNumberInput,
+.botAiNumberField .botAiNumberInput {
+  grid-column: 2;
+  grid-row: 1;
+  width: 112px;
 }
 
 .panelBots[data-profile-builder-open="true"]::after {
@@ -31484,6 +31844,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   animation: popIn 0.16s ease-out;
+}
+
+.botProfileBuilder.botAiParameterBuilder {
+  width: min(660px, calc(100vw - var(--panel-width) - 56px));
+  border-radius: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 98%, var(--editor-bot-color, var(--fg)) 2%),
+      color-mix(in srgb, var(--bg) 90%, var(--editor-bot-color, var(--fg)) 10%)
+    );
+}
+
+.botProfileBuilder.botAiParameterBuilder .botAiParameterBody {
+  grid-column: 1 / -1;
 }
 
 .botProfileBuilderHeader {
@@ -32561,6 +32938,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .panelHeaderIconButton:hover {
   background: var(--bg-hover);
   color: var(--fg);
+}
+
+.settingsHeaderThemeButton {
+  color: var(--fg-muted);
+}
+
+.settingsHeaderThemeButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .panelHeaderIconButton:disabled {
@@ -40606,7 +40993,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #ffffff 78%, transparent),
-    0 12px 34px -30px color-mix(in srgb, var(--editor-bot-color, #161514) 38%, #161514);
+	    0 12px 34px -30px color-mix(in srgb, var(--editor-bot-color, #161514) 38%, #161514);
+}
+
+.themeLight .botAiParameterBuilder {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 92%, var(--editor-bot-color, var(--accent)) 8%),
+      color-mix(in srgb, var(--bg-surface) 88%, var(--editor-bot-color, var(--accent)) 12%)
+    );
+}
+
+.themeLight .botAiPromptField,
+.themeLight .botAiSamplerPanel,
+.themeLight .botAiControlField {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 78%, var(--bg-surface) 22%),
+      color-mix(in srgb, var(--bg-surface) 92%, var(--bg) 8%)
+    );
 }
 
 .themeLight .panelBots .botIdentityCard {
@@ -40709,12 +41116,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight .settingsOverview,
 .themeLight .settingsSection {
   border-color: color-mix(in srgb, var(--line-strong) 34%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, #ffffff 78%, var(--bg-surface) 22%),
-      color-mix(in srgb, var(--bg-surface) 82%, var(--bg) 18%)
-    );
+  background: color-mix(in srgb, #ffffff 76%, var(--bg-surface));
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 76%, transparent);
 }
 
@@ -41586,9 +41988,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-columns: 1fr;
   }
 
-  .panelSettings > .settingsWorkspace {
+  .panelSettings > .settingsShell {
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     -webkit-overflow-scrolling: touch;
     padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 18px));
   }
@@ -41811,17 +42213,37 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 	    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
 	  }
 
-	  .botAiParameterBody {
-	    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
-	  }
+		  .botAiParameterBody {
+		    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
+		  }
 
-	  .botAiSamplerGrid {
+		  .botAiPromptField textarea {
+		    min-height: 180px;
+		  }
+
+		  .botAiSamplerGrid {
+		    grid-template-columns: 1fr;
+		  }
+
+		  .botAiControlField,
+		  .botAiNumberField {
+		    grid-template-columns: minmax(0, 1fr) 92px;
+		  }
+
+		  .botAiNumberField .botAiControlHeader {
+		    grid-column: 1;
+		  }
+
+		  .botAiNumberField .botAiNumberInput,
+		  .panelBots .form .botAiNumberField input.botAiNumberInput,
+		  .panelBots .form input.botAiNumberInput,
+		  .botAiNumberInput {
+		    width: 92px;
+		  }
+
+	  .botAvatarCustomizerBody {
 	    grid-template-columns: 1fr;
-	  }
-
-  .botAvatarCustomizerBody {
-    grid-template-columns: 1fr;
-    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
+	    padding: 12px max(14px, calc(env(safe-area-inset-right) + 14px));
   }
 
   .botAvatarModalPreview {
