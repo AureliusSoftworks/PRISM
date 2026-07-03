@@ -15,6 +15,19 @@ export interface BotLibraryGroupMaintenanceGroup {
   builtIn?: boolean;
 }
 
+export interface BotLibraryGroupSelectionGroup {
+  id: string;
+  botIds: readonly string[];
+  builtIn?: boolean;
+}
+
+export interface BotLibraryMultiSelectionActions<
+  TGroup extends BotLibraryGroupSelectionGroup,
+> {
+  canCreateGroup: boolean;
+  removableGroup: TGroup | null;
+}
+
 export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
   bots: readonly TBot[],
   groups: readonly BotLibraryGroupFilterGroup[],
@@ -63,4 +76,30 @@ export function pruneBotLibraryGroupsForExistingBots<
     }),
     minimumCustomBots
   );
+}
+
+export function resolveCommonBotLibraryGroupForSelection<
+  TGroup extends BotLibraryGroupSelectionGroup,
+>(groups: readonly TGroup[], selectedBotIds: readonly string[]): TGroup | null {
+  const selectedSet = new Set(selectedBotIds);
+  if (selectedSet.size < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS) return null;
+  const selectedIds = Array.from(selectedSet);
+  const matching = groups.filter((group) =>
+    selectedIds.every((botId) => group.botIds.includes(botId))
+  );
+  if (matching.length === 0) return null;
+  return matching.find((group) => group.builtIn !== true) ?? matching[0] ?? null;
+}
+
+export function resolveBotLibraryMultiSelectionActions<
+  TGroup extends BotLibraryGroupSelectionGroup,
+>(
+  groups: readonly TGroup[],
+  selectedBotIds: readonly string[]
+): BotLibraryMultiSelectionActions<TGroup> {
+  const selectedSet = new Set(selectedBotIds);
+  return {
+    canCreateGroup: selectedSet.size >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
+    removableGroup: resolveCommonBotLibraryGroupForSelection(groups, selectedBotIds),
+  };
 }
