@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
+  resolveBotLibraryMultiSelectionActions,
 } from "./botLibraryGroupFilter.ts";
 
 describe("bot library group filtering", () => {
@@ -29,6 +31,49 @@ describe("bot library group filtering", () => {
     assert.deepEqual(
       filterBotsByLibraryGroup(bots, groups, "group:story").map((bot) => bot.id),
       ["bot-a", "bot-b"]
+    );
+  });
+
+  it("allows one bot to appear in multiple differently named groups", () => {
+    const libraryBots = [
+      { id: "vader", name: "Darth Vader" },
+      { id: "palpatine", name: "Emperor Palpatine" },
+      { id: "luke", name: "Luke Skywalker" },
+    ];
+    const overlappingGroups = [
+      { id: "group:villains", botIds: ["vader", "palpatine"] },
+      { id: "group:star-wars", botIds: ["vader", "luke"] },
+    ];
+
+    assert.deepEqual(
+      filterBotsByLibraryGroup(libraryBots, overlappingGroups, "group:villains").map(
+        (bot) => bot.id
+      ),
+      ["vader", "palpatine"]
+    );
+    assert.deepEqual(
+      filterBotsByLibraryGroup(libraryBots, overlappingGroups, "group:star-wars").map(
+        (bot) => bot.id
+      ),
+      ["vader", "luke"]
+    );
+  });
+
+  it("filters ungrouped bots that are not in favorites or custom groups", () => {
+    const libraryBots = [
+      { id: "bot-a", name: "Astra" },
+      { id: "bot-b", name: "Basil" },
+      { id: "bot-c", name: "Cora" },
+      { id: "bot-d", name: "Dax" },
+    ];
+
+    assert.deepEqual(
+      filterBotsByLibraryGroup(libraryBots, groups, "ungrouped").map((bot) => bot.id),
+      ["bot-d"]
+    );
+    assert.deepEqual(
+      filterUngroupedBotsByLibraryGroups(libraryBots, groups).map((bot) => bot.id),
+      ["bot-d"]
     );
   });
 
@@ -72,5 +117,18 @@ describe("bot library group filtering", () => {
       ["builtin:favorites", "group:stale-trio"]
     );
     assert.deepEqual(maintainedGroups[1]?.botIds, ["bot-a", "bot-b"]);
+  });
+
+  it("keeps create-group available when selected bots already share a group", () => {
+    const actions = resolveBotLibraryMultiSelectionActions(
+      [
+        { id: "builtin:favorites", botIds: ["vader", "palpatine"], builtIn: true },
+        { id: "group:villains", botIds: ["vader", "palpatine"], builtIn: false },
+      ],
+      ["vader", "palpatine"]
+    );
+
+    assert.equal(actions.canCreateGroup, true);
+    assert.equal(actions.removableGroup?.id, "group:villains");
   });
 });

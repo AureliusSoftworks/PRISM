@@ -15,14 +15,32 @@ export interface BotLibraryGroupMaintenanceGroup {
   builtIn?: boolean;
 }
 
+export interface BotLibraryGroupSelectionGroup {
+  id: string;
+  botIds: readonly string[];
+  builtIn?: boolean;
+}
+
+export interface BotLibraryMultiSelectionActions<
+  TGroup extends BotLibraryGroupSelectionGroup,
+> {
+  canCreateGroup: boolean;
+  removableGroup: TGroup | null;
+}
+
 export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
   bots: readonly TBot[],
   groups: readonly BotLibraryGroupFilterGroup[],
   filterId: string,
-  allFilterId = "all"
+  allFilterId = "all",
+  ungroupedFilterId = "ungrouped"
 ): TBot[] {
   if (filterId === allFilterId) {
     return [...bots];
+  }
+
+  if (filterId === ungroupedFilterId) {
+    return filterUngroupedBotsByLibraryGroups(bots, groups);
   }
 
   const group = groups.find((candidate) => candidate.id === filterId);
@@ -32,6 +50,28 @@ export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
 
   const allowedBotIds = new Set(group.botIds);
   return bots.filter((bot) => allowedBotIds.has(bot.id));
+}
+
+export function groupedBotIdsForLibraryGroups(
+  groups: readonly BotLibraryGroupFilterGroup[]
+): Set<string> {
+  const groupedBotIds = new Set<string>();
+  for (const group of groups) {
+    for (const botId of group.botIds) {
+      groupedBotIds.add(botId);
+    }
+  }
+  return groupedBotIds;
+}
+
+export function filterUngroupedBotsByLibraryGroups<
+  TBot extends BotLibraryGroupFilterBot,
+>(
+  bots: readonly TBot[],
+  groups: readonly BotLibraryGroupFilterGroup[]
+): TBot[] {
+  const groupedBotIds = groupedBotIdsForLibraryGroups(groups);
+  return bots.filter((bot) => !groupedBotIds.has(bot.id));
 }
 
 export function pruneBotLibraryGroupsWithFewBots<
@@ -63,4 +103,30 @@ export function pruneBotLibraryGroupsForExistingBots<
     }),
     minimumCustomBots
   );
+}
+
+export function resolveCommonBotLibraryGroupForSelection<
+  TGroup extends BotLibraryGroupSelectionGroup,
+>(groups: readonly TGroup[], selectedBotIds: readonly string[]): TGroup | null {
+  const selectedSet = new Set(selectedBotIds);
+  if (selectedSet.size < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS) return null;
+  const selectedIds = Array.from(selectedSet);
+  const matching = groups.filter((group) =>
+    selectedIds.every((botId) => group.botIds.includes(botId))
+  );
+  if (matching.length === 0) return null;
+  return matching.find((group) => group.builtIn !== true) ?? matching[0] ?? null;
+}
+
+export function resolveBotLibraryMultiSelectionActions<
+  TGroup extends BotLibraryGroupSelectionGroup,
+>(
+  groups: readonly TGroup[],
+  selectedBotIds: readonly string[]
+): BotLibraryMultiSelectionActions<TGroup> {
+  const selectedSet = new Set(selectedBotIds);
+  return {
+    canCreateGroup: selectedSet.size >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
+    removableGroup: resolveCommonBotLibraryGroupForSelection(groups, selectedBotIds),
+  };
 }

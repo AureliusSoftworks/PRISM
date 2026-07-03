@@ -254,13 +254,21 @@ import {
 import {
   BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
   filterBotsByLibraryGroup,
+  filterUngroupedBotsByLibraryGroups,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
+  resolveBotLibraryMultiSelectionActions,
 } from "./botLibraryGroupFilter";
+import {
+  resolveCanvasBotMarqueeSelection,
+  resolveInactiveCanvasBotMarqueeSelection,
+  type CanvasBotMarqueeSelectionMode,
+} from "./botCanvasMarqueeSelection";
 import {
   botProfileDetailsUnlocked,
   botProfileReferenceName,
 } from "./botProfileEditorGate";
+import { buildBotCustomizerSavePatch } from "./botCustomizerSavePatch";
 import { LensTile } from "./LensTile";
 import {
   CircleHelp,
@@ -268,6 +276,7 @@ import {
   Brush,
   Building2,
   Check,
+  ChevronLeft,
   Copy,
   Download,
   Droplets,
@@ -1315,6 +1324,8 @@ type CanvasBotMarqueeDragState = {
   startClientX: number;
   startClientY: number;
   active: boolean;
+  mode: CanvasBotMarqueeSelectionMode;
+  baseSelectedBotIds: Set<string>;
   tileRects: Array<{ botId: string; rect: DOMRect }>;
 };
 
@@ -11746,6 +11757,7 @@ async function fetchBotMarketplaceManifest(): Promise<BotMarketplaceManifest> {
 
 const BOT_LIBRARY_FILTER_ALL = "all" as const;
 const BOT_LIBRARY_GROUP_FILTER_ALL = "all" as const;
+const BOT_LIBRARY_GROUP_FILTER_UNGROUPED = "ungrouped" as const;
 const BOT_LIBRARY_GROUP_CREATE_NEW = "create-new" as const;
 const BOT_LIBRARY_GROUP_BOT_CAP = 24;
 const BOT_MARKETPLACE_STARTER_THEME_ID = "originals";
@@ -12251,6 +12263,16 @@ function buildBotLibraryGroupGradient(
   return `${nodeLayers.join(", ")}, ${ambientLayer}, ${baseLayer}`;
 }
 
+function botLibraryGroupAccentColor(
+  groupBots: readonly Bot[],
+  theme: "light" | "dark"
+): string {
+  const rawAccent = groupBots
+    .map((bot) => bot.color?.trim())
+    .find((color): color is string => Boolean(color && hexChannels(color)));
+  return normalizeAccentForTheme(rawAccent ?? PRISM_DEFAULT_ACCENT, theme);
+}
+
 function botLibraryGroupVisualStyle(
   group: Pick<BotLibraryGroup, "id">,
   groupBots: readonly Bot[],
@@ -12262,6 +12284,7 @@ function botLibraryGroupVisualStyle(
       groupBots,
       theme
     ),
+    ["--bot-library-group-accent" as string]: botLibraryGroupAccentColor(groupBots, theme),
   } as React.CSSProperties;
 }
 
@@ -29232,6 +29255,10 @@ function HomeContent(): React.JSX.Element {
   /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
   const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
   const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
+  const chatHeaderRef = useRef<HTMLElement | null>(null);
+  const chatHeaderInlineActionsRef = useRef<HTMLDivElement | null>(null);
+  const [chatHeaderToolsWrapped, setChatHeaderToolsWrapped] = useState(false);
+  const chatHeaderToolsWrapWidthRef = useRef<number | null>(null);
   // Wrench toggle anchor — focus returns here on Escape / outside-click /
   // collapse so keyboard users land on the control they just opened.
   const chatOverflowGearButtonRef = useRef<HTMLButtonElement>(null);
@@ -30546,6 +30573,61 @@ function HomeContent(): React.JSX.Element {
   const mobileKeyboardInset = useMobileKeyboardInset(
     composerFocused && viewportWidth <= PICKER_MOBILE_BREAKPOINT
   );
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let frame: number | null = null;
+    const scheduleMeasure = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        if (viewportWidth <= PHONE_MENU_BREAKPOINT) {
+          chatHeaderToolsWrapWidthRef.current = null;
+          if (chatHeaderToolsWrapped) setChatHeaderToolsWrapped(false);
+          return;
+        }
+
+        if (chatHeaderToolsWrapped) {
+          const wrapWidth = chatHeaderToolsWrapWidthRef.current;
+          if (wrapWidth !== null && viewportWidth >= wrapWidth + 32) {
+            setChatHeaderToolsWrapped(false);
+          }
+          return;
+        }
+
+        const header = chatHeaderRef.current;
+        const actions = chatHeaderInlineActionsRef.current;
+        if (!header || !actions) return;
+
+        const visibleChildren = Array.from(header.children).filter((child) => {
+          const element = child as HTMLElement;
+          return element.offsetParent !== null && element.offsetHeight > 0;
+        }) as HTMLElement[];
+        const firstRowTop = Math.min(...visibleChildren.map((child) => child.offsetTop));
+        if (!Number.isFinite(firstRowTop)) return;
+
+        if (actions.offsetTop > firstRowTop + 8) {
+          chatHeaderToolsWrapWidthRef.current = viewportWidth;
+          setChatHeaderToolsWrapped(true);
+        }
+      });
+    };
+
+    scheduleMeasure();
+    const header = chatHeaderRef.current;
+    const observer =
+      header && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(scheduleMeasure)
+        : null;
+    if (header) observer?.observe(header);
+    window.addEventListener("resize", scheduleMeasure);
+
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+    };
+  }, [chatHeaderToolsWrapped, viewportWidth]);
   useLayoutEffect(() => {
     if (!DEV_TOOLS_ENABLED || !devToolsRuntimeActive || typeof document === "undefined") {
       const defaultInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
@@ -34811,6 +34893,7 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) return;
     if (botLibraryGroups.some((group) => group.id === botLibraryGroupFilterId)) return;
     setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
@@ -39052,6 +39135,7 @@ function HomeContent(): React.JSX.Element {
   );
   useEffect(() => {
     if (coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) return;
     if (botLibraryGroups.some((group) => group.id === coffeeBotLibraryGroupFilterId)) return;
     setCoffeeBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
   }, [botLibraryGroups, coffeeBotLibraryGroupFilterId]);
@@ -39612,16 +39696,29 @@ function HomeContent(): React.JSX.Element {
   );
   const activeBotLibraryGroupFilter = useMemo(
     () =>
-      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL
+      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL ||
+      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED
         ? null
         : botLibraryGroups.find((group) => group.id === botLibraryGroupFilterId) ?? null,
     [botLibraryGroupFilterId, botLibraryGroups]
   );
+  const botLibraryUngroupedFilterActive =
+    botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED;
+  const ungroupedPanelBots = useMemo<readonly Bot[]>(
+    () => filterUngroupedBotsByLibraryGroups(sortedPanelBots, botLibraryGroups),
+    [botLibraryGroups, sortedPanelBots]
+  );
   const baseFilteredPanelBots = useMemo<readonly Bot[]>(() => {
+    if (botLibraryUngroupedFilterActive) return ungroupedPanelBots;
     if (!activeBotLibraryGroupFilter) return sortedPanelBots;
     const allowedBotIds = new Set(activeBotLibraryGroupFilter.botIds);
     return sortedPanelBots.filter((bot) => allowedBotIds.has(bot.id));
-  }, [activeBotLibraryGroupFilter, sortedPanelBots]);
+  }, [
+    activeBotLibraryGroupFilter,
+    botLibraryUngroupedFilterActive,
+    sortedPanelBots,
+    ungroupedPanelBots,
+  ]);
   const botLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
     const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
       const allowedBotIds = new Set(group.botIds.filter((botId) => existingBotIds.has(botId)));
@@ -39646,16 +39743,32 @@ function HomeContent(): React.JSX.Element {
         count: sortedPanelBots.length,
         bots: sortedPanelBots,
       },
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+        name: "Ungrouped",
+        menuName: "Ungrouped bots",
+        count: ungroupedPanelBots.length,
+        bots: ungroupedPanelBots,
+      },
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
     ];
-  }, [botLibraryGroups, customBotLibraryGroups, existingBotIds, sortedPanelBots]);
+  }, [
+    botLibraryGroups,
+    customBotLibraryGroups,
+    existingBotIds,
+    sortedPanelBots,
+    ungroupedPanelBots,
+  ]);
   const botLibraryGroupPickerValue = useMemo(() => {
+    if (botLibraryUngroupedFilterActive) {
+      return BOT_LIBRARY_GROUP_FILTER_UNGROUPED;
+    }
     if (activeBotLibraryGroupFilter) {
       return `${BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX}${activeBotLibraryGroupFilter.id}`;
     }
     return BOT_LIBRARY_GROUP_FILTER_ALL;
-  }, [activeBotLibraryGroupFilter]);
+  }, [activeBotLibraryGroupFilter, botLibraryUngroupedFilterActive]);
   const coffeeBotLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
     const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
       const allowedBotIds = new Set(group.botIds);
@@ -39671,6 +39784,10 @@ function HomeContent(): React.JSX.Element {
     const favoritesGroup =
       botLibraryGroups.find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID) ??
       createFavoritesBotGroup();
+    const ungroupedCoffeeBots = filterUngroupedBotsByLibraryGroups(
+      coffeeBotsLibrary,
+      botLibraryGroups
+    );
     return [
       {
         id: BOT_LIBRARY_GROUP_FILTER_ALL,
@@ -39679,6 +39796,13 @@ function HomeContent(): React.JSX.Element {
         menuCountLabel: "Default view",
         count: coffeeBotsLibrary.length,
         bots: coffeeBotsLibrary,
+      },
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+        name: "Ungrouped",
+        menuName: "Ungrouped bots",
+        count: ungroupedCoffeeBots.length,
+        bots: ungroupedCoffeeBots,
       },
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
@@ -39690,7 +39814,8 @@ function HomeContent(): React.JSX.Element {
         coffeeBotsLibrary,
         botLibraryGroups,
         coffeeBotLibraryGroupFilterId,
-        BOT_LIBRARY_GROUP_FILTER_ALL
+        BOT_LIBRARY_GROUP_FILTER_ALL,
+        BOT_LIBRARY_GROUP_FILTER_UNGROUPED
       ),
     [botLibraryGroups, coffeeBotLibraryGroupFilterId, coffeeBotsLibrary]
   );
@@ -39721,7 +39846,9 @@ function HomeContent(): React.JSX.Element {
     coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL
       ? coffeeSearchTerm
         ? "Nothing in this group matches that search."
-        : "No chat-enabled bots live in this group yet."
+        : coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED
+          ? "Every chat-enabled bot is already in a group."
+          : "No chat-enabled bots live in this group yet."
       : "No bots match that search.";
   const composeMentionBotPicks = useMemo(
     () =>
@@ -40321,9 +40448,6 @@ function HomeContent(): React.JSX.Element {
     !emptyStateSearchActive &&
     !activeBot &&
     Boolean(activeBotLibraryGroupFilter);
-  const messagesFrameBotLibraryGroupFocus =
-    botLibraryGroupDashboardActive &&
-    Boolean(activeBotLibraryGroupFilter && !activeBotLibraryGroupFilter.builtIn);
   const zenToneSpace = chatLikeSurface
     ? resolveZenToneSpaceFromAnnoyance(detail?.prismMood?.annoyance)
     : 0;
@@ -40341,28 +40465,16 @@ function HomeContent(): React.JSX.Element {
             "--zen-tone-scroll-margin-extra": `${Math.round(zenToneSpace * 112)}px`,
           }
         : {};
-      const groupVars =
-        messagesFrameBotLibraryGroupFocus && activeBotLibraryGroupFilter
-          ? botLibraryGroupVisualStyle(
-              activeBotLibraryGroupFilter,
-              baseFilteredPanelBots,
-              resolvedTheme
-            )
-          : {};
-      const merged = { ...lensThumb, ...homeVars, ...zenToneVars, ...groupVars };
+      const merged = { ...lensThumb, ...homeVars, ...zenToneVars };
       return Object.keys(merged).length > 0
         ? (merged as unknown as React.CSSProperties)
         : undefined;
     },
     [
-      activeBotLibraryGroupFilter,
-      baseFilteredPanelBots,
       chatLikeSurface,
       emptyStateLensVisible,
       homeRainbowVars,
       lensThumbXPct,
-      messagesFrameBotLibraryGroupFocus,
-      resolvedTheme,
       zenToneSpace,
     ]
   );
@@ -40545,10 +40657,14 @@ function HomeContent(): React.JSX.Element {
     : null;
   const activeBotPanelFilterLabel =
     botPanelGroup === BOT_LIBRARY_FILTER_ALL
-      ? activeBotLibraryGroupFilter?.name ?? "All bots"
-      : activeBotLibraryGroupFilter
-        ? `${activeBotLibraryGroupFilter.name} · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
-        : activeBotPanelGroup?.label ?? "Filtered bots";
+      ? botLibraryUngroupedFilterActive
+        ? "Ungrouped"
+        : activeBotLibraryGroupFilter?.name ?? "All bots"
+      : botLibraryUngroupedFilterActive
+        ? `Ungrouped · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
+        : activeBotLibraryGroupFilter
+          ? `${activeBotLibraryGroupFilter.name} · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
+          : activeBotPanelGroup?.label ?? "Filtered bots";
   // Keep the library list visible for every active filter, including the
   // neutral "all bots" tile. Group tiles still narrow the same shared list.
   const botPanelListVisible = bots.length > 0;
@@ -52953,10 +53069,15 @@ function HomeContent(): React.JSX.Element {
       width: right - left,
       height: bottom - top,
     });
-    const nextSelectedIds = new Set<string>();
+    const hitBotIds: string[] = [];
     for (const { botId, rect } of drag.tileRects) {
-      if (rectsIntersect(viewportRect, rect)) nextSelectedIds.add(botId);
+      if (rectsIntersect(viewportRect, rect)) hitBotIds.push(botId);
     }
+    const nextSelectedIds = resolveCanvasBotMarqueeSelection({
+      mode: drag.mode,
+      baseSelectedBotIds: drag.baseSelectedBotIds,
+      hitBotIds,
+    });
     setCanvasSelectedBotIds((current) =>
       stringSetsEqual(current, nextSelectedIds) ? current : nextSelectedIds
     );
@@ -52969,11 +53090,18 @@ function HomeContent(): React.JSX.Element {
     if (event.pointerType === "touch") return false;
     if (event.button !== 0) return false;
     const target = event.target;
-    if (
-      target instanceof Element &&
-      target.closest("button, input, textarea, select, a, [role='button'], [data-bot-id]")
-    ) {
-      return false;
+    if (target instanceof Element) {
+      const startsOnBotTile = Boolean(target.closest("[data-bot-id]"));
+      const allowBotTileShiftDrag = event.shiftKey && startsOnBotTile;
+      const blockedInteractiveTarget = target.closest(
+        "button, input, textarea, select, a, [role='button']"
+      );
+      if (blockedInteractiveTarget && !allowBotTileShiftDrag) {
+        return false;
+      }
+      if (startsOnBotTile && !allowBotTileShiftDrag) {
+        return false;
+      }
     }
     const frame = event.currentTarget;
     const frameRect = frame.getBoundingClientRect();
@@ -52993,6 +53121,8 @@ function HomeContent(): React.JSX.Element {
       startClientX: event.clientX,
       startClientY: event.clientY,
       active: false,
+      mode: event.shiftKey ? "toggle" : "replace",
+      baseSelectedBotIds: new Set(canvasSelectedBotIds),
       tileRects,
     };
     setCanvasBotMarqueeRect(null);
@@ -53002,7 +53132,7 @@ function HomeContent(): React.JSX.Element {
       // Some browser/test environments do not expose pointer capture.
     }
     return true;
-  }, [detail, pendingReplyVisible]);
+  }, [canvasSelectedBotIds, detail, pendingReplyVisible]);
 
   const handleCanvasBotMarqueePointerMove = useCallback((
     event: React.PointerEvent<HTMLDivElement>
@@ -53035,7 +53165,13 @@ function HomeContent(): React.JSX.Element {
       event.preventDefault();
       event.stopPropagation();
     } else {
-      setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
+      const nextSelectedIds = resolveInactiveCanvasBotMarqueeSelection(
+        drag.mode,
+        drag.baseSelectedBotIds
+      );
+      setCanvasSelectedBotIds((current) =>
+        stringSetsEqual(current, nextSelectedIds) ? current : nextSelectedIds
+      );
     }
     setCanvasBotMarqueeRect(null);
     canvasBotMarqueeDragRef.current = null;
@@ -53077,6 +53213,10 @@ function HomeContent(): React.JSX.Element {
       performShowAllBotsView(null);
       return;
     }
+    if (nextValue === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) {
+      applyBotLibraryGroupFilter(BOT_LIBRARY_GROUP_FILTER_UNGROUPED);
+      return;
+    }
     if (nextValue.startsWith(BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX)) {
       const groupId = nextValue.slice(BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX.length);
       applyBotLibraryGroupFilter(groupId);
@@ -53098,6 +53238,11 @@ function HomeContent(): React.JSX.Element {
       "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true'], [data-bot-picker-frame='true']"
     );
     if (interactiveTarget) return;
+    if (event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const shouldReturnToBotDirectory =
       bots.length > 0 &&
       !pendingReplyVisible &&
@@ -54961,24 +55106,6 @@ function HomeContent(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
-  }
-
-  function resolveCommonBotGroupForSelection(selectedBotIds: string[]): BotLibraryGroup | null {
-    if (selectedBotIds.length < 2) return null;
-    const selectedSet = new Set(selectedBotIds);
-    const matching = botLibraryGroups.filter((group) =>
-      selectedBotIds.every((botId) => group.botIds.includes(botId))
-    );
-    if (matching.length === 0) return null;
-    // Prefer mutable user groups before Favorites so "Ungroup" usually targets
-    // explicit user-created groupings first.
-    const mutable = matching.find((group) => !group.builtIn);
-    const target = mutable ?? matching[0];
-    if (!target) return null;
-    return {
-      ...target,
-      botIds: target.botIds.filter((botId) => selectedSet.has(botId)),
-    };
   }
 
   function createDefaultBotGroupName(): string {
@@ -57710,33 +57837,44 @@ function HomeContent(): React.JSX.Element {
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
         : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
+    const patch = buildBotCustomizerSavePatch(
+      {
+        name: trimmedName,
+        storedSystemPrompt,
+        advancedMode: botEditorAdvancedMode,
+        localModel,
+        onlineModel,
+        localModelForStorage: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+        onlineModelForStorage: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
+        localImageModel: newBotLocalImageModel,
+        openAiImageModel: newBotOpenAiImageModel,
+        localImageModelForStorage: localImageStored,
+        openAiImageModelForStorage: openaiImageStored,
+        onlineEnabled: newBotOnlineEnabled,
+        deleteProtected: newBotDeleteProtected,
+        flirtEnabled: newBotFlirtEnabled,
+        temperature: newBotTemperature,
+        maxTokens: newBotMaxTokens,
+        topP: newBotTopP,
+        topK: newBotTopK,
+        repetitionPenalty: newBotRepetitionPenalty,
+        color: newBotColor,
+        glyph: newBotGlyph,
+        faceEyesFont: newBotFaceEyesFont,
+        faceMouthFont: newBotFaceMouthFont,
+        faceFontWeight: newBotFaceFontWeight,
+        profilePictureImageId: newBotProfilePictureImageId,
+      },
+      editOriginalRef.current
+    );
+    if (Object.keys(patch).length === 0) return;
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
     try {
       const result = await api<{ bot?: Bot }>(`/api/bots/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          name: trimmedName,
-          systemPrompt: storedSystemPrompt,
-          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
-          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
-          localImageModel: localImageStored,
-          openaiImageModel: openaiImageStored,
-          onlineEnabled: newBotOnlineEnabled,
-	          flirtEnabled: newBotFlirtEnabled,
-	          temperature: newBotTemperature,
-	          maxTokens: newBotMaxTokens,
-	          topP: newBotTopP,
-	          topK: newBotTopK,
-	          repetitionPenalty: newBotRepetitionPenalty,
-	          color: newBotColor,
-          glyph: newBotGlyph,
-          faceEyesFont: newBotFaceEyesFont,
-          faceMouthFont: newBotFaceMouthFont,
-          faceFontWeight: newBotFaceFontWeight,
-          profilePictureImageId: newBotProfilePictureImageId,
-        }),
+        body: JSON.stringify(patch),
       });
       setNewBotLocalModel(localModel);
       setNewBotOnlineModel(onlineModel);
@@ -59232,9 +59370,11 @@ function HomeContent(): React.JSX.Element {
             .filter((candidate): candidate is Bot => Boolean(candidate))
         : [];
     const isMultiSelectionMenu = multiSelectedBots.length > 1;
-    const commonGroup = isMultiSelectionMenu
-      ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
+    const multiSelectedBotIds = multiSelectedBots.map((candidate) => candidate.id);
+    const multiSelectionGroupActions = isMultiSelectionMenu
+      ? resolveBotLibraryMultiSelectionActions(botLibraryGroups, multiSelectedBotIds)
       : null;
+    const commonGroup = multiSelectionGroupActions?.removableGroup ?? null;
     const botLibraryGroupContext = botContextMenu.groupId
       ? botLibraryGroups.find((group) => group.id === botContextMenu.groupId) ?? null
       : null;
@@ -59309,31 +59449,41 @@ function HomeContent(): React.JSX.Element {
                 <span>Export bots</span>
               </span>
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                closeBotContextMenu();
-                const ids = multiSelectedBots.map((candidate) => candidate.id);
-                if (commonGroup) {
-                  ungroupSelectedBots(commonGroup.id, ids);
-                  setPanelNotice(
-                    ids.length === 2
-                      ? `Ungrouped 2 bots from "${commonGroup.name}".`
-                      : `Ungrouped ${ids.length} bots from "${commonGroup.name}".`
-                  );
-                } else {
-                  groupSelectedBots(ids);
-                }
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">
-                  {commonGroup ? "⊖" : "⊕"}
+            {multiSelectionGroupActions?.canCreateGroup ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeBotContextMenu();
+                  groupSelectedBots(multiSelectedBotIds);
+                }}
+              >
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
+                  <span>Add to group</span>
                 </span>
-                <span>{commonGroup ? `Ungroup (${commonGroup.name})` : "Group"}</span>
-              </span>
-            </button>
+              </button>
+            ) : null}
+            {commonGroup ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeBotContextMenu();
+                  ungroupSelectedBots(commonGroup.id, multiSelectedBotIds);
+                  setPanelNotice(
+                    multiSelectedBotIds.length === 2
+                      ? `Removed 2 bots from "${commonGroup.name}".`
+                      : `Removed ${multiSelectedBotIds.length} bots from "${commonGroup.name}".`
+                  );
+                }}
+              >
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊖</span>
+                  <span>Remove from {commonGroup.name}</span>
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -61131,8 +61281,9 @@ function HomeContent(): React.JSX.Element {
     const canDelete = Boolean(!isZenSurface && ((detail && selectedId) || selectedBotCanDelete));
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
     const headerActionsDisabled = false;
-    const isMobileGear =
+    const isPhoneGear =
       FLOATING_SHELL_APPLETS_ENABLED && viewportWidth <= PHONE_MENU_BREAKPOINT;
+    const useHeaderToolsMenu = isPhoneGear || chatHeaderToolsWrapped;
     const privateDefaultHeaderMode = privateChatActive && !privateCustomBotActive;
     const privateFocusedBotHeaderMode = privateChatActive && privateCustomBotActive;
     const privateFocusedBotBase =
@@ -61176,7 +61327,7 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           className={`${styles.imageReadyNoticeChip} ${
-            isMobileGear ? styles.imageReadyNoticeChipFloating : ""
+            isPhoneGear ? styles.imageReadyNoticeChipFloating : ""
           }`}
           style={{
             backgroundColor: imageReadyNotice.accentHex,
@@ -61351,7 +61502,7 @@ function HomeContent(): React.JSX.Element {
       event.stopPropagation();
     };
 
-    if (!isMobileGear) {
+    if (!useHeaderToolsMenu) {
       // Desktop: header is now a row of glyph-only icon buttons. The old
       // SETTINGS / IMAGES / MEMORIES accordion was removed in favor of
       // direct-action icons; the gear glyph opens Settings instead of toggling
@@ -61359,7 +61510,10 @@ function HomeContent(): React.JSX.Element {
       // context menu and bot card affordances elsewhere.
       return (
         <div
-          ref={chatOverflowMenuRef}
+          ref={(node) => {
+            chatOverflowMenuRef.current = node;
+            chatHeaderInlineActionsRef.current = node;
+          }}
           className={`${styles.chatHeaderActions} ${
             gearHidden ? styles.chatHeaderActionsHidden : ""
           } ${
@@ -61415,7 +61569,10 @@ function HomeContent(): React.JSX.Element {
 
     return (
       <div
-        ref={chatOverflowMenuRef}
+        ref={(node) => {
+          chatOverflowMenuRef.current = node;
+          chatHeaderInlineActionsRef.current = null;
+        }}
         className={`${styles.chatGearAnchor} ${gearHidden ? styles.chatGearAnchorHidden : ""}`}
       >
         <div className={styles.chatHeaderGearAnchor}>
@@ -61424,15 +61581,19 @@ function HomeContent(): React.JSX.Element {
             className={styles.chatGearButton}
             aria-expanded={chatOverflowMenuOpen}
             aria-haspopup="menu"
-            aria-label="Conversation tools menu"
-            data-glyph-tooltip="Conversation tools"
+            aria-label={isPhoneGear ? "Conversation tools menu" : "Navigation menu"}
+            data-glyph-tooltip={isPhoneGear ? "Conversation tools" : "Navigation menu"}
             onPointerDownCapture={swallowMenuPointerDown}
             onClick={(event) => {
               swallowMenuEvent(event);
               setChatOverflowMenuOpen(open => !open);
             }}
           >
-            <WrenchGlyph />
+            {isPhoneGear ? (
+              <WrenchGlyph />
+            ) : (
+              <MenuIcon className={styles.headerIconGlyph} aria-hidden="true" />
+            )}
           </button>
           {chatOverflowMenuOpen && (
             <div
@@ -71309,6 +71470,9 @@ function HomeContent(): React.JSX.Element {
                           <option value={BOT_LIBRARY_GROUP_FILTER_ALL}>
                             No group selected
                           </option>
+                          <option value={BOT_LIBRARY_GROUP_FILTER_UNGROUPED}>
+                            Ungrouped ({botLibraryBotCountLabel(ungroupedPanelBots.length)})
+                          </option>
                           <option value={BOT_LIBRARY_FAVORITES_GROUP_ID}>
                             Favorites ({favoriteBotIdSet.size})
                           </option>
@@ -71365,9 +71529,11 @@ function HomeContent(): React.JSX.Element {
                         <p className={styles.botLibraryEmptyFilter} role="status">
                           {activeBotLibraryGroupFilter?.id === BOT_LIBRARY_FAVORITES_GROUP_ID
                             ? "No favorite bots yet."
-                            : activeBotLibraryGroupFilter
-                              ? "No bots in this group."
-                              : "No bots match this filter."}
+                            : botLibraryUngroupedFilterActive
+                              ? "Every bot is already in a group."
+                              : activeBotLibraryGroupFilter
+                                ? "No bots in this group."
+                                : "No bots match this filter."}
                         </p>
                       ) : visibleBotPanelBots.map((b) => {
                         const isEditing = editingBotId === b.id;
@@ -80622,9 +80788,10 @@ function HomeContent(): React.JSX.Element {
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
-        <header
-          className={styles.chatHeader}
-          data-dev-panel-safe-area="top"
+	        <header
+	          ref={chatHeaderRef}
+	          className={styles.chatHeader}
+	          data-dev-panel-safe-area="top"
           onPointerEnter={handleZenHeaderPointerEnter}
           onPointerLeave={handleZenHeaderPointerLeave}
           onFocusCapture={handleZenHeaderFocusCapture}
@@ -80654,11 +80821,6 @@ function HomeContent(): React.JSX.Element {
                     className={styles.hubHomeWordmark}
                   />
                   <AppletHeaderLabel appletId="zen" />
-                  {showHeaderShowAllBotsLink ? (
-                    <span className={styles.wordmarkBackToAllBots} aria-hidden="true">
-                      {"\u2190 show all bots"}
-                    </span>
-                  ) : null}
                 </span>
               </button>
             </div>
@@ -80843,9 +81005,6 @@ function HomeContent(): React.JSX.Element {
           data-chat-focus={chatLikeSurface ? "true" : undefined}
           data-replying-live={chatLikeSurface && replyInFlightSignals ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
-          data-bot-library-group-focus={
-            messagesFrameBotLibraryGroupFocus ? "true" : undefined
-          }
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
@@ -81974,9 +82133,10 @@ function HomeContent(): React.JSX.Element {
         className={styles.chatPane}
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
-        <header
-          className={styles.chatHeader}
-          data-dev-panel-safe-area="top"
+	        <header
+	          ref={chatHeaderRef}
+	          className={styles.chatHeader}
+	          data-dev-panel-safe-area="top"
           onPointerEnter={revealChatHeaderChrome}
           onFocusCapture={revealChatHeaderChrome}
         >
@@ -82013,10 +82173,14 @@ function HomeContent(): React.JSX.Element {
                       chatOverflowMenuOpen ? styles.headerIdentityCopyCollapsed : ""
                     }`}
                   >
-                    <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
                     <span className={styles.headerIdentityBackToBots} aria-hidden="true">
-                      {"\u2190 back to bots"}
+                      <ChevronLeft size={14} strokeWidth={2.35} />
+                      <span>All bots</span>
                     </span>
+                    <span className={styles.headerIdentityBreadcrumbDivider} aria-hidden="true">
+                      /
+                    </span>
+                    <span className={styles.headerIdentityName}>{headerIdentity.name}</span>
                   </span>
                 </span>
               </button>
@@ -82044,11 +82208,6 @@ function HomeContent(): React.JSX.Element {
                       className={styles.hubHomeWordmark}
                     />
                     <AppletHeaderLabel appletId="chat" />
-                    {showHeaderShowAllBotsLink ? (
-                      <span className={styles.wordmarkBackToAllBots} aria-hidden="true">
-                        {"\u2190 show all bots"}
-                      </span>
-                    ) : null}
                   </span>
                 </button>
               </div>
@@ -82102,9 +82261,6 @@ function HomeContent(): React.JSX.Element {
           data-chat-focus={chatLikeSurface ? "true" : undefined}
           data-replying-live={chatLikeSurface && replyInFlightSignals ? "true" : undefined}
           data-private-bot={privateCustomBotActive ? "true" : undefined}
-          data-bot-library-group-focus={
-            messagesFrameBotLibraryGroupFocus ? "true" : undefined
-          }
           style={messagesFrameStyle}
           onContextMenu={handleMessagesFrameContextMenu}
         >
@@ -82351,6 +82507,7 @@ function HomeContent(): React.JSX.Element {
                     )}
                     data-starter-bot-affordance="true"
                     aria-labelledby="bot-library-group-dashboard-title"
+                    onClick={(event) => event.stopPropagation()}
                   >
                     <header className={styles.botGroupDashboardHeader}>
                       <div className={styles.botGroupDashboardCopy}>
@@ -82365,13 +82522,6 @@ function HomeContent(): React.JSX.Element {
                         ) : null}
                       </div>
                       <div className={styles.botGroupDashboardActions}>
-                        <button
-                          type="button"
-                          className={styles.botGroupDashboardAction}
-                          onClick={() => performShowAllBotsView(null)}
-                        >
-                          Show all bots
-                        </button>
                         <button
                           type="button"
                           className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
