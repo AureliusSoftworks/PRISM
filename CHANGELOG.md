@@ -12,6 +12,27 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.1] - 2026-07-03
+
+### Added
+
+- **Ungrouped bot filter.** Bot group pickers now include an Ungrouped option
+  for bots that are not in any saved group, including the Coffee-ready picker
+  and the bot drawer.
+
+### Changed
+
+- **Bot library selection and grouping are more flexible.** Shift selection now
+  supports marquee toggling without clearing existing picks, bots can belong to
+  multiple differently named groups, and the chat header compresses more cleanly
+  at narrower widths.
+
+### Fixed
+
+- **Name-only bot saves work again.** The bottom Save changes action now
+  persists bot name edits even when no other bot fields changed, while the
+  header floppy icon remains an export action.
+
 ## [0.6.0] - 2026-07-03
 
 ### Added
