@@ -3,6 +3,11 @@ import { decryptJson, decryptText, encryptJson, encryptText } from "./security.t
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
+  normalizeBotFaceFontId,
+  normalizeBotFaceFontWeight,
+  type BotFaceFontId,
+} from "@localai/shared";
+import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
   normalizeZenAutonomyEnabled,
@@ -23,6 +28,7 @@ export interface BackupUserSettings {
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
+  coffeeExperimentalTableAngleEnabled?: boolean;
   psychicModeEnabled?: boolean;
   fallbackModelMessageStripe: boolean;
   hiddenBotModelIds: string[];
@@ -72,8 +78,14 @@ export interface BackupBotSnapshot {
   flirtEnabled: boolean;
   temperature: number;
   maxTokens: number;
+  topP?: number;
+  topK?: number;
+  repetitionPenalty?: number;
   color?: string | null;
   glyph?: string | null;
+  faceEyesFont?: BotFaceFontId | null;
+  faceMouthFont?: BotFaceFontId | null;
+  faceFontWeight?: number | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -156,6 +168,7 @@ export function exportUserSnapshot(
          composer_writing_assist,
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
+         coffee_experimental_table_angle_enabled,
          psychic_mode_enabled,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
@@ -206,6 +219,7 @@ export function exportUserSnapshot(
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
+        coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
@@ -256,6 +270,8 @@ export function exportUserSnapshot(
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
         experimentalAllModelEffortEnabled:
           user.experimental_all_model_effort_enabled === 1,
+        coffeeExperimentalTableAngleEnabled:
+          user.coffee_experimental_table_angle_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
@@ -366,10 +382,16 @@ export function exportUserSnapshot(
          online_enabled,
          delete_protected,
          flirt_enabled,
-         temperature,
-         max_tokens,
-         color,
+	         temperature,
+	         max_tokens,
+	         top_p,
+	         top_k,
+	         repetition_penalty,
+	         color,
          glyph,
+         face_eyes_font,
+         face_mouth_font,
+         face_font_weight,
          chat_enabled,
          visibility,
          created_at,
@@ -391,10 +413,16 @@ export function exportUserSnapshot(
     online_enabled: number;
     delete_protected: number;
     flirt_enabled: number;
-    temperature: number | null;
-    max_tokens: number | null;
-    color: string | null;
+	    temperature: number | null;
+	    max_tokens: number | null;
+	    top_p: number | null;
+	    top_k: number | null;
+	    repetition_penalty: number | null;
+	    color: string | null;
     glyph: string | null;
+    face_eyes_font: string | null;
+    face_mouth_font: string | null;
+    face_font_weight: number | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -494,10 +522,17 @@ export function exportUserSnapshot(
       onlineEnabled: bot.online_enabled !== 0,
       deleteProtected: bot.delete_protected === 1,
       flirtEnabled: bot.flirt_enabled === 1,
-      temperature: typeof bot.temperature === "number" ? bot.temperature : 0.7,
-      maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
-      color: bot.color,
+	      temperature: typeof bot.temperature === "number" ? bot.temperature : 0.7,
+	      maxTokens: typeof bot.max_tokens === "number" ? bot.max_tokens : 2048,
+	      topP: typeof bot.top_p === "number" ? bot.top_p : 1,
+	      topK: typeof bot.top_k === "number" ? bot.top_k : 40,
+	      repetitionPenalty:
+	        typeof bot.repetition_penalty === "number" ? bot.repetition_penalty : 1.1,
+	      color: bot.color,
       glyph: bot.glyph,
+      faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
+      faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
+      faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
       chatEnabled: bot.chat_enabled !== 0,
       visibility: bot.visibility === "public" ? "public" : "private",
       createdAt: bot.created_at,
@@ -570,6 +605,7 @@ export function importUserSnapshot(
         composer_writing_assist = ?,
         experimental_dual_ollama_enabled = ?,
         experimental_all_model_effort_enabled = ?,
+        coffee_experimental_table_angle_enabled = ?,
         psychic_mode_enabled = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
@@ -619,6 +655,7 @@ export function importUserSnapshot(
       settings.composerWritingAssist ? 1 : 0,
       settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
+      settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.fallbackModelMessageStripe ? 1 : 0,
       JSON.stringify(
@@ -690,16 +727,22 @@ export function importUserSnapshot(
         openai_image_model,
         online_enabled,
         delete_protected,
-        flirt_enabled,
-        temperature,
-        max_tokens,
-        color,
+	        flirt_enabled,
+	        temperature,
+	        max_tokens,
+	        top_p,
+	        top_k,
+	        repetition_penalty,
+	        color,
         glyph,
+        face_eyes_font,
+        face_mouth_font,
+        face_font_weight,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -727,11 +770,19 @@ export function importUserSnapshot(
           : null,
         bot.onlineEnabled === false ? 0 : 1,
         bot.deleteProtected === true ? 1 : 0,
-        bot.flirtEnabled === true ? 1 : 0,
-        typeof bot.temperature === "number" ? bot.temperature : 0.7,
-        typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
-        typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
+	        bot.flirtEnabled === true ? 1 : 0,
+	        typeof bot.temperature === "number" ? bot.temperature : 0.7,
+	        typeof bot.maxTokens === "number" ? Math.max(1, Math.floor(bot.maxTokens)) : 2048,
+	        typeof bot.topP === "number" ? Math.min(1, Math.max(0, bot.topP)) : 1,
+	        typeof bot.topK === "number" ? Math.max(0, Math.floor(bot.topK)) : 40,
+	        typeof bot.repetitionPenalty === "number"
+	          ? Math.min(2, Math.max(0.5, bot.repetitionPenalty))
+	          : 1.1,
+	        typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0 ? bot.glyph.trim() : null,
+        normalizeBotFaceFontId(bot.faceEyesFont),
+        normalizeBotFaceFontId(bot.faceMouthFont),
+        normalizeBotFaceFontWeight(bot.faceFontWeight),
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,

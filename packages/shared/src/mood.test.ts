@@ -7,7 +7,11 @@ import {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  COFFEE_NEAR_DESATURATED_SATURATION,
+  coffeeDepartureChanceFromSocial,
+  coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
+  coffeeSocialSnapshotIsNearDesaturated,
   createDefaultPrismMoodState,
   decayPrismMood,
   isPrismMoodIgnoring,
@@ -280,4 +284,64 @@ test("coffee social snapshots map into shared mood", () => {
   assert.ok(mood.annoyance > 0.7);
   assert.ok(mood.warmth < 0.35);
   assert.equal(mood.moodKey, "strained");
+});
+
+test("coffee social snapshots map into mood saturation", () => {
+  const good = coffeeMoodSaturationFromSocial({
+    disposition: 0.9,
+    valuesFriction: 0.08,
+    restraint: 0.6,
+    engagement: 0.88,
+    leavePressure: 0.04,
+  });
+  const strained = coffeeMoodSaturationFromSocial({
+    disposition: 0.2,
+    valuesFriction: 0.85,
+    restraint: 0.52,
+    engagement: 0.2,
+    leavePressure: 0.9,
+  });
+  const sameMoodLowLeave = {
+    disposition: 0.82,
+    valuesFriction: 0.2,
+    restraint: 0.62,
+    engagement: 0.74,
+    leavePressure: 0.12,
+  };
+  const sameMoodHighLeave = {
+    ...sameMoodLowLeave,
+    leavePressure: 0.9,
+  };
+
+  assert.ok(good > 1);
+  assert.ok(strained < COFFEE_NEAR_DESATURATED_SATURATION);
+  assert.ok(
+    coffeeDepartureChanceFromSocial(sameMoodHighLeave) >
+      coffeeDepartureChanceFromSocial(sameMoodLowLeave)
+  );
+  const sameMoodLowLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodLowLeave);
+  const sameMoodHighLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodHighLeave);
+  assert.ok(sameMoodHighLeaveSaturation < sameMoodLowLeaveSaturation);
+  assert.ok(sameMoodHighLeaveSaturation > 0.74);
+  assert.equal(coffeeSocialSnapshotIsNearDesaturated(sameMoodHighLeave), false);
+  assert.equal(
+    coffeeSocialSnapshotIsNearDesaturated({
+      disposition: 0.2,
+      valuesFriction: 0.85,
+      restraint: 0.52,
+      engagement: 0.2,
+      leavePressure: 0.9,
+    }),
+    true
+  );
+  assert.equal(
+    coffeeSocialSnapshotIsNearDesaturated({
+      disposition: 0.55,
+      valuesFriction: 0.36,
+      restraint: 0.65,
+      engagement: 0.62,
+      leavePressure: 0.1,
+    }),
+    false
+  );
 });

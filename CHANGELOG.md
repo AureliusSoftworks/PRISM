@@ -12,6 +12,37 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.0] - 2026-07-03
+
+### Added
+
+- **Applet registry and expanded bot/app catalog.** Prism now has applet
+  version labels, a shared web applet registry, and `docs/applets.md` for
+  applet-level changelogs and design ethos. The bot/app catalog also expands
+  the Prism bot set and Coffee applets.
+- **Bot library group safeguards.** Custom bot groups now prune stale or
+  underfilled groups, show clearer capacity labels, and can project
+  group-owned delete protection onto member bots.
+
+### Changed
+
+- **Settings opens directly to controls.** Settings now uses direct section
+  navigation, quieter utility styling, a header color-mode toggle, and
+  Account-local backup import/export actions.
+- **Bot customization is easier to scan.** Bot profile editing keeps existing
+  profile details visible while a name is temporarily blank, and the advanced
+  AI Parameters modal now uses the full layout with readable prompt and
+  sampler controls.
+- **Coffee table behavior feels more grounded.** Coffee sip/refill
+  presentation, plain-name attention cues, and sip face rendering are more
+  consistent across seats and turns.
+
+### Fixed
+
+- **Chat, memory, and mode boundaries are tighter.** Chat, Zen, Coffee, and
+  local/online behavior now keep their prompt, memory, and tool context more
+  consistently scoped to the active lane.
+
 ## [0.5.2] - 2026-06-30
 
 ### Added

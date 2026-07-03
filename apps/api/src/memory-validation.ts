@@ -519,7 +519,7 @@ export async function validateMemoryCandidates(
         ...options,
         candidates: candidatesForCritic,
       }),
-      { temperature: 0.1, maxTokens: 700 }
+      { temperature: 0.1, maxTokens: 700, usagePurpose: "memory_inference" }
     );
     parsed = parseJsonPayload(response);
   } catch {

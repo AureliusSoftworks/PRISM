@@ -1,6 +1,17 @@
 /** Horizontal band of the table oval: left of center, center column, or right. */
 export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
 
+const COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE = 4;
+
+export function coffeeSeatHorizontalSideFromLeftPercent(
+  leftPercent: number
+): CoffeeSeatHorizontalSide {
+  if (!Number.isFinite(leftPercent)) return 0;
+  if (leftPercent < 50 - COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return -1;
+  if (leftPercent > 50 + COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return 1;
+  return 0;
+}
+
 /**
  * `scaleY` for a seat on the oval: after the 90° plate rotation, `scaleY`
  * controls the face's screen-horizontal direction. Left-side seats flip so
@@ -13,13 +24,13 @@ export function coffeePlateFaceScaleYFromSeatHorizontalSide(
 }
 
 /**
- * Top seat faces a target on the left half of the table with the same flip as
- * left-side seats; targets on the right stay unflipped.
+ * Top seat reads from the opposite side of the table. A left-side target should
+ * keep the head unflipped; a right-side target should flip it toward the speaker.
  */
 export function coffeeHeadPlateFaceScaleYFromGazeTargetSide(
   targetSide: CoffeeSeatHorizontalSide
 ): string {
-  return targetSide === -1 ? "-1" : "1";
+  return targetSide === 1 ? "-1" : "1";
 }
 
 /**
@@ -32,6 +43,14 @@ export function coffeeSeatHorizontalTableSide(
   seatCount: number,
   layoutIndex: number
 ): CoffeeSeatHorizontalSide {
+  if (compact && seatCount === 4) {
+    const left = ({ 0: 22, 1: 78, 2: 78, 3: 22 } as Record<number, number>)[
+      layoutIndex
+    ] ?? 50;
+    if (left < 50) return -1;
+    if (left > 50) return 1;
+    return 0;
+  }
   if (compact) {
     const leftBySeat: Record<number, number> = {
       0: 50,
@@ -77,7 +96,7 @@ export function coffeeSeatIsTopHead(
   layoutIndex: number,
   seatIndex: number
 ): boolean {
-  if (compact) return seatIndex === 0;
+  if (compact) return seatCount !== 4 && seatIndex === 0;
   return (seatCount === 3 || seatCount === 5) && layoutIndex === 0;
 }
 

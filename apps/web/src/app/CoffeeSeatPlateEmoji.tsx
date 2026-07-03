@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, type JSX } from "react";
-import type { BotVoicePreset } from "@localai/shared";
+import { useEffect, useState, type CSSProperties, type JSX } from "react";
+import type { BotFaceFontId, BotVoicePreset } from "@localai/shared";
 import { applyCoffeeSeatBlink } from "./coffee-seat-plate-blink.ts";
 
 function randomBetween(lo: number, hi: number): number {
@@ -16,6 +16,23 @@ function scheduleKeyDigest(key: string): number {
   return n;
 }
 
+function faceInflateScaleForWeight(weight: number | null | undefined): number | undefined {
+  if (typeof weight !== "number" || !Number.isFinite(weight)) return undefined;
+  const clamped = Math.max(300, Math.min(900, weight));
+  return 0.92 + ((clamped - 300) / 600) * 0.18;
+}
+
+function coffeeSeatEmojiPartForGlyph(args: {
+  baseText: string;
+  baseGlyph: string | undefined;
+  index: number;
+}): "eyes" | "mouth" {
+  if (args.baseText.includes("*")) {
+    return args.baseGlyph === "*" ? "mouth" : "eyes";
+  }
+  return args.index === 0 ? "eyes" : "mouth";
+}
+
 export type CoffeeSeatPlateEmojiProps = {
   /** When false, eyes stay open and timers are cleared (preview / not joined). */
   enabled: boolean;
@@ -26,7 +43,15 @@ export type CoffeeSeatPlateEmojiProps = {
   baseText: string;
   rotateDeg: number;
   voicePreset: BotVoicePreset;
+  faceEyesFont?: BotFaceFontId | null;
+  faceMouthFont?: BotFaceFontId | null;
+  faceFontWeight?: number | null;
   className: string;
+};
+
+type CoffeeSeatPlateBlinkState = {
+  eyesOpen: boolean;
+  key: string;
 };
 
 /**
@@ -40,9 +65,17 @@ export function CoffeeSeatPlateEmoji({
   baseText,
   rotateDeg,
   voicePreset,
+  faceEyesFont,
+  faceMouthFont,
+  faceFontWeight,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
-  const [eyesOpen, setEyesOpen] = useState(true);
+  const blinkKey = `${enabled ? "enabled" : "disabled"}:${isTalking ? "talking" : "idle"}:${baseText}:${scheduleKey}`;
+  const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
+    eyesOpen: true,
+    key: blinkKey,
+  });
+  const eyesOpen = blinkState.key === blinkKey ? blinkState.eyesOpen : true;
 
   useEffect(() => {
     if (!enabled || isTalking) {
@@ -71,10 +104,10 @@ export function CoffeeSeatPlateEmoji({
     const armNextBlink = () => {
       arm(() => {
         if (cancelled) return;
-        setEyesOpen(false);
+        setBlinkState({ eyesOpen: false, key: blinkKey });
         arm(() => {
           if (cancelled) return;
-          setEyesOpen(true);
+          setBlinkState({ eyesOpen: true, key: blinkKey });
           armNextBlink();
         }, randomBetween(80, 140));
       }, randomBetween(1500, 4000));
@@ -86,33 +119,50 @@ export function CoffeeSeatPlateEmoji({
       cancelled = true;
       clearAll();
     };
-  }, [enabled, isTalking, scheduleKey]);
+  }, [blinkKey, enabled, isTalking, scheduleKey]);
 
   const displayEyesOpen = !enabled || isTalking || eyesOpen;
   const displayText = applyCoffeeSeatBlink(baseText, displayEyesOpen);
   const glyphParts = Array.from(displayText);
+  const baseGlyphParts = Array.from(baseText);
+  const faceInflateScale = faceInflateScaleForWeight(faceFontWeight);
 
   return (
     <span
       className={className}
       data-coffee-plate-emoji-glyphs={glyphParts.length}
       data-coffee-plate-emoji-eyes-open={
-        glyphParts[0]?.trim() ? "true" : "false"
+        displayEyesOpen ? "true" : "false"
       }
       data-voice-preset={voicePreset}
+      data-face-custom={
+        faceEyesFont || faceMouthFont || faceFontWeight ? "true" : undefined
+      }
       style={{
-        transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
-      }}
+        ["--bot-face-font-weight" as string]: faceFontWeight ?? undefined,
+        ["--bot-face-inflate-scale" as string]: faceInflateScale,
+        transform: `translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scale(var(--bot-face-inflate-scale, 1)) scaleY(var(--coffee-plate-emoji-face-scale-y, 1))`,
+      } as CSSProperties}
       aria-hidden="true"
     >
       {glyphParts.map((glyph, index) => (
-        <span
-          key={index === 0 ? "eyes" : "mouth"}
-          data-coffee-plate-emoji-glyph={glyph}
-          data-coffee-plate-emoji-part={index === 0 ? "eyes" : "mouth"}
-        >
-          {glyph}
-        </span>
+        (() => {
+          const part = coffeeSeatEmojiPartForGlyph({
+            baseText,
+            baseGlyph: baseGlyphParts[index],
+            index,
+          });
+          return (
+            <span
+              key={`${part}-${index}`}
+              data-coffee-plate-emoji-glyph={glyph}
+              data-coffee-plate-emoji-part={part}
+              data-face-font={part === "eyes" ? faceEyesFont ?? undefined : faceMouthFont ?? undefined}
+            >
+              {glyph}
+            </span>
+          );
+        })()
       ))}
     </span>
   );

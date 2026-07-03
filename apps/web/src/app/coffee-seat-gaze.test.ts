@@ -5,15 +5,33 @@ import {
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeHeadSpeakingGazeTargetBotId,
   coffeePlateFaceScaleYFromSeatHorizontalSide,
+  coffeeSeatHorizontalSideFromLeftPercent,
   coffeeSeatHorizontalTableSide,
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze.ts";
+
+describe("coffeeSeatHorizontalSideFromLeftPercent", () => {
+  it("classifies left percentages into stable horizontal bands", () => {
+    assert.equal(coffeeSeatHorizontalSideFromLeftPercent(24.3), -1);
+    assert.equal(coffeeSeatHorizontalSideFromLeftPercent(49.5), 0);
+    assert.equal(coffeeSeatHorizontalSideFromLeftPercent(50), 0);
+    assert.equal(coffeeSeatHorizontalSideFromLeftPercent(53.5), 0);
+    assert.equal(coffeeSeatHorizontalSideFromLeftPercent(76.2), 1);
+  });
+});
 
 describe("coffeeSeatHorizontalTableSide", () => {
   it("classifies compact seats by base left%", () => {
     assert.equal(coffeeSeatHorizontalTableSide(true, 0, 5, 0), 0);
     assert.equal(coffeeSeatHorizontalTableSide(true, 1, 5, 0), -1);
     assert.equal(coffeeSeatHorizontalTableSide(true, 2, 5, 0), 1);
+  });
+
+  it("classifies compact 4-seat preview by visual layout slot", () => {
+    assert.equal(coffeeSeatHorizontalTableSide(true, 0, 4, 0), -1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 1, 4, 1), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 2, 4, 2), 1);
+    assert.equal(coffeeSeatHorizontalTableSide(true, 3, 4, 3), -1);
   });
 
   it("classifies full-stage 5-seat ring", () => {
@@ -41,6 +59,7 @@ describe("coffeeSeatIsTopHead", () => {
   it("identifies compact top as head", () => {
     assert.equal(coffeeSeatIsTopHead(true, 5, 0, 0), true);
     assert.equal(coffeeSeatIsTopHead(true, 5, 1, 1), false);
+    assert.equal(coffeeSeatIsTopHead(true, 4, 0, 0), false);
   });
 
   it("identifies only centered full-stage top seats as head", () => {
@@ -60,10 +79,10 @@ describe("coffeePlateFaceScaleYFromSeatHorizontalSide", () => {
 });
 
 describe("coffeeHeadPlateFaceScaleYFromGazeTargetSide", () => {
-  it("flips Y when gaze target is on the left half of the ring", () => {
-    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(-1), "-1");
+  it("flips Y only when a top head target is on the right half of the ring", () => {
+    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(-1), "1");
     assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(0), "1");
-    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(1), "1");
+    assert.equal(coffeeHeadPlateFaceScaleYFromGazeTargetSide(1), "-1");
   });
 });
 
@@ -122,6 +141,28 @@ describe("coffeeHeadGazeHorizontalSign", () => {
       botNameToId: map,
     });
     assert.equal(sign, -1);
+  });
+
+  it("ignores pending speaker before table typing begins", () => {
+    const map = new Map([
+      ["Top", "top"],
+      ["Left", "left"],
+    ]);
+    const sign = coffeeHeadGazeHorizontalSign({
+      compact: false,
+      seatCount: 5,
+      visibleSeats: [
+        { botId: "top", seatIndex: 0, layoutIndex: 0 },
+        { botId: "left", seatIndex: 0, layoutIndex: 1 },
+      ],
+      headBotId: "top",
+      coffeeTurnRhythmState: "botThinking",
+      coffeePendingSpeakerBotId: "left",
+      headIsSpeaking: false,
+      messages: [],
+      botNameToId: map,
+    });
+    assert.equal(sign, 0);
   });
 
   it("uses inferred addressee when head is speaking", () => {

@@ -55,7 +55,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
             secondary_ollama_host, experimental_dual_ollama_enabled,
-            experimental_all_model_effort_enabled, psychic_mode_enabled,
+            experimental_all_model_effort_enabled,
+            coffee_experimental_table_angle_enabled, psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
             preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
@@ -92,6 +93,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.secondary_ollama_host, null);
       assert.equal(user.experimental_dual_ollama_enabled, 0);
       assert.equal(user.experimental_all_model_effort_enabled, 0);
+      assert.equal(user.coffee_experimental_table_angle_enabled, 0);
       assert.equal(user.psychic_mode_enabled, 0);
       assert.equal(user.comfyui_host, null);
       assert.equal(user.comfyui_workflows, "[]");
@@ -180,6 +182,7 @@ function seedResetFixture(db: DatabaseSync): void {
       secondary_ollama_host = 'http://192.168.1.7:11434',
       experimental_dual_ollama_enabled = 1,
       experimental_all_model_effort_enabled = 1,
+      coffee_experimental_table_angle_enabled = 1,
       psychic_mode_enabled = 1,
       comfyui_host = 'http://192.168.1.8:8188',
       comfyui_workflows = '[{"id":"workflow-a"}]',
@@ -372,6 +375,17 @@ function seedResetFixture(db: DatabaseSync): void {
     "user-1",
     "conversation-1",
     "bot-1",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    "INSERT INTO coffee_cup_top_offs (user_id, conversation_id, bot_id, progress_before, progress_after, topped_off_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    "user-1",
+    "conversation-1",
+    "bot-1",
+    0.6,
+    0.04,
+    "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(

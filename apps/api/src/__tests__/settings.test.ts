@@ -57,6 +57,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     composerWritingAssist: 1,
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
+    coffeeExperimentalTableAngleEnabled: 0,
     psychicModeEnabled: 0,
     fallbackModelMessageStripe: 1,
     hiddenBotModelIds: "[]",
@@ -309,6 +310,37 @@ describe("resolveNextSettings — experimentalAllModelEffortEnabled", () => {
         { experimentalAllModelEffortEnabled: "true" as unknown as boolean },
         current
       ).experimentalAllModelEffortEnabled,
+      1
+    );
+  });
+});
+
+describe("resolveNextSettings — coffeeExperimentalTableAngleEnabled", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { coffeeExperimentalTableAngleEnabled: true },
+        baseline({ coffeeExperimentalTableAngleEnabled: 0 })
+      ).coffeeExperimentalTableAngleEnabled,
+      1
+    );
+    assert.equal(
+      resolveNextSettings(
+        { coffeeExperimentalTableAngleEnabled: false },
+        baseline({ coffeeExperimentalTableAngleEnabled: 1 })
+      ).coffeeExperimentalTableAngleEnabled,
+      0
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ coffeeExperimentalTableAngleEnabled: 1 });
+    assert.equal(resolveNextSettings({}, current).coffeeExperimentalTableAngleEnabled, 1);
+    assert.equal(
+      resolveNextSettings(
+        { coffeeExperimentalTableAngleEnabled: "true" as unknown as boolean },
+        current
+      ).coffeeExperimentalTableAngleEnabled,
       1
     );
   });

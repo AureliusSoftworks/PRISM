@@ -5,6 +5,7 @@ import {
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
+  reconcileHiddenModelIdsForCatalog,
   resolveAutoModel,
 } from "./modelRouting.ts";
 
@@ -67,6 +68,51 @@ describe("default online model visibility", () => {
       "claude-3-5-haiku-latest",
       "claude-test-model",
     ]);
+  });
+
+  it("unhides stale default-hidden chat aliases after visibility rules change", () => {
+    const catalog = {
+      local: [
+        { id: "llama3.2" },
+        { id: "llava:latest" },
+        { id: "nomic-embed-text:latest" },
+      ],
+      online: [
+        { id: "gpt-5.2-chat-latest", provider: "openai" as const },
+        { id: "gpt-5.4", provider: "openai" as const },
+        { id: "gpt-5.4-mini", provider: "openai" as const },
+        { id: "gpt-5.4-pro", provider: "openai" as const },
+        { id: "gpt-5-search-api", provider: "openai" as const },
+        { id: "claude-opus-4-7", provider: "anthropic" as const },
+        { id: "claude-fable-5", provider: "anthropic" as const },
+      ],
+    };
+
+    assert.deepEqual(
+      reconcileHiddenModelIdsForCatalog(
+        [
+          "gpt-5.2-chat-latest",
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.4-pro",
+          "gpt-5-search-api",
+          "claude-opus-4-7",
+          "claude-fable-5",
+          "llava:latest",
+          "nomic-embed-text:latest",
+          "custom-hidden-model",
+        ],
+        catalog
+      ),
+      [
+        "gpt-5.4-pro",
+        "gpt-5-search-api",
+        "claude-fable-5",
+        "llava:latest",
+        "nomic-embed-text:latest",
+        "custom-hidden-model",
+      ]
+    );
   });
 });
 

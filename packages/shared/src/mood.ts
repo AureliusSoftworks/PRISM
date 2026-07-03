@@ -120,6 +120,65 @@ function roundedUnit(value: number): number {
   return Math.round(clampPrismMoodValue(value) * 1000) / 1000;
 }
 
+export const COFFEE_NEAR_DESATURATED_SATURATION = 0.18;
+
+export function coffeeDepartureChanceFromSocial(
+  social: CoffeeSocialLikeSnapshot
+): number {
+  const disposition = clampPrismMoodValue(social.disposition);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const valuesFriction = clampPrismMoodValue(social.valuesFriction);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const chance =
+    leavePressure * 0.5 +
+    (1 - engagement) * 0.22 +
+    valuesFriction * 0.14 +
+    (1 - disposition) * 0.1 +
+    (1 - restraint) * 0.04;
+  return Math.round(Math.max(0, Math.min(1, chance)) * 1000) / 1000;
+}
+
+export function coffeeMoodSaturationFromSocial(
+  social: CoffeeSocialLikeSnapshot
+): number {
+  const disposition = clampPrismMoodValue(social.disposition);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const valuesFriction = clampPrismMoodValue(social.valuesFriction);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const socialHealth =
+    disposition * 0.34 +
+    engagement * 0.24 +
+    (1 - valuesFriction) * 0.24 +
+    (1 - leavePressure) * 0.08 +
+    restraint * 0.1;
+  const strain = Math.max(
+    valuesFriction * 0.42 + leavePressure * 0.32,
+    (1 - disposition) * 0.56 + (1 - engagement) * 0.44
+  );
+  const departureChance = coffeeDepartureChanceFromSocial(social);
+  const departureFadeBase = Math.max(0, (departureChance - 0.62) / 0.38);
+  const departureFade = Math.pow(departureFadeBase, 1.35) * 0.52;
+  const saturation =
+    0.12 +
+    socialHealth * 1.22 -
+    Math.max(0, strain - 0.72) * 0.7 -
+    departureFade;
+  return Math.round(Math.max(0.06, Math.min(1.38, saturation)) * 1000) / 1000;
+}
+
+export function coffeeSocialSnapshotIsNearDesaturated(
+  social: CoffeeSocialLikeSnapshot
+): boolean {
+  return (
+    coffeeMoodSaturationFromSocial(social) <= COFFEE_NEAR_DESATURATED_SATURATION ||
+    coffeeDepartureChanceFromSocial(social) >= 0.82 ||
+    (clampPrismMoodValue(social.disposition) <= 0.16 &&
+      clampPrismMoodValue(social.engagement) <= 0.22)
+  );
+}
+
 function roundedDelta(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 1000) / 1000;

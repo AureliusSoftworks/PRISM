@@ -3,7 +3,13 @@ import {
   openAiModelSupportsReasoningEffort,
   reasoningEffortForRequest,
   type ReasoningEffort,
+  type UsagePurpose,
 } from "@localai/shared";
+import {
+  recordEstimatedEmbeddingUsage,
+  recordTextUsage,
+  usagePurpose,
+} from "./usage.ts";
 
 /**
  * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
@@ -21,7 +27,11 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  repetitionPenalty?: number;
   reasoningEffort?: ReasoningEffort;
+  usagePurpose?: UsagePurpose;
   /** Cancels in-flight provider work when the originating chat request is stopped. */
   signal?: AbortSignal;
   /** Ask providers that support it to constrain the visible reply to a JSON object. */
@@ -249,6 +259,7 @@ export async function embedTextLocal(
   );
   const ollamaHost = secondaryModel ? options.secondaryOllamaHost!.trim() : config.ollamaHost;
   const model = secondaryModel ?? requestedModel;
+  const startedAt = Date.now();
   try {
     const response = await fetch(`${ollamaHost}/api/embeddings`, {
       method: "POST",
@@ -262,6 +273,13 @@ export async function embedTextLocal(
       return fallbackEmbedding(text);
     }
     const payload = (await response.json()) as { embedding?: number[] };
+    recordEstimatedEmbeddingUsage({
+      provider: "local",
+      model,
+      text,
+      purpose: "embedding",
+      durationMs: Date.now() - startedAt,
+    });
     return payload.embedding ?? fallbackEmbedding(text);
   } catch {
     return fallbackEmbedding(text);
@@ -1057,6 +1075,15 @@ export class LocalOllamaProvider implements LlmProvider {
       // Ollama uses `num_predict` for the max-generation-tokens cap.
       ollamaOptions.num_predict = options.maxTokens;
     }
+    if (typeof options?.topP === "number") {
+      ollamaOptions.top_p = options.topP;
+    }
+    if (typeof options?.topK === "number") {
+      ollamaOptions.top_k = options.topK;
+    }
+    if (typeof options?.repetitionPenalty === "number") {
+      ollamaOptions.repeat_penalty = options.repetitionPenalty;
+    }
     const requestBody: Record<string, unknown> = {
       model,
       stream: false,
@@ -1075,6 +1102,7 @@ export class LocalOllamaProvider implements LlmProvider {
       requestBody.options = ollamaOptions;
     }
 
+    const startedAt = Date.now();
     const response = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1086,6 +1114,12 @@ export class LocalOllamaProvider implements LlmProvider {
     }
     const payload = (await response.json()) as {
       message?: { content?: string; thinking?: string; tool_calls?: unknown };
+      prompt_eval_count?: number;
+      eval_count?: number;
+      total_duration?: number;
+      load_duration?: number;
+      prompt_eval_duration?: number;
+      eval_duration?: number;
     };
     const msg = payload.message;
     const trimmedContent =
@@ -1113,6 +1147,34 @@ export class LocalOllamaProvider implements LlmProvider {
           "This step is separate from ComfyUI: the Images button uses your local image model only after the assistant has produced a reply."
       );
     }
+    const inputTokens =
+      typeof payload.prompt_eval_count === "number" ? payload.prompt_eval_count : null;
+    const outputTokens = typeof payload.eval_count === "number" ? payload.eval_count : null;
+    recordTextUsage({
+      provider: "local",
+      model,
+      purpose: usagePurpose(options?.usagePurpose),
+      inputTokens,
+      outputTokens,
+      totalTokens:
+        inputTokens !== null || outputTokens !== null
+          ? (inputTokens ?? 0) + (outputTokens ?? 0)
+          : null,
+      tokenCountSource:
+        inputTokens !== null || outputTokens !== null ? "provider_reported" : "unavailable",
+      durationMs:
+        typeof payload.total_duration === "number"
+          ? payload.total_duration / 1_000_000
+          : Date.now() - startedAt,
+      loadDurationMs:
+        typeof payload.load_duration === "number" ? payload.load_duration / 1_000_000 : null,
+      promptDurationMs:
+        typeof payload.prompt_eval_duration === "number"
+          ? payload.prompt_eval_duration / 1_000_000
+          : null,
+      completionDurationMs:
+        typeof payload.eval_duration === "number" ? payload.eval_duration / 1_000_000 : null,
+    });
     return text;
   }
 
@@ -1159,6 +1221,12 @@ export class OpenAiProvider implements LlmProvider {
     ) {
       requestBody.temperature = options.temperature;
     }
+    if (
+      typeof options?.topP === "number" &&
+      !openAiModelUsesFixedDefaultTemperature(modelId)
+    ) {
+      requestBody.top_p = options.topP;
+    }
     if (typeof options?.maxTokens === "number") {
       if (openAiModelUsesMaxCompletionTokens(modelId)) {
         requestBody.max_completion_tokens = options.maxTokens;
@@ -1182,6 +1250,7 @@ export class OpenAiProvider implements LlmProvider {
         signal: options?.signal,
       });
 
+    let startedAt = Date.now();
     let response = await sendRequest(requestBody);
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
@@ -1202,6 +1271,7 @@ export class OpenAiProvider implements LlmProvider {
             detail || "<empty body>"
           }`
         );
+        startedAt = Date.now();
         response = await sendRequest(retryBody);
         if (response.ok) {
           delete requestBody.reasoning_effort;
@@ -1228,7 +1298,26 @@ export class OpenAiProvider implements LlmProvider {
         message?: { content?: string; refusal?: string };
         finish_reason?: string;
       }>;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens_details?: {
+          cached_tokens?: number;
+        };
+      };
     };
+    recordTextUsage({
+      provider: "openai",
+      model: modelId,
+      purpose: usagePurpose(options?.usagePurpose),
+      inputTokens: payload.usage?.prompt_tokens ?? null,
+      outputTokens: payload.usage?.completion_tokens ?? null,
+      totalTokens: payload.usage?.total_tokens ?? null,
+      cachedInputTokens: payload.usage?.prompt_tokens_details?.cached_tokens ?? null,
+      tokenCountSource: payload.usage ? "provider_reported" : "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     const content = payload.choices?.[0]?.message?.content?.trim();
     const refusal = payload.choices?.[0]?.message?.refusal?.trim();
     const finishReason = payload.choices?.[0]?.finish_reason?.trim().toLowerCase();
@@ -1287,6 +1376,15 @@ export class AnthropicProvider implements LlmProvider {
     if (systemMessages.length > 0) {
       requestBody.system = systemMessages.join("\n\n");
     }
+    if (typeof options?.temperature === "number") {
+      requestBody.temperature = options.temperature;
+    }
+    if (typeof options?.topP === "number") {
+      requestBody.top_p = options.topP;
+    }
+    if (typeof options?.topK === "number") {
+      requestBody.top_k = options.topK;
+    }
     if (options?.jsonSchema || options?.jsonMode) {
       const jsonInstruction = options.jsonSchema
         ? `Return only a JSON object matching this JSON Schema: ${JSON.stringify(options.jsonSchema)}`
@@ -1297,6 +1395,7 @@ export class AnthropicProvider implements LlmProvider {
           : jsonInstruction;
     }
 
+    const startedAt = Date.now();
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -1319,7 +1418,28 @@ export class AnthropicProvider implements LlmProvider {
     const payload = (await response.json()) as {
       content?: Array<{ type?: string; text?: unknown }>;
       stop_reason?: string | null;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
     };
+    recordTextUsage({
+      provider: "anthropic",
+      model: modelId,
+      purpose: usagePurpose(options?.usagePurpose),
+      inputTokens: payload.usage?.input_tokens ?? null,
+      outputTokens: payload.usage?.output_tokens ?? null,
+      totalTokens:
+        typeof payload.usage?.input_tokens === "number" ||
+        typeof payload.usage?.output_tokens === "number"
+          ? (payload.usage?.input_tokens ?? 0) + (payload.usage?.output_tokens ?? 0)
+          : null,
+      cachedInputTokens: payload.usage?.cache_read_input_tokens ?? null,
+      tokenCountSource: payload.usage ? "provider_reported" : "unavailable",
+      durationMs: Date.now() - startedAt,
+    });
     const content = (payload.content ?? [])
       .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
       .join("")

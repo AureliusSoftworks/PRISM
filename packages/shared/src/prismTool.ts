@@ -75,6 +75,65 @@ export interface WebSearchPayload {
   results: WebSearchResult[];
 }
 
+export interface CoffeeAmbientActionPayload {
+  v: 1;
+  name: "coffeeAmbientAction";
+  source: "scripted";
+  category: "sip" | "cup";
+  action: string;
+}
+
+export interface CoffeeUserActionPayload {
+  v: 1;
+  name: "coffeeUserAction";
+  source: "user";
+  action: string;
+  occurredAt: string;
+}
+
+export interface CoffeeReplaySocialSnapshotPayload {
+  disposition: number;
+  valuesFriction: number;
+  restraint: number;
+  engagement: number;
+  leavePressure: number;
+}
+
+export interface CoffeeReplayArrivalEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "arrival";
+  botId: string;
+  occurredAt: string;
+  walkDurationMs?: number;
+  nameplateDelayMs?: number;
+}
+
+export interface CoffeeReplayMoodEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "mood";
+  botId: string;
+  occurredAt: string;
+  social: CoffeeReplaySocialSnapshotPayload;
+}
+
+export interface CoffeeReplayTopOffEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "topOff";
+  botId: string;
+  occurredAt: string;
+  progressBefore: number;
+  progressAfter: number;
+  toppedOffAt: string;
+}
+
+export type CoffeeReplayEventPayload =
+  | CoffeeReplayArrivalEventPayload
+  | CoffeeReplayMoodEventPayload
+  | CoffeeReplayTopOffEventPayload;
+
 export type ZenDisplayAlign = "start" | "center" | "end";
 
 export interface ZenDisplayPlacement {
@@ -129,6 +188,12 @@ export interface StoredAssistantToolEnvelope {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** Persisted web results shown as an assistant-side source card. */
   webSearch?: WebSearchPayload;
+  /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only user action cue shown as ambient context, not a table turn. */
+  coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only hidden state beats used by replay, not visible transcript prose. */
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -161,6 +226,9 @@ export interface ParsedStoredAssistantToolPayload {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -424,6 +492,163 @@ function normalizeStoredWebSearchPayload(value: unknown): WebSearchPayload | und
     fetchedAt,
     results,
   };
+}
+
+function normalizeCoffeeAmbientActionPayload(
+  value: unknown
+): CoffeeAmbientActionPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (row.v !== 1 || row.name !== "coffeeAmbientAction" || row.source !== "scripted") {
+    return undefined;
+  }
+  const category = row.category === "sip" || row.category === "cup" ? row.category : undefined;
+  const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";
+  if (!category || !action || action.length > 80) return undefined;
+  return {
+    v: 1,
+    name: "coffeeAmbientAction",
+    source: "scripted",
+    category,
+    action,
+  };
+}
+
+function normalizeCoffeeUserActionPayload(value: unknown): CoffeeUserActionPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (row.v !== 1 || row.name !== "coffeeUserAction" || row.source !== "user") {
+    return undefined;
+  }
+  const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";
+  const occurredAtRaw = typeof row.occurredAt === "string" ? row.occurredAt.trim() : "";
+  const occurredAtMs = Date.parse(occurredAtRaw);
+  if (!action || action.length > 160 || !Number.isFinite(occurredAtMs)) return undefined;
+  return {
+    v: 1,
+    name: "coffeeUserAction",
+    source: "user",
+    action,
+    occurredAt: new Date(occurredAtMs).toISOString(),
+  };
+}
+
+function clampCoffeeReplayUnitValue(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeCoffeeReplayIso(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || Number.isNaN(Date.parse(trimmed))) return undefined;
+  return trimmed;
+}
+
+function normalizeCoffeeReplayDurationMs(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(30_000, Math.round(value)));
+}
+
+function normalizeCoffeeReplayBotId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 160 ? trimmed : undefined;
+}
+
+function normalizeCoffeeReplaySocialSnapshot(
+  value: unknown
+): CoffeeReplaySocialSnapshotPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const disposition = clampCoffeeReplayUnitValue(row.disposition);
+  const valuesFriction = clampCoffeeReplayUnitValue(row.valuesFriction);
+  const restraint = clampCoffeeReplayUnitValue(row.restraint);
+  const engagement = clampCoffeeReplayUnitValue(row.engagement);
+  const leavePressure = clampCoffeeReplayUnitValue(row.leavePressure);
+  if (
+    disposition === undefined ||
+    valuesFriction === undefined ||
+    restraint === undefined ||
+    engagement === undefined ||
+    leavePressure === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    disposition,
+    valuesFriction,
+    restraint,
+    engagement,
+    leavePressure,
+  };
+}
+
+export function normalizeCoffeeReplayEventPayload(
+  value: unknown
+): CoffeeReplayEventPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (row.v !== 1 || row.name !== "coffeeReplayEvent") return undefined;
+  const botId = normalizeCoffeeReplayBotId(row.botId);
+  const occurredAt = normalizeCoffeeReplayIso(row.occurredAt);
+  if (!botId || !occurredAt) return undefined;
+  if (row.kind === "arrival") {
+    const walkDurationMs = normalizeCoffeeReplayDurationMs(row.walkDurationMs);
+    const nameplateDelayMs = normalizeCoffeeReplayDurationMs(row.nameplateDelayMs);
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "arrival",
+      botId,
+      occurredAt,
+      ...(walkDurationMs !== undefined ? { walkDurationMs } : {}),
+      ...(nameplateDelayMs !== undefined ? { nameplateDelayMs } : {}),
+    };
+  }
+  if (row.kind === "mood") {
+    const social = normalizeCoffeeReplaySocialSnapshot(row.social);
+    if (!social) return undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "mood",
+      botId,
+      occurredAt,
+      social,
+    };
+  }
+  if (row.kind === "topOff") {
+    const progressBefore = clampCoffeeReplayUnitValue(row.progressBefore);
+    const progressAfter = clampCoffeeReplayUnitValue(row.progressAfter);
+    const toppedOffAt = normalizeCoffeeReplayIso(row.toppedOffAt);
+    if (
+      progressBefore === undefined ||
+      progressAfter === undefined ||
+      !toppedOffAt
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "topOff",
+      botId,
+      occurredAt,
+      progressBefore,
+      progressAfter,
+      toppedOffAt,
+    };
+  }
+  return undefined;
+}
+
+function normalizeCoffeeReplayEventPayloads(value: unknown): CoffeeReplayEventPayload[] {
+  const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return values
+    .map(normalizeCoffeeReplayEventPayload)
+    .filter((event): event is CoffeeReplayEventPayload => event !== undefined)
+    .slice(0, 8);
 }
 
 function parseVersion(value: unknown): number {
@@ -981,6 +1206,15 @@ export function parseStoredAssistantToolPayload(
       const webSearch = root
         ? normalizeStoredWebSearchPayload(root.webSearch)
         : undefined;
+      const coffeeAmbientAction = root
+        ? normalizeCoffeeAmbientActionPayload(root.coffeeAmbientAction)
+        : undefined;
+      const coffeeUserAction = root
+        ? normalizeCoffeeUserActionPayload(root.coffeeUserAction)
+        : undefined;
+      const coffeeReplayEvents = root
+        ? normalizeCoffeeReplayEventPayloads(root.coffeeReplayEvents)
+        : [];
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -988,6 +1222,9 @@ export function parseStoredAssistantToolPayload(
         ...(webSearch ? { webSearch } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
+        ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+        ...(coffeeUserAction ? { coffeeUserAction } : {}),
+        ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -998,6 +1235,9 @@ export function parseStoredAssistantToolPayload(
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
+    const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(row.coffeeAmbientAction);
+    const coffeeUserAction = normalizeCoffeeUserActionPayload(row.coffeeUserAction);
+    const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1027,6 +1267,9 @@ export function parseStoredAssistantToolPayload(
       ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+      ...(coffeeUserAction ? { coffeeUserAction } : {}),
+      ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
     };
   } catch {
     return {};
@@ -1045,6 +1288,9 @@ export function hydrateAssistantMessageParts(args: {
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1062,6 +1308,13 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
     ...(stored.webSearch ? { webSearch: stored.webSearch } : {}),
+    ...(stored.coffeeAmbientAction
+      ? { coffeeAmbientAction: stored.coffeeAmbientAction }
+      : {}),
+    ...(stored.coffeeUserAction ? { coffeeUserAction: stored.coffeeUserAction } : {}),
+    ...(stored.coffeeReplayEvents && stored.coffeeReplayEvents.length > 0
+      ? { coffeeReplayEvents: stored.coffeeReplayEvents }
+      : {}),
   };
 }
 
@@ -1080,6 +1333,9 @@ export function serializeAssistantToolPayload(args: {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1091,14 +1347,53 @@ export function serializeAssistantToolPayload(args: {
   const hasZenDisplay = zenDisplay !== undefined;
   const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
   const hasZenTurn = zenTurn !== undefined;
-  if (!hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
+  const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(args.coffeeAmbientAction);
+  const hasCoffeeAmbientAction = coffeeAmbientAction !== undefined;
+  const coffeeUserAction = normalizeCoffeeUserActionPayload(args.coffeeUserAction);
+  const hasCoffeeUserAction = coffeeUserAction !== undefined;
+  const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(args.coffeeReplayEvents);
+  const hasCoffeeReplayEvents = coffeeReplayEvents.length > 0;
+  if (
+    !hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasImage &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction &&
+    !hasCoffeeUserAction &&
+    !hasCoffeeReplayEvents
+  ) {
     return null;
   }
 
-  if (!hasAsk && !hasStory && !hasMood && !hasWebSearch && !hasZenDisplay && !hasZenTurn && hasImage) {
+  if (
+    !hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction &&
+    !hasCoffeeUserAction &&
+    !hasCoffeeReplayEvents &&
+    hasImage
+  ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
   }
-  if (hasAsk && !hasStory && !hasMood && !hasImage && !hasWebSearch && !hasZenDisplay && !hasZenTurn) {
+  if (
+    hasAsk &&
+    !hasStory &&
+    !hasMood &&
+    !hasImage &&
+    !hasWebSearch &&
+    !hasZenDisplay &&
+    !hasZenTurn &&
+    !hasCoffeeAmbientAction &&
+    !hasCoffeeUserAction &&
+    !hasCoffeeReplayEvents
+  ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
 
@@ -1121,6 +1416,9 @@ export function serializeAssistantToolPayload(args: {
     ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
     ...(hasWebSearch ? { webSearch } : {}),
+    ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
+    ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
+    ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
   };
   return JSON.stringify(payload);
 }

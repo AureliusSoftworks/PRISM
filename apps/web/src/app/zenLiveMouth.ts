@@ -87,6 +87,19 @@ function zenLiveBotMouthShapeAtPhase(
   return pattern[localIndex] ?? "closed";
 }
 
+export function zenLiveBotMouthShapeFromSpeechPhase({
+  speechSeedText,
+  phaseIndex,
+}: {
+  speechSeedText: string;
+  phaseIndex: number;
+}): ZenLiveBotMouthShape {
+  return zenLiveBotMouthShapeAtPhase(
+    phaseIndex,
+    zenLiveMouthHashText(speechSeedText)
+  );
+}
+
 function zenLiveRevealTokenHasWord(token: string | undefined): boolean {
   return typeof token === "string" && /[A-Za-z0-9]/u.test(token);
 }

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type {
   ChatMessage,
   CoffeeBotSocialSnapshot,
+  CoffeeCupTopOffSnapshot,
   Conversation,
   MemoryCategory,
   MemoryTier,
@@ -44,6 +45,7 @@ export interface DbUserRecord {
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
+  coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
   openAiKeyCiphertext: string | null;
   openAiKeyIv: string | null;
@@ -78,6 +80,13 @@ interface DbCoffeeBotSocialRow {
   restraint: number;
   engagement: number;
   leave_pressure: number;
+}
+
+interface DbCoffeeCupTopOffRow {
+  bot_id: string;
+  progress_before: number;
+  progress_after: number;
+  topped_off_at: string;
 }
 
 type DbBotRelationshipRow = {
@@ -164,6 +173,7 @@ export function createDatabase(): DatabaseSync {
       secondary_ollama_host TEXT,
       experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0,
       experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
+      coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -272,6 +282,40 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      message_id TEXT,
+      bot_id TEXT,
+      request_id TEXT NOT NULL,
+      privacy_scope TEXT NOT NULL DEFAULT 'normal',
+      mode TEXT,
+      surface TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      event_type TEXT NOT NULL DEFAULT 'text',
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      total_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      image_count INTEGER,
+      image_size TEXT,
+      image_quality TEXT,
+      duration_ms INTEGER,
+      load_duration_ms INTEGER,
+      prompt_duration_ms INTEGER,
+      completion_duration_ms INTEGER,
+      token_count_source TEXT NOT NULL DEFAULT 'unavailable',
+      cost_micro_usd INTEGER,
+      pricing_snapshot_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
+      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE SET NULL,
+      FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE SET NULL
+    );
     CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -341,8 +385,15 @@ export function createDatabase(): DatabaseSync {
       openai_image_model TEXT,
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
+      top_p REAL DEFAULT 1,
+      top_k INTEGER DEFAULT 40,
+      repetition_penalty REAL DEFAULT 1.1,
       color TEXT,
       glyph TEXT,
+      face_eyes_font TEXT,
+      face_mouth_font TEXT,
+      face_font_weight INTEGER,
+      profile_picture_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -454,6 +505,18 @@ export function createDatabase(): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS coffee_cup_top_offs (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      progress_before REAL NOT NULL DEFAULT 0,
+      progress_after REAL NOT NULL DEFAULT 0,
+      topped_off_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS prism_mood_state (
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
@@ -495,6 +558,7 @@ export function createDatabase(): DatabaseSync {
       preset_mode TEXT NOT NULL DEFAULT 'manual',
       coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
       model_choice TEXT NOT NULL DEFAULT '{}',
+      starter_topics TEXT NOT NULL DEFAULT '{}',
       mood_summary TEXT NOT NULL DEFAULT '{}',
       archived_at TEXT,
       created_at TEXT NOT NULL,
@@ -622,6 +686,14 @@ export function createDatabase(): DatabaseSync {
   if (!hasExperimentalAllModelEffortEnabled) {
     db.exec(
       "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
+  const hasCoffeeExperimentalTableAngleEnabled = userColumns.some(
+    (column) => column.name === "coffee_experimental_table_angle_enabled"
+  );
+  if (!hasCoffeeExperimentalTableAngleEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0;"
     );
   }
   const hasPsychicModeEnabled = userColumns.some(
@@ -1045,6 +1117,14 @@ export function createDatabase(): DatabaseSync {
       "ALTER TABLE coffee_groups ADD COLUMN model_choice TEXT NOT NULL DEFAULT '{}';"
     );
   }
+  const hasCoffeeGroupStarterTopicsColumn = coffeeGroupColumns.some(
+    (column) => column.name === "starter_topics"
+  );
+  if (!hasCoffeeGroupStarterTopicsColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN starter_topics TEXT NOT NULL DEFAULT '{}';"
+    );
+  }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
     .all() as Array<{ name: string }>;
@@ -1243,6 +1323,30 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotGlyphColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
   }
+  const hasBotFaceEyesFontColumn = botColumns.some(
+    (column) => column.name === "face_eyes_font"
+  );
+  if (!hasBotFaceEyesFontColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eyes_font TEXT;");
+  }
+  const hasBotFaceMouthFontColumn = botColumns.some(
+    (column) => column.name === "face_mouth_font"
+  );
+  if (!hasBotFaceMouthFontColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_font TEXT;");
+  }
+  const hasBotFaceFontWeightColumn = botColumns.some(
+    (column) => column.name === "face_font_weight"
+  );
+  if (!hasBotFaceFontWeightColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_font_weight INTEGER;");
+  }
+  const hasBotProfilePictureImageIdColumn = botColumns.some(
+    (column) => column.name === "profile_picture_image_id"
+  );
+  if (!hasBotProfilePictureImageIdColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN profile_picture_image_id TEXT;");
+  }
   const hasBotChatEnabledColumn = botColumns.some(
     (column) => column.name === "chat_enabled"
   );
@@ -1291,6 +1395,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotOpenaiImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
+  }
+  const hasBotTopPColumn = botColumns.some(
+    (column) => column.name === "top_p"
+  );
+  if (!hasBotTopPColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN top_p REAL DEFAULT 1;");
+  }
+  const hasBotTopKColumn = botColumns.some(
+    (column) => column.name === "top_k"
+  );
+  if (!hasBotTopKColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN top_k INTEGER DEFAULT 40;");
+  }
+  const hasBotRepetitionPenaltyColumn = botColumns.some(
+    (column) => column.name === "repetition_penalty"
+  );
+  if (!hasBotRepetitionPenaltyColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN repetition_penalty REAL DEFAULT 1.1;");
   }
   const hasBotExportHashColumn = botColumns.some(
     (column) => column.name === "export_hash"
@@ -1370,10 +1492,25 @@ export function createDatabase(): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);"
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_created ON usage_events (user_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_conversation_created ON usage_events (user_id, conversation_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_provider_created ON usage_events (user_id, provider, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_purpose_created ON usage_events (user_id, purpose, created_at DESC);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
@@ -1769,6 +1906,70 @@ export function upsertCoffeeBotSocialState(
       snapshot.restraint,
       snapshot.engagement,
       snapshot.leavePressure,
+      updatedAt
+    );
+  }
+}
+
+/**
+ * Loads persisted Coffee cup top-off state for a conversation and subset of bots.
+ */
+export function loadCoffeeCupTopOffState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  botIds: readonly string[]
+): Record<string, CoffeeCupTopOffSnapshot> {
+  if (botIds.length === 0) return {};
+  const placeholders = botIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT bot_id, progress_before, progress_after, topped_off_at
+         FROM coffee_cup_top_offs
+        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`
+    )
+    .all(userId, conversationId, ...botIds) as unknown as DbCoffeeCupTopOffRow[];
+  const byId: Record<string, CoffeeCupTopOffSnapshot> = {};
+  for (const row of rows) {
+    byId[row.bot_id] = {
+      progressBefore: row.progress_before,
+      progressAfter: row.progress_after,
+      toppedOffAt: row.topped_off_at,
+    };
+  }
+  return byId;
+}
+
+/**
+ * Upserts Coffee cup top-off snapshots for one conversation.
+ */
+export function upsertCoffeeCupTopOffState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  stateByBotId: Record<string, CoffeeCupTopOffSnapshot>,
+  updatedAt: string
+): void {
+  const entries = Object.entries(stateByBotId);
+  if (entries.length === 0) return;
+  const statement = db.prepare(
+    `INSERT INTO coffee_cup_top_offs (
+      user_id, conversation_id, bot_id, progress_before, progress_after, topped_off_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, conversation_id, bot_id) DO UPDATE SET
+      progress_before = excluded.progress_before,
+      progress_after = excluded.progress_after,
+      topped_off_at = excluded.topped_off_at,
+      updated_at = excluded.updated_at`
+  );
+  for (const [botId, snapshot] of entries) {
+    statement.run(
+      userId,
+      conversationId,
+      botId,
+      snapshot.progressBefore,
+      snapshot.progressAfter,
+      snapshot.toppedOffAt,
       updatedAt
     );
   }

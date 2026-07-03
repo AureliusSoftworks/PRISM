@@ -11,7 +11,11 @@ export {
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   clampPrismMoodValue,
+  COFFEE_NEAR_DESATURATED_SATURATION,
+  coffeeDepartureChanceFromSocial,
+  coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
+  coffeeSocialSnapshotIsNearDesaturated,
   createDefaultPrismMoodState,
   DEFAULT_PRISM_MOOD_SENSITIVITY,
   debugPatchPrismMood,
@@ -92,10 +96,30 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_FACE_FONT_IDS,
+  BOT_FACE_FONT_LABELS,
+  BOT_FACE_FONT_WEIGHT_MAX,
+  BOT_FACE_FONT_WEIGHT_MIN,
+  BOT_FACE_FONT_WEIGHT_STEP,
+  DEFAULT_BOT_FACE_FONT_ID,
+  DEFAULT_BOT_FACE_FONT_WEIGHT,
+  botFaceFontFromVoicePreset,
+  isBotFaceFontId,
+  normalizeBotFaceFontId,
+  normalizeBotFaceFontWeight,
+  randomBotFaceStyle,
+  resolveBotFaceStyle,
+  type BotFaceFontId,
+  type BotFaceStyle,
+  type BotFaceStyleInput,
+} from "./botAvatar.js";
+
+export {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
+  normalizeCoffeeReplayEventPayload,
   normalizeZenDisplayMetadata,
   normalizeStoredZenAssistantTurnPayload,
   parseAssistantPrismTools,
@@ -105,6 +129,13 @@ export {
   serializeAskQuestionTool,
   type AskQuestionOption,
   type AskQuestionPayload,
+  type CoffeeAmbientActionPayload,
+  type CoffeeReplayArrivalEventPayload,
+  type CoffeeReplayEventPayload,
+  type CoffeeReplayMoodEventPayload,
+  type CoffeeReplaySocialSnapshotPayload,
+  type CoffeeReplayTopOffEventPayload,
+  type CoffeeUserActionPayload,
   type ParsedAssistantTurn,
   type ParsedStoredAssistantToolPayload,
   type SentGeneratedImagePayload,
@@ -298,6 +329,9 @@ export {
 
 import type {
   AskQuestionPayload,
+  CoffeeAmbientActionPayload,
+  CoffeeReplayEventPayload,
+  CoffeeUserActionPayload,
   SentGeneratedImagePayload,
   ZenDisplayMetadata,
 } from "./prismTool.js";
@@ -313,6 +347,103 @@ import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
+
+export type UsageProviderName =
+  | LlmProviderName
+  | "ollama"
+  | "comfyui"
+  | "unknown";
+
+export type UsageRange = "24h" | "7d" | "30d" | "all";
+
+export type UsagePrivacyScope = "normal" | "private";
+
+export type UsageEventType = "text" | "embedding" | "image";
+
+export type UsageTokenCountSource =
+  | "provider_reported"
+  | "estimated"
+  | "unavailable";
+
+export type UsagePurpose =
+  | "chat_reply"
+  | "chat_boundary"
+  | "chat_fallback"
+  | "chat_web_search_followup"
+  | "conversation_title"
+  | "coffee_turn"
+  | "coffee_router"
+  | "coffee_summary"
+  | "composer_cleanup"
+  | "embedding"
+  | "image_generation"
+  | "bot_profile_picture"
+  | "image_prompt"
+  | "memory_inference"
+  | "memory_summary"
+  | "prompt_wildcard"
+  | "psychic_planning"
+  | "story_generation"
+  | "zen_live_action"
+  | "system_unlabeled";
+
+export interface UsageTotals {
+  eventCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  localTokens: number;
+  onlineTokens: number;
+  imageCount: number;
+  estimatedCostMicroUsd: number;
+  providerReportedEvents: number;
+  estimatedTokenEvents: number;
+  unpricedOnlineEvents: number;
+}
+
+export interface UsageBreakdownItem extends UsageTotals {
+  key: string;
+  label: string;
+  provider?: UsageProviderName;
+  model?: string;
+  purpose?: UsagePurpose;
+}
+
+export interface UsageRecentEvent {
+  id: string;
+  createdAt: string;
+  surface: string;
+  mode: string | null;
+  purpose: UsagePurpose;
+  provider: UsageProviderName;
+  model: string;
+  eventType: UsageEventType;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  tokenCountSource: UsageTokenCountSource;
+  imageCount: number | null;
+  imageSize: string | null;
+  imageQuality: string | null;
+  estimatedCostMicroUsd: number | null;
+  costEstimated: boolean;
+  unpriced: boolean;
+}
+
+export interface UsageResponse {
+  ok: true;
+  range: UsageRange;
+  rangeStart: string | null;
+  generatedAt: string;
+  totals: UsageTotals;
+  byProvider: UsageBreakdownItem[];
+  byModel: UsageBreakdownItem[];
+  byPurpose: UsageBreakdownItem[];
+  recentEvents: UsageRecentEvent[];
+  trackingStartedAt: string | null;
+  hasUntrackedHistory: boolean;
+  conversationScoped: boolean;
+}
 
 export interface UserProfile {
   id: string;
@@ -363,6 +494,12 @@ export interface ChatMessage {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** When this assistant turn included web search results shown as a source card. */
   webSearch?: WebSearchPayload;
+  /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only user action cue shown as ambient context, not transcript prose. */
+  coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -550,9 +687,17 @@ export interface CoffeeCupStatus {
   progress: number;
   frameIndex: number;
   amount: CoffeeCupAmountStage;
+  fillRatio: number;
+  coldness: number;
   amountLabel: string;
   temperatureLabel: string;
   tasteLabel: string;
+}
+
+export interface CoffeeCupTopOffSnapshot {
+  progressBefore: number;
+  progressAfter: number;
+  toppedOffAt: string;
 }
 
 const COFFEE_CUP_AMOUNT_LABELS: Record<CoffeeCupAmountStage, string> = {
@@ -571,6 +716,17 @@ const COFFEE_CUP_TASTE_LABELS = [
   "toasty",
   "slightly bitter",
   "mellow",
+] as const;
+
+const COFFEE_CUP_TOP_OFF_TARGET_PROGRESS = 0.04;
+const COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS = 0.18;
+const COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX = [
+  COFFEE_CUP_TOP_OFF_TARGET_PROGRESS,
+  COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS,
+  0.38,
+  0.58,
+  0.78,
+  0.96,
 ] as const;
 
 function clampCoffeeCupProgress(value: number): number {
@@ -600,16 +756,108 @@ export function coffeeCupSipBias(seed: string): number {
   return coffeeCupStableUnitValue(`${seed}:sip-bias`);
 }
 
-export function coffeeCupSipCycleMs(seed: string): number {
-  return 92_000 - Math.round(coffeeCupSipBias(seed) * 40_000);
+export function coffeeCupSessionDurationPaceMultiplier(
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const minutes =
+    typeof durationMinutes === "number" &&
+    Number.isFinite(durationMinutes) &&
+    durationMinutes > 0
+      ? durationMinutes
+      : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  const extraMinutes = Math.max(0, minutes - COFFEE_SESSION_DURATION_MINUTES_MIN);
+  return 1 + extraMinutes * 0.02;
 }
 
-export function coffeeCupConsumptionRate(seed: string): number {
-  return 0.82 + coffeeCupSipBias(seed) * 0.48;
+export function coffeeCupSipMessageGapForDuration(
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
+  baseGap = 5
+): number {
+  const safeBaseGap =
+    typeof baseGap === "number" && Number.isFinite(baseGap)
+      ? Math.max(1, Math.floor(baseGap))
+      : 5;
+  return Math.max(
+    safeBaseGap,
+    Math.ceil(safeBaseGap * coffeeCupSessionDurationPaceMultiplier(durationMinutes))
+  );
 }
 
-export function coffeeCupPacedProgress(progress: number, seed: string): number {
-  return clampCoffeeCupProgress(progress * coffeeCupConsumptionRate(seed));
+export function coffeeCupSipCycleMs(
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const baseCycleMs = 34_000 - Math.round(coffeeCupSipBias(seed) * 15_000);
+  return Math.round(baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes));
+}
+
+export function coffeeCupConsumptionRate(
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const baseRate = 1.12 + coffeeCupSipBias(seed) * 0.58;
+  return baseRate / coffeeCupSessionDurationPaceMultiplier(durationMinutes);
+}
+
+export function coffeeCupPacedProgress(
+  progress: number,
+  seed: string,
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  return clampCoffeeCupProgress(
+    progress * coffeeCupConsumptionRate(seed, durationMinutes)
+  );
+}
+
+export function coffeeCupFillRatioForProgress(progress: number): number {
+  return Math.max(0, 1 - clampCoffeeCupProgress(progress));
+}
+
+export function coffeeCupColdnessForProgress(progress: number): number {
+  return clampCoffeeCupProgress(progress);
+}
+
+export function coffeeCupSipLikelihoodForProgress(progress: number): number {
+  const clamped = clampCoffeeCupProgress(progress);
+  if (clamped >= 0.96) return 0;
+  const fillRatio = coffeeCupFillRatioForProgress(clamped);
+  if (fillRatio <= 0.04) return 0;
+  const fillFactor =
+    fillRatio >= 0.18 ? 1 : Math.max(0, Math.min(1, (fillRatio - 0.04) / 0.14));
+  const coldness = coffeeCupColdnessForProgress(clamped);
+  const temperatureFactor =
+    coldness >= 0.9
+      ? 0.18
+      : Math.max(0.18, 1 - Math.pow(coldness, 1.6) * 0.72);
+  return Math.max(0, Math.min(1, fillFactor * temperatureFactor));
+}
+
+export function coffeeCupShouldFinishAfterSip(args: {
+  seed: string;
+  previousProgress: number;
+  nextProgress?: number | null;
+  sipCount?: number | null;
+}): boolean {
+  const previousProgress = clampCoffeeCupProgress(args.previousProgress);
+  const nextProgress =
+    typeof args.nextProgress === "number" && Number.isFinite(args.nextProgress)
+      ? clampCoffeeCupProgress(args.nextProgress)
+      : previousProgress;
+  if (previousProgress >= 0.96 && nextProgress >= 0.96) return true;
+  const nextColdness = coffeeCupColdnessForProgress(nextProgress);
+  if (nextColdness < 0.9) return false;
+  const wholeSipCount =
+    typeof args.sipCount === "number" && Number.isFinite(args.sipCount)
+      ? Math.max(1, Math.floor(args.sipCount))
+      : 1;
+  const coldFinishChance = Math.min(
+    0.35,
+    0.12 + Math.max(0, nextColdness - 0.9) * 2.3
+  );
+  return (
+    coffeeCupStableUnitValue(`${args.seed}:finish-after-sip:${wholeSipCount}`) <
+    coldFinishChance
+  );
 }
 
 export function coffeeCupFrameIndexForProgress(progress: number): number {
@@ -622,12 +870,19 @@ export function coffeeCupFrameIndexForProgress(progress: number): number {
   return 0;
 }
 
+export function coffeeCupTopOffProgressForFrameIndex(frameIndex: number): number {
+  const frame = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  return COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX[frame]!;
+}
+
 export function coffeeCupStatusForProgress(
   progress: number,
   seed = "coffee"
 ): CoffeeCupStatus {
   const clamped = clampCoffeeCupProgress(progress);
   const frameIndex = coffeeCupFrameIndexForProgress(clamped);
+  const fillRatio = coffeeCupFillRatioForProgress(clamped);
+  const coldness = coffeeCupColdnessForProgress(clamped);
   const amount: CoffeeCupAmountStage =
     frameIndex === 0
       ? "full"
@@ -641,13 +896,13 @@ export function coffeeCupStatusForProgress(
               ? "dregs"
               : "empty";
   const temperatureLabel =
-    clamped < 0.16
+    coldness < 0.18
       ? "hot"
-      : clamped < 0.42
+      : coldness < 0.44
         ? "warm"
-        : clamped < 0.75
+        : coldness < 0.7
           ? "cooling"
-          : clamped < 0.96
+          : coldness < 0.9
             ? "lukewarm"
             : "cold";
   const tasteLabel = COFFEE_CUP_TASTE_LABELS[
@@ -657,6 +912,8 @@ export function coffeeCupStatusForProgress(
     progress: clamped,
     frameIndex,
     amount,
+    fillRatio,
+    coldness,
     amountLabel: COFFEE_CUP_AMOUNT_LABELS[amount],
     temperatureLabel,
     tasteLabel,
@@ -680,8 +937,92 @@ export function coffeeCupProgressFromSessionTiming(args: {
   return clampCoffeeCupProgress(1 - Math.max(0, remainingMs) / durationMs);
 }
 
+function coffeeCupTopOffConsumptionDurationMs(
+  durationMinutes?: CoffeeSessionDurationMinutes | null
+): number {
+  const minutes =
+    typeof durationMinutes === "number" &&
+    Number.isFinite(durationMinutes) &&
+    durationMinutes > 0
+      ? durationMinutes
+      : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  const durationMs = minutes * 60 * 1000;
+  return Number.isFinite(durationMs) && durationMs > 0
+    ? durationMs
+    : DEFAULT_COFFEE_SESSION_DURATION_MINUTES * 60 * 1000;
+}
+
+export function coffeeCupCanTopOff(progress: number): boolean {
+  return (
+    coffeeCupFrameIndexForProgress(progress) > 0 &&
+    clampCoffeeCupProgress(progress) >= COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS
+  );
+}
+
+export function coffeeCupTopOffSnapshotForProgress(
+  progress: number,
+  toppedOffAt: string,
+  targetProgressAfter?: number | null
+): CoffeeCupTopOffSnapshot | null {
+  const progressBefore = clampCoffeeCupProgress(progress);
+  if (!coffeeCupCanTopOff(progressBefore)) return null;
+  const requestedProgressAfter =
+    typeof targetProgressAfter === "number" && Number.isFinite(targetProgressAfter)
+      ? clampCoffeeCupProgress(targetProgressAfter)
+      : COFFEE_CUP_TOP_OFF_TARGET_PROGRESS;
+  const progressAfter = Math.min(progressBefore, requestedProgressAfter);
+  if (progressAfter >= progressBefore) return null;
+  return {
+    progressBefore,
+    progressAfter,
+    toppedOffAt,
+  };
+}
+
+export function coffeeCupProgressAfterTopOff(args: {
+  progress: number;
+  topOff?: CoffeeCupTopOffSnapshot | null;
+  nowMs: number;
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
+  lowerProgressMeansConsumption?: boolean | null;
+}): number {
+  const progress = clampCoffeeCupProgress(args.progress);
+  const topOff = args.topOff;
+  if (!topOff) return progress;
+  const toppedOffAtMs = Date.parse(topOff.toppedOffAt);
+  if (!Number.isFinite(toppedOffAtMs)) return progress;
+  if (!Number.isFinite(args.nowMs) || args.nowMs < toppedOffAtMs) return progress;
+  const progressBefore = clampCoffeeCupProgress(topOff.progressBefore);
+  const progressAfter = clampCoffeeCupProgress(topOff.progressAfter);
+  if (progressBefore <= progressAfter || progress <= progressAfter) return progress;
+  const elapsedMs = Math.max(0, args.nowMs - toppedOffAtMs);
+  const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(args.durationMinutes);
+  const timedConsumedProgress = Math.max(
+    0,
+    Math.min(1, elapsedMs / consumptionDurationMs)
+  );
+  const explicitConsumedProgress =
+    args.lowerProgressMeansConsumption === true
+      ? Math.max(0, progress - progressAfter)
+      : 0;
+  const topOffProgress = clampCoffeeCupProgress(
+    progressAfter + Math.max(timedConsumedProgress, explicitConsumedProgress)
+  );
+  return Math.min(progress, topOffProgress);
+}
+
 export function coffeeCupPromptCueForStatus(status: CoffeeCupStatus): string {
-  return `Your coffee is ${status.amountLabel}, ${status.temperatureLabel}, and tastes ${status.tasteLabel}. You may naturally reference sipping it, the amount left, its temperature, or its taste when that fits the moment, but do not force a coffee comment every turn.`;
+  const base = `Your coffee is ${status.amountLabel}, ${status.temperatureLabel}, and tastes ${status.tasteLabel}.`;
+  if (status.amount === "empty" || status.fillRatio <= 0.04) {
+    return `${base} The mug is empty; do not describe sipping it, steam, heat, or fresh coffee.`;
+  }
+  if (status.temperatureLabel === "cold" || status.coldness >= 0.9) {
+    return `${base} It is cold now; do not describe steam, heat, or a hot sip. You may ignore it, push it aside, or reluctantly take/finish a sip if that fits the moment, but do not force a coffee comment every turn.`;
+  }
+  if (status.fillRatio <= 0.12) {
+    return `${base} Only a little remains, so do not describe visible steam. You may naturally reference the last dregs or a final sip when that fits the moment, but do not force a coffee comment every turn.`;
+  }
+  return `${base} You may naturally reference sipping it, the amount left, its temperature, or its taste when that fits the moment, but do not force a coffee comment every turn.`;
 }
 /** Bots may hold their Coffee poll vote until this close to session end. */
 export const COFFEE_POLL_FINALIZE_REMAINING_MS = 30_000;
@@ -694,6 +1035,9 @@ export type CoffeePresetMode = "manual" | "auto";
 
 /** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
 export type CoffeeTopicSelectionMode = "manual" | "auto";
+
+/** Stored Coffee Group starter topics keyed by bot id. */
+export type CoffeeGroupStarterTopicsByBotId = Record<string, string[]>;
 
 export interface CoffeePreset {
   id: string;
@@ -741,6 +1085,8 @@ export interface CoffeeGroup {
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty = Auto. */
   modelChoiceByProvider?: CoffeeGroupModelChoice;
+  /** Coffee-only persisted topic pool generated from each seated bot. */
+  starterTopicsByBotId?: CoffeeGroupStarterTopicsByBotId;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -807,6 +1153,11 @@ export interface Conversation {
    * This is primarily consumed by dev diagnostics and prompt shaping.
    */
   coffeeBotSocialById?: Record<string, CoffeeBotSocialSnapshot>;
+  /**
+   * Coffee-only physical cup top-offs keyed by bot id for this conversation.
+   * A top-off refills/reheats the visible cup and can shape later prompt cues.
+   */
+  coffeeCupTopOffsByBotId?: Record<string, CoffeeCupTopOffSnapshot>;
   /**
    * Normalized Prism mood/relationship state for this conversation surface.
    * Coffee adapts its per-seat social state into this shape; Zen persists it
@@ -940,6 +1291,7 @@ export {
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
   isDisabledModelChoice,
+  reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
@@ -1309,6 +1661,18 @@ export interface CoffeeSessionCreateResponse {
   teams?: CoffeeTeamState;
 }
 
+/** Request body for `POST /api/coffee/sessions/:id/user-action`. */
+export interface CoffeeUserActionRequest {
+  /** Action-only composer input, e.g. `*leans back and folds arms*`. */
+  action: string;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/user-action`. */
+export interface CoffeeUserActionResponse {
+  conversation: Conversation;
+  coffeeUserAction: CoffeeUserActionPayload;
+}
+
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
 export interface CoffeeContinueRequest {
   /**
@@ -1322,8 +1686,18 @@ export interface CoffeeContinueRequest {
    * to speak instead of running the automatic speaker router.
    */
   directedSpeakerBotId?: string;
+  /**
+   * Optional original user line for chained multi-mention replies. Used only
+   * with `directedSpeakerBotId` so follow-up bots answer the same prompt.
+   */
+  directedUserMessage?: string;
   /** Client hint used for rare bot-interrupt presentation while composing. */
   userIsComposing?: boolean;
+  /**
+   * Client-visible bots currently seated at the live table. During Coffee's
+   * opening arrivals, the server routes turns only among these bots.
+   */
+  presentBotIds?: string[];
 }
 
 /** Request body for `PATCH /api/coffee/sessions/:id/settings`. */
@@ -1354,6 +1728,13 @@ export interface CoffeeTurnRequest {
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */
   playerInterruption?: CoffeePlayerInterruptionInput;
+  /** Optional director-mode pick for this user turn. */
+  directedSpeakerBotId?: string;
+  /**
+   * Client-visible bots currently seated at the live table. During Coffee's
+   * opening arrivals, the server routes turns only among these bots.
+   */
+  presentBotIds?: string[];
 }
 
 /** Response body for `POST /api/coffee/turn`. */
@@ -1361,6 +1742,8 @@ export interface CoffeeTurnResponse {
   conversation: Conversation;
   /** The bot id chosen by the router for this turn (matches the assistant message's bot_id). Null only for stale no-op turns. */
   speakerBotId: string | null;
+  /** Refreshed active Coffee poll state after this turn, when a poll is running. */
+  poll?: CoffeePoll | null;
   /** Optional human-readable router rationale for debugging/inspection. Never shown to the user verbatim. */
   routerReason?: string;
   /** True when an obsolete autonomous turn was safely discarded without inserting a reply. */

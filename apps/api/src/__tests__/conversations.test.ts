@@ -38,6 +38,7 @@ function createTestDb(): DatabaseSync {
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
+      coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]',
       archived_at TEXT,
       archive_batch_id TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
@@ -748,19 +749,30 @@ function seedListConversation(
     userId: string;
     title: string;
     updatedAt: string;
+    mode?: "zen" | "chat" | "sandbox" | "coffee";
     incognito?: boolean;
     archivedAt?: string | null;
     botId?: string | null;
+    botGroupIds?: string[];
+    coffeeGroupId?: string | null;
+    coffeeAbsentBotIds?: string[];
     assistantBotId?: string | null;
   }
 ): void {
   db.prepare(
-    "INSERT INTO conversations (id, user_id, title, bot_id, archived_at, incognito, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    `INSERT INTO conversations (
+      id, user_id, title, conversation_mode, bot_id, bot_group_ids, coffee_group_id,
+      coffee_absent_bot_ids, archived_at, incognito, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     options.id,
     options.userId,
     options.title,
+    options.mode ?? "sandbox",
     options.botId ?? null,
+    options.botGroupIds ? JSON.stringify(options.botGroupIds) : null,
+    options.coffeeGroupId ?? null,
+    JSON.stringify(options.coffeeAbsentBotIds ?? []),
     options.archivedAt ?? null,
     options.incognito ? 1 : 0,
     "2026-01-01T00:00:00.000Z",
@@ -885,6 +897,26 @@ describe("listConversationSummaries", () => {
 
     const conversations = listConversationSummaries(db, "user-1");
     assert.deepEqual(conversations.map((conversation) => conversation.id), ["active-1"]);
+  });
+
+  it("includes Coffee invitees who were absent from a saved session", () => {
+    const db = createTestDb();
+    seedListConversation(db, {
+      id: "coffee-1",
+      userId: "user-1",
+      title: "Moody table",
+      mode: "coffee",
+      botGroupIds: ["bot-alice", "bot-cara"],
+      coffeeGroupId: "group-1",
+      coffeeAbsentBotIds: ["bot-boris"],
+      updatedAt: "2026-01-01T00:00:02.000Z",
+    });
+
+    const [conversation] = listConversationSummaries(db, "user-1");
+
+    assert.equal(conversation?.mode, "coffee");
+    assert.deepEqual(conversation?.botGroupIds, ["bot-alice", "bot-cara"]);
+    assert.deepEqual(conversation?.coffeeAbsentBotIds, ["bot-boris"]);
   });
 });
 

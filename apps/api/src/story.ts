@@ -1401,6 +1401,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
       jsonMode: true,
       jsonSchema: STORY_COMPACT_EPISODE_JSON_SCHEMA,
       jsonSchemaName: "prism_story_outline",
+      usagePurpose: "story_generation",
     };
   }
   return {
@@ -1411,6 +1412,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
     jsonMode: true,
     jsonSchema: STORY_EPISODE_JSON_SCHEMA,
     jsonSchemaName: "prism_story_episode",
+    usagePurpose: "story_generation",
   };
 }
 

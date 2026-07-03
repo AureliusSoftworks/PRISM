@@ -10,6 +10,9 @@ import {
   serializeAssistantToolPayload,
   serializeAskQuestionTool,
   type AskQuestionPayload,
+  type CoffeeAmbientActionPayload,
+  type CoffeeReplayEventPayload,
+  type CoffeeUserActionPayload,
   type WebSearchPayload,
 } from "./prismTool.ts";
 
@@ -593,6 +596,79 @@ describe("hydrateAssistantMessageParts", () => {
     });
     assert.equal(h.content, "Fresh context.");
     assert.deepEqual(h.webSearch, webSearch);
+  });
+
+  it("hydrates persisted Coffee ambient actions from tool_payload", () => {
+    const coffeeAmbientAction: CoffeeAmbientActionPayload = {
+      v: 1,
+      name: "coffeeAmbientAction",
+      source: "scripted",
+      category: "sip",
+      action: "takes a quiet sip",
+    };
+    const stored = serializeAssistantToolPayload({ coffeeAmbientAction });
+    assert.deepEqual(parseStoredAssistantToolPayload(stored).coffeeAmbientAction, coffeeAmbientAction);
+    const h = hydrateAssistantMessageParts({
+      content: "That tracks.",
+      toolPayload: stored,
+    });
+    assert.equal(h.content, "That tracks.");
+    assert.deepEqual(h.coffeeAmbientAction, coffeeAmbientAction);
+  });
+
+  it("hydrates persisted Coffee user actions from tool_payload", () => {
+    const coffeeUserAction: CoffeeUserActionPayload = {
+      v: 1,
+      name: "coffeeUserAction",
+      source: "user",
+      action: "leans back and folds arms",
+      occurredAt: "2026-07-02T15:00:00.000Z",
+    };
+    const stored = serializeAssistantToolPayload({ coffeeUserAction });
+    assert.deepEqual(parseStoredAssistantToolPayload(stored).coffeeUserAction, coffeeUserAction);
+    const h = hydrateAssistantMessageParts({
+      content: "*leans back and folds arms*",
+      toolPayload: stored,
+    });
+    assert.equal(h.content, "*leans back and folds arms*");
+    assert.deepEqual(h.coffeeUserAction, coffeeUserAction);
+  });
+
+  it("hydrates persisted Coffee replay events from tool_payload", () => {
+    const coffeeReplayEvents: CoffeeReplayEventPayload[] = [
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "arrival",
+        botId: "bot-1",
+        occurredAt: "2026-07-02T15:00:00.000Z",
+        walkDurationMs: 3200,
+        nameplateDelayMs: 3800,
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "topOff",
+        botId: "bot-1",
+        occurredAt: "2026-07-02T15:01:00.000Z",
+        progressBefore: 0.7,
+        progressAfter: 0.2,
+        toppedOffAt: "2026-07-02T15:01:00.000Z",
+      },
+    ];
+    const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
+
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(stored).coffeeReplayEvents,
+      coffeeReplayEvents
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "",
+        toolPayload: stored,
+      }).coffeeReplayEvents,
+      coffeeReplayEvents
+    );
   });
 });
 

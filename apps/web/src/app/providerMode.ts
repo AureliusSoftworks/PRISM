@@ -5,6 +5,8 @@ export type OnlineProvider = Exclude<Provider, "local">;
 export type ResponseMode = "local" | "online";
 
 const AUTO_MODEL_CHOICE = "auto";
+export const OPENAI_FALLBACK_CHAT_MODEL_ID = "gpt-4o-mini";
+export const ANTHROPIC_FALLBACK_CHAT_MODEL_ID = "claude-sonnet-4-6";
 
 export interface ProviderModeModelOption {
   id: string;
@@ -36,6 +38,32 @@ export function isOnlineProvider(provider: Provider): provider is OnlineProvider
 
 export function onlineProviderFallback(provider: Provider): OnlineProvider {
   return provider === "anthropic" ? "anthropic" : "openai";
+}
+
+export function fallbackOnlineModelIdsForProvider(
+  provider: OnlineProvider,
+  preferredOnlineModel?: string | null
+): string[] {
+  const ids: string[] = [];
+  const preferred = normalizeProviderModeModelChoice(preferredOnlineModel);
+  if (preferred !== AUTO_MODEL_CHOICE && preferred !== DISABLED_MODEL_CHOICE) {
+    const preferredProvider = inferOnlineProviderForModelChoice(
+      preferred,
+      [],
+      provider
+    );
+    if (preferredProvider === provider) {
+      ids.push(preferred);
+    }
+  }
+
+  ids.push(
+    provider === "anthropic"
+      ? ANTHROPIC_FALLBACK_CHAT_MODEL_ID
+      : OPENAI_FALLBACK_CHAT_MODEL_ID
+  );
+
+  return Array.from(new Set(ids));
 }
 
 export function combinedOnlineModelOptions<T extends ProviderModeModelOption>(

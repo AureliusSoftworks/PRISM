@@ -16,9 +16,14 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(":V", false), "\u00a0V");
   });
 
-  it("replaces leading semicolon (sad eyes) with non-collapsing whitespace", () => {
+  it("keeps legacy semicolon faces blink-safe", () => {
     assert.equal(applyCoffeeSeatBlink(";(", false), "\u00a0(");
     assert.equal(applyCoffeeSeatBlink(";0", false), "\u00a00");
+  });
+
+  it("replaces leading greater-than (guarded eyes) with non-collapsing whitespace", () => {
+    assert.equal(applyCoffeeSeatBlink(">[", false), "\u00a0[");
+    assert.equal(applyCoffeeSeatBlink(">O", false), "\u00a0O");
   });
 
   it("no-ops on empty or unknown first character", () => {

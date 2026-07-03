@@ -1,4 +1,13 @@
-import { extractStageDirections } from "./botMention.ts";
+import { extractStageDirections, tokenizeBotMentionSource } from "./botMention.ts";
+import {
+  coffeeCupSipMessageGapForDuration,
+  type CoffeeAmbientActionPayload,
+  type CoffeeCupTopOffSnapshot,
+  type CoffeeReplayEventPayload,
+  type CoffeeReplaySocialSnapshotPayload,
+  type CoffeeReplayTopOffEventPayload,
+  type CoffeeSessionSettings,
+} from "@localai/shared";
 
 const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
@@ -21,7 +30,32 @@ export interface CoffeeReplayMessageLike {
   role: string;
   content: string;
   botName?: string;
+  botId?: string | null;
   createdAt?: string;
+  provider?: string | null;
+  model?: string | null;
+  coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
+}
+
+export interface CoffeeReviewClipboardBotLike {
+  id: string;
+  name: string;
+}
+
+export interface CoffeeReviewClipboardContext {
+  conversationId?: string | null;
+  title?: string | null;
+  topic?: string | null;
+  phase?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  durationMinutes?: number | null;
+  incognito?: boolean | null;
+  groupId?: string | null;
+  bots?: readonly CoffeeReviewClipboardBotLike[];
+  absentBotIds?: readonly string[];
+  settings?: Partial<CoffeeSessionSettings> | null;
 }
 
 export interface CoffeeReplayAction {
@@ -37,6 +71,17 @@ export interface CoffeeActionBotContext {
   glyph?: string | null;
 }
 
+export interface CoffeeReplayState {
+  hasReplayEvents: boolean;
+  arrivedBotIds: Set<string>;
+  walkingInBotIds: Set<string>;
+  nameplatePendingBotIds: Set<string>;
+  socialByBotId: Record<string, CoffeeReplaySocialSnapshotPayload>;
+  topOffsByBotId: Record<string, CoffeeCupTopOffSnapshot>;
+  currentEvents: CoffeeReplayEventPayload[];
+  activeTopOffEvent: CoffeeReplayTopOffEventPayload | null;
+}
+
 const COFFEE_ACTION_FACIAL_HAIR_RE = /\b(?:beard|mustache|moustache|goatee)\b/i;
 const COFFEE_ACTION_EXPLICIT_NO_FACIAL_HAIR_RE =
   /\b(?:beardless|clean-shaven|no\s+(?:beard|mustache|moustache|goatee))\b/i;
@@ -44,9 +89,31 @@ const COFFEE_ACTION_EXPLICIT_FACIAL_HAIR_RE =
   /\b(?:bearded|has\s+(?:a\s+)?(?:beard|mustache|moustache|goatee)|with\s+(?:a\s+)?(?:beard|mustache|moustache|goatee))\b/i;
 const COFFEE_ACTION_KNOWN_NO_FACIAL_HAIR_RE =
   /\b(?:mr\.?\s*krabs|eugene\s+krabs|squidward|spongebob|patrick\s+star|sandy\s+cheeks|plankton|sheldon\s+j\.?\s*plankton)\b/i;
-export const COFFEE_SIP_ACTION_MIN_MESSAGE_GAP = 5;
+export const COFFEE_SIP_ACTION_MIN_MESSAGE_GAP = 3;
 const COFFEE_SIP_ACTION_RE =
   /\b(?:sips?|sipping|drinks?|drinking|takes?\s+(?:a\s+)?(?:quick|small|slow|quiet|deliberate|long)?\s*sip|raises?\s+(?:(?:his|her|their|the)\s+)?(?:cup|mug)\s+(?:to|toward)\s+(?:his|her|their|the)?\s*(?:mouth|lips)|lifts?\s+(?:(?:his|her|their|the)\s+)?(?:cup|mug)\s+(?:to|toward)\s+(?:his|her|their|the)?\s*(?:mouth|lips))\b/i;
+
+function stripCoffeeVisibleQuoteMarks(text: string): string {
+  return text
+    .replace(/[“”"]/g, "")
+    .replace(/\s+([,.!?;:])/gu, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function stripCoffeeActionBotMentionArtifacts(text: string): string {
+  const markdownReduced = tokenizeBotMentionSource(text)
+    .map((segment) => (segment.kind === "mention" ? segment.displayName : segment.text))
+    .join("");
+
+  return markdownReduced
+    .replace(/\(\s*prism-bot:\/\/[^)\s]+\s*\)/gi, "")
+    .replace(/\bprism-bot:\/\/[^\s),.;!?]+/gi, "")
+    .replace(/\s+([,.!?;:])/gu, "$1")
+    .replace(/\b(?:at|towards?|to|from|with|for)\s*$/iu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
 function coffeeActionContextRejectsFacialHair(
   bot: CoffeeActionBotContext | null | undefined
@@ -62,8 +129,12 @@ export function sanitizeCoffeeActionForBot(
   action: string,
   bot?: CoffeeActionBotContext | null
 ): string {
-  const collapsed = action.replace(/\s+/g, " ").trim();
-  if (!collapsed || !COFFEE_ACTION_FACIAL_HAIR_RE.test(collapsed)) return collapsed;
+  const collapsed = stripCoffeeVisibleQuoteMarks(
+    stripCoffeeActionBotMentionArtifacts(action).replace(/\s+/g, " ").trim()
+  );
+  if (!collapsed) return "";
+  if (coffeeActionIsSip(collapsed)) return "";
+  if (!COFFEE_ACTION_FACIAL_HAIR_RE.test(collapsed)) return collapsed;
   if (!coffeeActionContextRejectsFacialHair(bot)) return collapsed;
 
   return collapsed
@@ -88,6 +159,15 @@ export function coffeeActionCanDisplayWhileSpeaking(
   return !coffeeActionIsSip(action) || spokenText.trim().length === 0;
 }
 
+export function coffeeActionSipMessageGapForDuration(
+  durationMinutes?: number | null
+): number {
+  return coffeeCupSipMessageGapForDuration(
+    durationMinutes,
+    COFFEE_SIP_ACTION_MIN_MESSAGE_GAP
+  );
+}
+
 export function coffeeActionPassesSipCadence(
   action: string,
   messageIndex: number,
@@ -97,6 +177,20 @@ export function coffeeActionPassesSipCadence(
   if (!coffeeActionIsSip(action)) return true;
   if (typeof previousSipMessageIndex !== "number") return true;
   return messageIndex - previousSipMessageIndex >= minMessageGap;
+}
+
+export function coffeeActionAnimationStartedAtMs(
+  message: Pick<CoffeeReplayMessageLike, "id" | "createdAt">,
+  firstVisibleAtMsByMessageId?: ReadonlyMap<string, number> | null
+): number {
+  const localStartedAt =
+    message.id && firstVisibleAtMsByMessageId
+      ? firstVisibleAtMsByMessageId.get(message.id)
+      : undefined;
+  if (typeof localStartedAt === "number" && Number.isFinite(localStartedAt)) {
+    return localStartedAt;
+  }
+  return Date.parse(message.createdAt ?? "");
 }
 
 export function clampCoffeeReplayMessageIndex(messageCount: number, index: number): number {
@@ -112,6 +206,80 @@ export function coffeeReplayVisibleMessages<T>(
   if (messages.length === 0) return [];
   const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, replayMessageIndex);
   return messages.slice(0, clampedIndex + 1);
+}
+
+export function coffeeStageActionTimelineMessages<T>(args: {
+  messages: readonly T[];
+  replayMessages: readonly T[];
+  sessionFinished: boolean;
+  replayActive: boolean;
+}): readonly T[] {
+  if (args.sessionFinished && !args.replayActive) return [];
+  return args.replayActive ? args.replayMessages : args.messages;
+}
+
+export function coffeeReplayEventsForMessage(
+  message: Pick<CoffeeReplayMessageLike, "coffeeReplayEvents"> | null | undefined
+): CoffeeReplayEventPayload[] {
+  return Array.isArray(message?.coffeeReplayEvents) ? message.coffeeReplayEvents : [];
+}
+
+export function coffeeReplayMessageHasStateEvent(
+  message: Pick<CoffeeReplayMessageLike, "coffeeReplayEvents"> | null | undefined
+): boolean {
+  return coffeeReplayEventsForMessage(message).length > 0;
+}
+
+export function coffeeReplayStateAt(
+  messages: readonly CoffeeReplayMessageLike[],
+  replayMessageIndex: number
+): CoffeeReplayState {
+  const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, replayMessageIndex);
+  const arrivedBotIds = new Set<string>();
+  const walkingInBotIds = new Set<string>();
+  const nameplatePendingBotIds = new Set<string>();
+  const socialByBotId: Record<string, CoffeeReplaySocialSnapshotPayload> = {};
+  const topOffsByBotId: Record<string, CoffeeCupTopOffSnapshot> = {};
+  const currentEvents: CoffeeReplayEventPayload[] = [];
+  let hasReplayEvents = false;
+  let activeTopOffEvent: CoffeeReplayTopOffEventPayload | null = null;
+
+  for (let index = 0; index < messages.length && index <= clampedIndex; index += 1) {
+    const isCurrentMessage = index === clampedIndex;
+    for (const event of coffeeReplayEventsForMessage(messages[index])) {
+      hasReplayEvents = true;
+      if (isCurrentMessage) currentEvents.push(event);
+      if (event.kind === "arrival") {
+        arrivedBotIds.add(event.botId);
+        if (isCurrentMessage) {
+          walkingInBotIds.add(event.botId);
+          nameplatePendingBotIds.add(event.botId);
+        }
+      } else if (event.kind === "mood") {
+        socialByBotId[event.botId] = event.social;
+      } else if (event.kind === "topOff") {
+        topOffsByBotId[event.botId] = {
+          progressBefore: event.progressBefore,
+          progressAfter: event.progressAfter,
+          toppedOffAt: event.toppedOffAt,
+        };
+        if (isCurrentMessage) {
+          activeTopOffEvent = event;
+        }
+      }
+    }
+  }
+
+  return {
+    hasReplayEvents,
+    arrivedBotIds,
+    walkingInBotIds,
+    nameplatePendingBotIds,
+    socialByBotId,
+    topOffsByBotId,
+    currentEvents,
+    activeTopOffEvent,
+  };
 }
 
 export function coffeeTranscriptVisibleMessages<T extends { role: string; content: string }>(
@@ -132,6 +300,204 @@ export function coffeeTranscriptVisibleMessages<T extends { role: string; conten
   });
 }
 
+function coffeeReviewTableText(message: Pick<CoffeeReplayMessageLike, "role" | "content">): string {
+  const content =
+    message.role === "assistant" ? extractStageDirections(message.content).mainText : message.content;
+  return stripCoffeeVisibleQuoteMarks(content.replace(/\s+/g, " ").trim());
+}
+
+function coffeeReviewSpeaker(message: CoffeeReplayMessageLike): string {
+  if (message.role === "assistant") return message.botName?.trim() || "Bot";
+  if (message.role === "user") return "You";
+  return "Session";
+}
+
+function coffeeReviewValue(label: string, raw: unknown): string | null {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed ? `${label}: ${trimmed}` : null;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) return `${label}: ${raw}`;
+  if (typeof raw === "boolean") return `${label}: ${raw ? "yes" : "no"}`;
+  return null;
+}
+
+function coffeeReviewSettingsText(settings: Partial<CoffeeSessionSettings> | null | undefined): string {
+  if (!settings) return "";
+  const parts: string[] = [];
+  if (typeof settings.responseLength === "string") {
+    parts.push(`responseLength=${settings.responseLength}`);
+  }
+  if (typeof settings.tableEnergy === "string") {
+    parts.push(`tableEnergy=${settings.tableEnergy}`);
+  }
+  if (typeof settings.crossTalk === "string") {
+    parts.push(`crossTalk=${settings.crossTalk}`);
+  }
+  if (typeof settings.memoryCallbacks === "string") {
+    parts.push(`memoryCallbacks=${settings.memoryCallbacks}`);
+  }
+  if (typeof settings.responseDelayBias === "number") {
+    parts.push(`responseDelayBias=${settings.responseDelayBias}`);
+  }
+  if (typeof settings.breathingRoom === "number") {
+    parts.push(`breathingRoom=${settings.breathingRoom}`);
+  }
+  if (typeof settings.stayOnThread === "boolean") {
+    parts.push(`stayOnThread=${settings.stayOnThread ? "yes" : "no"}`);
+  }
+  if (typeof settings.givePlayerLastWord === "boolean") {
+    parts.push(`givePlayerLastWord=${settings.givePlayerLastWord ? "yes" : "no"}`);
+  }
+  return parts.join("; ");
+}
+
+function coffeeReviewReplayEventCountsText(events: readonly CoffeeReplayEventPayload[]): string {
+  if (events.length === 0) return "none recorded";
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    counts.set(event.kind, (counts.get(event.kind) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([kind, count]) => `${kind}=${count}`)
+    .join("; ");
+}
+
+function coffeeReviewUnitValue(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  return value.toFixed(2);
+}
+
+function coffeeReviewPercent(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  return `${Math.round(value * 100)}%`;
+}
+
+function coffeeReviewBotLabel(
+  botId: string,
+  botNameById: ReadonlyMap<string, string>
+): string {
+  const name = botNameById.get(botId);
+  return name ? `${name} (${botId})` : botId;
+}
+
+function coffeeReviewReplayEventLine(
+  event: CoffeeReplayEventPayload,
+  botNameById: ReadonlyMap<string, string>
+): string {
+  const bot = coffeeReviewBotLabel(event.botId, botNameById);
+  if (event.kind === "arrival") {
+    const timing = [
+      typeof event.walkDurationMs === "number" ? `walk=${event.walkDurationMs}ms` : "",
+      typeof event.nameplateDelayMs === "number" ? `nameplate=${event.nameplateDelayMs}ms` : "",
+    ].filter(Boolean);
+    return `- ${event.occurredAt} arrival: ${bot}${timing.length ? ` (${timing.join(", ")})` : ""}`;
+  }
+  if (event.kind === "topOff") {
+    return `- ${event.occurredAt} topOff: ${bot} cup ${coffeeReviewPercent(
+      event.progressBefore
+    )} -> ${coffeeReviewPercent(event.progressAfter)}`;
+  }
+  return `- ${event.occurredAt} mood: ${bot} disposition=${coffeeReviewUnitValue(
+    event.social.disposition
+  )}; valuesFriction=${coffeeReviewUnitValue(
+    event.social.valuesFriction
+  )}; restraint=${coffeeReviewUnitValue(event.social.restraint)}; engagement=${coffeeReviewUnitValue(
+    event.social.engagement
+  )}; leavePressure=${coffeeReviewUnitValue(event.social.leavePressure)}`;
+}
+
+export function formatCoffeeReviewClipboardText(args: {
+  messages: readonly CoffeeReplayMessageLike[];
+  context?: CoffeeReviewClipboardContext;
+}): string {
+  const { messages, context } = args;
+  const replayEvents = messages.flatMap((message) => message.coffeeReplayEvents ?? []);
+  const botNameById = new Map<string, string>();
+  for (const bot of context?.bots ?? []) {
+    if (bot.id.trim() && bot.name.trim()) botNameById.set(bot.id, bot.name);
+  }
+  for (const message of messages) {
+    if (message.botId && message.botName?.trim()) {
+      botNameById.set(message.botId, message.botName.trim());
+    }
+  }
+
+  const visibleMessages = coffeeTranscriptVisibleMessages(messages);
+  const transcriptLines = visibleMessages
+    .map((message) => {
+      const text = coffeeReviewTableText(message);
+      return text ? `${coffeeReviewSpeaker(message)}: ${text}` : null;
+    })
+    .filter((line): line is string => line !== null);
+  const roster = (context?.bots ?? [])
+    .map((bot) => `${bot.name}${bot.id ? ` (${bot.id})` : ""}`)
+    .join(", ");
+  const absent = (context?.absentBotIds ?? [])
+    .map((botId) => coffeeReviewBotLabel(botId, botNameById))
+    .join(", ");
+  const observedModels = Array.from(
+    new Set(
+      messages
+        .filter((message) => message.role === "assistant")
+        .map((message) => {
+          const provider = typeof message.provider === "string" ? message.provider.trim() : "";
+          const model = typeof message.model === "string" ? message.model.trim() : "";
+          if (!provider && !model) return "";
+          return model ? `${provider || "provider"}:${model}` : provider;
+        })
+        .filter(Boolean)
+    )
+  );
+  const settings = coffeeReviewSettingsText(context?.settings);
+
+  const contextLines = [
+    coffeeReviewValue("Title", context?.title),
+    coffeeReviewValue("Topic", context?.topic),
+    coffeeReviewValue("Session ID", context?.conversationId),
+    coffeeReviewValue("Phase", context?.phase),
+    coffeeReviewValue("Created", context?.createdAt),
+    coffeeReviewValue("Updated", context?.updatedAt),
+    typeof context?.durationMinutes === "number" && Number.isFinite(context.durationMinutes)
+      ? `Duration: ${context.durationMinutes} minutes`
+      : null,
+    coffeeReviewValue("Incognito", context?.incognito),
+    coffeeReviewValue("Group ID", context?.groupId),
+    roster ? `Roster: ${roster}` : null,
+    absent ? `Absent bots: ${absent}` : null,
+    settings ? `Settings: ${settings}` : null,
+    observedModels.length ? `Observed models/providers: ${observedModels.join("; ")}` : null,
+    `Visible transcript messages: ${transcriptLines.length}`,
+    `Replay events: ${coffeeReviewReplayEventCountsText(replayEvents)}`,
+  ].filter((line): line is string => line !== null);
+
+  return [
+    "# PRISM Coffee Review Export",
+    ...contextLines,
+    "",
+    "## Table Prose",
+    ...(transcriptLines.length ? transcriptLines : ["(No visible table prose.)"]),
+    ...(replayEvents.length
+      ? [
+          "",
+          "## Replay Events",
+          ...replayEvents.map((event) => coffeeReviewReplayEventLine(event, botNameById)),
+        ]
+      : []),
+  ].join("\n");
+}
+
+export function coffeeActionsForMessage(message: CoffeeReplayMessageLike): string[] {
+  const actions = extractStageDirections(message.content).actions
+    .map((action) => stripCoffeeVisibleQuoteMarks(action.replace(/\s+/g, " ").trim()))
+    .filter((action) => action.length > 0);
+  const ambientAction =
+    message.coffeeAmbientAction?.source === "scripted"
+      ? stripCoffeeVisibleQuoteMarks(message.coffeeAmbientAction.action.replace(/\s+/g, " ").trim())
+      : "";
+  return ambientAction ? [...actions, ambientAction] : actions;
+}
+
 export function collectCoffeeReplayActionsForBot(
   messages: readonly CoffeeReplayMessageLike[],
   botName: string
@@ -141,9 +507,8 @@ export function collectCoffeeReplayActionsForBot(
   const out: CoffeeReplayAction[] = [];
   messages.forEach((message, messageIndex) => {
     if (message.role !== "assistant" || message.botName !== normalizedBotName) return;
-    const { actions } = extractStageDirections(message.content);
-    for (const action of actions) {
-      const trimmed = action.replace(/\s+/g, " ").trim();
+    for (const action of coffeeActionsForMessage(message)) {
+      const trimmed = sanitizeCoffeeActionForBot(action).replace(/\s+/g, " ").trim();
       if (!trimmed) continue;
       out.push({
         action: trimmed,

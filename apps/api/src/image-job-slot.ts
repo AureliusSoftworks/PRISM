@@ -15,6 +15,7 @@ import {
   type AssistantSentImageUserPrefs,
 } from "./assistant-sent-image.ts";
 import { getAuxiliaryProvider, type LlmProvider } from "./providers.ts";
+import { runWithUsageSession } from "./usage.ts";
 
 function resolveImageJobWallMs(): number {
   const raw = process.env.PRISM_IMAGE_JOB_WALL_MS?.trim();
@@ -227,6 +228,9 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     ...(assembled.moodConfidence !== undefined ? { moodConfidence: assembled.moodConfidence } : {}),
     ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
     ...(assembled.sentGeneratedImage ? { sentGeneratedImage: assembled.sentGeneratedImage } : {}),
+    ...(assembled.coffeeAmbientAction
+      ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
+      : {}),
   };
 }
 
@@ -294,6 +298,7 @@ async function inferImageReadyFollowUpText(args: {
       {
         temperature: FOLLOW_UP_TEMPERATURE,
         maxTokens: FOLLOW_UP_MAX_TOKENS,
+        usagePurpose: "image_prompt",
       }
     );
     const line = raw.trim().replace(/\s+/g, " ");
@@ -448,7 +453,15 @@ export function startChatImageBackgroundJob(args: {
     job.abortController.abort();
   }, IMAGE_JOB_WALL_MS);
 
-  void (async () => {
+  void Promise.resolve(runWithUsageSession({
+    db,
+    userId: job.userId,
+    privacyScope: job.incognito ? "private" : "normal",
+    mode: job.mode,
+    surface: "chat_image",
+    conversationId: job.conversationId,
+    botId: job.botId,
+  }, async () => {
     const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
     try {
       const result = await runAssistantSentImageGeneration({
@@ -594,7 +607,7 @@ export function startChatImageBackgroundJob(args: {
     } finally {
       clearTimeout(wallTimer);
     }
-  })().catch((err) => {
+  })).catch((err) => {
     console.warn("[image-job-slot] background job crashed:", err);
     void finishImageJob(job.id, job.userId, {
       status: "failed",

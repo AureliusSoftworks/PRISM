@@ -5821,7 +5821,7 @@ describe("processChatMessage conversational memory cues", () => {
     assert.match(repaired.botOpinion?.lastReason ?? "", /repair/i);
   });
 
-  it("auto-creates one protected about-you memory when a bot has no long-term user memory", async () => {
+  it("does not auto-create protected about-you memories from account display name", async () => {
     const db = createChatTestDb();
     installChatFetchStub("Thanks for sharing.");
 
@@ -5833,26 +5833,19 @@ describe("processChatMessage conversational memory cues", () => {
       {
         preferredProvider: "local",
         autoMemory: false,
+        userDisplayName: "Jared",
         botId: "bot-1",
         incognito: false,
         mode: "sandbox",
       }
     );
 
-    const firstAboutYou = db
-      .prepare(
-        "SELECT source, category, tier FROM memories WHERE user_id = ? AND source = 'about_you' ORDER BY created_at DESC LIMIT 1"
-      )
-      .get("user-1") as { source: string; category: string; tier: string } | undefined;
-    assert.equal(firstAboutYou?.source, "about_you");
-    assert.equal(firstAboutYou?.category, "user");
-    assert.equal(firstAboutYou?.tier, "long_term");
     const firstCount = (
       db
         .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
         .get("user-1") as { n: number }
     ).n;
-    assert.equal(firstCount, 1);
+    assert.equal(firstCount, 0);
 
     await processChatMessage(
       db,
@@ -5862,6 +5855,7 @@ describe("processChatMessage conversational memory cues", () => {
       {
         preferredProvider: "local",
         autoMemory: false,
+        userDisplayName: "Jared",
         botId: "bot-1",
         incognito: false,
         mode: "sandbox",
@@ -5873,7 +5867,7 @@ describe("processChatMessage conversational memory cues", () => {
         .prepare("SELECT COUNT(*) AS n FROM memories WHERE user_id = ? AND source = 'about_you'")
         .get("user-1") as { n: number }
     ).n;
-    assert.equal(secondCount, 1);
+    assert.equal(secondCount, 0);
   });
 });
 
@@ -5888,18 +5882,24 @@ describe("extractPrismBotMentionIdsFromMessage", () => {
 describe("processChatMessage Zen session memory prompt gating", () => {
   it("injects session memory only for explicit prior-context inquiries", async () => {
     const db = createChatTestDb();
-    const createdAt = "2026-06-20T10:00:00.000Z";
+    const nowMs = Date.now();
+    const previousCreatedAt = new Date(nowMs - 120_000).toISOString();
+    const previousUpdatedAt = new Date(nowMs - 90_000).toISOString();
+    const summaryCreatedAt = new Date(nowMs - 80_000).toISOString();
+    const checkpointNow = new Date(nowMs - 60_000);
+    const checkpointAssistantAt = new Date(nowMs - 59_000).toISOString();
+    const activeCreatedAt = new Date(nowMs - 30_000).toISOString();
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
-    ).run("active", "user-1", "Active Zen", createdAt, createdAt);
+    ).run("active", "user-1", "Active Zen", activeCreatedAt, activeCreatedAt);
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', 0, ?, ?)"
     ).run(
       "previous",
       "user-1",
       "Bridge Story",
-      "2026-06-20T09:00:00.000Z",
-      "2026-06-20T09:30:00.000Z"
+      previousCreatedAt,
+      previousUpdatedAt
     );
     db.prepare(
       "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -5913,9 +5913,9 @@ describe("processChatMessage Zen session memory prompt gating", () => {
         mode: "zen",
         summary: "The user and Prism are midway through a bridge story.",
         displaySummary: "I'm holding the bridge story at the choice.",
-        createdAt: "2026-06-20T09:31:00.000Z",
+        createdAt: summaryCreatedAt,
       }),
-      "2026-06-20T09:31:00.000Z"
+      summaryCreatedAt
     );
     await createZenSessionMemoryCheckpoint({
       db,
@@ -5939,22 +5939,22 @@ describe("processChatMessage Zen session memory prompt gating", () => {
           id: "previous-assistant",
           role: "assistant",
           content: "The bridge waits between a lantern path and a map path.",
-          createdAt: "2026-06-20T09:29:00.000Z",
+          createdAt: previousUpdatedAt,
         },
       ],
       userMessage: {
         id: "previous-user",
         role: "user",
         content: "Let's finish this later.",
-        createdAt: "2026-06-20T09:30:00.000Z",
+        createdAt: checkpointNow.toISOString(),
       },
       assistantMessage: {
         id: "previous-reply",
         role: "assistant",
         content: "We can pause at the choice.",
-        createdAt: "2026-06-20T09:30:01.000Z",
+        createdAt: checkpointAssistantAt,
       },
-      now: new Date("2026-06-20T09:30:00.000Z"),
+      now: checkpointNow,
     });
 
     type ProviderBody = {

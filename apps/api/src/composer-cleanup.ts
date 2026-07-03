@@ -96,6 +96,7 @@ export async function cleanupComposerTextWithModel(args: {
       model: args.model,
       temperature: 0.05,
       maxTokens,
+      usagePurpose: "composer_cleanup",
       signal: args.signal,
     }
   );
@@ -369,6 +370,7 @@ export async function cleanupResolvedPromptWithModel(args: {
       temperature: 0.05,
       maxTokens,
       jsonMode: true,
+      usagePurpose: "composer_cleanup",
       signal: args.signal,
     }
   );
