@@ -10,7 +10,10 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
-_Staging area - nothing queued for release yet._
+### Added
+
+- Applet version labels, a shared web applet registry, and
+  `docs/applets.md` for applet-level changelogs and design ethos.
 
 ## [0.5.2] - 2026-06-30
 

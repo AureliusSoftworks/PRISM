@@ -1,11 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   coffeeCupPacedProgress,
   coffeeCupStatusForProgress,
 } from "@localai/shared";
 import {
   buildCoffeeCupVisualState,
+  COFFEE_CUP_SPRITE_COLORS,
   coffeeCupCanTopOff,
   coffeeCupColorForBotColor,
   coffeeCupConsumptionRate,
@@ -14,6 +16,7 @@ import {
   coffeeCupProgressForSipCount,
   coffeeCupPrismFamilyForBotColor,
   coffeeCupSessionDurationPaceMultiplier,
+  coffeeCupSipBelongsToCurrentFill,
   coffeeCupSipCycleMs,
   coffeeCupSipGatedTimedProgress,
   coffeeCupSipAnimationTiming,
@@ -26,6 +29,17 @@ import {
   coffeeCupTopOffSnapshotForProgress,
   coffeeCupVisualSipCountForAnimation,
 } from "./coffee-cup-sprites.ts";
+
+function coffeeCupAssetPngSize(assetName: string): { width: number; height: number } {
+  const data = readFileSync(
+    new URL(`../../public/coffee-cups/${assetName}`, import.meta.url)
+  );
+  assert.equal(data.subarray(1, 4).toString("ascii"), "PNG");
+  return {
+    width: data.readUInt32BE(16),
+    height: data.readUInt32BE(20),
+  };
+}
 
 describe("coffee cup sprites", () => {
   it("maps drink levels to authored sheet positions", () => {
@@ -129,11 +143,22 @@ describe("coffee cup sprites", () => {
     assert.match(light.sipImageUrl, /coffee_light_red_sip\.png$/);
   });
 
+  it("keeps light-mode sip sprites on the same canvas as dark-mode sip sprites", () => {
+    for (const color of COFFEE_CUP_SPRITE_COLORS) {
+      assert.deepEqual(
+        coffeeCupAssetPngSize(`coffee_light_${color}_sip.png`),
+        coffeeCupAssetPngSize(`coffee_${color}_sip.png`)
+      );
+    }
+  });
+
   it("maps accepted sip counts to deterministic visual depletion", () => {
     assert.equal(coffeeCupProgressForSipCount(0), 0);
     assert.equal(coffeeCupProgressForSipCount(1), 0.1);
     assert.equal(coffeeCupProgressForSipCount(4), 0.4);
     assert.equal(coffeeCupProgressForSipCount(10), 0.96);
+    assert.equal(coffeeCupProgressForSipCount(1, 0.38), 0.48);
+    assert.equal(coffeeCupProgressForSipCount(6, 0.38), 0.96);
 
     const untouched = buildCoffeeCupVisualState({
       seed: "session:bot-alice",
@@ -158,6 +183,62 @@ describe("coffee cup sprites", () => {
     assert.equal(untouched.progress, 0);
     assert.ok(afterTwoSips.progress > untouched.progress);
     assert.equal(afterTwoSips.frameIndex, 1);
+  });
+
+  it("counts explicit sips from the latest top-off baseline", () => {
+    const toppedOffAt = "2026-07-01T12:00:00.000Z";
+    const topOff = coffeeCupTopOffSnapshotForProgress(0.82, toppedOffAt, 0.38);
+    assert.notEqual(topOff, null);
+    const nowMs = Date.parse(toppedOffAt) + 1_000;
+    const afterOneSip = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs,
+      topOff,
+      sipCount: 1,
+      sippingOverride: false,
+    });
+    const afterSixSips = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs,
+      topOff,
+      sipCount: 6,
+      sippingOverride: false,
+      finishSeed: "visible-empty-after-refill",
+    });
+
+    assert.equal(afterOneSip.progress, 0.48);
+    assert.equal(afterOneSip.frameIndex, 2);
+    assert.equal(afterSixSips.frameIndex, 5);
+  });
+
+  it("keeps sip history before a top-off out of the current fill state", () => {
+    const topOff = coffeeCupTopOffSnapshotForProgress(
+      0.82,
+      "2026-07-01T12:00:10.000Z"
+    );
+    assert.notEqual(topOff, null);
+
+    assert.equal(
+      coffeeCupSipBelongsToCurrentFill({
+        messageCreatedAt: "2026-07-01T12:00:09.999Z",
+        topOff,
+      }),
+      false
+    );
+    assert.equal(
+      coffeeCupSipBelongsToCurrentFill({
+        messageCreatedAt: "2026-07-01T12:00:10.001Z",
+        topOff,
+      }),
+      true
+    );
+    assert.equal(
+      coffeeCupSipBelongsToCurrentFill({
+        messageCreatedAt: "not-a-date",
+        topOff,
+      }),
+      true
+    );
   });
 
   it("uses explicit sip animation only when provided for sip-count cups", () => {
@@ -377,6 +458,25 @@ describe("coffee cup sprites", () => {
     assert.ok(toppedOff.steamAlpha > 0);
   });
 
+  it("can top off cups to a partial visible frame", () => {
+    const toppedOffAt = "2026-07-01T12:00:00.000Z";
+    const topOff = coffeeCupTopOffSnapshotForProgress(0.82, toppedOffAt, 0.38);
+    assert.notEqual(topOff, null);
+
+    const toppedOff = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: Date.parse(toppedOffAt),
+      progressOverride: 0.82,
+      topOff,
+      sippingOverride: false,
+    });
+
+    assert.equal(topOff?.progressBefore, 0.82);
+    assert.equal(topOff?.progressAfter, 0.38);
+    assert.equal(toppedOff.frameIndex, 2);
+    assert.equal(toppedOff.amount, "half");
+  });
+
   it("does not top off already-full cups", () => {
     assert.equal(coffeeCupCanTopOff(0.08), false);
     assert.equal(
@@ -385,7 +485,7 @@ describe("coffee cup sprites", () => {
     );
   });
 
-  it("lets top-off refill state decay back to normal cup progress", () => {
+  it("depletes a top-off from the refilled baseline instead of the old empty state", () => {
     const toppedOffAt = "2026-07-01T12:00:00.000Z";
     const topOff = coffeeCupTopOffSnapshotForProgress(0.72, toppedOffAt);
     assert.notEqual(topOff, null);
@@ -402,17 +502,17 @@ describe("coffee cup sprites", () => {
       nowMs: nowMs + 2 * 60 * 1000,
       durationMinutes: 10,
     });
-    const decayed = coffeeCupProgressAfterTopOff({
+    const naturalProgress = coffeeCupProgressAfterTopOff({
       progress: 0.72,
       topOff,
       nowMs: nowMs + 10 * 60 * 1000,
       durationMinutes: 10,
     });
 
-    assert.ok(immediate < later);
-    assert.ok(later > 0.45);
-    assert.ok(later < decayed);
-    assert.equal(decayed, 0.72);
+    assert.equal(immediate, 0.04);
+    assert.ok(later > immediate);
+    assert.ok(later < 0.3);
+    assert.equal(naturalProgress, 0.72);
   });
 
   it("keeps a fresh top-off full when timed progress is already ahead", () => {
@@ -445,7 +545,7 @@ describe("coffee cup sprites", () => {
     assert.ok(visual.progress < 0.06);
   });
 
-  it("lets sips drain a topped-off cup before time decay catches up", () => {
+  it("lets sips drain a topped-off cup from the refilled level", () => {
     const toppedOffAt = "2026-07-01T12:00:00.000Z";
     const topOff = coffeeCupTopOffSnapshotForProgress(0.62, toppedOffAt);
     assert.notEqual(topOff, null);
@@ -457,7 +557,7 @@ describe("coffee cup sprites", () => {
       durationMinutes: 10,
     });
     const afterSip = coffeeCupProgressAfterTopOff({
-      progress: 0.82,
+      progress: 0.14,
       topOff,
       nowMs,
       durationMinutes: 10,
@@ -465,8 +565,40 @@ describe("coffee cup sprites", () => {
     });
 
     assert.equal(immediate, 0.04);
-    assert.ok(afterSip > immediate);
-    assert.ok(afterSip < 0.82);
+    assert.equal(afterSip, 0.14);
+  });
+
+  it("keeps a refilled timed cup filled after the next sip", () => {
+    const sessionStartedAtMs = Date.parse("2026-07-01T12:00:00.000Z");
+    const toppedOffAtMs = sessionStartedAtMs + 9 * 60 * 1000;
+    const durationMinutes = 10;
+    const topOff = coffeeCupTopOffSnapshotForProgress(
+      0.9,
+      new Date(toppedOffAtMs).toISOString()
+    );
+    assert.notEqual(topOff, null);
+
+    const afterRefillIdle = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: toppedOffAtMs + 2 * 60 * 1000,
+      sessionStartedAtMs,
+      durationMinutes,
+      topOff,
+      sippingOverride: false,
+    });
+    const afterFirstSip = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: toppedOffAtMs + 2 * 60 * 1000,
+      sessionStartedAtMs,
+      durationMinutes,
+      topOff,
+      sipCount: 1,
+      sippingOverride: false,
+    });
+
+    assert.ok(afterRefillIdle.progress < 0.3);
+    assert.ok(afterFirstSip.progress < 0.3);
+    assert.notEqual(afterFirstSip.frameIndex, 5);
   });
 
   it("lets the first sip drain a timed top-off even before sip progress catches up", () => {

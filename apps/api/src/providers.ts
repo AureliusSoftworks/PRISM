@@ -27,6 +27,9 @@ export interface GenerateOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  topP?: number;
+  topK?: number;
+  repetitionPenalty?: number;
   reasoningEffort?: ReasoningEffort;
   usagePurpose?: UsagePurpose;
   /** Cancels in-flight provider work when the originating chat request is stopped. */
@@ -1072,6 +1075,15 @@ export class LocalOllamaProvider implements LlmProvider {
       // Ollama uses `num_predict` for the max-generation-tokens cap.
       ollamaOptions.num_predict = options.maxTokens;
     }
+    if (typeof options?.topP === "number") {
+      ollamaOptions.top_p = options.topP;
+    }
+    if (typeof options?.topK === "number") {
+      ollamaOptions.top_k = options.topK;
+    }
+    if (typeof options?.repetitionPenalty === "number") {
+      ollamaOptions.repeat_penalty = options.repetitionPenalty;
+    }
     const requestBody: Record<string, unknown> = {
       model,
       stream: false,
@@ -1208,6 +1220,12 @@ export class OpenAiProvider implements LlmProvider {
       !openAiModelUsesFixedDefaultTemperature(modelId)
     ) {
       requestBody.temperature = options.temperature;
+    }
+    if (
+      typeof options?.topP === "number" &&
+      !openAiModelUsesFixedDefaultTemperature(modelId)
+    ) {
+      requestBody.top_p = options.topP;
     }
     if (typeof options?.maxTokens === "number") {
       if (openAiModelUsesMaxCompletionTokens(modelId)) {
@@ -1357,6 +1375,15 @@ export class AnthropicProvider implements LlmProvider {
     };
     if (systemMessages.length > 0) {
       requestBody.system = systemMessages.join("\n\n");
+    }
+    if (typeof options?.temperature === "number") {
+      requestBody.temperature = options.temperature;
+    }
+    if (typeof options?.topP === "number") {
+      requestBody.top_p = options.topP;
+    }
+    if (typeof options?.topK === "number") {
+      requestBody.top_k = options.topK;
     }
     if (options?.jsonSchema || options?.jsonMode) {
       const jsonInstruction = options.jsonSchema

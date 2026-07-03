@@ -771,6 +771,34 @@ describe("system-owned local lanes", () => {
     assert.equal(requestedBody.model, "mistral:latest");
   });
 
+  it("passes advanced sampler knobs to Ollama options", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      temperature: 0.44,
+      maxTokens: 120,
+      topP: 0.82,
+      topK: 32,
+      repetitionPenalty: 1.18,
+    });
+
+    assert.deepEqual(requestedBody.options, {
+      temperature: 0.44,
+      num_predict: 120,
+      top_p: 0.82,
+      top_k: 32,
+      repeat_penalty: 1.18,
+    });
+  });
+
   it("pins local embeddings to nomic-embed-text", async () => {
     let requestedUrl = "";
     let requestedBody: Record<string, unknown> = {};
@@ -996,6 +1024,29 @@ describe("OpenAiProvider request shape", () => {
     });
 
     assert.equal(body.temperature, 0.91);
+  });
+
+  it("sends supported top_p but omits Ollama-only sampler fields", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-4o-mini",
+      topP: 0.73,
+      topK: 24,
+      repetitionPenalty: 1.2,
+    });
+
+    assert.equal(body.top_p, 0.73);
+    assert.equal(body.top_k, undefined);
+    assert.equal(body.repetition_penalty, undefined);
   });
 
   it("sends reasoning_effort for supported OpenAI reasoning models", async () => {

@@ -385,6 +385,9 @@ export function createDatabase(): DatabaseSync {
       openai_image_model TEXT,
       temperature REAL DEFAULT 0.7,
       max_tokens INTEGER DEFAULT 2048,
+      top_p REAL DEFAULT 1,
+      top_k INTEGER DEFAULT 40,
+      repetition_penalty REAL DEFAULT 1.1,
       color TEXT,
       glyph TEXT,
       face_eyes_font TEXT,
@@ -1392,6 +1395,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotOpenaiImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
+  }
+  const hasBotTopPColumn = botColumns.some(
+    (column) => column.name === "top_p"
+  );
+  if (!hasBotTopPColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN top_p REAL DEFAULT 1;");
+  }
+  const hasBotTopKColumn = botColumns.some(
+    (column) => column.name === "top_k"
+  );
+  if (!hasBotTopKColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN top_k INTEGER DEFAULT 40;");
+  }
+  const hasBotRepetitionPenaltyColumn = botColumns.some(
+    (column) => column.name === "repetition_penalty"
+  );
+  if (!hasBotRepetitionPenaltyColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN repetition_penalty REAL DEFAULT 1.1;");
   }
   const hasBotExportHashColumn = botColumns.some(
     (column) => column.name === "export_hash"

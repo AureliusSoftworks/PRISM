@@ -88,6 +88,7 @@ import {
   createCoffeeConversationFromGroup,
   deleteCoffeeGroup,
   deleteCoffeePreset,
+  getCoffeeConversationTranscript,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
   listCoffeeGroups,
@@ -95,6 +96,8 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  recordCoffeeUserAction,
+  recordCoffeeReplayEvents,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
@@ -930,6 +933,27 @@ function readOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+const BOT_TOP_P_DEFAULT = 1;
+const BOT_TOP_K_DEFAULT = 40;
+const BOT_REPETITION_PENALTY_DEFAULT = 1.1;
+
+function normalizeBotTopP(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return BOT_TOP_P_DEFAULT;
+  return Number(Math.min(1, Math.max(0, value)).toFixed(2));
+}
+
+function normalizeBotTopK(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return BOT_TOP_K_DEFAULT;
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeBotRepetitionPenalty(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return BOT_REPETITION_PENALTY_DEFAULT;
+  }
+  return Number(Math.min(2, Math.max(0.5, value)).toFixed(2));
 }
 
 function readManualChatTool(value: unknown): ManualChatToolRequest | undefined {
@@ -3700,7 +3724,7 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, semantic_facets, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
@@ -3711,10 +3735,13 @@ function buildRoutes(): RouteDefinition[] {
               local_model?: string | null;
               online_model?: string | null;
               online_enabled?: number | null;
-              flirt_enabled?: number | null;
-              temperature?: number | null;
-              max_tokens?: number | null;
-            }
+	              flirt_enabled?: number | null;
+	              temperature?: number | null;
+	              max_tokens?: number | null;
+	              top_p?: number | null;
+	              top_k?: number | null;
+	              repetition_penalty?: number | null;
+	            }
           | undefined;
         if (bot) {
           botName = bot.name?.trim() || "this bot";
@@ -3732,11 +3759,20 @@ function buildRoutes(): RouteDefinition[] {
             effectiveProvider === "local"
               ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
               : readOptionalString(bot.online_model);
-          if (typeof bot.temperature === "number") {
-            generationOverrides.temperature = bot.temperature;
-          }
-        }
-      }
+	          if (typeof bot.temperature === "number") {
+	            generationOverrides.temperature = bot.temperature;
+	          }
+	          if (typeof bot.top_p === "number") {
+	            generationOverrides.topP = bot.top_p;
+	          }
+	          if (typeof bot.top_k === "number") {
+	            generationOverrides.topK = bot.top_k;
+	          }
+	          if (typeof bot.repetition_penalty === "number") {
+	            generationOverrides.repetitionPenalty = bot.repetition_penalty;
+	          }
+	        }
+	      }
 
       const openAiApiKey =
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
@@ -4111,7 +4147,7 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(runtimeBotId, userId) as
           | {
@@ -4121,10 +4157,13 @@ function buildRoutes(): RouteDefinition[] {
               local_model?: string | null;
               online_model?: string | null;
               online_enabled?: number | null;
-              flirt_enabled?: number | null;
-              temperature?: number | null;
-              max_tokens?: number | null;
-            }
+	              flirt_enabled?: number | null;
+	              temperature?: number | null;
+	              max_tokens?: number | null;
+	              top_p?: number | null;
+	              top_k?: number | null;
+	              repetition_penalty?: number | null;
+	            }
           | undefined;
         if (bot) {
           starterPromptLabel = bot.name;
@@ -4147,11 +4186,20 @@ function buildRoutes(): RouteDefinition[] {
           if (typeof bot.temperature === "number") {
             generationOverrides.temperature = bot.temperature;
           }
-          if (typeof bot.max_tokens === "number") {
-            generationOverrides.maxTokens = bot.max_tokens;
-          }
-        }
-      }
+	          if (typeof bot.max_tokens === "number") {
+	            generationOverrides.maxTokens = bot.max_tokens;
+	          }
+	          if (typeof bot.top_p === "number") {
+	            generationOverrides.topP = bot.top_p;
+	          }
+	          if (typeof bot.top_k === "number") {
+	            generationOverrides.topK = bot.top_k;
+	          }
+	          if (typeof bot.repetition_penalty === "number") {
+	            generationOverrides.repetitionPenalty = bot.repetition_penalty;
+	          }
+	        }
+	      }
       if (!starterPromptLabel && mode === "zen" && runtimeBotId == null) {
         starterPromptLabel = "Prism";
       }
@@ -4602,6 +4650,28 @@ function buildRoutes(): RouteDefinition[] {
         ...result,
       });
     }),
+    route("GET", "/api/coffee/sessions/:id/transcript", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const messages = getCoffeeConversationTranscript(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        messages,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/replay-events", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = recordCoffeeReplayEvents(
+        db,
+        userId,
+        ctx.params.id,
+        body.events ?? body.event ?? body
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        conversation,
+      });
+    }),
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -4672,7 +4742,8 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         ctx.params.id,
         ctx.params.botId,
-        body.progress
+        body.progress,
+        body.progressAfter
       );
       json(ctx.res, 200, {
         ok: true,
@@ -4818,6 +4889,16 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         poll,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/user-action", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const action = readString(body.action, "action");
+      const result = recordCoffeeUserAction(db, userId, ctx.params.id, action);
+      json(ctx.res, 200, {
+        ok: true,
+        ...result,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/continue", async (ctx) => {
@@ -6911,7 +6992,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, {
@@ -6943,6 +7024,9 @@ function buildRoutes(): RouteDefinition[] {
       const flirtEnabled = body.flirtEnabled === true ? 1 : 0;
       const temperature = typeof body.temperature === "number" ? body.temperature : 0.7;
       const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 2048;
+      const topP = normalizeBotTopP(body.topP);
+      const topK = normalizeBotTopK(body.topK);
+      const repetitionPenalty = normalizeBotRepetitionPenalty(body.repetitionPenalty);
       const faceEyesFont = readBotFaceFontForStorage(body.faceEyesFont);
       const faceMouthFont = readBotFaceFontForStorage(body.faceMouthFont);
       const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
@@ -6972,7 +7056,7 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
       ).run(
         botId,
         userId,
@@ -6989,6 +7073,9 @@ function buildRoutes(): RouteDefinition[] {
         flirtEnabled,
         temperature,
         maxTokens,
+        topP,
+        topK,
+        repetitionPenalty,
         color,
         glyph,
         faceEyesFont,
@@ -7021,6 +7108,9 @@ function buildRoutes(): RouteDefinition[] {
           flirt_enabled: flirtEnabled,
           temperature,
           maxTokens,
+          top_p: topP,
+          top_k: topK,
+          repetition_penalty: repetitionPenalty,
           color,
           glyph,
           face_eyes_font: faceEyesFont,
@@ -7034,7 +7124,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -7119,6 +7209,12 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
+      if (typeof body.topP === "number") { fields.push("top_p = ?"); values.push(normalizeBotTopP(body.topP)); }
+      if (typeof body.topK === "number") { fields.push("top_k = ?"); values.push(normalizeBotTopK(body.topK)); }
+      if (typeof body.repetitionPenalty === "number") {
+        fields.push("repetition_penalty = ?");
+        values.push(normalizeBotRepetitionPenalty(body.repetitionPenalty));
+      }
       if (body.faceEyesFont !== undefined) {
         if (body.faceEyesFont === null) {
           fields.push("face_eyes_font = ?");
@@ -7230,7 +7326,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, { ok: true, bot: updatedBot });

@@ -18,6 +18,11 @@ interface CoffeeObserverMemoryRule {
   textFactory: (speakerName: string, peerName: string) => string;
 }
 
+interface CoffeeObserverBotNameRef {
+  canonicalName: string;
+  mentionNames: string[];
+}
+
 interface BotPreferredAddressRule {
   pattern: RegExp;
 }
@@ -558,6 +563,84 @@ function coffeeObserverNameKey(rawName: string | null | undefined): string | nul
   return normalizeCoffeeObserverName(rawName)?.toLocaleLowerCase() ?? null;
 }
 
+const COFFEE_OBSERVER_TITLE_TOKENS = new Set([
+  "captain",
+  "capt",
+  "doctor",
+  "dr",
+  "lord",
+  "madam",
+  "miss",
+  "mister",
+  "mr",
+  "mrs",
+  "ms",
+  "prof",
+  "professor",
+  "sir",
+]);
+
+function coffeeObserverNameVariants(rawName: string | null | undefined): string[] {
+  const canonicalName = normalizeCoffeeObserverName(rawName);
+  if (!canonicalName) return [];
+  const variants = [canonicalName];
+  const parts = canonicalName
+    .split(/\s+/)
+    .map((part) => normalizeCoffeeObserverName(part))
+    .filter((part): part is string => part !== null);
+  if (parts.length > 1) {
+    const first = parts[0]!;
+    const last = parts[parts.length - 1]!;
+    const firstKey = coffeeObserverNameKey(first);
+    if (
+      first.length >= 3 &&
+      firstKey &&
+      !COFFEE_OBSERVER_TITLE_TOKENS.has(firstKey)
+    ) {
+      variants.push(first);
+    }
+    if (
+      last.length >= 3 &&
+      firstKey &&
+      COFFEE_OBSERVER_TITLE_TOKENS.has(firstKey)
+    ) {
+      variants.push(last);
+    }
+  }
+  return variants.filter((name, index, all) => all.indexOf(name) === index);
+}
+
+function buildCoffeeObserverBotNameRefs(seatedBotNames: string[]): {
+  botRefs: CoffeeObserverBotNameRef[];
+  botNameKeys: Set<string>;
+} {
+  const variantsByName = seatedBotNames.map((name) => ({
+    canonicalName: name,
+    variants: coffeeObserverNameVariants(name),
+  }));
+  const keyCounts = new Map<string, number>();
+  const botNameKeys = new Set<string>();
+  for (const { variants } of variantsByName) {
+    for (const variant of variants) {
+      const key = coffeeObserverNameKey(variant);
+      if (!key) continue;
+      botNameKeys.add(key);
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const botRefs = variantsByName.map(({ canonicalName, variants }) => {
+    const canonicalKey = coffeeObserverNameKey(canonicalName);
+    return {
+      canonicalName,
+      mentionNames: variants.filter((variant) => {
+        const key = coffeeObserverNameKey(variant);
+        return key !== null && (key === canonicalKey || keyCounts.get(key) === 1);
+      }),
+    };
+  });
+  return { botRefs, botNameKeys };
+}
+
 function stripCoffeeBotMentionMarkdown(text: string): string {
   return text.replace(/\[([^\]]+)\]\(prism-bot:\/\/[^)]+\)/g, "$1");
 }
@@ -679,18 +762,20 @@ function textMentionsName(text: string, name: string): boolean {
 function extractCoffeeObserverBotRelations(args: {
   normalizedMessage: string;
   speakerName: string;
-  seatedBotNames: string[];
+  seatedBotRefs: CoffeeObserverBotNameRef[];
 }): MemoryCandidate[] {
   const candidates: MemoryCandidate[] = [];
   const speakerKey = coffeeObserverNameKey(args.speakerName);
-  for (const peerName of args.seatedBotNames) {
-    const peerKey = coffeeObserverNameKey(peerName);
+  for (const peer of args.seatedBotRefs) {
+    const peerKey = coffeeObserverNameKey(peer.canonicalName);
     if (!peerKey || peerKey === speakerKey) continue;
-    if (!textMentionsName(args.normalizedMessage, peerName)) continue;
+    if (!peer.mentionNames.some((name) => textMentionsName(args.normalizedMessage, name))) {
+      continue;
+    }
     for (const rule of COFFEE_OBSERVER_BOT_RELATION_RULES) {
       if (!rule.pattern.test(args.normalizedMessage)) continue;
       candidates.push({
-        text: rule.textFactory(args.speakerName, peerName),
+        text: rule.textFactory(args.speakerName, peer.canonicalName),
         confidence: COFFEE_OBSERVER_BOT_RELATION_CONFIDENCE,
         category: "bot_relation",
         durability: COFFEE_OBSERVER_BOT_RELATION_DURABILITY,
@@ -714,17 +799,13 @@ export function extractCoffeeObserverMemoryCandidates(args: {
   const seatedBotNames = args.seatedBotNames
     .map(normalizeCoffeeObserverName)
     .filter((name): name is string => name !== null);
-  const botNameKeys = new Set(
-    seatedBotNames
-      .map(coffeeObserverNameKey)
-      .filter((key): key is string => key !== null)
-  );
+  const { botRefs, botNameKeys } = buildCoffeeObserverBotNameRefs(seatedBotNames);
   return uniqueMemoryCandidates([
     ...extractCoffeeObserverUserFacts(normalizedMessage, botNameKeys),
     ...extractCoffeeObserverBotRelations({
       normalizedMessage,
       speakerName,
-      seatedBotNames,
+      seatedBotRefs: botRefs,
     }),
   ]).slice(0, 3);
 }

@@ -6,6 +6,7 @@ import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 import {
   applyOnlineModelChoice,
   combinedOnlineModelOptions,
+  fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
   filterVisibleOnlineModelOptions,
   inferOnlineProviderForModelChoice,
@@ -80,6 +81,21 @@ describe("provider mode helpers", () => {
         "openai"
       ),
       "anthropic"
+    );
+  });
+
+  it("keeps provider fallback ids available while a live online catalog is missing", () => {
+    assert.deepEqual(
+      fallbackOnlineModelIdsForProvider("openai", "gpt-5.4"),
+      ["gpt-5.4", "gpt-4o-mini"]
+    );
+    assert.deepEqual(
+      fallbackOnlineModelIdsForProvider("anthropic", "gpt-5.4"),
+      ["claude-sonnet-4-6"]
+    );
+    assert.deepEqual(
+      fallbackOnlineModelIdsForProvider("anthropic", "claude-opus-4-8"),
+      ["claude-opus-4-8", "claude-sonnet-4-6"]
     );
   });
 

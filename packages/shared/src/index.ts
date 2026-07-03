@@ -12,6 +12,7 @@ export {
   applyPrismMoodPositiveTurn,
   clampPrismMoodValue,
   COFFEE_NEAR_DESATURATED_SATURATION,
+  coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
@@ -118,6 +119,7 @@ export {
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,
   hydrateAssistantMessageParts,
+  normalizeCoffeeReplayEventPayload,
   normalizeZenDisplayMetadata,
   normalizeStoredZenAssistantTurnPayload,
   parseAssistantPrismTools,
@@ -128,6 +130,12 @@ export {
   type AskQuestionOption,
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
+  type CoffeeReplayArrivalEventPayload,
+  type CoffeeReplayEventPayload,
+  type CoffeeReplayMoodEventPayload,
+  type CoffeeReplaySocialSnapshotPayload,
+  type CoffeeReplayTopOffEventPayload,
+  type CoffeeUserActionPayload,
   type ParsedAssistantTurn,
   type ParsedStoredAssistantToolPayload,
   type SentGeneratedImagePayload,
@@ -322,6 +330,8 @@ export {
 import type {
   AskQuestionPayload,
   CoffeeAmbientActionPayload,
+  CoffeeReplayEventPayload,
+  CoffeeUserActionPayload,
   SentGeneratedImagePayload,
   ZenDisplayMetadata,
 } from "./prismTool.js";
@@ -486,6 +496,10 @@ export interface ChatMessage {
   webSearch?: WebSearchPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only user action cue shown as ambient context, not transcript prose. */
+  coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
+  coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -706,8 +720,14 @@ const COFFEE_CUP_TASTE_LABELS = [
 
 const COFFEE_CUP_TOP_OFF_TARGET_PROGRESS = 0.04;
 const COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS = 0.18;
-const COFFEE_CUP_TOP_OFF_MIN_DECAY_MS = 60_000;
-const COFFEE_CUP_TOP_OFF_MAX_DECAY_MS = 6 * 60 * 1000;
+const COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX = [
+  COFFEE_CUP_TOP_OFF_TARGET_PROGRESS,
+  COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS,
+  0.38,
+  0.58,
+  0.78,
+  0.96,
+] as const;
 
 function clampCoffeeCupProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -850,6 +870,11 @@ export function coffeeCupFrameIndexForProgress(progress: number): number {
   return 0;
 }
 
+export function coffeeCupTopOffProgressForFrameIndex(frameIndex: number): number {
+  const frame = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  return COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX[frame]!;
+}
+
 export function coffeeCupStatusForProgress(
   progress: number,
   seed = "coffee"
@@ -912,7 +937,7 @@ export function coffeeCupProgressFromSessionTiming(args: {
   return clampCoffeeCupProgress(1 - Math.max(0, remainingMs) / durationMs);
 }
 
-function coffeeCupTopOffDecayMs(
+function coffeeCupTopOffConsumptionDurationMs(
   durationMinutes?: CoffeeSessionDurationMinutes | null
 ): number {
   const minutes =
@@ -921,10 +946,10 @@ function coffeeCupTopOffDecayMs(
     durationMinutes > 0
       ? durationMinutes
       : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
-  return Math.max(
-    COFFEE_CUP_TOP_OFF_MIN_DECAY_MS,
-    Math.min(COFFEE_CUP_TOP_OFF_MAX_DECAY_MS, minutes * 60 * 1000 * 0.3)
-  );
+  const durationMs = minutes * 60 * 1000;
+  return Number.isFinite(durationMs) && durationMs > 0
+    ? durationMs
+    : DEFAULT_COFFEE_SESSION_DURATION_MINUTES * 60 * 1000;
 }
 
 export function coffeeCupCanTopOff(progress: number): boolean {
@@ -936,13 +961,20 @@ export function coffeeCupCanTopOff(progress: number): boolean {
 
 export function coffeeCupTopOffSnapshotForProgress(
   progress: number,
-  toppedOffAt: string
+  toppedOffAt: string,
+  targetProgressAfter?: number | null
 ): CoffeeCupTopOffSnapshot | null {
   const progressBefore = clampCoffeeCupProgress(progress);
   if (!coffeeCupCanTopOff(progressBefore)) return null;
+  const requestedProgressAfter =
+    typeof targetProgressAfter === "number" && Number.isFinite(targetProgressAfter)
+      ? clampCoffeeCupProgress(targetProgressAfter)
+      : COFFEE_CUP_TOP_OFF_TARGET_PROGRESS;
+  const progressAfter = Math.min(progressBefore, requestedProgressAfter);
+  if (progressAfter >= progressBefore) return null;
   return {
     progressBefore,
-    progressAfter: Math.min(progressBefore, COFFEE_CUP_TOP_OFF_TARGET_PROGRESS),
+    progressAfter,
     toppedOffAt,
   };
 }
@@ -964,20 +996,18 @@ export function coffeeCupProgressAfterTopOff(args: {
   const progressAfter = clampCoffeeCupProgress(topOff.progressAfter);
   if (progressBefore <= progressAfter || progress <= progressAfter) return progress;
   const elapsedMs = Math.max(0, args.nowMs - toppedOffAtMs);
-  const decayMs = coffeeCupTopOffDecayMs(args.durationMinutes);
-  const refillSpan = progressBefore - progressAfter;
-  const timedRecoveredProgress = (elapsedMs / decayMs) * refillSpan;
-  const consumedRecoveredProgress =
-    args.lowerProgressMeansConsumption === true
-      ? progress >= progressBefore
-        ? Math.max(0, progress - progressBefore)
-        : Math.max(0, progress - progressAfter)
-      : 0;
-  const recoveredProgress = Math.min(
-    refillSpan,
-    Math.max(timedRecoveredProgress, consumedRecoveredProgress)
+  const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(args.durationMinutes);
+  const timedConsumedProgress = Math.max(
+    0,
+    Math.min(1, elapsedMs / consumptionDurationMs)
   );
-  const topOffProgress = clampCoffeeCupProgress(progressAfter + recoveredProgress);
+  const explicitConsumedProgress =
+    args.lowerProgressMeansConsumption === true
+      ? Math.max(0, progress - progressAfter)
+      : 0;
+  const topOffProgress = clampCoffeeCupProgress(
+    progressAfter + Math.max(timedConsumedProgress, explicitConsumedProgress)
+  );
   return Math.min(progress, topOffProgress);
 }
 
@@ -1629,6 +1659,18 @@ export interface CoffeeSessionCreateResponse {
   poll?: CoffeePoll;
   /** Present when the session started with Coffee Teams. */
   teams?: CoffeeTeamState;
+}
+
+/** Request body for `POST /api/coffee/sessions/:id/user-action`. */
+export interface CoffeeUserActionRequest {
+  /** Action-only composer input, e.g. `*leans back and folds arms*`. */
+  action: string;
+}
+
+/** Response body for `POST /api/coffee/sessions/:id/user-action`. */
+export interface CoffeeUserActionResponse {
+  conversation: Conversation;
+  coffeeUserAction: CoffeeUserActionPayload;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
