@@ -1,0 +1,4 @@
+interface:
+  display_name: "Coffee Review"
+  short_description: "Review Coffee transcripts and improve PRISM"
+  default_prompt: "Use $coffee-review to analyze this Coffee transcript and make focused PRISM-level UX fixes."
