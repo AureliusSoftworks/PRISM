@@ -254,6 +254,7 @@ import {
 import {
   BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
   filterBotsByLibraryGroup,
+  filterUngroupedBotsByLibraryGroups,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
   resolveBotLibraryMultiSelectionActions,
@@ -11756,6 +11757,7 @@ async function fetchBotMarketplaceManifest(): Promise<BotMarketplaceManifest> {
 
 const BOT_LIBRARY_FILTER_ALL = "all" as const;
 const BOT_LIBRARY_GROUP_FILTER_ALL = "all" as const;
+const BOT_LIBRARY_GROUP_FILTER_UNGROUPED = "ungrouped" as const;
 const BOT_LIBRARY_GROUP_CREATE_NEW = "create-new" as const;
 const BOT_LIBRARY_GROUP_BOT_CAP = 24;
 const BOT_MARKETPLACE_STARTER_THEME_ID = "originals";
@@ -34891,6 +34893,7 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) return;
     if (botLibraryGroups.some((group) => group.id === botLibraryGroupFilterId)) return;
     setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
@@ -39132,6 +39135,7 @@ function HomeContent(): React.JSX.Element {
   );
   useEffect(() => {
     if (coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
+    if (coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) return;
     if (botLibraryGroups.some((group) => group.id === coffeeBotLibraryGroupFilterId)) return;
     setCoffeeBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
   }, [botLibraryGroups, coffeeBotLibraryGroupFilterId]);
@@ -39692,16 +39696,29 @@ function HomeContent(): React.JSX.Element {
   );
   const activeBotLibraryGroupFilter = useMemo(
     () =>
-      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL
+      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL ||
+      botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED
         ? null
         : botLibraryGroups.find((group) => group.id === botLibraryGroupFilterId) ?? null,
     [botLibraryGroupFilterId, botLibraryGroups]
   );
+  const botLibraryUngroupedFilterActive =
+    botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED;
+  const ungroupedPanelBots = useMemo<readonly Bot[]>(
+    () => filterUngroupedBotsByLibraryGroups(sortedPanelBots, botLibraryGroups),
+    [botLibraryGroups, sortedPanelBots]
+  );
   const baseFilteredPanelBots = useMemo<readonly Bot[]>(() => {
+    if (botLibraryUngroupedFilterActive) return ungroupedPanelBots;
     if (!activeBotLibraryGroupFilter) return sortedPanelBots;
     const allowedBotIds = new Set(activeBotLibraryGroupFilter.botIds);
     return sortedPanelBots.filter((bot) => allowedBotIds.has(bot.id));
-  }, [activeBotLibraryGroupFilter, sortedPanelBots]);
+  }, [
+    activeBotLibraryGroupFilter,
+    botLibraryUngroupedFilterActive,
+    sortedPanelBots,
+    ungroupedPanelBots,
+  ]);
   const botLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
     const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
       const allowedBotIds = new Set(group.botIds.filter((botId) => existingBotIds.has(botId)));
@@ -39726,16 +39743,32 @@ function HomeContent(): React.JSX.Element {
         count: sortedPanelBots.length,
         bots: sortedPanelBots,
       },
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+        name: "Ungrouped",
+        menuName: "Ungrouped bots",
+        count: ungroupedPanelBots.length,
+        bots: ungroupedPanelBots,
+      },
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
     ];
-  }, [botLibraryGroups, customBotLibraryGroups, existingBotIds, sortedPanelBots]);
+  }, [
+    botLibraryGroups,
+    customBotLibraryGroups,
+    existingBotIds,
+    sortedPanelBots,
+    ungroupedPanelBots,
+  ]);
   const botLibraryGroupPickerValue = useMemo(() => {
+    if (botLibraryUngroupedFilterActive) {
+      return BOT_LIBRARY_GROUP_FILTER_UNGROUPED;
+    }
     if (activeBotLibraryGroupFilter) {
       return `${BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX}${activeBotLibraryGroupFilter.id}`;
     }
     return BOT_LIBRARY_GROUP_FILTER_ALL;
-  }, [activeBotLibraryGroupFilter]);
+  }, [activeBotLibraryGroupFilter, botLibraryUngroupedFilterActive]);
   const coffeeBotLibraryGroupFilterOptions = useMemo<BotLibraryGroupPickerOption[]>(() => {
     const optionForGroup = (group: BotLibraryGroup): BotLibraryGroupPickerOption => {
       const allowedBotIds = new Set(group.botIds);
@@ -39751,6 +39784,10 @@ function HomeContent(): React.JSX.Element {
     const favoritesGroup =
       botLibraryGroups.find((group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID) ??
       createFavoritesBotGroup();
+    const ungroupedCoffeeBots = filterUngroupedBotsByLibraryGroups(
+      coffeeBotsLibrary,
+      botLibraryGroups
+    );
     return [
       {
         id: BOT_LIBRARY_GROUP_FILTER_ALL,
@@ -39759,6 +39796,13 @@ function HomeContent(): React.JSX.Element {
         menuCountLabel: "Default view",
         count: coffeeBotsLibrary.length,
         bots: coffeeBotsLibrary,
+      },
+      {
+        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+        name: "Ungrouped",
+        menuName: "Ungrouped bots",
+        count: ungroupedCoffeeBots.length,
+        bots: ungroupedCoffeeBots,
       },
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
@@ -39770,7 +39814,8 @@ function HomeContent(): React.JSX.Element {
         coffeeBotsLibrary,
         botLibraryGroups,
         coffeeBotLibraryGroupFilterId,
-        BOT_LIBRARY_GROUP_FILTER_ALL
+        BOT_LIBRARY_GROUP_FILTER_ALL,
+        BOT_LIBRARY_GROUP_FILTER_UNGROUPED
       ),
     [botLibraryGroups, coffeeBotLibraryGroupFilterId, coffeeBotsLibrary]
   );
@@ -39801,7 +39846,9 @@ function HomeContent(): React.JSX.Element {
     coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL
       ? coffeeSearchTerm
         ? "Nothing in this group matches that search."
-        : "No chat-enabled bots live in this group yet."
+        : coffeeBotLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED
+          ? "Every chat-enabled bot is already in a group."
+          : "No chat-enabled bots live in this group yet."
       : "No bots match that search.";
   const composeMentionBotPicks = useMemo(
     () =>
@@ -40610,10 +40657,14 @@ function HomeContent(): React.JSX.Element {
     : null;
   const activeBotPanelFilterLabel =
     botPanelGroup === BOT_LIBRARY_FILTER_ALL
-      ? activeBotLibraryGroupFilter?.name ?? "All bots"
-      : activeBotLibraryGroupFilter
-        ? `${activeBotLibraryGroupFilter.name} · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
-        : activeBotPanelGroup?.label ?? "Filtered bots";
+      ? botLibraryUngroupedFilterActive
+        ? "Ungrouped"
+        : activeBotLibraryGroupFilter?.name ?? "All bots"
+      : botLibraryUngroupedFilterActive
+        ? `Ungrouped · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
+        : activeBotLibraryGroupFilter
+          ? `${activeBotLibraryGroupFilter.name} · ${activeBotPanelGroup?.label ?? "Filtered bots"}`
+          : activeBotPanelGroup?.label ?? "Filtered bots";
   // Keep the library list visible for every active filter, including the
   // neutral "all bots" tile. Group tiles still narrow the same shared list.
   const botPanelListVisible = bots.length > 0;
@@ -53160,6 +53211,10 @@ function HomeContent(): React.JSX.Element {
   function applyBotLibraryHeaderFilter(nextValue: string): void {
     if (nextValue === BOT_LIBRARY_GROUP_FILTER_ALL) {
       performShowAllBotsView(null);
+      return;
+    }
+    if (nextValue === BOT_LIBRARY_GROUP_FILTER_UNGROUPED) {
+      applyBotLibraryGroupFilter(BOT_LIBRARY_GROUP_FILTER_UNGROUPED);
       return;
     }
     if (nextValue.startsWith(BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX)) {
@@ -71415,6 +71470,9 @@ function HomeContent(): React.JSX.Element {
                           <option value={BOT_LIBRARY_GROUP_FILTER_ALL}>
                             No group selected
                           </option>
+                          <option value={BOT_LIBRARY_GROUP_FILTER_UNGROUPED}>
+                            Ungrouped ({botLibraryBotCountLabel(ungroupedPanelBots.length)})
+                          </option>
                           <option value={BOT_LIBRARY_FAVORITES_GROUP_ID}>
                             Favorites ({favoriteBotIdSet.size})
                           </option>
@@ -71471,9 +71529,11 @@ function HomeContent(): React.JSX.Element {
                         <p className={styles.botLibraryEmptyFilter} role="status">
                           {activeBotLibraryGroupFilter?.id === BOT_LIBRARY_FAVORITES_GROUP_ID
                             ? "No favorite bots yet."
-                            : activeBotLibraryGroupFilter
-                              ? "No bots in this group."
-                              : "No bots match this filter."}
+                            : botLibraryUngroupedFilterActive
+                              ? "Every bot is already in a group."
+                              : activeBotLibraryGroupFilter
+                                ? "No bots in this group."
+                                : "No bots match this filter."}
                         </p>
                       ) : visibleBotPanelBots.map((b) => {
                         const isEditing = editingBotId === b.id;

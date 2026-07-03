@@ -32,10 +32,15 @@ export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
   bots: readonly TBot[],
   groups: readonly BotLibraryGroupFilterGroup[],
   filterId: string,
-  allFilterId = "all"
+  allFilterId = "all",
+  ungroupedFilterId = "ungrouped"
 ): TBot[] {
   if (filterId === allFilterId) {
     return [...bots];
+  }
+
+  if (filterId === ungroupedFilterId) {
+    return filterUngroupedBotsByLibraryGroups(bots, groups);
   }
 
   const group = groups.find((candidate) => candidate.id === filterId);
@@ -45,6 +50,28 @@ export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
 
   const allowedBotIds = new Set(group.botIds);
   return bots.filter((bot) => allowedBotIds.has(bot.id));
+}
+
+export function groupedBotIdsForLibraryGroups(
+  groups: readonly BotLibraryGroupFilterGroup[]
+): Set<string> {
+  const groupedBotIds = new Set<string>();
+  for (const group of groups) {
+    for (const botId of group.botIds) {
+      groupedBotIds.add(botId);
+    }
+  }
+  return groupedBotIds;
+}
+
+export function filterUngroupedBotsByLibraryGroups<
+  TBot extends BotLibraryGroupFilterBot,
+>(
+  bots: readonly TBot[],
+  groups: readonly BotLibraryGroupFilterGroup[]
+): TBot[] {
+  const groupedBotIds = groupedBotIdsForLibraryGroups(groups);
+  return bots.filter((bot) => !groupedBotIds.has(bot.id));
 }
 
 export function pruneBotLibraryGroupsWithFewBots<

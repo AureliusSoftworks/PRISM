@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
@@ -55,6 +56,24 @@ describe("bot library group filtering", () => {
         (bot) => bot.id
       ),
       ["vader", "luke"]
+    );
+  });
+
+  it("filters ungrouped bots that are not in favorites or custom groups", () => {
+    const libraryBots = [
+      { id: "bot-a", name: "Astra" },
+      { id: "bot-b", name: "Basil" },
+      { id: "bot-c", name: "Cora" },
+      { id: "bot-d", name: "Dax" },
+    ];
+
+    assert.deepEqual(
+      filterBotsByLibraryGroup(libraryBots, groups, "ungrouped").map((bot) => bot.id),
+      ["bot-d"]
+    );
+    assert.deepEqual(
+      filterUngroupedBotsByLibraryGroups(libraryBots, groups).map((bot) => bot.id),
+      ["bot-d"]
     );
   });
 
