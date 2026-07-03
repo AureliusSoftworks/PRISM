@@ -1323,6 +1323,7 @@ type CanvasBotMarqueeDragState = {
   frameRect: DOMRect;
   startClientX: number;
   startClientY: number;
+  pressedBotId: string | null;
   active: boolean;
   mode: CanvasBotMarqueeSelectionMode;
   baseSelectedBotIds: Set<string>;
@@ -53090,8 +53091,11 @@ function HomeContent(): React.JSX.Element {
     if (event.pointerType === "touch") return false;
     if (event.button !== 0) return false;
     const target = event.target;
+    let pressedBotId: string | null = null;
     if (target instanceof Element) {
-      const startsOnBotTile = Boolean(target.closest("[data-bot-id]"));
+      const botTileTarget = target.closest<HTMLElement>("[data-bot-id]");
+      const startsOnBotTile = botTileTarget !== null;
+      pressedBotId = botTileTarget?.dataset.botId ?? null;
       const allowBotTileShiftDrag = event.shiftKey && startsOnBotTile;
       const blockedInteractiveTarget = target.closest(
         "button, input, textarea, select, a, [role='button']"
@@ -53120,6 +53124,7 @@ function HomeContent(): React.JSX.Element {
       frameRect,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      pressedBotId,
       active: false,
       mode: event.shiftKey ? "toggle" : "replace",
       baseSelectedBotIds: new Set(canvasSelectedBotIds),
@@ -53167,11 +53172,20 @@ function HomeContent(): React.JSX.Element {
     } else {
       const nextSelectedIds = resolveInactiveCanvasBotMarqueeSelection(
         drag.mode,
-        drag.baseSelectedBotIds
+        drag.baseSelectedBotIds,
+        drag.pressedBotId
       );
       setCanvasSelectedBotIds((current) =>
         stringSetsEqual(current, nextSelectedIds) ? current : nextSelectedIds
       );
+      if (drag.mode === "toggle" && drag.pressedBotId) {
+        canvasBotMarqueeSuppressClickRef.current = true;
+        window.setTimeout(() => {
+          canvasBotMarqueeSuppressClickRef.current = false;
+        }, 0);
+        event.preventDefault();
+        event.stopPropagation();
+      }
     }
     setCanvasBotMarqueeRect(null);
     canvasBotMarqueeDragRef.current = null;
@@ -83033,6 +83047,12 @@ function HomeContent(): React.JSX.Element {
                               openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);
                             }}
                             onClick={(e) => {
+                              if (canvasBotMarqueeSuppressClickRef.current) {
+                                canvasBotMarqueeSuppressClickRef.current = false;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
+                              }
                               if (botContextSuppressClickRef.current) {
                                 botContextSuppressClickRef.current = false;
                                 e.preventDefault();

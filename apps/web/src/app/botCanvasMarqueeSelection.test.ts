@@ -59,4 +59,24 @@ describe("bot canvas marquee selection", () => {
 
     assert.deepEqual(ids(selected), ["bot-a", "bot-b"]);
   });
+
+  it("adds an inactive Shift-pressed tile when the click is swallowed", () => {
+    const selected = resolveInactiveCanvasBotMarqueeSelection(
+      "toggle",
+      new Set(["bot-a"]),
+      "bot-b"
+    );
+
+    assert.deepEqual(ids(selected), ["bot-a", "bot-b"]);
+  });
+
+  it("removes an inactive Shift-pressed tile already in the selection", () => {
+    const selected = resolveInactiveCanvasBotMarqueeSelection(
+      "toggle",
+      new Set(["bot-a", "bot-b"]),
+      "bot-b"
+    );
+
+    assert.deepEqual(ids(selected), ["bot-a"]);
+  });
 });
