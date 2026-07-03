@@ -12,6 +12,15 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.2] - 2026-07-03
+
+### Desktop
+
+- **Windows EXE upgrades clear orphaned runtime processes.** The NSIS
+  installer now performs a path-filtered cleanup loop for Prism's desktop
+  shell, bundled API/web `node.exe` children, and Qdrant before extracting
+  runtime files, preventing locked `runtime\node\node.exe` upgrade dialogs.
+
 ## [0.6.1] - 2026-07-03
 
 ### Added

@@ -7,8 +7,9 @@
 ;
 ; Uses nsis_tauri_utils (Tauri's bundled NSIS plugin) for process
 ; detection and kill — nsProcess is not available in Tauri's NSIS env.
-; node.exe is killed via PowerShell filtered to Prism's runtime path
-; so unrelated Node.js apps on the machine are unaffected.
+; Prism runtime children are killed via PowerShell filtered to Prism's
+; install/runtime paths so unrelated Node.js apps on the machine are
+; unaffected.
 ;
 ; NSIS escaping notes:
 ;   $$   -> literal $ in a double-quoted NSIS string
@@ -26,10 +27,13 @@
   nsis_tauri_utils::KillProcessCurrentUser "qdrant.exe"
   Pop $R0
 
-  ; Kill node.exe processes running from Prism's runtime folder only
-  nsExec::ExecToLog "powershell.exe -NoProfile -NonInteractive -Command $\"Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '*\Prism\runtime\*' } | Stop-Process -Force$\""
+  ; Kill orphaned Prism shell/runtime processes by install path. This catches
+  ; older builds whose Job Object did not take node.exe/qdrant.exe down with
+  ; the desktop shell, and loops briefly so file handles are released before
+  ; extraction overwrites runtime binaries.
+  nsExec::ExecToLog "powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -Command $\"$$ErrorActionPreference = 'SilentlyContinue'; 1..12 | ForEach-Object { Get-CimInstance Win32_Process | Where-Object { $$path = [string]$$_.ExecutablePath; $$command = [string]$$_.CommandLine; (($$_.Name -eq 'prism_desktop.exe') -and (($$path -like '*\AppData\Local\Prism\prism_desktop.exe') -or ($$path -like '*\AppData\Local\PRISM\prism_desktop.exe'))) -or (($$_.Name -in @('node.exe','qdrant.exe')) -and (($$path -like '*\AppData\Local\Prism\runtime\*') -or ($$path -like '*\AppData\Local\PRISM\runtime\*') -or ($$command -like '*AppData\Local\Prism\runtime*') -or ($$command -like '*AppData\Local\PRISM\runtime*'))) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }; Start-Sleep -Milliseconds 250 }$\""
   Pop $R0
 
-  Sleep 1000
+  Sleep 2000
   SetDetailsPrint lastused
 !macroend
