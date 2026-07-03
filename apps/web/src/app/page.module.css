@@ -4649,19 +4649,6 @@
   min-width: 0;
 }
 
-.wordmarkBackToAllBots {
-  display: inline-flex;
-  align-items: center;
-  font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-  line-height: 1.05;
-  color: color-mix(in srgb, var(--accent) 72%, var(--fg) 28%);
-  opacity: 0.92;
-}
-
 .headerIdentity {
   --header-identity-color: var(--fg);
   display: inline-flex;
@@ -4672,16 +4659,16 @@
 }
 
 .headerIdentityCopy {
-  display: grid;
-  align-content: center;
-  justify-items: start;
-  gap: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   text-align: left;
 }
 
 .headerIdentityCopyCollapsed .headerIdentityName,
-.headerIdentityCopyCollapsed .headerIdentityBackToBots {
+.headerIdentityCopyCollapsed .headerIdentityBackToBots,
+.headerIdentityCopyCollapsed .headerIdentityBreadcrumbDivider {
   display: none;
 }
 
@@ -4765,14 +4752,36 @@
 .headerIdentityBackToBots {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-  line-height: 1.05;
+  letter-spacing: 0;
+  line-height: 1;
   color: color-mix(in srgb, var(--header-identity-color) 72%, var(--fg) 28%);
   opacity: 0.92;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.headerIdentityBackToBots svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.hubHomeButton:hover .headerIdentityBackToBots {
+  color: color-mix(in srgb, var(--header-identity-color) 84%, var(--fg) 16%);
+  opacity: 1;
+}
+
+.headerIdentityBreadcrumbDivider {
+  flex: 0 0 auto;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--fg-subtle);
+  opacity: 0.68;
 }
 
 /* Mirror the auth/hub lockup in light mode: force every letter stroke
@@ -9966,22 +9975,6 @@
     );
 }
 
-.messagesFrame[data-bot-library-group-focus="true"] {
-  background:
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--bg-deep) 52%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 64%, transparent) 50%,
-      color-mix(in srgb, var(--bg-surface) 88%, transparent) 100%
-    ),
-    radial-gradient(
-      ellipse 88% 64% at 50% 18%,
-      color-mix(in srgb, var(--fg) 7%, transparent),
-      transparent 70%
-    ),
-    var(--bot-library-group-gradient);
-}
-
 /* Private chat — mono mood by default. Custom-bot private chats keep only
    small bot-color cues so incognito reads first and bot identity second. */
 .messagesFrame[data-mode="private"]:not([data-private-bot="true"]) {
@@ -10429,34 +10422,74 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .emptyStateGroupDashboard {
   justify-content: center;
-  padding: 28px 18px 32px;
-  overflow: hidden;
+  align-items: center;
+  padding: clamp(36px, 7vh, 84px) 24px clamp(44px, 8vh, 76px);
+  overflow: visible;
+  isolation: isolate;
+}
+
+.emptyStateGroupDashboard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 70% 62% at 50% 42%,
+      color-mix(in srgb, var(--bg) 12%, transparent),
+      transparent 72%
+    );
 }
 
 .botGroupDashboard {
-  width: min(100%, 1120px);
-  min-height: min(620px, calc(100vh - 260px));
-  max-height: calc(100vh - 224px);
+  width: min(calc(100% - 32px), 1180px);
+  min-height: min(620px, calc(100vh - 270px));
+  max-height: calc(100vh - 216px);
   box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 18px;
   padding: 24px;
-  border: 1px solid color-mix(in srgb, var(--fg-muted) 22%, var(--line));
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 24%, var(--line));
+  border-radius: 14px;
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--bg-surface) 70%, transparent),
-      color-mix(in srgb, var(--bg) 32%, transparent)
+      color-mix(in srgb, var(--bg-surface) 84%, transparent),
+      color-mix(in srgb, var(--bg) 58%, transparent)
     ),
     var(--bot-library-group-gradient);
+  background-blend-mode: normal, soft-light;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
-    0 24px 70px color-mix(in srgb, #000 20%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000 16%, transparent),
+    0 42px 118px color-mix(in srgb, #000 38%, transparent),
+    0 18px 44px color-mix(in srgb, #000 18%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 5%, transparent);
   color: var(--fg);
   overflow: hidden;
   text-align: left;
+  backdrop-filter: blur(22px) saturate(1.12);
+  transform: translateZ(0);
+}
+
+.themeLight .botGroupDashboard {
+  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 92%, transparent),
+      color-mix(in srgb, var(--bg) 74%, transparent)
+    ),
+    var(--bot-library-group-gradient);
+  background-blend-mode: normal, multiply;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 74%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent),
+    0 36px 92px color-mix(in srgb, #6f655e 20%, transparent),
+    0 14px 34px color-mix(in srgb, #6f655e 12%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 58%, transparent);
 }
 
 .botGroupDashboardHeader {
