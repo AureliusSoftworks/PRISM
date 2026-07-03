@@ -12,6 +12,15 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.3] - 2026-07-03
+
+### Fixed
+
+- **Windows Shift-click bot selection works reliably.** Multi-selecting bots
+  with Shift now toggles the pressed bot on pointer release when Windows
+  pointer capture swallows the follow-up click, while still avoiding duplicate
+  toggles on platforms that deliver the click normally.
+
 ## [0.6.2] - 2026-07-03
 
 ### Desktop
