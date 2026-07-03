@@ -29,7 +29,16 @@ export function resolveCanvasBotMarqueeSelection({
 
 export function resolveInactiveCanvasBotMarqueeSelection(
   mode: CanvasBotMarqueeSelectionMode,
-  baseSelectedBotIds: ReadonlySet<string>
+  baseSelectedBotIds: ReadonlySet<string>,
+  pressedBotId?: string | null
 ): Set<string> {
-  return mode === "replace" ? new Set() : new Set(baseSelectedBotIds);
+  if (mode === "replace") return new Set();
+  const nextSelectedBotIds = new Set(baseSelectedBotIds);
+  if (!pressedBotId) return nextSelectedBotIds;
+  if (baseSelectedBotIds.has(pressedBotId)) {
+    nextSelectedBotIds.delete(pressedBotId);
+  } else {
+    nextSelectedBotIds.add(pressedBotId);
+  }
+  return nextSelectedBotIds;
 }
