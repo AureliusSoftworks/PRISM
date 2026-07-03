@@ -267,6 +267,7 @@ import {
   botProfileDetailsUnlocked,
   botProfileReferenceName,
 } from "./botProfileEditorGate";
+import { buildBotCustomizerSavePatch } from "./botCustomizerSavePatch";
 import { LensTile } from "./LensTile";
 import {
   CircleHelp,
@@ -57781,33 +57782,44 @@ function HomeContent(): React.JSX.Element {
       newBotOpenAiImageModel === AUTO_MODEL_CHOICE
         ? ""
         : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
+    const patch = buildBotCustomizerSavePatch(
+      {
+        name: trimmedName,
+        storedSystemPrompt,
+        advancedMode: botEditorAdvancedMode,
+        localModel,
+        onlineModel,
+        localModelForStorage: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
+        onlineModelForStorage: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
+        localImageModel: newBotLocalImageModel,
+        openAiImageModel: newBotOpenAiImageModel,
+        localImageModelForStorage: localImageStored,
+        openAiImageModelForStorage: openaiImageStored,
+        onlineEnabled: newBotOnlineEnabled,
+        deleteProtected: newBotDeleteProtected,
+        flirtEnabled: newBotFlirtEnabled,
+        temperature: newBotTemperature,
+        maxTokens: newBotMaxTokens,
+        topP: newBotTopP,
+        topK: newBotTopK,
+        repetitionPenalty: newBotRepetitionPenalty,
+        color: newBotColor,
+        glyph: newBotGlyph,
+        faceEyesFont: newBotFaceEyesFont,
+        faceMouthFont: newBotFaceMouthFont,
+        faceFontWeight: newBotFaceFontWeight,
+        profilePictureImageId: newBotProfilePictureImageId,
+      },
+      editOriginalRef.current
+    );
+    if (Object.keys(patch).length === 0) return;
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
     try {
       const result = await api<{ bot?: Bot }>(`/api/bots/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          name: trimmedName,
-          systemPrompt: storedSystemPrompt,
-          localModel: localModel === AUTO_MODEL_CHOICE ? "" : localModel,
-          onlineModel: onlineModel === AUTO_MODEL_CHOICE ? "" : onlineModel,
-          localImageModel: localImageStored,
-          openaiImageModel: openaiImageStored,
-          onlineEnabled: newBotOnlineEnabled,
-	          flirtEnabled: newBotFlirtEnabled,
-	          temperature: newBotTemperature,
-	          maxTokens: newBotMaxTokens,
-	          topP: newBotTopP,
-	          topK: newBotTopK,
-	          repetitionPenalty: newBotRepetitionPenalty,
-	          color: newBotColor,
-          glyph: newBotGlyph,
-          faceEyesFont: newBotFaceEyesFont,
-          faceMouthFont: newBotFaceMouthFont,
-          faceFontWeight: newBotFaceFontWeight,
-          profilePictureImageId: newBotProfilePictureImageId,
-        }),
+        body: JSON.stringify(patch),
       });
       setNewBotLocalModel(localModel);
       setNewBotOnlineModel(onlineModel);
