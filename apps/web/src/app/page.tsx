@@ -251,7 +251,16 @@ import {
   generatedBotMemorySeedsForCreate,
   type GeneratedBotMemorySeedSet,
 } from "./botRandomizer";
-import { filterBotsByLibraryGroup } from "./botLibraryGroupFilter";
+import {
+  BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
+  filterBotsByLibraryGroup,
+  pruneBotLibraryGroupsForExistingBots,
+  pruneBotLibraryGroupsWithFewBots,
+} from "./botLibraryGroupFilter";
+import {
+  botProfileDetailsUnlocked,
+  botProfileReferenceName,
+} from "./botProfileEditorGate";
 import { LensTile } from "./LensTile";
 import {
   CircleHelp,
@@ -7977,6 +7986,7 @@ interface BotLibraryGroup {
   name: string;
   description: string;
   botIds: string[];
+  deleteProtected: boolean;
   builtIn: boolean;
   createdAt: string;
   updatedAt: string;
@@ -8192,6 +8202,7 @@ function createFavoritesBotGroup(): BotLibraryGroup {
     name: "Favorites",
     description: "Pinned bots you want to keep close.",
     botIds: [],
+    deleteProtected: false,
     builtIn: true,
     createdAt: now,
     updatedAt: now,
@@ -8205,12 +8216,13 @@ function createPrismStarterBotGroup(
   const uniqueBotIds = Array.from(
     new Set(botIds.filter((botId) => typeof botId === "string" && botId.trim().length > 0))
   );
-  if (uniqueBotIds.length === 0) return null;
+  if (uniqueBotIds.length < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS) return null;
   return {
     id: BOT_LIBRARY_STARTER_GROUP_ID,
     name: BOT_LIBRARY_STARTER_GROUP_NAME,
     description: BOT_LIBRARY_STARTER_GROUP_DESCRIPTION,
     botIds: uniqueBotIds,
+    deleteProtected: false,
     builtIn: false,
     createdAt: now,
     updatedAt: now,
@@ -8233,6 +8245,7 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
           if (!candidate || typeof candidate !== "object") return null;
           const record = candidate as Partial<BotLibraryGroup>;
           if (typeof record.id !== "string" || typeof record.name !== "string") return null;
+          const builtIn = record.id === BOT_LIBRARY_FAVORITES_GROUP_ID || record.builtIn === true;
           const now = new Date().toISOString();
           return {
             id: record.id.trim(),
@@ -8241,7 +8254,8 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
             botIds: Array.isArray(record.botIds)
               ? record.botIds.filter((id): id is string => typeof id === "string")
               : [],
-            builtIn: record.id === BOT_LIBRARY_FAVORITES_GROUP_ID || record.builtIn === true,
+            deleteProtected: record.deleteProtected === true,
+            builtIn,
             createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
             updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
           };
@@ -8262,11 +8276,41 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
     builtIn: true,
     name: "Favorites",
   });
-  return Array.from(byId.values()).sort((a, b) => {
+  return pruneBotLibraryGroupsWithFewBots(Array.from(byId.values())).sort((a, b) => {
     if (a.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return -1;
     if (b.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+function protectedBotIdsForBotLibraryGroups(
+  groups: readonly BotLibraryGroup[],
+  existingBotIds?: ReadonlySet<string>
+): Set<string> {
+  const protectedIds = new Set<string>();
+  for (const group of groups) {
+    if (!group.deleteProtected) continue;
+    for (const botId of group.botIds) {
+      if (!existingBotIds || existingBotIds.has(botId)) {
+        protectedIds.add(botId);
+      }
+    }
+  }
+  return protectedIds;
+}
+
+function applyBotDeleteProtectionProjection(
+  rows: Bot[],
+  protectedBotIds: ReadonlySet<string>
+): Bot[] {
+  let changed = false;
+  const next = rows.map((bot) => {
+    const deleteProtected = protectedBotIds.has(bot.id) ? 1 : 0;
+    if (bot.delete_protected === deleteProtected) return bot;
+    changed = true;
+    return { ...bot, delete_protected: deleteProtected };
+  });
+  return changed ? next : rows;
 }
 
 function createBotLibraryGroupId(): string {
@@ -15477,14 +15521,71 @@ interface BotLibraryGroupPickerProps {
   dismissPopoversSignal?: number;
 }
 
-function botLibraryGroupCountLabel(count: number, cap?: number): string {
-  if (cap !== undefined) {
-    return `${count} / ${cap} bots`;
-  }
+function botLibraryBotCountLabel(count: number): string {
   return count === 1 ? "1 bot" : `${count} bots`;
 }
 
-function botLibraryGroupCapError(count: number): string | null {
+function botLibrarySelectedCountLabel(count: number): string {
+  return count === 1 ? "1 selected" : `${count} selected`;
+}
+
+function botLibrarySlotCountLabel(count: number): string {
+  return count === 1 ? "1 slot" : `${count} slots`;
+}
+
+function botLibraryEmptySlotCountLabel(count: number): string {
+  return count === 1 ? "1 empty slot" : `${count} empty slots`;
+}
+
+function botLibraryGroupCapacityLabel(count: number, cap: number): string {
+  const emptySlots = Math.max(0, cap - count);
+  if (count > cap) {
+    return `${botLibrarySelectedCountLabel(count)}, over the ${botLibrarySlotCountLabel(cap)} limit`;
+  }
+  if (emptySlots === 0) {
+    return `${botLibrarySelectedCountLabel(count)}, full`;
+  }
+  return `${botLibrarySelectedCountLabel(count)}, ${botLibraryEmptySlotCountLabel(emptySlots)}`;
+}
+
+function botLibraryGroupPickerCountLabel(
+  option: BotLibraryGroupPickerOption
+): string {
+  if (option.id === BOT_LIBRARY_GROUP_FILTER_ALL) {
+    return String(option.count);
+  }
+  if (option.cap !== undefined) {
+    return botLibrarySelectedCountLabel(option.count);
+  }
+  return botLibraryBotCountLabel(option.count);
+}
+
+function botLibraryGroupDashboardEyebrowLabel(
+  count: number,
+  cap: number | undefined,
+  protectedCount: number
+): string {
+  const labels =
+    cap === undefined
+      ? [botLibraryBotCountLabel(count)]
+      : [
+          botLibrarySelectedCountLabel(count),
+          count > cap
+            ? `over the ${botLibrarySlotCountLabel(cap)} limit`
+            : count === cap
+              ? "full"
+              : botLibraryEmptySlotCountLabel(Math.max(0, cap - count)),
+        ];
+  if (protectedCount > 0) {
+    labels.push(`${protectedCount} protected`);
+  }
+  return labels.join(" · ");
+}
+
+function botLibraryGroupSizeError(count: number): string | null {
+  if (count < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS) {
+    return `Custom bot groups need at least ${BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS} bots.`;
+  }
   return count > BOT_LIBRARY_GROUP_BOT_CAP
     ? `Custom bot groups can include up to ${BOT_LIBRARY_GROUP_BOT_CAP} bots.`
     : null;
@@ -15504,6 +15605,7 @@ function BotLibraryGroupPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const selectedOption =
     options.find((option) => option.id === value) ?? options[0] ?? null;
+  const selectedIsDefault = selectedOption?.id === BOT_LIBRARY_GROUP_FILTER_ALL;
   const selectedStyle = selectedOption
     ? botLibraryGroupVisualStyle(
         { id: selectedOption.id },
@@ -15571,6 +15673,7 @@ function BotLibraryGroupPicker({
       data-filter-active={
         selectedOption.id !== BOT_LIBRARY_GROUP_FILTER_ALL ? "true" : undefined
       }
+      data-default-option={selectedIsDefault ? "true" : undefined}
       data-disabled={disabled ? "true" : undefined}
       style={selectedStyle}
     >
@@ -15589,7 +15692,7 @@ function BotLibraryGroupPicker({
         <span className={styles.botLibraryGroupTriggerName}>{selectedOption.name}</span>
         {showCounts ? (
           <span className={styles.botLibraryGroupTriggerCount} aria-hidden="true">
-            {botLibraryGroupCountLabel(selectedOption.count, selectedOption.cap)}
+            {botLibraryGroupPickerCountLabel(selectedOption)}
           </span>
         ) : null}
         <span className={styles.composeBotTriggerChevron} aria-hidden="true">
@@ -15631,7 +15734,7 @@ function BotLibraryGroupPicker({
                 const optionName = option.menuName ?? option.name;
                 const optionCountLabel = showCounts
                   ? option.menuCountLabel ??
-                    botLibraryGroupCountLabel(option.count, option.cap)
+                    botLibraryGroupPickerCountLabel(option)
                   : null;
                 return (
                   <button
@@ -27328,8 +27431,11 @@ function BotAiParameterCustomizer({
           </button>
         </header>
         <div className={styles.botAiParameterBody}>
-          <label className={`${styles.botProfileField} ${styles.botAiPromptField}`}>
-            <span>System Prompt</span>
+          <label className={styles.botAiPromptField}>
+            <div className={styles.botAiFieldHeader}>
+              <span>System Prompt</span>
+              <strong>{systemPrompt.trim() ? "Set" : "Blank"}</strong>
+            </div>
             <textarea
               spellCheck={false}
               placeholder="You are..."
@@ -27337,73 +27443,137 @@ function BotAiParameterCustomizer({
               onChange={(event) => onSystemPromptChange(event.currentTarget.value)}
             />
           </label>
-          <div className={styles.botAiSamplerGrid}>
-            <label className={styles.botProfileField}>
-              <span>Temperature</span>
-              <input
-                type="number"
-                min={BOT_TEMPERATURE_MIN}
-                max={BOT_TEMPERATURE_MAX}
-                step="0.01"
-                value={temperature}
-                onChange={(event) =>
-                  onTemperatureChange(normalizeBotTemperature(Number(event.currentTarget.value)))
-                }
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>Max Tokens</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={maxTokens}
-                onChange={(event) =>
-                  onMaxTokensChange(normalizeBotMaxTokens(Number(event.currentTarget.value)))
-                }
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>Top P</span>
-              <input
-                type="number"
-                min={BOT_TOP_P_MIN}
-                max={BOT_TOP_P_MAX}
-                step="0.01"
-                value={topP}
-                onChange={(event) =>
-                  onTopPChange(normalizeBotTopP(Number(event.currentTarget.value)))
-                }
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>Top K</span>
-              <input
-                type="number"
-                min={BOT_TOP_K_MIN}
-                step={1}
-                value={topK}
-                onChange={(event) =>
-                  onTopKChange(normalizeBotTopK(Number(event.currentTarget.value)))
-                }
-              />
-            </label>
-            <label className={styles.botProfileField}>
-              <span>Repetition Penalty</span>
-              <input
-                type="number"
-                min={BOT_REPETITION_PENALTY_MIN}
-                max={BOT_REPETITION_PENALTY_MAX}
-                step="0.01"
-                value={repetitionPenalty}
-                onChange={(event) =>
-                  onRepetitionPenaltyChange(
-                    normalizeBotRepetitionPenalty(Number(event.currentTarget.value))
-                  )
-                }
-              />
-            </label>
-          </div>
+          <section className={styles.botAiSamplerPanel} aria-label="Sampler controls">
+            <header className={styles.botAiSamplerHeader}>
+              <span>Sampler</span>
+              <strong>Advanced</strong>
+            </header>
+            <div className={styles.botAiSamplerGrid}>
+              <label className={styles.botAiControlField}>
+                <div className={styles.botAiControlHeader}>
+                  <span>Temperature</span>
+                  <strong>{formatBotParameterValue(temperature)}</strong>
+                </div>
+                <input
+                  className={styles.botAiRange}
+                  type="range"
+                  min={BOT_TEMPERATURE_MIN}
+                  max={BOT_TEMPERATURE_MAX}
+                  step="0.01"
+                  value={temperature}
+                  onChange={(event) =>
+                    onTemperatureChange(normalizeBotTemperature(Number(event.currentTarget.value)))
+                  }
+                />
+                <input
+                  className={styles.botAiNumberInput}
+                  type="number"
+                  min={BOT_TEMPERATURE_MIN}
+                  max={BOT_TEMPERATURE_MAX}
+                  step="0.01"
+                  value={temperature}
+                  aria-label="Temperature value"
+                  onChange={(event) =>
+                    onTemperatureChange(normalizeBotTemperature(Number(event.currentTarget.value)))
+                  }
+                />
+              </label>
+              <label className={styles.botAiControlField}>
+                <div className={styles.botAiControlHeader}>
+                  <span>Top P</span>
+                  <strong>{formatBotParameterValue(topP)}</strong>
+                </div>
+                <input
+                  className={styles.botAiRange}
+                  type="range"
+                  min={BOT_TOP_P_MIN}
+                  max={BOT_TOP_P_MAX}
+                  step="0.01"
+                  value={topP}
+                  onChange={(event) =>
+                    onTopPChange(normalizeBotTopP(Number(event.currentTarget.value)))
+                  }
+                />
+                <input
+                  className={styles.botAiNumberInput}
+                  type="number"
+                  min={BOT_TOP_P_MIN}
+                  max={BOT_TOP_P_MAX}
+                  step="0.01"
+                  value={topP}
+                  aria-label="Top P value"
+                  onChange={(event) =>
+                    onTopPChange(normalizeBotTopP(Number(event.currentTarget.value)))
+                  }
+                />
+              </label>
+              <label className={styles.botAiControlField}>
+                <div className={styles.botAiControlHeader}>
+                  <span>Repeat Penalty</span>
+                  <strong>{formatBotParameterValue(repetitionPenalty)}</strong>
+                </div>
+                <input
+                  className={styles.botAiRange}
+                  type="range"
+                  min={BOT_REPETITION_PENALTY_MIN}
+                  max={BOT_REPETITION_PENALTY_MAX}
+                  step="0.01"
+                  value={repetitionPenalty}
+                  onChange={(event) =>
+                    onRepetitionPenaltyChange(
+                      normalizeBotRepetitionPenalty(Number(event.currentTarget.value))
+                    )
+                  }
+                />
+                <input
+                  className={styles.botAiNumberInput}
+                  type="number"
+                  min={BOT_REPETITION_PENALTY_MIN}
+                  max={BOT_REPETITION_PENALTY_MAX}
+                  step="0.01"
+                  value={repetitionPenalty}
+                  aria-label="Repetition penalty value"
+                  onChange={(event) =>
+                    onRepetitionPenaltyChange(
+                      normalizeBotRepetitionPenalty(Number(event.currentTarget.value))
+                    )
+                  }
+                />
+              </label>
+              <label className={`${styles.botAiControlField} ${styles.botAiNumberField}`}>
+                <div className={styles.botAiControlHeader}>
+                  <span>Top K</span>
+                </div>
+                <input
+                  className={styles.botAiNumberInput}
+                  type="number"
+                  min={BOT_TOP_K_MIN}
+                  step={1}
+                  value={topK}
+                  aria-label="Top K value"
+                  onChange={(event) =>
+                    onTopKChange(normalizeBotTopK(Number(event.currentTarget.value)))
+                  }
+                />
+              </label>
+              <label className={`${styles.botAiControlField} ${styles.botAiNumberField}`}>
+                <div className={styles.botAiControlHeader}>
+                  <span>Max Tokens</span>
+                </div>
+                <input
+                  className={styles.botAiNumberInput}
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={maxTokens}
+                  aria-label="Max tokens value"
+                  onChange={(event) =>
+                    onMaxTokensChange(normalizeBotMaxTokens(Number(event.currentTarget.value)))
+                  }
+                />
+              </label>
+            </div>
+          </section>
         </div>
       </section>
     </div>
@@ -28841,6 +29011,7 @@ function HomeContent(): React.JSX.Element {
   const [botContextMenu, setBotContextMenu] = useState<{
     botId: string;
     selectedBotIds: string[];
+    groupId?: string;
     x: number;
     y: number;
   } | null>(null);
@@ -28887,7 +29058,7 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const botContextSuppressClickRef = useRef(false);
   const [panel, setPanel] = useState<PanelView>(null);
-  const [settingsScope, setSettingsScope] = useState<SettingsScope>("entry");
+  const [settingsScope, setSettingsScope] = useState<SettingsScope>("connections");
   const [usageRange, setUsageRange] = useState<UsageRange>("7d");
   const [usageScope, setUsageScope] = useState<"all" | "conversation">("all");
   const [usageReport, setUsageReport] = useState<UsageResponse | null>(null);
@@ -29223,10 +29394,13 @@ function HomeContent(): React.JSX.Element {
     botContextLongPressRef.current = null;
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
+  const botLibraryGroupsCanPruneRef = useRef(false);
   const marketplaceGlyphRepairAttemptedRef = useRef<Set<string>>(new Set());
   const [botLibraryGroups, setBotLibraryGroups] = useState<BotLibraryGroup[]>(() => [
     createFavoritesBotGroup(),
   ]);
+  const [botLibraryGroupsHydratedUserId, setBotLibraryGroupsHydratedUserId] =
+    useState<string | null>(null);
   const [commandCenterPreferredModel, setCommandCenterPreferredModel] =
     useState<string>(AUTO_MODEL_CHOICE);
   const [commandCenterCommands, setCommandCenterCommands] = useState<CommandCenterCommand[]>(
@@ -30079,12 +30253,19 @@ function HomeContent(): React.JSX.Element {
     setBotPreferredModelsModalOpen(false);
     setBotLensDropActive(false);
     if (advanced) {
-      setNewBotSystemPrompt(serializeStoredBotPrompt(botProfile, newBotName.trim()));
+      setNewBotSystemPrompt(serializeStoredBotPrompt(
+        botProfile,
+        botProfileReferenceName({
+          draftName: newBotName,
+          editingBotId,
+          editingOriginalName: editOriginalRef.current?.name,
+        })
+      ));
     } else {
       setBotProfile(parseStoredBotPrompt(newBotSystemPrompt).fields);
     }
     setBotEditorAdvancedMode(advanced);
-  }, [botProfile, newBotName, newBotSystemPrompt]);
+  }, [botProfile, editingBotId, newBotName, newBotSystemPrompt]);
   // Two-stage delete confirmation. `pendingDeleteKey` holds either a
   // conversation id (sidebar ×), HEADER_DELETE_KEY (header button), or the
   // DELETE_ALL_KEY sentinel (reached by holding any × past the threshold).
@@ -30138,6 +30319,7 @@ function HomeContent(): React.JSX.Element {
     faceFontWeight: number;
     profilePictureImageId: string | null;
   } | null>(null);
+  const botDeleteProtectionProjectionRunRef = useRef(0);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
   const botProfilePictureUploadInputRef = useRef<HTMLInputElement | null>(null);
   // Sentinel at the tail of the message stream. The scroll effect brings it
@@ -31402,7 +31584,7 @@ function HomeContent(): React.JSX.Element {
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
-    setSettingsScope("entry");
+    setSettingsScope("connections");
     setProfileNameModalOpen(false);
     setProfileNameDraft("");
     setOpenAiKey("");
@@ -31463,7 +31645,7 @@ function HomeContent(): React.JSX.Element {
     setPanelClosing(false);
     setPanel(nextPanel);
     if (nextPanel === "settings") {
-      setSettingsScope("entry");
+      setSettingsScope("connections");
     }
     if (nextPanel === "usage" && !selectedId) {
       setUsageScope("all");
@@ -31480,7 +31662,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, [selectedId]);
 
-  const openSettingsPanel = useCallback((initialScope: SettingsScope = "entry") => {
+  const openSettingsPanel = useCallback((initialScope: SettingsScope = "connections") => {
     openRightPanel("settings");
     setSettingsScope(initialScope);
   }, [openRightPanel]);
@@ -34409,12 +34591,18 @@ function HomeContent(): React.JSX.Element {
   }, [user]);
 
   useEffect(() => {
+    botLibraryGroupsCanPruneRef.current = false;
+    setBotLibraryGroupsHydratedUserId(null);
     if (!user) {
       setBotLibraryGroups([createFavoritesBotGroup()]);
       setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
       return;
     }
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {
+      setBotLibraryGroups([createFavoritesBotGroup()]);
+      setBotLibraryGroupsHydratedUserId(user.id);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(botLibraryGroupsStorageKey(user.id));
       const parsed: unknown = raw ? JSON.parse(raw) : [];
@@ -34422,6 +34610,7 @@ function HomeContent(): React.JSX.Element {
     } catch {
       setBotLibraryGroups([createFavoritesBotGroup()]);
     }
+    setBotLibraryGroupsHydratedUserId(user.id);
   }, [user]);
 
   useEffect(() => {
@@ -34436,6 +34625,7 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (!user || typeof window === "undefined") return;
+    if (botLibraryGroupsHydratedUserId !== user.id) return;
     try {
       window.localStorage.setItem(
         botLibraryGroupsStorageKey(user.id),
@@ -34444,7 +34634,7 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Non-fatal: groups still work for this page session.
     }
-  }, [botLibraryGroups, user]);
+  }, [botLibraryGroups, botLibraryGroupsHydratedUserId, user]);
 
   useEffect(() => {
     if (!user) {
@@ -34609,17 +34799,15 @@ function HomeContent(): React.JSX.Element {
   }, [conversationGroupsByKey, user]);
 
   useEffect(() => {
+    if (!botLibraryGroupsCanPruneRef.current) return;
+    if (!user || botLibraryGroupsHydratedUserId !== user.id) return;
     const existingBotIds = new Set(bots.map((bot) => bot.id));
     setBotLibraryGroups((current) =>
       normalizeBotLibraryGroups(
-        current.map((group) => ({
-          ...group,
-          botIds: group.botIds.filter((botId) => existingBotIds.has(botId)),
-          updatedAt: group.updatedAt,
-        }))
+        pruneBotLibraryGroupsForExistingBots(current, existingBotIds)
       )
     );
-  }, [bots]);
+  }, [bots, botLibraryGroupsHydratedUserId, user]);
 
   useEffect(() => {
     if (botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_ALL) return;
@@ -39334,6 +39522,82 @@ function HomeContent(): React.JSX.Element {
     [bots, resolvedTheme, panelColorHarmonyActive]
   );
   const existingBotIds = useMemo(() => new Set(bots.map((bot) => bot.id)), [bots]);
+  const groupProtectedBotIds = useMemo(
+    () => protectedBotIdsForBotLibraryGroups(botLibraryGroups, existingBotIds),
+    [botLibraryGroups, existingBotIds]
+  );
+  const isBotDeleteProtected = useCallback(
+    (botId: string): boolean => groupProtectedBotIds.has(botId),
+    [groupProtectedBotIds]
+  );
+  useEffect(() => {
+    if (!user || botLibraryGroupsHydratedUserId !== user.id || bots.length === 0) return;
+    const toProtect: string[] = [];
+    const toAllow: string[] = [];
+    for (const bot of bots) {
+      const desiredProtected = groupProtectedBotIds.has(bot.id);
+      const currentlyProtected = bot.delete_protected === 1;
+      if (desiredProtected && !currentlyProtected) {
+        toProtect.push(bot.id);
+      } else if (!desiredProtected && currentlyProtected) {
+        toAllow.push(bot.id);
+      }
+    }
+    if (toProtect.length === 0 && toAllow.length === 0) return;
+
+    const projectionRun = botDeleteProtectionProjectionRunRef.current + 1;
+    botDeleteProtectionProjectionRunRef.current = projectionRun;
+    const affectedIds = new Set([...toProtect, ...toAllow]);
+    const protectedIds = new Set(groupProtectedBotIds);
+    const previousBots = bots;
+    const previousNewBotDeleteProtected = newBotDeleteProtected;
+    const previousEditOriginal = editOriginalRef.current;
+    setBots((list) => applyBotDeleteProtectionProjection(list, protectedIds));
+    if (editingBotId && affectedIds.has(editingBotId)) {
+      const deleteProtected = protectedIds.has(editingBotId);
+      setNewBotDeleteProtected(deleteProtected);
+      if (editOriginalRef.current) {
+        editOriginalRef.current = {
+          ...editOriginalRef.current,
+          deleteProtected,
+        };
+      }
+    }
+
+    const syncProjection = async (): Promise<void> => {
+      try {
+        if (toProtect.length > 0) {
+          await api<{ updated?: number }>("/api/bots/selected/delete-protection", {
+            method: "PATCH",
+            body: JSON.stringify({ ids: toProtect, deleteProtected: true }),
+          });
+        }
+        if (toAllow.length > 0) {
+          await api<{ updated?: number }>("/api/bots/selected/delete-protection", {
+            method: "PATCH",
+            body: JSON.stringify({ ids: toAllow, deleteProtected: false }),
+          });
+        }
+        await refreshBots();
+      } catch (err) {
+        if (projectionRun !== botDeleteProtectionProjectionRunRef.current) return;
+        setBots(previousBots);
+        setNewBotDeleteProtected(previousNewBotDeleteProtected);
+        editOriginalRef.current = previousEditOriginal;
+        setPanelError(
+          err instanceof Error ? err.message : "Sync group delete protection failed."
+        );
+      }
+    };
+    void syncProjection();
+  }, [
+    bots,
+    botLibraryGroupsHydratedUserId,
+    editingBotId,
+    groupProtectedBotIds,
+    newBotDeleteProtected,
+    user,
+  ]);
   const favoriteBotIdSet = useMemo(() => {
     const favorites = botLibraryGroups.find(
       (group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID
@@ -40050,10 +40314,15 @@ function HomeContent(): React.JSX.Element {
     }
     return vars;
   }, [messagesFrameMode, hueLensTrackSegments]);
-  const messagesFrameBotLibraryGroupFocus =
+  const botLibraryGroupDashboardActive =
     view === "sandbox" &&
     activeConversationIsEmpty &&
-    !selectedBotId &&
+    !pendingIncognito &&
+    !emptyStateSearchActive &&
+    !activeBot &&
+    Boolean(activeBotLibraryGroupFilter);
+  const messagesFrameBotLibraryGroupFocus =
+    botLibraryGroupDashboardActive &&
     Boolean(activeBotLibraryGroupFilter && !activeBotLibraryGroupFilter.builtIn);
   const zenToneSpace = chatLikeSurface
     ? resolveZenToneSpaceFromAnnoyance(detail?.prismMood?.annoyance)
@@ -42570,6 +42839,7 @@ function HomeContent(): React.JSX.Element {
   }
   async function refreshBots(): Promise<Bot[]> {
     const d = await api<{ bots: Bot[] }>("/api/bots");
+    botLibraryGroupsCanPruneRef.current = true;
     setBots(d.bots);
     return d.bots;
   }
@@ -42924,6 +43194,8 @@ function HomeContent(): React.JSX.Element {
   async function logout() {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
     clearNativeSessionToken();
+    botLibraryGroupsCanPruneRef.current = false;
+    setBotLibraryGroupsHydratedUserId(null);
     setUser(null);
     starterPackFreshAccountEligibleUserRef.current = null;
     setPreAuthChecklistComplete(false);
@@ -50549,6 +50821,31 @@ function HomeContent(): React.JSX.Element {
     setChatOverflowMenuOpen(false);
   }, [closeMessageContextOverlay]);
 
+  const openBotLibraryGroupBotContextMenu = useCallback((
+    groupId: string,
+    bot: Bot,
+    x: number,
+    y: number
+  ) => {
+    const clamped = clampContextMenuPosition(
+      x,
+      y,
+      BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+    );
+    setBotContextMenu({
+      botId: bot.id,
+      selectedBotIds: [],
+      groupId,
+      x: clamped.x,
+      y: clamped.y,
+    });
+    closeMessageContextOverlay();
+    setConversationGroupContextMenu(null);
+    setCanvasToolsContextMenu(null);
+    setChatOverflowMenuOpen(false);
+  }, [closeMessageContextOverlay]);
+
   const openConversationGroupContextMenu = useCallback(
     (groupKey: string, x: number, y: number) => {
       const clamped = clampContextMenuPosition(
@@ -50611,8 +50908,15 @@ function HomeContent(): React.JSX.Element {
     if (!botContextMenu) return;
     if (!bots.some((bot) => bot.id === botContextMenu.botId)) {
       closeBotContextMenu();
+      return;
     }
-  }, [botContextMenu, bots, closeBotContextMenu]);
+    if (botContextMenu.groupId) {
+      const group = botLibraryGroups.find((candidate) => candidate.id === botContextMenu.groupId);
+      if (!group || !group.botIds.includes(botContextMenu.botId)) {
+        closeBotContextMenu();
+      }
+    }
+  }, [botContextMenu, botLibraryGroups, bots, closeBotContextMenu]);
 
   useEffect(() => {
     if (!botContextMenu) return;
@@ -51038,7 +51342,6 @@ function HomeContent(): React.JSX.Element {
         onlineEnabled: bot.online_enabled === 1,
         flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
-        deleteProtected: bot.delete_protected === 1,
       },
       profile,
       systemPrompt: visiblePrompt,
@@ -51550,7 +51853,6 @@ function HomeContent(): React.JSX.Element {
         onlineEnabled: parsedBot.onlineEnabled !== false,
         flirtEnabled: parsedBot.flirtEnabled === true,
         chatEnabled: parsedBot.chatEnabled !== false,
-        deleteProtected: parsedBot.deleteProtected === true,
 	        temperature:
 	          typeof parsedBot.temperature === "number"
 	            ? normalizeBotTemperature(parsedBot.temperature)
@@ -51970,6 +52272,7 @@ function HomeContent(): React.JSX.Element {
             name: manifestName,
             description: manifestDescription,
             botIds: Array.from(new Set(targetBotIds)),
+            deleteProtected: false,
             builtIn: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -53537,6 +53840,14 @@ function HomeContent(): React.JSX.Element {
       if (shouldAllowNativeContextMenu(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
+      if (botLibraryGroupDashboardActive) {
+        closeMessageContextOverlay();
+        setBotContextMenu(null);
+        setConversationGroupContextMenu(null);
+        setCanvasToolsContextMenu(null);
+        setChatOverflowMenuOpen(false);
+        return;
+      }
       const clamped = clampContextMenuPosition(
         event.clientX,
         event.clientY,
@@ -53549,7 +53860,7 @@ function HomeContent(): React.JSX.Element {
       setConversationGroupContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
-    [shouldAllowNativeContextMenu, closeMessageContextOverlay]
+    [shouldAllowNativeContextMenu, botLibraryGroupDashboardActive, closeMessageContextOverlay]
   );
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
@@ -53804,10 +54115,10 @@ function HomeContent(): React.JSX.Element {
   }, [panel, editingBotId]);
 
   useEffect(() => {
-    if (botProfileBuilderOpen && !newBotName.trim()) {
+    if (botProfileBuilderOpen && !editingBotId && !newBotName.trim()) {
       setBotProfileBuilderOpen(false);
     }
-  }, [botProfileBuilderOpen, newBotName]);
+  }, [botProfileBuilderOpen, editingBotId, newBotName]);
 
 	  useEffect(() => {
 	    if (botAvatarCustomizerOpen && panel !== "bots") {
@@ -54450,10 +54761,24 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function allowBotDeletionForIds(ids: readonly string[]): Promise<void> {
+    const uniqueIds = Array.from(new Set(ids.filter((id) => typeof id === "string")));
+    if (uniqueIds.length === 0) return;
+    await api<{ updated?: number }>("/api/bots/selected/delete-protection", {
+      method: "PATCH",
+      body: JSON.stringify({ ids: uniqueIds, deleteProtected: false }),
+    });
+  }
+
   async function deleteBot(id: string) {
     setPanelError(null);
     setPanelNotice(null);
     disarmDelete();
+    if (isBotDeleteProtected(id)) {
+      setPanelBotDeleteConfirm(null);
+      setPanelError("This bot is protected. Allow deletion from its group dashboard first.");
+      return;
+    }
     // If the deleted bot was the one loaded into the top form, collapse
     // back to create mode so the editor doesn't keep pointing at a row
     // that no longer exists.
@@ -54475,6 +54800,7 @@ function HomeContent(): React.JSX.Element {
       setSelectedBotId(null);
     }
     try {
+      await allowBotDeletionForIds([id]);
       await api(`/api/bots/${id}`, { method: "DELETE" });
       await refreshBots();
       if (panelRef.current === "bots") {
@@ -54688,7 +55014,7 @@ function HomeContent(): React.JSX.Element {
       description: "",
       botIds: uniqueSelected,
       targetGroupId: BOT_LIBRARY_GROUP_CREATE_NEW,
-      error: botLibraryGroupCapError(uniqueSelected.length),
+      error: botLibraryGroupSizeError(uniqueSelected.length),
     });
   }
 
@@ -54741,7 +55067,7 @@ function HomeContent(): React.JSX.Element {
       dialog.mode === "create" && dialog.targetGroupId === BOT_LIBRARY_GROUP_CREATE_NEW;
     const capValidationError =
       dialog.mode === "create" && creatingNewGroup
-        ? botLibraryGroupCapError(dialog.botIds.length)
+        ? botLibraryGroupSizeError(dialog.botIds.length)
         : null;
     const validationError =
       capValidationError ??
@@ -54776,7 +55102,7 @@ function HomeContent(): React.JSX.Element {
         if (mergedBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP) {
           setBotLibraryGroupDetailsDialog({
             ...dialog,
-            error: `Adding these bots would put "${target.name}" at ${botLibraryGroupCountLabel(
+            error: `Adding these bots would put "${target.name}" at ${botLibraryGroupCapacityLabel(
               mergedBotIds.length,
               BOT_LIBRARY_GROUP_BOT_CAP
             )}.`,
@@ -54821,6 +55147,7 @@ function HomeContent(): React.JSX.Element {
             name,
             description,
             botIds: uniqueSelected,
+            deleteProtected: false,
             builtIn: false,
             createdAt: now,
             updatedAt: now,
@@ -54928,9 +55255,10 @@ function HomeContent(): React.JSX.Element {
     setPanelNotice(`Deleted "${target.name}". Bots were kept.`);
   }
 
-  function ungroupSelectedBots(groupId: string, selectedBotIds: string[]): void {
-    if (selectedBotIds.length < 2) return;
-    const selectedSet = new Set(selectedBotIds);
+  function removeBotsFromLibraryGroup(groupId: string, botIds: string[]): void {
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!target || botIds.length === 0) return;
+    const selectedSet = new Set(botIds);
     setPanelError(null);
     setPanelNotice(null);
     setBotLibraryGroups((current) =>
@@ -54938,14 +55266,32 @@ function HomeContent(): React.JSX.Element {
         current.map((group) =>
           group.id === groupId
             ? {
-              ...group,
-              botIds: group.botIds.filter((botId) => !selectedSet.has(botId)),
-              updatedAt: new Date().toISOString(),
-            }
+                ...group,
+                botIds: group.botIds.filter((botId) => !selectedSet.has(botId)),
+                updatedAt: new Date().toISOString(),
+              }
             : group
         )
       )
     );
+    setCanvasSelectedBotIds((current) => {
+      const next = new Set(current);
+      for (const botId of selectedSet) {
+        next.delete(botId);
+      }
+      return stringSetsEqual(current, next) ? current : next;
+    });
+    const removedCount = botIds.length;
+    setPanelNotice(
+      removedCount === 1
+        ? `Removed bot from "${target.name}".`
+        : `Removed ${removedCount} bots from "${target.name}".`
+    );
+  }
+
+  function ungroupSelectedBots(groupId: string, selectedBotIds: string[]): void {
+    if (selectedBotIds.length < 2) return;
+    removeBotsFromLibraryGroup(groupId, selectedBotIds);
   }
 
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
@@ -54959,8 +55305,11 @@ function HomeContent(): React.JSX.Element {
     disarmDelete();
     const previousBots = bots;
     const previousSelectedBotId = selectedBotId;
-    const protectedBots = previousBots.filter((bot) => bot.delete_protected === 1);
+    const protectedBots = previousBots.filter((bot) => isBotDeleteProtected(bot.id));
     const protectedBotIds = new Set(protectedBots.map((bot) => bot.id));
+    const deletableBotIds = previousBots
+      .filter((bot) => !protectedBotIds.has(bot.id))
+      .map((bot) => bot.id);
     const unprotectedCount = previousBots.length - protectedBots.length;
     // Nothing to clear — short-circuit rather than fire a no-op request.
     // Tapping into the empty state via hold-from-nothing is unreachable in
@@ -54983,7 +55332,11 @@ function HomeContent(): React.JSX.Element {
       setBotPanelView("library");
     }
     try {
-      await api("/api/bots", { method: "DELETE" });
+      await allowBotDeletionForIds(deletableBotIds);
+      await api("/api/bots/selected", {
+        method: "DELETE",
+        body: JSON.stringify({ ids: deletableBotIds }),
+      });
       await refreshBots();
     } catch (err) {
       setBots(previousBots);
@@ -55000,18 +55353,30 @@ function HomeContent(): React.JSX.Element {
     const previousBots = bots;
     const previousSelectedBotId = selectedBotId;
     const previousMarqueeSelection = new Set(canvasSelectedBotIds);
+    const selectedIdSet = new Set(uniqueIds);
+    const selectedExistingBots = previousBots.filter((bot) => selectedIdSet.has(bot.id));
+    const deletableIds = selectedExistingBots
+      .filter((bot) => !isBotDeleteProtected(bot.id))
+      .map((bot) => bot.id);
+    const groupProtectedCount = selectedExistingBots.length - deletableIds.length;
+    if (deletableIds.length === 0) {
+      setSelectedBotDeleteConfirm(null);
+      setPanelNotice(
+        groupProtectedCount > 0
+          ? `Kept ${groupProtectedCount} protected bot${groupProtectedCount === 1 ? "" : "s"}.`
+          : "No bots deleted."
+      );
+      return;
+    }
     try {
+      await allowBotDeletionForIds(deletableIds);
       const result = await api<{ deleted?: number; protectedSkipped?: number }>(
         "/api/bots/selected",
         {
           method: "DELETE",
-          body: JSON.stringify({ ids: uniqueIds }),
+          body: JSON.stringify({ ids: deletableIds }),
         }
       );
-      const selectedIdSet = new Set(uniqueIds);
-      const deletableIds = previousBots
-        .filter((bot) => selectedIdSet.has(bot.id) && bot.delete_protected !== 1)
-        .map((bot) => bot.id);
       const deletedIdSet = new Set(deletableIds);
       setBots(previousBots.filter((bot) => !deletedIdSet.has(bot.id)));
       if (previousSelectedBotId && deletedIdSet.has(previousSelectedBotId)) {
@@ -55030,7 +55395,8 @@ function HomeContent(): React.JSX.Element {
       const deletedCount =
         typeof result.deleted === "number" ? result.deleted : deletedIdSet.size;
       const protectedCount =
-        typeof result.protectedSkipped === "number" ? result.protectedSkipped : 0;
+        groupProtectedCount +
+        (typeof result.protectedSkipped === "number" ? result.protectedSkipped : 0);
       setPanelNotice(
         protectedCount > 0
           ? `Deleted ${deletedCount} bot${deletedCount === 1 ? "" : "s"}; kept ${protectedCount} protected.`
@@ -55044,90 +55410,35 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function setBotsDeleteProtection(
-    targetBots: readonly Bot[],
-    deleteProtected: boolean,
-    options: { groupName?: string } = {}
-  ): Promise<void> {
-    const uniqueBots = Array.from(
-      new Map(
-        targetBots
-          .filter((bot): bot is Bot => Boolean(bot?.id))
-          .map((bot) => [bot.id, bot])
-      ).values()
-    );
-    if (uniqueBots.length === 0) return;
-
+  function setBotLibraryGroupDeleteProtection(
+    groupId: string,
+    deleteProtected: boolean
+  ): void {
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!target) return;
     setPanelError(null);
     setPanelNotice(null);
     disarmDelete();
     setPanelBotDeleteConfirm(null);
     setSelectedBotDeleteConfirm(null);
-    const ids = uniqueBots.map((bot) => bot.id);
-    const idSet = new Set(ids);
-    const previousBots = bots;
-    const previousNewBotDeleteProtected = newBotDeleteProtected;
-    const previousEditOriginal = editOriginalRef.current;
-    const nextDeleteProtectedValue = deleteProtected ? 1 : 0;
-    setBots((list) =>
-      list.map((bot) =>
-        idSet.has(bot.id)
-          ? { ...bot, delete_protected: nextDeleteProtectedValue }
-          : bot
+    setBotLibraryGroups((current) =>
+      normalizeBotLibraryGroups(
+        current.map((group) =>
+          group.id === groupId
+            ? {
+                ...group,
+                deleteProtected,
+                updatedAt: new Date().toISOString(),
+              }
+            : group
+        )
       )
     );
-    if (editingBotId && idSet.has(editingBotId)) {
-      setNewBotDeleteProtected(deleteProtected);
-      if (editOriginalRef.current) {
-        editOriginalRef.current = {
-          ...editOriginalRef.current,
-          deleteProtected,
-        };
-      }
-    }
-
-    try {
-      const result = await api<{ updated?: number }>(
-        "/api/bots/selected/delete-protection",
-        {
-          method: "PATCH",
-          body: JSON.stringify({ ids, deleteProtected }),
-        }
-      );
-      await refreshBots();
-      const updated = typeof result.updated === "number" ? result.updated : ids.length;
-      if (updated === 0) {
-        setPanelNotice("No bots updated.");
-      } else if (options.groupName) {
-        setPanelNotice(
-          deleteProtected
-            ? `Protected "${options.groupName}" from bot deletion.`
-            : `Allowed deletion for "${options.groupName}".`
-        );
-      } else if (uniqueBots.length === 1) {
-        setPanelNotice(
-          deleteProtected
-            ? `${uniqueBots[0]!.name} is protected from deletion.`
-            : `${uniqueBots[0]!.name} can be deleted.`
-        );
-      } else {
-        setPanelNotice(
-          deleteProtected
-            ? `Protected ${updated} selected bot${updated === 1 ? "" : "s"} from deletion.`
-            : `Allowed deletion for ${updated} selected bot${updated === 1 ? "" : "s"}.`
-        );
-      }
-    } catch (err) {
-      setBots(previousBots);
-      if (editingBotId && idSet.has(editingBotId)) {
-        setNewBotDeleteProtected(previousNewBotDeleteProtected);
-        editOriginalRef.current = previousEditOriginal;
-      }
-      try { await refreshBots(); } catch { /* best-effort refresh */ }
-      setPanelError(
-        err instanceof Error ? err.message : "Update delete protection failed."
-      );
-    }
+    setPanelNotice(
+      deleteProtected
+        ? `Protected "${target.name}" from bot deletion.`
+        : `Allowed deletion for "${target.name}". Bots in other protected groups stay protected.`
+    );
   }
 
   async function devToolsDeleteAllBots() {
@@ -55712,7 +56023,7 @@ function HomeContent(): React.JSX.Element {
       bot.online_model
     );
     const seededOnlineEnabled = bot.online_enabled !== 0;
-    const seededDeleteProtected = bot.delete_protected === 1;
+    const seededDeleteProtected = isBotDeleteProtected(bot.id);
     const seededFlirtEnabled = bot.flirt_enabled === 1;
     const seededTemperature = normalizeBotTemperature(bot.temperature);
     const seededMaxTokens = normalizeBotMaxTokens(bot.max_tokens);
@@ -58911,8 +59222,7 @@ function HomeContent(): React.JSX.Element {
     const bot = bots.find((candidate) => candidate.id === botContextMenu.botId);
     if (!bot) return null;
     const selectedBotIds =
-      botContextMenu.selectedBotIds.length > 1 &&
-      botContextMenu.selectedBotIds.includes(bot.id)
+      botContextMenu.selectedBotIds.length > 1
         ? botContextMenu.selectedBotIds.filter((id) => bots.some((candidate) => candidate.id === id))
         : [];
     const multiSelectedBots =
@@ -58925,12 +59235,57 @@ function HomeContent(): React.JSX.Element {
     const commonGroup = isMultiSelectionMenu
       ? resolveCommonBotGroupForSelection(multiSelectedBots.map((candidate) => candidate.id))
       : null;
+    const botLibraryGroupContext = botContextMenu.groupId
+      ? botLibraryGroups.find((group) => group.id === botContextMenu.groupId) ?? null
+      : null;
     const singleBotIsGridSelected = canvasSelectedBotIds.has(bot.id);
+    const hasMultipleCanvasSelectedBots = canvasSelectedBotIds.size > 1;
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
       "--bot-color": normalizeAccentForTheme(bot.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
     } as React.CSSProperties;
+    if (botContextMenu.groupId && !botLibraryGroupContext) return null;
+    if (botLibraryGroupContext) {
+      return (
+        <div
+          ref={botContextMenuRef}
+          className={`${styles.messageContextMenu} ${styles.botContextMenu}`}
+          style={menuStyle}
+          role="menu"
+          aria-label={`${bot.name} group actions`}
+        >
+          {!hasMultipleCanvasSelectedBots ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                openBotPanelHub(bot);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                <span>Edit bot</span>
+              </span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              closeBotContextMenu();
+              removeBotsFromLibraryGroup(botLibraryGroupContext.id, [bot.id]);
+            }}
+          >
+            <span className={styles.contextMenuItemLabel}>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⊖</span>
+              <span>Remove bot from group</span>
+            </span>
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         ref={botContextMenuRef}
@@ -58985,7 +59340,7 @@ function HomeContent(): React.JSX.Element {
               onClick={() => {
                 closeBotContextMenu();
                 const protectedCount = multiSelectedBots.filter(
-                  (candidate) => candidate.delete_protected === 1
+                  (candidate) => isBotDeleteProtected(candidate.id)
                 ).length;
                 setSelectedBotDeleteConfirm({
                   ids: multiSelectedBots.map((candidate) => candidate.id),
@@ -59030,19 +59385,21 @@ function HomeContent(): React.JSX.Element {
                 <span>Clone bot</span>
               </span>
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                closeBotContextMenu();
-                openBotCustomizer(bot);
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
-                <span>Edit bot</span>
-              </span>
-            </button>
+            {!hasMultipleCanvasSelectedBots ? (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeBotContextMenu();
+                  openBotCustomizer(bot);
+                }}
+              >
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                  <span>Edit bot</span>
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -59056,7 +59413,7 @@ function HomeContent(): React.JSX.Element {
                 <span>View memories</span>
               </span>
             </button>
-            {bot.delete_protected !== 1 ? (
+            {!isBotDeleteProtected(bot.id) ? (
               <button
                 type="button"
                 role="menuitem"
@@ -59794,7 +60151,7 @@ function HomeContent(): React.JSX.Element {
     if (isCoffeeGroupDelete && !groupForDelete) return null;
 
     const protectedBotCount = isBots
-      ? bots.filter((bot) => bot.delete_protected === 1).length
+      ? bots.filter((bot) => isBotDeleteProtected(bot.id)).length
       : 0;
     const count = isCoffeeGroupDelete
       ? 1
@@ -60111,7 +60468,7 @@ function HomeContent(): React.JSX.Element {
                     const wouldOverflow = mergedCount > BOT_LIBRARY_GROUP_BOT_CAP;
                     return (
                       <option key={group.id} value={group.id} disabled={wouldOverflow}>
-                        {group.name} ({botLibraryGroupCountLabel(
+                        {group.name} ({botLibraryGroupCapacityLabel(
                           count,
                           BOT_LIBRARY_GROUP_BOT_CAP
                         )}{wouldOverflow ? " - too full" : ""})
@@ -60124,7 +60481,7 @@ function HomeContent(): React.JSX.Element {
             {createUsesExistingGroup ? (
               <p className={styles.botLibraryGroupDialogHint}>
                 These bots will be added to {createDestinationGroup.name}. Result:{" "}
-                {botLibraryGroupCountLabel(
+                {botLibraryGroupCapacityLabel(
                   createDestinationMergedCount,
                   BOT_LIBRARY_GROUP_BOT_CAP
                 )}.
@@ -60769,7 +61126,7 @@ function HomeContent(): React.JSX.Element {
     const canFavoriteActions = !isZenSurface && Boolean(activeBot);
     const canExport = !isZenSurface && Boolean(detail && selectedId);
     const selectedBotCanDelete = Boolean(
-      !isZenSurface && activeBot && activeBot.delete_protected !== 1
+      !isZenSurface && activeBot && !isBotDeleteProtected(activeBot.id)
     );
     const canDelete = Boolean(!isZenSurface && ((detail && selectedId) || selectedBotCanDelete));
     /** Always allow header tools (Sandbox non-zen was the only case that disabled during first reply / pending). */
@@ -60949,7 +61306,7 @@ function HomeContent(): React.JSX.Element {
         closeMenu();
         return;
       }
-      if (activeBot && activeBot.delete_protected !== 1) {
+      if (activeBot && !isBotDeleteProtected(activeBot.id)) {
         disarmDelete();
         void deleteBot(activeBot.id);
         closeMenu();
@@ -60968,7 +61325,7 @@ function HomeContent(): React.JSX.Element {
         : detail && selectedId
           ? "Delete this chat"
           : activeBot
-            ? activeBot.delete_protected === 1
+            ? isBotDeleteProtected(activeBot.id)
               ? "Delete is disabled for protected bots"
               : "Delete this bot"
             : "Delete";
@@ -61882,7 +62239,7 @@ function HomeContent(): React.JSX.Element {
     const isArmedSingle = pendingDeleteKey === botKey;
     const isHolding = holdingKey === botKey;
     const armedAll = pendingDeleteKey === DELETE_ALL_BOTS_KEY;
-    const isProtected = bot.delete_protected === 1;
+    const isProtected = isBotDeleteProtected(bot.id);
 
     const className = [
       styles.botCardDelete,
@@ -66910,50 +67267,27 @@ function HomeContent(): React.JSX.Element {
             scope={settingsScope}
             settingsLoaded={Boolean(settings)}
             panelClosing={panelClosing}
-            busy={busy}
-            accountBackupBusy={accountBackupBusy}
-            accountRestoreBusy={accountRestoreBusy}
-            panelNotice={panelNotice}
-            panelError={panelError}
-            accountImportInputRef={accountImportInputRef}
-            saveIcon={<IconSave />}
-            uploadIcon={<IconUpload />}
-            connectionStatusPills={[
-              {
-                key: "openai",
-                text: openAiKeyDisplay?.overviewText ?? "OpenAI unset",
-                status: openAiKeyDisplay?.overviewStatus ?? "idle",
-              },
-              {
-                key: "anthropic",
-                text: anthropicKeyDisplay?.overviewText ?? "Anthropic unset",
-                status: anthropicKeyDisplay?.overviewStatus ?? "idle",
-              },
-              {
-                key: "elevenlabs",
-                text: elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset",
-                status: elevenLabsKeyDisplay?.overviewStatus ?? "idle",
-              },
-              {
-                key: "secondary-ollama",
-                text: secondaryOllamaStatusText,
-                status: secondaryOllamaUiStatus,
-              },
-              {
-                key: "comfyui",
-                text: comfyUiStatusText,
-                status: comfyUiUiStatus,
-              },
-            ]}
+            headerAccessory={
+              <button
+                type="button"
+                className={`${styles.panelHeaderIconButton} ${styles.settingsHeaderThemeButton}`}
+                onClick={() => void cycleThemeMode()}
+                aria-label={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+                }
+                data-glyph-tooltip={
+                  effectiveThemeMode === "system"
+                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
+                }
+              >
+                <ThemeGlyph mode={effectiveThemeMode} />
+              </button>
+            }
             onScopeChange={setSettingsScope}
             onClose={closePanel}
-            onAccountImportFileSelection={(event) => {
-              void handleAccountImportFileSelection(event);
-            }}
-            onExportAccount={() => {
-              void exportAccountAsPrismArchive();
-            }}
-            onOpenAccountImportPicker={openAccountImportPicker}
             renderScopeContent={(activeSettingsScope: SettingsLeafScope) => (
               <>
           {settings && activeSettingsScope === "coffee" && (
@@ -66961,14 +67295,6 @@ function HomeContent(): React.JSX.Element {
               className={`${styles.form} ${styles.settingsWorkspace}`}
               onSubmit={saveCoffeeModeSettings}
             >
-              <section className={styles.settingsOverview} aria-label="Coffee Mode settings overview">
-                <div>
-                  <span className={styles.settingsEyebrow}>Coffee Mode</span>
-                  <h4>Table Settings</h4>
-                  <p>Session display preferences for the Coffee table.</p>
-                </div>
-              </section>
-
               <div className={styles.settingsSectionGrid}>
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
@@ -67035,17 +67361,10 @@ function HomeContent(): React.JSX.Element {
           )}
           {settings && activeSettingsScope === "zen" && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveZenModeSettings}>
-              <section className={styles.settingsOverview} aria-label="Zen Mode settings overview">
-                <div>
-                  <span className={styles.settingsEyebrow}>Zen Mode</span>
-                  <h4>Session &amp; Atmosphere</h4>
-                  <p>Current session break: {formatZenDuration(zenSessionIdleGapMs)} idle. Fresh start: {formatZenDuration(zenFreshStartGapMs, "fresh")}.</p>
-                </div>
-              </section>
-
               <div className={styles.settingsSectionGrid}>
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="zen"
                   aria-labelledby="zen-session-settings-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -67696,33 +68015,11 @@ function HomeContent(): React.JSX.Element {
             activeSettingsScope !== "coffee" &&
             activeSettingsScope !== "zen" && (
             <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveSettings}>
-              <section className={styles.settingsOverview} aria-label="Settings overview">
-                <div>
-                  <span className={styles.settingsEyebrow}>Workspace settings</span>
-                  <h4>Prism Control Room</h4>
-                  <p>
-                    Connections, model routing, memory behavior, and account controls in one place.
-                  </p>
-                </div>
-                <div className={styles.settingsStatusPills} aria-label="Connection status">
-                  <span data-status={openAiKeyDisplay?.overviewStatus ?? "idle"}>
-                    {openAiKeyDisplay?.overviewText ?? "OpenAI unset"}
-                  </span>
-                  <span data-status={anthropicKeyDisplay?.overviewStatus ?? "idle"}>
-                    {anthropicKeyDisplay?.overviewText ?? "Anthropic unset"}
-                  </span>
-                  <span data-status={elevenLabsKeyDisplay?.overviewStatus ?? "idle"}>
-                    {elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset"}
-                  </span>
-                  <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
-                  <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
-                </div>
-              </section>
-
               <div className={styles.settingsSectionGrid}>
                 {activeSettingsScope === "connections" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="connections"
                   aria-labelledby="settings-connections-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -67740,6 +68037,19 @@ function HomeContent(): React.JSX.Element {
                       </PanelSectionInfo>
                     </div>
                   </header>
+                  <div className={styles.settingsStatusPills} aria-label="Connection status">
+                    <span data-status={openAiKeyDisplay?.overviewStatus ?? "idle"}>
+                      {openAiKeyDisplay?.overviewText ?? "OpenAI unset"}
+                    </span>
+                    <span data-status={anthropicKeyDisplay?.overviewStatus ?? "idle"}>
+                      {anthropicKeyDisplay?.overviewText ?? "Anthropic unset"}
+                    </span>
+                    <span data-status={elevenLabsKeyDisplay?.overviewStatus ?? "idle"}>
+                      {elevenLabsKeyDisplay?.overviewText ?? "ElevenLabs unset"}
+                    </span>
+                    <span data-status={secondaryOllamaUiStatus}>{secondaryOllamaStatusText}</span>
+                    <span data-status={comfyUiUiStatus}>{comfyUiStatusText}</span>
+                  </div>
                   <div className={styles.settingsFieldGrid}>
                     <label className={styles.settingsHostField}>
                       <span className={styles.settingsHostLabel}>OpenAI key</span>
@@ -67930,6 +68240,7 @@ function HomeContent(): React.JSX.Element {
                 {activeSettingsScope === "experimental" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="experimental"
                   aria-labelledby="settings-experimental-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -68254,6 +68565,7 @@ function HomeContent(): React.JSX.Element {
                 {activeSettingsScope === "account" && (
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="account"
                   aria-labelledby="settings-account-title"
                 >
                   <header className={styles.settingsSectionHeader}>
@@ -68271,8 +68583,43 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </header>
                   <p className={styles.settingsCompactCopy}>
-                    Export and import live in the header. Pairing codes are disabled in the standalone app.
+                    Manage this local account, profile name, backup files, and destructive data controls.
                   </p>
+                  <div className={styles.settingsAccountDataActions}>
+                    <input
+                      ref={accountImportInputRef}
+                      type="file"
+                      accept=".prism"
+                      className={styles.panelHiddenFileInput}
+                      onChange={(event) => {
+                        void handleAccountImportFileSelection(event);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={() => {
+                        void exportAccountAsPrismArchive();
+                      }}
+                      disabled={busy || accountBackupBusy || accountRestoreBusy}
+                    >
+                      <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                        <IconSave />
+                      </span>
+                      Export backup
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.accountLogoutButton}
+                      onClick={openAccountImportPicker}
+                      disabled={busy || accountBackupBusy || accountRestoreBusy}
+                    >
+                      <span className={styles.panelHeaderImportGlyph} aria-hidden="true">
+                        <IconUpload />
+                      </span>
+                      Import backup
+                    </button>
+                  </div>
                   <div className={styles.accountActionsButtonRow}>
                     <button
                       type="button"
@@ -68901,6 +69248,16 @@ function HomeContent(): React.JSX.Element {
         const botPanelCanSave = botPanelFormActive;
         const trimmedName = newBotName.trim();
         const nameIsPresent = trimmedName.length > 0;
+        const profileReferenceName = botProfileReferenceName({
+          draftName: newBotName,
+          editingBotId,
+          editingBotName: editingBot?.name,
+          editingOriginalName: editOriginalRef.current?.name,
+        });
+        const profileDetailsAreUnlocked = botProfileDetailsUnlocked({
+          draftName: newBotName,
+          editingBotId,
+        });
 
         // Normalize colors to lower-case hex so comparison isn't tripped
         // up by the picker returning "#ABCDEF" while the DB stored
@@ -68927,7 +69284,7 @@ function HomeContent(): React.JSX.Element {
         );
         const currentStoredSystemPrompt = botEditorAdvancedMode
           ? newBotSystemPrompt
-          : serializeStoredBotPrompt(botProfile, trimmedName);
+          : serializeStoredBotPrompt(botProfile, profileReferenceName);
         const pristineSystemPrompt = botEditorAdvancedMode
           ? editPristine?.rawPrompt ?? editPristine?.prompt ?? ""
           : editPristine?.prompt ?? "";
@@ -69063,12 +69420,12 @@ function HomeContent(): React.JSX.Element {
         })();
         const completedProfileCategories = botProfileCompletionCount(botProfile);
         const profileSummary =
-          !nameIsPresent
+          !profileDetailsAreUnlocked
             ? "Name this bot to unlock profile details"
             : completedProfileCategories === 0
             ? "Purpose only"
             : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
-        const profileProgressPercent = nameIsPresent
+        const profileProgressPercent = profileDetailsAreUnlocked
           ? Math.round(
               (completedProfileCategories / BOT_PROFILE_BUILDER_PAGE_ORDER.length) * 100
             )
@@ -69086,7 +69443,7 @@ function HomeContent(): React.JSX.Element {
           newBotTopK !== BOT_TOP_K_DEFAULT ||
           newBotRepetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT;
         const botIdentityDisplayName =
-          trimmedName || editingBot?.name?.trim() || "Unnamed bot";
+          trimmedName || profileReferenceName || editingBot?.name?.trim() || "Unnamed bot";
         const botPanelMode = editingBotId ? "edit" : "create";
         const botPanelTitle =
           botPanelView === "home"
@@ -69186,15 +69543,18 @@ function HomeContent(): React.JSX.Element {
           botPanelView !== "home" &&
           (botPanelView !== "customize" || Boolean(editingBotId || selectedBotPanelBot));
         const headerTrashTargetBot = botPanelTargetBot;
+        const headerTrashTargetProtected = Boolean(
+          headerTrashTargetBot && isBotDeleteProtected(headerTrashTargetBot.id)
+        );
         const headerTrashEnabled =
           !busy &&
           (botPanelView === "create" ||
-            Boolean(headerTrashTargetBot && headerTrashTargetBot.delete_protected !== 1));
+            Boolean(headerTrashTargetBot && !headerTrashTargetProtected));
         const headerTrashAriaLabel = busy
           ? "Wait for the current action to finish"
           : botPanelView === "create"
             ? "Clear all fields in the new bot form"
-            : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
+            : headerTrashTargetProtected
               ? "Delete bot — protected; allow deletion from its group dashboard first"
               : headerTrashTargetBot
                 ? `Delete ${headerTrashTargetBot.name}`
@@ -69203,7 +69563,7 @@ function HomeContent(): React.JSX.Element {
           ? "Wait for the current action to finish"
           : botPanelView === "create"
             ? "Clear the customizer and start a fresh new bot"
-            : headerTrashTargetBot && headerTrashTargetBot.delete_protected === 1
+            : headerTrashTargetProtected
               ? "Protected bot — allow deletion from its group dashboard"
               : headerTrashTargetBot
                 ? `Delete ${headerTrashTargetBot.name}`
@@ -69334,7 +69694,7 @@ function HomeContent(): React.JSX.Element {
                         resetBotForm();
                         return;
                       }
-                      if (!headerTrashTargetBot || headerTrashTargetBot.delete_protected === 1) return;
+                      if (!headerTrashTargetBot || headerTrashTargetProtected) return;
                       disarmDelete();
                       setPanelBotDeleteConfirm({
                         id: headerTrashTargetBot.id,
@@ -70117,7 +70477,7 @@ function HomeContent(): React.JSX.Element {
               </section>
               <BotAvatarCustomizer
                 open={botAvatarCustomizerOpen}
-                botName={trimmedName}
+                botName={profileReferenceName}
                 scheduleKey={`bot-avatar-modal-${editingBotId ?? "draft"}`}
                 faceEyesFont={newBotFaceEyesFont}
                 faceMouthFont={newBotFaceMouthFont}
@@ -70266,7 +70626,7 @@ function HomeContent(): React.JSX.Element {
 	                        const complete = botProfileCategoryComplete(
 	                          botProfile,
 	                          category,
-	                          trimmedName
+	                          profileReferenceName
 	                        );
 	                        return (
 	                          <button
@@ -70274,10 +70634,10 @@ function HomeContent(): React.JSX.Element {
 	                            type="button"
 	                            className={styles.botProfileSummaryButton}
 	                            data-complete={complete ? "true" : undefined}
-	                            data-locked={!nameIsPresent ? "true" : undefined}
-	                            disabled={!nameIsPresent}
+	                            data-locked={!profileDetailsAreUnlocked ? "true" : undefined}
+	                            disabled={!profileDetailsAreUnlocked}
 	                            onClick={() => {
-	                              if (!nameIsPresent) return;
+	                              if (!profileDetailsAreUnlocked) return;
 	                              setColorWheelOpen(false);
 	                              setBotAvatarCustomizerOpen(false);
 	                              setBotAiParametersModalOpen(false);
@@ -70287,11 +70647,11 @@ function HomeContent(): React.JSX.Element {
 	                          >
 	                            <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
 	                            <small>
-	                              {nameIsPresent
-	                                ? botProfileCategorySummary(botProfile, category, trimmedName)
+	                              {profileDetailsAreUnlocked
+	                                ? botProfileCategorySummary(botProfile, category, profileReferenceName)
 	                                : "Enter a name first"}
 	                            </small>
-	                            <strong>{!nameIsPresent ? "Locked" : complete ? "Complete" : "Optional"}</strong>
+	                            <strong>{!profileDetailsAreUnlocked ? "Locked" : complete ? "Complete" : "Optional"}</strong>
 	                          </button>
 	                        );
 	                      })()
@@ -70303,7 +70663,7 @@ function HomeContent(): React.JSX.Element {
 	                open={botProfileBuilderOpen}
                 activePage={botProfileActivePage}
                 profile={botProfile}
-                botName={trimmedName}
+                botName={profileReferenceName}
                 onActivePageChange={setBotProfileActivePage}
 	                onProfileChange={setBotProfile}
 	                onClose={() => setBotProfileBuilderOpen(false)}
@@ -70958,7 +71318,7 @@ function HomeContent(): React.JSX.Element {
                             ).length;
                             return (
                               <option key={group.id} value={group.id}>
-                                {group.name} ({botLibraryGroupCountLabel(
+                                {group.name} ({botLibraryGroupCapacityLabel(
                                   count,
                                   BOT_LIBRARY_GROUP_BOT_CAP
                                 )})
@@ -81961,32 +82321,22 @@ function HomeContent(): React.JSX.Element {
             if (showFocusedBotLibraryGroup && focusedBotLibraryGroup) {
               const groupDashboardBots = baseFilteredPanelBots;
               const groupDescription = focusedBotLibraryGroup.description.trim();
-              const groupCountLabel = botLibraryGroupCountLabel(
-                groupDashboardBots.length,
-                focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP
-              );
               const groupProtectedBotCount = groupDashboardBots.filter(
-                (bot) => bot.delete_protected === 1
+                (bot) => isBotDeleteProtected(bot.id)
               ).length;
-              const groupDeleteProtected =
-                groupDashboardBots.length > 0 &&
-                groupProtectedBotCount === groupDashboardBots.length;
-              const groupPartiallyProtected =
-                groupProtectedBotCount > 0 &&
-                groupProtectedBotCount < groupDashboardBots.length;
+              const groupEyebrowLabel = botLibraryGroupDashboardEyebrowLabel(
+                groupDashboardBots.length,
+                focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
+                groupProtectedBotCount
+              );
+              const groupDeleteProtected = focusedBotLibraryGroup.deleteProtected;
               const nextGroupDeleteProtected = !groupDeleteProtected;
               const groupProtectionLabel = groupDeleteProtected
                 ? "Allow deletion"
-                : groupPartiallyProtected
-                  ? "Protect all"
-                  : "Protect group";
+                : "Protect group";
               const groupProtectionTitle = groupDeleteProtected
-                ? `Allow deletion for all bots in ${focusedBotLibraryGroup.name}`
-                : `Protect all bots in ${focusedBotLibraryGroup.name} from deletion`;
-              const groupEyebrowLabel =
-                groupProtectedBotCount > 0
-                  ? `${groupCountLabel} · ${groupProtectedBotCount} protected`
-                  : groupCountLabel;
+                ? `Allow deletion for bots in ${focusedBotLibraryGroup.name}`
+                : `Protect bots in ${focusedBotLibraryGroup.name} from deletion`;
               return (
                 <div
                   className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
@@ -82026,12 +82376,10 @@ function HomeContent(): React.JSX.Element {
                           type="button"
                           className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
                           data-active={groupDeleteProtected ? "true" : undefined}
-                          disabled={groupDashboardBots.length === 0}
                           onClick={() =>
-                            void setBotsDeleteProtection(
-                              groupDashboardBots,
-                              nextGroupDeleteProtected,
-                              { groupName: focusedBotLibraryGroup.name }
+                            setBotLibraryGroupDeleteProtection(
+                              focusedBotLibraryGroup.id,
+                              nextGroupDeleteProtected
                             )
                           }
                           aria-label={groupProtectionTitle}
@@ -82073,7 +82421,8 @@ function HomeContent(): React.JSX.Element {
                         aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
                       >
                         {groupDashboardBots.map((b) => {
-                          const isProtected = b.delete_protected === 1;
+                          const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
+                          const isProtected = isBotDeleteProtected(b.id);
                           const isFavorite = favoriteBotIdSet.has(b.id);
                           const tileTraits = [
                             isFavorite ? "favorite" : null,
@@ -82095,6 +82444,7 @@ function HomeContent(): React.JSX.Element {
                             styles.chatBotTileWithName,
                             styles.botGroupDashboardBotTile,
                             isProtected ? styles.chatBotTileProtected : null,
+                            isMarqueeSelected ? styles.chatBotTileMarqueeSelected : null,
                           ].filter(Boolean).join(" ");
                           return (
                             <button
@@ -82102,7 +82452,32 @@ function HomeContent(): React.JSX.Element {
                               type="button"
                               className={tileClassName}
                               style={tileStyle}
-                              onClick={() => commitEmptyStateBotSelection(b.id)}
+                              data-bot-id={b.id}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                openBotLibraryGroupBotContextMenu(
+                                  focusedBotLibraryGroup.id,
+                                  b,
+                                  event.clientX,
+                                  event.clientY
+                                );
+                              }}
+                              onClick={(event) => {
+                                if (canvasBotMarqueeSuppressClickRef.current) {
+                                  canvasBotMarqueeSuppressClickRef.current = false;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  return;
+                                }
+                                if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  toggleCanvasBotSelection(b.id);
+                                  return;
+                                }
+                                commitEmptyStateBotSelection(b.id);
+                              }}
                               aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
                               data-favorite={isFavorite ? "true" : undefined}
                               data-delete-protected={isProtected ? "true" : undefined}
@@ -82403,7 +82778,7 @@ function HomeContent(): React.JSX.Element {
                           }
                           const isSelected = sandboxGridSelectedBotId === b.id;
                           const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
-                          const isProtected = b.delete_protected === 1;
+                          const isProtected = isBotDeleteProtected(b.id);
                           const isFavorite = favoriteBotIdSet.has(b.id);
                           const tileTraits = [
                             isFavorite ? "favorite" : null,
@@ -82502,7 +82877,7 @@ function HomeContent(): React.JSX.Element {
                                 return;
                               }
                               const multiSelectionIds =
-                                canvasSelectedBotIds.size > 1 && canvasSelectedBotIds.has(b.id)
+                                canvasSelectedBotIds.size > 1
                                   ? Array.from(canvasSelectedBotIds)
                                   : [];
                               openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);
