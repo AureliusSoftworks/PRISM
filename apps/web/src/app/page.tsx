@@ -83074,6 +83074,7 @@ function HomeContent(): React.JSX.Element {
                           const showFeaturedName =
                             !geom.compactPixelGrid &&
                             geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
+                          const botTileTooltip = showFeaturedName ? undefined : b.name;
                           if (showFeaturedName) {
                             tileClassName += ` ${styles.chatBotTileWithName}`;
                             if (
@@ -83102,6 +83103,7 @@ function HomeContent(): React.JSX.Element {
                             aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
                             className={tileClassName}
                             data-bot-id={b.id}
+                            data-glyph-tooltip={botTileTooltip}
                             data-favorite={isFavorite ? "true" : undefined}
                             data-delete-protected={isProtected ? "true" : undefined}
                             onPointerDown={e => {
@@ -83188,7 +83190,6 @@ function HomeContent(): React.JSX.Element {
                               }
                               commitEmptyStateBotSelection(b.id);
                             }}
-                            title={b.name}
                             style={tileStyle}
                           >
                             {showTileGlyph && (
@@ -83220,9 +83221,6 @@ function HomeContent(): React.JSX.Element {
                                 {b.name}
                               </span>
                             )}
-                            <span className={styles.chatBotTileHoverLabel} aria-hidden="true">
-                              {b.name}
-                            </span>
                           </button>
                         );
                         })}
