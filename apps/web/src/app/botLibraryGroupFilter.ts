@@ -13,6 +13,16 @@ export interface BotLibraryGroupMaintenanceGroup {
   id: string;
   botIds: string[];
   builtIn?: boolean;
+  marketplaceThemeId?: string | null;
+}
+
+export interface BotLibraryGroupUpsertGroup extends BotLibraryGroupMaintenanceGroup {
+  name: string;
+  description: string;
+  deleteProtected: boolean;
+  builtIn: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BotLibraryGroupSelectionGroup {
@@ -26,6 +36,15 @@ export interface BotLibraryMultiSelectionActions<
 > {
   canCreateGroup: boolean;
   removableGroup: TGroup | null;
+}
+
+export interface UpsertBotLibraryGroupOptions {
+  name: string;
+  description?: string;
+  botIds: readonly string[];
+  marketplaceThemeId?: string | null;
+  now?: string;
+  createGroupId: () => string;
 }
 
 export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
@@ -81,7 +100,12 @@ export function pruneBotLibraryGroupsWithFewBots<
   minimumCustomBots = BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS
 ): TGroup[] {
   return groups.filter(
-    (group) => group.builtIn === true || group.botIds.length >= minimumCustomBots
+    (group) =>
+      group.builtIn === true ||
+      group.botIds.length >= minimumCustomBots ||
+      (typeof group.marketplaceThemeId === "string" &&
+        group.marketplaceThemeId.trim().length > 0 &&
+        group.botIds.length > 0)
   );
 }
 
@@ -129,4 +153,57 @@ export function resolveBotLibraryMultiSelectionActions<
     canCreateGroup: selectedSet.size >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
     removableGroup: resolveCommonBotLibraryGroupForSelection(groups, selectedBotIds),
   };
+}
+
+export function upsertBotLibraryGroup<
+  TGroup extends BotLibraryGroupUpsertGroup,
+>(
+  groups: readonly TGroup[],
+  options: UpsertBotLibraryGroupOptions
+): TGroup[] {
+  const name = options.name.trim();
+  if (!name) return [...groups];
+
+  const botIds = Array.from(
+    new Set(options.botIds.filter((botId) => typeof botId === "string" && botId.trim().length > 0))
+  );
+  if (botIds.length === 0) return [...groups];
+
+  const now = options.now ?? new Date().toISOString();
+  const description = options.description?.trim() ?? "";
+  const marketplaceThemeId = options.marketplaceThemeId?.trim().toLowerCase() || null;
+  const normalizedName = name.toLowerCase();
+  const existingIndex = groups.findIndex((group) => {
+    const groupMarketplaceThemeId = group.marketplaceThemeId?.trim().toLowerCase() || null;
+    if (marketplaceThemeId && groupMarketplaceThemeId === marketplaceThemeId) return true;
+    return group.name.trim().toLowerCase() === normalizedName;
+  });
+
+  if (existingIndex >= 0) {
+    const existing = groups[existingIndex]!;
+    const next = [...groups];
+    next[existingIndex] = {
+      ...existing,
+      description: description || existing.description,
+      botIds: Array.from(new Set([...existing.botIds, ...botIds])),
+      marketplaceThemeId: marketplaceThemeId ?? existing.marketplaceThemeId ?? null,
+      updatedAt: now,
+    };
+    return next;
+  }
+
+  return [
+    ...groups,
+    {
+      id: options.createGroupId(),
+      name,
+      description,
+      botIds,
+      deleteProtected: false,
+      builtIn: false,
+      marketplaceThemeId,
+      createdAt: now,
+      updatedAt: now,
+    } as TGroup,
+  ];
 }

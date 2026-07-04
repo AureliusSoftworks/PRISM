@@ -258,6 +258,7 @@ import {
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
   resolveBotLibraryMultiSelectionActions,
+  upsertBotLibraryGroup,
 } from "./botLibraryGroupFilter";
 import {
   resolveCanvasBotMarqueeSelection,
@@ -7998,6 +7999,7 @@ interface BotLibraryGroup {
   name: string;
   description: string;
   botIds: string[];
+  marketplaceThemeId?: string | null;
   deleteProtected: boolean;
   builtIn: boolean;
   createdAt: string;
@@ -8234,6 +8236,7 @@ function createPrismStarterBotGroup(
     name: BOT_LIBRARY_STARTER_GROUP_NAME,
     description: BOT_LIBRARY_STARTER_GROUP_DESCRIPTION,
     botIds: uniqueBotIds,
+    marketplaceThemeId: BOT_MARKETPLACE_STARTER_THEME_ID,
     deleteProtected: false,
     builtIn: false,
     createdAt: now,
@@ -8266,6 +8269,11 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
             botIds: Array.isArray(record.botIds)
               ? record.botIds.filter((id): id is string => typeof id === "string")
               : [],
+            marketplaceThemeId:
+              typeof record.marketplaceThemeId === "string" &&
+              record.marketplaceThemeId.trim().length > 0
+                ? record.marketplaceThemeId.trim().toLowerCase()
+                : null,
             deleteProtected: record.deleteProtected === true,
             builtIn,
             createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
@@ -8329,6 +8337,59 @@ function createBotLibraryGroupId(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? `group:${crypto.randomUUID()}`
     : `group:${Date.now().toString(36)}`;
+}
+
+interface MarketplaceInstalledBotReference {
+  botHash: string | null;
+  botId: string;
+}
+
+function botIdByMarketplaceHash(
+  bots: readonly Bot[],
+  extraInstalledBots: readonly MarketplaceInstalledBotReference[] = []
+): Map<string, string> {
+  const byHash = new Map<string, string>();
+  for (const bot of bots) {
+    const hash = normalizeImportedBotHash(bot.export_hash);
+    if (hash) byHash.set(hash, bot.id);
+  }
+  for (const bot of extraInstalledBots) {
+    const hash = normalizeImportedBotHash(bot.botHash);
+    if (hash && bot.botId.trim().length > 0) {
+      byHash.set(hash, bot.botId);
+    }
+  }
+  return byHash;
+}
+
+function upsertMarketplaceBotLibraryThemeGroups(
+  groups: readonly BotLibraryGroup[],
+  manifest: BotMarketplaceManifest,
+  touchedEntries: readonly BotMarketplaceEntry[],
+  installedBots: readonly Bot[],
+  extraInstalledBots: readonly MarketplaceInstalledBotReference[] = []
+): BotLibraryGroup[] {
+  const touchedEntryIds = new Set(touchedEntries.map((entry) => entry.id));
+  if (touchedEntryIds.size === 0) return [...groups];
+
+  const installedBotIdByHash = botIdByMarketplaceHash(installedBots, extraInstalledBots);
+  let nextGroups = normalizeBotLibraryGroups(groups);
+  for (const theme of manifest.themes) {
+    const themeEntries = marketplaceEntriesForTheme(manifest, theme.id);
+    if (!themeEntries.some((entry) => touchedEntryIds.has(entry.id))) continue;
+    const themeBotIds = themeEntries
+      .map((entry) => installedBotIdByHash.get(entry.botHash) ?? null)
+      .filter((botId): botId is string => Boolean(botId));
+    if (themeBotIds.length === 0) continue;
+    nextGroups = upsertBotLibraryGroup(nextGroups, {
+      name: theme.name,
+      description: theme.description,
+      botIds: themeBotIds,
+      marketplaceThemeId: theme.id,
+      createGroupId: createBotLibraryGroupId,
+    });
+  }
+  return normalizeBotLibraryGroups(nextGroups);
 }
 
 function createBuiltInHelpCommand(): CommandCenterCommand {
@@ -52582,6 +52643,17 @@ function HomeContent(): React.JSX.Element {
         selectInChat: false,
         keepBotsPanelOpen: true,
       });
+      if (botMarketplaceManifest) {
+        setBotLibraryGroups((current) =>
+          upsertMarketplaceBotLibraryThemeGroups(
+            current,
+            botMarketplaceManifest,
+            [entry],
+            bots,
+            [{ botHash: result.importedBotHash ?? entry.botHash, botId: result.botId }]
+          )
+        );
+      }
       setBotPanelView("marketplace");
       setPanelNotice(
         result.restoredMemories > 0
@@ -52608,6 +52680,7 @@ function HomeContent(): React.JSX.Element {
         ({ entry }) => !botMarketplaceInstalledHashes.has(entry.botHash)
       );
       const importedIds: string[] = [];
+      const importedBotReferences: MarketplaceInstalledBotReference[] = [];
       let restoredTotal = 0;
       for (const bundle of missingPrepared) {
         const result = await importBotFromExportRawText(bundle.raw, {
@@ -52618,10 +52691,23 @@ function HomeContent(): React.JSX.Element {
           keepBotsPanelOpen: true,
         });
         importedIds.push(result.botId);
+        importedBotReferences.push({
+          botHash: result.importedBotHash ?? bundle.entry.botHash,
+          botId: result.botId,
+        });
         restoredTotal += result.restoredMemories;
       }
-      await refreshBots();
+      const refreshedBots = await refreshBots();
       await refreshMemories();
+      setBotLibraryGroups((current) =>
+        upsertMarketplaceBotLibraryThemeGroups(
+          current,
+          botMarketplaceManifest,
+          entries,
+          refreshedBots,
+          importedBotReferences
+        )
+      );
       setBotPanelView("marketplace");
       if (missingPrepared.length === 0) {
         setPanelNotice(`${theme.name} is already installed.`);
