@@ -1522,8 +1522,9 @@ const IMAGE_GENERATION_SIZE_BY_VARIANT: Record<ImageGenerationVariant, string> =
 };
 const ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
 const ZEN_WALLPAPER_PREGEN_MESSAGE_LEAD = 0;
-const ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
-const ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
+const ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_MIN_PX = 360;
+const ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_MAX_PX = 900;
+const ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_VIEWPORT_RATIO = 0.82;
 const ZEN_IDLE_ERA_GAP_MS = 12 * 60 * 60 * 1000;
 const ZEN_LONG_SESSION_GAP_MS = 7 * 24 * 60 * 60 * 1000;
 const ZEN_SESSION_BOUNDARY_DATE_GAP_MS = 24 * 60 * 60 * 1000;
@@ -1540,14 +1541,6 @@ const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL =
   ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL;
 const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
-const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT =
-  ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
-const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
-const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
-const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT =
-  ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
-const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
-const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 const DEFAULT_ZEN_CANVAS_TYPING_SPEED = 1;
 const MIN_ZEN_CANVAS_TYPING_SPEED = 0.25;
 const MAX_ZEN_CANVAS_TYPING_SPEED = 3;
@@ -7460,8 +7453,6 @@ interface UserSettings {
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
   zenWallpaperRegenMessageInterval: number;
-  zenWallpaperRevealDelayMessageCount: number;
-  zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
   zenCanvasTypingSpeed: number;
   zenMessageFontMinPx: number;
@@ -7492,8 +7483,6 @@ type ZenModeSettingsFields = Pick<
   | "zenFreshStartGapMs"
   | "zenRecentContextMessages"
   | "zenWallpaperRegenMessageInterval"
-  | "zenWallpaperRevealDelayMessageCount"
-  | "zenWallpaperRevealSpanMessageCount"
   | "zenMoodSensitivity"
   | "zenCanvasTypingSpeed"
   | "zenMessageFontMinPx"
@@ -10271,24 +10260,6 @@ function normalizeZenWallpaperRegenMessageIntervalSetting(value: unknown): numbe
   );
 }
 
-function normalizeZenWallpaperRevealDelayMessageCountSetting(value: unknown): number {
-  return normalizeIntegerSetting(
-    value,
-    DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
-  );
-}
-
-function normalizeZenWallpaperRevealSpanMessageCountSetting(value: unknown): number {
-  return normalizeIntegerSetting(
-    value,
-    DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
-    MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
-  );
-}
-
 function normalizeZenMoodSensitivitySetting(value: unknown): number {
   return normalizePrismMoodSensitivity(value, DEFAULT_ZEN_MOOD_SENSITIVITY);
 }
@@ -10396,10 +10367,6 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
     zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
-    zenWallpaperRevealDelayMessageCount:
-      DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    zenWallpaperRevealSpanMessageCount:
-      DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
     zenMessageFontMinPx: DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
@@ -10483,14 +10450,6 @@ function normalizeZenModeSettingsFields(
     zenWallpaperRegenMessageInterval:
       normalizeZenWallpaperRegenMessageIntervalSetting(
         settings?.zenWallpaperRegenMessageInterval
-      ),
-    zenWallpaperRevealDelayMessageCount:
-      normalizeZenWallpaperRevealDelayMessageCountSetting(
-        settings?.zenWallpaperRevealDelayMessageCount
-      ),
-    zenWallpaperRevealSpanMessageCount:
-      normalizeZenWallpaperRevealSpanMessageCountSetting(
-        settings?.zenWallpaperRevealSpanMessageCount
       ),
     zenMoodSensitivity: normalizeZenMoodSensitivitySetting(
       settings?.zenMoodSensitivity
@@ -20431,18 +20390,6 @@ function normalizeZenAtmosphereHistory(
         : null;
     if (generationMessageCount === null) return;
     const previous = byImageId.get(imageId);
-    const rawRevealStart = entry?.revealStartMessageCount;
-    const revealStartMessageCount =
-      typeof rawRevealStart === "number" && Number.isFinite(rawRevealStart)
-        ? Math.max(0, Math.floor(rawRevealStart))
-        : previous?.revealStartMessageCount ??
-          generationMessageCount + ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT;
-    const rawRevealFull = entry?.revealFullMessageCount;
-    const revealFullMessageCount =
-      typeof rawRevealFull === "number" && Number.isFinite(rawRevealFull)
-        ? Math.max(revealStartMessageCount, Math.floor(rawRevealFull))
-        : previous?.revealFullMessageCount ??
-          revealStartMessageCount + ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT;
     byImageId.set(imageId, {
       imageId,
       promptSeed:
@@ -20450,8 +20397,6 @@ function normalizeZenAtmosphereHistory(
           ? entry.promptSeed.trim()
           : previous?.promptSeed ?? null,
       generationMessageCount,
-      revealStartMessageCount,
-      revealFullMessageCount,
       ...(entry?.createdAt || previous?.createdAt
         ? { createdAt: entry?.createdAt ?? previous?.createdAt }
         : {}),
@@ -28819,8 +28764,6 @@ function HomeContent(): React.JSX.Element {
     zenFreshStartGapMs,
     zenRecentContextMessages,
     zenWallpaperRegenMessageInterval,
-    zenWallpaperRevealDelayMessageCount,
-    zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
     zenCanvasTypingSpeed,
     zenMessageFontMinPx,
@@ -30029,9 +29972,7 @@ function HomeContent(): React.JSX.Element {
       zenAtmosphereTimeline
         .map(
           (entry) =>
-            `${entry.imageId}:${entry.generationMessageCount}:${
-              entry.revealStartMessageCount ?? ""
-            }:${entry.revealFullMessageCount ?? ""}:${entry.createdAt ?? ""}`
+            `${entry.imageId}:${entry.generationMessageCount}:${entry.createdAt ?? ""}`
         )
         .join("|"),
     [zenAtmosphereTimeline]
@@ -30041,17 +29982,14 @@ function HomeContent(): React.JSX.Element {
     const visibleMessageCount = detail?.messages.length ?? 0;
     return calculateZenAtmosphereLayerOpacitiesForReader({
       timeline: zenAtmosphereTimeline,
-      readerY: visibleMessageCount,
-      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
-      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      readerY: visibleMessageCount + 1,
+      revealScrollDistancePx: 1,
       messageCountToY: (messageCount) => messageCount,
     });
   }, [
     view,
     detail?.messages.length,
     zenAtmosphereTimelineKey,
-    zenWallpaperRevealDelayMessageCount,
-    zenWallpaperRevealSpanMessageCount,
   ]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageGlobalPositiveKeywords, setImageGlobalPositiveKeywords] = useState<string[]>(
@@ -49292,6 +49230,7 @@ function HomeContent(): React.JSX.Element {
     const rootRect = scrollRoot.getBoundingClientRect();
     const messageCountToY = (messageCount: number): number => {
       const count = Math.max(0, Math.floor(messageCount));
+      if (count === 0) return 0;
       if (messages.length === 0) {
         return count * Math.max(140, scrollRoot.clientHeight * 0.22);
       }
@@ -49299,14 +49238,8 @@ function HomeContent(): React.JSX.Element {
         const anchorMessage = messages[count - 1];
         const row = anchorMessage ? findMessageRowById(scrollRoot, anchorMessage.id) : null;
         if (row) {
-          const anchor = findChatModeMessageScrollAnchor(row);
-          const anchorRect = anchor.getBoundingClientRect();
-          return (
-            anchorRect.top -
-            rootRect.top +
-            scrollRoot.scrollTop +
-            anchorRect.height / 2
-          );
+          const rowRect = row.getBoundingClientRect();
+          return rowRect.top - rootRect.top + scrollRoot.scrollTop;
         }
       }
       if (count <= messages.length) {
@@ -49319,11 +49252,17 @@ function HomeContent(): React.JSX.Element {
       return scrollRoot.scrollHeight + (count - messages.length) * averageMessageHeight;
     };
     const readerY = scrollRoot.scrollTop + scrollRoot.clientHeight * 0.5;
+    const revealScrollDistancePx = Math.min(
+      ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_MAX_PX,
+      Math.max(
+        ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_MIN_PX,
+        scrollRoot.clientHeight * ZEN_ATMOSPHERE_REVEAL_SCROLL_DISTANCE_VIEWPORT_RATIO
+      )
+    );
     return calculateZenAtmosphereLayerOpacitiesForReader({
       timeline: zenAtmosphereTimeline,
       readerY,
-      revealDelayMessageCount: zenWallpaperRevealDelayMessageCount,
-      revealSpanMessageCount: zenWallpaperRevealSpanMessageCount,
+      revealScrollDistancePx,
       messageCountToY,
     });
   }
@@ -56101,11 +56040,6 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  function ungroupSelectedBots(groupId: string, selectedBotIds: string[]): void {
-    if (selectedBotIds.length < 2) return;
-    removeBotsFromLibraryGroup(groupId, selectedBotIds);
-  }
-
   // User-facing bulk wipe reached via press-and-hold on any bot card ×.
   // Mirrors `deleteAllConversations` exactly: optimistic clear, best-effort
   // server sync, snapshot rollback on failure. This belongs to the normal
@@ -60057,9 +59991,8 @@ function HomeContent(): React.JSX.Element {
     const isMultiSelectionMenu = multiSelectedBots.length > 1;
     const multiSelectedBotIds = multiSelectedBots.map((candidate) => candidate.id);
     const multiSelectionGroupActions = isMultiSelectionMenu
-      ? resolveBotLibraryMultiSelectionActions(botLibraryGroups, multiSelectedBotIds)
+      ? resolveBotLibraryMultiSelectionActions(multiSelectedBotIds)
       : null;
-    const commonGroup = multiSelectionGroupActions?.removableGroup ?? null;
     const botLibraryGroupContext = botContextMenu.groupId
       ? botLibraryGroups.find((group) => group.id === botContextMenu.groupId) ?? null
       : null;
@@ -60068,7 +60001,7 @@ function HomeContent(): React.JSX.Element {
     const singleBotIsGridSelected = canvasSelectedBotIds.has(bot.id);
     const hasMultipleCanvasSelectedBots = canvasSelectedBotIds.size > 1;
     const singleBotAddToGroupOptions =
-      !isMultiSelectionMenu && !hasMultipleCanvasSelectedBots
+      !isMultiSelectionMenu
         ? botLibraryAddToGroupOptionsForBot(bot.id)
         : [];
     const botIsFavorite = favoriteBotIdSet.has(bot.id);
@@ -60138,7 +60071,7 @@ function HomeContent(): React.JSX.Element {
               <span>Export bot</span>
             </span>
           </button>
-          {!botLibraryGroupContextIsFavorites ? (
+          {!botLibraryGroupContextIsFavorites && !hasMultipleCanvasSelectedBots ? (
             <button
               type="button"
               role="menuitem"
@@ -60191,26 +60124,6 @@ function HomeContent(): React.JSX.Element {
                 <span className={styles.contextMenuItemLabel}>
                   <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
                   <span>Add to group</span>
-                </span>
-              </button>
-            ) : null}
-            {commonGroup ? (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  closeBotContextMenu();
-                  ungroupSelectedBots(commonGroup.id, multiSelectedBotIds);
-                  setPanelNotice(
-                    multiSelectedBotIds.length === 2
-                      ? `Removed 2 bots from "${commonGroup.name}".`
-                      : `Removed ${multiSelectedBotIds.length} bots from "${commonGroup.name}".`
-                  );
-                }}
-              >
-                <span className={styles.contextMenuItemLabel}>
-                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊖</span>
-                  <span>Remove from {commonGroup.name}</span>
                 </span>
               </button>
             ) : null}
@@ -60294,21 +60207,19 @@ function HomeContent(): React.JSX.Element {
                 <span>Clone bot</span>
               </span>
             </button>
-            {!hasMultipleCanvasSelectedBots ? (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  closeBotContextMenu();
-                  openBotCustomizer(bot);
-                }}
-              >
-                <span className={styles.contextMenuItemLabel}>
-                  <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
-                  <span>Edit bot</span>
-                </span>
-              </button>
-            ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                openBotCustomizer(bot);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                <span>Edit bot</span>
+              </span>
+            </button>
             <button
               type="button"
               role="menuitem"
@@ -68806,7 +68717,7 @@ function HomeContent(): React.JSX.Element {
                         id="settings-section-info-zen-wallpaper"
                         label="About Zen wallpaper settings"
                       >
-                        Controls Zen Atmosphere wallpaper model choices, opacity, style, and generation timing.
+                        Controls Zen Atmosphere wallpaper model choices, opacity, style, and generation cadence.
                       </PanelSectionInfo>
                     </div>
                   </header>
@@ -69001,74 +68912,6 @@ function HomeContent(): React.JSX.Element {
                           setSettings((previous) =>
                             previous
                               ? { ...previous, zenWallpaperRegenMessageInterval: next }
-                              : previous
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className={styles.settingsRangeField}>
-                      <span className={styles.settingsRangeHeader}>
-                        <span className={styles.controlLabelWithInfo}>
-                          <span>Reveal delay</span>
-                          <PanelSectionInfo
-                            id="settings-control-info-zen-wallpaper-reveal-delay"
-                            label="About wallpaper reveal delay"
-                            variant="control"
-                          >
-                            Sets how many messages wait before a newly generated wallpaper begins fading in.
-                          </PanelSectionInfo>
-                        </span>
-                        <span className={styles.settingsRangeValue}>
-                          {zenWallpaperRevealDelayMessageCount} messages
-                        </span>
-                      </span>
-                      <input
-                        type="range"
-                        min={MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT}
-                        max={MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT}
-                        step={1}
-                        value={zenWallpaperRevealDelayMessageCount}
-                        onChange={(event) => {
-                          const next = normalizeZenWallpaperRevealDelayMessageCountSetting(
-                            event.target.value
-                          );
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperRevealDelayMessageCount: next }
-                              : previous
-                          );
-                        }}
-                      />
-                    </label>
-                    <label className={styles.settingsRangeField}>
-                      <span className={styles.settingsRangeHeader}>
-                        <span className={styles.controlLabelWithInfo}>
-                          <span>Reveal span</span>
-                          <PanelSectionInfo
-                            id="settings-control-info-zen-wallpaper-reveal-span"
-                            label="About wallpaper reveal span"
-                            variant="control"
-                          >
-                            Sets how many messages the wallpaper uses to fade from hidden to fully visible.
-                          </PanelSectionInfo>
-                        </span>
-                        <span className={styles.settingsRangeValue}>
-                          {zenWallpaperRevealSpanMessageCount} messages
-                        </span>
-                      </span>
-                      <input
-                        type="range"
-                        min={MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT}
-                        max={MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT}
-                        step={1}
-                        value={zenWallpaperRevealSpanMessageCount}
-                        onChange={(event) => {
-                          const next = normalizeZenWallpaperRevealSpanMessageCountSetting(
-                            event.target.value
-                          );
-                          setSettings((previous) =>
-                            previous
-                              ? { ...previous, zenWallpaperRevealSpanMessageCount: next }
                               : previous
                           );
                         }}
@@ -81618,8 +81461,6 @@ function HomeContent(): React.JSX.Element {
             imageId: zenRememberedWallpaperPreview.imageId,
             promptSeed: zenRememberedWallpaperPreview.promptSeed,
             generationMessageCount: 0,
-            revealStartMessageCount: 0,
-            revealFullMessageCount: 0,
             createdAt: zenRememberedWallpaperPreview.createdAt,
           }
         : null;
@@ -83990,7 +83831,7 @@ function HomeContent(): React.JSX.Element {
                                 return;
                               }
                               const multiSelectionIds =
-                                canvasSelectedBotIds.size > 1
+                                canvasSelectedBotIds.size > 1 && canvasSelectedBotIds.has(b.id)
                                   ? Array.from(canvasSelectedBotIds)
                                   : [];
                               openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);

@@ -1,23 +1,18 @@
 export interface ZenAtmosphereTimelineEntry {
   imageId: string;
   generationMessageCount: number;
-  revealStartMessageCount?: number;
-  revealFullMessageCount?: number;
   createdAt?: string;
 }
 
 interface ZenAtmosphereAnchorEntry extends ZenAtmosphereTimelineEntry {
   startY: number;
   fullY: number;
-  revealStartMessageCount: number;
-  revealFullMessageCount: number;
 }
 
 export interface ZenAtmosphereLayerOpacityArgs {
   timeline: readonly ZenAtmosphereTimelineEntry[];
   readerY: number;
-  revealDelayMessageCount: number;
-  revealSpanMessageCount: number;
+  revealScrollDistancePx: number;
   messageCountToY: (messageCount: number) => number;
 }
 
@@ -38,36 +33,26 @@ export function maxZenAtmosphereLayerOpacity(
 export function calculateZenAtmosphereLayerOpacitiesForReader({
   timeline,
   readerY,
-  revealDelayMessageCount,
-  revealSpanMessageCount,
+  revealScrollDistancePx,
   messageCountToY,
 }: ZenAtmosphereLayerOpacityArgs): Record<string, number> {
   if (timeline.length === 0) return {};
 
+  const revealDistancePx = Math.max(1, revealScrollDistancePx);
   const anchors: ZenAtmosphereAnchorEntry[] = timeline
     .map((entry) => {
-      const revealStartMessageCount =
-        entry.revealStartMessageCount ??
-        entry.generationMessageCount + revealDelayMessageCount;
-      const revealFullMessageCount = Math.max(
-        revealStartMessageCount,
-        entry.revealFullMessageCount ??
-          revealStartMessageCount + revealSpanMessageCount
-      );
-      const startY = messageCountToY(revealStartMessageCount);
-      const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
+      const startY = messageCountToY(entry.generationMessageCount);
+      const fullY = startY + revealDistancePx;
       return {
         ...entry,
         startY,
         fullY,
-        revealStartMessageCount,
-        revealFullMessageCount,
       };
     })
     .sort((a, b) => {
       const yDelta = a.startY - b.startY;
       if (Math.abs(yDelta) > 0.5) return yDelta;
-      return a.revealStartMessageCount - b.revealStartMessageCount;
+      return a.generationMessageCount - b.generationMessageCount;
     });
 
   const next: Record<string, number> = {};

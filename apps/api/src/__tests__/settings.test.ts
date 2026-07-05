@@ -15,8 +15,6 @@ import {
   DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
-  DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-  DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
@@ -82,8 +80,6 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
     zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
-    zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
     zenMessageFontMinPx: DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
@@ -1006,8 +1002,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
         zenFreshStartGapMs: 3 * 24 * 60 * 60 * 1000,
         zenRecentContextMessages: 42,
         zenWallpaperRegenMessageInterval: 24,
-        zenWallpaperRevealDelayMessageCount: 3,
-        zenWallpaperRevealSpanMessageCount: 10,
       },
       baseline()
     );
@@ -1016,8 +1010,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(next.zenFreshStartGapMs, 3 * 24 * 60 * 60 * 1000);
     assert.equal(next.zenRecentContextMessages, 42);
     assert.equal(next.zenWallpaperRegenMessageInterval, 24);
-    assert.equal(next.zenWallpaperRevealDelayMessageCount, 3);
-    assert.equal(next.zenWallpaperRevealSpanMessageCount, 10);
   });
 
   it("keeps stored values when omitted or invalid", () => {
@@ -1026,8 +1018,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       zenFreshStartGapMs: 4 * 24 * 60 * 60 * 1000,
       zenRecentContextMessages: 44,
       zenWallpaperRegenMessageInterval: 40,
-      zenWallpaperRevealDelayMessageCount: 6,
-      zenWallpaperRevealSpanMessageCount: 16,
     });
 
     const next = resolveNextSettings(
@@ -1036,8 +1026,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
         zenFreshStartGapMs: false,
         zenRecentContextMessages: null,
         zenWallpaperRegenMessageInterval: undefined,
-        zenWallpaperRevealDelayMessageCount: "still nope",
-        zenWallpaperRevealSpanMessageCount: Number.NaN,
       },
       current
     );
@@ -1046,14 +1034,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(next.zenFreshStartGapMs, current.zenFreshStartGapMs);
     assert.equal(next.zenRecentContextMessages, current.zenRecentContextMessages);
     assert.equal(next.zenWallpaperRegenMessageInterval, current.zenWallpaperRegenMessageInterval);
-    assert.equal(
-      next.zenWallpaperRevealDelayMessageCount,
-      current.zenWallpaperRevealDelayMessageCount
-    );
-    assert.equal(
-      next.zenWallpaperRevealSpanMessageCount,
-      current.zenWallpaperRevealSpanMessageCount
-    );
   });
 
   it("clamps fresh starts to happen no earlier than the idle session break", () => {
@@ -1074,8 +1054,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       {
         zenRecentContextMessages: 1,
         zenWallpaperRegenMessageInterval: 1,
-        zenWallpaperRevealDelayMessageCount: -2,
-        zenWallpaperRevealSpanMessageCount: 0,
       },
       baseline()
     );
@@ -1083,20 +1061,14 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       {
         zenRecentContextMessages: 999,
         zenWallpaperRegenMessageInterval: 999,
-        zenWallpaperRevealDelayMessageCount: 999,
-        zenWallpaperRevealSpanMessageCount: 999,
       },
       baseline()
     );
 
     assert.equal(low.zenRecentContextMessages, 10);
     assert.equal(low.zenWallpaperRegenMessageInterval, 3);
-    assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
-    assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
     assert.equal(high.zenRecentContextMessages, 80);
     assert.equal(high.zenWallpaperRegenMessageInterval, 100);
-    assert.equal(high.zenWallpaperRevealDelayMessageCount, 20);
-    assert.equal(high.zenWallpaperRevealSpanMessageCount, 50);
   });
 
   it("clamps Zen mood sensitivity while preserving current value for invalid input", () => {

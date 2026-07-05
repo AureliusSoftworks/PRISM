@@ -204,8 +204,6 @@ import {
   normalizeZenWallpaperGrayscaleEnabled,
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperRegenMessageInterval,
-  normalizeZenWallpaperRevealDelayMessageCount,
-  normalizeZenWallpaperRevealSpanMessageCount,
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   parseHiddenBotModelIds,
@@ -538,8 +536,6 @@ interface UserDbRow {
   zen_fresh_start_gap_ms: number | null;
   zen_recent_context_messages: number | null;
   zen_wallpaper_regen_message_interval: number | null;
-  zen_wallpaper_reveal_delay_message_count: number | null;
-  zen_wallpaper_reveal_span_message_count: number | null;
   zen_mood_sensitivity: number | null;
   zen_canvas_typing_speed: number | null;
   zen_message_font_min_px: number | null;
@@ -707,7 +703,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_wallpaper_reveal_delay_message_count, zen_wallpaper_reveal_span_message_count, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -2832,17 +2828,6 @@ function buildRoutes(): RouteDefinition[] {
                 zen_wallpaper_status = 'generating'
           WHERE id = ? AND user_id = ?`
       ).run(conversationId, userId);
-      const zenWallpaperRevealDelayMessageCount =
-        normalizeZenWallpaperRevealDelayMessageCount(
-          user.zen_wallpaper_reveal_delay_message_count
-        );
-      const zenWallpaperRevealSpanMessageCount =
-        normalizeZenWallpaperRevealSpanMessageCount(
-          user.zen_wallpaper_reveal_span_message_count
-        );
-      const generatedWallpaperRevealDelayMessageCount = existingWallpaper.imageId
-        ? zenWallpaperRevealDelayMessageCount
-        : 0;
       const nextWallpaperHistoryJson = (imageId: string, createdAt: string): string =>
         serializeZenWallpaperHistory(
           buildZenWallpaperHistoryForGeneratedImage(
@@ -2851,12 +2836,6 @@ function buildRoutes(): RouteDefinition[] {
               imageId,
               promptSeed: prompt,
               generationMessageCount: messageCount,
-              revealStartMessageCount:
-                messageCount + generatedWallpaperRevealDelayMessageCount,
-              revealFullMessageCount:
-                messageCount +
-                generatedWallpaperRevealDelayMessageCount +
-                zenWallpaperRevealSpanMessageCount,
               createdAt,
             },
             {
@@ -5825,14 +5804,6 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperRegenMessageInterval: normalizeZenWallpaperRegenMessageInterval(
             user.zen_wallpaper_regen_message_interval
           ),
-          zenWallpaperRevealDelayMessageCount:
-            normalizeZenWallpaperRevealDelayMessageCount(
-              user.zen_wallpaper_reveal_delay_message_count
-            ),
-          zenWallpaperRevealSpanMessageCount:
-            normalizeZenWallpaperRevealSpanMessageCount(
-              user.zen_wallpaper_reveal_span_message_count
-            ),
           zenMoodSensitivity: normalizeZenMoodSensitivity(
             user.zen_mood_sensitivity
           ),
@@ -6061,10 +6032,6 @@ function buildRoutes(): RouteDefinition[] {
         zenRecentContextMessages: user.zen_recent_context_messages,
         zenWallpaperRegenMessageInterval:
           user.zen_wallpaper_regen_message_interval,
-        zenWallpaperRevealDelayMessageCount:
-          user.zen_wallpaper_reveal_delay_message_count,
-        zenWallpaperRevealSpanMessageCount:
-          user.zen_wallpaper_reveal_span_message_count,
         zenMoodSensitivity: user.zen_mood_sensitivity,
         zenCanvasTypingSpeed: user.zen_canvas_typing_speed,
         zenMessageFontMinPx: user.zen_message_font_min_px,
@@ -6131,7 +6098,7 @@ function buildRoutes(): RouteDefinition[] {
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_wallpaper_reveal_delay_message_count = ?, zen_wallpaper_reveal_span_message_count = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -6172,8 +6139,6 @@ function buildRoutes(): RouteDefinition[] {
         next.zenFreshStartGapMs,
         next.zenRecentContextMessages,
         next.zenWallpaperRegenMessageInterval,
-        next.zenWallpaperRevealDelayMessageCount,
-        next.zenWallpaperRevealSpanMessageCount,
         next.zenMoodSensitivity,
         next.zenCanvasTypingSpeed,
         next.zenMessageFontMinPx,

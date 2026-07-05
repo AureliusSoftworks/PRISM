@@ -49,12 +49,6 @@ export const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
 export const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
 export const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 export const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
-export const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
-export const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
-export const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
-export const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
-export const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
-export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 export const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 export const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
@@ -115,8 +109,6 @@ export interface CurrentSettings {
   zenFreshStartGapMs: number | null;
   zenRecentContextMessages: number | null;
   zenWallpaperRegenMessageInterval: number | null;
-  zenWallpaperRevealDelayMessageCount: number | null;
-  zenWallpaperRevealSpanMessageCount: number | null;
   zenMoodSensitivity: number | null;
   zenCanvasTypingSpeed: number | null;
   zenMessageFontMinPx: number | null;
@@ -167,8 +159,6 @@ export interface NextSettings {
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
   zenWallpaperRegenMessageInterval: number;
-  zenWallpaperRevealDelayMessageCount: number;
-  zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
   zenCanvasTypingSpeed: number;
   zenMessageFontMinPx: number;
@@ -548,30 +538,6 @@ export function normalizeZenWallpaperRegenMessageInterval(
   );
 }
 
-export function normalizeZenWallpaperRevealDelayMessageCount(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
-): number {
-  return normalizeNumberSetting(
-    value,
-    fallback,
-    MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
-  );
-}
-
-export function normalizeZenWallpaperRevealSpanMessageCount(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
-): number {
-  return normalizeNumberSetting(
-    value,
-    fallback,
-    MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
-  );
-}
-
 export function normalizeZenMoodSensitivity(
   value: unknown,
   fallback = DEFAULT_ZEN_MOOD_SENSITIVITY
@@ -933,28 +899,6 @@ export function resolveNextSettings(
           body.zenWallpaperRegenMessageInterval,
           currentZenWallpaperRegenMessageInterval
         );
-  const currentZenWallpaperRevealDelayMessageCount =
-    normalizeZenWallpaperRevealDelayMessageCount(
-      current.zenWallpaperRevealDelayMessageCount
-    );
-  const zenWallpaperRevealDelayMessageCount =
-    body.zenWallpaperRevealDelayMessageCount === undefined
-      ? currentZenWallpaperRevealDelayMessageCount
-      : normalizeZenWallpaperRevealDelayMessageCount(
-          body.zenWallpaperRevealDelayMessageCount,
-          currentZenWallpaperRevealDelayMessageCount
-        );
-  const currentZenWallpaperRevealSpanMessageCount =
-    normalizeZenWallpaperRevealSpanMessageCount(
-      current.zenWallpaperRevealSpanMessageCount
-    );
-  const zenWallpaperRevealSpanMessageCount =
-    body.zenWallpaperRevealSpanMessageCount === undefined
-      ? currentZenWallpaperRevealSpanMessageCount
-      : normalizeZenWallpaperRevealSpanMessageCount(
-          body.zenWallpaperRevealSpanMessageCount,
-          currentZenWallpaperRevealSpanMessageCount
-        );
   const currentZenMoodSensitivity = normalizeZenMoodSensitivity(
     current.zenMoodSensitivity
   );
@@ -1112,8 +1056,6 @@ export function resolveNextSettings(
     zenFreshStartGapMs,
     zenRecentContextMessages,
     zenWallpaperRegenMessageInterval,
-    zenWallpaperRevealDelayMessageCount,
-    zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
     zenCanvasTypingSpeed,
     zenMessageFontMinPx,
