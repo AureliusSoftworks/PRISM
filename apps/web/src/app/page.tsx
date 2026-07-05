@@ -44,6 +44,12 @@ import {
   isPrismBackendUnavailableError,
   type BackendUnavailableEventDetail,
 } from "./backendUnavailable";
+import {
+  AUTH_REAUTH_REQUIRED_EVENT,
+  dispatchAuthReauthRequiredEvent,
+  shouldRedirectToLoginForApiFailure,
+  type AuthReauthRequiredDetail,
+} from "./authReauth";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
 import {
@@ -13176,11 +13182,26 @@ async function downloadBotImageFile(
   if (!res.ok) {
     const raw = await res.text();
     let message = raw.trim() || `Download failed (${res.status})`;
+    let payload: { ok?: boolean; error?: string } | null = null;
     try {
-      const payload = JSON.parse(raw) as { error?: string };
+      payload = JSON.parse(raw) as { ok?: boolean; error?: string };
       if (payload.error) message = payload.error;
     } catch {
       // Keep constructed message when body is not JSON.
+    }
+    if (
+      shouldRedirectToLoginForApiFailure({
+        path,
+        status: res.status,
+        payload,
+      })
+    ) {
+      dispatchAuthReauthRequiredEvent({
+        path,
+        status: res.status,
+        reason: message,
+      });
+      throw new Error("Please log in again.");
     }
     throw new Error(message);
   }
@@ -13329,6 +13350,20 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
       throw backendError;
     }
     const fallbackMessage = raw.trim() || `Request failed (${res.status})`;
+    if (
+      shouldRedirectToLoginForApiFailure({
+        path,
+        status: res.status,
+        payload,
+      })
+    ) {
+      dispatchAuthReauthRequiredEvent({
+        path,
+        status: res.status,
+        reason: payload?.error ?? fallbackMessage,
+      });
+      throw new Error("Please log in again.");
+    }
     throw new Error(payload?.error ?? fallbackMessage);
   }
   if (typeof path === "string" && path.startsWith("/api") && path !== "/api/dev/restart") {
@@ -43341,6 +43376,56 @@ function HomeContent(): React.JSX.Element {
     setMemoryTransitionPhase("idle");
   }
 
+  const clearAuthenticatedSessionState = useCallback(() => {
+    clearNativeSessionToken();
+    botLibraryGroupsCanPruneRef.current = false;
+    setBotLibraryGroupsHydratedUserId(null);
+    setUser(null);
+    starterPackFreshAccountEligibleUserRef.current = null;
+    setPreAuthChecklistComplete(false);
+    setConversations([]);
+    setSelectedId(null);
+    setDetail(null);
+    setSessionOpinion(null);
+    setBotOpinion(null);
+    setMemories([]);
+    setBotMemories([]);
+    setBotMemoryDossier(null);
+    setSettings(null);
+    setModelCatalog(null);
+    setBots([]);
+    setImages([]);
+    setError(null);
+    setPanelError(null);
+    setPanelNotice(null);
+    setBusy(false);
+    setPanel(null);
+    setPanelClosing(false);
+    setBotPanelView("home");
+    setImageLightbox(null);
+    setBotTransferOverlay(null);
+    setManualAskQuestionModal(null);
+    clearViewSwitchOverlayTimers();
+    setViewSwitchTarget(null);
+    setViewSwitchOverlayPhase("hidden");
+    router.replace("/?mode=login");
+  }, [clearViewSwitchOverlayTimers, router]);
+
+  useEffect(() => {
+    const handleAuthReauthRequired = (event: Event): void => {
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as AuthReauthRequiredDetail | undefined)
+          : undefined;
+      console.warn("[auth] reauthentication required", detail);
+      clearAuthenticatedSessionState();
+    };
+    window.addEventListener(AUTH_REAUTH_REQUIRED_EVENT, handleAuthReauthRequired);
+    return () => {
+      window.removeEventListener(AUTH_REAUTH_REQUIRED_EVENT, handleAuthReauthRequired);
+    };
+  }, [clearAuthenticatedSessionState]);
+
   async function submitAuth(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
     try {
@@ -43377,26 +43462,7 @@ function HomeContent(): React.JSX.Element {
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
-    clearNativeSessionToken();
-    botLibraryGroupsCanPruneRef.current = false;
-    setBotLibraryGroupsHydratedUserId(null);
-    setUser(null);
-    starterPackFreshAccountEligibleUserRef.current = null;
-    setPreAuthChecklistComplete(false);
-    setConversations([]);
-    setDetail(null);
-    setSessionOpinion(null);
-    setBotOpinion(null);
-    setMemories([]);
-    setBotMemories([]);
-    setBotMemoryDossier(null);
-    setSettings(null);
-    setModelCatalog(null);
-    setBots([]);
-    setImages([]);
-    // Drop any ?view= param so the next login lands on the Hub instead
-    // of whichever mode the user was last browsing.
-    navigateToView("hub");
+    clearAuthenticatedSessionState();
   }
 
   function markTutorialComplete(mode: TutorialMode): void {
@@ -59824,6 +59890,25 @@ function HomeContent(): React.JSX.Element {
                 !botIds.includes(bot.id) && count < BOT_LIBRARY_GROUP_BOT_CAP
             )
         : [];
+    const botIsFavorite = favoriteBotIdSet.has(bot.id);
+    const favoriteLabel = botIsFavorite ? "Remove from Favorites" : "Add to Favorites";
+    const renderFavoriteMenuItem = (): React.JSX.Element => (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          closeBotContextMenu();
+          toggleBotFavorite(bot.id);
+        }}
+      >
+        <span className={styles.contextMenuItemLabel}>
+          <span className={styles.contextMenuGlyph} aria-hidden="true">
+            {botIsFavorite ? "★" : "☆"}
+          </span>
+          <span>{favoriteLabel}</span>
+        </span>
+      </button>
+    );
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -59854,6 +59939,7 @@ function HomeContent(): React.JSX.Element {
               </span>
             </button>
           ) : null}
+          {renderFavoriteMenuItem()}
           {singleBotAddToGroupOptions.length > 0 ? (
             <div className={styles.botContextMenuSelectItem} role="none">
               <label>
@@ -59999,6 +60085,7 @@ function HomeContent(): React.JSX.Element {
                 <span>{singleBotIsGridSelected ? "Deselect" : "Select"}</span>
               </span>
             </button>
+            {renderFavoriteMenuItem()}
             {singleBotAddToGroupOptions.length > 0 ? (
               <div className={styles.botContextMenuSelectItem} role="none">
                 <label>

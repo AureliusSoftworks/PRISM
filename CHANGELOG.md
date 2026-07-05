@@ -12,6 +12,21 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.5] - 2026-07-04
+
+### Added
+
+- **Bot context menus can favorite bots directly.** Single-bot context menus now
+  include an Add or Remove Favorites action, making quick bot curation available
+  from the canvas and group views.
+
+### Fixed
+
+- **Expired sessions return to login.** When a browser session expires or needs
+  reauthentication, Prism now clears the authenticated UI state and sends the
+  user to the login screen instead of leaving an "Authentication required"
+  message in the app.
+
 ## [0.6.4] - 2026-07-04
 
 ### Added
