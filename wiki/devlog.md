@@ -17,3 +17,11 @@ Reworked .wikiwiki/site-theme.json to use PRISM app CSS cues: dark-by-default wa
 Files: `.wikiwiki/site-theme.json`, `apps/web/src/app/prism/page.module.css`, `apps/web/src/app/page.module.css`, `wiki-site/assets/project-theme.css`
 
 Recorded: 2026-07-05T00:40:28.067Z | Record: `event_752b90fc-e23c-4000-afe3-fbb07affebba` | Confidence: high
+
+## Wikiwiki updated and first-run theming retested
+
+Updated the installed wk dependency to Wikiwiki commit ab7e817 and verified the initial setup/theme/render/site path against PRISM source files. Theme preview now sanitizes README logo HTML, inspects PRISM CSS/design sources, and generates a dark-first PRISM-branded site without hand-editing generated CSS.
+
+Files: `package-lock.json`, `.wikiwiki/site-theme.json`, `wiki-site/assets/project-theme.css`, `apps/web/src/app/prism/page.module.css`, `apps/web/src/app/page.module.css`, `apps/web/src/app/globals.css`
+
+Recorded: 2026-07-05T01:18:50.957Z | Record: `event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a` | Confidence: high

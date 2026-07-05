@@ -2,7 +2,7 @@
 
 # Notes
 
-## 2026-07-05T00:07:19.617Z
+## Note from 2026-07-05
 
 Wikiwiki generated files should be refreshed through structured records and theme files: edit .wikiwiki/records/*.jsonl or .wikiwiki/site-theme.json, then run npm run wiki:site. Avoid hand-editing wiki/ or wiki-site/ output.
 
@@ -10,7 +10,7 @@ Tags: `audience:developer`, `docs`, `generated-files`
 
 Record: `note_5850980f-5230-4d48-ae29-08c98e6ed3a3` | Authority: agent | Confidence: high
 
-## 2026-07-05T00:07:19.718Z
+## Note from 2026-07-05
 
 Prism should not be broadly promoted from wiki copy until the product-worthy launch checklist has pass evidence for downloads, first-run setup, LOCAL privacy, support boundaries, and outreach review.
 

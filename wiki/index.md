@@ -8,6 +8,7 @@ This is the generated human-readable view of PRISM's structured project knowledg
 
 ## Pages
 
+- [Articles](./articles.md)
 - [Concepts](./concepts.md)
 - [Decisions](./decisions.md)
 - [Devlog](./devlog.md)
@@ -17,9 +18,10 @@ This is the generated human-readable view of PRISM's structured project knowledg
 
 ## Record Counts
 
+- Article: 0
 - Concept: 6
 - Decision: 4
-- Event: 2
+- Event: 3
 - Note: 2
 - Symbol: 3
 - Link: 0
