@@ -16513,7 +16513,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0 1px color-mix(in srgb, var(--bot-color, var(--fg)) 16%, transparent),
     var(--shadow-lg),
     0 0 34px color-mix(in srgb, var(--bot-color, var(--fg)) 18%, transparent);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .botContextMenu::before {
@@ -16559,44 +16561,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botContextMenu button {
   padding-left: 18px;
-}
-
-.botContextMenuSelectItem {
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg) 34%, transparent);
-  color: var(--fg);
-  padding: 10px 14px 10px 18px;
-}
-
-.botContextMenuSelectItem label {
-  display: grid;
-  gap: 8px;
-}
-
-.botContextMenuSelectItem select {
-  width: 100%;
-  min-width: 178px;
-  box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 28%, var(--line));
-  border-radius: 8px;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-surface) 80%, transparent),
-      color-mix(in srgb, var(--bg) 82%, transparent)
-    );
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  padding: 7px 9px;
-}
-
-.botContextMenuSelectItem select:focus {
-  border-color: color-mix(in srgb, var(--message-context-accent, var(--accent-ink)) 60%, var(--line));
-  outline: none;
 }
 
 .messageContextMenu button:active {
@@ -34260,6 +34224,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botLibraryGroupDialog {
   width: min(500px, 100%);
+}
+
+.botLibraryAddToGroupDialog {
+  max-width: 440px;
 }
 
 .botLibraryGroupDialogField {
