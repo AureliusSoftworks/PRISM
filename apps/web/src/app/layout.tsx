@@ -11,6 +11,7 @@ import {
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
+import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
 const uiSans = Instrument_Sans({
@@ -90,6 +91,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body>
+        <TextFieldContextMenu />
         <BlockBrowserInspection />
         <DisableNativeTooltips />
         {children}

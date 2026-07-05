@@ -6,6 +6,7 @@ import {
   shouldBlockBrowserMouseShortcut,
   shouldBlockBrowserWheelShortcut,
 } from "./browserShortcutGuards";
+import { closestTextEditingTarget } from "./editableTextContextMenuModel";
 
 const PRISM_HISTORY_GUARD_STATE_KEY = "__prismHistoryGuard";
 const BROWSER_MOUSE_NAVIGATION_EVENTS = [
@@ -125,6 +126,7 @@ export function BlockBrowserInspection(): null {
     }
 
     const onContextMenu = (e: MouseEvent) => {
+      if (closestTextEditingTarget(e.target)) return;
       e.preventDefault();
     };
 
