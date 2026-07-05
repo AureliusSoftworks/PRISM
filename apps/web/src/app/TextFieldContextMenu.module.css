@@ -1,0 +1,70 @@
+.menu {
+  position: fixed;
+  z-index: 2147483647;
+  width: 156px;
+  padding: 5px;
+  border: 1px solid var(--text-field-menu-border, rgba(255, 255, 255, 0.16));
+  border-radius: 8px;
+  background: var(--text-field-menu-bg, rgba(15, 18, 28, 0.96));
+  color: var(--text-field-menu-fg, #f2f5fb);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.1) inset;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  transform-origin: top left;
+  animation: textFieldContextMenuIn 0.1s ease-out;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: default;
+}
+
+.item:hover,
+.item:focus-visible,
+.item[data-active="true"] {
+  outline: none;
+  background: var(--text-field-menu-hover, rgba(255, 255, 255, 0.1));
+}
+
+.item:disabled {
+  color: var(--text-field-menu-disabled, rgba(242, 245, 251, 0.38));
+}
+
+.item:disabled:hover,
+.item:disabled:focus-visible,
+.item:disabled[data-active="true"] {
+  background: transparent;
+}
+
+@keyframes textFieldContextMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}

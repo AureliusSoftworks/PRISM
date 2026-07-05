@@ -31,9 +31,10 @@
       .veil {
         position: fixed;
         inset: 0;
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        place-items: center;
         align-items: center;
+        isolation: isolate;
         background:
           radial-gradient(circle at 50% 40%, color-mix(in srgb, #5de6ff 14%, transparent) 0 18%, transparent 44%),
           radial-gradient(circle at 36% 58%, color-mix(in srgb, #ff4d6d  9%, transparent) 0 22%, transparent 50%),
@@ -44,15 +45,52 @@
 
       /* ── Center section (logo + status) ── */
       .center {
-        flex: 1 1 0;
-        min-height: 0;
+        position: relative;
+        z-index: 3;
+        width: min(88vw, 680px);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         gap: 22px;
-        padding: 32px 24px 8px;
+        padding: 32px 24px;
         animation: floatIn 620ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+      }
+
+      .focus-mask {
+        position: absolute;
+        z-index: 2;
+        left: 50%;
+        top: 50%;
+        width: min(74vw, 720px);
+        height: clamp(280px, 44dvh, 440px);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        background:
+          radial-gradient(ellipse at center,
+            color-mix(in srgb, var(--bg-deep) 96%, transparent) 0 34%,
+            color-mix(in srgb, var(--bg-deep) 88%, transparent) 46%,
+            color-mix(in srgb, var(--bg-deep) 52%, transparent) 64%,
+            transparent 82%
+          );
+        filter: blur(2px);
+      }
+
+      .focus-mask::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 63%;
+        width: min(58vw, 540px);
+        height: clamp(110px, 17dvh, 170px);
+        transform: translate(-50%, -50%);
+        border-radius: 999px;
+        background:
+          radial-gradient(ellipse at center,
+            color-mix(in srgb, var(--bg-deep) 98%, transparent) 0 48%,
+            color-mix(in srgb, var(--bg-deep) 74%, transparent) 68%,
+            transparent 100%
+          );
       }
 
       /* ── Halo orbit ── */
@@ -194,16 +232,20 @@
 
       /* ── Console pane ── */
       .console {
-        flex: 0 0 auto;
-        width: 100%;
-        max-height: 36dvh;
-        min-height: 80px;
+        position: absolute;
+        z-index: 1;
+        inset: 0;
         display: flex;
         flex-direction: column;
         background:
-          linear-gradient(to bottom, transparent 0%, color-mix(in srgb, #000 28%, transparent) 100%),
-          color-mix(in srgb, var(--bg-deep) 88%, #000);
-        border-top: 1px solid rgba(255,255,255,0.05);
+          linear-gradient(to bottom,
+            color-mix(in srgb, #000 18%, transparent) 0%,
+            transparent 24%,
+            transparent 72%,
+            color-mix(in srgb, #000 26%, transparent) 100%
+          );
+        opacity: 0.82;
+        pointer-events: none;
       }
 
       .console-header {
@@ -211,14 +253,13 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 6px 14px;
-        border-bottom: 1px solid rgba(255,255,255,0.04);
+        padding: 14px 18px 5px;
         color: var(--fg-muted);
         font-size: 0.66rem;
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        opacity: 0.7;
+        opacity: 0.42;
       }
 
       .console-dot { width: 5px; height: 5px; border-radius: 999px; }
@@ -230,17 +271,22 @@
         flex: 1 1 auto;
         overflow-y: auto;
         overflow-x: hidden;
-        padding: 8px 0 12px;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(255,255,255,0.1) transparent;
+        padding: 0 0 18px;
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 42px, #000 calc(100% - 32px), transparent 100%);
+        mask-image: linear-gradient(to bottom, transparent 0, #000 42px, #000 calc(100% - 32px), transparent 100%);
+      }
+
+      .console-lines::-webkit-scrollbar {
+        display: none;
       }
 
       .log-line {
         display: flex;
         align-items: baseline;
         gap: 0;
-        padding: 1px 14px;
-        font: 11px/1.55 var(--mono);
+        padding: 1px 18px;
+        font: clamp(10px, 1.18dvh, 13px)/1.52 var(--mono);
         white-space: pre-wrap;
         word-break: break-all;
       }
@@ -258,7 +304,7 @@
 
       .log-text {
         flex: 1 1 auto;
-        color: color-mix(in srgb, var(--fg) 64%, var(--fg-muted));
+        color: color-mix(in srgb, var(--fg) 30%, var(--fg-muted));
       }
 
       /* ── Keyframes ── */
@@ -274,10 +320,34 @@
         .halo, .ring, .aura, .glyph, .svc-dot { animation: none !important; }
         .veil, .center { animation: none !important; }
       }
+
+      @media (max-width: 560px), (max-height: 520px) {
+        .center {
+          gap: 16px;
+          padding: 24px 18px;
+        }
+
+        .focus-mask {
+          width: min(92vw, 560px);
+          height: clamp(240px, 56dvh, 360px);
+        }
+
+        .focus-mask::after {
+          width: min(78vw, 440px);
+          height: 128px;
+        }
+
+        .services {
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="veil">
+      <div class="focus-mask" aria-hidden="true"></div>
+
       <div class="center">
         <div class="halo" aria-hidden="true">
           <div class="aura"></div>
