@@ -328,6 +328,24 @@ window.WIKIWIKI_SEARCH_INDEX = [
   {
     "type": "event",
     "typeLabel": "Devlog",
+    "id": "event_836e6d6c-33bb-48c5-9074-3deba3b54f2e",
+    "title": "Wiki site wired to PRISM brand graphics",
+    "summary": "Wiki site wired to PRISM brand graphics",
+    "tags": [
+      "devlog",
+      "wikiwiki",
+      "theme",
+      "graphics"
+    ],
+    "authority": "agent",
+    "confidence": "high",
+    "audienceLabel": "For developers",
+    "url": "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html",
+    "text": "event_836e6d6c-33bb-48c5-9074-3deba3b54f2e agent agent high 2026-07-05T05:58:46.535Z event Wiki site wired to PRISM brand graphics Added PRISM logo, wordmark, and favicon asset paths to the Wikiwiki site theme so the generated static wiki uses the repo-local PRISM triangle mark and wordmark instead of fallback initials. .wikiwiki/site-theme.json apps/web/public/icon-triangle.svg apps/web/public/wordmark.svg audience:developer devlog wikiwiki theme graphics"
+  },
+  {
+    "type": "event",
+    "typeLabel": "Devlog",
     "id": "event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12",
     "title": "Wikiwiki installed",
     "summary": "Wikiwiki installed",
@@ -346,8 +364,8 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "type": "event",
     "typeLabel": "Devlog",
     "id": "event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392",
-    "title": "Wikiwiki npm package updated to 1.0.3",
-    "summary": "Wikiwiki npm package updated to 1.0.3",
+    "title": "Wikiwiki npm package updated to 1.0.4",
+    "summary": "Wikiwiki npm package updated to 1.0.4",
     "tags": [
       "devlog",
       "tooling",
@@ -357,7 +375,7 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "confidence": "high",
     "audienceLabel": "For developers",
     "url": "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html",
-    "text": "event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392 agent agent high 2026-07-05T03:21:55.558Z 2026-07-05T04:13:07.238Z event Wikiwiki npm package updated to 1.0.3 Updated the PRISM root @thjodann/wk devDependency and package lock to the current npm release 1.0.3, then refreshed the Codex wk agent skill with the updated CLI and verified wiki validation, render, and site generation. package.json package-lock.json audience:developer devlog tooling wikiwiki"
+    "text": "event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392 agent agent high 2026-07-05T03:21:55.558Z 2026-07-05T05:50:34.202Z event Wikiwiki npm package updated to 1.0.4 Updated the PRISM root @thjodann/wk devDependency and package lock to the current npm release 1.0.4, refreshed the Codex wk agent skill with the updated CLI, and verified Wikiwiki status, validation, Markdown render, and all-audience site generation. package.json package-lock.json audience:developer devlog tooling wikiwiki"
   },
   {
     "type": "event",

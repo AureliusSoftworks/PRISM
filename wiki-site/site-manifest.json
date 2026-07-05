@@ -6,6 +6,12 @@
   "audience": "all",
   "project_name": "PRISM",
   "theme_file": ".wikiwiki/site-theme.json",
+  "assets": {
+    "logo": "assets/logo.svg",
+    "wordmark": "assets/wordmark.svg",
+    "favicon": "assets/favicon.svg",
+    "favicon_light": "assets/favicon-light.svg"
+  },
   "pages": [
     "index.html",
     "articles.html",
@@ -35,6 +41,7 @@
     "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
     "records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html",
     "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
+    "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html",
     "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html",
     "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html",
     "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
@@ -179,6 +186,12 @@
     },
     {
       "type": "event",
+      "id": "event_836e6d6c-33bb-48c5-9074-3deba3b54f2e",
+      "title": "Wiki site wired to PRISM brand graphics",
+      "url": "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html"
+    },
+    {
+      "type": "event",
       "id": "event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12",
       "title": "Wikiwiki installed",
       "url": "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html"
@@ -186,7 +199,7 @@
     {
       "type": "event",
       "id": "event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392",
-      "title": "Wikiwiki npm package updated to 1.0.3",
+      "title": "Wikiwiki npm package updated to 1.0.4",
       "url": "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html"
     },
     {

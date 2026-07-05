@@ -7,7 +7,7 @@
   <meta name="generator" content="Wikiwiki">
   <title>Developer guide - PRISM Wiki</title>
   <script>(function(){try{var m=localStorage.getItem("wikiwiki-theme-mode")||"dark";if(m==="light"||m==="dark"){document.documentElement.dataset.theme=m;}else{delete document.documentElement.dataset.theme;}}catch(e){}}());</script>
-  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" data-wikiwiki-favicon data-favicon-dark="../assets/favicon.svg" data-favicon-light="../assets/favicon-light.svg" data-favicon-dark-type="image/svg+xml" data-favicon-light-type="image/svg+xml">
   <link rel="stylesheet" href="../assets/wikiwiki.css">
   <link rel="stylesheet" href="../assets/project-theme.css">
   <script src="../assets/search-index.js" defer></script>
@@ -19,7 +19,7 @@
     <aside class="sidebar" aria-label="Wiki navigation">
       <div class="sidebar-top">
         <a class="brand" href="../index.html" aria-label="Wiki home">
-          <span class="brand-mark">PR</span>
+          <span class="brand-mark has-image"><img src="../assets/favicon.svg" alt="" aria-hidden="true"></span>
           <span>
             <strong>PRISM</strong>
             <small>Project wiki</small>
@@ -42,7 +42,7 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>5</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
 <a class="nav-link" href="../notes.html">Notes<span>2</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
@@ -67,15 +67,15 @@
     <h2>Summary</h2>
     <p>Repo structure, common commands, local privacy invariants, and the Wikiwiki documentation workflow for Prism maintainers.</p>
     <h2>Article</h2>
-    <p>## Repo Shape</p>
+    <h2>Repo Shape</h2>
 <p>Prism is organized as apps plus shared packages. <code>apps/api</code> owns local data, auth, providers, memory, and orchestration. <code>apps/web</code> owns the product UI. <code>apps/desktop</code> wraps and stages the local runtime. <code>packages/shared</code> and <code>packages/config</code> hold cross-surface contracts and configuration.</p>
-<p>## Common Commands</p>
+<h2>Common Commands</h2>
 <p>Use <code>npm run dev</code> for the full local stack, <code>npm run dev:api</code> or <code>npm run dev:web</code> for one side, <code>npm run typecheck</code> for workspace type checks, <code>npm run lint</code> for linting, and <code>npm run build</code> for production build coverage. API tests run with <code>npm run test --prefix apps/api</code>.</p>
-<p>## Privacy Invariant</p>
+<h2>Privacy Invariant</h2>
 <p>LOCAL mode is a hard boundary. New outbound network work must either target configured local services or have an explicit LOCAL guard with matching UI behavior and tests. Do not weaken the provider tests that pin this behavior.</p>
-<p>## Wikiwiki Workflow</p>
+<h2>Wikiwiki Workflow</h2>
 <p>Treat <code>.wikiwiki/records/*.jsonl</code> as the source of truth. Add or revise records first, then regenerate Markdown and the static site with <code>wk validate</code>, <code>wk render</code>, and <code>wk site --audience all</code>. Do not hand-edit generated <code>wiki/</code> or <code>wiki-site/</code> output.</p>
-<p>## Distribution And Launch</p>
+<h2>Distribution And Launch</h2>
 <p>Official desktop builds are free, with optional non-gating support. Launch copy should remain restrained until platform smoke tests, first-run setup, LOCAL privacy, support boundaries, and outreach materials have pass evidence.</p>
     <h2>Categories</h2><p><code>Developer</code></p>
     <h2>Aliases</h2><p><code>Maintainer guide</code> <code>Repo guide</code> <code>Wikiwiki workflow</code></p>

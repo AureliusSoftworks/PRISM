@@ -1,0 +1,33 @@
+{
+  "type": "decision",
+  "title": "Project configuration changes",
+  "reason": "Project configuration changed.",
+  "audience": "developer",
+  "tags": [
+    "audience:developer",
+    "config"
+  ],
+  "confidence": "medium",
+  "files": [
+    ".wikiwiki/site-theme.json",
+    "package.json"
+  ],
+  "draft": {
+    "source": "git-diff",
+    "authority": "agent",
+    "confidence": "medium",
+    "files": [
+      ".wikiwiki/site-theme.json",
+      "package.json"
+    ],
+    "tags": [
+      "audience:developer",
+      "config"
+    ],
+    "title": "Project configuration changes",
+    "context": "TODO: capture the context behind this configuration change.",
+    "decision": "TODO: capture the decision.",
+    "consequences": ""
+  },
+  "command_hint": "wk decision add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\".wikiwiki/site-theme.json\",\"package.json\"],\"tags\":[\"audience:developer\",\"config\"],\"title\":\"Project configuration changes\",\"context\":\"TODO: capture the context behind this configuration change.\",\"decision\":\"TODO: capture the decision.\",\"consequences\":\"\"}'"
+}

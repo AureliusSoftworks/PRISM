@@ -21,6 +21,34 @@
     return validThemeModes.includes(value) ? value : "auto";
   }
 
+  function effectiveThemeMode(mode) {
+    const normalizedMode = normalizeThemeMode(mode);
+    if (normalizedMode === "light" || normalizedMode === "dark") {
+      return normalizedMode;
+    }
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  function updateFavicon(mode) {
+    const link = document.querySelector("link[data-wikiwiki-favicon]");
+    if (!link) {
+      return;
+    }
+    const effectiveMode = effectiveThemeMode(mode);
+    const href = effectiveMode === "light"
+      ? link.getAttribute("data-favicon-light")
+      : link.getAttribute("data-favicon-dark");
+    const type = effectiveMode === "light"
+      ? link.getAttribute("data-favicon-light-type")
+      : link.getAttribute("data-favicon-dark-type");
+    if (href) {
+      link.setAttribute("href", href);
+    }
+    if (type) {
+      link.setAttribute("type", type);
+    }
+  }
+
   function applyThemeMode(mode, persist) {
     const normalizedMode = normalizeThemeMode(mode);
     if (normalizedMode === "light" || normalizedMode === "dark") {
@@ -29,6 +57,7 @@
       delete document.documentElement.dataset.theme;
     }
     document.documentElement.dataset.themeMode = normalizedMode;
+    updateFavicon(normalizedMode);
     document.querySelectorAll("[data-theme-choice]").forEach((button) => {
       button.setAttribute("aria-pressed", button.getAttribute("data-theme-choice") === normalizedMode ? "true" : "false");
     });
@@ -137,4 +166,17 @@
       applyThemeMode(button.getAttribute("data-theme-choice") || "auto", true);
     });
   });
+  if (window.matchMedia) {
+    const colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateAutoFavicon = () => {
+      if (normalizeThemeMode(document.documentElement.dataset.themeMode || "auto") === "auto") {
+        updateFavicon("auto");
+      }
+    };
+    if (colorSchemeQuery.addEventListener) {
+      colorSchemeQuery.addEventListener("change", updateAutoFavicon);
+    } else if (colorSchemeQuery.addListener) {
+      colorSchemeQuery.addListener(updateAutoFavicon);
+    }
+  }
 }());

@@ -7,7 +7,7 @@
   <meta name="generator" content="Wikiwiki">
   <title>Project overview - PRISM Wiki</title>
   <script>(function(){try{var m=localStorage.getItem("wikiwiki-theme-mode")||"dark";if(m==="light"||m==="dark"){document.documentElement.dataset.theme=m;}else{delete document.documentElement.dataset.theme;}}catch(e){}}());</script>
-  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" data-wikiwiki-favicon data-favicon-dark="../assets/favicon.svg" data-favicon-light="../assets/favicon-light.svg" data-favicon-dark-type="image/svg+xml" data-favicon-light-type="image/svg+xml">
   <link rel="stylesheet" href="../assets/wikiwiki.css">
   <link rel="stylesheet" href="../assets/project-theme.css">
   <script src="../assets/search-index.js" defer></script>
@@ -19,7 +19,7 @@
     <aside class="sidebar" aria-label="Wiki navigation">
       <div class="sidebar-top">
         <a class="brand" href="../index.html" aria-label="Wiki home">
-          <span class="brand-mark">PR</span>
+          <span class="brand-mark has-image"><img src="../assets/favicon.svg" alt="" aria-hidden="true"></span>
           <span>
             <strong>PRISM</strong>
             <small>Project wiki</small>
@@ -42,7 +42,7 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>5</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
 <a class="nav-link" href="../notes.html">Notes<span>2</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
@@ -67,17 +67,17 @@
     <h2>Summary</h2>
     <p>What Prism is, what is available now, and which product principles shape the workspace.</p>
     <h2>Article</h2>
-    <p>## What Prism Is</p>
+    <h2>What Prism Is</h2>
 <p>Prism is a local-first AI workspace for calm, multi-perspective thinking. It keeps everyday and sensitive work on the local machine, while still allowing explicit cloud-provider use when stronger online models are worth it.</p>
-<p>## Available Now</p>
+<h2>Available Now</h2>
 <ul><li>Chat v0.5 is the full playground for bots, model controls, images, exports, and memory-aware conversations.</li>
 <li>Zen v0.3 is the calmer one-to-one continuity lane.</li>
 <li>Coffee v0.6 is the multi-bot group conversation lane.</li>
 <li>Story v0.1 is a preview visual-novel lane with bots, choices, maps, and transcripts.</li>
 <li>Account login, tenant isolation, encrypted key handling, and memory features are part of the current core.</li></ul>
-<p>## Product Principles</p>
+<h2>Product Principles</h2>
 <p>Prism is private by default, creative by design, and explicit about control. The LOCAL/ONLINE toggle is a privacy boundary rather than a suggestion. Experience lanes stay separated so practical controls and experiential presence do not blur into one overloaded chat surface.</p>
-<p>## Architecture Snapshot</p>
+<h2>Architecture Snapshot</h2>
 <p>The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts.</p>
     <h2>Categories</h2><p><code>Overview</code></p>
     <h2>Aliases</h2><p><code>Home</code> <code>Prism overview</code></p>

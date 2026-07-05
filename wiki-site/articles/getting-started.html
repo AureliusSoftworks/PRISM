@@ -7,7 +7,7 @@
   <meta name="generator" content="Wikiwiki">
   <title>Getting started - PRISM Wiki</title>
   <script>(function(){try{var m=localStorage.getItem("wikiwiki-theme-mode")||"dark";if(m==="light"||m==="dark"){document.documentElement.dataset.theme=m;}else{delete document.documentElement.dataset.theme;}}catch(e){}}());</script>
-  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" data-wikiwiki-favicon data-favicon-dark="../assets/favicon.svg" data-favicon-light="../assets/favicon-light.svg" data-favicon-dark-type="image/svg+xml" data-favicon-light-type="image/svg+xml">
   <link rel="stylesheet" href="../assets/wikiwiki.css">
   <link rel="stylesheet" href="../assets/project-theme.css">
   <script src="../assets/search-index.js" defer></script>
@@ -19,7 +19,7 @@
     <aside class="sidebar" aria-label="Wiki navigation">
       <div class="sidebar-top">
         <a class="brand" href="../index.html" aria-label="Wiki home">
-          <span class="brand-mark">PR</span>
+          <span class="brand-mark has-image"><img src="../assets/favicon.svg" alt="" aria-hidden="true"></span>
           <span>
             <strong>PRISM</strong>
             <small>Project wiki</small>
@@ -42,7 +42,7 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>5</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
 <a class="nav-link" href="../notes.html">Notes<span>2</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
@@ -67,15 +67,15 @@
     <h2>Summary</h2>
     <p>How to run Prism locally, where desktop distribution is headed, and what privacy defaults to expect.</p>
     <h2>Article</h2>
-    <p>## Recommended Local Run</p>
+    <h2>Recommended Local Run</h2>
 <p>For a full local stack, copy <code>.env.example</code> to <code>.env</code>, set the required secrets, and run Docker Compose. The web app opens at <code>http://localhost:18788</code>; API health is at <code>http://localhost:18787/health</code>.</p>
-<p>## Local Development</p>
+<h2>Local Development</h2>
 <p>For source development, install the shared packages, config package, API, and web dependencies, pull the default Ollama models, then run <code>npm run dev</code> from the repo root. The root README lists the exact commands.</p>
-<p>## Private By Default</p>
+<h2>Private By Default</h2>
 <p>Prism binds to loopback by default, so other devices on the network cannot connect unless network sharing is explicitly enabled. LOCAL mode should keep chat, auxiliary work, embeddings, and online-only image generation within the local privacy boundary.</p>
-<p>## Desktop Distribution</p>
+<h2>Desktop Distribution</h2>
 <p>Official desktop builds are free. GitHub Releases are the baseline delivery path for macOS, Windows, and Linux artifacts, with optional Patreon support treated as patronage rather than product access.</p>
-<p>## Launch Caveat</p>
+<h2>Launch Caveat</h2>
 <p>The product-worthy launch checklist is still pending. Broad public promotion should wait until platform artifacts, first-run setup, LOCAL privacy, support copy, and outreach materials have recorded pass evidence.</p>
     <h2>Categories</h2><p><code>Guides</code></p>
     <h2>Aliases</h2><p><code>Quick start</code> <code>Install Prism</code></p>
