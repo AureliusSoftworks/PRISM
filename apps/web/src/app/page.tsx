@@ -845,6 +845,7 @@ const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
 /** Text mirror of desktop `chatHeaderActions` — tall when every row is visible. */
 const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 280;
 const CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 464;
+const ZEN_CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 232;
 
 // Bot-list twin of DELETE_ALL_KEY — armed when a press-and-hold crosses the
 // threshold on any bot card ×. Kept separate so the confirmation modal can
@@ -54614,7 +54615,9 @@ function HomeContent(): React.JSX.Element {
         event.clientX,
         event.clientY,
         CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
-        CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+        view === "chat"
+          ? ZEN_CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+          : CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
       );
       setCanvasToolsContextMenu({ x: clamped.x, y: clamped.y });
       closeMessageContextOverlay();
@@ -54622,7 +54625,12 @@ function HomeContent(): React.JSX.Element {
       setConversationGroupContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
-    [shouldAllowNativeContextMenu, botLibraryGroupDashboardActive, closeMessageContextOverlay]
+    [
+      shouldAllowNativeContextMenu,
+      botLibraryGroupDashboardActive,
+      closeMessageContextOverlay,
+      view,
+    ]
   );
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
@@ -62642,8 +62650,8 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  /** Right-click on `messagesFrame`: text commands mirroring desktop `chatHeaderActions`
-   *  (`renderChatOverflowGear` when `!isMobileGear`). Keep rows + disabled rules in sync. */
+  /** Right-click on `messagesFrame`: Sandbox mirrors the full header tool stack;
+   *  Zen keeps a compact canvas menu so the calm surface stays light. */
   function renderCanvasToolsContextMenu(): React.JSX.Element | null {
     if (!canvasToolsContextMenu) return null;
     const sandboxDefaultBotView =
@@ -62705,6 +62713,85 @@ function HomeContent(): React.JSX.Element {
       effectiveThemeMode === "system"
         ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
         : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
+
+    if (isZenSurface) {
+      return (
+        <div
+          ref={canvasToolsContextMenuRef}
+          className={`${styles.messageContextMenu} ${styles.botContextMenu} ${styles.canvasToolsContextMenu}`}
+          style={menuStyle}
+          role="menu"
+          aria-label="Zen canvas tools"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runAndClose(() => openSettingsPanel())}
+          >
+            <span className={styles.contextMenuItemLabel}>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⚙</span>
+              <span>Settings</span>
+            </span>
+          </button>
+          {showZenAtmosphereButton ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={zenAtmosphereDisabled}
+              onClick={() => {
+                if (zenAtmosphereDisabled || !detail) return;
+                runAndClose(() => {
+                  const nextEnabled = !zenAtmosphereEnabled;
+                  if (nextEnabled) {
+                    zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
+                      detail.id,
+                      detail.messages.length
+                    );
+                  } else {
+                    zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
+                  }
+                  void requestZenWallpaperUpdate(detail.id, {
+                    enabled: nextEnabled,
+                    generate: false,
+                  });
+                });
+              }}
+            >
+              {zenAtmosphereBusy
+                ? "Generating Atmosphere"
+                : zenAtmosphereEnabled
+                  ? "Turn off Atmosphere"
+                  : "Turn on Atmosphere"}
+            </button>
+          ) : null}
+          {showChatThemeButton ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() =>
+                runAndClose(() => {
+                  void cycleThemeMode();
+                })
+              }
+            >
+              {themeLabel}
+            </button>
+          ) : null}
+          {showSandboxHubButton ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runAndClose(handleHeaderHubClick)}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⌂</span>
+                <span>Back to Hub</span>
+              </span>
+            </button>
+          ) : null}
+        </div>
+      );
+    }
 
     return (
       <div
