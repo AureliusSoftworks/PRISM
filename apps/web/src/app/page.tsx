@@ -60055,6 +60055,8 @@ function HomeContent(): React.JSX.Element {
     const botLibraryGroupContext = botContextMenu.groupId
       ? botLibraryGroups.find((group) => group.id === botContextMenu.groupId) ?? null
       : null;
+    const botLibraryGroupContextIsFavorites =
+      botLibraryGroupContext?.id === BOT_LIBRARY_FAVORITES_GROUP_ID;
     const singleBotIsGridSelected = canvasSelectedBotIds.has(bot.id);
     const hasMultipleCanvasSelectedBots = canvasSelectedBotIds.size > 1;
     const singleBotAddToGroupOptions =
@@ -60115,34 +60117,34 @@ function HomeContent(): React.JSX.Element {
             </button>
           ) : null}
           {renderFavoriteMenuItem()}
-          {singleBotAddToGroupOptions.length > 0 ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                closeBotContextMenu();
-                openAddBotToGroupDialog(bot.id);
-              }}
-            >
-              <span className={styles.contextMenuItemLabel}>
-                <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
-                <span>Add to group</span>
-              </span>
-            </button>
-          ) : null}
           <button
             type="button"
             role="menuitem"
             onClick={() => {
               closeBotContextMenu();
-              removeBotsFromLibraryGroup(botLibraryGroupContext.id, [bot.id]);
+              void exportBotProfile(bot);
             }}
           >
             <span className={styles.contextMenuItemLabel}>
-              <span className={styles.contextMenuGlyph} aria-hidden="true">⊖</span>
-              <span>Remove bot from group</span>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">⇪</span>
+              <span>Export bot</span>
             </span>
           </button>
+          {!botLibraryGroupContextIsFavorites ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                removeBotsFromLibraryGroup(botLibraryGroupContext.id, [bot.id]);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⊖</span>
+                <span>Remove bot from group</span>
+              </span>
+            </button>
+          ) : null}
         </div>
       );
     }
@@ -60246,6 +60248,19 @@ function HomeContent(): React.JSX.Element {
               </span>
             </button>
             {renderFavoriteMenuItem()}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                void exportBotProfile(bot);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⇪</span>
+                <span>Export bot</span>
+              </span>
+            </button>
             {singleBotAddToGroupOptions.length > 0 ? (
               <button
                 type="button"
