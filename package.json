@@ -39,6 +39,6 @@
     "wiki:closeout": "wk closeout --profile mixed --audience all"
   },
   "devDependencies": {
-    "@thjodann/wk": "^1.0.0"
+    "@thjodann/wk": "^1.0.3"
   }
 }

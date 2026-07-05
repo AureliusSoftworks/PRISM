@@ -2,6 +2,16 @@
 
 # Symbols
 
+## addBotToLibraryGroup
+
+Kind: function
+
+File: `apps/web/src/app/botLibraryGroupFilter.ts`
+
+Adds one existing bot to a mutable saved bot group while pruning stale IDs and refusing built-in, duplicate, missing, or full-group cases.
+
+Record: `symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17` | Authority: agent | Confidence: high
+
 ## embedTextLocal
 
 Kind: function

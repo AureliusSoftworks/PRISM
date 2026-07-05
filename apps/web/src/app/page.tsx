@@ -252,6 +252,7 @@ import {
   type GeneratedBotMemorySeedSet,
 } from "./botRandomizer";
 import {
+  addBotToLibraryGroup,
   BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
   filterBotsByLibraryGroup,
   filterUngroupedBotsByLibraryGroups,
@@ -8344,6 +8345,12 @@ interface MarketplaceInstalledBotReference {
   botId: string;
 }
 
+interface MarketplaceBundleImportResult {
+  importedBotIds: string[];
+  importedBotReferences: MarketplaceInstalledBotReference[];
+  restoredTotal: number;
+}
+
 function botIdByMarketplaceHash(
   bots: readonly Bot[],
   extraInstalledBots: readonly MarketplaceInstalledBotReference[] = []
@@ -11833,6 +11840,16 @@ const BOT_MARKETPLACE_LENS_CATEGORY_PRISM_LANES: Record<string, PrismGroupId> = 
 const BOT_LIBRARY_HEADER_SAVED_GROUP_PREFIX = "saved:";
 const BOT_LIBRARY_DRAWER_ANIMATION_MS = 220;
 const PANEL_CLOSE_ANIMATION_MS = 180;
+const BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR = [
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "a",
+  "[role='button']",
+  "[data-starter-bot-affordance='true']",
+  "[data-bot-picker-frame='true']",
+].join(",");
 const STARTER_PACK_INSTALL_STORAGE_PREFIX = "prism_starter_pack_installed_v1";
 const PANEL_FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -34962,17 +34979,6 @@ function HomeContent(): React.JSX.Element {
   }, [botLibraryGroupFilterId, botLibraryGroups]);
 
   useEffect(() => {
-    if (!botLibraryGroupDetailsDialog) return;
-    const handleWindowKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        setBotLibraryGroupDetailsDialog(null);
-      }
-    };
-    window.addEventListener("keydown", handleWindowKeyDown);
-    return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [botLibraryGroupDetailsDialog]);
-
-  useEffect(() => {
     if (!botLibraryGroupDeleteConfirm) return;
     if (botLibraryGroups.some((group) => group.id === botLibraryGroupDeleteConfirm.id)) return;
     setBotLibraryGroupDeleteConfirm(null);
@@ -43714,6 +43720,7 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Factory reset failed.");
     } finally {
+      setBotTransferOverlay(null);
       setBusy(false);
     }
   }
@@ -52552,6 +52559,176 @@ function HomeContent(): React.JSX.Element {
     return prepared;
   }
 
+  function startMarketplaceInstallOverlay(options: {
+    title: string;
+    subject: string;
+    detail: string;
+    currentStepLabel: string;
+    totalBots?: number;
+    accentColor?: string | null;
+    glyph?: BotGlyphName;
+  }): void {
+    startBotTransferOverlay({
+      mode: "import",
+      title: options.title,
+      subject: options.subject,
+      detail: options.detail,
+      currentStepLabel: options.currentStepLabel,
+      completedSteps: 0,
+      totalSteps: null,
+      accentColor: options.accentColor ?? null,
+      glyph: options.glyph ?? DEFAULT_BOT_GLYPH,
+      stats: {
+        totalBots: options.totalBots,
+        completedBots: typeof options.totalBots === "number" ? 0 : undefined,
+      },
+    });
+  }
+
+  async function importMarketplacePreparedBundlesWithOverlay(
+    prepared: readonly BotMarketplacePreparedBundle[],
+    options: {
+      title: string;
+      subject: string;
+    }
+  ): Promise<MarketplaceBundleImportResult> {
+    if (prepared.length === 0) {
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        title: options.title,
+        subject: options.subject,
+        detail: "Everything in this marketplace selection is already installed.",
+        currentStepLabel: "Already installed",
+        completedSteps: 1,
+        totalSteps: 1,
+        stats: { ...current.stats, completedBots: 0, totalBots: 0 },
+      }));
+      await waitForBotTransferPaint();
+      return { importedBotIds: [], importedBotReferences: [], restoredTotal: 0 };
+    }
+
+    const bundleHints = prepared.map((bundle) => ({
+      bundle,
+      hint: parseImportBotLoadingHint(bundle.raw),
+    }));
+    const totalMemories = bundleHints.reduce((sum, { hint }) => sum + hint.memoryCount, 0);
+    const totalSteps = Math.max(
+      2,
+      1 + bundleHints.reduce((sum, { hint }) => sum + 1 + hint.memoryCount, 0)
+    );
+    let completedSteps = 1;
+    let completedMemorySteps = 0;
+    let importedCount = 0;
+    let restoredTotal = 0;
+    const importedBotIds: string[] = [];
+    const importedBotReferences: MarketplaceInstalledBotReference[] = [];
+
+    updateBotTransferOverlay((current) => ({
+      ...current,
+      title: options.title,
+      subject: options.subject,
+      detail:
+        totalMemories > 0
+          ? `Installing ${prepared.length} bot${prepared.length === 1 ? "" : "s"} and restoring ${totalMemories} memories.`
+          : `Installing ${prepared.length} bot${prepared.length === 1 ? "" : "s"}.`,
+      currentStepLabel: "Preparing marketplace install",
+      completedSteps,
+      totalSteps,
+      stats: {
+        ...current.stats,
+        totalBots: prepared.length,
+        completedBots: 0,
+        totalMemories,
+        completedMemories: 0,
+      },
+    }));
+    await waitForBotTransferPaint();
+
+    for (const { bundle, hint } of bundleHints) {
+      let botCreated = false;
+      let entryRestoredMemories = 0;
+      const subject = hint.name ?? bundle.entry.name;
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject,
+        detail:
+          hint.memoryCount > 0
+            ? `Restoring ${hint.memoryCount} memories for ${subject}.`
+            : `Installing ${subject}.`,
+        currentStepLabel: `Installing ${subject}`,
+        accentColor: hint.color ?? bundle.entry.color ?? current.accentColor,
+        glyph: hint.glyph,
+      }));
+      await waitForBotTransferPaint();
+      const result = await importBotFromExportRawText(bundle.raw, {
+        suppressNotice: true,
+        suppressPanelReset: true,
+        selectInChat: false,
+        deferRefresh: true,
+        keepBotsPanelOpen: true,
+        onProgress: (event) => {
+          if (event.kind === "bot-created" && !botCreated) {
+            botCreated = true;
+            completedSteps += 1;
+          }
+          if (event.kind === "memory-restored") {
+            const memoryDelta = Math.max(0, event.restoredMemories - entryRestoredMemories);
+            entryRestoredMemories = event.restoredMemories;
+            completedSteps += memoryDelta;
+            completedMemorySteps += memoryDelta;
+          }
+          updateBotTransferOverlay((current) => ({
+            ...current,
+            subject: event.importedName,
+            detail:
+              event.totalMemories > 0
+                ? `${event.restoredMemories} of ${event.totalMemories} memories restored.`
+                : "Profile restored.",
+            currentStepLabel:
+              event.kind === "memory-restored"
+                ? `Restoring memories for ${event.importedName}`
+                : `Created ${event.importedName}`,
+            completedSteps: Math.min(completedSteps, current.totalSteps ?? completedSteps),
+            stats: {
+              ...current.stats,
+              completedBots: importedCount + (botCreated ? 1 : 0),
+              completedMemories: completedMemorySteps,
+              imported: importedCount,
+            },
+          }));
+        },
+      });
+      if (!botCreated) {
+        completedSteps += 1;
+      }
+      importedCount += 1;
+      restoredTotal += result.restoredMemories;
+      importedBotIds.push(result.botId);
+      importedBotReferences.push({
+        botHash: result.importedBotHash ?? bundle.entry.botHash,
+        botId: result.botId,
+      });
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: result.importedName,
+        detail:
+          result.restoredMemories > 0
+            ? `${result.importedName} installed with ${result.restoredMemories} memories.`
+            : `${result.importedName} installed.`,
+        currentStepLabel: `${importedCount} of ${prepared.length} bots installed`,
+        completedSteps: Math.min(completedSteps, current.totalSteps ?? completedSteps),
+        stats: {
+          ...current.stats,
+          completedBots: importedCount,
+          completedMemories: completedMemorySteps,
+          imported: importedCount,
+        },
+      }));
+    }
+
+    return { importedBotIds, importedBotReferences, restoredTotal };
+  }
+
   async function installPrismStarterPackFromMarketplace(): Promise<{
     installedCount: number;
     starterBotCount: number;
@@ -52578,18 +52755,30 @@ function HomeContent(): React.JSX.Element {
       throw new Error("Prism starter pack is missing from the marketplace catalog.");
     }
 
+    startMarketplaceInstallOverlay({
+      title: "Installing starter bots",
+      subject: "Prism Originals",
+      detail: "Fetching marketplace bundles.",
+      currentStepLabel: "Downloading starter pack",
+      totalBots: entries.length,
+    });
+    await waitForBotTransferPaint();
     const missingEntries = marketplaceMissingEntries(entries, installedHashes);
     const prepared = await prepareMarketplaceBundles(missingEntries);
-    for (const bundle of prepared) {
-      await importBotFromExportRawText(bundle.raw, {
-        suppressNotice: true,
-        suppressPanelReset: true,
-        selectInChat: false,
-        deferRefresh: true,
-        keepBotsPanelOpen: true,
-      });
-    }
+    const importResult = await importMarketplacePreparedBundlesWithOverlay(prepared, {
+      title: "Installing starter bots",
+      subject: "Prism Originals",
+    });
 
+    if (prepared.length > 0) {
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: "Prism Originals",
+        detail: "Refreshing bot library and memories.",
+        currentStepLabel: "Refreshing Prism",
+        completedSteps: Math.min(current.completedSteps, Math.max(0, (current.totalSteps ?? 1) - 1)),
+      }));
+    }
     const refreshedBots = prepared.length > 0 ? await refreshBots() : currentBots;
     if (prepared.length > 0) {
       await refreshMemories();
@@ -52615,6 +52804,22 @@ function HomeContent(): React.JSX.Element {
         // Non-fatal: the in-memory group state is already set for this page session.
       }
     }
+    updateBotTransferOverlay((current) => ({
+      ...current,
+      subject: "Prism Originals",
+      detail:
+        importResult.importedBotIds.length > 0
+          ? `${importResult.importedBotIds.length} starter bots installed.`
+          : "Prism Originals are already installed.",
+      currentStepLabel: "Complete",
+      completedSteps: current.totalSteps ?? current.completedSteps,
+      stats: {
+        ...current.stats,
+        completedBots: importResult.importedBotIds.length,
+        completedMemories: importResult.restoredTotal,
+        imported: importResult.importedBotIds.length,
+      },
+    }));
     return {
       installedCount: prepared.length,
       starterBotCount: starterBotIds.length,
@@ -52635,34 +52840,73 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
+      const entryGlyph = isBotGlyphName(entry.glyph) ? entry.glyph : DEFAULT_BOT_GLYPH;
+      startMarketplaceInstallOverlay({
+        title: "Installing marketplace bot",
+        subject: entry.name,
+        detail: "Fetching marketplace bundle.",
+        currentStepLabel: "Downloading bot",
+        totalBots: 1,
+        accentColor: entry.color ?? null,
+        glyph: entryGlyph,
+      });
+      await waitForBotTransferPaint();
       const [prepared] = await prepareMarketplaceBundles([entry]);
       if (!prepared) throw new Error(`${entry.name} marketplace bundle could not be prepared.`);
-      const result = await importBotFromExportRawText(prepared.raw, {
-        suppressNotice: true,
-        suppressPanelReset: true,
-        selectInChat: false,
-        keepBotsPanelOpen: true,
+      const importResult = await importMarketplacePreparedBundlesWithOverlay([prepared], {
+        title: "Installing marketplace bot",
+        subject: entry.name,
       });
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: entry.name,
+        detail: "Refreshing bot library and memories.",
+        currentStepLabel: "Refreshing Prism",
+        completedSteps: Math.min(current.completedSteps, Math.max(0, (current.totalSteps ?? 1) - 1)),
+      }));
+      const refreshedBots = await refreshBots();
+      await refreshMemories();
+      const importedBotId = importResult.importedBotIds[0] ?? null;
+      if (importedBotId) {
+        await refreshBotMemories(importedBotId);
+      }
       if (botMarketplaceManifest) {
         setBotLibraryGroups((current) =>
           upsertMarketplaceBotLibraryThemeGroups(
             current,
             botMarketplaceManifest,
             [entry],
-            bots,
-            [{ botHash: result.importedBotHash ?? entry.botHash, botId: result.botId }]
+            refreshedBots,
+            importResult.importedBotReferences
           )
         );
       }
       setBotPanelView("marketplace");
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: entry.name,
+        detail:
+          importResult.restoredTotal > 0
+            ? `${entry.name} installed with ${importResult.restoredTotal} memories.`
+            : `${entry.name} installed.`,
+        currentStepLabel: "Complete",
+        completedSteps: current.totalSteps ?? current.completedSteps,
+        stats: {
+          ...current.stats,
+          completedBots: 1,
+          completedMemories: importResult.restoredTotal,
+          imported: 1,
+        },
+      }));
       setPanelNotice(
-        result.restoredMemories > 0
-          ? `${result.importedName} installed with ${result.restoredMemories} memories.`
-          : `${result.importedName} installed.`
+        importResult.restoredTotal > 0
+          ? `${entry.name} installed with ${importResult.restoredTotal} memories.`
+          : `${entry.name} installed.`
       );
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Marketplace install failed.");
     } finally {
+      setBotTransferOverlay(null);
       setBotMarketplaceInstallingKey(null);
     }
   }
@@ -52675,28 +52919,29 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
+      startMarketplaceInstallOverlay({
+        title: "Installing marketplace pack",
+        subject: theme.name,
+        detail: "Fetching marketplace bundles.",
+        currentStepLabel: "Downloading pack",
+        totalBots: entries.length,
+      });
+      await waitForBotTransferPaint();
       const prepared = await prepareMarketplaceBundles(entries);
       const missingPrepared = prepared.filter(
         ({ entry }) => !botMarketplaceInstalledHashes.has(entry.botHash)
       );
-      const importedIds: string[] = [];
-      const importedBotReferences: MarketplaceInstalledBotReference[] = [];
-      let restoredTotal = 0;
-      for (const bundle of missingPrepared) {
-        const result = await importBotFromExportRawText(bundle.raw, {
-          suppressNotice: true,
-          suppressPanelReset: true,
-          selectInChat: false,
-          deferRefresh: true,
-          keepBotsPanelOpen: true,
-        });
-        importedIds.push(result.botId);
-        importedBotReferences.push({
-          botHash: result.importedBotHash ?? bundle.entry.botHash,
-          botId: result.botId,
-        });
-        restoredTotal += result.restoredMemories;
-      }
+      const importResult = await importMarketplacePreparedBundlesWithOverlay(missingPrepared, {
+        title: "Installing marketplace pack",
+        subject: theme.name,
+      });
+      updateBotTransferOverlay((current) => ({
+        ...current,
+        subject: theme.name,
+        detail: "Refreshing bot library and memories.",
+        currentStepLabel: "Refreshing Prism",
+        completedSteps: Math.min(current.completedSteps, Math.max(0, (current.totalSteps ?? 1) - 1)),
+      }));
       const refreshedBots = await refreshBots();
       await refreshMemories();
       setBotLibraryGroups((current) =>
@@ -52705,22 +52950,46 @@ function HomeContent(): React.JSX.Element {
           botMarketplaceManifest,
           entries,
           refreshedBots,
-          importedBotReferences
+          importResult.importedBotReferences
         )
       );
       setBotPanelView("marketplace");
       if (missingPrepared.length === 0) {
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: theme.name,
+          detail: `${theme.name} is already installed.`,
+          currentStepLabel: "Complete",
+          completedSteps: current.totalSteps ?? current.completedSteps,
+        }));
         setPanelNotice(`${theme.name} is already installed.`);
       } else {
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          subject: theme.name,
+          detail:
+            importResult.restoredTotal > 0
+              ? `${theme.name} installed: ${importResult.importedBotIds.length} bots and ${importResult.restoredTotal} memories.`
+              : `${theme.name} installed: ${importResult.importedBotIds.length} bots.`,
+          currentStepLabel: "Complete",
+          completedSteps: current.totalSteps ?? current.completedSteps,
+          stats: {
+            ...current.stats,
+            completedBots: importResult.importedBotIds.length,
+            completedMemories: importResult.restoredTotal,
+            imported: importResult.importedBotIds.length,
+          },
+        }));
         setPanelNotice(
-          restoredTotal > 0
-            ? `${theme.name} installed: ${importedIds.length} bots and ${restoredTotal} memories.`
-            : `${theme.name} installed: ${importedIds.length} bots.`
+          importResult.restoredTotal > 0
+            ? `${theme.name} installed: ${importResult.importedBotIds.length} bots and ${importResult.restoredTotal} memories.`
+            : `${theme.name} installed: ${importResult.importedBotIds.length} bots.`
         );
       }
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Marketplace theme install failed.");
     } finally {
+      setBotTransferOverlay(null);
       setBotMarketplaceInstallingKey(null);
     }
   }
@@ -52753,6 +53022,7 @@ function HomeContent(): React.JSX.Element {
         setStoryError(message);
       }
     } finally {
+      setBotTransferOverlay(null);
       setBotMarketplaceInstallingKey(null);
     }
   }
@@ -52791,6 +53061,7 @@ function HomeContent(): React.JSX.Element {
         }
       } finally {
         if (!cancelled) {
+          setBotTransferOverlay(null);
           setBotMarketplaceInstallingKey(null);
         }
       }
@@ -52815,13 +53086,41 @@ function HomeContent(): React.JSX.Element {
   }
 
   function installMarketplaceLens(lens: MarketplaceLensEntry, options?: { quiet?: boolean }): void {
+    if (!options?.quiet && (botMarketplaceInstallingKey || botTransferBusy)) return;
+    if (!options?.quiet) {
+      setBotMarketplaceInstallingKey(`lens:${lens.id}`);
+      setPanelError(null);
+      setPanelNotice(null);
+      startMarketplaceInstallOverlay({
+        title: "Installing marketplace Lens",
+        subject: lens.displayName,
+        detail: "Saving Lens to your library.",
+        currentStepLabel: "Installing Lens",
+      });
+    }
     const next = new Set(installedMarketplaceLensIds);
     next.add(lens.id);
-    commitInstalledMarketplaceLensIds(next);
-    if (!options?.quiet) {
-      setPanelError(null);
-      setPanelNotice(`${lens.displayName} installed.`);
+    if (options?.quiet) {
+      commitInstalledMarketplaceLensIds(next);
+      return;
     }
+    void (async () => {
+      try {
+        await waitForBotTransferPaint();
+        commitInstalledMarketplaceLensIds(next);
+        updateBotTransferOverlay((current) => ({
+          ...current,
+          detail: `${lens.displayName} installed.`,
+          currentStepLabel: "Complete",
+          completedSteps: 1,
+          totalSteps: 1,
+        }));
+        setPanelNotice(`${lens.displayName} installed.`);
+      } finally {
+        setBotTransferOverlay(null);
+        setBotMarketplaceInstallingKey(null);
+      }
+    })();
   }
 
   function removeMarketplaceLens(lens: MarketplaceLensEntry): void {
@@ -53183,9 +53482,7 @@ function HomeContent(): React.JSX.Element {
       const startsOnBotTile = botTileTarget !== null;
       pressedBotId = botTileTarget?.dataset.botId ?? null;
       const allowBotTileShiftDrag = event.shiftKey && startsOnBotTile;
-      const blockedInteractiveTarget = target.closest(
-        "button, input, textarea, select, a, [role='button']"
-      );
+      const blockedInteractiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
       if (blockedInteractiveTarget && !allowBotTileShiftDrag) {
         return false;
       }
@@ -53334,9 +53631,7 @@ function HomeContent(): React.JSX.Element {
     if (detail || pendingIncognito) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
-    const interactiveTarget = target.closest(
-      "button, input, textarea, select, a, [role='button'], [data-starter-bot-affordance='true'], [data-bot-picker-frame='true']"
-    );
+    const interactiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
     if (interactiveTarget) return;
     if (event.shiftKey) {
       event.preventDefault();
@@ -55451,6 +55746,41 @@ function HomeContent(): React.JSX.Element {
 
   function groupSelectedBots(selectedBotIds: string[]): void {
     openCreateBotLibraryGroupDialog(selectedBotIds);
+  }
+
+  function addBotToExistingLibraryGroup(botId: string, groupId: string): void {
+    const bot = bots.find((candidate) => candidate.id === botId);
+    const target = botLibraryGroups.find((group) => group.id === groupId);
+    if (!bot || !target || target.builtIn) return;
+
+    const result = addBotToLibraryGroup(botLibraryGroups, {
+      groupId,
+      botId,
+      existingBotIds,
+      maxBots: BOT_LIBRARY_GROUP_BOT_CAP,
+      now: new Date().toISOString(),
+    });
+    if (result.status !== "added") {
+      setPanelError(null);
+      setPanelNotice(
+        result.status === "already-in-group"
+          ? `"${target.name}" already has ${bot.name}.`
+          : result.status === "group-full"
+            ? `"${target.name}" is full.`
+            : "Could not add bot to that group."
+      );
+      return;
+    }
+
+    setPanelError(null);
+    setPanelNotice(`Added ${bot.name} to "${target.name}".`);
+    setBotLibraryGroups(normalizeBotLibraryGroups(result.groups));
+    setBotLibraryGroupFilterId(groupId);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    if ((view === "chat" || view === "sandbox") && !detail && !pendingReplyVisible) {
+      resetEmptyStateBotSelection();
+      setHueFilterCenter(null);
+    }
   }
 
   function editBotLibraryGroup(groupId: string): void {
@@ -59480,6 +59810,20 @@ function HomeContent(): React.JSX.Element {
       : null;
     const singleBotIsGridSelected = canvasSelectedBotIds.has(bot.id);
     const hasMultipleCanvasSelectedBots = canvasSelectedBotIds.size > 1;
+    const singleBotAddToGroupOptions =
+      !isMultiSelectionMenu && !hasMultipleCanvasSelectedBots
+        ? customBotLibraryGroups
+            .map((group) => {
+              const existingGroupBotIds = group.botIds.filter((botId) =>
+                existingBotIds.has(botId)
+              );
+              return { group, count: existingGroupBotIds.length, botIds: existingGroupBotIds };
+            })
+            .filter(
+              ({ count, botIds }) =>
+                !botIds.includes(bot.id) && count < BOT_LIBRARY_GROUP_BOT_CAP
+            )
+        : [];
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -59509,6 +59853,36 @@ function HomeContent(): React.JSX.Element {
                 <span>Edit bot</span>
               </span>
             </button>
+          ) : null}
+          {singleBotAddToGroupOptions.length > 0 ? (
+            <div className={styles.botContextMenuSelectItem} role="none">
+              <label>
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
+                  <span>Add to group</span>
+                </span>
+                <select
+                  value=""
+                  aria-label={`Add ${bot.name} to group`}
+                  onChange={(event) => {
+                    const groupId = event.currentTarget.value;
+                    if (!groupId) return;
+                    closeBotContextMenu();
+                    addBotToExistingLibraryGroup(bot.id, groupId);
+                  }}
+                >
+                  <option value="" disabled>Choose group</option>
+                  {singleBotAddToGroupOptions.map(({ group, count }) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name} ({botLibraryGroupCapacityLabel(
+                        count,
+                        BOT_LIBRARY_GROUP_BOT_CAP
+                      )})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           ) : null}
           <button
             type="button"
@@ -59625,6 +59999,36 @@ function HomeContent(): React.JSX.Element {
                 <span>{singleBotIsGridSelected ? "Deselect" : "Select"}</span>
               </span>
             </button>
+            {singleBotAddToGroupOptions.length > 0 ? (
+              <div className={styles.botContextMenuSelectItem} role="none">
+                <label>
+                  <span className={styles.contextMenuItemLabel}>
+                    <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
+                    <span>Add to group</span>
+                  </span>
+                  <select
+                    value=""
+                    aria-label={`Add ${bot.name} to group`}
+                    onChange={(event) => {
+                      const groupId = event.currentTarget.value;
+                      if (!groupId) return;
+                      closeBotContextMenu();
+                      addBotToExistingLibraryGroup(bot.id, groupId);
+                    }}
+                  >
+                    <option value="" disabled>Choose group</option>
+                    {singleBotAddToGroupOptions.map(({ group, count }) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} ({botLibraryGroupCapacityLabel(
+                          count,
+                          BOT_LIBRARY_GROUP_BOT_CAP
+                        )})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -60656,7 +61060,6 @@ function HomeContent(): React.JSX.Element {
       <div
         className={styles.botPreferredModelsModalBackdrop}
         role="presentation"
-        onClick={() => setBotLibraryGroupDetailsDialog(null)}
       >
         <form
           className={`${styles.botPreferredModelsModal} ${styles.botLibraryGroupDialog}`}
@@ -70318,6 +70721,7 @@ function HomeContent(): React.JSX.Element {
                               installedMarketplaceLensIds
                             );
                             const installed = lensState === "installed";
+                            const lensInstalling = botMarketplaceInstallingKey === `lens:${lens.id}`;
                             const prismLane = botMarketplaceLensCategoryPrismLane(
                               botMarketplaceSelectedLensCategory?.id
                             );
@@ -70372,19 +70776,27 @@ function HomeContent(): React.JSX.Element {
                                       }
                                       installMarketplaceLens(lens);
                                     }}
+                                    disabled={marketplaceActionBusy && !lensInstalling}
                                   >
                                     {installed ? (
                                       <Sparkles size={15} strokeWidth={2.1} aria-hidden="true" />
                                     ) : (
                                       <Download size={15} strokeWidth={2.1} aria-hidden="true" />
                                     )}
-                                    <span>{installed ? "Use for Generation" : "Install Lens"}</span>
+                                    <span>
+                                      {installed
+                                        ? "Use for Generation"
+                                        : lensInstalling
+                                          ? "Installing"
+                                          : "Install Lens"}
+                                    </span>
                                   </button>
                                   {installed ? (
                                     <button
                                       type="button"
                                       className={styles.botMarketplaceSecondaryButton}
                                       onClick={() => removeMarketplaceLens(lens)}
+                                      disabled={marketplaceActionBusy}
                                     >
                                       Remove
                                     </button>
@@ -81228,6 +81640,7 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
+            onClick={!detail && !pendingReplyVisible ? handleEmptyStateBackgroundClick : undefined}
             onWheelCapture={handleChatModeThreadWheel}
             onTouchStartCapture={handleChatModeThreadTouchStart}
             onTouchMoveCapture={handleChatModeThreadTouchMove}
@@ -82419,6 +82832,7 @@ function HomeContent(): React.JSX.Element {
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
+            onClick={!detail && !pendingReplyVisible ? handleEmptyStateBackgroundClick : undefined}
             onWheelCapture={handleChatModeThreadWheel}
             onTouchStartCapture={handleChatModeThreadTouchStart}
             onTouchMoveCapture={handleChatModeThreadTouchMove}

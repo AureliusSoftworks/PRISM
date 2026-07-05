@@ -36,22 +36,22 @@
         <nav class="nav">
 <p class="nav-heading">Start Here</p>
 <a class="nav-link" href="../../index.html">Home</a>
-<a class="nav-link" href="../../articles.html">Articles<span>0</span></a>
+<a class="nav-link" href="../../articles.html">Articles<span>5</span></a>
 <a class="nav-link" href="../../guides.html">Guides</a>
 <a class="nav-link" href="../../search.html">Search</a>
 <p class="nav-heading">Agent records</p>
-<a class="nav-link" href="../../concepts.html">Concepts<span>6</span></a>
+<a class="nav-link" href="../../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link active" href="../../decisions.html" aria-current="page">Decisions<span>4</span></a>
-<a class="nav-link" href="../../devlog.html">Devlog<span>3</span></a>
+<a class="nav-link" href="../../devlog.html">Devlog<span>5</span></a>
 <a class="nav-link" href="../../notes.html">Notes<span>2</span></a>
-<a class="nav-link" href="../../symbols.html">Symbols<span>3</span></a>
+<a class="nav-link" href="../../symbols.html">Symbols<span>4</span></a>
 </nav>
       </div>
     </aside>
     <main id="content" class="content">
       <header class="page-header">
         <h1>Adopt Wikiwiki for repo-local project knowledge</h1>
-        <p>Install @thjodann/wk from Thjodann/Wikiwiki as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.</p>
+        <p>Install @thjodann/wk as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -67,9 +67,9 @@
   <h2>Context</h2>
   <p>PRISM needs scriptable local project knowledge that agents and maintainers can update without a hosted service or separate database.</p>
   <h2>Decision</h2>
-  <p>Install @thjodann/wk from Thjodann/Wikiwiki as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.</p>
+  <p>Install @thjodann/wk as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.</p>
   <h2>Consequences</h2>
-  <p>Structured records in .wikiwiki/records are the source of truth. Generated Markdown lives in wiki/ and the static browseable site lives in wiki-site/. The package-lock entry is kept on git+https so clean installs do not require GitHub SSH access.</p>
+  <p>Structured records in .wikiwiki/records are the source of truth. Generated Markdown lives in wiki/ and the static browseable site lives in wiki-site/. The @thjodann/wk dependency is consumed from the npm registry so clean installs do not need GitHub SSH access.</p>
 </section>
   <aside class="sources-panel">
   <h2>Related files</h2>
@@ -85,7 +85,7 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-04T23:58:03.367Z">2026-07-04</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-04T23:58:03.367Z">2026-07-04</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-05T04:13:16.368Z">2026-07-05</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:developer</code> <code>docs</code> <code>tooling</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../../package.json"><code>package.json</code></a></li>
 <li><a class="source-link" href="../../../package-lock.json"><code>package-lock.json</code></a></li>

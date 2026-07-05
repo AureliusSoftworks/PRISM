@@ -25,3 +25,19 @@ Updated the installed wk dependency to Wikiwiki commit ab7e817 and verified the 
 Files: `package-lock.json`, `.wikiwiki/site-theme.json`, `wiki-site/assets/project-theme.css`, `apps/web/src/app/prism/page.module.css`, `apps/web/src/app/page.module.css`, `apps/web/src/app/globals.css`
 
 Recorded: 2026-07-05T01:18:50.957Z | Record: `event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a` | Confidence: high
+
+## Wikiwiki npm package updated to 1.0.3
+
+Updated the PRISM root @thjodann/wk devDependency and package lock to the current npm release 1.0.3, then refreshed the Codex wk agent skill with the updated CLI and verified wiki validation, render, and site generation.
+
+Files: `package.json`, `package-lock.json`
+
+Recorded: 2026-07-05T03:21:55.558Z | Record: `event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392` | Confidence: high
+
+## Bot library and marketplace UX refined
+
+Marketplace bot, pack, starter, and Lens installs now show the same progress overlay used for bot import/export flows. Bot group dashboards behave like focused canvas views: clicking the open canvas outside the group card returns to the full bot directory. Single-bot context menus can add that bot to an existing eligible custom group through a dropdown, and bot group detail dialogs no longer close from backdrop clicks while editing text.
+
+Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryGroupFilter.test.ts`, `apps/web/src/app/page.module.css`
+
+Recorded: 2026-07-05T04:12:50.226Z | Record: `event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6` | Confidence: high

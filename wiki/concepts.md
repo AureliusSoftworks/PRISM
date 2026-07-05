@@ -2,6 +2,18 @@
 
 # Concepts
 
+## Bot library groups and marketplace installs
+
+The Chat and Sandbox bot canvas can organize bots into saved groups and install marketplace bots, packs, starter bots, and Lenses with explicit progress feedback.
+
+Custom bot groups are mutable saved views with capacity limits, dashboard cards, delete protection, and context-menu maintenance. A single selected bot can be added to an existing custom group, focused group cards return to the full bot directory when the user clicks outside the card, and group detail dialogs close only through visible controls so text selection does not dismiss them. Marketplace bot, theme, starter-pack, and Lens installs reuse the bot import overlay so install progress is visible while bot profiles and memories are restored.
+
+Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryGroupFilter.test.ts`, `apps/web/src/app/page.module.css`
+
+Tags: `audience:all`, `ux`, `bots`, `groups`, `marketplace`
+
+Record: `concept_38af8f30-6915-43a6-814b-76ca3e5b63cf` | Authority: agent | Confidence: high
+
 ## Experience lanes
 
 Chat, Zen, Coffee, Sandbox, and Story are distinct lanes with different emotional weight and control surfaces.
