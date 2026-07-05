@@ -202,26 +202,28 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "text": "event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12 agent agent high 2026-07-04T23:58:03.465Z event Wikiwiki installed Installed Thjodann/Wikiwiki into PRISM, initialized the Wikiwiki config and record store, added npm scripts, and rendered the initial Markdown wiki plus static wiki site. package.json .wikiwiki/config.json wiki/index.md wiki-site/index.html audience:developer docs tooling milestone"
   },
   {
-    "type": "note",
-    "typeLabel": "Note",
-    "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
-    "title": "Prism should not be broadly promoted from wiki copy until the product-worthy lau",
-    "summary": "Prism should not be broadly promoted from wiki copy until the product-worthy launch checklist has pass evidence for downloads, first-run setup, LOCAL...",
+    "type": "event",
+    "typeLabel": "Devlog",
+    "id": "event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a",
+    "title": "Wikiwiki updated and first-run theming retested",
+    "summary": "Wikiwiki updated and first-run theming retested",
     "tags": [
-      "launch",
-      "caveats"
+      "wikiwiki",
+      "theme",
+      "devlog",
+      "verification"
     ],
     "authority": "agent",
     "confidence": "high",
-    "audienceLabel": "For everyone",
-    "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
-    "text": "note_65e62737-730b-45ab-b59e-309f9888db4f agent agent high 2026-07-05T00:07:19.718Z note Prism should not be broadly promoted from wiki copy until the product-worthy launch checklist has pass evidence for downloads, first-run setup, LOCAL privacy, support boundaries, and outreach review. audience:all launch caveats"
+    "audienceLabel": "",
+    "url": "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
+    "text": "event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a agent agent high 2026-07-05T01:18:50.957Z event Wikiwiki updated and first-run theming retested Updated the installed wk dependency to Wikiwiki commit ab7e817 and verified the initial setup/theme/render/site path against PRISM source files. Theme preview now sanitizes README logo HTML, inspects PRISM CSS/design sources, and generates a dark-first PRISM-branded site without hand-editing generated CSS. package-lock.json .wikiwiki/site-theme.json wiki-site/assets/project-theme.css apps/web/src/app/prism/page.module.css apps/web/src/app/page.module.css apps/web/src/app/globals.css wikiwiki theme devlog verification"
   },
   {
     "type": "note",
     "typeLabel": "Note",
     "id": "note_5850980f-5230-4d48-ae29-08c98e6ed3a3",
-    "title": "Wikiwiki generated files should be refreshed through structured records and them",
+    "title": "Note from 2026-07-05",
     "summary": "Wikiwiki generated files should be refreshed through structured records and theme files: edit .wikiwiki/records/*.jsonl or .wikiwiki/site-theme.json...",
     "tags": [
       "docs",
@@ -232,6 +234,22 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "audienceLabel": "For developers",
     "url": "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html",
     "text": "note_5850980f-5230-4d48-ae29-08c98e6ed3a3 agent agent high 2026-07-05T00:07:19.617Z note Wikiwiki generated files should be refreshed through structured records and theme files: edit .wikiwiki/records/*.jsonl or .wikiwiki/site-theme.json, then run npm run wiki:site. Avoid hand-editing wiki/ or wiki-site/ output. audience:developer docs generated-files"
+  },
+  {
+    "type": "note",
+    "typeLabel": "Note",
+    "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
+    "title": "Note from 2026-07-05",
+    "summary": "Prism should not be broadly promoted from wiki copy until the product-worthy launch checklist has pass evidence for downloads, first-run setup, LOCAL...",
+    "tags": [
+      "launch",
+      "caveats"
+    ],
+    "authority": "agent",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
+    "text": "note_65e62737-730b-45ab-b59e-309f9888db4f agent agent high 2026-07-05T00:07:19.718Z note Prism should not be broadly promoted from wiki copy until the product-worthy launch checklist has pass evidence for downloads, first-run setup, LOCAL privacy, support boundaries, and outreach review. audience:all launch caveats"
   },
   {
     "type": "symbol",

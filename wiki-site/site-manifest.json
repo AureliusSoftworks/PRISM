@@ -8,6 +8,7 @@
   "theme_file": ".wikiwiki/site-theme.json",
   "pages": [
     "index.html",
+    "articles.html",
     "guides.html",
     "concepts.html",
     "decisions.html",
@@ -15,7 +16,25 @@
     "notes.html",
     "symbols.html",
     "links.html",
-    "search.html"
+    "search.html",
+    "records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html",
+    "records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html",
+    "records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html",
+    "records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html",
+    "records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html",
+    "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html",
+    "records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html",
+    "records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html",
+    "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html",
+    "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
+    "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
+    "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html",
+    "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
+    "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html",
+    "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
+    "records/symbol/symbol_beaadb06-ce2d-4ace-bf2b-646296edf413.html",
+    "records/symbol/symbol_5a171439-f62d-4a58-866e-dd2802ae886a.html",
+    "records/symbol/symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953.html"
   ],
   "integrations": {
     "beads": {
@@ -38,6 +57,7 @@
       "recent_closed": []
     }
   },
+  "articles": [],
   "records": [
     {
       "type": "concept",
@@ -112,16 +132,22 @@
       "url": "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html"
     },
     {
-      "type": "note",
-      "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
-      "title": "Prism should not be broadly promoted from wiki copy until the product-worthy lau",
-      "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html"
+      "type": "event",
+      "id": "event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a",
+      "title": "Wikiwiki updated and first-run theming retested",
+      "url": "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html"
     },
     {
       "type": "note",
       "id": "note_5850980f-5230-4d48-ae29-08c98e6ed3a3",
-      "title": "Wikiwiki generated files should be refreshed through structured records and them",
+      "title": "Note from 2026-07-05",
       "url": "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html"
+    },
+    {
+      "type": "note",
+      "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
+      "title": "Note from 2026-07-05",
+      "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html"
     },
     {
       "type": "symbol",
