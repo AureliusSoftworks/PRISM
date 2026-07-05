@@ -1,0 +1,248 @@
+{
+  "generator": "Wikiwiki",
+  "generated_from": ".wikiwiki/records",
+  "command": "wk site",
+  "source_base_url": null,
+  "audience": "all",
+  "project_name": "PRISM",
+  "theme_file": ".wikiwiki/site-theme.json",
+  "assets": {
+    "logo": "assets/logo.svg",
+    "wordmark": "assets/wordmark.svg",
+    "favicon": "assets/favicon.svg",
+    "favicon_light": "assets/favicon-light.svg"
+  },
+  "pages": [
+    "index.html",
+    "articles.html",
+    "guides.html",
+    "concepts.html",
+    "decisions.html",
+    "devlog.html",
+    "notes.html",
+    "symbols.html",
+    "links.html",
+    "search.html",
+    "articles/project-overview.html",
+    "articles/getting-started.html",
+    "articles/features-and-workflows.html",
+    "articles/bot-library-and-marketplace.html",
+    "articles/developer-guide.html",
+    "records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html",
+    "records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html",
+    "records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html",
+    "records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html",
+    "records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html",
+    "records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html",
+    "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html",
+    "records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html",
+    "records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html",
+    "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html",
+    "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
+    "records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html",
+    "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
+    "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html",
+    "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html",
+    "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html",
+    "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
+    "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html",
+    "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
+    "records/symbol/symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17.html",
+    "records/symbol/symbol_beaadb06-ce2d-4ace-bf2b-646296edf413.html",
+    "records/symbol/symbol_5a171439-f62d-4a58-866e-dd2802ae886a.html",
+    "records/symbol/symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953.html"
+  ],
+  "integrations": {
+    "beads": {
+      "detected": true,
+      "enabled": true,
+      "available": false,
+      "configured": "auto",
+      "error": "beads_auto_read_skipped",
+      "warnings": [
+        "Beads workspace detected; detailed bd reads are skipped in auto mode to avoid dirtying .beads. Set integrations.beads.enabled to true to opt in."
+      ],
+      "counts": {
+        "ready": 0,
+        "in_progress": 0,
+        "recent_closed": 0
+      },
+      "issue_ids": [],
+      "ready": [],
+      "in_progress": [],
+      "recent_closed": []
+    }
+  },
+  "articles": [
+    {
+      "id": "article_d9ba11bc-3099-4f1e-bf47-1ebe10122438",
+      "title": "Project overview",
+      "slug": "project-overview",
+      "url": "articles/project-overview.html"
+    },
+    {
+      "id": "article_7a88eb32-6db1-4110-9dcf-e6793bc20454",
+      "title": "Getting started",
+      "slug": "getting-started",
+      "url": "articles/getting-started.html"
+    },
+    {
+      "id": "article_9547e9e8-fe98-41fa-87ab-64ddd8b390f8",
+      "title": "Features and workflows",
+      "slug": "features-and-workflows",
+      "url": "articles/features-and-workflows.html"
+    },
+    {
+      "id": "article_a85cd666-f08f-43b5-911b-d03d411293a2",
+      "title": "Bot library and marketplace",
+      "slug": "bot-library-and-marketplace",
+      "url": "articles/bot-library-and-marketplace.html"
+    },
+    {
+      "id": "article_e250c780-976e-443d-9cc5-5199c0d38422",
+      "title": "Developer guide",
+      "slug": "developer-guide",
+      "url": "articles/developer-guide.html"
+    }
+  ],
+  "records": [
+    {
+      "type": "concept",
+      "id": "concept_38af8f30-6915-43a6-814b-76ca3e5b63cf",
+      "title": "Bot library groups and marketplace installs",
+      "url": "records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_bbdc911a-c8a6-417e-8a32-a5650c8be316",
+      "title": "Experience lanes",
+      "url": "records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_98e450e7-a536-4429-9c00-75d47211ac3e",
+      "title": "Free desktop distribution",
+      "url": "records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e",
+      "title": "LOCAL mode privacy boundary",
+      "url": "records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6",
+      "title": "Memory and continuity pipeline",
+      "url": "records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_17097483-9143-4f39-91de-8ad33a73b888",
+      "title": "Monorepo architecture",
+      "url": "records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_6fbe4496-b766-4a5a-abca-987acdd7d770",
+      "title": "Product promise",
+      "url": "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_74d88333-8a92-47f5-897a-2f0458817e74",
+      "title": "Adopt Wikiwiki for repo-local project knowledge",
+      "url": "records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_d8f8761e-d67c-4d96-8217-3af3b67ec403",
+      "title": "Keep experience lanes separated",
+      "url": "records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_a19295be-77fe-4e95-9a6a-57206331a0a5",
+      "title": "Keep LOCAL mode strict",
+      "url": "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_791a7b3c-d069-4543-907d-3c0cda50f452",
+      "title": "Keep support non-gating",
+      "url": "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html"
+    },
+    {
+      "type": "event",
+      "id": "event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6",
+      "title": "Bot library and marketplace UX refined",
+      "url": "records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html"
+    },
+    {
+      "type": "event",
+      "id": "event_752b90fc-e23c-4000-afe3-fbb07affebba",
+      "title": "Wiki site restyled with PRISM visual language",
+      "url": "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html"
+    },
+    {
+      "type": "event",
+      "id": "event_836e6d6c-33bb-48c5-9074-3deba3b54f2e",
+      "title": "Wiki site wired to PRISM brand graphics",
+      "url": "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html"
+    },
+    {
+      "type": "event",
+      "id": "event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12",
+      "title": "Wikiwiki installed",
+      "url": "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html"
+    },
+    {
+      "type": "event",
+      "id": "event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392",
+      "title": "Wikiwiki npm package updated to 1.0.4",
+      "url": "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html"
+    },
+    {
+      "type": "event",
+      "id": "event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a",
+      "title": "Wikiwiki updated and first-run theming retested",
+      "url": "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html"
+    },
+    {
+      "type": "note",
+      "id": "note_5850980f-5230-4d48-ae29-08c98e6ed3a3",
+      "title": "Note from 2026-07-05",
+      "url": "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html"
+    },
+    {
+      "type": "note",
+      "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
+      "title": "Note from 2026-07-05",
+      "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17",
+      "title": "addBotToLibraryGroup",
+      "url": "records/symbol/symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_beaadb06-ce2d-4ace-bf2b-646296edf413",
+      "title": "embedTextLocal",
+      "url": "records/symbol/symbol_beaadb06-ce2d-4ace-bf2b-646296edf413.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_5a171439-f62d-4a58-866e-dd2802ae886a",
+      "title": "getAuxiliaryProvider",
+      "url": "records/symbol/symbol_5a171439-f62d-4a58-866e-dd2802ae886a.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953",
+      "title": "selectProvider",
+      "url": "records/symbol/symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953.html"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "localai-chatgov",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.6.4",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -29,6 +29,16 @@
     "eval-effort-ladder": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts",
     "build": "npm run build -w packages/shared && npm run build -w packages/config && npm run build -w apps/api && npm run build -w apps/web",
     "lint": "npm run lint -w apps/api && npm run lint -w apps/web",
-    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/config && npm run typecheck -w apps/api && npm run typecheck -w apps/web"
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/config && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "wiki:status": "wk status --json",
+    "wiki:spin": "wk spin --profile mixed --json",
+    "wiki:check": "wk validate",
+    "wiki:render": "wk validate && wk render",
+    "wiki:site": "wk validate && wk render && wk site --audience all",
+    "wiki:site:user": "wk validate && wk render && wk site --audience user",
+    "wiki:closeout": "wk closeout --profile mixed --audience all"
+  },
+  "devDependencies": {
+    "@thjodann/wk": "^1.0.4"
   }
 }

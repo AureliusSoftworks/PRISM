@@ -2,11 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addBotToLibraryGroup,
   filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
   pruneBotLibraryGroupsForExistingBots,
   pruneBotLibraryGroupsWithFewBots,
   resolveBotLibraryMultiSelectionActions,
+  upsertBotLibraryGroup,
+  type BotLibraryGroupUpsertGroup,
 } from "./botLibraryGroupFilter.ts";
 
 describe("bot library group filtering", () => {
@@ -98,6 +101,19 @@ describe("bot library group filtering", () => {
     );
   });
 
+  it("keeps marketplace theme groups with one installed bot", () => {
+    const maintainedGroups = pruneBotLibraryGroupsWithFewBots([
+      { id: "group:empty-marketplace", botIds: [], marketplaceThemeId: "science" },
+      { id: "group:science", botIds: ["tesla"], marketplaceThemeId: "science" },
+      { id: "group:solo", botIds: ["bot-a"], builtIn: false },
+    ]);
+
+    assert.deepEqual(
+      maintainedGroups.map((group) => group.id),
+      ["group:science"]
+    );
+  });
+
   it("deletes custom groups that fall below two surviving bots", () => {
     const maintainedGroups = pruneBotLibraryGroupsForExistingBots(
       [
@@ -130,5 +146,92 @@ describe("bot library group filtering", () => {
 
     assert.equal(actions.canCreateGroup, true);
     assert.equal(actions.removableGroup?.id, "group:villains");
+  });
+
+  it("adds one bot to a mutable existing group and drops stale ids", () => {
+    const result = addBotToLibraryGroup(
+      [
+        {
+          id: "group:story",
+          botIds: ["bot-a", "bot-missing"],
+          builtIn: false,
+          updatedAt: "2026-07-04T00:00:00.000Z",
+        },
+      ],
+      {
+        groupId: "group:story",
+        botId: "bot-b",
+        existingBotIds: new Set(["bot-a", "bot-b"]),
+        maxBots: 3,
+        now: "2026-07-04T01:00:00.000Z",
+      }
+    );
+
+    assert.equal(result.status, "added");
+    assert.deepEqual(result.groups[0]?.botIds, ["bot-a", "bot-b"]);
+    assert.equal(result.groups[0]?.updatedAt, "2026-07-04T01:00:00.000Z");
+  });
+
+  it("does not add one bot to built-in, duplicate, or full groups", () => {
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "builtin:favorites", botIds: [], builtIn: true }],
+        { groupId: "builtin:favorites", botId: "bot-a" }
+      ).status,
+      "built-in-group"
+    );
+
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "group:story", botIds: ["bot-a"], builtIn: false }],
+        { groupId: "group:story", botId: "bot-a" }
+      ).status,
+      "already-in-group"
+    );
+
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "group:full", botIds: ["bot-a", "bot-b"], builtIn: false }],
+        { groupId: "group:full", botId: "bot-c", maxBots: 2 }
+      ).status,
+      "group-full"
+    );
+  });
+
+  it("upserts marketplace groups by theme id and merges installed bots", () => {
+    const now = "2026-07-04T00:00:00.000Z";
+    const groups = upsertBotLibraryGroup<BotLibraryGroupUpsertGroup>([], {
+      name: "Science & Invention",
+      description: "Investigators and inventors.",
+      botIds: ["tesla"],
+      marketplaceThemeId: "science-invention",
+      now,
+      createGroupId: () => "group:science",
+    });
+
+    const mergedGroups = upsertBotLibraryGroup(
+      [
+        {
+          ...groups[0]!,
+          name: "My Science Bench",
+          updatedAt: "2026-07-04T01:00:00.000Z",
+        },
+      ],
+      {
+        name: "Science & Invention",
+        description: "Updated catalog description.",
+        botIds: ["curie", "tesla"],
+        marketplaceThemeId: "science-invention",
+        now: "2026-07-04T02:00:00.000Z",
+        createGroupId: () => "group:duplicate",
+      }
+    );
+
+    assert.equal(mergedGroups.length, 1);
+    assert.equal(mergedGroups[0]?.id, "group:science");
+    assert.equal(mergedGroups[0]?.name, "My Science Bench");
+    assert.deepEqual(mergedGroups[0]?.botIds, ["tesla", "curie"]);
+    assert.equal(mergedGroups[0]?.marketplaceThemeId, "science-invention");
+    assert.equal(mergedGroups[0]?.updatedAt, "2026-07-04T02:00:00.000Z");
   });
 });

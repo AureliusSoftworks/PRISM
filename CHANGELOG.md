@@ -12,6 +12,37 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.6.4] - 2026-07-04
+
+### Added
+
+- **Wikiwiki project wiki.** Prism now includes a repo-local Wikiwiki knowledge
+  base with structured records, generated Markdown, and a browseable static
+  wiki site for product and maintainer context.
+- **Marketplace installs maintain bot library groups.** Marketplace theme and
+  starter-pack installs now create or update saved bot groups by marketplace
+  theme, keeping installed packs visible even when only one bot from the group
+  is present.
+
+### Changed
+
+- **Bot group workflows are smoother.** Marketplace bot, pack, starter, and
+  Lens installs now show the shared import progress overlay, focused group
+  cards return to the full bot overview when the surrounding canvas is clicked,
+  and single-bot context menus can add that bot to an eligible saved group.
+- **Wiki site branding now matches Prism.** The generated wiki site uses
+  Prism's dark visual language, triangle mark, wordmark, and favicon instead
+  of fallback generated branding.
+
+### Fixed
+
+- **Bot group edit dialogs stay open while selecting text.** Naming or
+  renaming a bot group no longer dismisses the dialog from backdrop clicks or
+  drag-selection outside the modal; users close it through explicit controls.
+- **Dense bot tile tooltips no longer reshape picker tiles.** Compact bot
+  picker labels now use a glyph tooltip data attribute instead of an in-tile
+  hover label, keeping dense picker layouts stable.
+
 ## [0.6.3] - 2026-07-03
 
 ### Fixed
