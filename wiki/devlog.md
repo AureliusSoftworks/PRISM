@@ -26,9 +26,9 @@ Files: `package-lock.json`, `.wikiwiki/site-theme.json`, `wiki-site/assets/proje
 
 Recorded: 2026-07-05T01:18:50.957Z | Record: `event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a` | Confidence: high
 
-## Wikiwiki npm package updated to 1.0.3
+## Wikiwiki npm package updated to 1.0.4
 
-Updated the PRISM root @thjodann/wk devDependency and package lock to the current npm release 1.0.3, then refreshed the Codex wk agent skill with the updated CLI and verified wiki validation, render, and site generation.
+Updated the PRISM root @thjodann/wk devDependency and package lock to the current npm release 1.0.4, refreshed the Codex wk agent skill with the updated CLI, and verified Wikiwiki status, validation, Markdown render, and all-audience site generation.
 
 Files: `package.json`, `package-lock.json`
 
@@ -41,3 +41,11 @@ Marketplace bot, pack, starter, and Lens installs now show the same progress ove
 Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryGroupFilter.test.ts`, `apps/web/src/app/page.module.css`
 
 Recorded: 2026-07-05T04:12:50.226Z | Record: `event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6` | Confidence: high
+
+## Wiki site wired to PRISM brand graphics
+
+Added PRISM logo, wordmark, and favicon asset paths to the Wikiwiki site theme so the generated static wiki uses the repo-local PRISM triangle mark and wordmark instead of fallback initials.
+
+Files: `.wikiwiki/site-theme.json`, `apps/web/public/icon-triangle.svg`, `apps/web/public/wordmark.svg`
+
+Recorded: 2026-07-05T05:58:46.535Z | Record: `event_836e6d6c-33bb-48c5-9074-3deba3b54f2e` | Confidence: high

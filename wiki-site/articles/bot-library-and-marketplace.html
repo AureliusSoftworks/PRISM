@@ -7,7 +7,7 @@
   <meta name="generator" content="Wikiwiki">
   <title>Bot library and marketplace - PRISM Wiki</title>
   <script>(function(){try{var m=localStorage.getItem("wikiwiki-theme-mode")||"dark";if(m==="light"||m==="dark"){document.documentElement.dataset.theme=m;}else{delete document.documentElement.dataset.theme;}}catch(e){}}());</script>
-  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" data-wikiwiki-favicon data-favicon-dark="../assets/favicon.svg" data-favicon-light="../assets/favicon-light.svg" data-favicon-dark-type="image/svg+xml" data-favicon-light-type="image/svg+xml">
   <link rel="stylesheet" href="../assets/wikiwiki.css">
   <link rel="stylesheet" href="../assets/project-theme.css">
   <script src="../assets/search-index.js" defer></script>
@@ -19,7 +19,7 @@
     <aside class="sidebar" aria-label="Wiki navigation">
       <div class="sidebar-top">
         <a class="brand" href="../index.html" aria-label="Wiki home">
-          <span class="brand-mark">PR</span>
+          <span class="brand-mark has-image"><img src="../assets/favicon.svg" alt="" aria-hidden="true"></span>
           <span>
             <strong>PRISM</strong>
             <small>Project wiki</small>
@@ -42,7 +42,7 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>5</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
 <a class="nav-link" href="../notes.html">Notes<span>2</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
@@ -67,15 +67,15 @@
     <h2>Summary</h2>
     <p>How Prism organizes bots into library groups and installs marketplace bots, packs, starter bots, and Lenses.</p>
     <h2>Article</h2>
-    <p>## Bot Library Groups</p>
+    <h2>Bot Library Groups</h2>
 <p>The Chat and Sandbox canvas can show all bots, ungrouped bots, favorites, marketplace theme groups, or custom saved groups. Custom groups act like focused dashboard cards with optional descriptions, delete protection, edit/delete controls, and a capacity cap.</p>
-<p>## Canvas Behavior</p>
+<h2>Canvas Behavior</h2>
 <p>A focused group card is a drill-in view, not a dead end. Clicking open canvas outside the group card returns to the overview where all bots are visible. Interacting with the card, bot tiles, menus, dialogs, or composer controls does not trigger that return.</p>
-<p>## Context Menus</p>
+<h2>Context Menus</h2>
 <p>Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a dropdown that lists only groups where the bot is not already present and capacity remains.</p>
-<p>## Group Details Dialogs</p>
+<h2>Group Details Dialogs</h2>
 <p>Create and edit dialogs for bot groups are higher-level modals. They close through explicit controls such as the close button, Cancel, or Save, so dragging across text fields while naming or renaming a group does not accidentally dismiss the dialog.</p>
-<p>## Marketplace Installs</p>
+<h2>Marketplace Installs</h2>
 <p>Marketplace bot, theme pack, starter-pack, and Lens installs now show the shared bot transfer overlay. The overlay communicates download, preparation, profile creation, memory restore, refresh, and completion states instead of leaving the marketplace feeling idle.</p>
     <h2>Categories</h2><p><code>Product</code> <code>Guides</code></p>
     <h2>Aliases</h2><p><code>Bot groups</code> <code>Marketplace installs</code> <code>Bot library groups</code></p>

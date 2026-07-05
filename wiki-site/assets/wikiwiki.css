@@ -20,6 +20,7 @@
   --card-gradient: linear-gradient(180deg, #fffdf7 0%, #faf9f3 100%);
   --brand-gradient: linear-gradient(135deg, var(--accent), var(--accent-strong));
   --brand-mark-text: #fffaf0;
+  --brand-asset-filter: invert(1) hue-rotate(180deg) saturate(1.14);
   --badge-bg: #e5f0ed;
   --badge-text: var(--accent-strong);
   --tag-bg: #f8e8f1;
@@ -52,6 +53,7 @@
     --card-gradient: linear-gradient(180deg, #1a261f 0%, #141e18 100%);
     --brand-gradient: linear-gradient(135deg, var(--accent), #2dd4bf);
     --brand-mark-text: #101914;
+    --brand-asset-filter: none;
     --badge-bg: rgba(110, 231, 199, 0.16);
     --badge-text: #d1fae5;
     --tag-bg: rgba(240, 171, 252, 0.18);
@@ -84,6 +86,7 @@
   --card-gradient: linear-gradient(180deg, #1a261f 0%, #141e18 100%);
   --brand-gradient: linear-gradient(135deg, var(--accent), #2dd4bf);
   --brand-mark-text: #101914;
+  --brand-asset-filter: none;
   --badge-bg: rgba(110, 231, 199, 0.16);
   --badge-text: #d1fae5;
   --tag-bg: rgba(240, 171, 252, 0.18);
@@ -98,6 +101,7 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
+  --brand-asset-filter: invert(1) hue-rotate(180deg) saturate(1.14);
 }
 
 * {
@@ -194,6 +198,21 @@ code {
   font-size: 0.85rem;
   font-weight: 800;
   letter-spacing: 0;
+}
+
+.brand-mark.has-image {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  padding: 0.22rem;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: var(--brand-asset-filter);
+  object-fit: contain;
+  transition: filter 160ms ease;
 }
 
 .brand strong,
@@ -323,10 +342,49 @@ input[type="search"]:focus {
   margin-bottom: 1.5rem;
 }
 
+.home-brand-asset {
+  display: flex;
+  align-items: center;
+  min-height: 3.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.home-brand-asset img {
+  display: block;
+  filter: var(--brand-asset-filter);
+  max-width: min(28rem, 100%);
+  max-height: 5.5rem;
+  object-fit: contain;
+  object-position: left center;
+  transition: filter 160ms ease;
+}
+
+.home-brand-asset.logo img {
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  box-shadow: var(--shadow);
+  padding: 0.35rem;
+}
+
 .page-header h1 {
   margin: 0.15rem 0 0.45rem;
   font-size: clamp(2rem, 4vw, 3.8rem);
   line-height: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
 }
 
 .page-header p {
@@ -583,18 +641,75 @@ input[type="search"]:focus {
   padding: clamp(1rem, 3vw, 1.6rem);
 }
 
-.prose h2 {
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
   margin: 1.3rem 0 0.3rem;
+}
+
+.prose h1 {
+  font-size: 1.55rem;
+}
+
+.prose h2 {
   font-size: 1.25rem;
 }
 
-.prose h2:first-child {
+.prose h3 {
+  font-size: 1.1rem;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 1rem;
+}
+
+.prose h1:first-child,
+.prose h2:first-child,
+.prose h3:first-child,
+.prose h4:first-child,
+.prose h5:first-child,
+.prose h6:first-child {
   margin-top: 0;
 }
 
 .prose p,
-.prose ul {
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre {
   color: var(--text);
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.45rem;
+}
+
+.prose blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.prose pre {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  padding: 0.85rem;
+}
+
+.prose pre code {
+  display: block;
+  overflow-wrap: normal;
+  background: transparent;
+  padding: 0;
+  white-space: pre;
 }
 
 .record-meta {

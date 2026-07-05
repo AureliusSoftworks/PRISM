@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Light-theme brand icon: an explicit filled triangle ring (outer minus inner)
+     so small-size rasterizers cannot alter corner joins.
+
+     The mark uses the same tightened geometry as the hover-preview Prism
+     triangle: top vertex locked at (28, 6), bottom corners lifted/narrowed
+     to (48, 43) and (8, 43), with an inner cutout at
+     (28, 20.31) / (19.6, 35.85) / (36.4, 35.85).
+
+     Paired in page.module.css with a drop-shadow filter that traces the
+     stroke's alpha, plus a continuous hue-rotate animation that spins
+     the entire palette around the color wheel so light mode mirrors
+     dark mode's chromatic motion language. -->
+<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="prismTriangleRing" gradientUnits="userSpaceOnUse" x1="8" y1="43" x2="48" y2="6">
+      <stop offset="0" stop-color="#e11d48"/>
+      <stop offset="0.18" stop-color="#d97706"/>
+      <stop offset="0.36" stop-color="#0d9488"/>
+      <stop offset="0.54" stop-color="#0284c7"/>
+      <stop offset="0.72" stop-color="#7c3aed"/>
+      <stop offset="0.9" stop-color="#db2777"/>
+      <stop offset="1" stop-color="#e11d48"/>
+    </linearGradient>
+  </defs>
+  <path
+    fill="#111827"
+    fill-opacity="0.2"
+    fill-rule="evenodd"
+    d="M28 6L48 43H8L28 6Z M28 20.31L19.6 35.85H36.4L28 20.31Z"
+  />
+  <path
+    fill="url(#prismTriangleRing)"
+    fill-rule="evenodd"
+    d="M28 6L48 43H8L28 6Z M28 20.31L19.6 35.85H36.4L28 20.31Z"
+  />
+</svg>

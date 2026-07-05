@@ -1,0 +1,33 @@
+{
+  "type": "event",
+  "title": "Working tree changes",
+  "reason": "Repo has meaningful working tree changes.",
+  "audience": "developer",
+  "tags": [
+    "audience:developer",
+    "devlog"
+  ],
+  "confidence": "medium",
+  "files": [
+    ".wikiwiki/site-theme.json",
+    "package-lock.json",
+    "package.json"
+  ],
+  "draft": {
+    "source": "git-diff",
+    "authority": "agent",
+    "confidence": "medium",
+    "files": [
+      ".wikiwiki/site-theme.json",
+      "package-lock.json",
+      "package.json"
+    ],
+    "tags": [
+      "audience:developer",
+      "devlog"
+    ],
+    "summary": "Working tree changes",
+    "details": "TODO: capture what changed and why it matters."
+  },
+  "command_hint": "wk event add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\".wikiwiki/site-theme.json\",\"package-lock.json\",\"package.json\"],\"tags\":[\"audience:developer\",\"devlog\"],\"summary\":\"Working tree changes\",\"details\":\"TODO: capture what changed and why it matters.\"}'"
+}
