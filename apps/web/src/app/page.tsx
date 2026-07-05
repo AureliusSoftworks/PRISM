@@ -834,6 +834,7 @@ const MEMORY_PHYSICS_OFFSET_JITTER_Y = 14;
 const BOT_CONTEXT_LONG_PRESS_MS = 480;
 const BOT_CONTEXT_LONG_PRESS_MOVE_CANCEL_PX = 12;
 const CONTEXT_MENU_VIEWPORT_MARGIN_PX = 12;
+const CONTEXT_MENU_COMPOSER_BOUNDARY_SELECTOR = "[data-starter-compose-surface='true']";
 const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
@@ -7999,6 +8000,12 @@ interface AccountExportBundleV1 {
   schema: "prism-account-backup-v1";
   exportedAt: string;
   snapshot: unknown;
+  botLibraryGroups?: BotLibraryGroup[];
+}
+
+interface ParsedAccountBackupV1 {
+  snapshot: unknown;
+  botLibraryGroups?: BotLibraryGroup[];
 }
 
 interface BotLibraryGroup {
@@ -8029,6 +8036,11 @@ type BotLibraryGroupDetailsDialogState =
       description: string;
       error: string | null;
     };
+
+interface BotLibraryAddToGroupDialogState {
+  botId: string;
+  groupId: string;
+}
 
 interface CommandCenterArgument {
   key: string;
@@ -8146,6 +8158,13 @@ interface BotGroupManifestV1 {
     name?: string;
     description?: string;
     botFileNames?: string[];
+  };
+}
+
+interface BotCollectionExportOptions {
+  group?: {
+    name: string;
+    description?: string;
   };
 }
 
@@ -29151,6 +29170,7 @@ function HomeContent(): React.JSX.Element {
     groupId?: string;
     x: number;
     y: number;
+    maxHeight?: number;
   } | null>(null);
   const [conversationGroupContextMenu, setConversationGroupContextMenu] = useState<{
     groupKey: string;
@@ -29345,6 +29365,8 @@ function HomeContent(): React.JSX.Element {
     useState<BotLibraryGroupDetailsDialogState | null>(null);
   const [botLibraryGroupDeleteConfirm, setBotLibraryGroupDeleteConfirm] =
     useState<BotLibraryGroup | null>(null);
+  const [botLibraryAddToGroupDialog, setBotLibraryAddToGroupDialog] =
+    useState<BotLibraryAddToGroupDialogState | null>(null);
   const [botPanelView, setBotPanelView] = useState<BotPanelView>("home");
   const [selectedBotPanelBotId, setSelectedBotPanelBotId] = useState<string | null>(null);
   const [botMarketplaceManifest, setBotMarketplaceManifest] =
@@ -35029,6 +35051,17 @@ function HomeContent(): React.JSX.Element {
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
   }, [botLibraryGroupDeleteConfirm]);
+
+  useEffect(() => {
+    if (!botLibraryAddToGroupDialog) return;
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setBotLibraryAddToGroupDialog(null);
+      }
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [botLibraryAddToGroupDialog]);
 
   useEffect(() => {
     if (
@@ -43404,6 +43437,7 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("home");
     setImageLightbox(null);
     setBotTransferOverlay(null);
+    setBotLibraryAddToGroupDialog(null);
     setManualAskQuestionModal(null);
     clearViewSwitchOverlayTimers();
     setViewSwitchTarget(null);
@@ -43572,6 +43606,7 @@ function HomeContent(): React.JSX.Element {
     setExpandedPromptShortcutTargetsByMessageId({});
     setConversationGroupOrder([]);
     setBotLibraryGroups(createFactoryResetBotLibraryGroups([]));
+    setBotLibraryAddToGroupDialog(null);
     setConversations([]);
     setSelectedId(null);
     selectedIdRef.current = null;
@@ -51027,7 +51062,8 @@ function HomeContent(): React.JSX.Element {
     x: number,
     y: number,
     estimatedWidth: number,
-    estimatedHeight: number
+    estimatedHeight: number,
+    bottomBoundaryY = window.innerHeight
   ): { x: number; y: number } {
     const minX = CONTEXT_MENU_VIEWPORT_MARGIN_PX;
     const minY = CONTEXT_MENU_VIEWPORT_MARGIN_PX;
@@ -51037,12 +51073,33 @@ function HomeContent(): React.JSX.Element {
     );
     const maxY = Math.max(
       minY,
-      window.innerHeight - estimatedHeight - CONTEXT_MENU_VIEWPORT_MARGIN_PX
+      bottomBoundaryY - estimatedHeight - CONTEXT_MENU_VIEWPORT_MARGIN_PX
     );
     return {
       x: Math.min(Math.max(x, minX), maxX),
       y: Math.min(Math.max(y, minY), maxY),
     };
+  }
+
+  function contextMenuComposerBoundaryY(): number {
+    if (typeof document === "undefined") return window.innerHeight;
+    let boundaryY = window.innerHeight;
+    document
+      .querySelectorAll<HTMLElement>(CONTEXT_MENU_COMPOSER_BOUNDARY_SELECTOR)
+      .forEach((node) => {
+        if (!isElementVisibleForZenLiveBotBoundary(node)) return;
+        const rect = node.getBoundingClientRect();
+        if (rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+        boundaryY = Math.min(boundaryY, Math.max(0, rect.top));
+      });
+    return boundaryY;
+  }
+
+  function contextMenuMaxHeightForBoundary(bottomBoundaryY: number): number {
+    return Math.max(
+      0,
+      Math.floor(bottomBoundaryY - CONTEXT_MENU_VIEWPORT_MARGIN_PX * 2)
+    );
   }
 
   const openBotContextMenu = useCallback((
@@ -51051,11 +51108,13 @@ function HomeContent(): React.JSX.Element {
     y: number,
     selectedBotIds?: string[]
   ) => {
+    const bottomBoundaryY = contextMenuComposerBoundaryY();
     const clamped = clampContextMenuPosition(
       x,
       y,
       BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
-      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX,
+      bottomBoundaryY
     );
     setBotContextMenu({
       botId: bot.id,
@@ -51065,6 +51124,7 @@ function HomeContent(): React.JSX.Element {
           : [],
       x: clamped.x,
       y: clamped.y,
+      maxHeight: contextMenuMaxHeightForBoundary(bottomBoundaryY),
     });
     closeMessageContextOverlay();
     setConversationGroupContextMenu(null);
@@ -51078,11 +51138,13 @@ function HomeContent(): React.JSX.Element {
     x: number,
     y: number
   ) => {
+    const bottomBoundaryY = contextMenuComposerBoundaryY();
     const clamped = clampContextMenuPosition(
       x,
       y,
       BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
-      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX
+      BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX,
+      bottomBoundaryY
     );
     setBotContextMenu({
       botId: bot.id,
@@ -51090,6 +51152,7 @@ function HomeContent(): React.JSX.Element {
       groupId,
       x: clamped.x,
       y: clamped.y,
+      maxHeight: contextMenuMaxHeightForBoundary(bottomBoundaryY),
     });
     closeMessageContextOverlay();
     setConversationGroupContextMenu(null);
@@ -51168,6 +51231,46 @@ function HomeContent(): React.JSX.Element {
       }
     }
   }, [botContextMenu, botLibraryGroups, bots, closeBotContextMenu]);
+
+  useLayoutEffect(() => {
+    if (!botContextMenu) return;
+    const menu = botContextMenuRef.current;
+    if (!menu) return;
+    const rect = menu.getBoundingClientRect();
+    const bottomBoundaryY = contextMenuComposerBoundaryY();
+    const clamped = clampContextMenuPosition(
+      botContextMenu.x,
+      botContextMenu.y,
+      Math.ceil(rect.width || BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX),
+      Math.ceil(rect.height || BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX),
+      bottomBoundaryY
+    );
+    const maxHeight = contextMenuMaxHeightForBoundary(bottomBoundaryY);
+    const xChanged = Math.abs(clamped.x - botContextMenu.x) > 1;
+    const yChanged = Math.abs(clamped.y - botContextMenu.y) > 1;
+    const maxHeightChanged =
+      typeof botContextMenu.maxHeight !== "number" ||
+      Math.abs(maxHeight - botContextMenu.maxHeight) > 1;
+    if (!xChanged && !yChanged && !maxHeightChanged) return;
+
+    setBotContextMenu((current) => {
+      if (!current) return current;
+      if (
+        current.botId !== botContextMenu.botId ||
+        current.groupId !== botContextMenu.groupId ||
+        current.x !== botContextMenu.x ||
+        current.y !== botContextMenu.y
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        x: clamped.x,
+        y: clamped.y,
+        maxHeight,
+      };
+    });
+  }, [botContextMenu]);
 
   useEffect(() => {
     if (!botContextMenu) return;
@@ -51675,16 +51778,22 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function exportBotsAsCollection(selectedBots: Bot[]): Promise<void> {
+  async function exportBotsAsCollection(
+    selectedBots: readonly Bot[],
+    options: BotCollectionExportOptions = {}
+  ): Promise<void> {
     if (selectedBots.length === 0) return;
     if (botTransferBusy) return;
     setPanelError(null);
     setPanelNotice(null);
+    const groupName = options.group?.name.trim() ?? "";
+    const exportingGroup = groupName.length > 0;
     startBotTransferOverlay({
       mode: "export",
-      title: "Exporting bots",
-      subject:
-        selectedBots.length === 1
+      title: exportingGroup ? "Exporting group" : "Exporting bots",
+      subject: exportingGroup
+        ? groupName
+        : selectedBots.length === 1
           ? selectedBots[0]?.name ?? "1 bot"
           : `${selectedBots.length} bots`,
       detail: "Gathering profiles and memories.",
@@ -51697,6 +51806,7 @@ function HomeContent(): React.JSX.Element {
     });
     const files: Record<string, Uint8Array> = {};
     const usedNames = new Set<string>();
+    const botFileNames: string[] = [];
     let totalMemories = 0;
     try {
       await waitForBotTransferPaint();
@@ -51719,6 +51829,7 @@ function HomeContent(): React.JSX.Element {
           suffix += 1;
         }
         usedNames.add(candidate);
+        botFileNames.push(candidate);
         files[candidate] = strToU8(built.json);
         updateBotTransferOverlay((current) => ({
           ...current,
@@ -51735,9 +51846,20 @@ function HomeContent(): React.JSX.Element {
           },
         }));
       }
+      if (exportingGroup) {
+        const manifest: BotGroupManifestV1 = {
+          schema: "prism-bot-group-manifest-v1",
+          group: {
+            name: groupName,
+            description: options.group?.description?.trim() ?? "",
+            botFileNames,
+          },
+        };
+        files["manifest.json"] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
+      }
       updateBotTransferOverlay((current) => ({
         ...current,
-        subject: `${selectedBots.length} bots`,
+        subject: exportingGroup ? groupName : `${selectedBots.length} bots`,
         detail: "Compressing the bot collection.",
         currentStepLabel: "Creating .bots file",
         completedSteps: selectedBots.length,
@@ -51749,7 +51871,9 @@ function HomeContent(): React.JSX.Element {
       const anchor = document.createElement("a");
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       anchor.href = url;
-      anchor.download = `bots-${selectedBots.length}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`;
+      anchor.download = exportingGroup
+        ? `bots-${slugifyFileToken(groupName)}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`
+        : `bots-${selectedBots.length}-${stamp}${BOT_COLLECTION_FILE_EXTENSION}`;
       updateBotTransferOverlay((current) => ({
         ...current,
         detail: "Handing the collection to your browser.",
@@ -51766,11 +51890,14 @@ function HomeContent(): React.JSX.Element {
         completedSteps: current.totalSteps ?? current.completedSteps,
         stats: { ...current.stats, exported: selectedBots.length },
       }));
-      setPanelNotice(
-        totalMemories > 0
+      const exportNotice = exportingGroup
+        ? totalMemories > 0
+          ? `${groupName} exported to .bots with ${selectedBots.length} bots and ${totalMemories} memories.`
+          : `${groupName} exported to .bots with ${selectedBots.length} bots.`
+        : totalMemories > 0
           ? `${selectedBots.length} bots exported to .bots with ${totalMemories} memories.`
-          : `${selectedBots.length} bots exported to .bots.`
-      );
+          : `${selectedBots.length} bots exported to .bots.`;
+      setPanelNotice(exportNotice);
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Bot export failed.");
     } finally {
@@ -51792,6 +51919,7 @@ function HomeContent(): React.JSX.Element {
         schema: "prism-account-backup-v1",
         exportedAt,
         snapshot: response.snapshot,
+        botLibraryGroups: normalizeBotLibraryGroups(botLibraryGroups),
       };
       const files: Record<string, Uint8Array> = {
         "backup.json": strToU8(`${JSON.stringify(bundle, null, 2)}\n`),
@@ -51813,7 +51941,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function parseAccountSnapshotFromJson(raw: string): unknown {
+  function parseAccountBackupFromJson(raw: string): ParsedAccountBackupV1 {
     let parsed: unknown;
     try {
       parsed = JSON.parse(stripOptionalLeadingUtf8Bom(raw));
@@ -51828,12 +51956,35 @@ function HomeContent(): React.JSX.Element {
       if (!("snapshot" in record)) {
         throw new Error("Backup file is missing snapshot data.");
       }
-      return record.snapshot;
+      return {
+        snapshot: record.snapshot,
+        ...(
+          "botLibraryGroups" in record
+            ? { botLibraryGroups: normalizeBotLibraryGroups(record.botLibraryGroups) }
+            : {}
+        ),
+      };
     }
     if (record.version === 1 && Array.isArray(record.conversations) && Array.isArray(record.memories)) {
-      return record;
+      return { snapshot: record };
     }
     throw new Error("Unsupported .prism backup format.");
+  }
+
+  function restoreAccountBotLibraryGroups(groups: readonly BotLibraryGroup[] | undefined): void {
+    if (!groups) return;
+    const normalized = normalizeBotLibraryGroups(groups);
+    setBotLibraryGroups(normalized);
+    if (user?.id && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(
+          botLibraryGroupsStorageKey(user.id),
+          JSON.stringify(normalized)
+        );
+      } catch {
+        // Non-fatal: the in-memory group state is already restored for this page session.
+      }
+    }
   }
 
   async function importAccountFromPrismFile(file: File): Promise<void> {
@@ -51854,13 +52005,18 @@ function HomeContent(): React.JSX.Element {
     if (!jsonEntry) {
       throw new Error(".prism file does not contain a JSON backup payload.");
     }
-    const snapshot = parseAccountSnapshotFromJson(strFromU8(jsonEntry[1]));
+    const backup = parseAccountBackupFromJson(strFromU8(jsonEntry[1]));
     await api("/api/backup/import", {
       method: "POST",
-      body: JSON.stringify({ snapshot }),
+      body: JSON.stringify({ snapshot: backup.snapshot }),
     });
     await refreshAll();
-    setPanelNotice("Account backup imported.");
+    restoreAccountBotLibraryGroups(backup.botLibraryGroups);
+    setPanelNotice(
+      backup.botLibraryGroups
+        ? "Account backup imported, including bot groups."
+        : "Account backup imported."
+    );
   }
 
   async function handleAccountImportFileSelection(
@@ -55814,6 +55970,30 @@ function HomeContent(): React.JSX.Element {
     openCreateBotLibraryGroupDialog(selectedBotIds);
   }
 
+  function botLibraryAddToGroupOptionsForBot(
+    botId: string
+  ): Array<{ group: BotLibraryGroup; count: number; botIds: string[] }> {
+    return customBotLibraryGroups
+      .map((group) => {
+        const existingGroupBotIds = group.botIds.filter((candidateBotId) =>
+          existingBotIds.has(candidateBotId)
+        );
+        return { group, count: existingGroupBotIds.length, botIds: existingGroupBotIds };
+      })
+      .filter(
+        ({ count, botIds }) =>
+          !botIds.includes(botId) && count < BOT_LIBRARY_GROUP_BOT_CAP
+      );
+  }
+
+  function openAddBotToGroupDialog(botId: string): void {
+    const options = botLibraryAddToGroupOptionsForBot(botId);
+    const firstGroupId = options[0]?.group.id;
+    if (!firstGroupId) return;
+    setPanelError(null);
+    setBotLibraryAddToGroupDialog({ botId, groupId: firstGroupId });
+  }
+
   function addBotToExistingLibraryGroup(botId: string, groupId: string): void {
     const bot = bots.find((candidate) => candidate.id === botId);
     const target = botLibraryGroups.find((group) => group.id === groupId);
@@ -55874,6 +56054,7 @@ function HomeContent(): React.JSX.Element {
     }
     setBotLibraryGroupDetailsDialog(null);
     setBotLibraryGroupDeleteConfirm(null);
+    setBotLibraryAddToGroupDialog(null);
     setPanelError(null);
     setPanelNotice(`Deleted "${target.name}". Bots were kept.`);
   }
@@ -59878,17 +60059,7 @@ function HomeContent(): React.JSX.Element {
     const hasMultipleCanvasSelectedBots = canvasSelectedBotIds.size > 1;
     const singleBotAddToGroupOptions =
       !isMultiSelectionMenu && !hasMultipleCanvasSelectedBots
-        ? customBotLibraryGroups
-            .map((group) => {
-              const existingGroupBotIds = group.botIds.filter((botId) =>
-                existingBotIds.has(botId)
-              );
-              return { group, count: existingGroupBotIds.length, botIds: existingGroupBotIds };
-            })
-            .filter(
-              ({ count, botIds }) =>
-                !botIds.includes(bot.id) && count < BOT_LIBRARY_GROUP_BOT_CAP
-            )
+        ? botLibraryAddToGroupOptionsForBot(bot.id)
         : [];
     const botIsFavorite = favoriteBotIdSet.has(bot.id);
     const favoriteLabel = botIsFavorite ? "Remove from Favorites" : "Add to Favorites";
@@ -59912,6 +60083,10 @@ function HomeContent(): React.JSX.Element {
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
+      maxHeight:
+        typeof botContextMenu.maxHeight === "number"
+          ? `${botContextMenu.maxHeight}px`
+          : undefined,
       "--bot-color": normalizeAccentForTheme(bot.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
     } as React.CSSProperties;
     if (botContextMenu.groupId && !botLibraryGroupContext) return null;
@@ -59941,34 +60116,19 @@ function HomeContent(): React.JSX.Element {
           ) : null}
           {renderFavoriteMenuItem()}
           {singleBotAddToGroupOptions.length > 0 ? (
-            <div className={styles.botContextMenuSelectItem} role="none">
-              <label>
-                <span className={styles.contextMenuItemLabel}>
-                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
-                  <span>Add to group</span>
-                </span>
-                <select
-                  value=""
-                  aria-label={`Add ${bot.name} to group`}
-                  onChange={(event) => {
-                    const groupId = event.currentTarget.value;
-                    if (!groupId) return;
-                    closeBotContextMenu();
-                    addBotToExistingLibraryGroup(bot.id, groupId);
-                  }}
-                >
-                  <option value="" disabled>Choose group</option>
-                  {singleBotAddToGroupOptions.map(({ group, count }) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name} ({botLibraryGroupCapacityLabel(
-                        count,
-                        BOT_LIBRARY_GROUP_BOT_CAP
-                      )})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                openAddBotToGroupDialog(bot.id);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
+                <span>Add to group</span>
+              </span>
+            </button>
           ) : null}
           <button
             type="button"
@@ -60087,34 +60247,19 @@ function HomeContent(): React.JSX.Element {
             </button>
             {renderFavoriteMenuItem()}
             {singleBotAddToGroupOptions.length > 0 ? (
-              <div className={styles.botContextMenuSelectItem} role="none">
-                <label>
-                  <span className={styles.contextMenuItemLabel}>
-                    <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
-                    <span>Add to group</span>
-                  </span>
-                  <select
-                    value=""
-                    aria-label={`Add ${bot.name} to group`}
-                    onChange={(event) => {
-                      const groupId = event.currentTarget.value;
-                      if (!groupId) return;
-                      closeBotContextMenu();
-                      addBotToExistingLibraryGroup(bot.id, groupId);
-                    }}
-                  >
-                    <option value="" disabled>Choose group</option>
-                    {singleBotAddToGroupOptions.map(({ group, count }) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name} ({botLibraryGroupCapacityLabel(
-                          count,
-                          BOT_LIBRARY_GROUP_BOT_CAP
-                        )})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeBotContextMenu();
+                  openAddBotToGroupDialog(bot.id);
+                }}
+              >
+                <span className={styles.contextMenuItemLabel}>
+                  <span className={styles.contextMenuGlyph} aria-hidden="true">⊕</span>
+                  <span>Add to group</span>
+                </span>
+              </button>
             ) : null}
             <button
               type="button"
@@ -61278,6 +61423,96 @@ function HomeContent(): React.JSX.Element {
                 {submitLabel}
               </button>
             </div>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
+  const renderBotLibraryAddToGroupDialog = (): React.JSX.Element | null => {
+    if (!botLibraryAddToGroupDialog) return null;
+    const dialog = botLibraryAddToGroupDialog;
+    const bot = bots.find((candidate) => candidate.id === dialog.botId);
+    if (!bot) return null;
+    const options = botLibraryAddToGroupOptionsForBot(bot.id);
+    if (options.length === 0) return null;
+    const selectedGroupId = options.some(({ group }) => group.id === dialog.groupId)
+      ? dialog.groupId
+      : options[0]!.group.id;
+    const selectedOption = options.find(({ group }) => group.id === selectedGroupId) ?? null;
+    const mergedCount = selectedOption
+      ? new Set([...selectedOption.botIds, bot.id]).size
+      : 0;
+    const submitSelectedGroup = (): void => {
+      setBotLibraryAddToGroupDialog(null);
+      addBotToExistingLibraryGroup(bot.id, selectedGroupId);
+    };
+
+    return (
+      <div
+        className={styles.deleteAllModalBackdrop}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setBotLibraryAddToGroupDialog(null);
+        }}
+      >
+        <form
+          className={`${styles.deleteAllModalPanel} ${styles.botLibraryAddToGroupDialog}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bot-library-add-to-group-title"
+          aria-describedby="bot-library-add-to-group-desc"
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitSelectedGroup();
+          }}
+        >
+          <h2 id="bot-library-add-to-group-title" className={styles.deleteAllModalTitle}>
+            Add {bot.name} to group
+          </h2>
+          <p id="bot-library-add-to-group-desc" className={styles.deleteAllModalBody}>
+            Select one saved group for this bot.
+          </p>
+          <label className={styles.botLibraryGroupDialogField}>
+            <span>Group</span>
+            <select
+              value={selectedGroupId}
+              autoFocus
+              onChange={(event) =>
+                setBotLibraryAddToGroupDialog((current) =>
+                  current ? { ...current, groupId: event.currentTarget.value } : current
+                )
+              }
+            >
+              {options.map(({ group, count }) => (
+                <option key={group.id} value={group.id}>
+                  {group.name} ({botLibraryGroupCapacityLabel(
+                    count,
+                    BOT_LIBRARY_GROUP_BOT_CAP
+                  )})
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedOption ? (
+            <p className={styles.botLibraryGroupDialogHint}>
+              Result: {botLibraryGroupCapacityLabel(
+                mergedCount,
+                BOT_LIBRARY_GROUP_BOT_CAP
+              )}.
+            </p>
+          ) : null}
+          <div className={styles.deleteAllModalActions}>
+            <button
+              type="button"
+              className={styles.deleteAllModalCancel}
+              onClick={() => setBotLibraryAddToGroupDialog(null)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className={styles.deleteAllModalConfirm}>
+              Add to group
+            </button>
           </div>
         </form>
       </div>
@@ -65244,6 +65479,7 @@ function HomeContent(): React.JSX.Element {
   const renderSharedPanels = (): React.JSX.Element => (
     <>
       {renderBotLibraryGroupDetailsDialog()}
+      {renderBotLibraryAddToGroupDialog()}
       {renderBotLibraryGroupDeleteModal()}
       {manualAskQuestionModal ? (
         <div
@@ -83094,6 +83330,10 @@ function HomeContent(): React.JSX.Element {
               const groupProtectionTitle = groupDeleteProtected
                 ? `Allow deletion for bots in ${focusedBotLibraryGroup.name}`
                 : `Protect bots in ${focusedBotLibraryGroup.name} from deletion`;
+              const groupExportTitle =
+                groupDashboardBots.length > 0
+                  ? `Export ${focusedBotLibraryGroup.name} as a bot collection`
+                  : `${focusedBotLibraryGroup.name} has no bots to export`;
               return (
                 <div
                   className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
@@ -83142,6 +83382,24 @@ function HomeContent(): React.JSX.Element {
                             strokeWidth={2.05}
                           />
                           <span>{groupProtectionLabel}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.botGroupDashboardAction}
+                          disabled={groupDashboardBots.length === 0 || botTransferBusy}
+                          onClick={() =>
+                            void exportBotsAsCollection(groupDashboardBots, {
+                              group: {
+                                name: focusedBotLibraryGroup.name,
+                                description: focusedBotLibraryGroup.description,
+                              },
+                            })
+                          }
+                          aria-label={groupExportTitle}
+                          title={groupExportTitle}
+                        >
+                          <Download size={14} strokeWidth={2.1} aria-hidden="true" />
+                          <span>Export group</span>
                         </button>
                         {!focusedBotLibraryGroup.builtIn ? (
                           <>
