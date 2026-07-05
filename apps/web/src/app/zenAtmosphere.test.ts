@@ -13,21 +13,18 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline: [],
         readerY: 300,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       {}
     );
   });
 
-  it("keeps the first Atmosphere layer invisible before its reveal point", () => {
+  it("keeps the first Atmosphere layer invisible before its generated message", () => {
     const timeline = [
       {
         imageId: "first",
-        generationMessageCount: 2,
-        revealStartMessageCount: 4,
-        revealFullMessageCount: 8,
+        generationMessageCount: 4,
       },
     ];
 
@@ -35,21 +32,18 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
         readerY: 350,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 0 }
     );
   });
 
-  it("fades the first generated Atmosphere layer from its generation point", () => {
+  it("fades a generated Atmosphere layer by scrolled distance", () => {
     const timeline = [
       {
         imageId: "first",
         generationMessageCount: 2,
-        revealStartMessageCount: 2,
-        revealFullMessageCount: 6,
       },
     ];
 
@@ -57,8 +51,7 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
         readerY: 200,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 0 }
@@ -67,8 +60,7 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
         readerY: 400,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 0.5 }
@@ -77,68 +69,30 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
         readerY: 700,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 1 }
     );
   });
 
-  it("ramps the first Atmosphere layer through its reveal span", () => {
+  it("keeps the previous wallpaper visible until the next scroll-distance crossfade", () => {
     const timeline = [
       {
         imageId: "first",
         generationMessageCount: 2,
-        revealStartMessageCount: 4,
-        revealFullMessageCount: 8,
-      },
-    ];
-
-    assert.deepEqual(
-      calculateZenAtmosphereLayerOpacitiesForReader({
-        timeline,
-        readerY: 600,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
-        messageCountToY,
-      }),
-      { first: 0.5 }
-    );
-    assert.deepEqual(
-      calculateZenAtmosphereLayerOpacitiesForReader({
-        timeline,
-        readerY: 900,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
-        messageCountToY,
-      }),
-      { first: 1 }
-    );
-  });
-
-  it("keeps the previous wallpaper visible until the next generated layer crossfades", () => {
-    const timeline = [
-      {
-        imageId: "first",
-        generationMessageCount: 2,
-        revealStartMessageCount: 2,
-        revealFullMessageCount: 6,
       },
       {
         imageId: "second",
         generationMessageCount: 10,
-        revealStartMessageCount: 12,
-        revealFullMessageCount: 16,
       },
     ];
 
     assert.deepEqual(
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
-        readerY: 1100,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        readerY: 900,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 1, second: 0 }
@@ -146,9 +100,8 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
     assert.deepEqual(
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
-        readerY: 1400,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        readerY: 1200,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 0.5, second: 0.5 }
@@ -156,9 +109,8 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
     assert.deepEqual(
       calculateZenAtmosphereLayerOpacitiesForReader({
         timeline,
-        readerY: 1700,
-        revealDelayMessageCount: 2,
-        revealSpanMessageCount: 4,
+        readerY: 1500,
+        revealScrollDistancePx: 400,
         messageCountToY,
       }),
       { first: 0, second: 1 }

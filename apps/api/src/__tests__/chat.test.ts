@@ -5104,8 +5104,6 @@ describe("processChatMessage conversational memory cues", () => {
         imageId: "wallpaper-new",
         promptSeed: "moonlit reef",
         generationMessageCount: 0,
-        revealStartMessageCount: 0,
-        revealFullMessageCount: 0,
         createdAt: "2026-02-01T00:00:00.000Z",
       },
     ]);
@@ -5138,8 +5136,6 @@ describe("processChatMessage conversational memory cues", () => {
         imageId: "wallpaper-new",
         promptSeed: "moonlit reef",
         generationMessageCount: 0,
-        revealStartMessageCount: 0,
-        revealFullMessageCount: 0,
         createdAt: "2026-02-01T00:00:00.000Z",
       },
     ]);

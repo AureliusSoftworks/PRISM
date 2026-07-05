@@ -307,7 +307,7 @@ describe("getLatestRememberedZenWallpaperForBot", () => {
 });
 
 describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
-  it("rebases absolute wallpaper reveal counts to the restored message window", () => {
+  it("rebases absolute wallpaper generation counts to the restored message window", () => {
     const metadata = rebaseZenWallpaperMetadataForVisibleWindow(
       {
         enabled: true,
@@ -341,21 +341,15 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
       metadata.history.map((entry) => ({
         imageId: entry.imageId,
         generationMessageCount: entry.generationMessageCount,
-        revealStartMessageCount: entry.revealStartMessageCount,
-        revealFullMessageCount: entry.revealFullMessageCount,
       })),
       [
         {
           imageId: "wallpaper-old",
           generationMessageCount: 10,
-          revealStartMessageCount: 14,
-          revealFullMessageCount: 26,
         },
         {
           imageId: "wallpaper-new",
           generationMessageCount: 75,
-          revealStartMessageCount: 79,
-          revealFullMessageCount: 91,
         },
       ]
     );
@@ -381,15 +375,13 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
         imageId: "wallpaper-stale",
         promptSeed: "stale prompt",
         generationMessageCount: 5,
-        revealStartMessageCount: 5,
-        revealFullMessageCount: 5,
       },
     ]);
   });
 });
 
 describe("buildZenWallpaperHistoryForGeneratedImage", () => {
-  it("replaces the scroll timeline with an immediately visible wallpaper", () => {
+  it("replaces the scroll timeline with one wallpaper", () => {
     const history = buildZenWallpaperHistoryForGeneratedImage(
       JSON.stringify([
         {
@@ -404,8 +396,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
         imageId: "wallpaper-new",
         promptSeed: "new prompt",
         generationMessageCount: 120,
-        revealStartMessageCount: 124,
-        revealFullMessageCount: 136,
         createdAt: "2026-06-19T12:00:00.000Z",
       },
       {
@@ -420,8 +410,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
         imageId: "wallpaper-new",
         promptSeed: "new prompt",
         generationMessageCount: 120,
-        revealStartMessageCount: 0,
-        revealFullMessageCount: 0,
         createdAt: "2026-06-19T12:00:00.000Z",
       },
     ]);
@@ -442,8 +430,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
         imageId: "wallpaper-new",
         promptSeed: "new prompt",
         generationMessageCount: 70,
-        revealStartMessageCount: 74,
-        revealFullMessageCount: 86,
       },
       {
         latestMessageCount: 70,
@@ -454,19 +440,16 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
     assert.deepEqual(
       history.map((entry) => ({
         imageId: entry.imageId,
-        revealStartMessageCount: entry.revealStartMessageCount,
-        revealFullMessageCount: entry.revealFullMessageCount,
+        generationMessageCount: entry.generationMessageCount,
       })),
       [
         {
           imageId: "wallpaper-old",
-          revealStartMessageCount: 34,
-          revealFullMessageCount: 46,
+          generationMessageCount: 30,
         },
         {
           imageId: "wallpaper-new",
-          revealStartMessageCount: 74,
-          revealFullMessageCount: 86,
+          generationMessageCount: 70,
         },
       ]
     );
@@ -481,8 +464,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
           imageId: `wallpaper-${index + 1}`,
           promptSeed: `theme ${index + 1}`,
           generationMessageCount: 12,
-          revealStartMessageCount: index === 0 ? 12 : 16,
-          revealFullMessageCount: index === 0 ? 24 : 28,
           createdAt: `2026-06-24T12:00:0${index}.000Z`,
         },
         {

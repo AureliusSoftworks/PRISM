@@ -190,8 +190,6 @@ export function createDatabase(): DatabaseSync {
       zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
       zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
       zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30,
-      zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
-      zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
       zen_message_font_min_px REAL NOT NULL DEFAULT 15.8,
@@ -819,18 +817,6 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenWallpaperRegenMessageInterval) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;");
-  }
-  const hasZenWallpaperRevealDelayMessageCount = userColumns.some(
-    (column) => column.name === "zen_wallpaper_reveal_delay_message_count"
-  );
-  if (!hasZenWallpaperRevealDelayMessageCount) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4;");
-  }
-  const hasZenWallpaperRevealSpanMessageCount = userColumns.some(
-    (column) => column.name === "zen_wallpaper_reveal_span_message_count"
-  );
-  if (!hasZenWallpaperRevealSpanMessageCount) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12;");
   }
   const hasZenMoodSensitivity = userColumns.some(
     (column) => column.name === "zen_mood_sensitivity"

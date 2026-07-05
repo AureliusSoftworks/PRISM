@@ -528,8 +528,6 @@ export function buildRememberedZenWallpaperHistory(
       imageId: wallpaper.imageId,
       promptSeed: wallpaper.promptSeed,
       generationMessageCount: 0,
-      revealStartMessageCount: 0,
-      revealFullMessageCount: 0,
       createdAt: wallpaper.createdAt,
     },
   ]);
@@ -544,15 +542,7 @@ export function buildZenWallpaperHistoryForGeneratedImage(
     replaceImmediately?: boolean;
   }
 ): ZenWallpaperHistoryEntry[] {
-  const normalizedEntry = normalizeZenWallpaperHistoryEntry(
-    options.replaceImmediately
-      ? {
-          ...entry,
-          revealStartMessageCount: 0,
-          revealFullMessageCount: 0,
-        }
-      : entry
-  );
+  const normalizedEntry = normalizeZenWallpaperHistoryEntry(entry);
   if (!normalizedEntry) return parseZenWallpaperHistory(rawHistory);
   if (options.replaceImmediately) {
     return normalizeZenWallpaperHistory([normalizedEntry]);
@@ -589,12 +579,19 @@ export function pruneZenWallpaperHistoryForRestoreWindow(
 ): ZenWallpaperHistoryEntry[] {
   const latest = Math.max(0, Math.floor(latestMessageCount));
   const windowStart = Math.max(0, latest - Math.max(0, Math.floor(restoreMessageLimit)));
-  return parseZenWallpaperHistory(rawHistory).filter((entry) => {
-    const generatedAt = entry.generationMessageCount;
-    const revealStart = entry.revealStartMessageCount ?? entry.generationMessageCount;
-    const revealFull = entry.revealFullMessageCount ?? entry.generationMessageCount;
-    return revealFull >= windowStart && generatedAt <= latest;
-  });
+  const history = parseZenWallpaperHistory(rawHistory).filter(
+    (entry) => entry.generationMessageCount <= latest
+  );
+  const visibleEntries = history.filter(
+    (entry) => entry.generationMessageCount >= windowStart
+  );
+  const baselineEntry =
+    history
+      .filter((entry) => entry.generationMessageCount < windowStart)
+      .at(-1) ?? null;
+  return normalizeZenWallpaperHistory(
+    baselineEntry ? [baselineEntry, ...visibleEntries] : visibleEntries
+  );
 }
 
 export function mapZenWallpaperMetadata(row: {
@@ -631,75 +628,10 @@ export function mapZenWallpaperMetadata(row: {
   };
 }
 
-const ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT = 4;
-const ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT = 12;
-
 function normalizeMessageCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.floor(value))
     : 0;
-}
-
-type ZenWallpaperWindowEntry = ZenWallpaperHistoryEntry & {
-  revealStartMessageCount: number;
-  revealFullMessageCount: number;
-};
-
-function prepareZenWallpaperWindowEntry(
-  entry: ZenWallpaperHistoryEntry,
-  args: {
-    totalMessageCount: number;
-    currentImageId: string | null;
-  }
-): ZenWallpaperWindowEntry {
-  const generationMessageCount = Math.min(
-    normalizeMessageCount(entry.generationMessageCount),
-    args.totalMessageCount
-  );
-  const hasExplicitReveal =
-    entry.revealStartMessageCount !== undefined ||
-    entry.revealFullMessageCount !== undefined;
-  const isLegacyCurrentImage =
-    entry.imageId === args.currentImageId && !hasExplicitReveal;
-  const wasGeneratedBeyondCurrentThread =
-    normalizeMessageCount(entry.generationMessageCount) >
-    args.totalMessageCount;
-  const defaultRevealStart =
-    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
-      ? generationMessageCount
-      : generationMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT;
-  const revealStartMessageCount =
-    entry.revealStartMessageCount !== undefined
-      ? normalizeMessageCount(entry.revealStartMessageCount)
-      : defaultRevealStart;
-  const defaultRevealFull =
-    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
-      ? revealStartMessageCount
-      : revealStartMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT;
-  const revealFullMessageCount =
-    entry.revealFullMessageCount !== undefined
-      ? Math.max(
-          revealStartMessageCount,
-          normalizeMessageCount(entry.revealFullMessageCount)
-        )
-      : defaultRevealFull;
-  return {
-    ...entry,
-    generationMessageCount,
-    revealStartMessageCount,
-    revealFullMessageCount,
-  };
-}
-
-function compareZenWallpaperWindowEntries(
-  a: ZenWallpaperWindowEntry,
-  b: ZenWallpaperWindowEntry
-): number {
-  const fullDelta = a.revealFullMessageCount - b.revealFullMessageCount;
-  if (fullDelta !== 0) return fullDelta;
-  const generationDelta = a.generationMessageCount - b.generationMessageCount;
-  if (generationDelta !== 0) return generationDelta;
-  return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
 }
 
 /**
@@ -740,36 +672,28 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
           imageId: currentImageId,
           promptSeed: metadata.promptSeed,
           generationMessageCount: currentGenerationMessageCount,
-          revealStartMessageCount: currentGenerationMessageCount,
-          revealFullMessageCount: currentGenerationMessageCount,
         },
       ]);
     }
   }
 
-  const preparedEntries = history.map((entry) =>
-    prepareZenWallpaperWindowEntry(entry, {
-      totalMessageCount,
-      currentImageId,
-    })
-  );
-  const selectedByImageId = new Map<string, ZenWallpaperWindowEntry>();
-  let baselineEntry: ZenWallpaperWindowEntry | null = null;
+  const preparedEntries = history
+    .map((entry) => ({
+      ...entry,
+      generationMessageCount: Math.min(
+        normalizeMessageCount(entry.generationMessageCount),
+        totalMessageCount
+      ),
+    }))
+    .filter((entry) => entry.generationMessageCount <= totalMessageCount);
+  const selectedByImageId = new Map<string, ZenWallpaperHistoryEntry>();
+  const baselineEntry =
+    preparedEntries
+      .filter((entry) => entry.generationMessageCount < windowStartMessageCount)
+      .at(-1) ?? null;
 
   for (const entry of preparedEntries) {
-    if (entry.revealFullMessageCount < windowStartMessageCount) {
-      if (
-        !baselineEntry ||
-        compareZenWallpaperWindowEntries(baselineEntry, entry) < 0
-      ) {
-        baselineEntry = entry;
-      }
-      continue;
-    }
-    if (
-      entry.revealStartMessageCount <= totalMessageCount &&
-      entry.revealFullMessageCount >= windowStartMessageCount
-    ) {
+    if (entry.generationMessageCount >= windowStartMessageCount) {
       selectedByImageId.set(entry.imageId, entry);
     }
   }
@@ -786,8 +710,6 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
       imageId: currentImageId,
       promptSeed: metadata.promptSeed,
       generationMessageCount: currentGenerationMessageCount,
-      revealStartMessageCount: currentGenerationMessageCount,
-      revealFullMessageCount: currentGenerationMessageCount,
     });
   }
 
@@ -796,11 +718,6 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
       imageId: entry.imageId,
       promptSeed: entry.promptSeed,
       generationMessageCount: rebaseCount(entry.generationMessageCount),
-      revealStartMessageCount: rebaseCount(entry.revealStartMessageCount),
-      revealFullMessageCount: Math.max(
-        rebaseCount(entry.revealStartMessageCount),
-        rebaseCount(entry.revealFullMessageCount)
-      ),
       ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
     }))
   );
