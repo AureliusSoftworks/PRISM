@@ -59824,6 +59824,25 @@ function HomeContent(): React.JSX.Element {
                 !botIds.includes(bot.id) && count < BOT_LIBRARY_GROUP_BOT_CAP
             )
         : [];
+    const botIsFavorite = favoriteBotIdSet.has(bot.id);
+    const favoriteLabel = botIsFavorite ? "Remove from Favorites" : "Add to Favorites";
+    const renderFavoriteMenuItem = (): React.JSX.Element => (
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          closeBotContextMenu();
+          toggleBotFavorite(bot.id);
+        }}
+      >
+        <span className={styles.contextMenuItemLabel}>
+          <span className={styles.contextMenuGlyph} aria-hidden="true">
+            {botIsFavorite ? "★" : "☆"}
+          </span>
+          <span>{favoriteLabel}</span>
+        </span>
+      </button>
+    );
     const menuStyle = {
       left: `${botContextMenu.x}px`,
       top: `${botContextMenu.y}px`,
@@ -59854,6 +59873,7 @@ function HomeContent(): React.JSX.Element {
               </span>
             </button>
           ) : null}
+          {renderFavoriteMenuItem()}
           {singleBotAddToGroupOptions.length > 0 ? (
             <div className={styles.botContextMenuSelectItem} role="none">
               <label>
@@ -59999,6 +60019,7 @@ function HomeContent(): React.JSX.Element {
                 <span>{singleBotIsGridSelected ? "Deselect" : "Select"}</span>
               </span>
             </button>
+            {renderFavoriteMenuItem()}
             {singleBotAddToGroupOptions.length > 0 ? (
               <div className={styles.botContextMenuSelectItem} role="none">
                 <label>
