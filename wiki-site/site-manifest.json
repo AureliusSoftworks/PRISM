@@ -1,0 +1,145 @@
+{
+  "generator": "Wikiwiki",
+  "generated_from": ".wikiwiki/records",
+  "command": "wk site",
+  "source_base_url": null,
+  "audience": "all",
+  "project_name": "PRISM",
+  "theme_file": ".wikiwiki/site-theme.json",
+  "pages": [
+    "index.html",
+    "guides.html",
+    "concepts.html",
+    "decisions.html",
+    "devlog.html",
+    "notes.html",
+    "symbols.html",
+    "links.html",
+    "search.html"
+  ],
+  "integrations": {
+    "beads": {
+      "detected": true,
+      "enabled": true,
+      "available": false,
+      "configured": "auto",
+      "error": "beads_auto_read_skipped",
+      "warnings": [
+        "Beads workspace detected; detailed bd reads are skipped in auto mode to avoid dirtying .beads. Set integrations.beads.enabled to true to opt in."
+      ],
+      "counts": {
+        "ready": 0,
+        "in_progress": 0,
+        "recent_closed": 0
+      },
+      "issue_ids": [],
+      "ready": [],
+      "in_progress": [],
+      "recent_closed": []
+    }
+  },
+  "records": [
+    {
+      "type": "concept",
+      "id": "concept_bbdc911a-c8a6-417e-8a32-a5650c8be316",
+      "title": "Experience lanes",
+      "url": "records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_98e450e7-a536-4429-9c00-75d47211ac3e",
+      "title": "Free desktop distribution",
+      "url": "records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e",
+      "title": "LOCAL mode privacy boundary",
+      "url": "records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6",
+      "title": "Memory and continuity pipeline",
+      "url": "records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_17097483-9143-4f39-91de-8ad33a73b888",
+      "title": "Monorepo architecture",
+      "url": "records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html"
+    },
+    {
+      "type": "concept",
+      "id": "concept_6fbe4496-b766-4a5a-abca-987acdd7d770",
+      "title": "Product promise",
+      "url": "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_74d88333-8a92-47f5-897a-2f0458817e74",
+      "title": "Adopt Wikiwiki for repo-local project knowledge",
+      "url": "records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_d8f8761e-d67c-4d96-8217-3af3b67ec403",
+      "title": "Keep experience lanes separated",
+      "url": "records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_a19295be-77fe-4e95-9a6a-57206331a0a5",
+      "title": "Keep LOCAL mode strict",
+      "url": "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_791a7b3c-d069-4543-907d-3c0cda50f452",
+      "title": "Keep support non-gating",
+      "url": "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html"
+    },
+    {
+      "type": "event",
+      "id": "event_752b90fc-e23c-4000-afe3-fbb07affebba",
+      "title": "Wiki site restyled with PRISM visual language",
+      "url": "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html"
+    },
+    {
+      "type": "event",
+      "id": "event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12",
+      "title": "Wikiwiki installed",
+      "url": "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html"
+    },
+    {
+      "type": "note",
+      "id": "note_65e62737-730b-45ab-b59e-309f9888db4f",
+      "title": "Prism should not be broadly promoted from wiki copy until the product-worthy lau",
+      "url": "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html"
+    },
+    {
+      "type": "note",
+      "id": "note_5850980f-5230-4d48-ae29-08c98e6ed3a3",
+      "title": "Wikiwiki generated files should be refreshed through structured records and them",
+      "url": "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_beaadb06-ce2d-4ace-bf2b-646296edf413",
+      "title": "embedTextLocal",
+      "url": "records/symbol/symbol_beaadb06-ce2d-4ace-bf2b-646296edf413.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_5a171439-f62d-4a58-866e-dd2802ae886a",
+      "title": "getAuxiliaryProvider",
+      "url": "records/symbol/symbol_5a171439-f62d-4a58-866e-dd2802ae886a.html"
+    },
+    {
+      "type": "symbol",
+      "id": "symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953",
+      "title": "selectProvider",
+      "url": "records/symbol/symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953.html"
+    }
+  ]
+}
