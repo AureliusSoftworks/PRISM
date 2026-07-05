@@ -6,9 +6,9 @@
 
 Context: PRISM needs scriptable local project knowledge that agents and maintainers can update without a hosted service or separate database.
 
-Decision: Install @thjodann/wk from Thjodann/Wikiwiki as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.
+Decision: Install @thjodann/wk as a root dev dependency, initialize .wikiwiki with the mixed profile for all audiences, and use the wiki:* npm scripts for validation and rendering.
 
-Consequences: Structured records in .wikiwiki/records are the source of truth. Generated Markdown lives in wiki/ and the static browseable site lives in wiki-site/. The package-lock entry is kept on git+https so clean installs do not require GitHub SSH access.
+Consequences: Structured records in .wikiwiki/records are the source of truth. Generated Markdown lives in wiki/ and the static browseable site lives in wiki-site/. The @thjodann/wk dependency is consumed from the npm registry so clean installs do not need GitHub SSH access.
 
 Files: `package.json`, `package-lock.json`, `.wikiwiki/config.json`
 

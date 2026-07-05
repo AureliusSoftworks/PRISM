@@ -1,0 +1,112 @@
+{
+  "type": "closeout-draft",
+  "id": "closeout_76a97fcd-0f66-4263-ad9b-9d6925d0e152",
+  "created_at": "2026-07-05T04:01:06.267Z",
+  "profile": "mixed",
+  "audience": "all",
+  "changed_files": [
+    ".wikiwiki/records/events.jsonl",
+    "apps/web/src/app/botLibraryGroupFilter.test.ts",
+    "apps/web/src/app/botLibraryGroupFilter.ts",
+    "apps/web/src/app/page.module.css",
+    "apps/web/src/app/page.tsx",
+    "package-lock.json",
+    "package.json"
+  ],
+  "drafts": [
+    {
+      "type": "decision",
+      "title": "Project configuration changes",
+      "reason": "Project configuration changed.",
+      "audience": "developer",
+      "tags": [
+        "audience:developer",
+        "config"
+      ],
+      "draft_path": ".wikiwiki/drafts/closeout/closeout_76a97fcd-0f66-4263-ad9b-9d6925d0e152/record-drafts/001-decision-project-configuration-changes.json",
+      "command_hint": "wk decision add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\"package.json\"],\"tags\":[\"audience:developer\",\"config\"],\"title\":\"Project configuration changes\",\"context\":\"TODO: capture the context behind this configuration change.\",\"decision\":\"TODO: capture the decision.\",\"consequences\":\"\"}'"
+    },
+    {
+      "type": "event",
+      "title": "Working tree changes",
+      "reason": "Repo has meaningful working tree changes.",
+      "audience": "developer",
+      "tags": [
+        "audience:developer",
+        "devlog"
+      ],
+      "draft_path": ".wikiwiki/drafts/closeout/closeout_76a97fcd-0f66-4263-ad9b-9d6925d0e152/record-drafts/002-event-working-tree-changes.json",
+      "command_hint": "wk event add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\"apps/web/src/app/botLibraryGroupFilter.test.ts\",\"apps/web/src/app/botLibraryGroupFilter.ts\",\"apps/web/src/app/page.module.css\",\"apps/web/src/app/page.tsx\",\"package-lock.json\",\"package.json\"],\"tags\":[\"audience:developer\",\"devlog\"],\"summary\":\"Working tree changes\",\"details\":\"TODO: capture what changed and why it matters.\"}'"
+    }
+  ],
+  "integrations": {
+    "beads": {
+      "detected": true,
+      "enabled": true,
+      "available": false,
+      "configured": "auto",
+      "beads_path": "/Users/jared/Developer/Web Apps/PRISM/.beads",
+      "warnings": [
+        "Beads workspace detected; detailed bd reads are skipped in auto mode to avoid dirtying .beads. Set integrations.beads.enabled to true to opt in."
+      ],
+      "counts": {
+        "ready": 0,
+        "in_progress": 0,
+        "recent_closed": 0
+      },
+      "issue_ids": [],
+      "ready": [],
+      "in_progress": [],
+      "recent_closed": [],
+      "error": "beads_auto_read_skipped"
+    }
+  },
+  "rendered_files": [
+    "wiki/index.md",
+    "wiki/articles.md",
+    "wiki/concepts.md",
+    "wiki/decisions.md",
+    "wiki/devlog.md",
+    "wiki/notes.md",
+    "wiki/symbols.md",
+    "wiki/links.md"
+  ],
+  "site_files": [
+    "wiki-site/index.html",
+    "wiki-site/articles.html",
+    "wiki-site/guides.html",
+    "wiki-site/concepts.html",
+    "wiki-site/decisions.html",
+    "wiki-site/devlog.html",
+    "wiki-site/notes.html",
+    "wiki-site/symbols.html",
+    "wiki-site/links.html",
+    "wiki-site/search.html",
+    "wiki-site/records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html",
+    "wiki-site/records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html",
+    "wiki-site/records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html",
+    "wiki-site/records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html",
+    "wiki-site/records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html",
+    "wiki-site/records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html",
+    "wiki-site/records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html",
+    "wiki-site/records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html",
+    "wiki-site/records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html",
+    "wiki-site/records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
+    "wiki-site/records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
+    "wiki-site/records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html",
+    "wiki-site/records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html",
+    "wiki-site/records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
+    "wiki-site/records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html",
+    "wiki-site/records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
+    "wiki-site/records/symbol/symbol_beaadb06-ce2d-4ace-bf2b-646296edf413.html",
+    "wiki-site/records/symbol/symbol_5a171439-f62d-4a58-866e-dd2802ae886a.html",
+    "wiki-site/records/symbol/symbol_695dfa41-e3fb-404d-8c6d-9c8bd4a1f953.html",
+    "wiki-site/favicon.svg",
+    "wiki-site/assets/wikiwiki.css",
+    "wiki-site/assets/project-theme.css",
+    "wiki-site/assets/search-index.js",
+    "wiki-site/assets/wikiwiki.js",
+    "wiki-site/.nojekyll",
+    "wiki-site/site-manifest.json"
+  ]
+}

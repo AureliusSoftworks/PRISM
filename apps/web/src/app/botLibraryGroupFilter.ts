@@ -14,6 +14,7 @@ export interface BotLibraryGroupMaintenanceGroup {
   botIds: string[];
   builtIn?: boolean;
   marketplaceThemeId?: string | null;
+  updatedAt?: string;
 }
 
 export interface BotLibraryGroupUpsertGroup extends BotLibraryGroupMaintenanceGroup {
@@ -45,6 +46,29 @@ export interface UpsertBotLibraryGroupOptions {
   marketplaceThemeId?: string | null;
   now?: string;
   createGroupId: () => string;
+}
+
+export type AddBotToLibraryGroupStatus =
+  | "added"
+  | "missing-bot"
+  | "missing-group"
+  | "built-in-group"
+  | "already-in-group"
+  | "group-full";
+
+export interface AddBotToLibraryGroupOptions {
+  groupId: string;
+  botId: string;
+  existingBotIds?: ReadonlySet<string>;
+  maxBots?: number;
+  now?: string;
+}
+
+export interface AddBotToLibraryGroupResult<
+  TGroup extends BotLibraryGroupMaintenanceGroup,
+> {
+  groups: TGroup[];
+  status: AddBotToLibraryGroupStatus;
 }
 
 export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
@@ -153,6 +177,49 @@ export function resolveBotLibraryMultiSelectionActions<
     canCreateGroup: selectedSet.size >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
     removableGroup: resolveCommonBotLibraryGroupForSelection(groups, selectedBotIds),
   };
+}
+
+export function addBotToLibraryGroup<
+  TGroup extends BotLibraryGroupMaintenanceGroup,
+>(
+  groups: readonly TGroup[],
+  options: AddBotToLibraryGroupOptions
+): AddBotToLibraryGroupResult<TGroup> {
+  const botId = options.botId.trim();
+  if (!botId || (options.existingBotIds && !options.existingBotIds.has(botId))) {
+    return { groups: [...groups], status: "missing-bot" };
+  }
+
+  const targetIndex = groups.findIndex((group) => group.id === options.groupId);
+  if (targetIndex < 0) {
+    return { groups: [...groups], status: "missing-group" };
+  }
+
+  const target = groups[targetIndex]!;
+  if (target.builtIn === true) {
+    return { groups: [...groups], status: "built-in-group" };
+  }
+
+  const existingTargetBotIds = target.botIds.filter(
+    (candidateBotId) =>
+      !options.existingBotIds || options.existingBotIds.has(candidateBotId)
+  );
+  if (existingTargetBotIds.includes(botId)) {
+    return { groups: [...groups], status: "already-in-group" };
+  }
+
+  const mergedBotIds = Array.from(new Set([...existingTargetBotIds, botId]));
+  if (options.maxBots !== undefined && mergedBotIds.length > options.maxBots) {
+    return { groups: [...groups], status: "group-full" };
+  }
+
+  const next = [...groups];
+  next[targetIndex] = {
+    ...target,
+    botIds: mergedBotIds,
+    updatedAt: options.now ?? new Date().toISOString(),
+  } as TGroup;
+  return { groups: next, status: "added" };
 }
 
 export function upsertBotLibraryGroup<

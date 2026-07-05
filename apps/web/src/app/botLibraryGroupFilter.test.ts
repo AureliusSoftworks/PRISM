@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addBotToLibraryGroup,
   filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
   pruneBotLibraryGroupsForExistingBots,
@@ -145,6 +146,56 @@ describe("bot library group filtering", () => {
 
     assert.equal(actions.canCreateGroup, true);
     assert.equal(actions.removableGroup?.id, "group:villains");
+  });
+
+  it("adds one bot to a mutable existing group and drops stale ids", () => {
+    const result = addBotToLibraryGroup(
+      [
+        {
+          id: "group:story",
+          botIds: ["bot-a", "bot-missing"],
+          builtIn: false,
+          updatedAt: "2026-07-04T00:00:00.000Z",
+        },
+      ],
+      {
+        groupId: "group:story",
+        botId: "bot-b",
+        existingBotIds: new Set(["bot-a", "bot-b"]),
+        maxBots: 3,
+        now: "2026-07-04T01:00:00.000Z",
+      }
+    );
+
+    assert.equal(result.status, "added");
+    assert.deepEqual(result.groups[0]?.botIds, ["bot-a", "bot-b"]);
+    assert.equal(result.groups[0]?.updatedAt, "2026-07-04T01:00:00.000Z");
+  });
+
+  it("does not add one bot to built-in, duplicate, or full groups", () => {
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "builtin:favorites", botIds: [], builtIn: true }],
+        { groupId: "builtin:favorites", botId: "bot-a" }
+      ).status,
+      "built-in-group"
+    );
+
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "group:story", botIds: ["bot-a"], builtIn: false }],
+        { groupId: "group:story", botId: "bot-a" }
+      ).status,
+      "already-in-group"
+    );
+
+    assert.equal(
+      addBotToLibraryGroup(
+        [{ id: "group:full", botIds: ["bot-a", "bot-b"], builtIn: false }],
+        { groupId: "group:full", botId: "bot-c", maxBots: 2 }
+      ).status,
+      "group-full"
+    );
   });
 
   it("upserts marketplace groups by theme id and merges installed bots", () => {
