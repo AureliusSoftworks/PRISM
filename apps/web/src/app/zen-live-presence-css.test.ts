@@ -233,13 +233,18 @@ describe("Zen live presence CSS", () => {
 
     assert.match(presenceSource, /showThinkingSpinner = false/);
     assert.match(presenceSource, /showThinkingSpinner\?: boolean;/);
-    assert.match(presenceSource, /className=\{styles\.zenLiveBotPresenceThinkingGlyphAnchor\}/);
-    assert.match(presenceSource, /showThinkingSpinner\s+baseText=\{plateFace\.text\}/);
-    assert.match(presenceSource, /\{!showThinkingSpinner \? \(/);
     assert.match(
       presenceSource,
-      /data-thinking-spinner-active=\{showThinkingSpinner \? "true" : undefined\}/
+      /const faceSpinnerVisible = showThinkingSpinner \|\| transitioning;/
     );
+    assert.match(presenceSource, /className=\{styles\.zenLiveBotPresenceThinkingGlyphAnchor\}/);
+    assert.match(presenceSource, /showThinkingSpinner\s+baseText=\{plateFace\.text\}/);
+    assert.match(presenceSource, /\{!faceSpinnerVisible \? \(/);
+    assert.match(
+      presenceSource,
+      /data-thinking-spinner-active=\{faceSpinnerVisible \? "true" : undefined\}/
+    );
+    assert.doesNotMatch(presenceSource, /zenLiveBotPresenceSpinner/);
     assert.match(
       pageSource,
       /const zenPendingReplyPlaceholderVisible =\s+chatLikeSurface && pendingReplyVisualVisible && !chatAssistantRevealInProgress;/
@@ -260,12 +265,19 @@ describe("Zen live presence CSS", () => {
     const zenSpinnerGlyphRule = ruleForExactSelector(
       ".zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner=\"true\"]"
     );
-    assert.match(zenSpinnerGlyphRule, /#55ffe0/);
-    assert.match(zenSpinnerGlyphRule, /font-size:\s*clamp\(0\.98rem,\s*2\.4vw,\s*1\.54rem\)/);
+    assert.match(zenSpinnerGlyphRule, /color:\s*var\(--zen-presence-face-ink\)\s*;/);
+    assert.match(zenSpinnerGlyphRule, /var\(--coffee-bot-color\)/);
+    assert.match(zenSpinnerGlyphRule, /font-size:\s*clamp\(1\.82rem,\s*4\.5vw,\s*3\.08rem\)/);
+    assert.doesNotMatch(zenSpinnerGlyphRule, /#55ffe0|#0aa996/);
+    assert.match(
+      css,
+      /\.coffeeSeatPlateEmoji \[data-coffee-plate-thinking-frame\]\[data-face-font="warm"\]/
+    );
     assert.doesNotMatch(
       css,
       /\.zenLiveBotPresencePlate\[data-thinking-spinner-active="true"\] \.zenLiveBotPresenceFaceRig/
     );
+    assert.doesNotMatch(css, /\.zenLiveBotPresenceSpinner/);
 
     const presenceCallSites = [...pageSource.matchAll(/<ZenLiveBotPresencePlate[\s\S]*?\/>/g)];
     assert.equal(presenceCallSites.length, 2);
