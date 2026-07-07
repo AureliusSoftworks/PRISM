@@ -8,7 +8,7 @@ import {
 } from "./zenPersonaTransition.ts";
 
 describe("resolveZenPersonaTransitionStyle", () => {
-  it("passes explicit spoken styles through", () => {
+  it("passes explicit styles through", () => {
     assert.equal(
       resolveZenPersonaTransitionStyle("new-speaks", {
         fromBotId: "bot-a",
@@ -25,11 +25,19 @@ describe("resolveZenPersonaTransitionStyle", () => {
       }),
       "previous-introduces"
     );
+    assert.equal(
+      resolveZenPersonaTransitionStyle("off", {
+        fromBotId: "bot-a",
+        toBotId: "bot-b",
+        random: () => 0,
+      }),
+      "off"
+    );
   });
 
-  it("resolves Auto deterministically with injected random", () => {
+  it("resolves Random deterministically with injected random", () => {
     assert.equal(
-      resolveZenPersonaTransitionStyle("auto", {
+      resolveZenPersonaTransitionStyle("random", {
         fromBotId: "bot-a",
         toBotId: "bot-b",
         random: () => 0.1,
@@ -37,35 +45,43 @@ describe("resolveZenPersonaTransitionStyle", () => {
       "new-speaks"
     );
     assert.equal(
-      resolveZenPersonaTransitionStyle("auto", {
+      resolveZenPersonaTransitionStyle("random", {
+        fromBotId: "bot-a",
+        toBotId: "bot-b",
+        random: () => 0.5,
+      }),
+      "previous-introduces"
+    );
+    assert.equal(
+      resolveZenPersonaTransitionStyle("random", {
         fromBotId: "bot-a",
         toBotId: "bot-b",
         random: () => 0.9,
       }),
-      "previous-introduces"
+      "off"
     );
   });
 
-  it("never resolves Auto to a quiet or off state", () => {
+  it("includes all transition modes in Random", () => {
     const seen = new Set<string>();
-    for (const value of [0, 0.25, 0.5, 0.75, 0.999]) {
+    for (const value of [0, 0.25, 0.34, 0.65, 0.75, 0.999]) {
       seen.add(
-        resolveZenPersonaTransitionStyle("auto", {
+        resolveZenPersonaTransitionStyle("random", {
           fromBotId: "bot-a",
           toBotId: "bot-b",
           random: () => value,
         })
       );
     }
-    assert.deepEqual([...seen].sort(), ["new-speaks", "previous-introduces"]);
+    assert.deepEqual([...seen].sort(), ["new-speaks", "off", "previous-introduces"]);
   });
 
-  it("lets Auto choose PRISM introduces when Default is the current persona", () => {
+  it("lets Random choose PRISM introduces when Default is the current persona", () => {
     assert.equal(
-      resolveZenPersonaTransitionStyle("auto", {
+      resolveZenPersonaTransitionStyle("random", {
         fromBotId: null,
         toBotId: "bot-b",
-        random: () => 0.99,
+        random: () => 0.5,
       }),
       "previous-introduces"
     );
@@ -116,6 +132,22 @@ describe("zenPersonaPresenceAfterPickerSelection", () => {
         visibleBotId: "bot-a",
         phase: "departing",
         targetBotId: null,
+        waitingForIntroReveal: false,
+      }
+    );
+  });
+
+  it("switches immediately without show when Off is selected", () => {
+    assert.deepEqual(
+      zenPersonaPresenceAfterPickerSelection({
+        fromBotId: "bot-a",
+        toBotId: "bot-b",
+        style: "off",
+      }),
+      {
+        visibleBotId: "bot-b",
+        phase: "stable",
+        targetBotId: "bot-b",
         waitingForIntroReveal: false,
       }
     );

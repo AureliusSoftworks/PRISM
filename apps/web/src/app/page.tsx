@@ -741,11 +741,12 @@ function ZenPersonaTransitionChoiceControl({
   compact?: boolean;
 }): React.JSX.Element {
   const labels: Record<ZenPersonaTransitionChoice, string> = {
-    auto: "Auto",
+    random: compact ? "Rand" : "Random",
     "new-speaks": compact ? "New" : "New speaks",
     "previous-introduces": compact ? "Intro" : "Introduce",
+    off: "Off",
   };
-	                        return (
+  return (
     <div
       className={styles.zenPersonaTransitionControl}
       data-compact={compact ? "true" : undefined}
@@ -761,8 +762,8 @@ function ZenPersonaTransitionChoiceControl({
           variant="control"
           icon="help"
         >
-          Controls the handoff when you change Facets after Zen has started: Auto chooses,
-          New lets the selected Facet speak, and Introduce has the current Facet pass it over.
+          Controls the handoff when you change Facets after Zen has started: Random chooses
+          between Off, New, and Introduce. Off switches silently.
         </PanelSectionInfo>
       </span>
       <div className={styles.zenPersonaTransitionSegments}>
@@ -30123,7 +30124,7 @@ function HomeContent(): React.JSX.Element {
   const [
     zenPersonaTransitionChoice,
     setZenPersonaTransitionChoice,
-  ] = useState<ZenPersonaTransitionChoice>("auto");
+  ] = useState<ZenPersonaTransitionChoice>("random");
   const setZenPersonaPresenceState = useCallback(
     (next: ZenPersonaPresenceUiState): void => {
       zenPersonaPresenceRef.current = next;
@@ -55008,6 +55009,16 @@ function HomeContent(): React.JSX.Element {
       fromBotId,
       toBotId: nextBotId,
     });
+
+    if (style === "off") {
+      settleZenPersonaPresence(nextBotId);
+      setZenPersonaBotId(nextBotId);
+      setSelectedBotId(nextBotId);
+      setChatBotOverride(undefined);
+      closeEmptyStateBotSearch();
+      focusDraftInput();
+      return;
+    }
 
     beginZenPersonaPresenceTransition({
       fromBotId,
