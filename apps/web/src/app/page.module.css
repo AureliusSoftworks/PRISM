@@ -20618,8 +20618,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceBotGlyph {
   position: absolute;
-  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 95px));
-  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 148px));
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 96px));
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 149px));
   z-index: 12;
   box-sizing: border-box;
   width: clamp(23px, calc(var(--zen-live-bot-body-frame-size) * 0.16), 33px);

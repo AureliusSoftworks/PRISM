@@ -23229,8 +23229,8 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-copy-vertical-anchor": `${Math.round(bodySize * 1.08)}px`,
     "--zen-live-bot-copy-top-anchor": `${Math.round(bodySize * -0.06)}px`,
     "--zen-live-bot-copy-side-anchor": `${Math.round(bodySize * 0.58)}px`,
-    "--zen-live-bot-glyph-x-anchor": `${Math.round(bodySize * 0.5)}px`,
-    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.78)}px`,
+    "--zen-live-bot-glyph-x-anchor": `${Math.round(bodySize * 0.5) + 1}px`,
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.78) + 1}px`,
     ...(avatarPosition
       ? {
           "--zen-live-bot-avatar-x": `${avatarPosition.x}px`,
