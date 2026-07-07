@@ -186,15 +186,13 @@ export function CoffeeSeatPlateEmoji({
       data-coffee-plate-emoji-blink-phase={displayBlinkPhase}
       data-voice-preset={voicePreset}
       data-face-custom={
-        !thinkingSpinnerActive && (faceEyesFont || faceMouthFont || faceFontWeight)
+        faceEyesFont || faceMouthFont || faceFontWeight
           ? "true"
           : undefined
       }
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
       style={{
-        ["--bot-face-font-weight" as string]: thinkingSpinnerActive
-          ? undefined
-          : faceFontWeight ?? undefined,
+        ["--bot-face-font-weight" as string]: faceFontWeight ?? undefined,
         ["--bot-face-inflate-scale" as string]: faceInflateScale,
         transform: `translateX(${thinkingSpinnerActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scale(var(--bot-face-inflate-scale, 1)) scaleY(${thinkingSpinnerActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
       } as CSSProperties}
@@ -205,6 +203,7 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-frame="true"
           data-coffee-plate-thinking-frame-index={thinkingSpinnerFrameIndex}
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
+          data-face-font={faceMouthFont ?? undefined}
         >
           {thinkingSpinnerGlyph}
         </span>

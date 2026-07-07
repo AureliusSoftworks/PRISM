@@ -20333,28 +20333,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: saturate(0.86);
 }
 
-.zenLiveBotPresenceSpinner {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  width: 34%;
-  aspect-ratio: 1;
-  border-radius: 999px;
-  border: 2px solid color-mix(in srgb, var(--zen-presence-face-ink) 22%, transparent);
-  border-top-color: var(--zen-presence-face-ink);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-  transition: opacity 80ms linear;
-  animation: summarySpinnerSpin 0.9s linear infinite;
-}
-
-.zenLiveBotPresencePlate[data-transitioning="true"] .zenLiveBotPresenceSpinner {
-  opacity: 1;
-  transition-duration: 0ms;
-}
-
 .zenLiveBotPresenceFaceGlyph {
   color: var(--zen-presence-face-ink);
   position: relative;
@@ -20425,21 +20403,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
-  color: color-mix(in srgb, #55ffe0 88%, #ffffff 12%);
-  font-size: clamp(0.98rem, 2.4vw, 1.54rem);
+  color: var(--zen-presence-face-ink);
+  font-size: clamp(1.82rem, 4.5vw, 3.08rem);
   text-shadow:
     0 0 0.1em color-mix(in srgb, currentColor 84%, transparent),
-    0 0 0.34em color-mix(in srgb, #55ffe0 56%, transparent),
-    0 0 0.72em color-mix(in srgb, #55ffe0 32%, transparent);
+    0 0 0.34em color-mix(in srgb, var(--coffee-bot-color) 56%, transparent),
+    0 0 0.72em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
 }
 
 .themeLight .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"],
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
-  color: #057c73;
+  color: var(--zen-presence-face-ink);
   text-shadow:
     0 0 0.08em color-mix(in srgb, currentColor 34%, transparent),
-    0 0 0.28em color-mix(in srgb, #0aa996 22%, transparent);
+    0 0 0.28em color-mix(in srgb, var(--coffee-bot-color) 22%, transparent);
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -20797,10 +20775,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-prism-forming="true"] {
-    animation-duration: 1ms;
-  }
-
-  .zenLiveBotPresenceSpinner {
     animation-duration: 1ms;
   }
 
@@ -47722,6 +47696,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: var(--bot-face-font-weight, var(--prism-face-weight));
 }
 
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="neutral"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="neutral"] {
@@ -47730,6 +47705,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: 0.016em;
 }
 
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="warm"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="warm"] {
@@ -47738,6 +47714,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: -0.04em;
 }
 
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="concise"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="concise"] {
@@ -47746,6 +47723,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: 0.035em;
 }
 
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="playful"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="playful"] {
@@ -47754,6 +47732,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: 0.02em;
 }
 
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="formal"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="formal"] {

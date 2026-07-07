@@ -23194,6 +23194,7 @@ function ZenLiveBotPresencePlate({
     ? mouthShape ?? (mouthOpen ? "open-wide" : "closed")
     : "closed";
   const faceMouthOpen = faceTalking && faceMouthShape !== "closed";
+  const faceSpinnerVisible = showThinkingSpinner || transitioning;
   const plateFace =
     faceTalking && faceMouthShape === "closed"
       ? { text: ":|", rotateDeg: 90 }
@@ -23255,7 +23256,7 @@ function ZenLiveBotPresencePlate({
       data-presence-phase={transitioning ? presencePhase : undefined}
       data-transitioning={transitioning ? "true" : undefined}
       data-loading={transitioning ? "true" : undefined}
-      data-thinking-spinner-active={showThinkingSpinner ? "true" : undefined}
+      data-thinking-spinner-active={faceSpinnerVisible ? "true" : undefined}
       data-action-verbose={actionTextVerbose ? "true" : undefined}
       data-ask-question-active={askQuestionActive ? "true" : undefined}
       data-floating={avatarFloating ? "true" : undefined}
@@ -23307,8 +23308,7 @@ function ZenLiveBotPresencePlate({
           data-zen-live-bot-body-frame="true"
           aria-hidden="true"
         >
-          <span className={styles.zenLiveBotPresenceSpinner} aria-hidden="true" />
-          {showThinkingSpinner ? (
+          {faceSpinnerVisible ? (
             <span
               className={styles.zenLiveBotPresenceThinkingGlyphAnchor}
               aria-hidden="true"
@@ -23316,7 +23316,7 @@ function ZenLiveBotPresencePlate({
               <CoffeeSeatPlateEmoji
                 enabled
                 isTalking={false}
-                scheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}`}
+                scheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
                 showThinkingSpinner
                 baseText={plateFace.text}
                 rotateDeg={plateFace.rotateDeg}
@@ -23330,7 +23330,7 @@ function ZenLiveBotPresencePlate({
           ) : null}
           <BotFaceFrame />
         </span>
-        {!showThinkingSpinner ? (
+        {!faceSpinnerVisible ? (
           <span
             className={styles.zenLiveBotPresenceFaceRig}
             data-zen-live-bot-face-rig="true"
