@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   calculateZenAtmosphereLayerOpacitiesForReader,
+  calculateZenAtmosphereLayerStatesForReader,
   maxZenAtmosphereLayerOpacity,
 } from "./zenAtmosphere.ts";
 
@@ -39,7 +40,7 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
     );
   });
 
-  it("fades a generated Atmosphere layer by scrolled distance", () => {
+  it("fades a generated-only Atmosphere layer by scrolled distance", () => {
     const timeline = [
       {
         imageId: "first",
@@ -73,6 +74,89 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
         messageCountToY,
       }),
       { first: 1 }
+    );
+  });
+
+  it("keeps a starting wallpaper visible as the baseline layer", () => {
+    const timeline = [
+      {
+        imageId: "baseline",
+        generationMessageCount: 0,
+        startsVisible: true,
+      },
+      {
+        imageId: "first",
+        generationMessageCount: 4,
+      },
+    ];
+
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 0,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { baseline: 1, first: 0 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 600,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { baseline: 0.5, first: 0.5 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 800,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { baseline: 0, first: 1 }
+    );
+  });
+
+  it("fades later generated Atmosphere layers by scrolled distance", () => {
+    const timeline = [
+      {
+        imageId: "first",
+        generationMessageCount: 2,
+      },
+      {
+        imageId: "second",
+        generationMessageCount: 7,
+      },
+    ];
+
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 700,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { first: 1, second: 0 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 900,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { first: 0.5, second: 0.5 }
+    );
+    assert.deepEqual(
+      calculateZenAtmosphereLayerOpacitiesForReader({
+        timeline,
+        readerY: 1200,
+        revealScrollDistancePx: 400,
+        messageCountToY,
+      }),
+      { first: 0, second: 1 }
     );
   });
 
@@ -115,6 +199,57 @@ describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
       }),
       { first: 0, second: 1 }
     );
+  });
+});
+
+describe("calculateZenAtmosphereLayerStatesForReader", () => {
+  const messageCountToY = (messageCount: number): number => messageCount * 100;
+
+  it("returns bounded parallax with layer opacity", () => {
+    const states = calculateZenAtmosphereLayerStatesForReader({
+      timeline: [
+        {
+          imageId: "baseline",
+          generationMessageCount: 0,
+          startsVisible: true,
+        },
+      ],
+      readerY: 1200,
+      revealScrollDistancePx: 400,
+      messageCountToY,
+      parallaxRate: 0.2,
+      parallaxMaxPx: 24,
+    });
+
+    assert.deepEqual(states, {
+      baseline: {
+        opacity: 1,
+        parallaxY: -24,
+      },
+    });
+  });
+
+  it("does not move a hidden upcoming layer before its anchor", () => {
+    const states = calculateZenAtmosphereLayerStatesForReader({
+      timeline: [
+        {
+          imageId: "first",
+          generationMessageCount: 6,
+        },
+      ],
+      readerY: 500,
+      revealScrollDistancePx: 400,
+      messageCountToY,
+      parallaxRate: 0.2,
+      parallaxMaxPx: 24,
+    });
+
+    assert.deepEqual(states, {
+      first: {
+        opacity: 0,
+        parallaxY: 0,
+      },
+    });
   });
 });
 

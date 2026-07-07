@@ -35,6 +35,8 @@ function createTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      parent_id TEXT,
+      fork_message_id TEXT,
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
@@ -381,7 +383,7 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
 });
 
 describe("buildZenWallpaperHistoryForGeneratedImage", () => {
-  it("replaces the scroll timeline with one wallpaper", () => {
+  it("keeps forced wallpaper generations on the scroll reveal timeline", () => {
     const history = buildZenWallpaperHistoryForGeneratedImage(
       JSON.stringify([
         {
@@ -405,14 +407,22 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
       }
     );
 
-    assert.deepEqual(history, [
-      {
-        imageId: "wallpaper-new",
-        promptSeed: "new prompt",
-        generationMessageCount: 120,
-        createdAt: "2026-06-19T12:00:00.000Z",
-      },
-    ]);
+    assert.deepEqual(
+      history.map((entry) => ({
+        imageId: entry.imageId,
+        generationMessageCount: entry.generationMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-old",
+          generationMessageCount: 30,
+        },
+        {
+          imageId: "wallpaper-new",
+          generationMessageCount: 120,
+        },
+      ]
+    );
   });
 
   it("keeps automatic wallpaper generations on the scroll reveal timeline", () => {
@@ -1023,6 +1033,55 @@ describe("deleteConversation", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM coffee_poll_votes").get() as { n: number }).n,
       0
+    );
+  });
+
+  it("deletes a session root and its child bot projections", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "session-1");
+    seedChat(db, "user-1", "fork-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("session-1", "user-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat', bot_id = ?, parent_id = ? WHERE id = ? AND user_id = ?"
+    ).run("bot-1", "session-1", "fork-1", "user-1");
+
+    deleteConversation(db, "user-1", "session-1");
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n,
+      0
+    );
+  });
+
+  it("deletes a child bot projection without deleting the session canvas", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "session-1");
+    seedChat(db, "user-1", "fork-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("session-1", "user-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat', bot_id = ?, parent_id = ? WHERE id = ? AND user_id = ?"
+    ).run("bot-1", "session-1", "fork-1", "user-1");
+
+    deleteConversation(db, "user-1", "fork-1");
+
+    const remaining = db
+      .prepare("SELECT id, parent_id FROM conversations ORDER BY id")
+      .all() as Array<{ id: string; parent_id: string | null }>;
+    assert.deepEqual(
+      remaining.map((row) => ({ id: row.id, parent_id: row.parent_id })),
+      [{ id: "session-1", parent_id: null }]
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?").get("session-1") as { n: number }).n,
+      1
     );
   });
 

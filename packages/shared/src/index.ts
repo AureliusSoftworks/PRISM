@@ -1127,6 +1127,12 @@ export interface Conversation {
    * Coffee mode leaves this null and uses {@link botGroupIds} instead.
    */
   botId: string | null;
+  /** Hub metadata for unified Chat. Hub rows are canonical timelines; side rows fork from a Hub. */
+  hubRole?: "hub" | "side";
+  /** Bot that owns this Hub group. Null means the PRISM Hub. */
+  hubBotId?: string | null;
+  /** Parent Hub conversation for side chats. Null/omitted for Hub roots. */
+  parentHubId?: string | null;
   /**
    * Coffee-only — ordered list of 2-5 bot ids that participate in this
    * live session. Captured once when the Coffee thread is created and
@@ -1339,9 +1345,10 @@ export interface MemoryValidationEvent {
 /**
  * Post-auth surface the user is chatting from.
  *
- * - `"chat"`: the calm, stripped-down personal Prism. Honors auto-memory and
- *   per-send `incognito` (where incognito keeps the conversation entirely
- *   ephemeral without changing the selected provider).
+ * - `"zen"`: PRISM's own lane. It may use an optional Facet bot for a turn,
+ *   but the conversation remains PRISM-owned rather than bot-locked.
+ * - `"chat"`: bot-locked persona conversation. Requires a concrete `botId`
+ *   and keeps memory scoped to that bot.
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
@@ -1397,10 +1404,18 @@ export interface ChatRequestPayload {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
   reasoningEffort?: ReasoningEffort;
+  /**
+   * Chat/Sandbox bot selector. In Zen this is a backwards-compatible fallback
+   * for `facetBotId`.
+   */
   botId?: string | null;
-  /** When true in Zen, keep this turn client-held and skip memory/persistence. */
+  /** Preferred Zen Facet selector. Keeps the conversation row bot_id NULL. */
+  facetBotId?: string | null;
+  /** When true in Zen/Chat, keep this turn client-held and skip memory/persistence. */
   incognito?: boolean;
-  /** Zen-only automatic Persona handoff turn. */
+  /** Zen-only automatic Facet handoff turn. */
+  facetTransition?: ZenPersonaTransitionInput;
+  /** Backwards-compatible name for Zen Facet handoff. */
   personaTransition?: ZenPersonaTransitionInput;
   /** Zen-only idle autonomy check/turn. */
   zenAutonomy?: ZenAutonomyInput;

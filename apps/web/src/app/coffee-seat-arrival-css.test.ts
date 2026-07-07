@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 const cssPath = join(dirname(fileURLToPath(import.meta.url)), "page.module.css");
+const coffeeSeatPlateEmojiPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "CoffeeSeatPlateEmoji.tsx"
+);
 const css = readFileSync(cssPath, "utf8");
+const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 
 function ruleForSeatVector(
   kind: "arrival" | "finished",
@@ -72,6 +77,27 @@ function ruleForExactSelector(selector: string): string {
   );
   assert.ok(match, `Missing CSS rule for ${selector}`);
   return match[2]!;
+}
+
+function rulesForExactSelector(selector: string): string[] {
+  return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter((entry) =>
+      (entry[1] ?? "")
+        .split(",")
+        .map((candidate) => candidate.trim())
+        .includes(selector)
+    )
+    .map((entry) => entry[2] ?? "");
+}
+
+function assertNoAnimatedTransition(selector: string): void {
+  const rules = rulesForExactSelector(selector);
+  assert.ok(rules.length > 0, `Missing CSS rule for ${selector}`);
+  for (const rule of rules) {
+    for (const match of rule.matchAll(/transition:\s*([^;]+);/g)) {
+      assert.equal(match[1]?.trim(), "none");
+    }
+  }
 }
 
 describe("Coffee seat arrival CSS", () => {
@@ -165,5 +191,70 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(rule, /font-family:\s*var\(--font-ui-sans\),\s*system-ui,\s*sans-serif\s*;/);
     assert.match(rule, /font-weight:\s*760\s*;/);
     assert.match(rule, /letter-spacing:\s*0\s*;/);
+  });
+
+  it("keeps shared bot face glyph changes abrupt", () => {
+    assertNoAnimatedTransition(".coffeeSeatPlateEmoji");
+    assertNoAnimatedTransition('.coffeeSeat[data-top-head-seat="true"] .coffeeSeatPlateEmoji');
+    assertNoAnimatedTransition(".coffeeSeatPlateEmoji [data-coffee-plate-emoji-part]");
+    assertNoAnimatedTransition(".messageMoodCoffeeFace [data-coffee-plate-emoji-part]");
+    assertNoAnimatedTransition(".zenLiveBotPresenceFaceGlyph");
+    assertNoAnimatedTransition(".zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]");
+  });
+
+  it("masks live bot body rasters to the composed shell silhouette", () => {
+    const rasterRule = ruleForExactSelector(".coffeeSeatBodyRaster");
+    assert.match(rasterRule, /--bot-body-raster-mask-image:\s*[\s\S]*radial-gradient\(circle at 50% 45%, #000 0 40%/);
+    assert.match(rasterRule, /radial-gradient\(circle at 50% 78%/);
+    assert.match(rasterRule, /-webkit-mask-image:\s*var\(--bot-body-raster-mask-image\)/);
+    assert.match(rasterRule, /mask-image:\s*var\(--bot-body-raster-mask-image\)/);
+    assert.match(rasterRule, /mask-size:\s*var\(--bot-body-raster-mask-size\)\s*;/);
+    assert.match(rasterRule, /mask-repeat:\s*var\(--bot-body-raster-mask-repeat\)\s*;/);
+
+    const livePlateRule = ruleForExactSelector('.coffeeSeatPlate[data-live-body-style="zen"]');
+    assert.match(livePlateRule, /--bot-face-frame-glow-filter:\s*[\s\S]*drop-shadow/);
+    assert.match(livePlateRule, /--bot-face-frame-inset:\s*0\s*;/);
+    assert.match(livePlateRule, /--bot-face-metal-light-inset:\s*0\s*;/);
+
+    const liveFaceRule = ruleForExactSelector(
+      '.coffeeSeatPlate[data-live-body-style="zen"] .coffeeSeatPlateEmoji'
+    );
+    assert.match(liveFaceRule, /font-size:\s*clamp\(1\.36rem,\s*3\.8vw,\s*1\.9rem\)/);
+
+    const frameRule = ruleForExactSelector(".botFaceFrame");
+    assert.match(frameRule, /var\(--bot-face-frame-glow-filter,\s*drop-shadow\(0 0 0 transparent\)\)/);
+  });
+
+  it("centers the thinking slash spinner within the bot face screen", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-coffee-plate-thinking-frame-index=\{thinkingSpinnerFrameIndex\}/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-coffee-plate-thinking-glyph=\{thinkingSpinnerGlyph\}/
+    );
+
+    const spinnerRule = ruleForExactSelector(
+      '.coffeeSeatPlateEmoji[data-coffee-plate-thinking-spinner="true"]'
+    );
+    assert.match(spinnerRule, /--coffee-plate-emoji-nudge-y:\s*0px\s*;/);
+    assert.match(spinnerRule, /--coffee-seat-emotion-face-scale:\s*1\s*;/);
+    assert.match(spinnerRule, /grid-template-columns:\s*1em\s*;/);
+    assert.match(spinnerRule, /grid-template-rows:\s*1em\s*;/);
+    assert.match(spinnerRule, /place-self:\s*center\s*;/);
+
+    const frameRule = ruleForExactSelector(
+      ".coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame]"
+    );
+    assert.match(frameRule, /position:\s*relative\s*;/);
+    assert.match(frameRule, /display:\s*grid\s*;/);
+    assert.match(frameRule, /place-items:\s*center\s*;/);
+    assert.match(frameRule, /font-size:\s*1em\s*;/);
+    assert.match(frameRule, /inline-size:\s*1em\s*;/);
+    assert.match(frameRule, /block-size:\s*1em\s*;/);
+    assert.match(frameRule, /line-height:\s*1\s*;/);
+    assert.match(frameRule, /text-align:\s*center\s*;/);
+    assert.match(frameRule, /transform:\s*none\s*;/);
   });
 });

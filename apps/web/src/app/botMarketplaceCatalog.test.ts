@@ -15,6 +15,7 @@ import {
   botMarketplaceThemeGradientColors,
   buildBotMarketplaceThemeVisualStyle,
 } from "./botMarketplaceThemeGradient.ts";
+import { parsePrismBotArchive } from "./botArchive.ts";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const publicRoot = path.join(appRoot, "public");
@@ -22,6 +23,10 @@ const faceFontIds = new Set(["neutral", "warm", "concise", "playful", "formal"])
 
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
+}
+
+function readBotBundle(filePath: string) {
+  return parsePrismBotArchive(readFileSync(filePath));
 }
 
 describe("bot marketplace static catalog", () => {
@@ -32,28 +37,18 @@ describe("bot marketplace static catalog", () => {
 
     assert.equal(manifest.bots.length > 0, true);
     for (const entry of manifest.bots) {
-      const bundle = readJsonFile<{
-        schema?: unknown;
-        botHash?: unknown;
-        bot?: {
-          name?: unknown;
-          faceEyesFont?: unknown;
-          faceMouthFont?: unknown;
-          faceFontWeight?: unknown;
-        };
-        memories?: unknown;
-      }>(path.join(publicRoot, entry.bundlePath));
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
 
-      assert.equal(bundle.schema, "prism-bot-export-v1", entry.name);
-      assert.equal(bundle.botHash, entry.botHash, entry.name);
-      assert.equal(bundle.bot?.name, entry.name, entry.name);
-      assert.equal(faceFontIds.has(bundle.bot?.faceEyesFont as string), true, entry.name);
-      assert.equal(faceFontIds.has(bundle.bot?.faceMouthFont as string), true, entry.name);
-      assert.equal(typeof bundle.bot?.faceFontWeight, "number", entry.name);
-      const weight = bundle.bot?.faceFontWeight as number;
+      assert.equal(bundle.botJson.schema, "prism-bot-export-v2", entry.name);
+      assert.equal(bundle.botJson.botHash, entry.botHash, entry.name);
+      assert.equal(bundle.botJson.bot.name, entry.name, entry.name);
+      assert.equal(faceFontIds.has(bundle.botJson.bot.faceEyesFont as string), true, entry.name);
+      assert.equal(faceFontIds.has(bundle.botJson.bot.faceMouthFont as string), true, entry.name);
+      assert.equal(typeof bundle.botJson.bot.faceFontWeight, "number", entry.name);
+      const weight = bundle.botJson.bot.faceFontWeight as number;
       assert.equal(weight >= 300 && weight <= 800, true, entry.name);
       assert.equal(weight % 25, 0, entry.name);
-      assert.equal(Array.isArray(bundle.memories) ? bundle.memories.length : 0, entry.memoryCount);
+      assert.equal(bundle.memories.length, entry.memoryCount);
     }
   });
 
@@ -293,18 +288,18 @@ describe("bot marketplace static catalog", () => {
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
-    const jesusBundle = readJsonFile<{ bot?: { glyph?: unknown } }>(
+    const jesusBundle = readBotBundle(
       path.join(publicRoot, "bot-marketplace/bots/bot-jesus-christ.bot")
     );
-    const alanWattsBundle = readJsonFile<{ bot?: { glyph?: unknown } }>(
+    const alanWattsBundle = readBotBundle(
       path.join(publicRoot, "bot-marketplace/bots/bot-alan-watts.bot")
     );
 
     assert.equal(byId.get("jesus-christ")?.color, "#2563A8");
     assert.equal(byId.get("jesus-christ")?.glyph, "lucideFishSymbol");
-    assert.equal(jesusBundle.bot?.glyph, "lucideFishSymbol");
+    assert.equal(jesusBundle.botJson.bot.glyph, "lucideFishSymbol");
     assert.equal(byId.get("alan-watts")?.glyph, "yinYang");
-    assert.equal(alanWattsBundle.bot?.glyph, "yinYang");
+    assert.equal(alanWattsBundle.botJson.bot.glyph, "yinYang");
   });
 
   it("maps Prism Originals to the PRISM letter palette", () => {
@@ -351,14 +346,9 @@ describe("bot marketplace static catalog", () => {
     for (const [botId, faceFont] of expectedFaces) {
       const entry = byId.get(botId);
       assert.ok(entry, botId);
-      const bundle = readJsonFile<{
-        bot?: {
-          faceEyesFont?: unknown;
-          faceMouthFont?: unknown;
-        };
-      }>(path.join(publicRoot, entry.bundlePath));
-      assert.equal(bundle.bot?.faceEyesFont, faceFont, botId);
-      assert.equal(bundle.bot?.faceMouthFont, faceFont, botId);
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      assert.equal(bundle.botJson.bot.faceEyesFont, faceFont, botId);
+      assert.equal(bundle.botJson.bot.faceMouthFont, faceFont, botId);
     }
   });
 });

@@ -5,7 +5,7 @@ future mode surfaces. Their versions track felt product behavior, not internal
 implementation churn.
 
 Applet versions are independent from the Prism app release version. Prism can
-ship as `0.5.2` while Coffee is `v0.6` and Story is `v0.1`.
+ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 ## Ethos
 
@@ -24,9 +24,9 @@ ship as `0.5.2` while Coffee is `v0.6` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v0.5 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v0.3 | Active | Calm one-to-one continuity surface with live presence, atmosphere, and lower-control flow. |
-| Coffee | v0.6 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Chat | v0.6 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
+| Zen | v0.4 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v0.7 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -38,6 +38,13 @@ ship as `0.5.2` while Coffee is `v0.6` and Story is `v0.1`.
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
 ## Changelog
+
+### 2026-07-05
+
+- Bumped `Chat` to `v0.6`, `Zen` to `v0.4`, and `Coffee` to `v0.7` after the
+  latest visible applet work.
+- Marked the standalone Zen lane as deprecating in favor of Prism's default calm
+  state.
 
 ### 2026-07-02
 

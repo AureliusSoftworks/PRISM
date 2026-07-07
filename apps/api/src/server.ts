@@ -64,6 +64,9 @@ import {
   type ManualChatToolRequest,
 } from "./chat.ts";
 import {
+  getConversationHubMetadata,
+} from "./conversation-hubs.ts";
+import {
   generateZenLiveActionReaction,
   normalizeZenLiveActionContextInput,
   normalizeZenLiveActionInterruptInput,
@@ -187,6 +190,14 @@ import {
   parseBotProfilePictureDataUrl,
   readProfilePictureImageIdForBot,
 } from "./bot-profile-pictures.ts";
+import {
+  BOT_ACCESSORY_IMAGE_PURPOSE,
+  BOT_ACCESSORY_SIZE,
+  clearBotAccessoryReference,
+  deleteBotAccessoryImageIfOwned,
+  normalizeBotAccessoryPngBytes,
+  parseBotAccessoryDataUrl,
+} from "./bot-accessories.ts";
 import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
@@ -2081,49 +2092,52 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/conversations/zen/open", async (ctx) => {
       const userId = requireAuth(ctx);
-      const existing = db
-        .prepare(
-          `SELECT id, conversation_mode
-             FROM conversations c
-            WHERE c.user_id = ?
-              AND COALESCE(c.incognito, 0) = 0
-              AND c.archived_at IS NULL
-              AND c.conversation_mode IN ('zen', 'chat')
-              AND (
-                NOT EXISTS (
-                  SELECT 1 FROM messages m_any
-                   WHERE m_any.conversation_id = c.id
-                     AND m_any.user_id = c.user_id
+      const body = ctx.body as Record<string, unknown>;
+      const forceNewSession = body.newSession === true || body.forceNewConversation === true;
+      const requestedBotId =
+        typeof body.botId === "string" && body.botId.trim().length > 0
+          ? body.botId.trim()
+          : null;
+      const requestedBot = requestedBotId
+        ? (db
+            .prepare("SELECT id, name FROM bots WHERE id = ? AND user_id = ?")
+            .get(requestedBotId, userId) as
+            | { id: string; name: string | null }
+            | undefined)
+        : null;
+      if (requestedBotId && !requestedBot) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      if (!forceNewSession) {
+        const existingSession = db
+          .prepare(
+            `SELECT id
+               FROM conversations
+              WHERE user_id = ?
+                AND COALESCE(incognito, 0) = 0
+                AND archived_at IS NULL
+                AND parent_id IS NULL
+                AND (
+                  conversation_mode = 'zen'
+                  OR (conversation_mode = 'chat' AND bot_id IS NULL)
                 )
-                OR EXISTS (
-                  SELECT 1 FROM messages m_assistant
-                   WHERE m_assistant.conversation_id = c.id
-                     AND m_assistant.user_id = c.user_id
-                     AND m_assistant.role = 'assistant'
-                )
-              )
-            ORDER BY c.updated_at DESC
-            LIMIT 1`
-        )
-        .get(userId) as
-        | { id?: string; conversation_mode?: string | null }
-        | undefined;
-      if (existing?.id) {
-        if (existing.conversation_mode === "chat") {
-          db.prepare(
-            "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
-          ).run(existing.id, userId);
+              ORDER BY updated_at DESC
+              LIMIT 1`
+          )
+          .get(userId) as { id: string } | undefined;
+        if (existingSession?.id) {
+          json(ctx.res, 200, { ok: true, conversationId: existingSession.id });
+          return;
         }
-        json(ctx.res, 200, { ok: true, conversationId: existing.id });
-        return;
       }
       const now = new Date().toISOString();
       const conversationId = randomId(12);
+      const title = "PRISM";
       db.prepare(
         `INSERT INTO conversations (
           id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
-        ) VALUES (?, ?, 'Zen', 'zen', NULL, 0, ?, ?)`
-      ).run(conversationId, userId, now, now);
+        ) VALUES (?, ?, ?, 'zen', NULL, 0, ?, ?)`
+      ).run(conversationId, userId, title, now, now);
       json(ctx.res, 200, { ok: true, conversationId });
     }),
     route("POST", "/api/conversations/:id/zen-starter-replay", async (ctx) => {
@@ -2203,9 +2217,11 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Conversation not found.");
       }
       const conversationModeForMessages =
-        conversation.conversation_mode === "zen" || conversation.conversation_mode === "chat"
+        conversation.conversation_mode === "zen"
           ? "zen"
-          : conversation.conversation_mode === "coffee"
+          : conversation.conversation_mode === "chat"
+            ? "chat"
+            : conversation.conversation_mode === "coffee"
             ? "coffee"
             : "sandbox";
       const messageRowsRaw = db
@@ -2324,6 +2340,9 @@ function buildRoutes(): RouteDefinition[] {
             : {}),
         };
       });
+      const hubMetadata = getConversationHubMetadata(db, userId, conversationId);
+      const effectiveConversationBotId =
+        hubMetadata?.hubBotId ?? conversation.bot_id ?? null;
       const opinionRow = db
         .prepare(
           `SELECT score, band, trend, last_reason, recent_reasons, updated_at
@@ -2334,7 +2353,7 @@ function buildRoutes(): RouteDefinition[] {
         .get(
           userId,
           conversationId,
-          conversation.bot_id ?? "__default__"
+          effectiveConversationBotId ?? "__default__"
         ) as
         | {
             score: number;
@@ -2375,11 +2394,13 @@ function buildRoutes(): RouteDefinition[] {
             updatedAt: opinionRow.updated_at,
           }
         : undefined;
-      const botOpinion = readBotOpinion(db, userId, conversation.bot_id ?? null);
+      const botOpinion = readBotOpinion(db, userId, effectiveConversationBotId);
       const conversationModeOut: "zen" | "chat" | "sandbox" | "coffee" =
-        conversation.conversation_mode === "zen" || conversation.conversation_mode === "chat"
+        conversation.conversation_mode === "zen"
           ? "zen"
-          : conversation.conversation_mode === "coffee"
+          : conversation.conversation_mode === "chat"
+            ? "chat"
+            : conversation.conversation_mode === "coffee"
             ? "coffee"
             : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(conversation.bot_group_ids);
@@ -2421,6 +2442,8 @@ function buildRoutes(): RouteDefinition[] {
           )
         );
       }
+      const includeZenWallpaper =
+        conversationModeOut === "zen" || hubMetadata?.hubRole === "side";
       json(ctx.res, 200, {
         ok: true,
         conversation: {
@@ -2428,6 +2451,13 @@ function buildRoutes(): RouteDefinition[] {
           title: conversation.title,
           mode: conversationModeOut,
           botId: conversationModeOut === "zen" ? null : conversation.bot_id ?? null,
+          ...(hubMetadata
+            ? {
+                hubRole: hubMetadata.hubRole,
+                hubBotId: hubMetadata.hubBotId,
+                parentHubId: hubMetadata.parentHubId,
+              }
+            : {}),
           ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
           ...(conversationModeOut === "coffee"
             ? { coffeeGroupId: conversation.coffee_group_id ?? null }
@@ -2453,7 +2483,7 @@ function buildRoutes(): RouteDefinition[] {
           lastBotId: conversation.last_bot_id ?? null,
           lastBotColor: conversation.last_bot_color ?? null,
           hasAssistantReply: conversation.has_assistant_reply === 1,
-          ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+          ...(includeZenWallpaper ? { zenWallpaper: zenWallpaperOut } : {}),
           ...(prismMoodOut ? { prismMood: prismMoodOut } : {}),
           createdAt: conversation.created_at,
           updatedAt: conversation.updated_at,
@@ -2471,15 +2501,23 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Message cannot be empty.");
       }
       const conversation = db
-        .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+        .prepare("SELECT id, conversation_mode, bot_id FROM conversations WHERE id = ? AND user_id = ?")
         .get(ctx.params.id, userId) as
-        | { id: string; conversation_mode: string | null }
+        | { id: string; conversation_mode: string | null; bot_id: string | null }
         | undefined;
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+      const zenCompatible =
+        conversation.conversation_mode === "zen" ||
+        (conversation.conversation_mode === "chat" && conversation.bot_id === null);
+      if (!zenCompatible) {
         throw new Error("Only Zen conversations can append buffered user messages.");
+      }
+      if (conversation.conversation_mode === "chat") {
+        db.prepare(
+          "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND bot_id IS NULL"
+        ).run(conversation.id, userId);
       }
       const now = new Date().toISOString();
       const messageId = randomId();
@@ -2514,8 +2552,9 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const enabled = body.enabled !== false;
       const generationRequested = body.generate !== false;
-      const replaceImmediately = generationRequested && body.replaceImmediately === true;
-      const force = generationRequested && (body.force === true || replaceImmediately);
+      const force =
+        generationRequested &&
+        (body.force === true || body.replaceImmediately === true);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
@@ -2576,13 +2615,11 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new HttpError(404, "Conversation not found.");
       }
-      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
-        throw new HttpError(400, "Zen Atmosphere is only available for Zen chats.");
-      }
-      if (conversation.conversation_mode === "chat") {
-        db.prepare(
-          "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
-        ).run(conversationId, userId);
+      const zenCompatible =
+        conversation.conversation_mode === "zen" ||
+        conversation.conversation_mode === "chat";
+      if (!zenCompatible) {
+        throw new HttpError(400, "Atmosphere is only available for Chat Hubs and side chats.");
       }
       const activeImageJob = peekActiveImageJobForUser(userId);
       if (
@@ -2841,7 +2878,6 @@ function buildRoutes(): RouteDefinition[] {
             {
               latestMessageCount: messageCount,
               restoreMessageLimit: ZEN_RESTORE_MESSAGE_LIMIT,
-              replaceImmediately,
             }
           )
         );
@@ -3486,7 +3522,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+      if (conversation.conversation_mode !== "zen") {
         throw new Error("Only Zen conversations can reset Prism mood.");
       }
       const now = new Date().toISOString();
@@ -3509,7 +3545,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+      if (conversation.conversation_mode !== "zen") {
         throw new Error("Only Zen conversations can be interrupted.");
       }
       const body = ctx.body as Record<string, unknown>;
@@ -3543,7 +3579,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode !== "zen" && conversation.conversation_mode !== "chat") {
+      if (conversation.conversation_mode !== "zen") {
         throw new Error("Only Zen conversations can record AskQuestion patience.");
       }
       const body = ctx.body as Record<string, unknown>;
@@ -3678,7 +3714,7 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const mode =
         body.mode === "zen" || body.mode === "chat"
-          ? "zen"
+          ? body.mode
           : "sandbox";
       const botId: string | null | undefined =
         typeof body.botId === "string"
@@ -3689,6 +3725,13 @@ function buildRoutes(): RouteDefinition[] {
       const composerConversationId =
         typeof body.conversationId === "string" ? body.conversationId : null;
       const effectiveBotId = botId;
+      const effectiveMemoryBotId =
+        typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0
+          ? effectiveBotId.trim()
+          : null;
+      if (mode === "chat" && !effectiveMemoryBotId) {
+        throw new HttpError(400, "Choose a bot before chatting.");
+      }
       const recentMessages = readComposerRecentMessages(body.recentMessages);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -3722,6 +3765,9 @@ function buildRoutes(): RouteDefinition[] {
 	              repetition_penalty?: number | null;
 	            }
           | undefined;
+        if (!bot) {
+          throw new HttpError(404, mode === "zen" ? "Facet not found." : "Bot not found.");
+        }
         if (bot) {
           botName = bot.name?.trim() || "this bot";
           botSystemPrompt = composeBotSystemPrompt(
@@ -3795,9 +3841,11 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         userKey,
-        typeof effectiveBotId === "string" ? effectiveBotId : null,
+        effectiveMemoryBotId,
         5
-      ).map((memory) => memory.text);
+      )
+        .filter((memory) => mode !== "chat" || memory.botId === effectiveMemoryBotId)
+        .map((memory) => memory.text);
       const recentContextLines = recentMessages.map((message) => {
         const speaker =
           message.role === "assistant"
@@ -3973,10 +4021,12 @@ function buildRoutes(): RouteDefinition[] {
       // enforces the same default as defense in depth.
       const mode =
         body.mode === "zen" || body.mode === "chat"
-          ? "zen"
+          ? body.mode
           : "sandbox";
       const requestedPersonaTransition =
-        mode === "zen" ? readZenPersonaTransition(body.personaTransition) : undefined;
+        mode === "zen"
+          ? readZenPersonaTransition(body.facetTransition ?? body.personaTransition)
+          : undefined;
       const requestedZenAutonomy =
         mode === "zen" ? readZenAutonomy(body.zenAutonomy) : undefined;
       const requestedAskQuestionPatience =
@@ -4019,10 +4069,20 @@ function buildRoutes(): RouteDefinition[] {
           : body.botId === null
             ? null
             : undefined;
-      // Zen private mode keeps the visible branch client-held: the request can
+      const facetBotId: string | null | undefined =
+        typeof body.facetBotId === "string"
+          ? body.facetBotId
+          : body.facetBotId === null
+            ? null
+            : undefined;
+      const requestedBotId = mode === "zen" && facetBotId !== undefined ? facetBotId : botId;
+      if (mode === "chat" && (typeof requestedBotId !== "string" || requestedBotId.trim().length === 0)) {
+        throw new HttpError(400, "Choose a bot before chatting.");
+      }
+      // Companion private mode keeps the visible branch client-held: the request can
       // carry an ephemeral transcript snapshot, but the server skips memory and
       // persistence for the turn. Sandbox ignores incognito as before.
-      const incognito = mode === "zen" && body.incognito === true;
+      const incognito = (mode === "zen" || mode === "chat") && body.incognito === true;
       // Per-request provider/model override so a fresh playground/Zen switch
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.
@@ -4033,13 +4093,13 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
-      let effectiveBotId = botId;
+      let effectiveBotId = requestedBotId;
       enterUsageSession({
         db,
         userId,
         privacyScope: incognito ? "private" : "normal",
         mode,
-        surface: mode === "zen" ? "zen" : "sandbox",
+        surface: mode === "zen" ? "zen" : mode,
         conversationId: conversationId ?? null,
         botId: effectiveBotId ?? null,
       });
@@ -4063,10 +4123,10 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen" ? requestedAskQuestionPatience : undefined;
       const zenLiveActionInterrupt =
         mode === "zen" ? requestedZenLiveActionInterrupt : undefined;
-      if (zenAskQuestionPatience && botId === undefined) {
+      if (zenAskQuestionPatience && requestedBotId === undefined) {
         effectiveBotId = zenAskQuestionPatience.activeBotId;
       }
-      if (zenLiveActionInterrupt && botId === undefined) {
+      if (zenLiveActionInterrupt && requestedBotId === undefined) {
         effectiveBotId = zenLiveActionInterrupt.activeBotId;
       }
       if (zenAutonomy) {
@@ -4344,8 +4404,9 @@ function buildRoutes(): RouteDefinition[] {
               comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
               secondaryOllamaHost: user.secondary_ollama_host,
             },
-            botId: effectiveBotId,
-            ...(personaTransition ? { personaTransition } : {}),
+            botId: mode === "zen" ? undefined : effectiveBotId,
+            ...(mode === "zen" ? { facetBotId: effectiveBotId ?? null } : {}),
+            ...(personaTransition ? { facetTransition: personaTransition } : {}),
             ...(zenAutonomy ? { zenAutonomy } : {}),
             ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
             ...(zenLiveActionContext ? { zenLiveActionContext } : {}),
@@ -5511,7 +5572,7 @@ function buildRoutes(): RouteDefinition[] {
       if (message.role !== "user") {
         throw new Error("Only user messages can be edited.");
       }
-      if (message.conversation_mode === "zen" || message.conversation_mode === "chat") {
+      if (message.conversation_mode === "zen") {
         throw new Error("Zen messages cannot be edited.");
       }
 
@@ -5560,7 +5621,7 @@ function buildRoutes(): RouteDefinition[] {
       if (message.role !== "assistant") {
         throw new Error("Only assistant messages can be interrupted.");
       }
-      if (message.conversation_mode !== "zen" && message.conversation_mode !== "chat") {
+      if (message.conversation_mode !== "zen") {
         throw new Error("Only Zen assistant messages can be interrupted.");
       }
       const laterMessage = db.prepare(
@@ -6870,6 +6931,7 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Image not found.");
       }
       clearBotProfilePictureReference(db, userId, imageId);
+      clearBotAccessoryReference(db, userId, imageId);
       db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
         imageId,
         userId
@@ -6957,7 +7019,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, {
@@ -6972,6 +7034,117 @@ function buildRoutes(): RouteDefinition[] {
           model: "upload",
         },
       });
+    }),
+    route("POST", "/api/bots/:id/accessory/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id;
+      const existing = db
+        .prepare(
+          "SELECT id, accessory_image_id FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId) as
+        | { id?: string; accessory_image_id?: string | null }
+        | undefined;
+      if (!existing?.id) {
+        throw new Error("Bot not found.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const sourceBytes = parseBotAccessoryDataUrl(body.dataUrl);
+      let pngBytes: Buffer;
+      try {
+        pngBytes = await normalizeBotAccessoryPngBytes(sourceBytes);
+      } catch {
+        throw new Error("Could not read that accessory image.");
+      }
+
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      try {
+        writeGeneratedImageBytes(localRelPath, pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        const detail = error instanceof Error ? error.message : "write failed";
+        throw new Error(`Could not save accessory (${detail}).`);
+      }
+
+      const now = new Date().toISOString();
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      try {
+        db.prepare(
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+          imageId,
+          userId,
+          botId,
+          "Uploaded bot accessory",
+          "Uploaded bot accessory",
+          displayUrl,
+          BOT_ACCESSORY_SIZE,
+          "upload",
+          "upload",
+          "upload",
+          localRelPath,
+          BOT_ACCESSORY_IMAGE_PURPOSE,
+          now
+        );
+        db.prepare(
+          "UPDATE bots SET accessory_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?"
+        ).run(imageId, now, botId, userId);
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      deleteBotAccessoryImageIfOwned(
+        db,
+        userId,
+        botId,
+        existing.accessory_image_id
+      );
+
+      const updatedBot = db
+        .prepare(
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        bot: updatedBot,
+        image: {
+          id: imageId,
+          url: displayUrl,
+          displayUrl,
+          hasLocalFile: true,
+          purpose: BOT_ACCESSORY_IMAGE_PURPOSE,
+          model: "upload",
+        },
+      });
+    }),
+    route("DELETE", "/api/bots/:id/accessory", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id;
+      const existing = db
+        .prepare(
+          "SELECT id, accessory_image_id FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId) as
+        | { id?: string; accessory_image_id?: string | null }
+        | undefined;
+      if (!existing?.id) {
+        throw new Error("Bot not found.");
+      }
+      const now = new Date().toISOString();
+      db.prepare(
+        "UPDATE bots SET accessory_image_id = NULL, updated_at = ? WHERE id = ? AND user_id = ?"
+      ).run(now, botId, userId);
+      deleteBotAccessoryImageIfOwned(db, userId, botId, existing.accessory_image_id);
+
+      const updatedBot = db
+        .prepare(
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+        )
+        .get(botId, userId);
+      json(ctx.res, 200, { ok: true, bot: updatedBot });
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7082,6 +7255,7 @@ function buildRoutes(): RouteDefinition[] {
           face_mouth_font: faceMouthFont,
           face_font_weight: faceFontWeight,
           profile_picture_image_id: null,
+          accessory_image_id: null,
           chat_enabled: chatEnabled,
         },
       });
@@ -7089,7 +7263,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -7291,7 +7465,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, { ok: true, bot: updatedBot });
@@ -7353,7 +7527,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode === "zen" || conversation.conversation_mode === "chat") {
+      if (conversation.conversation_mode === "zen") {
         throw new HttpError(400, "Zen conversations cannot be exported from the chat surface.");
       }
       const messages = db.prepare(
@@ -7532,9 +7706,11 @@ function buildRoutes(): RouteDefinition[] {
       if (!parent) {
         throw new Error("Parent conversation not found.");
       }
-      if (parent.conversation_mode === "zen" || parent.conversation_mode === "chat") {
-        throw new HttpError(400, "Zen conversations cannot be forked.");
-      }
+      const parentHubMetadata = getConversationHubMetadata(db, userId, parentId);
+      const forkBotId =
+        parent.conversation_mode === "zen"
+          ? parentHubMetadata?.hubBotId ?? null
+          : parent.bot_id ?? null;
       const forkId = randomId(12);
       const now = new Date().toISOString();
       let messageQuery =
@@ -7559,9 +7735,15 @@ function buildRoutes(): RouteDefinition[] {
       } else {
         messages = db.prepare(messageQuery).all(parentId, userId) as any;
       }
-      const forkMode = parent.conversation_mode === "chat" ? "chat" : "sandbox";
-      const forkWallpaperEnabled =
-        forkMode === "chat" && parent.zen_wallpaper_enabled === 1 ? 1 : 0;
+      const forkMode =
+        parent.conversation_mode === "zen"
+          ? forkBotId
+            ? "chat"
+            : "zen"
+          : parent.conversation_mode === "chat"
+            ? "chat"
+            : "sandbox";
+      const forkWallpaperEnabled: number = 0;
       const forkWallpaperHistory =
         forkWallpaperEnabled === 1
           ? pruneZenWallpaperHistoryForMessageCount(
@@ -7603,7 +7785,7 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         `Fork of ${parent.title}`,
         forkMode,
-        parent.bot_id,
+        forkBotId,
         parentId,
         forkMessageId,
         parent.incognito,

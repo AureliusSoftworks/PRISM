@@ -81,7 +81,7 @@ export interface BotMarketplaceManifest {
 
 export interface BotMarketplacePreparedBundle {
   entry: BotMarketplaceEntry;
-  raw: string;
+  bytes: Uint8Array;
 }
 
 const MARKETPLACE_SCHEMA = "prism-bot-marketplace-v1";
@@ -377,9 +377,9 @@ export function marketplaceLensInstallState(
 
 export function validateMarketplaceSelectionBundles(
   entries: readonly BotMarketplaceEntry[],
-  bundleRawByPath: ReadonlyMap<string, string>
+  bundleBytesByPath: ReadonlyMap<string, Uint8Array>
 ): BotMarketplacePreparedBundle[] {
-  const missing = entries.filter((entry) => !bundleRawByPath.has(entry.bundlePath));
+  const missing = entries.filter((entry) => !bundleBytesByPath.has(entry.bundlePath));
   if (missing.length > 0) {
     throw new Error(
       `Marketplace bundle missing for ${missing.map((entry) => entry.name).join(", ")}.`
@@ -387,6 +387,6 @@ export function validateMarketplaceSelectionBundles(
   }
   return entries.map((entry) => ({
     entry,
-    raw: bundleRawByPath.get(entry.bundlePath) ?? "",
+    bytes: bundleBytesByPath.get(entry.bundlePath) ?? new Uint8Array(),
   }));
 }

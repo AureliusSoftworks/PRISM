@@ -2,6 +2,21 @@ function excludedIdSet(excludedBotIds: ReadonlySet<string> | readonly string[]):
   return excludedBotIds instanceof Set ? new Set(excludedBotIds) : new Set(excludedBotIds);
 }
 
+export function sanitizeCoffeeSeatBotIdsForAvailableBots(
+  seatBotIds: readonly (string | null | undefined)[],
+  availableBotIds: Iterable<string>
+): Array<string | null> {
+  const available = new Set(availableBotIds);
+  const seen = new Set<string>();
+  return seatBotIds.map((seatBotId) => {
+    if (typeof seatBotId !== "string") return null;
+    const botId = seatBotId.trim();
+    if (!botId || !available.has(botId) || seen.has(botId)) return null;
+    seen.add(botId);
+    return botId;
+  });
+}
+
 export function coffeeGroupAttendingBotIds(
   groupBotIds: readonly string[],
   excludedBotIds: ReadonlySet<string> | readonly string[]

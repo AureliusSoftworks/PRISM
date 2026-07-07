@@ -130,6 +130,7 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
+      assert.ok(columns.some((column) => column.name === "accessory_image_id"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
         .all() as Array<{ name: string }>;
@@ -154,12 +155,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ?, accessory_image_id = ? WHERE id = ?"
         )
-        .run("warm", "formal", 725, "img-profile", "bot-1");
+        .run("warm", "formal", 725, "img-profile", "img-accessory", "bot-1");
       const avatarRow = reopened
         .prepare(
-          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as
         | {
@@ -167,12 +168,14 @@ describe("createDatabase bot export hash migration", () => {
             face_mouth_font: string | null;
             face_font_weight: number | null;
             profile_picture_image_id: string | null;
+            accessory_image_id: string | null;
           }
         | undefined;
       assert.equal(avatarRow?.face_eyes_font, "warm");
       assert.equal(avatarRow?.face_mouth_font, "formal");
       assert.equal(avatarRow?.face_font_weight, 725);
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
+      assert.equal(avatarRow?.accessory_image_id, "img-accessory");
       const settingsRow = reopened
         .prepare(
           "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px FROM users WHERE id = ?"

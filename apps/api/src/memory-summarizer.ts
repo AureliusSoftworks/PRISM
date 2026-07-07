@@ -77,8 +77,8 @@ function threadSummaryKey(userId: string, conversationId: string, mode: ChatMode
   return `${userId}:${conversationId}:${mode}`;
 }
 
-function normalizeThreadSummaryMode(mode: ChatMode | undefined): "zen" | "sandbox" {
-  return mode === "zen" || mode === "chat" ? "zen" : "sandbox";
+function normalizeThreadSummaryMode(mode: ChatMode | undefined): "zen" | "chat" | "sandbox" {
+  return mode === "zen" ? "zen" : mode === "chat" ? "chat" : "sandbox";
 }
 
 function normalizeDisplaySummary(raw: string, fallback: string): string {

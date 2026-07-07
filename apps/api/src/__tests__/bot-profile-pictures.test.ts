@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
 import {
+  BOT_ACCESSORY_IMAGE_PURPOSE,
+} from "../bot-accessories.ts";
+import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   GALLERY_EXCLUDED_PURPOSE_SQL,
   botProfilePictureImageBelongsToBot,
@@ -175,6 +178,7 @@ describe("bot profile picture gallery filtering", () => {
   it("excludes profile pictures and wallpapers from normal image gallery queries", () => {
     const db = createAvatarDb();
     seedImage(db, "avatar", "user-1", "bot-1", BOT_PROFILE_PICTURE_IMAGE_PURPOSE);
+    seedImage(db, "accessory", "user-1", "bot-1", BOT_ACCESSORY_IMAGE_PURPOSE);
     seedImage(db, "gallery", "user-1", null, "gallery");
     seedImage(db, "legacy", "user-1", null, null);
     seedImage(db, "wallpaper", "user-1", null, "wallpaper");
@@ -193,7 +197,7 @@ describe("bot profile picture gallery filtering", () => {
       .all() as Array<{ id: string }>;
     assert.deepEqual(
       remaining.map((row) => row.id),
-      ["avatar", "wallpaper"]
+      ["accessory", "avatar", "wallpaper"]
     );
   });
 });

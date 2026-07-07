@@ -1607,7 +1607,8 @@
   margin-top: 2px;
 }
 
-.conversationHeaderRow {
+.conversationHeaderRow,
+.coffeeSidebarHeader {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -1616,74 +1617,16 @@
   margin: 2px 0 0;
 }
 
-.conversationHeaderRow .sectionLabel {
+.conversationHeaderRow .sectionLabel,
+.coffeeSidebarHeader .sectionLabel {
   margin-top: 0;
 }
 
-.conversationHeaderActions {
+.conversationHeaderActions,
+.coffeeSidebarHeaderActions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.conversationSpotlightButton {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid color-mix(in srgb, #62d68a 44%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-elevated) 84%, #52c679 16%),
-      color-mix(in srgb, var(--bg) 88%, #43b667 12%)
-    );
-  color: color-mix(in srgb, #8af5ad 72%, var(--fg) 28%);
-  min-width: 34px;
-  height: 24px;
-  padding: 0 8px;
-  display: inline-grid;
-  place-items: center;
-  cursor: pointer;
-  border-radius: 9px;
-  font: inherit;
-  line-height: 0;
-  opacity: 0.94;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
-    0 1px 4px color-mix(in srgb, #49bf70 18%, transparent);
-  transition:
-    background 130ms ease-out,
-    color 130ms ease-out,
-    border-color 130ms ease-out,
-    box-shadow 130ms ease-out,
-    opacity 130ms ease-out,
-    transform 80ms ease-out;
-}
-
-.conversationSpotlightButtonGlyph :where(svg) {
-  width: 14px;
-  height: 14px;
-  stroke-width: 2.15;
-}
-
-.conversationSpotlightButton:hover,
-.conversationSpotlightButton:focus-visible {
-  color: color-mix(in srgb, #b5ffcc 92%, var(--fg) 8%);
-  border-color: color-mix(in srgb, #66db92 60%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-elevated) 78%, #55cb7d 22%),
-      color-mix(in srgb, var(--bg) 82%, #49bf70 18%)
-    );
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent),
-    0 0 0 1px color-mix(in srgb, #66db92 28%, transparent),
-    0 4px 12px color-mix(in srgb, #49bf70 22%, transparent);
-  outline: none;
-}
-
-.conversationSpotlightButton:active {
-  transform: translateY(1px);
 }
 
 .conversationDeleteAllButton {
@@ -1864,6 +1807,12 @@
   opacity: 0;
   transition: opacity 280ms ease;
   pointer-events: none;
+}
+
+.viewSwitchOverlay[data-scope="workspace"] {
+  position: absolute;
+  z-index: 24;
+  border-radius: 0;
 }
 
 .viewSwitchOverlay[data-phase="entering"] {
@@ -4629,6 +4578,160 @@
   flex: 0 1 auto;
 }
 
+.appSwitcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  z-index: 120;
+}
+
+.appSwitcherButton {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  min-width: 104px;
+  height: 32px;
+  display: inline-grid;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  color: var(--fg);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--bg-deep) 18%, transparent);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 100ms ease;
+}
+
+.appSwitcherButton:hover,
+.appSwitcherButton:focus-visible,
+.appSwitcher[data-open="true"] .appSwitcherButton {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--bg-hover) 82%, var(--bg-elevated) 18%);
+}
+
+.appSwitcherButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.appSwitcherButton:active {
+  transform: translateY(1px);
+}
+
+.appSwitcherGlyph,
+.appSwitcherMenuGlyph {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.appSwitcherGlyph svg,
+.appSwitcherMenuGlyph svg {
+  width: 22px;
+  height: 22px;
+}
+
+.appSwitcherName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.appSwitcherChevron {
+  opacity: 0.72;
+  transition: transform 140ms ease;
+}
+
+.appSwitcher[data-open="true"] .appSwitcherChevron {
+  transform: rotate(180deg);
+}
+
+.appSwitcherMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 190px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm), 0 16px 42px color-mix(in srgb, var(--bg-deep) 34%, transparent);
+  z-index: 870;
+}
+
+.appSwitcherMenuItem {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.appSwitcherMenuItem:hover:not(:disabled),
+.appSwitcherMenuItem:focus-visible:not(:disabled) {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.appSwitcherMenuItem:disabled {
+  cursor: default;
+}
+
+.appSwitcherMenuItem[data-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.appSwitcherMenuCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.appSwitcherMenuCopy > span,
+.appSwitcherMenuCopy > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appSwitcherMenuCopy > span {
+  font-size: 0.84rem;
+  font-weight: 760;
+}
+
+.appSwitcherMenuCopy > small {
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  font-weight: 680;
+}
+
 .hubHomeWordmark {
   height: 20px;
   width: auto;
@@ -4872,6 +4975,20 @@
   grid-template-columns: 1fr;
 }
 
+.appLayout[data-chat-sidebar-hidden="true"] > .sidebar {
+  display: none;
+}
+
+.appLayout[data-zen-surface="true"] {
+  --sidebar-drawer-width: clamp(290px, 28vw, 420px);
+  grid-template-columns: 1fr;
+}
+
+.appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"]) {
+  --sidebar-open-width: clamp(280px, 25vw, 360px);
+  grid-template-columns: var(--sidebar-open-width) minmax(0, 1fr);
+}
+
 /* Chat mode typography pass:
    - swap title treatment to a literary serif
    - keep controls/system chrome untouched
@@ -4991,7 +5108,8 @@
 }
 
 /* ── Sidebar ── */
-.sidebar {
+.sidebar,
+.coffeeSidebar {
   border-right: 1px solid var(--line);
   padding: 16px 12px;
   display: flex;
@@ -5000,6 +5118,85 @@
   min-height: 0;
   overflow: hidden;
   background: var(--bg-surface);
+}
+
+.appLayout[data-zen-surface="true"] > .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(var(--sidebar-drawer-width, 360px), calc(100vw - 36px));
+  z-index: 200;
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition:
+    transform 0.25s ease,
+    visibility 0s linear 0.25s;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"]) > .sidebar {
+  position: relative;
+  top: auto;
+  left: auto;
+  bottom: auto;
+  width: auto;
+  z-index: 1;
+  visibility: visible;
+  transform: none;
+  transition: none;
+  box-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"] > .sidebar.sidebarOpen {
+  visibility: visible;
+  transform: translateX(0);
+  transition-delay: 0s;
+}
+
+.appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"])
+  > .sidebar.sidebarOpen {
+  transform: none;
+}
+
+@media (max-width: 720px) {
+  .appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"]) {
+    grid-template-columns: 1fr;
+  }
+
+  .appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"]) > .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(var(--sidebar-drawer-width, 320px), calc(100vw - 36px));
+    z-index: 200;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"])
+    > .sidebarHandleOpen {
+    left: min(var(--sidebar-drawer-width, 320px), calc(100vw - 30px));
+  }
+}
+
+.appLayout[data-zen-surface="true"] > .overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(2px);
+  z-index: 199;
+  animation: overlayIn 0.2s ease-out;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .profile {
@@ -5452,7 +5649,8 @@
   letter-spacing: 0.01em;
 }
 
-.conversationList {
+.conversationList,
+.coffeeSessionList {
   list-style: none;
   overflow-y: auto;
   flex: 1;
@@ -5485,11 +5683,13 @@
   text-align: center;
 }
 
-.conversationList::-webkit-scrollbar {
+.conversationList::-webkit-scrollbar,
+.coffeeSessionList::-webkit-scrollbar {
   width: 6px;
 }
 
-.conversationList::-webkit-scrollbar-thumb {
+.conversationList::-webkit-scrollbar-thumb,
+.coffeeSessionList::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 3px;
 }
@@ -8448,19 +8648,38 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   background: var(--bg-surface);
+  min-width: 0;
 }
 
 .chatHeaderComposeToolsRow {
-  flex: 1 1 100%;
+  flex: 1 1 auto;
   min-width: 0;
-  margin-top: 4px;
+  margin-top: 0;
+  margin-left: auto;
 }
 
 .chatHeaderComposeToolsRow .composeTools {
+  width: auto;
   margin: 0;
   max-width: 100%;
+  justify-content: flex-end;
+  gap: 8px;
+  overflow: visible;
+}
+
+.chatHeaderComposeToolsRow .composeTools > .composeBotControl,
+.chatHeaderComposeToolsRow .composeTools > .composeModelControl {
+  min-width: 0;
+}
+
+.chatHeaderComposeToolsRow .composeTools > .composeBotControl {
+  flex: 0 1 clamp(118px, 13vw, 188px);
+}
+
+.chatHeaderComposeToolsRow .composeTools > .composeModelControl {
+  flex: 0 1 clamp(126px, 13vw, 190px);
 }
 
 .chatHeader h2 {
@@ -9470,10 +9689,10 @@
   position: absolute;
   /* Image models sometimes bake letterbox/pillarbox gutters into odd aspect
      outputs. The extra bleed crops those edges while keeping the center calm. */
-  inset: -6%;
+  inset: -8%;
   z-index: 0;
-  width: 112%;
-  height: 112%;
+  width: 116%;
+  height: 116%;
   object-fit: cover;
   opacity: calc(var(--zen-atmosphere-opacity, 0.28) * var(--zen-atmosphere-layer-opacity, 1));
   filter:
@@ -9481,7 +9700,7 @@
     contrast(0.92)
     brightness(0.78)
     grayscale(var(--zen-atmosphere-grayscale-amount));
-  transform: scale(1.02);
+  transform: translate3d(0, var(--zen-atmosphere-parallax-y, 0px), 0) scale(1.02);
   transition:
     opacity 180ms linear,
     filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
@@ -9490,6 +9709,7 @@
 
 .zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
   transform:
+    translate3d(0, var(--zen-atmosphere-parallax-y, 0px), 0)
     scale(1.02)
     scaleX(var(--zen-fallback-wallpaper-scale-x, 1))
     scaleY(var(--zen-fallback-wallpaper-scale-y, 1));
@@ -9823,6 +10043,14 @@
 @media (prefers-reduced-motion: reduce) {
   .zenAtmosphereBackdrop img {
     transition: none;
+    transform: scale(1.02);
+  }
+
+  .zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
+    transform:
+      scale(1.02)
+      scaleX(var(--zen-fallback-wallpaper-scale-x, 1))
+      scaleY(var(--zen-fallback-wallpaper-scale-y, 1));
   }
 
   .zenAtmosphereReadabilityOverlay {
@@ -10161,7 +10389,7 @@
 .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
   /* Keep enough tail room for the latest reply to sit in the clear reading
      band, even after typing visuals have just finished. */
-  padding-bottom: max(70dvh, calc(env(safe-area-inset-bottom) + 112px));
+  padding-bottom: max(240px, 28dvh, calc(env(safe-area-inset-bottom) + 112px));
 }
 
 .messages[data-chat-ephemeral="true"][data-replying-live="true"] {
@@ -10213,7 +10441,7 @@
 
 .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"]
   .chatEphemeralLiveEndSpacer {
-  height: max(42dvh, 280px);
+  height: clamp(156px, 22dvh, 300px);
 }
 
 .messagesFrame[data-chat-focus="true"] .messages[data-chat-ephemeral="true"] {
@@ -10414,10 +10642,137 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow: visible;
 }
 
+.emptyStateHubPicker {
+  padding-bottom: max(128px, calc(env(safe-area-inset-bottom) + 116px));
+}
+
+.emptyStateHubPicker .chatCanvasPickerControls {
+  margin-top: clamp(12px, 2.4vh, 26px);
+  order: 2;
+}
+
+.emptyStateHubPicker .chatBotPickerFrame {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  order: 3;
+  flex: 0 0 auto;
+  margin: clamp(14px, 2.8vh, 30px) auto 0;
+  transform: translate3d(
+    var(--picker-parallax-x, 0px),
+    var(--picker-parallax-y, 0px),
+    0
+  );
+}
+
+.emptyStateHubPicker .chatBotPickerFrame[data-returning-all="true"],
+.emptyStateHubPicker .chatBotPickerFrame[data-returning-all="true"] .chatBotPicker {
+  animation: none;
+}
+
 .emptyStateSearching {
   /* Search is an overlay, so opening it must not reflow the hero or picker. */
   --empty-state-search-active: 1;
   --empty-state-search-top: 168px;
+}
+
+.canvasBotBrowserRail {
+  position: relative;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, var(--fg-muted));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--fg-muted) 78%, var(--accent));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 76%, transparent),
+      color-mix(in srgb, var(--bg-deep) 78%, transparent)
+    );
+  box-shadow:
+    0 18px 42px color-mix(in srgb, #000 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+  backdrop-filter: blur(18px) saturate(1.18);
+}
+
+.chatCanvasPickerControls {
+  align-self: center;
+  width: min(var(--empty-state-browser-width, var(--picker-width, 820px)), calc(100% - 48px));
+  margin: clamp(2px, 1.8vh, 18px) auto 0;
+}
+
+.canvasBotBrowserRail .coffeeSearchBar {
+  flex: 1 1 auto;
+  grid-column: auto;
+  min-width: min(220px, 38vw);
+  min-height: 44px;
+  padding-inline: 13px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvasBotBrowserSearch {
+  min-width: 0;
+}
+
+.canvasBotBrowserRail .coffeeSearchBar input {
+  color: var(--fg);
+}
+
+.canvasBotBrowserRail .coffeeSearchBar input::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 74%, transparent);
+}
+
+.canvasBotBrowserRail .composeBotControl,
+.canvasBotBrowserRail .botLibraryGroupControl {
+  flex: 0 0 auto;
+  height: 44px;
+  border-color: color-mix(in srgb, var(--line) 58%, var(--fg-muted));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 54%, transparent),
+      color-mix(in srgb, var(--bg-deep) 62%, transparent)
+    ),
+    var(--bot-library-group-gradient, linear-gradient(transparent, transparent));
+  backdrop-filter: blur(18px) saturate(1.18);
+}
+
+.canvasBotBrowserRail .composeBotControl {
+  min-width: 44px;
+  max-width: min(16rem, 28vw);
+}
+
+.canvasBotBrowserRail .composeBotControl[data-disabled="true"] {
+  border-color: color-mix(in srgb, var(--line) 58%, var(--fg-muted));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 46%, transparent),
+      color-mix(in srgb, var(--bg-deep) 58%, transparent)
+    );
+  box-shadow: none;
+}
+
+.canvasBotBrowserRail .botLibraryGroupControl {
+  max-width: min(18rem, 34vw);
+}
+
+.canvasBotBrowserRail .composeBotTrigger,
+.canvasBotBrowserRail .botLibraryGroupTrigger {
+  padding-inline: 12px;
+}
+
+.canvasBotBrowserRail .botLibraryGroupTriggerName {
+  max-width: 12ch;
 }
 
 .emptyStateGroupDashboard {
@@ -11348,7 +11703,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .emptyStateInfoBand {
-  width: min(720px, calc(100% - 40px));
+  width: min(var(--empty-state-browser-width, 720px), calc(100% - 48px));
   /* Grid item default `min-width: auto` uses content min-size; long unbroken
      copy + a nowrap chip rail can otherwise force the band wider than its
      `width` cap and paint past the rounded card. */
@@ -11493,7 +11848,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .emptyStateInfoBand {
-    width: min(1060px, calc(100% - 72px));
+    width: min(var(--empty-state-browser-width, 1060px), calc(100% - 48px));
     gap: 14px;
     padding: 12px 18px 14px;
     border-radius: 18px;
@@ -12010,6 +12365,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @media (max-width: 720px) {
   .chatBotPickerFrame {
     bottom: 18px;
+  }
+
+  .canvasBotBrowserRail {
+    grid-template-columns: minmax(0, 1fr) auto;
+    border-radius: 18px;
+  }
+
+  .canvasBotBrowserRail .coffeeSearchBar {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .canvasBotBrowserRail .composeBotControl,
+  .canvasBotBrowserRail .botLibraryGroupControl {
+    width: auto;
+    min-width: 44px;
+    max-width: none;
   }
 
   /* N=1 reads cramped against the composer — lift farther than denser grids. */
@@ -13316,6 +13688,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: chatMessageDissolve 2.2s ease-in both;
 }
 
+.appLayout[data-private-active="true"] .messages[data-chat-ephemeral="true"] .message {
+  opacity: 0.68;
+  filter: saturate(0.72) brightness(1.08);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+.appLayout[data-private-active="true"] .messages[data-chat-ephemeral="true"] .messageUser {
+  opacity: 0.78;
+}
+
+.appLayout[data-private-poof="true"] .messages[data-chat-ephemeral="true"] .message {
+  animation: privateMessagePoof 0.36s cubic-bezier(0.24, 0.72, 0.2, 1) both;
+}
+
 .messages[data-chat-ephemeral="true"]
   .message.messageChatInterruptedSettle
   .chatEphemeralMarkdownBody {
@@ -13746,6 +14132,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes privateMessagePoof {
+  0% {
+    opacity: 0.74;
+    filter: blur(0) saturate(0.72) brightness(1.08);
+    transform: translateY(0) scale(1);
+  }
+  65% {
+    opacity: 0.34;
+    filter: blur(1.4px) saturate(0.55) brightness(1.18);
+    transform: translateY(-3px) scale(0.992);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(4px) saturate(0.3) brightness(1.25);
+    transform: translateY(-8px) scale(0.982);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .messages[data-chat-ephemeral="true"] .message.messageChatManifesting,
   .messages[data-chat-ephemeral="true"] .message.messageChatDissolving,
@@ -13778,6 +14182,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .message.messageChatInterruptedSettle
     .chatEphemeralMarkdownBody {
     animation: none;
+  }
+
+  .appLayout[data-private-poof="true"] .messages[data-chat-ephemeral="true"] .message {
+    animation: privateMessagePoofReduced 0.16s linear both;
   }
 
   .chatEphemeralTypedWordRainbow {
@@ -13831,6 +14239,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   @keyframes chatEphemeralLetterIn {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+}
+
+@keyframes privateMessagePoofReduced {
+  from {
+    opacity: 0.68;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -14860,17 +15277,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .messageMoodBadge[data-face="coffee"] {
   --coffee-bot-color: var(--accent);
+  --bot-face-frame-color: var(--coffee-bot-color);
+  --bot-face-frame-inset: -2px;
+  --bot-face-frame-opacity: 0.96;
   --coffee-plate-emoji-face-scale-y: 1;
-  --coffee-plate-emoji-nudge-y: 0px;
+  --coffee-plate-emoji-nudge-y: -5px;
   position: relative;
-  overflow: hidden;
+  isolation: isolate;
+  overflow: visible;
   color: var(--coffee-bot-color);
-  background:
-    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.1), transparent 48%),
-    #080808;
-  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 62%, rgba(255, 255, 255, 0.2));
+  background: transparent;
+  border: 0;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.45) inset,
     0 0 12px color-mix(in srgb, var(--coffee-bot-color) 26%, transparent);
 }
 
@@ -14883,7 +15301,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
-  color: color-mix(in srgb, var(--coffee-bot-color) 78%, #ffffff);
+  color: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff);
+  text-shadow:
+    0 0 4px color-mix(in srgb, currentColor 72%, transparent),
+    0 0 10px color-mix(in srgb, currentColor 46%, transparent);
   transform-origin: center center;
 }
 
@@ -18623,7 +19044,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
-.appLayout[data-zen-surface="true"] .messages.messagesEmptyState[data-chat-ephemeral="true"] {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages.messagesEmptyState[data-chat-ephemeral="true"] {
   --zen-empty-state-top-reserve: clamp(76px, 9dvh, 112px);
   --zen-empty-state-bottom-reserve: clamp(116px, 15dvh, 172px);
   box-sizing: border-box;
@@ -18648,7 +19070,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-tone-scroll-margin-extra: 0px;
   --zen-persona-ink-overlap: clamp(112px, calc(12dvh + var(--zen-tone-gap-extra)), 228px);
   --zen-prose-runway-top: clamp(240px, calc(38dvh + var(--zen-tone-runway-extra)), 672px);
-  --zen-prose-runway-bottom: clamp(300px, calc(54dvh + var(--zen-tone-runway-extra)), 632px);
+  --zen-prose-runway-bottom: clamp(260px, calc(34dvh + var(--zen-tone-runway-extra)), 420px);
+  --zen-readable-tail-padding: var(--zen-prose-runway-bottom);
   --zen-text-top-fade-start: clamp(28px, 5dvh, 68px);
   --zen-text-top-fade-mid: clamp(108px, 16dvh, 192px);
   --zen-text-top-fade-end: clamp(188px, 26dvh, 320px);
@@ -18662,9 +19085,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
   z-index: 5;
   padding-top: max(76px, var(--zen-prose-runway-top));
-  padding-bottom: max(104px, var(--zen-prose-runway-bottom));
+  padding-bottom: max(0px, var(--zen-readable-tail-padding));
   scroll-padding-top: var(--zen-prose-runway-top);
-  scroll-padding-bottom: var(--zen-prose-runway-bottom);
+  scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
   gap: clamp(34px, calc(7dvh + var(--zen-tone-gap-extra)), 156px);
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -18796,7 +19219,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-shadow: var(--zen-user-prose-shadow);
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState > .emptyState {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  > .emptyState {
   flex: 0 1 auto;
   min-height: auto;
   justify-content: center;
@@ -18806,18 +19231,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     clamp(54px, 10vh, 104px);
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateIconButton {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateIconButton {
   transform: translateY(0);
   filter:
     drop-shadow(0 0 28px color-mix(in srgb, var(--accent) 34%, transparent))
     drop-shadow(0 18px 42px rgba(0, 0, 0, 0.34));
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateIconButton:has(.emptyStatePrivateBotGlyph) {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateIconButton:has(.emptyStatePrivateBotGlyph) {
   filter: none;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleBlock {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitleBlock {
   width: min(680px, calc(100vw - 36px));
   justify-items: center;
   gap: clamp(10px, 1.7vh, 16px);
@@ -18846,7 +19277,42 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(18px) saturate(1.05);
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitle {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateHubPicker
+  .emptyStateTitleBlock {
+  margin-top: 0;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateHubPicker
+  .emptyStateInfoBand
+  .emptyStateTitleBlock {
+  width: auto;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  justify-items: start;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateHubPicker
+  .emptyStateInfoBand
+  .emptyStateTitle {
+  font-size: clamp(2.2rem, 4.6vw, 4.8rem);
+  line-height: 0.98;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitle {
   margin-top: 0;
   font-size: clamp(2rem, 5.4vw, 4.8rem);
   font-weight: 260;
@@ -18859,7 +19325,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 1px 1px rgba(0, 0, 0, 0.26);
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .messagesEmptyState
   .emptyStateTitle[data-zen-title-with-hero="true"] {
   position: relative;
@@ -18873,7 +19339,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: normal;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitlePhrase {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitlePhrase {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -18881,12 +19349,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleLead {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitleLead {
   display: inline;
   white-space: nowrap;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateTitleSubject {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitleSubject {
   display: block;
   max-width: min(100%, 9.2em);
   overflow: hidden;
@@ -18895,7 +19367,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .zenInlineHeroGlyph {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .zenInlineHeroGlyph {
   position: relative;
   inset-block-start: auto;
   left: auto;
@@ -18906,7 +19380,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 1;
 }
 
-.appLayout[data-zen-surface="true"] .messagesEmptyState .emptyStateHint {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateHint {
   max-width: 54ch;
   font-family: var(--font-chat-reading, var(--font-chat-serif), Georgia, "Times New Roman", serif);
   font-size: clamp(0.98rem, 1.4vw, 1.18rem);
@@ -18915,7 +19391,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 74%, var(--fg-muted));
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .zenSplashModelPicker {
   width: min(440px, 100%);
   margin-top: clamp(2px, 1.4vh, 10px);
   padding-top: clamp(12px, 2.4vh, 18px);
@@ -18925,51 +19401,77 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: auto;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModelPicker {
   max-width: none;
   justify-content: center;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .modeControl.chatHeaderModeToggle {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .modeControl.chatHeaderModeToggle {
   height: 32px;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeToggleTrack {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModeToggle
+  .modeToggleTrack {
   width: 88px;
   height: 32px;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumb {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModeToggle
+  .modeThumb {
   width: 68px;
   min-width: 68px;
   height: 32px;
   font-size: 11px;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModeToggle .modeThumbOnline {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModeToggle
+  .modeThumbOnline {
   transform: translate3d(20px, 0, 0);
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .zenPrivateModeToggle {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .zenPrivateModeToggle {
   width: 32px;
   height: 32px;
   flex-basis: 32px;
   border-radius: 999px;
 }
 
-.appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
-.appLayout.themeDark[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="online"] {
+.appLayout.themeDark[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .modeToggleTrack[data-response-mode="local"],
+.appLayout.themeDark[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .modeToggleTrack[data-response-mode="online"] {
   --mode-toggle-track: color-mix(in srgb, var(--accent) 44%, var(--bg-deep) 56%);
 }
 
-.appLayout.themeLight[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="local"],
-.appLayout.themeLight[data-zen-surface="true"] .zenSplashModelPicker .modeToggleTrack[data-response-mode="online"] {
+.appLayout.themeLight[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .modeToggleTrack[data-response-mode="local"],
+.appLayout.themeLight[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .modeToggleTrack[data-response-mode="online"] {
   --mode-toggle-track: color-mix(in srgb, var(--accent) 34%, var(--bg-surface) 66%);
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelControl {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModelPicker
+  .composeModelControl {
   height: 32px;
   max-width: min(15rem, 56vw);
   border-radius: 999px;
@@ -18985,14 +19487,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 10px 28px rgba(0, 0, 0, 0.12);
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelTrigger {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModelPicker
+  .composeModelTrigger {
   min-width: 154px;
   padding-inline: 13px;
   gap: 8px;
   justify-content: center;
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeControlLabel {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModelPicker
+  .composeControlLabel {
   display: inline;
   font-size: 10px;
   font-weight: 620;
@@ -19000,7 +19508,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg-subtle) 82%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .zenSplashModelPicker .chatHeaderModelPicker .composeModelTriggerName {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashModelPicker
+  .chatHeaderModelPicker
+  .composeModelTriggerName {
   max-width: min(16ch, 38vw);
   font-size: 12px;
 }
@@ -19069,13 +19580,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 8px;
 }
 
-.appLayout[data-zen-surface="true"] .compose {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .compose {
   --compose-send-ink: var(--compose-user-send-color);
   --compose-send-ink-muted: var(--compose-user-placeholder-color);
   --compose-send-glow: color-mix(in srgb, var(--compose-send-ink) 28%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .markdownComposerSurface {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .markdownComposerSurface {
   border-color: color-mix(in srgb, var(--compose-send-ink) 34%, var(--line));
   background:
     radial-gradient(
@@ -19099,7 +19610,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     box-shadow 0.34s ease;
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .compose[data-compose-send-tint="true"]
   .markdownComposerSurface {
   border-color: color-mix(in srgb, var(--compose-send-ink) 62%, var(--line));
@@ -19109,7 +19620,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .markdownComposerSurface:focus-within {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerSurface:focus-within {
   border-color: color-mix(in srgb, var(--compose-send-ink) 72%, var(--line));
   box-shadow:
     0 0 0 3px var(--compose-send-glow),
@@ -19117,21 +19629,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 14%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .markdownRichEditorHost :global(.tiptap),
-.appLayout[data-zen-surface="true"] .markdownComposerInputRow textarea {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownRichEditorHost
+  :global(.tiptap),
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerInputRow
+  textarea {
   color: var(--compose-send-ink);
   transition: color 0.34s ease;
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .markdownRichEditorHost
   :global(.tiptap p.is-editor-empty.is-empty::before),
-.appLayout[data-zen-surface="true"] .markdownComposerInputRow textarea::placeholder {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerInputRow
+  textarea::placeholder {
   color: var(--compose-send-ink-muted);
   transition: color 0.34s ease;
 }
 
-.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerInputRow
+  > button {
   border-color: color-mix(in srgb, var(--compose-send-ink) 44%, var(--line));
   background:
     linear-gradient(
@@ -19151,7 +19671,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transform 0.18s ease;
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .compose[data-compose-ready="true"]
   .markdownComposerInputRow
   > button:not(:disabled) {
@@ -19169,7 +19689,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button:hover:not(:disabled) {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerInputRow
+  > button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--compose-send-ink) 84%, var(--line));
   background:
     linear-gradient(
@@ -19179,7 +19701,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
 }
 
-.appLayout[data-zen-surface="true"] .markdownComposerInputRow > button:disabled {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .markdownComposerInputRow
+  > button:disabled {
   border-color: color-mix(in srgb, var(--compose-send-ink) 18%, var(--line));
   background: color-mix(in srgb, var(--bg-deep) 86%, var(--compose-send-ink) 14%);
   color: color-mix(in srgb, var(--compose-send-ink-muted) 82%, var(--fg-muted));
@@ -19189,12 +19713,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    followed line can settle in the clear reading band instead of being pinned
    just above the pill. */
 .appLayout[data-chat-sidebar-hidden="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-  padding-bottom: max(70dvh, 156px);
+  padding-bottom: max(260px, 30dvh, calc(env(safe-area-inset-bottom, 0px) + 128px));
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-  padding-bottom: max(70dvh, var(--zen-prose-runway-bottom), 156px);
-  scroll-padding-bottom: max(70dvh, var(--zen-prose-runway-bottom));
+  padding-bottom: max(0px, var(--zen-readable-tail-padding));
+  scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
+}
+
+.appLayout[data-zen-surface="true"]
+  .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"]
+  .chatEphemeralLiveEndSpacer {
+  height: 1px;
 }
 
 .appLayout[data-private-active="true"] .compose {
@@ -19372,19 +19902,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-border: color-mix(in srgb, var(--coffee-bot-color) 70%, rgba(255, 255, 255, 0.22));
   --zen-presence-face-ring: rgba(255, 255, 255, 0.035);
   --zen-presence-face-shadow:
-    0 0 28px color-mix(in srgb, var(--coffee-bot-color) 32%, transparent),
-    0 18px 30px rgba(0, 0, 0, 0.52);
+    0 0 22px color-mix(in srgb, var(--coffee-bot-color) 46%, transparent),
+    0 0 54px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent);
   --zen-presence-face-ink: color-mix(in srgb, var(--coffee-bot-color) 78%, #ffffff);
-  --zen-presence-pill-bg: color-mix(in srgb, #060608 78%, var(--coffee-bot-color) 22%);
-  --zen-presence-pill-border: color-mix(in srgb, var(--coffee-bot-color) 48%, rgba(255, 255, 255, 0.14));
+  --zen-presence-pill-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #09090b 84%, var(--coffee-bot-color) 16%),
+      color-mix(in srgb, #030304 88%, var(--coffee-bot-color) 12%)
+    );
+  --zen-presence-pill-border: color-mix(in srgb, var(--coffee-bot-color) 58%, #1b1610 42%);
   --zen-presence-pill-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.5) inset,
-    0 0 26px color-mix(in srgb, var(--coffee-bot-color) 44%, transparent),
-    0 0 52px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent),
+    0 0 30px color-mix(in srgb, var(--coffee-bot-color) 58%, transparent),
+    0 0 68px color-mix(in srgb, var(--coffee-bot-color) 32%, transparent),
     0 14px 30px rgba(0, 0, 0, 0.5);
   --zen-presence-pill-ink: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
   position: relative;
-  width: clamp(156px, 14.8vw, 196px);
+  width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
   min-height: clamp(92px, 9.8vw, 128px);
   margin: 0 auto 0 0;
   display: inline-grid;
@@ -19398,7 +19933,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: none;
   isolation: isolate;
   overflow: visible;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
@@ -19408,28 +19947,98 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: var(--zen-live-bot-avatar-y, 20px);
   z-index: 4;
   margin: 0;
-  pointer-events: auto;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  will-change: left, top;
+  will-change: left, top, width;
 }
 
-.zenLiveBotPresencePlate[data-floating="true"] * {
+.zenLiveBotPresencePlate * {
   pointer-events: none;
 }
 
-.zenLiveBotPresencePlate[data-dragging="true"] {
+.zenLiveBotPresenceBody {
+  --zen-live-bot-body-frame-size: var(
+    --zen-live-bot-avatar-body-size,
+    var(--zen-live-bot-avatar-face-size, clamp(72px, 8.8vw, 108px))
+  );
+  position: relative;
+  z-index: 8;
+  width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
+  aspect-ratio: 1;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+  cursor: default;
+  touch-action: none;
+  transform:
+    translateX(calc(var(--zen-live-bot-body-x, 50%) - 50%))
+    translateY(calc(var(--zen-live-bot-body-y, 50%) - 50%));
+  will-change: transform;
+}
+
+.zenLiveBotPresenceBodyRaster {
+  --bot-body-raster-mask-image:
+    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
+    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
+  --bot-body-raster-mask-position: center, center;
+  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
+  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  -webkit-mask-image: var(--bot-body-raster-mask-image);
+  -webkit-mask-position: var(--bot-body-raster-mask-position);
+  -webkit-mask-size: var(--bot-body-raster-mask-size);
+  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
+  mask-image: var(--bot-body-raster-mask-image);
+  mask-position: var(--bot-body-raster-mask-position);
+  mask-size: var(--bot-body-raster-mask-size);
+  mask-repeat: var(--bot-body-raster-mask-repeat);
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceFaceRig {
+  position: absolute;
+  left: var(--zen-live-bot-face-x, 50%);
+  top: var(--zen-live-bot-face-y, 50%);
+  z-index: 5;
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
+  transform-origin: 50% 50%;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceHitTarget {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 7;
+  box-sizing: border-box;
+  width: var(--zen-live-bot-body-frame-size);
+  height: var(--zen-live-bot-body-frame-size);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: transparent;
+  clip-path: circle(50% at 50% 50%);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.zenLiveBotPresencePlate[data-dragging="true"] .zenLiveBotPresenceHitTarget {
   cursor: grabbing;
 }
 
-.zenLiveBotPresencePlate[data-flinging="true"] {
+.zenLiveBotPresencePlate[data-flinging="true"] .zenLiveBotPresenceHitTarget {
   cursor: grab;
 }
 
 .zenLiveBotPresencePlate[data-action-verbose="true"] {
-  width: clamp(188px, 20vw, 286px);
+  width: var(--zen-live-bot-avatar-size, clamp(188px, 20vw, 286px));
 }
 
 .zenLiveBotPresencePlate[data-interrupt="true"] {
@@ -19484,6 +20093,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace {
   animation: zenLiveBotPresenceTalk 260ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+}
+
+.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceBody {
+  filter: none;
 }
 
 .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
@@ -19561,25 +20174,84 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFace {
-  position: relative;
-  z-index: 1;
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 13px color-mix(in srgb, var(--coffee-bot-color) 44%, transparent))
+    drop-shadow(0 0 30px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent));
+  --bot-face-frame-color: var(--coffee-bot-color);
+  --bot-face-frame-inset: 0;
+  --bot-face-frame-opacity: 0.96;
+  --bot-face-metal-light-opacity: 0.68;
+  position: absolute;
+  isolation: isolate;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
   box-sizing: border-box;
-  width: clamp(72px, 8.8vw, 108px);
-  height: clamp(72px, 8.8vw, 108px);
+  width: var(--zen-live-bot-body-frame-size);
+  height: var(--zen-live-bot-body-frame-size);
+  transform: translate(-50%, -50%);
   flex: 0 0 auto;
   display: grid;
   align-items: start;
   justify-items: center;
   padding-top: clamp(11px, 6%, 18px);
   border-radius: 50%;
-  background: var(--zen-presence-face-bg);
-  border: 1px solid var(--zen-presence-face-border);
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--coffee-bot-color);
-  box-shadow:
-    0 0 0 9px var(--zen-presence-face-ring),
-    var(--zen-presence-face-shadow);
-  overflow: hidden;
+  box-shadow: none;
+  overflow: visible;
+  cursor: inherit;
+  pointer-events: none;
   transition: box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.zenLiveBotPresencePlate[data-dragging="true"] .zenLiveBotPresenceFace,
+.zenLiveBotPresencePlate[data-flinging="true"] .zenLiveBotPresenceFace {
+  --bot-face-metal-light-opacity: 0.68;
+}
+
+.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace {
+  --bot-face-metal-light-opacity: 0.54;
+}
+
+.zenLiveBotPresencePlate[data-theme="light"][data-dragging="true"]
+  .zenLiveBotPresenceFace,
+.zenLiveBotPresencePlate[data-theme="light"][data-flinging="true"]
+  .zenLiveBotPresenceFace {
+  --bot-face-metal-light-opacity: 0.54;
+}
+
+.zenLiveBotPresencePlate[data-dragging="true"] .botFaceFrameMetalLightRaster,
+.zenLiveBotPresencePlate[data-flinging="true"] .botFaceFrameMetalLightRaster {
+  animation: botFaceFrameMetalLightSweep 1.8s linear infinite;
+}
+
+.zenLiveBotPresenceQuestionMark {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  z-index: 8;
+  box-sizing: border-box;
+  width: clamp(28px, 3.1vw, 38px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -48%);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--zen-presence-pill-border);
+  border-radius: 999px;
+  background: var(--zen-presence-pill-bg);
+  color: var(--zen-presence-pill-ink);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.42) inset,
+    0 0 18px color-mix(in srgb, var(--coffee-bot-color) 36%, transparent),
+    0 10px 18px rgba(0, 0, 0, 0.34);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: clamp(1rem, 1.8vw, 1.36rem);
+  font-weight: 820;
+  line-height: 1;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-bot-color) 38%, transparent);
+  pointer-events: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] {
@@ -19589,10 +20261,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     linear-gradient(180deg, #111113 0%, #030304 100%);
   --zen-presence-face-border: color-mix(in srgb, #ffffff 28%, transparent);
   --zen-presence-face-ring: color-mix(in srgb, #ffffff 7%, transparent);
-  --zen-presence-face-shadow:
-    0 0 0 1px color-mix(in srgb, #ffffff 7%, transparent) inset,
-    0 0 24px color-mix(in srgb, #ffffff 10%, transparent),
-    0 18px 30px rgba(0, 0, 0, 0.52);
+  --zen-presence-face-shadow: none;
   --zen-presence-face-ink: #f7f7f2;
   --zen-presence-pill-bg: color-mix(in srgb, #060608 88%, #ffffff 12%);
   --zen-presence-pill-border: color-mix(in srgb, #ffffff 18%, transparent);
@@ -19621,11 +20290,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     linear-gradient(180deg, #ffffff 0%, #f3f7fb 58%, #e7edf4 100%);
   --zen-presence-face-border: color-mix(in srgb, #242a33 18%, #7bb7c5 16%);
   --zen-presence-face-ring: color-mix(in srgb, #ffffff 72%, #dce8f2 28%);
-  --zen-presence-face-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.88) inset,
-    0 -18px 28px rgba(36, 42, 51, 0.08) inset,
-    0 0 24px rgba(49, 215, 255, 0.11),
-    0 15px 28px rgba(43, 54, 68, 0.18);
+  --zen-presence-face-shadow: none;
   --zen-presence-face-ink: #1d2430;
   --zen-presence-pill-bg: linear-gradient(
     180deg,
@@ -19694,7 +20359,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--zen-presence-face-ink);
   position: relative;
   z-index: 1;
-  text-shadow: 0 0 0.16em color-mix(in srgb, var(--coffee-bot-color) 42%, transparent);
+  text-shadow:
+    0 0 0.18em color-mix(in srgb, currentColor 78%, transparent),
+    0 0 0.42em color-mix(in srgb, currentColor 52%, transparent),
+    0 0 0.76em color-mix(in srgb, var(--coffee-bot-color) 34%, transparent);
+  pointer-events: none;
+  transition: none;
+}
+
+.coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+  font-size: var(
+    --zen-live-bot-avatar-face-glyph-size,
+    clamp(1.74rem, 5.15vw, 2.58rem)
+  );
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] {
@@ -19703,10 +20380,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform-origin: center center;
 }
 
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
+  --eye-blink-scale-x: 1;
+  --eye-blink-scale-y: 1;
+  transform:
+    translate(
+      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
+      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
+    )
+    scaleX(var(--eye-blink-scale-x))
+    scaleY(var(--eye-blink-scale-y));
+  will-change: transform;
+}
+
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
   [data-coffee-plate-emoji-part="eyes"] {
   opacity: 0.82;
-  transform: scaleX(1.24) scaleY(0.42);
+  --eye-blink-scale-x: 1.24;
+  --eye-blink-scale-y: 0.42;
+}
+
+.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-blink-phase="half"]
+  [data-coffee-plate-emoji-part="eyes"] {
+  --eye-blink-scale-y: 0.42;
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
@@ -19715,6 +20411,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFaceGlyph {
   text-shadow: none;
+}
+
+.zenLiveBotPresenceThinkingGlyphAnchor {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
+  color: color-mix(in srgb, #55ffe0 88%, #ffffff 12%);
+  font-size: clamp(0.98rem, 2.4vw, 1.54rem);
+  text-shadow:
+    0 0 0.1em color-mix(in srgb, currentColor 84%, transparent),
+    0 0 0.34em color-mix(in srgb, #55ffe0 56%, transparent),
+    0 0 0.72em color-mix(in srgb, #55ffe0 32%, transparent);
+}
+
+.themeLight .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"],
+.zenLiveBotPresencePlate[data-theme="light"]
+  .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
+  color: #057c73;
+  text-shadow:
+    0 0 0.08em color-mix(in srgb, currentColor 34%, transparent),
+    0 0 0.28em color-mix(in srgb, #0aa996 22%, transparent);
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -19851,57 +20576,101 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceCopy {
   position: absolute;
-  left: calc(50% + var(--zen-live-bot-copy-offset-x, 0px));
-  top: 100%;
-  z-index: 6;
+  left: calc(
+    var(--zen-live-bot-body-x, 50%) +
+    var(--zen-live-bot-copy-center-anchor, 95px) +
+    var(--zen-live-bot-copy-offset-x, 0px)
+  );
+  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-vertical-anchor, 152px));
+  z-index: 13;
   box-sizing: border-box;
-  width: min(156px, 16vw, calc(100vw - 56px));
-  min-width: min(132px, calc(100vw - 56px));
+  width: min(272px, 24vw, calc(100vw - 56px));
+  min-width: min(224px, calc(100vw - 56px));
   max-width: calc(100vw - 56px);
-  min-height: 3.45rem;
-  transform: translateX(-50%) translateY(clamp(-58px, -5.2vw, -40px));
+  min-height: 3.72rem;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 7px 10px 8px;
+  padding: 8px 12px 9px;
   border: 1px solid var(--zen-presence-pill-border);
-  border-radius: 14px;
-  background-color: var(--bg-surface);
+  border-radius: 18px;
+  background-color: #050506;
   background: var(--zen-presence-pill-bg);
   color: var(--zen-presence-pill-ink);
   box-shadow: var(--zen-presence-pill-shadow);
   line-height: 1.22;
   isolation: isolate;
   overflow: hidden;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.zenLiveBotPresencePlate[data-copy-placement="top"] .zenLiveBotPresenceCopy {
+  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-top-anchor, 38px));
+  transform: translateX(-50%) translateY(-100%);
+}
+
+.zenLiveBotPresencePlate[data-copy-placement="right"] .zenLiveBotPresenceCopy {
+  left: calc(
+    var(--zen-live-bot-body-x, 50%) +
+    var(--zen-live-bot-copy-center-anchor, 95px) +
+    var(--zen-live-bot-copy-side-anchor, 82px)
+  );
+  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-center-anchor, 95px));
+  transform: translateY(-50%);
+}
+
+.zenLiveBotPresencePlate[data-copy-placement="left"] .zenLiveBotPresenceCopy {
+  left: calc(
+    var(--zen-live-bot-body-x, 50%) +
+    var(--zen-live-bot-copy-center-anchor, 95px) -
+    var(--zen-live-bot-copy-side-anchor, 82px)
+  );
+  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-center-anchor, 95px));
+  transform: translateX(-100%) translateY(-50%);
 }
 
 .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy {
-  width: min(276px, 24vw, calc(100vw - 56px));
-  min-width: min(204px, calc(100vw - 56px));
+  width: min(328px, 28vw, calc(100vw - 56px));
+  min-width: min(260px, calc(100vw - 56px));
   min-height: 4.55rem;
   padding: 8px 12px 9px;
 }
 
 .zenLiveBotPresenceBotGlyph {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: calc(2.15 * 1.1 * 0.84rem);
+  position: absolute;
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 95px));
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 148px));
+  z-index: 12;
+  box-sizing: border-box;
+  width: clamp(23px, calc(var(--zen-live-bot-body-frame-size) * 0.16), 33px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--coffee-bot-color) 86%, #ffffff 14%);
+  filter:
+    drop-shadow(0 0 5px color-mix(in srgb, currentColor 92%, transparent))
+    drop-shadow(0 0 13px color-mix(in srgb, currentColor 64%, transparent));
   line-height: 0;
-  color: var(--coffee-bot-color);
+  pointer-events: none;
 }
 
 .zenLiveBotPresenceCopyText {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  justify-items: start;
+  justify-items: center;
   gap: 2px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow: visible;
   box-sizing: border-box;
-  text-align: left;
+  text-align: center;
 }
 
 .zenLiveBotPresenceActor {
@@ -19932,10 +20701,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
   --zen-presence-face-border: color-mix(in srgb, var(--coffee-bot-color) 66%, rgba(69, 52, 38, 0.28));
   --zen-presence-face-ring: rgba(255, 255, 255, 0.78);
-  --zen-presence-face-shadow:
-    0 0 0 1px color-mix(in srgb, var(--coffee-bot-color) 22%, rgba(78, 58, 38, 0.16)) inset,
-    0 0 24px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent),
-    0 14px 26px rgba(88, 72, 55, 0.2);
+  --zen-presence-face-shadow: none;
   --zen-presence-face-ink: color-mix(in srgb, var(--coffee-bot-color) 84%, #2f241b 16%);
   --zen-presence-pill-bg: color-mix(in srgb, #fffdf8 70%, var(--coffee-bot-color) 30%);
   --zen-presence-pill-border: color-mix(in srgb, var(--coffee-bot-color) 48%, rgba(86, 67, 48, 0.22));
@@ -19949,10 +20715,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight.appLayout[data-zen-atmosphere-active="true"] .zenLiveBotPresencePlate,
 .zenLiveBotPresencePlate[data-theme="light"][data-atmosphere-active="true"] {
   --zen-presence-face-ring: rgba(255, 255, 255, 0.88);
-  --zen-presence-face-shadow:
-    0 0 0 1px color-mix(in srgb, var(--coffee-bot-color) 28%, rgba(78, 58, 38, 0.18)) inset,
-    0 0 30px color-mix(in srgb, var(--coffee-bot-color) 30%, transparent),
-    0 16px 28px rgba(75, 58, 39, 0.22);
+  --zen-presence-face-shadow: none;
   --zen-presence-pill-bg: color-mix(in srgb, #fffdf8 74%, var(--coffee-bot-color) 26%);
   --zen-presence-pill-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.88) inset,
@@ -19978,11 +20741,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     linear-gradient(180deg, #ffffff 0%, #f4f8fb 58%, #e7eef5 100%);
   --zen-presence-face-border: color-mix(in srgb, #242a33 20%, #7bb7c5 18%);
   --zen-presence-face-ring: color-mix(in srgb, #ffffff 74%, #dce8f2 26%);
-  --zen-presence-face-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.9) inset,
-    0 -18px 28px rgba(36, 42, 51, 0.08) inset,
-    0 0 26px rgba(49, 215, 255, 0.12),
-    0 15px 28px rgba(43, 54, 68, 0.18);
+  --zen-presence-face-shadow: none;
   --zen-presence-pill-bg: linear-gradient(
     180deg,
     #ffffff,
@@ -20067,18 +20826,27 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .zenLiveBotPresencePlate {
-    width: min(158px, calc(100vw - 40px));
+    width: var(--zen-live-bot-avatar-size, min(158px, calc(100vw - 40px)));
     min-height: 96px;
   }
 
   .zenLiveBotPresenceFace {
-    width: 74px;
-    height: 74px;
+    width: var(
+      --zen-live-bot-avatar-body-size,
+      var(--zen-live-bot-avatar-face-size, 74px)
+    );
+    height: var(
+      --zen-live-bot-avatar-body-size,
+      var(--zen-live-bot-avatar-face-size, 74px)
+    );
     --coffee-plate-emoji-nudge-y: clamp(1px, 1%, 4px);
   }
 
-  .zenLiveBotPresenceFaceGlyph {
-    font-size: clamp(1.65rem, 7.2vw, 2.37rem);
+  .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+    font-size: var(
+      --zen-live-bot-avatar-face-glyph-size,
+      clamp(1.65rem, 7.2vw, 2.37rem)
+    );
   }
 
   .zenLiveBotPresenceCopy {
@@ -20088,11 +20856,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     min-height: 3.25rem;
     padding: 6px 8px 7px;
     border-radius: 12px;
-    transform: translateX(-50%) translateY(clamp(-58px, -12vw, -46px));
   }
 
   .zenLiveBotPresencePlate[data-action-verbose="true"] {
-    width: min(188px, calc(100vw - 40px));
+    width: var(--zen-live-bot-avatar-size, min(188px, calc(100vw - 40px)));
   }
 
   .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy {
@@ -24983,7 +25750,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--accent-hover);
 }
 
-.appLayout[data-zen-surface="true"] .compose .composeInner button {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .compose
+  .composeInner
+  button {
   border-color: color-mix(in srgb, var(--compose-send-ink) 44%, var(--line));
   background:
     linear-gradient(
@@ -25003,7 +25773,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     transform 0.18s ease;
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .compose[data-compose-ready="true"]
   .composeInner
   button:not(:disabled) {
@@ -25021,7 +25791,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 1px 0 color-mix(in srgb, var(--compose-send-ink) 18%, transparent);
 }
 
-.appLayout[data-zen-surface="true"] .compose .composeInner button:hover:not(:disabled) {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .compose
+  .composeInner
+  button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--compose-send-ink) 84%, var(--line));
   background:
     linear-gradient(
@@ -25031,7 +25804,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
 }
 
-.appLayout[data-zen-surface="true"] .compose .composeInner button:disabled {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .compose
+  .composeInner
+  button:disabled {
   border-color: color-mix(in srgb, var(--compose-send-ink) 18%, var(--line));
   background: color-mix(in srgb, var(--bg-deep) 86%, var(--compose-send-ink) 14%);
   color: color-mix(in srgb, var(--compose-send-ink-muted) 82%, var(--fg-muted));
@@ -33554,7 +34330,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarSummaryFace,
-.botAvatarSummaryProfile {
+.botAvatarSummaryAccessory {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -33571,12 +34347,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-emotion-face-scale: 1.04;
 }
 
-.botAvatarSummaryButton .botAvatarProfilePreview {
+.botAvatarSummaryButton .botAvatarAccessoryPreview {
   width: 58px;
   border-radius: 14px;
 }
 
-.botAvatarSummaryButton .botAvatarProfileEmpty {
+.botAvatarSummaryButton .botAvatarAccessoryEmpty {
   width: 34px;
   height: 34px;
 }
@@ -33611,13 +34387,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarFaceArea,
-.botAvatarProfileArea {
+.botAvatarAccessoryArea {
   min-width: 0;
   display: grid;
   gap: 11px;
 }
 
-.botAvatarProfileArea {
+.botAvatarAccessoryArea {
   align-content: start;
 }
 
@@ -33630,39 +34406,57 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarFacePlate {
+  --bot-face-frame-color: var(--editor-bot-color, var(--accent));
+  --bot-face-frame-inset: -15%;
+  --bot-face-frame-opacity: 0.96;
+  position: relative;
+  isolation: isolate;
   width: 86px;
   height: 86px;
   display: grid;
   place-items: center;
   border-radius: 999px;
-  background:
-    radial-gradient(
-      circle at 36% 28%,
-      color-mix(in srgb, #ffffff 38%, transparent) 0 7%,
-      transparent 22%
-    ),
-    radial-gradient(
-      circle at 50% 58%,
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent),
-      transparent 64%
-    ),
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--bg-surface) 92%, #ffffff 8%),
-      color-mix(in srgb, var(--bg-deep) 82%, #000000 18%)
-    );
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, var(--line));
-  box-shadow:
-    0 14px 28px -24px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, #000000),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent),
-    inset 0 -14px 24px -20px color-mix(in srgb, #000000 70%, transparent);
+  overflow: visible;
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
 }
 
 .botAvatarFaceGlyph {
+  position: relative;
+  z-index: 1;
   --coffee-seat-emotion-face-scale: 1.5;
-  --coffee-plate-emoji-nudge-y: 0px;
-  color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 82%, var(--fg));
-  text-shadow: 0 1px 5px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, transparent);
+  --coffee-plate-emoji-nudge-y: -5px;
+  color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 90%, var(--fg));
+  text-shadow:
+    0 0 5px color-mix(in srgb, currentColor 72%, transparent),
+    0 0 12px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 52%, transparent);
+}
+
+.botAvatarAccessoryFaceOverlay {
+  --bot-body-raster-mask-image:
+    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
+    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
+  --bot-body-raster-mask-position: center, center;
+  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
+  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  width: 100%;
+  height: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  -webkit-mask-image: var(--bot-body-raster-mask-image);
+  -webkit-mask-position: var(--bot-body-raster-mask-position);
+  -webkit-mask-size: var(--bot-body-raster-mask-size);
+  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
+  mask-image: var(--bot-body-raster-mask-image);
+  mask-position: var(--bot-body-raster-mask-position);
+  mask-size: var(--bot-body-raster-mask-size);
+  mask-repeat: var(--bot-body-raster-mask-repeat);
+  pointer-events: none;
 }
 
 .botAvatarCustomizer {
@@ -33682,7 +34476,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarModalFacePanel,
-.botAvatarModalProfilePanel {
+.botAvatarModalAccessoryPanel {
   min-width: 0;
   display: grid;
   gap: 12px;
@@ -33704,18 +34498,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarModalPreview .botAvatarFacePlate {
   width: 112px;
   height: 112px;
-  background:
-    radial-gradient(
-      circle at 50% 42%,
-      color-mix(in srgb, #ffffff 7%, transparent),
-      transparent 48%
-    ),
-    #080808;
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 54%, rgba(255, 255, 255, 0.22));
-  box-shadow:
-    0 0 0 8px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, transparent),
-    0 0 24px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, transparent),
-    0 14px 26px rgba(0, 0, 0, 0.42);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .botAvatarModalPreview .botAvatarFaceGlyph {
@@ -33723,7 +34508,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-plate-emoji-nudge-y: -5px;
 }
 
-.botAvatarModalProfilePanel {
+.botAvatarModalAccessoryPanel {
   justify-items: center;
 }
 
@@ -33734,7 +34519,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarPreviewCopy span,
-.botAvatarProfileCopy span,
+.botAvatarAccessoryCopy span,
 .botAvatarFontControl legend,
 .botAvatarWeightControl > span {
   color: var(--fg);
@@ -33743,7 +34528,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarPreviewCopy small,
-.botAvatarProfileCopy small {
+.botAvatarAccessoryCopy small {
   min-width: 0;
   color: var(--fg-muted);
   font-size: 11.5px;
@@ -33881,7 +34666,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 10px;
 }
 
-.botAvatarProfilePreview {
+.botAvatarAccessoryPreview {
   width: 112px;
   max-width: 100%;
   aspect-ratio: 1;
@@ -33903,18 +34688,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 16px 30px -28px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, #000000);
 }
 
-.botAvatarProfilePreview[data-empty="true"] {
+.botAvatarAccessoryPreview[data-empty="true"] {
   border-style: dashed;
 }
 
-.botAvatarProfileImage {
+.botAvatarAccessoryImage {
   width: 100%;
   height: 100%;
-  object-fit: cover;
   display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
 }
 
-.botAvatarProfileEmpty {
+.botAvatarAccessoryEmpty {
   width: 46px;
   height: 46px;
   border-radius: 999px;
@@ -33924,20 +34711,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
 }
 
-.botAvatarProfileCopy {
+.botAvatarAccessoryCopy {
   display: grid;
   gap: 3px;
   text-align: center;
 }
 
-.botAvatarProfileActions {
+.botAvatarAccessoryActions {
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
 }
 
-.form .botAvatarProfileActions button,
-.botAvatarProfileActions button {
+.form .botAvatarAccessoryActions button,
+.botAvatarAccessoryActions button {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -33957,22 +34744,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
 }
 
-.form .botAvatarProfileActions button:hover:not(:disabled),
-.form .botAvatarProfileActions button:focus-visible,
-.botAvatarProfileActions button:hover:not(:disabled),
-.botAvatarProfileActions button:focus-visible {
+.form .botAvatarAccessoryActions button:hover:not(:disabled),
+.form .botAvatarAccessoryActions button:focus-visible,
+.botAvatarAccessoryActions button:hover:not(:disabled),
+.botAvatarAccessoryActions button:focus-visible {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--line-strong));
   background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
   outline: none;
 }
 
-.form .botAvatarProfileActions button:disabled,
-.botAvatarProfileActions button:disabled {
+.form .botAvatarAccessoryActions button:disabled,
+.botAvatarAccessoryActions button:disabled {
   cursor: default;
   opacity: 0.46;
 }
 
-.botAvatarFileInput {
+.botAvatarAccessoryFileInput {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -39996,7 +40783,65 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .sidebarHandle {
-  display: none;
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  position: fixed;
+  top: clamp(96px, 50dvh, calc(100dvh - 128px));
+  left: 0;
+  z-index: 202;
+  width: 30px;
+  height: 86px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 16px 16px 0;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 92%, var(--accent) 8%),
+      color-mix(in srgb, var(--bg-deep) 78%, var(--accent-ink) 22%)
+    );
+  color: var(--fg);
+  box-shadow: var(--shadow-sm), 0 0 24px color-mix(in srgb, var(--accent-glow) 55%, transparent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  transform: translateY(-50%);
+  transition:
+    left 0.25s ease,
+    opacity 0.18s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.sidebarHandleOpen {
+  left: min(var(--sidebar-drawer-width, 280px), calc(100vw - 30px));
+}
+
+.appLayout[data-zen-surface="true"]:not([data-chat-sidebar-hidden="true"])
+  > .sidebarHandleOpen {
+  left: min(var(--sidebar-open-width, var(--sidebar-drawer-width, 280px)), calc(100vw - 30px));
+}
+
+.sidebarHandle:hover,
+.sidebarHandle:focus-visible {
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, var(--accent-ink) 46%, var(--line));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-surface) 84%, var(--accent) 16%),
+      color-mix(in srgb, var(--bg-deep) 66%, var(--accent-ink) 34%)
+    );
+  outline: none;
+}
+
+.sidebarHandle:active {
+  transform: translateY(-50%) translateX(1px);
 }
 
 /* Faded out while EITHER drawer is open:
@@ -40504,7 +41349,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 66%, transparent);
 }
 
-.themeLight .sidebar {
+.themeLight .sidebar,
+.themeLight .coffeeSidebar {
   border-right-color: color-mix(in srgb, var(--line-strong) 42%, var(--line));
   background:
     linear-gradient(
@@ -40517,7 +41363,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     8px 0 28px -30px rgba(22, 21, 20, 0.28);
 }
 
-.themeLight .conversationList {
+.themeLight .conversationList,
+.themeLight .coffeeSessionList {
   background:
     linear-gradient(
       180deg,
@@ -41172,7 +42019,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     -webkit-appearance: none;
     display: inline-flex;
     position: fixed;
-    top: 50%;
+    top: clamp(96px, 50dvh, calc(100dvh - 128px));
     left: 0;
     z-index: 202;
     width: 30px;
@@ -41204,7 +42051,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .sidebarHandleOpen {
-    left: var(--sidebar-drawer-width);
+    left: min(var(--sidebar-drawer-width, 280px), calc(100vw - 30px));
   }
 
   .sidebarHandle:hover,
@@ -42329,16 +43176,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .botAvatarProfilePreview {
+  .botAvatarAccessoryPreview {
     width: 96px;
   }
 
-  .botAvatarProfileActions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .botAvatarAccessoryActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .form .botAvatarProfileActions button,
-  .botAvatarProfileActions button {
+  .form .botAvatarAccessoryActions button,
+  .botAvatarAccessoryActions button {
     min-width: 0;
     padding-inline: 6px;
   }
@@ -42838,13 +43685,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     --zen-persona-ink-overlap: clamp(88px, calc(10dvh + var(--zen-tone-gap-extra)), 184px);
     --zen-prose-runway-top: clamp(148px, calc(34dvh + var(--zen-tone-runway-extra)), 412px);
     --zen-prose-runway-bottom: clamp(220px, calc(46dvh + var(--zen-tone-runway-extra)), 492px);
+    --zen-readable-tail-padding: var(--zen-prose-runway-bottom);
     padding-top: var(--zen-prose-runway-top);
-    padding-bottom: max(
-      var(--zen-prose-runway-bottom),
-      calc(env(safe-area-inset-bottom) + 48px)
-    );
+    padding-bottom: max(0px, var(--zen-readable-tail-padding));
     scroll-padding-top: var(--zen-prose-runway-top);
-    scroll-padding-bottom: var(--zen-prose-runway-bottom);
+    scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
     gap: clamp(26px, calc(6dvh + var(--zen-tone-gap-extra)), 128px);
   }
 
@@ -42870,12 +43715,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-    padding-bottom: max(
-      70dvh,
-      var(--zen-prose-runway-bottom),
-      calc(env(safe-area-inset-bottom) + 96px)
-    );
-    scroll-padding-bottom: max(70dvh, var(--zen-prose-runway-bottom));
+    padding-bottom: max(0px, var(--zen-readable-tail-padding));
+    scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
   }
 
   .chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
@@ -43432,7 +44273,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-panel-strong: rgba(255, 255, 255, 0.095);
   --coffee-line: rgba(255, 255, 255, 0.12);
   --coffee-muted: rgba(255, 255, 255, 0.58);
-  grid-template-columns: minmax(230px, 248px) minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100dvh;
   color: #f7f7f7;
   background:
@@ -43442,7 +44283,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeShell[data-transcript-open="true"] {
-  grid-template-columns: minmax(230px, 248px) minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
 .coffeeShell[data-session-active="true"] {
@@ -43454,16 +44295,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 100dvh;
-  padding: 18px 14px;
   box-sizing: border-box;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
-    rgba(0, 0, 0, 0.74);
   backdrop-filter: blur(18px);
 }
 
@@ -43477,11 +44309,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: inherit;
 }
 
+.sidebarWordmarkButton {
+  align-self: flex-start;
+  margin-bottom: 2px;
+}
+
 .coffeeHubButton:focus-visible,
 .coffeeNewSessionButton:focus-visible,
 .coffeeDeleteAllSessionsButton:focus-visible,
 .coffeeSessionButton:focus-visible,
 .coffeeBotPill:focus-visible,
+.coffeeCanvasBotTile:focus-visible,
 .coffeeSend:focus-visible,
 .coffeeComposer textarea:focus-visible,
 .coffeeSearchBar:focus-within {
@@ -43490,17 +44328,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSidebarHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
+  flex: 0 0 auto;
 }
 
 .coffeeSidebarHeaderActions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   flex: 0 0 auto;
 }
 
@@ -43538,15 +44369,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSessionList {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0;
-  margin: 0;
-  overflow-y: auto;
+  gap: 8px;
   overflow-x: hidden;
-  min-height: 0;
   flex: 1 1 auto;
 }
 
@@ -43882,7 +44706,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSessionEmpty {
-  padding: 14px 8px;
+  justify-self: center;
+  width: min(100%, 20ch);
+  padding: 26px 8px 14px;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .coffeeCreateGroupButton {
@@ -43908,23 +44737,95 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeMain {
+  --coffee-shell-inline-padding: clamp(14px, 2.2vw, 20px);
+  --coffee-shell-block-start-padding: clamp(18px, 3vw, 30px);
   --coffee-stage-max-width: 1320px;
   --coffee-stage-max-height: 780px;
   min-width: 0;
+  height: 100dvh;
   min-height: 100dvh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
-  padding: clamp(18px, 3vw, 30px);
+  padding-block-start: var(--coffee-shell-block-start-padding);
+  padding-block-end: 0;
+  padding-inline: var(--coffee-shell-inline-padding);
+  overflow: hidden;
+}
+
+.coffeeWorkspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.coffeeWorkspace > * {
+  min-width: 0;
+}
+
+.coffeeWorkspace[data-mode="picker"] {
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  overflow-y: hidden;
+}
+
+.coffeeWorkspace[data-mode="group-setup"] {
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: clamp(10px, 1.5vw, 14px);
+}
+
+.coffeeWorkspace[data-mode="picker"] .coffeeStage[data-picker-visible="true"] {
+  align-self: stretch;
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: clamp(10px, 1.5vw, 14px);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.coffeeWorkspace[data-mode="group-setup"] .coffeeStage {
+  align-self: stretch;
+  min-height: 0;
 }
 
 .coffeeHeader {
-  display: flex;
+  margin-block-start: calc(-1 * var(--coffee-shell-block-start-padding));
+  margin-inline: calc(-1 * var(--coffee-shell-inline-padding));
+}
+
+.coffeeHeaderLead {
+  min-width: 0;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.coffeeAppSwitcher .appSwitcherButton {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.coffeeAppSwitcher .appSwitcherButton:hover,
+.coffeeAppSwitcher .appSwitcherButton:focus-visible,
+.coffeeAppSwitcher[data-open="true"] .appSwitcherButton {
+  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.coffeeAppSwitcher .appSwitcherMenu {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(12, 10, 9, 0.94);
+  backdrop-filter: blur(18px);
 }
 
 .coffeeHeaderActions {
@@ -44023,17 +44924,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
   justify-self: center;
-  width: min(100%, var(--coffee-stage-max-width));
-  max-height: var(--coffee-stage-max-height);
+  width: 100%;
+  max-width: var(--coffee-stage-max-width);
+  max-height: none;
   min-height: 0;
-  overflow: hidden;
-  border-radius: 26px;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08), transparent 30%),
-    rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 26px 70px rgba(0, 0, 0, 0.36);
-  padding: clamp(16px, 2vw, 24px);
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
 }
 
 .coffeeStage[data-phase="arriving"],
@@ -44045,6 +44945,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeStage[data-autoplay-dock="true"] {
   grid-template-rows: minmax(0, 1fr) auto;
   row-gap: clamp(12px, 2vw, 18px);
+}
+
+.coffeeStage[data-picker-visible="true"] {
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: clamp(12px, 1.8vw, 18px);
+  max-height: none;
+}
+
+.coffeeStage[data-picker-visible="true"] .coffeeTableScene {
+  min-height: clamp(360px, 44vh, 540px);
+}
+
+.coffeeTableCanvas {
+  position: relative;
+  display: grid;
+  align-items: stretch;
+  justify-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  isolation: isolate;
+}
+
+.coffeeWorkspace[data-mode="picker"] .coffeeStage[data-picker-visible="true"] .coffeeTableCanvas {
+  align-self: stretch;
+  place-items: center;
+  height: 100%;
+  min-height: clamp(300px, 38vh, 420px);
+}
+
+.coffeeWorkspace[data-mode="group-setup"] .coffeeTableCanvas {
+  align-self: stretch;
+  place-items: center;
+  height: 100%;
+  min-height: clamp(280px, 34vh, 420px);
+}
+
+.coffeeWorkspace[data-mode="picker"] .coffeeStage[data-picker-visible="true"] .coffeeTableCanvas > .coffeeTableScene {
+  align-self: center;
+  justify-self: center;
+  width: min(100%, 820px);
+  flex: 0 0 auto;
+}
+
+.coffeeWorkspace[data-mode="group-setup"] .coffeeTableCanvas > .coffeeTableScene {
+  align-self: center;
+  justify-self: center;
+  width: min(100%, 820px);
+  flex: 0 0 auto;
 }
 
 .coffeeAutoplayDock {
@@ -44175,7 +45124,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   stroke-linejoin: round;
 }
 
-.coffeeStage[data-compact="true"] {
+.coffeeStage[data-compact="true"]:not([data-picker-visible="true"]) {
   grid-template-rows: 1fr;
   padding-block: clamp(10px, 1.4vw, 16px);
 }
@@ -44198,6 +45147,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"]) {
   min-height: clamp(360px, 46vh, 560px);
+}
+
+.coffeeWorkspace[data-mode="picker"]
+  .coffeeStage[data-phase="selecting"][data-picker-visible="true"][data-compact="true"]:not(
+    [data-group-ready="true"]
+  ) {
+  min-height: 0;
+}
+
+.coffeeWorkspace[data-mode="picker"]
+  .coffeeStage[data-phase="selecting"][data-picker-visible="true"][data-compact="true"]:not(
+    [data-group-ready="true"]
+  )
+  .coffeeTableScene {
+  height: auto;
+  min-height: clamp(260px, 34vh, 380px);
+  max-width: min(100%, 820px);
+  transform: none;
 }
 
 .coffeeStage[data-compact="true"] .coffeeTableDisk {
@@ -46158,8 +47125,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlate {
+  --bot-face-frame-color: var(--coffee-seat-emotion-color);
+  --bot-face-frame-inset: -7%;
+  --bot-face-frame-opacity: 0.96;
   --coffee-seat-plate-shift-x: clamp(-13px, -0.82vw, -8px);
   position: absolute;
+  isolation: isolate;
   inset: 0;
   z-index: 1;
   box-sizing: border-box;
@@ -46171,10 +47142,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-top: clamp(11px, 6%, 18px);
   border-radius: 50%;
   color: var(--coffee-bot-color);
-  background:
-    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.07), transparent 48%),
-    #080808;
-  border: 1px solid color-mix(in srgb, var(--coffee-seat-emotion-color) 70%, rgba(255, 255, 255, 0.22));
+  background: transparent;
+  border: 1px solid transparent;
   box-shadow:
     0 0 0 9px rgba(255, 255, 255, var(--coffee-seat-emotion-ring-alpha)),
     0 0 28px color-mix(in srgb, var(--coffee-seat-emotion-color) var(--coffee-seat-emotion-glow-strength), transparent),
@@ -46296,6 +47265,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlateGlyph {
+  position: relative;
+  z-index: 2;
   display: grid;
   place-items: center;
   width: 58%;
@@ -46318,6 +47289,67 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowText {
   grid-column: 1;
+}
+
+.coffeeSeatPlate[data-live-body-style="zen"] {
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 44%, transparent))
+    drop-shadow(0 0 24px color-mix(in srgb, var(--coffee-seat-emotion-color) 28%, transparent));
+  --coffee-live-bot-body-inset: -24%;
+  --bot-face-frame-inset: 0;
+  --bot-face-frame-opacity: 0.96;
+  --bot-face-frame-z: 0;
+  --bot-face-metal-light-inset: 0;
+  --bot-face-metal-light-opacity: 0.68;
+  --bot-face-metal-light-z: 5;
+  --bot-face-glyph-z: 6;
+  --coffee-seat-body-raster-inset: var(--coffee-live-bot-body-inset);
+  --coffee-plate-emoji-nudge-y: -5px;
+  place-items: center;
+  padding-top: 0;
+  box-shadow: none;
+}
+
+.coffeeStage[data-phase="arriving"] .coffeeSeatPlate[data-live-body-style="zen"],
+.coffeeStage[data-phase="live"] .coffeeSeatPlate[data-live-body-style="zen"],
+.coffeeStage[data-compact="true"] .coffeeSeatPlate[data-live-body-style="zen"] {
+  --coffee-plate-emoji-nudge-y: -5px;
+}
+
+.coffeeSeatPlate[data-live-body-style="zen"] .coffeeSeatPlateEmoji {
+  --coffee-plate-emoji-flip-anchor-x: 0px;
+  font-size: clamp(1.36rem, 3.8vw, 1.9rem);
+}
+
+.coffeeSeatPlate[data-live-body-style="zen"][data-body-raster-equipped="true"] {
+  --bot-face-frame-z: 2;
+}
+
+.coffeeSeatBodyRaster {
+  --bot-body-raster-mask-image:
+    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
+    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
+  --bot-body-raster-mask-position: center, center;
+  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
+  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
+  position: absolute;
+  inset: var(--coffee-seat-body-raster-inset, 0);
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  -webkit-mask-image: var(--bot-body-raster-mask-image);
+  -webkit-mask-position: var(--bot-body-raster-mask-position);
+  -webkit-mask-size: var(--bot-body-raster-mask-size);
+  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
+  mask-image: var(--bot-body-raster-mask-image);
+  mask-position: var(--bot-body-raster-mask-position);
+  mask-size: var(--bot-body-raster-mask-size);
+  mask-repeat: var(--bot-body-raster-mask-repeat);
+  pointer-events: none;
 }
 
 .coffeeSeatTeamBadge {
@@ -46377,10 +47409,156 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(229, 255, 235, 0.92);
 }
 
+.botPreviewFaceGlare {
+  --bot-preview-face-color: var(
+    --coffee-seat-emotion-color,
+    var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+  );
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 34% 24%,
+      rgba(255, 255, 255, 0.38),
+      rgba(255, 255, 255, 0.16) 18%,
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at 50% 58%,
+      color-mix(in srgb, var(--bot-preview-face-color) 24%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #101014 82%, var(--bot-preview-face-color) 18%),
+      color-mix(in srgb, #030304 88%, var(--bot-preview-face-color) 12%)
+    );
+  border: 1px solid color-mix(in srgb, var(--bot-preview-face-color) 50%, rgba(255, 255, 255, 0.18));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -12px 22px rgba(0, 0, 0, 0.34),
+    0 0 0 8px color-mix(in srgb, var(--bot-preview-face-color) 14%, transparent),
+    0 0 28px color-mix(in srgb, var(--bot-preview-face-color) 38%, transparent),
+    0 16px 28px rgba(0, 0, 0, 0.44);
+}
+
+.botFaceFrame {
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png");
+  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png");
+  position: absolute;
+  inset: var(--bot-face-frame-inset, -7%);
+  z-index: var(--bot-face-frame-z, 0);
+  display: block;
+  pointer-events: none;
+  background: var(--bot-face-frame-base-image) center / contain no-repeat;
+  opacity: var(--bot-face-frame-opacity, 1);
+  filter:
+    var(--bot-face-frame-glow-filter, drop-shadow(0 0 0 transparent))
+    saturate(var(--coffee-seat-mood-saturation, 1))
+    grayscale(var(--coffee-seat-mood-grayscale, 0))
+    contrast(var(--coffee-seat-mood-contrast, 1))
+    brightness(var(--coffee-seat-mood-brightness, 1));
+}
+
+.botFaceFrameTint {
+  --bot-face-frame-resolved-color: var(
+    --bot-face-frame-color,
+    var(--coffee-seat-emotion-color, var(--coffee-bot-color, var(--editor-bot-color, var(--accent))))
+  );
+  position: absolute;
+  inset: 0;
+  display: block;
+  color: var(--bot-face-frame-resolved-color);
+  background: currentColor;
+  -webkit-mask-image: var(--bot-face-frame-tint-mask);
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(--bot-face-frame-tint-mask);
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  filter:
+    drop-shadow(0 0 6px color-mix(in srgb, currentColor 28%, transparent))
+    saturate(1.08);
+}
+
+.botFaceFrameMetalLight {
+  position: absolute;
+  inset: var(--bot-face-metal-light-inset, var(--bot-face-frame-inset, -7%));
+  z-index: var(--bot-face-metal-light-z, 6);
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: var(--bot-face-metal-light-opacity, 0);
+  mix-blend-mode: overlay;
+  transform: translateY(var(--bot-face-metal-light-y, 0px));
+  clip-path: var(--bot-face-metal-light-clip-path, none);
+  -webkit-mask-image: var(
+    --bot-face-metal-light-mask-image,
+    url("/bot-frame/bot-frame-metal-mask.png")
+  );
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(
+    --bot-face-metal-light-mask-image,
+    url("/bot-frame/bot-frame-metal-mask.png")
+  );
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.botFaceFrameMetalLightRaster {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: url("/bot-frame/bot-frame-metal.png") center / contain no-repeat;
+  filter:
+    contrast(1.22)
+    brightness(1.08)
+    saturate(0.86);
+  transform:
+    rotate(var(--bot-face-metal-light-rotation, 0deg))
+    scale(var(--bot-face-metal-light-scale, 1.06));
+  transform-origin: center center;
+  will-change: transform;
+}
+
+@keyframes botFaceFrameMetalLightSweep {
+  from {
+    transform:
+      rotate(var(--bot-face-metal-light-rotation, 0deg))
+      scale(var(--bot-face-metal-light-scale, 1.06));
+  }
+
+  to {
+    transform:
+      rotate(calc(var(--bot-face-metal-light-rotation, 0deg) + 360deg))
+      scale(var(--bot-face-metal-light-scale, 1.06));
+  }
+}
+
+.themeLight .botFaceFrame,
+.themeLight.coffeeShell .botFaceFrame,
+.zenLiveBotPresencePlate[data-theme="light"] .botFaceFrame {
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png");
+  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-light-tint-mask.png");
+}
+
 .coffeeSeatPlateEmoji {
   --coffee-face-eye-track: 0.4em;
   --coffee-face-mouth-track: 0.4em;
   --coffee-face-gap: 0em;
+  --coffee-plate-emoji-flip-anchor-x: calc(
+    (1 - var(--coffee-plate-emoji-face-scale-y, 1)) * 0.1em
+  );
   display: block;
   font-family: var(--prism-face-font);
   font-size: clamp(1.97rem, 5.87vw, 2.93rem);
@@ -46389,14 +47567,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: var(--prism-face-letter-spacing);
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
-  color: color-mix(in srgb, var(--coffee-seat-emotion-color) 78%, #ffffff);
+  color: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff);
+  position: relative;
+  z-index: 2;
   /* rotate() + mood/seat scaling come from inline style; keep the origin stable. */
   transform-origin: center center;
-  transition: color 160ms ease, filter 160ms ease, transform 140ms ease;
+  transition: none;
 }
 
 .coffeeSeat[data-top-head-seat="true"] .coffeeSeatPlateEmoji {
-  transition: color 160ms ease, filter 160ms ease;
+  transition: none;
 }
 
 .coffeeSeatPlateEmoji,
@@ -46415,18 +47595,115 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
   block-size: 1em;
   overflow: visible;
+  position: relative;
+  z-index: var(--bot-face-glyph-z, 4);
+  opacity: 1;
+  text-shadow: none;
+  filter:
+    drop-shadow(0 0 0.08em color-mix(in srgb, currentColor 74%, transparent))
+    drop-shadow(0 0 0.24em color-mix(in srgb, currentColor 48%, transparent))
+    drop-shadow(0 0 0.48em color-mix(in srgb, currentColor 24%, transparent));
+  transition: none;
+}
+
+.zenLiveBotPresencePlate[data-transitioning="true"] .zenLiveBotPresenceFaceGlyph {
+  opacity: 0;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-transitioning="true"]
+  .zenLiveBotPresenceFaceGlyph {
+  opacity: 0.38;
+}
+
+.coffeeSeatPlateEmoji[data-coffee-plate-thinking-spinner="true"] {
+  --coffee-plate-emoji-nudge-y: 0px;
+  --coffee-seat-emotion-face-scale: 1;
+  --coffee-face-eye-track: 1em;
+  --coffee-face-mouth-track: 0em;
+  --coffee-face-gap: 0em;
+  grid-template-columns: 1em;
+  grid-template-rows: 1em;
+  inline-size: 1em;
+  block-size: 1em;
+  place-self: center;
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 780;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame] {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  position: relative;
+  inline-size: 1em;
+  block-size: 1em;
+  font-size: 1em;
+  font-weight: 780;
+  line-height: 1;
+  color: inherit;
+  text-align: center;
+  text-shadow:
+    0 0 0.12em color-mix(in srgb, currentColor 76%, transparent),
+    0 0 0.36em color-mix(in srgb, currentColor 44%, transparent);
+  transform: none;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] {
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   inline-size: 100%;
   block-size: 1em;
   line-height: 1;
+  position: relative;
+  color: inherit;
   transform-origin: center center;
-  transition: transform 160ms ease;
+  transition: none;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] {
+  inline-size: 1.22em;
+  block-size: 1.28em;
+  margin: -0.14em -0.11em;
+  line-height: 1.2;
+  overflow: visible;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="eyes"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
+  transform:
+    translate(
+      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
+      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
+    );
+}
+
+.coffeeSeatPlateEmoji[data-coffee-plate-emoji-blink-phase="half"]
+  [data-coffee-plate-emoji-part="eyes"],
+.messageMoodCoffeeFace[data-coffee-plate-emoji-blink-phase="half"]
+  [data-coffee-plate-emoji-part="eyes"],
+.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-blink-phase="half"]
+  [data-coffee-plate-emoji-part="eyes"] {
+  transform:
+    translate(
+      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
+      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
+    )
+    scaleX(0.42);
+  transition: none;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"] {
@@ -46627,6 +47904,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 34px color-mix(in srgb, var(--coffee-seat-emotion-color) 56%, transparent),
     0 0 64px color-mix(in srgb, var(--coffee-seat-emotion-color) 30%, transparent),
     0 18px 34px rgba(0, 0, 0, 0.54);
+}
+
+.coffeeSeat[data-director-enabled="true"] .coffeeSeatPlate[data-live-body-style="zen"],
+.coffeeSeat[data-director-enabled="true"]:hover .coffeeSeatPlate[data-live-body-style="zen"],
+.coffeeSeat[data-director-enabled="true"]:focus-visible
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .coffeeSeat[data-replay-review-enabled="true"]:hover .coffeeSeatCluster,
@@ -47793,7 +49078,113 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
 }
 
-/* Picker — empty state before a thread exists. */
+/* Canvas picker — empty state before a Coffee session exists. */
+.coffeeCanvasPicker {
+  position: relative;
+  z-index: 7;
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.coffeeCanvasPickerControls {
+  min-width: 0;
+}
+
+.coffeeCanvasPickerControls .botLibraryGroupTriggerCount {
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.coffeeCanvasBotGrid {
+  --tile-size: clamp(56px, 6vw, 92px);
+  --tile-gap: 8px;
+  --tile-hover-scale: 1.1;
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 1), var(--tile-size));
+  justify-content: center;
+  align-content: start;
+  gap: var(--tile-gap);
+  box-sizing: border-box;
+  width: min(100%, var(--picker-row-width, 100%));
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: max(8px, calc(var(--tile-size) * (var(--tile-hover-scale) - 1) * 0.5 + 2px));
+  overflow: visible;
+  list-style: none;
+}
+
+.coffeeCanvasBotGrid li {
+  display: grid;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  min-width: 0;
+}
+
+.coffeeCanvasBotTile {
+  width: var(--tile-size);
+  min-width: 0;
+  height: var(--tile-size);
+  min-height: 0;
+  max-height: none;
+  border-radius: min(16px, calc(var(--tile-size) * 0.2));
+}
+
+.coffeeCanvasBotTile .chatBotTileBotGlyph svg {
+  width: auto;
+  height: auto;
+  max-width: calc(var(--tile-size) * 0.86);
+  max-height: calc(var(--tile-size) * 0.86);
+}
+
+.coffeeCanvasBotTile .chatBotTileFeaturedName {
+  font-size: clamp(9px, calc(var(--tile-size) * 0.088), 12px);
+  letter-spacing: 0.045em;
+}
+
+.coffeeCanvasBotTileBadge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 4;
+  padding: 2px 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--bot-color, #ffffff) 44%, rgba(255, 255, 255, 0.24));
+  background: rgba(0, 0, 0, 0.38);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.54rem;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.coffeeCanvasBotTile:disabled {
+  cursor: not-allowed;
+  opacity: 0.34;
+  filter: saturate(0.72);
+  transform: none;
+}
+
+.coffeeCanvasBotGrid:not(.chatBotPickerPixelGrid):not(.chatBotPickerSolidSwatch):hover
+  .coffeeCanvasBotTile:not(:hover):not(:disabled) {
+  transform: scale(0.96);
+  opacity: 0.76;
+}
+
+.coffeeCanvasPicker .coffeeOfflineProtectionNotice,
+.coffeeCanvasPicker .coffeePickerEmpty {
+  margin: 0;
+}
+
+.coffeeCanvasPicker .coffeePickerEmptyState {
+  padding: 6px 0 4px;
+}
+
+/* Picker — legacy lower empty-state layout. */
 .coffeePicker {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -48028,6 +49419,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeGroupOverview {
   position: relative;
+  justify-self: center;
+  align-self: end;
+  width: min(100%, var(--coffee-stage-max-width));
   overflow-x: hidden;
   overflow-y: hidden;
   overscroll-behavior: contain;
@@ -51045,6 +52439,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 /* Composer — bottom of the shell. */
 .coffeeComposer {
   display: flex;
+  flex-wrap: wrap;
   justify-self: center;
   gap: 12px;
   align-items: flex-end;
@@ -51053,6 +52448,36 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.coffeeGlobalComposer {
+  justify-self: center;
+  align-self: end;
+  width: calc(100% + var(--coffee-shell-inline-padding) + var(--coffee-shell-inline-padding));
+  margin-inline: calc(0px - var(--coffee-shell-inline-padding));
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(
+      ellipse 72% 42% at var(--lens-thumb-x, 50%) 0%,
+      color-mix(in srgb, var(--accent) 10%, transparent) 0%,
+      transparent 74%
+    ),
+    rgba(255, 255, 255, 0.055);
+  box-shadow: 0 -8px 24px -22px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.coffeeGlobalComposer .coffeeComposerStatus {
+  margin-bottom: 8px;
+}
+
+.coffeeComposerStatus {
+  flex: 0 0 100%;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.78rem;
+  line-height: 1.2;
 }
 
 .coffeeComposerInputWrap {
@@ -51168,6 +52593,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 @media (max-width: 900px) {
   .coffeeShell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .coffeeShell[data-transcript-open="true"] {
@@ -51189,7 +52615,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeMain {
-    min-height: auto;
+    height: 100%;
+    min-height: 0;
   }
 
   .coffeeTranscriptPanel {
@@ -51201,6 +52628,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
   .coffeePicker {
     grid-template-columns: 1fr;
+  }
+
+  .coffeeCanvasPickerControls {
+    flex-wrap: wrap;
+  }
+
+  .coffeeCanvasPickerControls .coffeeSearchBar {
+    min-width: min(220px, 100%);
   }
 
   .coffeePickerControls {
@@ -51308,13 +52743,30 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     max-width: calc(100% - 24px);
   }
 
-  .coffeeStage[data-compact="true"] {
+  .coffeeStage[data-compact="true"]:not([data-picker-visible="true"]) {
     grid-template-rows: minmax(300px, 42vh);
   }
 
   .coffeeStage[data-compact="true"] .coffeeTableDisk {
     width: min(74vw, 328px);
     max-width: calc(100% - 38px);
+  }
+
+  .coffeeWorkspace[data-mode="picker"]
+    .coffeeStage[data-phase="selecting"][data-picker-visible="true"][data-compact="true"]:not(
+      [data-group-ready="true"]
+    )
+    .coffeeTableScene {
+    min-height: clamp(190px, 25vh, 230px);
+  }
+
+  .coffeeWorkspace[data-mode="picker"]
+    .coffeeStage[data-phase="selecting"][data-picker-visible="true"][data-compact="true"]:not(
+      [data-group-ready="true"]
+    )
+    .coffeeTableDisk {
+    width: min(62vw, 246px);
+    max-width: calc(100% - 64px);
   }
 
   .coffeeStage[data-compact="true"] .coffeeCenterMessage {
@@ -51432,6 +52884,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-columns: 1fr;
   }
 
+  .coffeeCanvasPicker {
+    gap: 8px;
+  }
+
+  .coffeeCanvasPickerControls .botLibraryGroupTriggerName {
+    max-width: none;
+  }
+
+  .coffeeCanvasBotGrid {
+    --tile-size: clamp(50px, 16vw, 76px);
+    --tile-gap: 7px;
+  }
+
   .coffeePickerControls {
     align-items: stretch;
     flex-direction: column;
@@ -51483,7 +52948,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     linear-gradient(180deg, #fffefa 0%, #f2ede5 100%);
 }
 
-.themeLight.coffeeShell :where(.coffeeSidebar, .coffeeTranscriptPanel) {
+.themeLight.coffeeShell .coffeeTranscriptPanel {
   border-color: color-mix(in srgb, var(--line) 82%, transparent);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.68)),
@@ -51629,6 +53094,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeMessage,
   .coffeeInterruptionCue,
   .coffeeComposer,
+  .coffeeGlobalComposer,
   .coffeeComposerInputWrap
 ) {
   border-color: var(--coffee-line);
@@ -51802,13 +53268,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeStage {
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.8), transparent 34%),
-    color-mix(in srgb, #ffffff 72%, var(--bg) 28%);
-  border-color: color-mix(in srgb, var(--line) 86%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.82),
-    0 26px 60px rgba(38, 30, 21, 0.12);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .themeLight.coffeeShell .coffeeStageStatus {
@@ -51877,14 +53339,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeSeatPlate {
-  background:
-    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.84), transparent 48%),
-    color-mix(in srgb, #fffdf8 76%, var(--coffee-seat-emotion-color) 24%);
-  border-color: color-mix(in srgb, var(--coffee-seat-emotion-color) 62%, rgba(95, 70, 45, 0.22));
+  background: transparent;
+  border-color: transparent;
   box-shadow:
     0 0 0 8px rgba(255, 255, 255, 0.56),
     0 0 24px color-mix(in srgb, var(--coffee-seat-emotion-color) 22%, transparent),
     0 16px 26px rgba(61, 44, 28, 0.2);
+}
+
+.themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"] {
+  --bot-face-metal-light-opacity: 0.54;
+  box-shadow: none;
 }
 
 .themeLight.coffeeShell .coffeeSeatPlateEmoji {
