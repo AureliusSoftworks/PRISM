@@ -174,11 +174,6 @@ import {
 } from "./coffee-replay";
 import { buildCoffeeOfflineProtectionMessage } from "./coffeeOfflineProtection";
 import {
-  PSYCHIC_COMMAND_NAME,
-  PSYCHIC_SLASH_COMMAND,
-  parsePsychicSlashCommand,
-} from "./psychicCommand";
-import {
   NVM_COMMAND_NAME,
   NVM_SLASH_COMMAND,
   parseNvmSlashCommand,
@@ -1383,7 +1378,6 @@ const MESSAGE_COPY_FEEDBACK_MS = 1600;
 const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
-const PSYCHIC_MODE_TOAST_DISMISS_MS = 3600;
 const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
 const ZEN_HEADER_REVEAL_EDGE_PX = 72;
 const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
@@ -5494,9 +5488,9 @@ interface Message {
   promptWildcards?: PromptWildcardRunMetadata;
   /** User-entered AskQuestion tool result completed by the assistant's selected choice. */
   manualAskQuestion?: ManualAskQuestionResultPayload;
-  /** Concise simulated reasoning summary shown when Psychic mode is enabled. */
+  /** Concise Psychic summary shown under Chat user turns. */
   psychicThought?: PsychicThoughtPayload;
-  /** Live-only verbose Psychic scratchpad shown in the active canvas when Psychic is enabled. */
+  /** Live-only verbose Psychic scratchpad shown in the active Chat canvas. */
   psychicScratchpad?: PsychicCanvasScratchpadPayload;
 }
 
@@ -7474,6 +7468,12 @@ interface ChatPostEnvelope {
 
 type ChatPsychicDebugPayload = NonNullable<ChatPostEnvelope["psychicDebug"]>;
 
+function psychicTextEnabledForConversation(
+  conversation: Pick<ConversationDetail, "mode"> | null | undefined
+): boolean {
+  return conversation?.mode === "chat";
+}
+
 function livePsychicScratchpadFromDebug(
   debug: ChatPsychicDebugPayload | undefined,
   enabled: boolean,
@@ -8024,12 +8024,6 @@ type MemoryToast =
       rejected: MemoryRejectedEventPayload;
       expiresAt: number;
     };
-interface PsychicModeToast {
-  id: string;
-  enabled: boolean;
-  source: "chat" | "coffee";
-  expiresAt: number;
-}
 interface LocalCommandToast {
   id: string;
   title: string;
@@ -8307,7 +8301,6 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "new-session",
   "forgive-me",
   "undo",
-  PSYCHIC_COMMAND_NAME,
   NVM_COMMAND_NAME,
 ]);
 const BUILT_IN_HELP_COMMAND_ALIASES: string[] = [];
@@ -8336,7 +8329,7 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "forgive-me",
   "undo",
   ...BUILT_IN_UNDO_COMMAND_ALIASES,
-  PSYCHIC_COMMAND_NAME,
+  "psychic",
   NVM_COMMAND_NAME,
   "dev",
   "forget",
@@ -8759,22 +8752,6 @@ function createBuiltInUndoCommand(): CommandCenterCommand {
   };
 }
 
-function createBuiltInPsychicCommand(): CommandCenterCommand {
-  const now = new Date().toISOString();
-  return {
-    id: "builtin:/psychic",
-    name: PSYCHIC_COMMAND_NAME,
-    title: PSYCHIC_COMMAND_NAME,
-    command: "Switches Psychic mode on or off for future turns.",
-    aliases: [],
-    arguments: [],
-    builtIn: true,
-    readOnly: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 function createBuiltInNvmCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
@@ -9183,7 +9160,6 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInNewSessionCommand(),
     createBuiltInForgiveMeCommand(),
     createBuiltInUndoCommand(),
-    createBuiltInPsychicCommand(),
     createBuiltInNvmCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
@@ -29314,8 +29290,6 @@ function HomeContent(): React.JSX.Element {
     useState<ZenPreviousContextSummary | null>(null);
   const [zenSessionMemories, setZenSessionMemories] = useState<ZenSessionMemoryItem[]>([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
-  const [psychicModeToast, setPsychicModeToast] =
-    useState<PsychicModeToast | null>(null);
   const [localCommandToast, setLocalCommandToast] =
     useState<LocalCommandToast | null>(null);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
@@ -36219,7 +36193,7 @@ function HomeContent(): React.JSX.Element {
     pendingReplyStartedAtMs !== null &&
     pendingReplyNowMs - pendingReplyStartedAtMs >= PSYCHIC_THINKING_INDICATOR_DELAY_MS;
   const psychicThinkingTargetMessageId = useMemo(() => {
-    if (settings?.psychicModeEnabled !== true) return null;
+    if (!psychicTextEnabledForConversation(detail)) return null;
     if (effectivePreferredProvider !== "local") return null;
     if (!psychicThinkingDelayElapsed) return null;
     for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
@@ -36230,9 +36204,9 @@ function HomeContent(): React.JSX.Element {
     }
     return null;
   }, [
+    detail?.mode,
     effectivePreferredProvider,
     psychicThinkingDelayElapsed,
-    settings?.psychicModeEnabled,
     visibleDetailMessages,
   ]);
   const promptShortcutColorIndexByMessageId = useMemo(() => {
@@ -37050,7 +37024,7 @@ function HomeContent(): React.JSX.Element {
         ? attachLivePsychicScratchpadToConversation(
             applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
             undefined,
-            settings?.psychicModeEnabled === true
+            psychicTextEnabledForConversation(result.conversation)
           )
         : undefined;
       if (conversation) {
@@ -42381,17 +42355,6 @@ function HomeContent(): React.JSX.Element {
   }, [memoryToasts.length, pausedMemoryToastIds]);
 
   useEffect(() => {
-    if (!psychicModeToast) return;
-    const remainingMs = Math.max(0, psychicModeToast.expiresAt - Date.now());
-    const timer = window.setTimeout(() => {
-      setPsychicModeToast((current) =>
-        current?.id === psychicModeToast.id ? null : current
-      );
-    }, remainingMs);
-    return () => window.clearTimeout(timer);
-  }, [psychicModeToast]);
-
-  useEffect(() => {
     if (!localCommandToast) return;
     const remainingMs = Math.max(0, localCommandToast.expiresAt - Date.now());
     const timer = window.setTimeout(() => {
@@ -43637,7 +43600,7 @@ function HomeContent(): React.JSX.Element {
           `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
       });
     }
-    if (envelope.psychicDebug) {
+    if (envelope.psychicDebug && psychicTextEnabledForConversation(envelope.conversation)) {
       const debug = envelope.psychicDebug;
       lines.push({
         kind: "summary",
@@ -44681,6 +44644,7 @@ function HomeContent(): React.JSX.Element {
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
+      psychicModeEnabled: mode === "chat",
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.resolvedCommandCenterPrompt
         ? { resolvedCommandCenterPrompt: options.resolvedCommandCenterPrompt }
@@ -44861,7 +44825,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          settings?.psychicModeEnabled === true
+          psychicTextEnabledForConversation(d.conversation)
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -44908,7 +44872,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          settings?.psychicModeEnabled === true
+          psychicTextEnabledForConversation(d.conversation)
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -45629,7 +45593,7 @@ function HomeContent(): React.JSX.Element {
       const patchedConversation = attachLivePsychicScratchpadToConversation(
         applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
         undefined,
-        settings?.psychicModeEnabled === true
+        psychicTextEnabledForConversation(result.conversation)
       );
       setDetail(patchedConversation);
       setSelectedId(patchedConversation.id);
@@ -45774,19 +45738,6 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  function showPsychicModeToast(
-    enabled: boolean,
-    source: "chat" | "coffee"
-  ): void {
-    const now = Date.now();
-    setPsychicModeToast({
-      id: `psychic-mode:${now}`,
-      enabled,
-      source,
-      expiresAt: now + PSYCHIC_MODE_TOAST_DISMISS_MS,
-    });
-  }
-
   function showLocalCommandToast(title: string, detail: string): void {
     const now = Date.now();
     setLocalCommandToast({
@@ -45846,47 +45797,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function togglePsychicModeFromSlashCommand(
-    options: { clearChatComposer?: boolean; source?: "chat" | "coffee" } = {}
-  ): Promise<void> {
-    const source = options.source ?? "chat";
-    const nextEnabled = settings?.psychicModeEnabled === true ? false : true;
-    setError(null);
-    if (options.clearChatComposer !== false) {
-      setConversationStarterPrompts(null);
-      clearComposerDraftNow();
-      if (editingMessageId !== null) {
-        setEditingMessageId(null);
-        setEditingOriginalText("");
-      }
-    }
-    setSettings((previous) =>
-      previous ? { ...previous, psychicModeEnabled: nextEnabled } : previous
-    );
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ psychicModeEnabled: nextEnabled }),
-      });
-      await refreshSettings();
-      showPsychicModeToast(nextEnabled, source);
-      const stateText = nextEnabled ? "enabled" : "disabled";
-      appendDevChatDebugLines([
-        {
-          kind: "backend",
-          text: `[/psychic] Psychic mode ${stateText}${
-            source === "coffee" ? " from Coffee" : ""
-          }.`,
-        },
-      ]);
-    } catch (err) {
-      setSettings((previous) =>
-        previous ? { ...previous, psychicModeEnabled: !nextEnabled } : previous
-      );
-      setError(err instanceof Error ? err.message : "Could not update Psychic mode.");
-    }
-  }
-
   function firstComposerCommandToken(trimmedLine: string): string {
     return normalizeComposerSlashCommandLine(trimmedLine).split(/\s+/)[0]?.trim().toLowerCase() ?? "";
   }
@@ -45905,7 +45815,6 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand === "/forgive-me" ||
       normalizedCommand === "/undo" ||
       normalizedCommand === "/undo-turn" ||
-      normalizedCommand === PSYCHIC_SLASH_COMMAND ||
       normalizedCommand === NVM_SLASH_COMMAND ||
       BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)
     );
@@ -45961,7 +45870,6 @@ function HomeContent(): React.JSX.Element {
     if (!isBuiltInOperationalSlashCommand(trimmedLine)) {
       return false;
     }
-    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
     const nvmCommand = parseNvmSlashCommand(trimmedLine);
     if (BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)) {
       clearComposerDraftNow();
@@ -46012,10 +45920,6 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizedCommand === "/forgive-me") {
       await resetPrismMoodFromSlashCommand();
-      return true;
-    }
-    if (psychicCommand.kind === "ok") {
-      await togglePsychicModeFromSlashCommand({ source: "chat" });
       return true;
     }
     await compactCurrentChatFromSlashCommand(
@@ -46402,7 +46306,7 @@ function HomeContent(): React.JSX.Element {
     const patchedConversation = attachLivePsychicScratchpadToConversation(
       applyCommandDisplayAliases(applyExplicitAskQuestionFallback(envelope.conversation)),
       envelope.psychicDebug,
-      settings?.psychicModeEnabled === true
+      psychicTextEnabledForConversation(envelope.conversation)
     );
     if (options.consumeCache) {
       clearZenInitialStarterReplyCache();
@@ -47690,7 +47594,7 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          settings?.psychicModeEnabled === true
+          psychicTextEnabledForConversation(d.conversation)
         );
         if (isInitialZenStarterPrompt) {
           zenInitialStarterLiveEnvelopeRef.current = {
@@ -48598,6 +48502,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function renderPsychicThoughtLine(msg: Message): React.ReactNode {
+    if (!psychicTextEnabledForConversation(detail)) return null;
     const pendingThinking = msg.id === psychicThinkingTargetMessageId;
     const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
       pendingThinking,
@@ -63101,38 +63006,16 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderPsychicModeToast = () => {
-    if (!psychicModeToast) return null;
-    return (
-      <div
-        className={styles.psychicModeToast}
-        data-psychic-active={psychicModeToast.enabled ? "true" : "false"}
-        role="status"
-        aria-live="polite"
-      >
-        <span className={styles.psychicModeToastDot} aria-hidden="true" />
-        <span className={styles.psychicModeToastCopy}>
-          <strong>{psychicModeToast.enabled ? "Psychic on" : "Psychic off"}</strong>
-          <small>
-            {psychicModeToast.enabled
-              ? "Summaries will appear under new sends."
-              : "Summaries hidden for new sends."}
-          </small>
-        </span>
-      </div>
-    );
-  };
-
   const renderLocalCommandToast = () => {
     if (!localCommandToast) return null;
     return (
       <div
-        className={`${styles.psychicModeToast} ${styles.localCommandToast}`}
+        className={`${styles.commandToast} ${styles.localCommandToast}`}
         role="status"
         aria-live="polite"
       >
-        <span className={styles.psychicModeToastDot} aria-hidden="true" />
-        <span className={styles.psychicModeToastCopy}>
+        <span className={styles.commandToastDot} aria-hidden="true" />
+        <span className={styles.commandToastCopy}>
           <strong>{localCommandToast.title}</strong>
           <small>{localCommandToast.detail}</small>
         </span>
@@ -77084,21 +76967,6 @@ function HomeContent(): React.JSX.Element {
     event.preventDefault();
     setCoffeeDraft(recalled);
   };
-  const consumeCoffeePsychicCommand = async (trimmedLine: string): Promise<boolean> => {
-    const psychicCommand = parsePsychicSlashCommand(trimmedLine);
-    if (psychicCommand.kind === "none") return false;
-    setCoffeeDraft("");
-    setCoffeeError(null);
-    if (psychicCommand.kind === "error") {
-      setCoffeeError(psychicCommand.error);
-      return true;
-    }
-    await togglePsychicModeFromSlashCommand({
-      clearChatComposer: false,
-      source: "coffee",
-    });
-    return true;
-  };
   const consumeCoffeeNvmCommand = async (trimmedLine: string): Promise<boolean> => {
     const nvmCommand = parseNvmSlashCommand(trimmedLine);
     if (nvmCommand.kind === "none") return false;
@@ -77119,9 +76987,6 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (await consumeCoffeeNvmCommand(trimmedLiveDraft)) {
-      return;
-    }
-    if (await consumeCoffeePsychicCommand(trimmedLiveDraft)) {
       return;
     }
     const echoCommand = parseCoffeeDevCommand(liveDraft);
@@ -77247,7 +77112,6 @@ function HomeContent(): React.JSX.Element {
     if (!trimmed) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (await consumeCoffeeNvmCommand(trimmed)) return;
-    if (await consumeCoffeePsychicCommand(trimmed)) return;
     if (liveDraft !== coffeeDraft) {
       setCoffeeDraft(liveDraft);
     }
@@ -82093,7 +81957,6 @@ function HomeContent(): React.JSX.Element {
         {renderCoffeeGroupSettingsModal()}
 
         {renderSharedPanels()}
-        {renderPsychicModeToast()}
         {renderLocalCommandToast()}
         {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
@@ -84597,7 +84460,6 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
-      {renderPsychicModeToast()}
       {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
@@ -86400,7 +86262,6 @@ function HomeContent(): React.JSX.Element {
       {renderImagesDeleteAllModal()}
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
-      {renderPsychicModeToast()}
       {renderLocalCommandToast()}
       {renderDevToolsPanel()}
       {renderDevMoodVisual()}
