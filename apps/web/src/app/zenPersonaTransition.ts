@@ -1,15 +1,17 @@
 import type { ZenPersonaTransitionStyle } from "@localai/shared";
 
-export type ZenPersonaTransitionChoice = "auto" | ZenPersonaTransitionStyle;
+export type ZenPersonaTransitionMode = ZenPersonaTransitionStyle | "off";
+export type ZenPersonaTransitionChoice = "random" | ZenPersonaTransitionMode;
 export type ZenPersonaPresencePhase = "stable" | "departing" | "arriving";
 
 export const ZEN_PERSONA_PRESENCE_DEPART_MS = 260;
 export const ZEN_PERSONA_PRESENCE_ARRIVE_MS = 360;
 
 export const ZEN_PERSONA_TRANSITION_CHOICES: readonly ZenPersonaTransitionChoice[] = [
-  "auto",
+  "random",
   "new-speaks",
   "previous-introduces",
+  "off",
 ] as const;
 
 export type ZenPersonaPresenceSnapshot = {
@@ -26,13 +28,16 @@ export function resolveZenPersonaTransitionStyle(
     toBotId: string | null;
     random?: () => number;
   }
-): ZenPersonaTransitionStyle {
-  if (choice === "new-speaks" || choice === "previous-introduces") {
+): ZenPersonaTransitionMode {
+  if (choice !== "random") {
     return choice;
   }
 
   const random = options.random ?? Math.random;
-  return random() < 0.5 ? "new-speaks" : "previous-introduces";
+  const roll = random();
+  if (roll < 1 / 3) return "new-speaks";
+  if (roll < 2 / 3) return "previous-introduces";
+  return "off";
 }
 
 export function resolveZenPersonaPresenceDurations(
@@ -50,8 +55,17 @@ export function resolveZenPersonaPresenceDurations(
 export function zenPersonaPresenceAfterPickerSelection(options: {
   fromBotId: string | null;
   toBotId: string | null;
-  style: ZenPersonaTransitionStyle;
+  style: ZenPersonaTransitionMode;
 }): ZenPersonaPresenceSnapshot {
+  if (options.style === "off") {
+    return {
+      visibleBotId: options.toBotId,
+      phase: "stable",
+      targetBotId: options.toBotId,
+      waitingForIntroReveal: false,
+    };
+  }
+
   if (options.style === "previous-introduces") {
     return {
       visibleBotId: options.fromBotId,
