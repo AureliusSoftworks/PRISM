@@ -499,7 +499,7 @@ describe("bot-locked Chat lane", () => {
 });
 
 describe("processChatMessage Psychic planning", () => {
-  it("attaches a concise Psychic summary to the triggering user message", async () => {
+  it("attaches a concise Psychic summary to Chat turns even when the legacy setting is off", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -536,9 +536,11 @@ describe("processChatMessage Psychic planning", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "sandbox",
+        mode: "chat",
         experimentalAllModelEffortEnabled: true,
-        psychicModeEnabled: true,
+        psychicModeEnabled: false,
+        botId: "bot-1",
+        botSystemPrompt: "You are the selected Chat bot.",
         botOverrides: { model: "llama3.2", reasoningEffort: "minimal" },
       }
     );
@@ -934,7 +936,7 @@ describe("processChatMessage Psychic planning", () => {
     );
   });
 
-  it("keeps online Psychic mode summary-only without extra online effort calls", async () => {
+  it("keeps online Chat Psychic summary-only without extra online effort calls", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -955,16 +957,18 @@ describe("processChatMessage Psychic planning", () => {
     const result = await processChatMessage(
       db,
       "user-1",
-      "Help with Psychic on.",
+      "Help in Chat.",
       CHAT_TEST_USER_KEY,
       {
         preferredProvider: "openai",
         openAiApiKey: "sk-test",
         autoMemory: false,
         incognito: true,
-        mode: "zen",
+        mode: "chat",
         experimentalAllModelEffortEnabled: true,
-        psychicModeEnabled: true,
+        psychicModeEnabled: false,
+        botId: "bot-1",
+        botSystemPrompt: "You are the selected Chat bot.",
         botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
       }
     );
@@ -981,6 +985,48 @@ describe("processChatMessage Psychic planning", () => {
       userMessage?.psychicThought?.summary ?? "",
       /^I'm helping with this turn using the selected online model/
     );
+  });
+
+  it("does not attach Psychic text to Zen turns even when the legacy setting is on", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Zen answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Keep Zen quiet.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: true,
+        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(result.psychicDebug, undefined);
+    const userMessage = result.conversation.messages.find(
+      (message) => message.role === "user"
+    );
+    assert.equal(userMessage?.psychicThought, undefined);
   });
 
   it("does not run simulated effort passes for Anthropic models", async () => {
@@ -1023,8 +1069,7 @@ describe("processChatMessage Psychic planning", () => {
       result.conversation.messages.find((message) => message.role === "assistant")?.content,
       "Anthropic answer."
     );
-    assert.equal(result.psychicDebug?.simulated, false);
-    assert.equal(result.psychicDebug?.passCount, 0);
+    assert.equal(result.psychicDebug, undefined);
     assert.ok(
       result.backendEvents?.some(
         (event) =>

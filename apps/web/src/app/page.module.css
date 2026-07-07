@@ -22304,7 +22304,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(10px);
 }
 
-.psychicModeToast {
+.commandToast {
   position: fixed;
   left: 50%;
   bottom: max(92px, calc(env(safe-area-inset-bottom) + 22px));
@@ -22332,21 +22332,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateX(-50%);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  animation: psychicModeToastIn 3.6s ease both;
-}
-
-.psychicModeToast[data-psychic-active="false"] {
-  border-color: color-mix(in srgb, var(--fg-muted) 28%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bg-surface) 90%, var(--fg-muted) 5%),
-      color-mix(in srgb, var(--bg-deep) 88%, transparent)
-    );
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.2),
-    0 0 20px color-mix(in srgb, var(--fg-muted) 9%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
+  animation: commandToastIn 3.6s ease both;
 }
 
 .localCommandToast {
@@ -22363,7 +22349,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
 }
 
-.psychicModeToastDot {
+.commandToastDot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
@@ -22371,18 +22357,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
-.psychicModeToast[data-psychic-active="false"] .psychicModeToastDot {
-  background: color-mix(in srgb, var(--fg-muted) 78%, var(--line));
-  box-shadow: none;
-}
-
-.psychicModeToastCopy {
+.commandToastCopy {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.psychicModeToastCopy strong {
+.commandToastCopy strong {
   font-size: 12px;
   font-weight: 760;
   letter-spacing: 0.08em;
@@ -22390,7 +22371,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-transform: uppercase;
 }
 
-.psychicModeToastCopy small {
+.commandToastCopy small {
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.25;
@@ -22399,7 +22380,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
 }
 
-@keyframes psychicModeToastIn {
+@keyframes commandToastIn {
   0% {
     opacity: 0;
     transform: translate(-50%, 10px) scale(0.97);

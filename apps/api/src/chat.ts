@@ -2638,7 +2638,7 @@ export interface UserChatSettings {
   experimentalDualOllamaEnabled?: boolean;
   /** Experimental: allow non-reasoning models to simulate effort with a planning pass. */
   experimentalAllModelEffortEnabled?: boolean;
-  /** Show concise simulated reasoning summaries below future user turns. */
+  /** Legacy account setting; visible Psychic summaries are now derived from Chat mode. */
   psychicModeEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
@@ -6321,6 +6321,7 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
+  const psychicModeEnabledForTurn = mode === "chat";
   // Incognito is a companion-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
@@ -6546,7 +6547,7 @@ export async function processChatMessage(
       secondaryOllamaHost: settings.secondaryOllamaHost,
       lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
       experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
-      psychicModeEnabled: settings.psychicModeEnabled,
+      psychicModeEnabled: psychicModeEnabledForTurn,
       denialBoundaryProvider: auxiliaryProvider,
       denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
       botSystemPrompt: effectiveBotSystemPrompt,
@@ -6621,7 +6622,7 @@ export async function processChatMessage(
           secondaryOllamaHost: settings.secondaryOllamaHost,
           lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
-          psychicModeEnabled: settings.psychicModeEnabled,
+          psychicModeEnabled: psychicModeEnabledForTurn,
           denialBoundaryProvider: auxiliaryProvider,
           denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
           botSystemPrompt: effectiveBotSystemPrompt,
@@ -7650,7 +7651,7 @@ export async function processChatMessage(
         secondaryOllamaHost: settings.secondaryOllamaHost,
         lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
         experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
-        psychicModeEnabled: settings.psychicModeEnabled,
+        psychicModeEnabled: psychicModeEnabledForTurn,
         denialBoundaryProvider: auxiliaryProvider,
         denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
         botSystemPrompt: effectiveBotSystemPrompt,
@@ -7754,7 +7755,7 @@ export async function processChatMessage(
           secondaryOllamaHost: settings.secondaryOllamaHost,
           lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
-          psychicModeEnabled: settings.psychicModeEnabled,
+          psychicModeEnabled: psychicModeEnabledForTurn,
           denialBoundaryProvider: auxiliaryProvider,
           denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
           botSystemPrompt: effectiveBotSystemPrompt,
