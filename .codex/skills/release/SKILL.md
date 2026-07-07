@@ -82,7 +82,7 @@ In `CHANGELOG.md`:
 - Insert `## [X.Y.Z] - YYYY-MM-DD` immediately below Unreleased using today's local date.
 - Match the existing style: concise bullets with bold lead phrases and 1-3 sentence explanations.
 
-### 5. Stamp Version
+### 5. Stamp Versions
 
 Run:
 
@@ -92,6 +92,15 @@ node scripts/set-version.mjs --version X.Y.Z
 
 This should update package versions and the project version constants. Inspect the diff and keep only expected release/version files.
 
+If the release includes meaningful user-facing or visual applet work, also update applet versions before committing:
+
+- Review changed applet surfaces with `git diff --name-only <last-changelog-commit>..HEAD -- apps/web/src/app docs` and the release-note commit list.
+- Bump each affected applet in `apps/web/src/app/appletVersions.ts`.
+- Update `docs/applets.md` Current Applets and Changelog with today's local date.
+- Keep `apps/web/src/app/appletVersions.test.ts` assertions in sync.
+
+Treat applet visual work broadly: layout, animation, controls, routing, atmosphere, avatars, cups/table art, wallpaper/state presentation, or visible default-state changes should prompt an applet version check.
+
 ### 6. Verify And Commit On dev
 
 Run targeted checks appropriate to the touched files. Prefer at least:
@@ -100,7 +109,7 @@ Run targeted checks appropriate to the touched files. Prefer at least:
 npm run typecheck
 ```
 
-Then stage only release files, usually `CHANGELOG.md` plus files changed by `scripts/set-version.mjs`.
+Then stage only release files, usually `CHANGELOG.md` plus files changed by `scripts/set-version.mjs`; include `docs/applets.md`, `apps/web/src/app/appletVersions.ts`, and `apps/web/src/app/appletVersions.test.ts` when applet versions changed.
 
 Commit on `dev`:
 
