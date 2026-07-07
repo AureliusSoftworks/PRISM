@@ -73,11 +73,11 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /"--zen-live-bot-glyph-x-anchor":\s*`\$\{Math\.round\(bodySize \* 0\.5\)\}px`/
+      /"--zen-live-bot-glyph-x-anchor":\s*`\$\{Math\.round\(bodySize \* 0\.5\) \+ 1\}px`/
     );
     assert.match(
       pageSource,
-      /"--zen-live-bot-glyph-y-anchor":\s*`\$\{Math\.round\(bodySize \* 0\.78\)\}px`/
+      /"--zen-live-bot-glyph-y-anchor":\s*`\$\{Math\.round\(bodySize \* 0\.78\) \+ 1\}px`/
     );
     assert.match(
       pageSource,
@@ -178,8 +178,8 @@ describe("Zen live presence CSS", () => {
 
     const glyphRule = ruleForExactSelector(".zenLiveBotPresenceBotGlyph");
     assert.match(glyphRule, /position:\s*absolute\s*;/);
-    assert.match(glyphRule, /left:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-x-anchor,\s*95px\)\)/);
-    assert.match(glyphRule, /top:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-y-anchor,\s*148px\)\)/);
+    assert.match(glyphRule, /left:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-x-anchor,\s*96px\)\)/);
+    assert.match(glyphRule, /top:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-y-anchor,\s*149px\)\)/);
     assert.match(glyphRule, /width:\s*clamp\(23px,\s*calc\(var\(--zen-live-bot-body-frame-size\)\s*\*\s*0\.16\),\s*33px\)/);
     assert.match(glyphRule, /padding:\s*0\s*;/);
     assert.match(glyphRule, /border:\s*0\s*;/);
