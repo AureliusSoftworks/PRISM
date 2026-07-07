@@ -18,6 +18,7 @@ export type ZenLiveBotActionState = {
 
 const TRAILING_SPEECH_BRIDGE_RE =
   /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
+const ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH = "\u02d0[";
 
 export function zenLiveActionMoodToBotMood(
   moodHint: ZenLiveActionMoodHint | undefined
@@ -98,7 +99,7 @@ export function zenLiveActionPlateFace(
     case "confused":
       return { text: openMouth ?? ":?", rotateDeg: 90 };
     case "stern":
-      return { text: openMouth ?? ":[", rotateDeg: 90 };
+      return { text: openMouth ?? ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH, rotateDeg: 90 };
     case "attentive":
       return { text: openMouth ?? ":]", rotateDeg: 90 };
     case "waiting":

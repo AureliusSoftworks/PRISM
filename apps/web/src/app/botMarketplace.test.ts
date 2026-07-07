@@ -146,8 +146,8 @@ describe("bot marketplace helpers", () => {
   it("rejects missing bundle coverage before a theme install writes anything", () => {
     const manifest = normalizeBotMarketplaceManifest(baseManifest);
     const entries = marketplaceEntriesForTheme(manifest, "famous-philosophers");
-    const bundles = new Map<string, string>([
-      ["/bot-marketplace/bots/bot-plato.bot", "{}"],
+    const bundles = new Map<string, Uint8Array>([
+      ["/bot-marketplace/bots/bot-plato.bot", new Uint8Array([1])],
     ]);
 
     assert.throws(

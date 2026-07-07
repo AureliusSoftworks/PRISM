@@ -26,9 +26,9 @@ The user has asked to pause, save, or finish the current thread later. Given onl
 Return JSON only in this shape: {"title":"3-8 word label","text":"1-3 concise sentences preserving the story/task checkpoint, open variables, names, choices, and where to resume."}
 Do not invent hidden text. Do not mention that this is a memory.`;
 
-const ZEN_PERSONA_SESSION_MEMORY_EXTRACT_PROMPT = `You write short-lived Zen Persona checkpoints for Prism.
-Given only the ordinary one-on-one transcript between this Persona and the human user, extract what this Persona should remember about their interaction with the user.
-Return JSON only in this shape: {"title":"3-8 word label","text":"1-3 concise sentences preserving the player-facing story/task checkpoint, emotional beat, open variables, and where this Persona should resume."}
+const ZEN_PERSONA_SESSION_MEMORY_EXTRACT_PROMPT = `You write short-lived Zen Facet checkpoints for Prism.
+Given only the ordinary one-on-one transcript between this Facet and the human user, extract what this Facet should remember about their interaction with the user.
+Return JSON only in this shape: {"title":"3-8 word label","text":"1-3 concise sentences preserving the player-facing story/task checkpoint, emotional beat, open variables, and where this Facet should resume."}
 Do not write memories of bots talking to each other, meeting each other, watching each other, or having relationships with each other.
 Do not mention hidden memory, checkpoints, UI, or metadata.`;
 
@@ -502,7 +502,7 @@ function buildPersonaCheckpointTranscript(args: {
 
   const transcript = relevantRows
     .slice(-ZEN_SESSION_MEMORY_TRANSCRIPT_MAX_MESSAGES)
-    .map((row) => `${row.role === "user" ? "User" : "Persona"}: ${clampText(row.content, 900)}`)
+    .map((row) => `${row.role === "user" ? "User" : "Facet"}: ${clampText(row.content, 900)}`)
     .join("\n");
   if (!transcript.trim()) return null;
   return {
@@ -526,7 +526,7 @@ function resolvePersonaName(db: DatabaseSync, userId: string, botId: string | nu
   const row = db
     .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public') LIMIT 1")
     .get(botId, userId) as { name?: string | null } | undefined;
-  return row?.name?.trim() || "Persona";
+  return row?.name?.trim() || "Facet";
 }
 
 export async function createZenPersonaSessionMemoryCheckpoint(args: {
@@ -564,7 +564,7 @@ export async function createZenPersonaSessionMemoryCheckpoint(args: {
       {
         role: "user",
         content: [
-          `Persona: ${personaName}`,
+          `Facet: ${personaName}`,
           "[Ordinary one-on-one transcript]",
           checkpointTranscript.transcript,
         ].join("\n"),
@@ -649,7 +649,10 @@ export function getZenPreviousContextSummary(args: {
          FROM conversations
         WHERE user_id = ?
           AND COALESCE(incognito, 0) = 0
-          AND conversation_mode IN ('zen', 'chat')
+          AND (
+            conversation_mode = 'zen'
+            OR (conversation_mode = 'chat' AND bot_id IS NULL)
+          )
           AND (? IS NULL OR id != ?)
         ORDER BY updated_at DESC
         LIMIT 8`
@@ -671,7 +674,10 @@ export function getZenPreviousContextSummary(args: {
         WHERE id = ?
           AND user_id = ?
           AND COALESCE(incognito, 0) = 0
-          AND conversation_mode IN ('zen', 'chat')
+          AND (
+            conversation_mode = 'zen'
+            OR (conversation_mode = 'chat' AND bot_id IS NULL)
+          )
         LIMIT 1`
     )
     .get(activeConversationId, userId) as
@@ -739,9 +745,9 @@ export function buildZenPersonaContinuityPromptContext(
 ): string | null {
   const memory = overview?.sessionMemories[0];
   if (!memory) return null;
-  const label = personaName?.trim() || (memory.botId ? "this Persona" : "Prism");
+  const label = personaName?.trim() || (memory.botId ? "this Facet" : "Prism");
   return [
-    "Zen Persona continuity context:",
+    "Zen Facet continuity context:",
     `This is private short-term continuity for ${label}'s one-on-one relationship with the human user.`,
     "Use it only when it helps the current reply feel continuous. Do not announce hidden memory or metadata.",
     "Do not treat this as memory of bots talking to, meeting, watching, or being with each other.",

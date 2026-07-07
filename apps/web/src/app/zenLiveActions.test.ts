@@ -88,7 +88,7 @@ describe("zenLiveActionPlateFace", () => {
       ["warm", ":]"],
       ["attentive", ":]"],
       ["confused", ":?"],
-      ["stern", ":["],
+      ["stern", "\u02d0["],
       ["waiting", ":|"],
       ["neutral", ":|"],
     ] as const;

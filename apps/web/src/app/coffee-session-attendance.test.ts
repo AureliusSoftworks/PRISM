@@ -4,6 +4,7 @@ import {
   coffeeGroupAttendanceCanStart,
   coffeeGroupAttendingBotIds,
   coffeeGroupSessionExcludedBotIds,
+  sanitizeCoffeeSeatBotIdsForAvailableBots,
   toggleCoffeeExcludedBotId,
 } from "./coffee-session-attendance.ts";
 
@@ -27,6 +28,16 @@ describe("coffee session attendance helpers", () => {
     assert.deepEqual(
       coffeeGroupSessionExcludedBotIds(["bot-a", "bot-b"], ["bot-missing", "bot-b"]),
       ["bot-b"]
+    );
+  });
+
+  it("prunes missing and duplicate draft seat ids before Coffee starts", () => {
+    assert.deepEqual(
+      sanitizeCoffeeSeatBotIdsForAvailableBots(
+        ["bot-a", "bot-missing", null, " bot-b ", "bot-a"],
+        ["bot-a", "bot-b"]
+      ),
+      ["bot-a", null, null, "bot-b", null]
     );
   });
 

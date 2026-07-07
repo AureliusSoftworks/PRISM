@@ -152,7 +152,7 @@ export function storyNpcFaceTextForExpression(
     case "warm":
       return isTalking ? ":0" : ":]";
     case "guarded":
-      return isTalking ? ":V" : ":[";
+      return isTalking ? ":V" : "\u02d0[";
     case "strained":
       return isTalking ? ";0" : ";(";
     case "neutral":

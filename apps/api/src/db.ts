@@ -266,6 +266,17 @@ export function createDatabase(): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_hubs (
+      user_id TEXT NOT NULL,
+      bot_key TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, bot_key),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_hubs_conversation
+      ON conversation_hubs(conversation_id);
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -392,6 +403,7 @@ export function createDatabase(): DatabaseSync {
       face_mouth_font TEXT,
       face_font_weight INTEGER,
       profile_picture_image_id TEXT,
+      accessory_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -964,6 +976,19 @@ export function createDatabase(): DatabaseSync {
   const conversationColumns = db
     .prepare("PRAGMA table_info(conversations)")
     .all() as Array<{ name: string }>;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_hubs (
+      user_id TEXT NOT NULL,
+      bot_key TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, bot_key),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_hubs_conversation
+      ON conversation_hubs(conversation_id);
+  `);
   const hasConversationModeColumn = conversationColumns.some(
     (column) => column.name === "conversation_mode"
   );
@@ -987,6 +1012,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationBotGroupIdsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN bot_group_ids TEXT;");
+  }
+  const hasConversationParentIdColumn = conversationColumns.some(
+    (column) => column.name === "parent_id"
+  );
+  if (!hasConversationParentIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN parent_id TEXT;");
+  }
+  const hasConversationForkMessageIdColumn = conversationColumns.some(
+    (column) => column.name === "fork_message_id"
+  );
+  if (!hasConversationForkMessageIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN fork_message_id TEXT;");
   }
   const hasConversationCoffeeSettingsColumn = conversationColumns.some(
     (column) => column.name === "coffee_settings"
@@ -1133,7 +1170,8 @@ export function createDatabase(): DatabaseSync {
   db.exec(`
     UPDATE conversations
     SET conversation_mode = 'zen'
-    WHERE conversation_mode = 'chat';
+    WHERE conversation_mode = 'chat'
+      AND bot_id IS NULL;
   `);
 
   const memoryColumns = db
@@ -1332,6 +1370,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotProfilePictureImageIdColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN profile_picture_image_id TEXT;");
+  }
+  const hasBotAccessoryImageIdColumn = botColumns.some(
+    (column) => column.name === "accessory_image_id"
+  );
+  if (!hasBotAccessoryImageIdColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN accessory_image_id TEXT;");
   }
   const hasBotChatEnabledColumn = botColumns.some(
     (column) => column.name === "chat_enabled"
@@ -1562,9 +1606,11 @@ export function mapConversation(
   messages: ChatMessage[]
 ): Conversation {
   const conversationMode =
-    row.conversation_mode === "zen" || row.conversation_mode === "chat"
+    row.conversation_mode === "zen"
       ? "zen"
-      : row.conversation_mode === "coffee"
+      : row.conversation_mode === "chat"
+        ? "chat"
+        : row.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
   const botGroupIds = parseBotGroupIds(row.bot_group_ids);

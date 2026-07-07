@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
+import { getConversationHubMetadata } from "./conversation-hubs.ts";
 import {
   analyzeMemoryIntent,
   extractBotJudgmentMemoryCandidates,
@@ -2600,7 +2601,7 @@ export interface UserChatSettings {
    * intro behavior if no protected about-you memory exists yet.
    */
   starterPromptWarrantsIntro?: boolean;
-  /** Human-readable persona label for starter chat titles. */
+  /** Human-readable persona/Facet label for starter chat titles. */
   starterPromptLabel?: string;
   /**
    * Tri-valued by design:
@@ -2612,9 +2613,12 @@ export interface UserChatSettings {
    * The tri-state is what lets a mid-thread bot switch persist to the
    * conversation row without also nuking the bot_id for every legacy
    * caller that forgets to include the field.
-   * Chat Companion 2.0 ignores this knob to enforce a single companion persona.
+   * Chat requires this to lock the conversation to one bot. Zen treats it as a
+   * backwards-compatible Facet selector when `facetBotId` is not provided.
    */
   botId?: string | null;
+  /** Preferred Zen Facet selector. Keeps the conversation row bot_id NULL. */
+  facetBotId?: string | null;
   incognito?: boolean;
   /**
    * Client-held prior messages for private chats. Used as prompt context only;
@@ -2653,10 +2657,9 @@ export interface UserChatSettings {
   /** Saved Zen setting: how many recent transcript rows stay verbatim in chat context. */
   recentContextMessageLimit?: number | null;
   /**
-   * Which post-auth surface the request originated from. Changes what
-   * "memory" means for this turn:
-   *   - "chat": cross-thread personal-fact memory + Qdrant summary recall.
-   *     Honors `incognito` as an ephemeral + skip-memory shortcut.
+   * Which post-auth surface the request originated from:
+   *   - "zen": PRISM lane with optional per-turn Facet attribution.
+   *   - "chat": bot-locked persona lane with bot-scoped memory.
    *   - "sandbox": NO cross-thread memory. Thread-scoped rolling
    *     compaction only — silent, invisible in the sidebar, never
    *     retrievable from other conversations.
@@ -2681,7 +2684,9 @@ export interface UserChatSettings {
   promptShortcut?: PromptShortcutMetadata;
   /** Optional user-facing wildcard metadata for resolved deck/option sends. */
   promptWildcards?: PromptWildcardRunMetadata;
-  /** Zen-only assistant transition after a Persona picker change. */
+  /** Preferred user-facing name for Zen Facet handoff. */
+  facetTransition?: ZenPersonaTransitionInput;
+  /** Backwards-compatible assistant transition after a Persona picker change. */
   personaTransition?: ZenPersonaTransitionInput;
   /** Zen-only idle autonomy turn. */
   zenAutonomy?: ZenAutonomyInput;
@@ -2721,7 +2726,7 @@ const COFFEE_CONTINUITY_SUMMARY_MAX_CHARS = 700;
 const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
 function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
-  if (mode === "zen" || mode === "chat") return "zen";
+  if (mode === "zen" || mode === "chat") return mode;
   if (mode === "coffee") return "coffee";
   return "sandbox";
 }
@@ -2735,6 +2740,139 @@ function sameChatBotId(
   right: string | null | undefined
 ): boolean {
   return normalizeChatBotId(left) === normalizeChatBotId(right);
+}
+
+function conversationColumnSet(db: DatabaseSync): Set<string> {
+  const rows = db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
+  return new Set(rows.map((row) => row.name));
+}
+
+function getOrCreateSessionBotProjectionConversation(
+  db: DatabaseSync,
+  userId: string,
+  sessionConversationId: string,
+  botId: string,
+  forkMessageId: string | null,
+  nowIso: string
+): string | null {
+  const columns = conversationColumnSet(db);
+  if (!columns.has("parent_id") || !columns.has("fork_message_id")) return null;
+  const bot = db
+    .prepare("SELECT id, name FROM bots WHERE id = ? AND user_id = ?")
+    .get(botId, userId) as { id: string; name: string | null } | undefined;
+  if (!bot) return null;
+
+  const filters = [
+    "user_id = ?",
+    "parent_id = ?",
+    "bot_id = ?",
+    "conversation_mode = 'chat'",
+  ];
+  if (columns.has("incognito")) {
+    filters.push("COALESCE(incognito, 0) = 0");
+  }
+  if (columns.has("archived_at")) {
+    filters.push("archived_at IS NULL");
+  }
+  const existing = db
+    .prepare(
+      `SELECT id
+         FROM conversations
+        WHERE ${filters.join("\n          AND ")}
+        ORDER BY updated_at DESC
+        LIMIT 1`
+    )
+    .get(userId, sessionConversationId, botId) as { id: string } | undefined;
+  if (existing?.id) return existing.id;
+
+  const projectionConversationId = randomId(12);
+  db.prepare(
+    `INSERT INTO conversations (
+      id, user_id, title, conversation_mode, bot_id, parent_id,
+      fork_message_id, incognito, created_at, updated_at
+    ) VALUES (?, ?, ?, 'chat', ?, ?, ?, 0, ?, ?)`
+  ).run(
+    projectionConversationId,
+    userId,
+    bot.name?.trim() || "Bot chat",
+    botId,
+    sessionConversationId,
+    forkMessageId,
+    nowIso,
+    nowIso
+  );
+  return projectionConversationId;
+}
+
+function mirrorZenTurnIntoSessionBotProjection(input: {
+  db: DatabaseSync;
+  userId: string;
+  sessionConversationId: string;
+  botId: string | null | undefined;
+  userMessageId: string | null;
+  assistantProseMessageId: string;
+  assistantImageMessageId?: string | null;
+  updatedAt: string;
+}): void {
+  const botId = normalizeChatBotId(input.botId);
+  if (!botId) return;
+  const projectionConversationId = getOrCreateSessionBotProjectionConversation(
+    input.db,
+    input.userId,
+    input.sessionConversationId,
+    botId,
+    input.assistantProseMessageId,
+    input.updatedAt
+  );
+  if (!projectionConversationId) return;
+
+  const sourceMessageIds = [
+    input.userMessageId,
+    input.assistantProseMessageId,
+    input.assistantImageMessageId ?? null,
+  ].filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (sourceMessageIds.length === 0) return;
+
+  const sourceRows = input.db
+    .prepare(
+      `SELECT role, content, provider, model, bot_id, tool_payload, created_at
+         FROM messages
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND id IN (${sourceMessageIds.map(() => "?").join(", ")})
+        ORDER BY created_at ASC, rowid ASC`
+    )
+    .all(input.userId, input.sessionConversationId, ...sourceMessageIds) as Array<{
+      role: string;
+      content: string;
+      provider: string | null;
+      model: string | null;
+      bot_id: string | null;
+      tool_payload: string | null;
+      created_at: string;
+    }>;
+
+  for (const row of sourceRows) {
+    input.db
+      .prepare(
+        "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(
+        randomId(12),
+        projectionConversationId,
+        input.userId,
+        row.role,
+        row.content,
+        row.provider,
+        row.model,
+        row.bot_id,
+        row.tool_payload,
+        row.created_at
+      );
+  }
+  input.db
+    .prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?")
+    .run(input.updatedAt, projectionConversationId, input.userId);
 }
 
 function readResumeContextString(value: unknown, maxChars = SESSION_RESUME_SUMMARY_MAX_CHARS): string | undefined {
@@ -3030,6 +3168,10 @@ function rollbackCancelledPersistedTurn(args: {
 }
 
 function isZenMode(mode: ChatMode): boolean {
+  return mode === "zen";
+}
+
+function isCompanionMode(mode: ChatMode): boolean {
   return mode === "zen" || mode === "chat";
 }
 
@@ -4896,7 +5038,7 @@ function readBotNameForZenPersona(
   const row = db
     .prepare("SELECT name FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')")
     .get(botId, userId) as { name?: string | null } | undefined;
-  return row?.name?.trim() || "the selected Persona";
+  return row?.name?.trim() || "the selected Facet";
 }
 
 function buildZenPersonaTransitionInstruction(args: {
@@ -4914,33 +5056,33 @@ function buildZenPersonaTransitionInstruction(args: {
   if (args.style === "previous-introduces") {
     if (!args.toBotId) {
       return [
-        "The user has turned off the active Zen Persona and returned Zen Mode to default PRISM.",
-        `The previous active Persona was ${fromName}.`,
+        "The user has turned off the active Zen Facet and returned Zen Mode to default PRISM.",
+        `The previous active Facet was ${fromName}.`,
         `Write one brief, natural handoff as ${fromName} that yields the conversation back to PRISM.`,
-        "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+        "Do not describe UI controls, system messages, or the mechanics of switching Facets.",
       ].join("\n");
     }
     return [
       `The user is switching Zen Mode from ${fromName} to ${toName}.`,
       `Write one brief, natural handoff as ${fromName} that introduces ${toName} or passes the conversation to them.`,
-      "Do not speak as the incoming Persona after the handoff.",
-      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+      "Do not speak as the incoming Facet after the handoff.",
+      "Do not describe UI controls, system messages, or the mechanics of switching Facets.",
     ].join("\n");
   }
   if (!args.toBotId) {
     return [
       "The user has returned Zen Mode to the default PRISM persona.",
-      `The previous active Persona was ${fromName}.`,
+      `The previous active Facet was ${fromName}.`,
       "Write one brief, natural handoff as PRISM that gently re-centers the conversation.",
-      "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+      "Do not describe UI controls, system messages, or the mechanics of switching Facets.",
     ].join("\n");
   }
   return [
-    `The user has equipped the ${toName} Persona in Zen Mode.`,
-    `The previous active Persona was ${fromName}.`,
+    `The user has equipped the ${toName} Facet in Zen Mode.`,
+    `The previous active Facet was ${fromName}.`,
     `Write one brief, natural first message as ${toName} that enters the ongoing conversation smoothly.`,
     "It may acknowledge the handoff or simply respond from the new perspective, whichever feels more natural from the recent context.",
-    "Do not describe UI controls, system messages, or the mechanics of switching personas.",
+    "Do not describe UI controls, system messages, or the mechanics of switching Facets.",
   ].join("\n");
 }
 
@@ -4979,7 +5121,7 @@ function zenAutonomyPersonaCandidates(
     ...rows
       .map((row) => ({
         botId: row.id,
-        name: row.name?.trim() || "Unnamed Persona",
+        name: row.name?.trim() || "Unnamed Facet",
       }))
       .filter((row) => row.botId && row.name.length > 0),
   ];
@@ -5072,7 +5214,7 @@ export async function decideZenAutonomyTurn(args: {
         "You are the Zen Autonomy router for Prism.",
         "Choose whether Zen should stay silent or initiate one brief assistant message after user idleness.",
         "Silence is preferred unless a small, natural check-in would feel alive and welcome.",
-        "If speaking, choose PRISM/default or one chat-enabled Persona from the candidate list.",
+        "If speaking, choose PRISM/default or one chat-enabled Facet from the candidate list.",
         "Never guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
         "Return only JSON: {\"action\":\"silent\"} or {\"action\":\"speak\",\"botId\":null|string}.",
       ].join("\n"),
@@ -5081,7 +5223,7 @@ export async function decideZenAutonomyTurn(args: {
       role: "user",
       content: [
         `Idle minutes: ${idleMinutes}.`,
-        `Active Persona: ${activeName} (${args.activeBotId ?? "PRISM"}).`,
+        `Active Facet: ${activeName} (${args.activeBotId ?? "PRISM"}).`,
         args.prismMood
           ? `PRISM mood: ${args.prismMood.moodKey}; annoyance=${args.prismMood.annoyance}; warmth=${args.prismMood.warmth}; engagement=${args.prismMood.engagement}.`
           : "PRISM mood: unavailable.",
@@ -5839,7 +5981,8 @@ async function retrieveMemoriesWithFallback(
   message: string,
   userKey: Buffer,
   botId: string | null,
-  includeThreadSummaries: boolean
+  includeThreadSummaries: boolean,
+  botScopedOnly = false
 ): Promise<string[]> {
   const timeoutSentinel = Symbol("memory-timeout");
   const timeout = new Promise<typeof timeoutSentinel>((resolve) => {
@@ -5860,7 +6003,10 @@ async function retrieveMemoriesWithFallback(
   const lines: string[] = [];
   const [encrypted, summaries] = result;
   if (encrypted.status === "fulfilled") {
-    lines.push(...encrypted.value.map((m) => m.text));
+    const memories = botScopedOnly
+      ? encrypted.value.filter((memory) => sameChatBotId(memory.botId, botId))
+      : encrypted.value;
+    lines.push(...memories.map((m) => m.text));
   }
   if (summaries.status === "fulfilled") {
     lines.push(...summaries.value.map((m) => m.text));
@@ -5902,6 +6048,7 @@ function buildModeRuntimePlan(mode: ChatMode, incognitoForTurn: boolean): ModeRu
 }
 
 async function handleCompanionChatTurn(args: {
+  mode: ChatMode;
   db: DatabaseSync;
   provider: LlmProvider;
   userId: string;
@@ -5914,6 +6061,7 @@ async function handleCompanionChatTurn(args: {
   userDisplayName?: string;
 }): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
   const {
+    mode,
     db,
     provider,
     userId,
@@ -5926,13 +6074,16 @@ async function handleCompanionChatTurn(args: {
   } = args;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
+  const botScopedOnly = mode === "chat";
   if (isStarterPrompt && retrievalMode === "cross_thread") {
     memoryLines = retrieveRecentMemoriesForStarter(
       db,
       userId,
       userKey,
       activeMemoryBotId
-    ).map((memory) => memory.text);
+    )
+      .filter((memory) => !botScopedOnly || sameChatBotId(memory.botId, activeMemoryBotId))
+      .map((memory) => memory.text);
   } else if (!isStarterPrompt) {
     memoryLines = await retrieveMemoriesWithFallback(
       db,
@@ -5941,7 +6092,8 @@ async function handleCompanionChatTurn(args: {
       message,
       userKey,
       activeMemoryBotId,
-      true
+      mode === "zen",
+      botScopedOnly
     );
     mentionedBotContexts = await buildMentionedBotPromptContexts({
       db,
@@ -5949,12 +6101,12 @@ async function handleCompanionChatTurn(args: {
       userKey,
       message,
       userDisplayName: args.userDisplayName,
-      includeMemories: retrievalMode === "cross_thread",
+      includeMemories: retrievalMode === "cross_thread" && mode === "zen",
     });
   }
   const threadSummary =
     retrievalMode === "cross_thread"
-      ? getLatestThreadSummary(db, userId, activeConversationId, "chat")
+      ? getLatestThreadSummary(db, userId, activeConversationId, mode)
       : null;
   return { threadSummary, memoryLines, mentionedBotContexts };
 }
@@ -6062,10 +6214,11 @@ export function loadPersistedConversationForChatResponse(args: {
   }
 
   const conversationModeOut: ChatMode =
-    conversationRow.conversation_mode === "zen" ||
-    conversationRow.conversation_mode === "chat"
+    conversationRow.conversation_mode === "zen"
       ? "zen"
-      : conversationRow.conversation_mode === "coffee"
+      : conversationRow.conversation_mode === "chat"
+        ? "chat"
+        : conversationRow.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
   const messageRowsDescOrAsc = db
@@ -6075,7 +6228,8 @@ export function loadPersistedConversationForChatResponse(args: {
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
-       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"},
+                m.rowid ${conversationModeOut === "zen" ? "DESC" : "ASC"}
        LIMIT ?`
     )
     .all(
@@ -6114,6 +6268,9 @@ export function loadPersistedConversationForChatResponse(args: {
     activeConversationId,
     "ignored_question"
   );
+  const hubMetadata = getConversationHubMetadata(db, userId, activeConversationId);
+  const includeZenWallpaper =
+    conversationModeOut === "zen" || hubMetadata?.hubRole === "side";
 
   return {
     id: conversationRow.id,
@@ -6121,11 +6278,18 @@ export function loadPersistedConversationForChatResponse(args: {
     title: conversationRow.title,
     mode: conversationModeOut,
     botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    ...(hubMetadata
+      ? {
+          hubRole: hubMetadata.hubRole,
+          hubBotId: hubMetadata.hubBotId,
+          parentHubId: hubMetadata.parentHubId,
+        }
+      : {}),
     incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
-    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    ...(includeZenWallpaper ? { zenWallpaper: zenWallpaperOut } : {}),
     prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,
@@ -6157,21 +6321,30 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
-  // Incognito is a Chat-mode concept (see shared types): keeps the thread
+  // Incognito is a companion-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.
-  const incognitoForTurn = settings.incognito === true && isZenMode(mode);
-  // Bot scope comes from the request's tri-state `botId` (undefined/null/string).
-  // In Zen this is per-turn Persona attribution; the conversation row itself
+  const incognitoForTurn = settings.incognito === true && isCompanionMode(mode);
+  // Bot scope comes from Chat's locked `botId` or Zen's optional Facet selector.
+  // In Zen this is per-turn Facet attribution; the conversation row itself
   // still reports botId null so Zen remains one continuous PRISM thread.
-  const activeBotId = settings.botId;
+  const activeBotId = isZenMode(mode)
+    ? settings.facetBotId !== undefined
+      ? settings.facetBotId
+      : settings.botId
+    : settings.botId;
   const activeMemoryBotId =
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
       : null;
+  if (mode === "chat" && !activeMemoryBotId) {
+    throw new Error("Choose a bot before chatting.");
+  }
+  const requestedPersonaTransition =
+    settings.facetTransition ?? settings.personaTransition;
   const personaTransition =
-    isZenMode(mode) && settings.personaTransition?.source === "picker"
-      ? normalizeZenPersonaTransition(settings.personaTransition)
+    isZenMode(mode) && requestedPersonaTransition?.source === "picker"
+      ? normalizeZenPersonaTransition(requestedPersonaTransition)
       : null;
   const personaTransitionTurn = personaTransition !== null;
   const zenAutonomy =
@@ -6723,37 +6896,12 @@ export async function processChatMessage(
 
   let activeConversationId = conversationId;
   let createdConversationForTurn = false;
-  if (isZenMode(mode) && settings.forceNewConversation !== true) {
-    const latestChatConversation = db
-      .prepare(
-        `SELECT c.id
-           FROM conversations c
-          WHERE c.user_id = ?
-            AND COALESCE(c.incognito, 0) = 0
-            AND c.conversation_mode IN ('zen', 'chat')
-            AND (
-              NOT EXISTS (
-                SELECT 1 FROM messages m_any
-                 WHERE m_any.conversation_id = c.id
-                   AND m_any.user_id = c.user_id
-              )
-              OR EXISTS (
-                SELECT 1 FROM messages m_assistant
-                 WHERE m_assistant.conversation_id = c.id
-                   AND m_assistant.user_id = c.user_id
-                   AND m_assistant.role = 'assistant'
-              )
-            )
-          ORDER BY c.updated_at DESC
-          LIMIT 1`
-      )
-      .get(userId) as { id?: string } | undefined;
-    if (!activeConversationId) {
-      activeConversationId = latestChatConversation?.id;
-    } else {
+  if (isZenMode(mode)) {
+    if (activeConversationId) {
+      const conversationColumns = conversationColumnSet(db);
       const requested = db
         .prepare(
-          `SELECT c.id, c.conversation_mode,
+          `SELECT c.id, c.conversation_mode, c.bot_id${conversationColumns.has("parent_id") ? ", c.parent_id" : ""},
                   EXISTS (
                     SELECT 1 FROM messages m_any
                      WHERE m_any.conversation_id = c.id
@@ -6772,6 +6920,8 @@ export async function processChatMessage(
         | {
             id: string;
             conversation_mode: string | null;
+            bot_id: string | null;
+            parent_id?: string | null;
             has_messages: number;
             has_assistant_reply: number;
           }
@@ -6779,22 +6929,104 @@ export async function processChatMessage(
       if (!requested?.id) {
         throw new Error("Conversation not found for this user.");
       }
+      const requestedIsZenCompatible =
+        requested.conversation_mode === "zen" ||
+        (requested.conversation_mode === "chat" &&
+          requested.bot_id === null &&
+          !requested.parent_id);
       const requestedIsUnfinishedZenTurn =
-        (requested.conversation_mode === "zen" || requested.conversation_mode === "chat") &&
-        requested.has_messages === 1 &&
+        requestedIsZenCompatible &&
+        requested.has_messages > 0 &&
         requested.has_assistant_reply !== 1;
-      if (
-        (requested.conversation_mode !== "zen" &&
-          requested.conversation_mode !== "chat") ||
-        requestedIsUnfinishedZenTurn
-      ) {
-        activeConversationId = latestChatConversation?.id;
+      if (requested.parent_id) {
+        activeConversationId = requested.parent_id;
+      } else if (requestedIsZenCompatible && !requestedIsUnfinishedZenTurn) {
+        // Keep the selected PRISM session as the canonical canvas. Bot picks
+        // become drawer-side child projections instead of switching to global
+        // per-bot hubs.
+      } else if (requestedIsUnfinishedZenTurn) {
+        activeConversationId = undefined;
+      } else {
+        throw new Error("Zen messages must be sent to a PRISM session.");
+      }
+    }
+    if (!activeConversationId && !settings.forceNewConversation) {
+      const conversationColumnNames = conversationColumnSet(db);
+      const latestPrismFilters = ["c.user_id = ?"];
+      if (conversationColumnNames.has("incognito")) {
+        latestPrismFilters.push("COALESCE(c.incognito, 0) = 0");
+      }
+      if (conversationColumnNames.has("archived_at")) {
+        latestPrismFilters.push("c.archived_at IS NULL");
+      }
+      if (conversationColumnNames.has("parent_id")) {
+        latestPrismFilters.push("c.parent_id IS NULL");
+      }
+      const hubTableExists = Boolean(
+        (
+          db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversation_hubs'")
+            .get() as { name?: string } | undefined
+        )?.name
+      );
+      const legacyBotHubExclusion = hubTableExists
+        ? `AND NOT EXISTS (
+                SELECT 1 FROM conversation_hubs h
+                 WHERE h.user_id = c.user_id
+                   AND h.conversation_id = c.id
+                   AND h.bot_key != '__prism__'
+              )`
+        : "";
+      const latestPrismConversation = db
+        .prepare(
+          `SELECT c.id, c.conversation_mode
+             FROM conversations c
+            WHERE ${latestPrismFilters.join("\n              AND ")}
+              AND (
+                c.conversation_mode = 'zen'
+                OR (c.conversation_mode = 'chat' AND c.bot_id IS NULL)
+              )
+              ${legacyBotHubExclusion}
+              AND (
+                NOT EXISTS (
+                  SELECT 1 FROM messages m_any
+                   WHERE m_any.conversation_id = c.id
+                     AND m_any.user_id = c.user_id
+                )
+                OR EXISTS (
+                  SELECT 1 FROM messages m_assistant
+                   WHERE m_assistant.conversation_id = c.id
+                     AND m_assistant.user_id = c.user_id
+                     AND m_assistant.role = 'assistant'
+                )
+              )
+            ORDER BY c.updated_at DESC
+            LIMIT 1`
+        )
+        .get(userId) as { id?: string; conversation_mode?: string | null } | undefined;
+      if (latestPrismConversation?.id) {
+        activeConversationId = latestPrismConversation.id;
       }
     }
     if (activeConversationId) {
       db.prepare(
-        "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND conversation_mode = 'chat'"
+        "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND conversation_mode = 'chat' AND bot_id IS NULL"
       ).run(activeConversationId, userId);
+    }
+  } else if (mode === "chat" && activeConversationId) {
+    const requested = db
+      .prepare("SELECT id, conversation_mode, bot_id FROM conversations WHERE id = ? AND user_id = ?")
+      .get(activeConversationId, userId) as
+      | { id: string; conversation_mode: string | null; bot_id: string | null }
+      | undefined;
+    if (!requested?.id) {
+      throw new Error("Conversation not found for this user.");
+    }
+    if (requested.conversation_mode !== "chat") {
+      throw new Error("Chat conversations cannot switch lanes.");
+    }
+    if (!sameChatBotId(requested.bot_id, activeMemoryBotId)) {
+      throw new Error("Chat conversations stay locked to one bot.");
     }
   }
   throwIfChatRequestCancelled(settings.signal);
@@ -6805,13 +7037,14 @@ export async function processChatMessage(
   if (!activeConversationId) {
     activeConversationId = randomId(12);
     createdConversationForTurn = true;
-    const conversationTitle = isStarterPrompt
+    const baseConversationTitle = isStarterPrompt
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : personaTransitionTurn
           ? "Zen"
         : zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
           ? "Zen"
         : generateConversationTitle(modelUserMessage);
+    const conversationTitle = baseConversationTitle;
     const conversationMode = isZenMode(mode) ? "zen" : mode;
     const conversationBotId = isZenMode(mode) ? null : activeBotId ?? null;
     if (rememberedZenWallpaperForNewConversation) {
@@ -6940,18 +7173,29 @@ export async function processChatMessage(
     outgoingZenPersonaCheckpointBotId = zenAutonomy.activeBotId;
   }
   if (outgoingZenPersonaCheckpointBotId !== undefined) {
+    let checkpointConversationId = activeConversationId;
+    if (!sameChatBotId(outgoingZenPersonaCheckpointBotId, activeMemoryBotId)) {
+      const requestedConversation = conversationId
+        ? (db
+            .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+            .get(conversationId, userId) as { id: string } | undefined)
+        : undefined;
+      checkpointConversationId =
+        requestedConversation?.id ??
+        activeConversationId;
+    }
     const checkpoint = await createZenPersonaSessionMemoryCheckpoint({
       db,
       provider: auxiliaryProvider,
       userId,
-      conversationId: activeConversationId,
+      conversationId: checkpointConversationId,
       botId: outgoingZenPersonaCheckpointBotId,
       userKey,
     });
     if (checkpoint) {
       pushBackendEvent(
         "memory",
-        "Zen Persona checkpoint saved",
+        "Zen Facet checkpoint saved",
         `bot=${checkpoint.botId ?? "default"}; title=${checkpoint.title}; expiresAt=${checkpoint.expiresAt}`
       );
     }
@@ -7088,8 +7332,9 @@ export async function processChatMessage(
   ) {
     throwIfChatRequestCancelled(settings.signal);
     const pipelineResult =
-      isZenMode(mode)
+      isCompanionMode(mode)
         ? await handleCompanionChatTurn({
+            mode,
             db,
             provider,
             userId,
@@ -7116,7 +7361,7 @@ export async function processChatMessage(
     mentionedBotContexts = pipelineResult.mentionedBotContexts;
   }
   if (
-    isZenMode(mode) &&
+    isCompanionMode(mode) &&
     !incognitoForTurn &&
     !isStarterPrompt &&
     !personaTransitionTurn &&
@@ -7276,7 +7521,7 @@ export async function processChatMessage(
 	  if (zenPersonaContinuityContext?.sessionMemories.length) {
 	    pushBackendEvent(
 	      "context",
-	      "Loaded Zen Persona continuity",
+	      "Loaded Zen Facet continuity",
 	      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
 	    );
 	  }
@@ -7818,6 +8063,21 @@ export async function processChatMessage(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantCreatedAt, activeConversationId, userId);
   }
+  if (isZenMode(mode) && !incognitoForTurn) {
+    mirrorZenTurnIntoSessionBotProjection({
+      db,
+      userId,
+      sessionConversationId: activeConversationId,
+      botId: activeMemoryBotId ?? assistantBotId ?? null,
+      userMessageId,
+      assistantProseMessageId,
+      assistantImageMessageId:
+        sentGeneratedImagePersisted && toolPayloadImageOnly
+          ? assistantImageMessageId
+          : null,
+      updatedAt: imageFollowUpCreatedAt,
+    });
+  }
   const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, opinionBotIdForTurn) ??
       buildOpinion(
@@ -8031,7 +8291,7 @@ export async function processChatMessage(
             : [];
       if (candidates.length > 0) {
         const memoryIntentScope =
-          memoryIntent.kind === "retract" ? "bot" : memoryIntent.scope;
+          mode === "chat" || memoryIntent.kind === "retract" ? "bot" : memoryIntent.scope;
         const memoryBotId =
           memoryIntentScope === "global"
             ? null
@@ -8299,10 +8559,11 @@ export async function processChatMessage(
   };
 
   const conversationModeOut: ChatMode =
-    conversationRow.conversation_mode === "zen" ||
-    conversationRow.conversation_mode === "chat"
+    conversationRow.conversation_mode === "zen"
       ? "zen"
-      : conversationRow.conversation_mode === "coffee"
+      : conversationRow.conversation_mode === "chat"
+        ? "chat"
+        : conversationRow.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
   const messageRowsDescOrAsc = db
@@ -8312,7 +8573,8 @@ export async function processChatMessage(
        FROM messages m
        LEFT JOIN bots b ON b.id = m.bot_id
        WHERE m.conversation_id = ? AND m.user_id = ?
-       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"}
+       ORDER BY m.created_at ${conversationModeOut === "zen" ? "DESC" : "ASC"},
+                m.rowid ${conversationModeOut === "zen" ? "DESC" : "ASC"}
        LIMIT ?`
     )
     .all(
@@ -8351,6 +8613,9 @@ export async function processChatMessage(
     activeConversationId,
     "ignored_question"
   );
+  const hubMetadata = getConversationHubMetadata(db, userId, activeConversationId);
+  const includeZenWallpaper =
+    conversationModeOut === "zen" || hubMetadata?.hubRole === "side";
 
   const conversationPersisted: Conversation = {
     id: conversationRow.id,
@@ -8358,11 +8623,18 @@ export async function processChatMessage(
     title: conversationRow.title,
     mode: conversationModeOut,
     botId: conversationModeOut === "zen" ? null : conversationRow.bot_id ?? null,
+    ...(hubMetadata
+      ? {
+          hubRole: hubMetadata.hubRole,
+          hubBotId: hubMetadata.hubBotId,
+          parentHubId: hubMetadata.parentHubId,
+        }
+      : {}),
     incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
     hasAssistantReply: conversationRow.has_assistant_reply === 1,
-    ...(conversationModeOut === "zen" ? { zenWallpaper: zenWallpaperOut } : {}),
+    ...(includeZenWallpaper ? { zenWallpaper: zenWallpaperOut } : {}),
     prismMood,
     createdAt: conversationRow.created_at,
     updatedAt: conversationRow.updated_at,

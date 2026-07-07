@@ -61,18 +61,21 @@ describe("shouldShowZenFallbackWallpaper", () => {
     );
   });
 
-  it("does not show while remembered or visible generated Atmosphere data is present", () => {
+  it("does not show while remembered Atmosphere data is present", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({ ...baseline, hasRememberedWallpaper: true }),
       false
     );
+  });
+
+  it("keeps the fallback available as a baseline when generated Atmosphere exists", () => {
     assert.equal(
       shouldShowZenFallbackWallpaper({
         ...baseline,
         atmosphereTimelineLength: 1,
         hasVisibleAtmosphere: true,
       }),
-      false
+      true
     );
   });
 

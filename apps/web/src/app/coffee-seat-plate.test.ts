@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
   coffeeSeatPlateGlyph,
@@ -22,7 +23,7 @@ describe("coffeeSeatPlateGlyph", () => {
     });
   });
 
-  it("uses colon eyes for every closed-mouth bot mood", () => {
+  it("keeps sad and angry closed-mouth faces distinct", () => {
     assert.deepEqual(coffeeSeatPlateGlyph("neutral", "closed"), {
       text: ":|",
       rotateDeg: 90,
@@ -32,7 +33,7 @@ describe("coffeeSeatPlateGlyph", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("angry", "closed"), {
-      text: ":[",
+      text: COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
       rotateDeg: 90,
     });
   });

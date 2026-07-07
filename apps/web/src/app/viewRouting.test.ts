@@ -8,18 +8,18 @@ import {
 
 describe("view routing helpers", () => {
   it("maps product routes onto the current internal surfaces", () => {
-    assert.equal(prismSurfaceViewForRouteParam("chat"), "sandbox");
+    assert.equal(prismSurfaceViewForRouteParam("chat"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("zen"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("coffee"), "coffee");
     assert.equal(prismSurfaceViewForRouteParam("story"), "story");
-    assert.equal(prismSurfaceViewForRouteParam(null), "hub");
-    assert.equal(prismSurfaceViewForRouteParam("unknown"), "hub");
+    assert.equal(prismSurfaceViewForRouteParam(null), "chat");
+    assert.equal(prismSurfaceViewForRouteParam("unknown"), "chat");
   });
 
-  it("keeps deprecated sandbox as a Chat alias without emitting sandbox URLs", () => {
-    assert.equal(prismSurfaceViewForRouteParam("sandbox"), "sandbox");
+  it("keeps deprecated hub, zen, and sandbox aliases without emitting old URLs", () => {
+    assert.equal(prismSurfaceViewForRouteParam("sandbox"), "chat");
     assert.equal(prismHrefForSurfaceView("sandbox"), "/?view=chat");
-    assert.equal(prismHrefForSurfaceView("chat"), "/?view=zen");
-    assert.equal(prismHrefForSurfaceView("hub"), "/");
+    assert.equal(prismHrefForSurfaceView("chat"), "/?view=chat");
+    assert.equal(prismHrefForSurfaceView("hub"), "/?view=chat");
   });
 });

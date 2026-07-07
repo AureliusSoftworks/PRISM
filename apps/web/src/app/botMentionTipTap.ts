@@ -106,7 +106,7 @@ export type MentionPersonaEditorAction =
   | { kind: "select-persona"; bot: BotMentionPick };
 
 /**
- * Zen Persona picker action: commits the highlighted bot as UI state and removes
+ * Zen Facet picker action: commits the highlighted bot as UI state and removes
  * only the active `@...` token from the rich editor.
  */
 export function applyComposeMentionPersonaToEditor(

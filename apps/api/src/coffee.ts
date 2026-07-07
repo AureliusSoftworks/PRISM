@@ -4725,12 +4725,65 @@ function loadRecentCoffeeGroupSocialState(
  * Look up the bots in `botIds` for `userId`. Throws when any bot is
  * missing so we never enter a Coffee turn with a half-resolved group.
  */
-export function loadCoffeeGroupProfiles(
+type CoffeeBotProfileRow = {
+  id: string;
+  name: string | null;
+  system_prompt: string | null;
+  color: string | null;
+  glyph: string | null;
+  face_eyes_font: string | null;
+  face_mouth_font: string | null;
+  face_font_weight: number | null;
+  profile_picture_image_id: string | null;
+  model: string | null;
+  local_model: string | null;
+  online_model: string | null;
+  online_enabled: number | null;
+  flirt_enabled: number | null;
+  temperature: number | null;
+  max_tokens: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  repetition_penalty: number | null;
+  semantic_facets: string | null;
+  semantic_facets_source_hash: string | null;
+  semantic_facets_updated_at: string | null;
+};
+
+function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
+  return {
+    id: row.id,
+    name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
+    systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
+    color: row.color ?? null,
+    glyph: row.glyph ?? null,
+    faceEyesFont: row.face_eyes_font ?? null,
+    faceMouthFont: row.face_mouth_font ?? null,
+    faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
+    profilePictureImageId: row.profile_picture_image_id ?? null,
+    localModel: row.local_model ?? null,
+    onlineModel: row.online_model ?? null,
+    defaultModel: row.model ?? null,
+    temperature: typeof row.temperature === "number" ? row.temperature : null,
+    maxTokens: typeof row.max_tokens === "number" ? row.max_tokens : null,
+    topP: typeof row.top_p === "number" ? row.top_p : null,
+    topK: typeof row.top_k === "number" ? row.top_k : null,
+    repetitionPenalty:
+      typeof row.repetition_penalty === "number" ? row.repetition_penalty : null,
+    onlineEnabled: row.online_enabled !== 0,
+    flirtEnabled: row.flirt_enabled === 1,
+    semanticFacetsRaw: row.semantic_facets ?? null,
+    semanticFacetsSourceHash: row.semantic_facets_source_hash ?? null,
+    semanticFacetsUpdatedAt: row.semantic_facets_updated_at ?? null,
+  };
+}
+
+function loadCoffeeGroupProfileRows(
   db: DatabaseSync,
   userId: string,
-  botIds: string[]
-): CoffeeBotProfile[] {
-  if (botIds.length === 0) return [];
+  botIds: readonly string[]
+): Map<string, CoffeeBotProfileRow> {
+  if (botIds.length === 0) return new Map();
   const placeholders = botIds.map(() => "?").join(", ");
   const botColumns = new Set(
     (db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>).map(
@@ -4756,63 +4809,37 @@ export function loadCoffeeGroupProfiles(
         WHERE id IN (${placeholders})
           AND (user_id = ? OR visibility = 'public')`
     )
-    .all(...botIds, userId) as Array<{
-    id: string;
-    name: string | null;
-    system_prompt: string | null;
-    color: string | null;
-    glyph: string | null;
-    face_eyes_font: string | null;
-    face_mouth_font: string | null;
-    face_font_weight: number | null;
-    profile_picture_image_id: string | null;
-    model: string | null;
-    local_model: string | null;
-    online_model: string | null;
-    online_enabled: number | null;
-    flirt_enabled: number | null;
-	    temperature: number | null;
-	    max_tokens: number | null;
-	    top_p: number | null;
-	    top_k: number | null;
-	    repetition_penalty: number | null;
-	    semantic_facets: string | null;
-    semantic_facets_source_hash: string | null;
-    semantic_facets_updated_at: string | null;
-  }>;
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  // Preserve the caller's ordering (matches the picker order).
+    .all(...botIds, userId) as CoffeeBotProfileRow[];
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function resolveCoffeeGroupProfiles(
+  db: DatabaseSync,
+  userId: string,
+  botIds: readonly string[]
+): { profiles: CoffeeBotProfile[]; missingBotIds: string[] } {
+  const rowsById = loadCoffeeGroupProfileRows(db, userId, botIds);
   const profiles: CoffeeBotProfile[] = [];
+  const missingBotIds: string[] = [];
   for (const id of botIds) {
-    const row = byId.get(id);
+    const row = rowsById.get(id);
     if (!row) {
-      throw new Error("One or more bots in this Coffee group could not be found.");
+      missingBotIds.push(id);
+      continue;
     }
-    profiles.push({
-      id: row.id,
-      name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
-      systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
-      color: row.color ?? null,
-      glyph: row.glyph ?? null,
-      faceEyesFont: row.face_eyes_font ?? null,
-      faceMouthFont: row.face_mouth_font ?? null,
-      faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
-      profilePictureImageId: row.profile_picture_image_id ?? null,
-      localModel: row.local_model ?? null,
-      onlineModel: row.online_model ?? null,
-      defaultModel: row.model ?? null,
-	      temperature: typeof row.temperature === "number" ? row.temperature : null,
-	      maxTokens: typeof row.max_tokens === "number" ? row.max_tokens : null,
-	      topP: typeof row.top_p === "number" ? row.top_p : null,
-	      topK: typeof row.top_k === "number" ? row.top_k : null,
-	      repetitionPenalty:
-	        typeof row.repetition_penalty === "number" ? row.repetition_penalty : null,
-	      onlineEnabled: row.online_enabled !== 0,
-      flirtEnabled: row.flirt_enabled === 1,
-      semanticFacetsRaw: row.semantic_facets ?? null,
-      semanticFacetsSourceHash: row.semantic_facets_source_hash ?? null,
-      semanticFacetsUpdatedAt: row.semantic_facets_updated_at ?? null,
-    });
+    profiles.push(mapCoffeeBotProfileRow(row));
+  }
+  return { profiles, missingBotIds };
+}
+
+export function loadCoffeeGroupProfiles(
+  db: DatabaseSync,
+  userId: string,
+  botIds: string[]
+): CoffeeBotProfile[] {
+  const { profiles, missingBotIds } = resolveCoffeeGroupProfiles(db, userId, botIds);
+  if (missingBotIds.length > 0) {
+    throw new Error("One or more bots in this Coffee group could not be found.");
   }
   return profiles;
 }
@@ -5138,9 +5165,14 @@ function mapCoffeeGroupRow(
   db: DatabaseSync,
   row: CoffeeGroupRow
 ): CoffeeGroup {
-  const coffeeSeatBotIds = loadCoffeeGroupSeatBotIds(db, row.user_id, row.id);
+  const storedSeatBotIds = loadCoffeeGroupSeatBotIds(db, row.user_id, row.id);
+  const storedBotGroupIds = storedSeatBotIds.filter((id): id is string => typeof id === "string");
+  const resolvedProfiles = resolveCoffeeGroupProfiles(db, row.user_id, storedBotGroupIds);
+  const availableBotIds = new Set(resolvedProfiles.profiles.map((profile) => profile.id));
+  const coffeeSeatBotIds = storedSeatBotIds.map((id) =>
+    id && availableBotIds.has(id) ? id : null
+  );
   const botGroupIds = coffeeSeatBotIds.filter((id): id is string => typeof id === "string");
-  const groupProfiles = loadCoffeeGroupProfiles(db, row.user_id, botGroupIds);
   const moodSummary = parseCoffeeMoodSummary(row.mood_summary);
   return {
     id: row.id,
@@ -5152,7 +5184,7 @@ function mapCoffeeGroupRow(
     presetMode: normalizeCoffeePresetMode(row.preset_mode),
     topicSelectionMode: normalizeCoffeeTopicSelectionMode(row.coffee_topic_mode ?? "manual"),
     modelChoiceByProvider: parseStoredCoffeeGroupModelChoice(row.model_choice),
-    starterTopicsByBotId: parseStoredCoffeeGroupStarterTopics(row.starter_topics, groupProfiles),
+    starterTopicsByBotId: parseStoredCoffeeGroupStarterTopics(row.starter_topics, resolvedProfiles.profiles),
     moodSummary: moodSummary ?? computeCoffeeGroupMoodSummary(db, row.user_id, row.id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -11206,6 +11238,9 @@ export async function createCoffeeConversationFromGroup(
   const row = loadCoffeeGroupRow(db, userId, groupId);
   if (!row) throw new Error("Coffee group not found.");
   const group = mapCoffeeGroupRow(db, row);
+  if (group.botGroupIds.length < COFFEE_GROUP_MIN_SIZE) {
+    throw new Error(`Invite at least ${COFFEE_GROUP_MIN_SIZE} available bots to start a Coffee Session.`);
+  }
   const requestedPresetId =
     typeof input.presetId === "string" && input.presetId.trim().length > 0
       ? input.presetId.trim()
@@ -11229,7 +11264,7 @@ export async function createCoffeeConversationFromGroup(
   const presetId = pickedPreset?.id ?? null;
   const durationMinutes = normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
   const autoPickStarterTopic = group.topicSelectionMode === "auto";
-  const { attendingSeatBotIds, absentBotIds } = applyCoffeeGroupSessionExclusions(
+  const { absentBotIds } = applyCoffeeGroupSessionExclusions(
     group.coffeeSeatBotIds,
     input.excludedBotIds
   );
@@ -11242,6 +11277,9 @@ export async function createCoffeeConversationFromGroup(
   const attendingBotIds = moodAttendance.attendingSeatBotIds.filter(
     (id): id is string => typeof id === "string" && id.trim().length > 0
   );
+  if (attendingBotIds.length < COFFEE_GROUP_MIN_SIZE) {
+    throw new Error(`Pick at least ${COFFEE_GROUP_MIN_SIZE} bots for a Coffee chat.`);
+  }
   const attendingGroup = attachCoffeeBotSemanticFacets(
     db,
     userId,

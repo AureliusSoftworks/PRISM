@@ -2,6 +2,7 @@ import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
+export const COFFEE_SEAT_ANGRY_BRACKET_GLYPH = "\u02d0[" as const;
 export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":*", rotateDeg: 90 } as const;
 export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.78;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
@@ -153,7 +154,10 @@ export function coffeeSeatPlateGlyph(
     case "sad":
       return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":(", rotateDeg: 90 };
     case "angry":
-      return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":[", rotateDeg: 90 };
+      return {
+        text: coffeeSeatOpenMouthGlyph(mouthShape) ?? COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+        rotateDeg: 90,
+      };
     default:
       return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":|", rotateDeg: 90 };
   }

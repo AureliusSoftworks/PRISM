@@ -46,6 +46,8 @@ function createChatTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      parent_id TEXT,
+      fork_message_id TEXT,
       coffee_topic TEXT,
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_updated_at TEXT,
@@ -440,6 +442,59 @@ describe("Coffee continuity context for private chats", () => {
     assert.match(prompt ?? "", /summary-level notes/);
     assert.match(prompt ?? "", /Do not invent exact quotes/);
     assert.match(prompt ?? "", /Crab meat poll/);
+  });
+});
+
+describe("bot-locked Chat lane", () => {
+  it("rejects Chat sends without a bot", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub();
+
+    await assert.rejects(
+      processChatMessage(
+        db,
+        "user-1",
+        "Hello?",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          botId: null,
+          incognito: false,
+          mode: "chat",
+        }
+      ),
+      /Choose a bot before chatting/
+    );
+  });
+
+  it("persists Chat as a bot-locked conversation", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Bot reply.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Hello bot.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are the selected bot.",
+      }
+    );
+
+    assert.equal(result.conversation.mode, "chat");
+    assert.equal(result.conversation.botId, "bot-1");
+
+    const row = db
+      .prepare("SELECT conversation_mode, bot_id FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { conversation_mode: string; bot_id: string | null };
+    assert.equal(row.conversation_mode, "chat");
+    assert.equal(row.bot_id, "bot-1");
   });
 });
 
@@ -1120,7 +1175,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1198,7 +1253,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1270,7 +1325,7 @@ describe("processChatMessage starter prompts", () => {
         botId: "bot-1",
         incognito: false,
         botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1334,7 +1389,7 @@ describe("processChatMessage starter prompts", () => {
         starterPromptLabel: "Prism",
         botId: null,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1391,7 +1446,7 @@ describe("processChatMessage starter prompts", () => {
         botId: "bot-1",
         incognito: false,
         botSystemPrompt: "You are Leaf Bot. You are curious and warm.",
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1475,7 +1530,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1562,7 +1617,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1608,7 +1663,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Henry",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1663,7 +1718,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1716,7 +1771,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1769,7 +1824,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1818,7 +1873,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Prism",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1868,7 +1923,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1915,7 +1970,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -1993,7 +2048,7 @@ describe("processChatMessage starter prompts", () => {
         starterPrompt: true,
         starterPromptLabel: "Ethan",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -2652,7 +2707,7 @@ describe("processChatMessage AskQuestion tool", () => {
         botId: "bot-1",
         incognito: false,
         botSystemPrompt: "You are Guide Bot. Offer gentle forks.",
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -2752,7 +2807,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -2804,7 +2859,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         manualTool: {
           name: "askQuestion",
           question: "Would you rather eat:",
@@ -2886,7 +2941,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         manualTool: {
           name: "askQuestion",
           question: "Which wording feels warmer?",
@@ -2931,7 +2986,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -2986,7 +3041,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -3095,7 +3150,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3194,7 +3249,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3292,7 +3347,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3390,7 +3445,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         prismInterruption: {
           kind: "assistant_reveal",
           assistantMessageId: "prior-assistant",
@@ -3492,7 +3547,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3521,7 +3576,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         prismInterruption: {
           kind: "assistant_reveal",
           assistantMessageId: "assistant-visible-fragment",
@@ -3555,7 +3610,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       interrupted.conversation.id
     );
@@ -3640,7 +3695,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3721,7 +3776,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3744,7 +3799,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3770,7 +3825,7 @@ describe("processChatMessage AskQuestion tool", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -3944,7 +3999,7 @@ describe("processChatMessage AskQuestion tool", () => {
           autoMemory: false,
           starterPrompt: false,
           incognito: false,
-          mode: "chat",
+          mode: "zen",
         },
         "mood-extreme"
       );
@@ -4006,7 +4061,7 @@ describe("processChatMessage AskQuestion tool", () => {
           autoMemory: false,
           starterPrompt: false,
           incognito: false,
-          mode: "chat",
+          mode: "zen",
         }
       );
 
@@ -4050,7 +4105,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4085,7 +4140,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4121,7 +4176,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4162,7 +4217,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4218,7 +4273,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4270,7 +4325,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4321,7 +4376,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4375,7 +4430,7 @@ describe("processChatMessage AskQuestion tool", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4436,7 +4491,7 @@ describe("processChatMessage thread compaction context", () => {
       compactProvider,
       userId,
       conversationId,
-      { mode: "chat", reason: "manual", force: true }
+      { mode: "zen", reason: "manual", force: true }
     );
     assert.equal(compacted.triggered, true);
     assert.ok(compacted.latestSummaryAt);
@@ -4495,7 +4550,7 @@ describe("processChatMessage thread compaction context", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -4569,7 +4624,7 @@ describe("processChatMessage thread compaction context", () => {
       compactProvider,
       userId,
       conversationId,
-      { mode: "chat", reason: "milestone" }
+      { mode: "zen", reason: "milestone" }
     );
     assert.equal(compacted.triggered, true);
 
@@ -4609,7 +4664,7 @@ describe("processChatMessage thread compaction context", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       conversationId
     );
@@ -4699,7 +4754,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
     await flushBackgroundTitleJobs();
@@ -4810,7 +4865,7 @@ describe("processChatMessage auto-generated titles", () => {
         preferredProvider: "local",
         autoMemory: true,
         incognito: true,
-        mode: "chat",
+        mode: "zen",
       }
     );
     await flushBackgroundTitleJobs();
@@ -4956,7 +5011,7 @@ describe("processChatMessage conversational memory cues", () => {
     assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
   });
 
-  it("scopes Zen Persona turns and memories to the active bot without locking the Zen conversation", async () => {
+  it("scopes Zen Facet turns and memories to the active bot without locking the Zen conversation", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);
     db.prepare(
@@ -4974,7 +5029,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -4998,15 +5053,26 @@ describe("processChatMessage conversational memory cues", () => {
       .get(result.conversation.id) as { bot_id: string | null };
     assert.equal(conversationRow.bot_id, null);
     const messageRows = db
-      .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
-      .all() as Array<{ role: string; bot_id: string | null }>;
+      .prepare(
+        "SELECT role, bot_id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+      )
+      .all(result.conversation.id) as Array<{ role: string; bot_id: string | null }>;
     assert.deepEqual(messageRows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "user", bot_id: "bot-1" },
+      { role: "assistant", bot_id: "bot-1" },
+    ]);
+    const projectionRows = db
+      .prepare(
+        "SELECT role, bot_id FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE parent_id = ?) ORDER BY created_at ASC"
+      )
+      .all(result.conversation.id) as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(projectionRows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
       { role: "user", bot_id: "bot-1" },
       { role: "assistant", bot_id: "bot-1" },
     ]);
   });
 
-  it("seeds fresh Zen Persona conversations with the latest remembered wallpaper", async () => {
+  it("seeds fresh Zen Facet conversations with the latest remembered wallpaper", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -5089,7 +5155,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5175,7 +5241,7 @@ describe("processChatMessage conversational memory cues", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5211,7 +5277,7 @@ describe("processChatMessage conversational memory cues", () => {
     assert.equal(conversationRow.zen_wallpaper_history, "[]");
   });
 
-  it("does not seed remembered Zen Persona wallpapers in private mode", async () => {
+  it("does not seed remembered Zen Facet wallpapers in private mode", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -5249,7 +5315,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: true,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5261,7 +5327,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
   });
 
-  it("arms fresh Zen Persona conversations for immediate Atmosphere generation when no remembered wallpaper exists", async () => {
+  it("arms fresh Zen Facet conversations for immediate Atmosphere generation when no remembered wallpaper exists", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -5278,7 +5344,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5318,7 +5384,7 @@ describe("processChatMessage conversational memory cues", () => {
         preferredProvider: "local",
         autoMemory: true,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         commandCenterPrompt: true,
         prismInterruption: {
           kind: "pending_reply",
@@ -5378,7 +5444,7 @@ describe("processChatMessage conversational memory cues", () => {
         preferredProvider: "local",
         autoMemory: true,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         commandCenterPrompt: true,
         promptInputOverride: "Please use the expanded prompt body here.",
         promptShortcut: {
@@ -5489,7 +5555,7 @@ describe("processChatMessage conversational memory cues", () => {
         userDisplayName: "Jared",
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5583,7 +5649,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -5691,7 +5757,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
     assert.ok(first.opinion);
@@ -5708,7 +5774,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       first.conversation.id
     );
@@ -5726,7 +5792,7 @@ describe("processChatMessage conversational memory cues", () => {
         autoMemory: false,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
     assert.ok(freshConversation.opinion);
@@ -5983,7 +6049,7 @@ describe("processChatMessage Zen session memory prompt gating", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Prism.",
       },
       "active"
@@ -6010,7 +6076,7 @@ describe("processChatMessage Zen session memory prompt gating", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Prism.",
       },
       "active"
@@ -6062,7 +6128,7 @@ describe("processChatMessage session resume context", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         sessionResumeContext: {
           summary: "We were shaping Prism into a living, continuous conversation.",
           previousActiveAt: "2026-06-18T20:00:00.000Z",
@@ -6172,7 +6238,7 @@ describe("processChatMessage topic reset context", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -6185,7 +6251,7 @@ describe("processChatMessage topic reset context", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         topicReset: true,
       },
       first.conversation.id
@@ -6246,7 +6312,7 @@ describe("processChatMessage Zen action prompt guidance", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -6352,7 +6418,7 @@ describe("processChatMessage bot mentions", () => {
         preferredProvider: "local",
         autoMemory: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       }
     );
 
@@ -6807,8 +6873,8 @@ describe("buildAskQuestionFallback", () => {
   });
 });
 
-describe("processChatMessage Zen Persona transitions", () => {
-  it("creates assistant-only attributed handoffs and returns to neutral PRISM", async () => {
+describe("processChatMessage Zen Facet transitions", () => {
+  it("keeps handoffs in one PRISM session and creates bot child projections", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -6825,7 +6891,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: "bot-1",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         personaTransition: {
           fromBotId: null,
           toBotId: "bot-1",
@@ -6835,6 +6901,8 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
 
     assert.equal(personaResult.conversation.botId, null);
+    assert.equal(personaResult.conversation.hubRole, "hub");
+    assert.equal(personaResult.conversation.hubBotId, null);
     assert.equal(personaResult.conversation.lastBotId, "bot-1");
     assert.equal(personaResult.conversation.lastBotColor, "#b11f2b");
     assert.deepEqual(
@@ -6855,7 +6923,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: null,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         personaTransition: {
           fromBotId: "bot-1",
           toBotId: null,
@@ -6866,6 +6934,9 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
 
     assert.equal(defaultResult.conversation.botId, null);
+    assert.equal(defaultResult.conversation.hubRole, "hub");
+    assert.equal(defaultResult.conversation.hubBotId, null);
+    assert.equal(defaultResult.conversation.id, personaResult.conversation.id);
     assert.equal(defaultResult.conversation.lastBotId, null);
     assert.equal(defaultResult.conversation.lastBotColor, null);
     assert.deepEqual(
@@ -6880,9 +6951,44 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
 
     const rows = db
+      .prepare(
+        "SELECT role, bot_id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+      )
+      .all(defaultResult.conversation.id) as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(rows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "assistant", bot_id: "bot-1" },
+      { role: "assistant", bot_id: null },
+    ]);
+    const projectionRows = db
+      .prepare(
+        "SELECT id, conversation_mode, bot_id, parent_id FROM conversations WHERE parent_id = ? ORDER BY created_at ASC"
+      )
+      .all(defaultResult.conversation.id) as Array<{
+        id: string;
+        conversation_mode: string;
+        bot_id: string | null;
+        parent_id: string | null;
+      }>;
+    assert.deepEqual(
+      projectionRows.map((row) => ({
+        conversation_mode: row.conversation_mode,
+        bot_id: row.bot_id,
+        parent_id: row.parent_id,
+      })),
+      [{ conversation_mode: "chat", bot_id: "bot-1", parent_id: defaultResult.conversation.id }]
+    );
+    const projectionMessages = db
+      .prepare("SELECT role, bot_id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all(projectionRows[0]!.id) as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(
+      projectionMessages.map((row) => ({ role: row.role, bot_id: row.bot_id })),
+      [{ role: "assistant", bot_id: "bot-1" }]
+    );
+    const allRows = db
       .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
       .all() as Array<{ role: string; bot_id: string | null }>;
-    assert.deepEqual(rows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+    assert.deepEqual(allRows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "assistant", bot_id: "bot-1" },
       { role: "assistant", bot_id: "bot-1" },
       { role: "assistant", bot_id: null },
     ]);
@@ -6896,9 +7002,13 @@ describe("processChatMessage Zen Persona transitions", () => {
       ) as { bot_id: string | null }).bot_id,
       null
     );
+    const hubRows = db
+      .prepare("SELECT bot_key, conversation_id FROM conversation_hubs ORDER BY bot_key ASC")
+      .all() as Array<{ bot_key: string; conversation_id: string }>;
+    assert.deepEqual(hubRows, []);
   });
 
-  it("attributes previous-introduces handoffs to the outgoing Persona", async () => {
+  it("attributes previous-introduces handoffs to the outgoing Facet", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -6918,7 +7028,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: "bot-2",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         personaTransition: {
           fromBotId: "bot-1",
           toBotId: "bot-2",
@@ -6940,9 +7050,19 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
 
     const rows = db
-      .prepare("SELECT role, bot_id FROM messages ORDER BY created_at ASC")
-      .all() as Array<{ role: string; bot_id: string | null }>;
+      .prepare(
+        "SELECT role, bot_id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+      )
+      .all(result.conversation.id) as Array<{ role: string; bot_id: string | null }>;
     assert.deepEqual(rows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
+      { role: "assistant", bot_id: "bot-1" },
+    ]);
+    const projectionRows = db
+      .prepare(
+        "SELECT role, bot_id FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE parent_id = ?) ORDER BY created_at ASC"
+      )
+      .all(result.conversation.id) as Array<{ role: string; bot_id: string | null }>;
+    assert.deepEqual(projectionRows.map((row) => ({ role: row.role, bot_id: row.bot_id })), [
       { role: "assistant", bot_id: "bot-1" },
     ]);
     assert.equal(
@@ -6968,7 +7088,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: "bot-2",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         personaTransition: {
           fromBotId: null,
           toBotId: "bot-2",
@@ -6989,7 +7109,7 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
   });
 
-  it("checkpoints outgoing Persona spans and injects only that Persona when returning", async () => {
+  it("checkpoints outgoing Facet spans and injects only that Facet when returning", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -7013,7 +7133,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         );
       }
       const promptText = body.messages?.map((message) => message.content).join("\n") ?? "";
-      if (promptText.includes("Zen Persona checkpoints")) {
+      if (promptText.includes("Zen Facet checkpoints")) {
         return new Response(
           JSON.stringify({
             message: {
@@ -7028,7 +7148,7 @@ describe("processChatMessage Zen Persona transitions", () => {
       }
       bodies.push(body);
       return new Response(
-        JSON.stringify({ message: { content: "Persona reply." } }),
+        JSON.stringify({ message: { content: "Facet reply." } }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as typeof fetch;
@@ -7043,7 +7163,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: false,
         botId: "mario",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Mario.",
         starterPromptLabel: "Mario",
       }
@@ -7059,7 +7179,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: false,
         botId: "crash",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Crash Bandicoot.",
         starterPromptLabel: "Crash Bandicoot",
         personaTransition: {
@@ -7093,7 +7213,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: false,
         botId: "mario",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Mario.",
         starterPromptLabel: "Mario",
         personaTransition: {
@@ -7108,7 +7228,7 @@ describe("processChatMessage Zen Persona transitions", () => {
 
     const returnPrompt = bodies
       .map((body) => body.messages?.map((message) => message.content).join("\n") ?? "")
-      .find((text) => text.includes("Zen Persona continuity context")) ?? "";
+      .find((text) => text.includes("Zen Facet continuity context")) ?? "";
     assert.match(returnPrompt, /Mario should resume the Mushroom Kingdom tax-code story/);
     assert.doesNotMatch(returnPrompt, /Crash should/);
     assert.equal(
@@ -7119,7 +7239,7 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
   });
 
-  it("checkpoints the outgoing Persona when Zen Autonomy switches speakers", async () => {
+  it("checkpoints the outgoing Facet when Zen Autonomy switches speakers", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -7141,7 +7261,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         );
       }
       const promptText = body.messages?.map((message) => message.content).join("\n") ?? "";
-      if (promptText.includes("Zen Persona checkpoints")) {
+      if (promptText.includes("Zen Facet checkpoints")) {
         return new Response(
           JSON.stringify({
             message: {
@@ -7155,7 +7275,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         );
       }
       return new Response(
-        JSON.stringify({ message: { content: "Persona reply." } }),
+        JSON.stringify({ message: { content: "Facet reply." } }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as typeof fetch;
@@ -7170,7 +7290,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: false,
         botId: "mario",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Mario.",
         starterPromptLabel: "Mario",
       }
@@ -7186,7 +7306,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: false,
         botId: "crash",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         botSystemPrompt: "You are Crash Bandicoot.",
         starterPromptLabel: "Crash Bandicoot",
         zenAutonomy: {
@@ -7216,7 +7336,7 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
   });
 
-  it("persists Zen Autonomy as one assistant row with Persona attribution", async () => {
+  it("persists Zen Autonomy as one assistant row with Facet attribution", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -7239,7 +7359,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: "bot-auto",
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         zenAutonomy: {
           source: "idle",
           activeBotId: "bot-auto",
@@ -7296,7 +7416,7 @@ describe("processChatMessage Zen Persona transitions", () => {
         autoMemory: true,
         botId: null,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         zenAutonomy: {
           source: "idle",
           activeBotId: null,
@@ -7318,7 +7438,7 @@ describe("processChatMessage Zen Persona transitions", () => {
     );
   });
 
-  it("treats chat-disabled Persona autonomy decisions as silent", async () => {
+  it("treats chat-disabled Facet autonomy decisions as silent", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, chat_enabled, visibility) VALUES (?, ?, ?, ?, ?)"
@@ -7393,7 +7513,7 @@ describe("processChatMessage Zen cancellation cleanup", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
         signal: controller.signal,
       }
     );
@@ -7433,7 +7553,7 @@ describe("processChatMessage Zen cancellation cleanup", () => {
         autoMemory: false,
         starterPrompt: false,
         incognito: false,
-        mode: "chat",
+        mode: "zen",
       },
       "stale-zen"
     );

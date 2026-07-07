@@ -71,6 +71,7 @@ import {
   loadCoffeeAttendanceContext,
   loadCoffeeStarterMemoryContext,
   loadCoffeeSessionMemoryChangeLines,
+  listCoffeeGroups,
   formatCoffeeAttendancePromptSummary,
   maybeBuildBotInterruptionEvent,
   normalizeCoffeeGroupBotIds,
@@ -2838,6 +2839,56 @@ describe("Coffee group foundation", () => {
     assert.equal(row.coffee_group_id, group.id);
     assert.equal(row.coffee_duration_minutes, 3);
     assert.deepEqual(JSON.parse(row.bot_group_ids), result.conversation.coffeeSeatBotIds);
+  });
+
+  it("prunes stale saved Coffee group seats before starting a session", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    for (const bot of [ALICE, BORIS, CARA]) {
+      seedCoffeeBot(db, userId, bot);
+    }
+
+    const group = createCoffeeGroup(db, userId, {
+      name: "Changing Table",
+      groupBotIds: [ALICE.id, CARA.id, BORIS.id, null, null],
+    });
+    db.prepare("DELETE FROM bots WHERE id = ?").run(CARA.id);
+
+    const [reread] = listCoffeeGroups(db, userId);
+    assert.deepEqual(reread?.botGroupIds, [ALICE.id, BORIS.id]);
+    assert.deepEqual(reread?.coffeeSeatBotIds, [ALICE.id, null, BORIS.id, null, null]);
+
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {});
+    assert.deepEqual(
+      [...(result.conversation.botGroupIds ?? [])].sort(),
+      [ALICE.id, BORIS.id].sort()
+    );
+    assert.deepEqual(
+      [...(result.conversation.coffeeSeatBotIds ?? [])]
+        .filter((id): id is string => typeof id === "string")
+        .sort(),
+      [ALICE.id, BORIS.id].sort()
+    );
+  });
+
+  it("blocks stale Coffee groups with fewer than two available bots", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+
+    const group = createCoffeeGroup(db, userId, {
+      name: "Too Quiet",
+      groupBotIds: [ALICE.id, BORIS.id, null, null, null],
+    });
+    db.prepare("DELETE FROM bots WHERE id = ?").run(BORIS.id);
+
+    const [reread] = listCoffeeGroups(db, userId);
+    assert.deepEqual(reread?.botGroupIds, [ALICE.id]);
+    assert.rejects(
+      () => createCoffeeConversationFromGroup(db, userId, group.id, {}),
+      /Invite at least 2 available bots to start a Coffee Session\./
+    );
   });
 
   it("restarts a completed Coffee session with the same topic and setup", async () => {

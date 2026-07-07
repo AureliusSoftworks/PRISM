@@ -701,7 +701,7 @@ export function composeMentionTabPlainTextAction(
 }
 
 /**
- * Zen Persona picker action: commits the highlighted bot as UI state and removes
+ * Zen Facet picker action: commits the highlighted bot as UI state and removes
  * only the active `@...` token from the composer.
  */
 export function composeMentionPersonaPlainTextAction(

@@ -58,17 +58,12 @@ export function shouldShowZenFallbackWallpaper({
   atmosphereEnabled,
   hasConversationBot = false,
   hasRememberedWallpaper,
-  atmosphereTimelineLength,
-  hasVisibleAtmosphere,
   hasConversationMessages,
 }: ZenFallbackWallpaperEligibilityArgs): boolean {
-  const generatedAtmosphereVisible =
-    hasVisibleAtmosphere ?? atmosphereTimelineLength > 0;
   return (
     chatSurface &&
     (atmosphereEnabled || hasConversationBot) &&
     hasConversationMessages &&
-    !hasRememberedWallpaper &&
-    !generatedAtmosphereVisible
+    !hasRememberedWallpaper
   );
 }
