@@ -375,6 +375,7 @@ function buildPirateDraft(
     suggestedGlyph: "lucideShip",
     faceStyle: {
       eyesFont: "playful",
+      eyeCharacter: null,
       mouthFont: "formal",
       weight: 650,
     },

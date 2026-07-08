@@ -101,10 +101,12 @@ export {
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
   BOT_FACE_FONT_WEIGHT_STEP,
+  DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
+  normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   randomBotFaceStyle,
@@ -113,6 +115,24 @@ export {
   type BotFaceStyle,
   type BotFaceStyleInput,
 } from "./botAvatar.js";
+
+export {
+  BOT_ACCESSORY_PLACEMENT_SIZE_PCT_MAX,
+  BOT_ACCESSORY_PLACEMENT_SIZE_PCT_MIN,
+  BOT_ACCESSORY_PLACEMENT_X_PCT_MAX,
+  BOT_ACCESSORY_PLACEMENT_X_PCT_MIN,
+  BOT_ACCESSORY_PLACEMENT_Y_PCT_MAX,
+  BOT_ACCESSORY_PLACEMENT_Y_PCT_MIN,
+  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT,
+  DEFAULT_BOT_ACCESSORY_PLACEMENT,
+  botAccessoryPlacementsEqual,
+  normalizeBotAccessoryArchivePlacement,
+  normalizeBotAccessoryLayer,
+  normalizeBotAccessoryPlacement,
+  type BotAccessoryArchivePlacement,
+  type BotAccessoryLayer,
+  type BotAccessoryPlacement,
+} from "./botAccessoryPlacement.js";
 
 export {
   PRISM_TOOL_END,

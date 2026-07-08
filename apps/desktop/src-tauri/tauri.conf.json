@@ -14,11 +14,11 @@
         "title": "PRISM",
         "width": 1400,
         "height": 948,
-        "minWidth": 948,
-        "minHeight": 760,
+        "minWidth": 1280,
+        "minHeight": 900,
         "resizable": true,
         "maximizable": true,
-        "fullscreen": false
+        "fullscreen": true
       }
     ],
     "security": {

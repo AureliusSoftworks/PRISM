@@ -51,6 +51,7 @@ import {
   type AuthReauthRequiredDetail,
 } from "./authReauth";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
+import { loadTintedBotAccessoryUrl, normalizeBotAccessoryTintHex } from "./botAccessoryTint";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
 import {
   buildCoffeeCupVisualState,
@@ -272,7 +273,10 @@ import {
   botProfileDetailsUnlocked,
   botProfileReferenceName,
 } from "./botProfileEditorGate";
-import { buildBotCustomizerSavePatch } from "./botCustomizerSavePatch";
+import {
+  buildBotCustomizerSavePatch,
+  type BotCustomizerSavePatch,
+} from "./botCustomizerSavePatch";
 import { LensTile } from "./LensTile";
 import {
   CircleHelp,
@@ -287,9 +291,12 @@ import {
   Droplets,
   Image as ImageGlyph,
   Info,
+  Lock,
   Menu as MenuIcon,
   Maximize2,
   Minimize2,
+  Moon,
+  MoveDiagonal2,
 	  Pause,
 	  PencilLine,
 	  Play,
@@ -300,6 +307,7 @@ import {
   SkipForward,
   Sparkles,
   Store,
+  Sun,
   Timer,
   Trash2,
   Waves,
@@ -317,10 +325,12 @@ import {
   BOT_FACE_FONT_WEIGHT_STEP,
   BOT_VOICE_PRESET_LABELS,
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  DEFAULT_BOT_ACCESSORY_PLACEMENT,
   MAX_CUSTOM_FACTS,
   ageFromIsoBirthday,
   classifyMemoryCategoryFromText,
   defaultBotPurpose,
+  DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   isAllowedOpenAiImageModelId,
@@ -350,6 +360,9 @@ import {
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
+  botAccessoryPlacementsEqual,
+  normalizeBotAccessoryPlacement,
+  normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   randomBotFaceStyle,
@@ -373,6 +386,7 @@ import {
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
   derivePrismMoodKey,
+  type BotAccessoryPlacement,
   type BotCustomFact,
   type BotFaceFontId,
   type BotFaceStyle,
@@ -560,6 +574,7 @@ import {
   type ZenLiveBotActionState,
 } from "./zenLiveActions";
 import {
+  ZEN_LIVE_MOUTH_PHASE_MS,
   zenLiveBotMouthShapeFromSpeechPhase,
   zenLiveBotMouthShapeFromRevealProgress,
   type ZenLiveBotMouthShape,
@@ -1220,6 +1235,12 @@ type DevMoodVisualDragState = {
   moved: boolean;
 };
 type ZenLiveBotAvatarPosition = { x: number; y: number };
+type ZenLiveBotScreenGlareState = {
+  xPct: number;
+  yPct: number;
+  angleDeg: number;
+  opacity: number;
+};
 type ZenLiveBotAvatarVelocity = { x: number; y: number };
 type ZenLiveBotAvatarBounds = {
   offsetX: number;
@@ -1227,7 +1248,24 @@ type ZenLiveBotAvatarBounds = {
   width: number;
   height: number;
 };
+type ZenLiveBotAvatarRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+  centerX: number;
+  centerY: number;
+};
+type ZenLiveBotProseHillRect = ZenLiveBotAvatarRect;
 type ZenLiveBotActionCopyPlacement = "top" | "right" | "bottom" | "left";
+type ZenLiveBotActionCopyAnchor = {
+  key: string;
+  placement: ZenLiveBotActionCopyPlacement;
+  x: number;
+  y: number;
+};
 type ZenLiveBotAvatarDragState = {
   pointerId: number;
   offsetX: number;
@@ -1241,6 +1279,17 @@ type ZenLiveBotAvatarDragState = {
   velocityX: number;
   velocityY: number;
   moved: boolean;
+};
+type ZenLiveBotGrabGeometry = {
+  centerX: number;
+  centerY: number;
+  radiusX: number;
+  radiusY: number;
+};
+type ZenLiveBotAvatarGrabStartOptions = {
+  allowSurfaceDrag?: boolean;
+  eventTarget?: EventTarget | null;
+  captureTarget?: HTMLElement;
 };
 type ZenLiveBotBodyPlacement = {
   xPct: number;
@@ -1925,7 +1974,12 @@ function collectZenLiveBotAvatarSafeAreaInsets(
   viewportWidth: number,
   viewportHeight: number
 ): DevPanelSafeAreaInsets {
-  const insets = collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight);
+  const panelInsets = collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight);
+  const insets = {
+    ...panelInsets,
+    left: 0,
+    right: 0,
+  };
   if (typeof document === "undefined") return insets;
 
   let composerBottomInset: number | null = null;
@@ -2134,14 +2188,278 @@ const ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED = 2200;
 const ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION = 0.82;
 const ZEN_LIVE_BOT_AVATAR_FRICTION_PER_FRAME = 0.992;
 const ZEN_LIVE_BOT_AVATAR_STOP_SPEED = 18;
+const PRISM_APP_CUSTOM_CURSOR_ENABLED = false;
+const PRISM_APP_CURSOR_BODY_CLASS = "prismAppCursorActive";
+const PRISM_APP_CURSOR_DARK_BODY_CLASS = "prismAppCursorThemeDark";
+const PRISM_APP_CURSOR_LIGHT_BODY_CLASS = "prismAppCursorThemeLight";
+const PRISM_APP_CURSOR_GRABBING_BODY_CLASS = "prismAppCursorGrabbing";
+const PRISM_APP_CURSOR_TEXT_SELECTOR = [
+  "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio'])",
+  "textarea",
+  "[contenteditable='true']",
+  "[contenteditable='plaintext-only']",
+  "[role='textbox']",
+  ".tiptap",
+].join(", ");
+const PRISM_APP_CURSOR_GRAB_SELECTOR = [
+  "[data-zen-live-bot-body-hit-target='true']",
+  "[data-zen-live-bot-presence-plate='true']",
+].join(", ");
+const PRISM_APP_CURSOR_EXCLUDED_SELECTOR = [
+  "[class*='chatBotPickerPixelGrid']",
+].join(", ");
+const PRISM_APP_CURSOR_FINGER_SELECTOR = [
+  "a[href]",
+  "button",
+  "summary",
+  "label",
+  "select",
+  "input[type='button']",
+  "input[type='submit']",
+  "input[type='reset']",
+  "input[type='checkbox']",
+  "input[type='radio']",
+  "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  "[role='tab']",
+  "[role='switch']",
+  "[role='checkbox']",
+  "[role='radio']",
+  "[data-app-cursor='finger']",
+].join(", ");
+const PRISM_APP_CURSOR_DISABLED_SELECTOR = [
+  "button:disabled",
+  "input:disabled",
+  "select:disabled",
+  "textarea:disabled",
+  "[aria-disabled='true']",
+  "[disabled]",
+].join(", ");
+
+type PrismNativeCursorAsset = {
+  path: string;
+  hotspotX: number;
+  hotspotY: number;
+  fallback: string;
+};
+
+type PrismNativeCursorSet = {
+  pointer: PrismNativeCursorAsset;
+  finger: PrismNativeCursorAsset;
+  text: PrismNativeCursorAsset;
+  grab: PrismNativeCursorAsset;
+  grabbing: PrismNativeCursorAsset;
+};
+
+const PRISM_APP_CURSOR_PNG_DATA = {
+  pointerDark: "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",
+  fingerDark: "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",
+  textDark: "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",
+  grabDark: "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",
+  grabbingDark: "iVBORw0KGgoAAAANSUhEUgAAABwAAAAeCAYAAAA/xX6fAAAFdUlEQVR4nN1Wy4sURxyu7q5+TPd2T7fMONj7ANkNCR5ENgNexEsgS25r/gE1BAIh4CE55CgrGJObgYA3QTxJkFy8eBIRc5ggEYIxWdbNQtjFmUnv9MhUd1dVd4VfrT30TsYXeMoPiupHdX/1fb9XIfR/N+UtrBVvA1CpzMprAoqJ69cCLO/V59dq5Vq+a7Vacn769Gn158WUeSownrgvfwwgWqPR0Blj2HEczTAMLIRQarWaBLQsS/4sTdM8yzKKMc77/X6OECrHVFA8BUwLwxATQgzP80wAcF1X8zxPNQxDgTEajXRKqRiNRkWWZWI4HNYYY7nruolpmrTf77MKaMl6DFKaZAWbmJ+fr+m6rluWZe7u7r4/MzOjUkqXYWCMkaqqSp7nAsAwxveOHDnyIyEkA4aDwSDnnJPd3V2KEOKToNWAkGC+71ue59mu69a2trZ+0DRtRdd1xDlHhmHIWYi9Ddu2jYqiQHme/8o5/yMIgu9N0/w7jmNBCBlWQMcS44ngwLqu13zfV3d2dj7CGK8AIwA6fvw4IoSgEydOoHa7je7evYtu3LiBKKVI07Rjuq4fi6LovSAIvqzX6+uapjmKoogoikqGSpUlANfq9XowPz+/2G63311YWDjfarXEwsKCuHXrlgADCavW6XTE9evXRbvdFs1mU4RhKDzPI81m84ujR4/OtVqtgyAEQkgv1SzZ4UajYdq27TqO48RxvKooymeMscVTp06hK1euSOlUVZUzSKooirwHe/DgATp37hxaX1+X90mS9MIw/IBS2h0MBkkURWnpz3GOUUohSJThcHiMEPKdruuLWZahIAgkSAkEIJqmjcHBp8vLy+j27dtodXVVSmwYRjNJkncOHDigcs5Lt40jU86WZem+7ytZln1omiYCsNOnT6OzZ8/KBQACrKoGoODjPM9RrVZDa2tr6OBBUBEBqAUEbNvWqoVjnIe2bSumaUKezSRJgk6ePIkuX768l7nPJXyRwWZgDYAtLS2hbrcLG4AAVKBYTGMozXVdSG6QAa2srMifgEQvAxsn9PM1hmHIDQAYEHAcZ9/HEjAMwz26GBelVI7jjHf/JqYoShlQsipNvpeA29vbMj+SJJESA7OdnR35YZnkb8vU6g3UR8aYgMpy//59CfamDIUQchRFIZ49e6a+EJAQAgsKzvk2+KHT6aA7d+5IlhCFrwIBg8iOokh+AxuHZ6PRSEwDFEmScPjANM2fYTHk2MWLF0HmV0pbstrY2EBbW1tSFfgfEIDyVu0WatkwdV1ncRwXhw4d6hRFcQ8+evjwocwtCCJg+SJQeAebunnzJhoMBvCIqqr6DxAghJTyiCogFFnOGKOwK9/3v03TNLUsC129elWWNkjwkunkAJ8/fvwYXbt2DRozyLnpuu5faZpC+ypb1D5J4UFOKc2gtTiO8zvG+JvRaCR/duHCBXTp0qWxf6oDpIcAO3PmjGTHOQdFfoKwgN4YRREwHMtaPcNAOOqe51m2bXuzs7Pa5ubm1wihT8tSd/jwYbS4uCg3AWDwDEAePXokr6WWlP45Nzf3MWMs7na7oziOk0pPlGWnBB6DhmFYgxLXaDTUJ0+efF4UxSemaQbgKxjg06q8IDfnHDr9L77vf+U4zgYwK4qC9Hq9auffd8QYt6pmsylPGKqqWvV6Xc2ybJZSugTV2DAMDcqW9ENRQI8sGGMpYywKguA3znna7/eLPM+Tfr9PK4eqfZJWfSqZtlotnGUZANeCIIBuotTrdVmuPM+Tu2WMqRBk0JgHgwGklmB7lvZ6vepB6j8+rLLcd1RsNpsYjoq2beM8z9XJYgxGCCkg7zRNgyCZdmKbemqbfFaCVueXtY3Jw3B1jO1fbaIkHgGbmxMAAAAASUVORK5CYII=",
+  pointerLight: "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",
+  fingerLight: "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",
+  textLight: "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",
+  grabLight: "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",
+  grabbingLight: "iVBORw0KGgoAAAANSUhEUgAAABwAAAAeCAYAAAA/xX6fAAAFn0lEQVR4nN2WTWjcRhTHR6MZaaWtvbti7eC0YBLX1OSS4CaXHEKg4NKcig+5BAIphYZSyKE9mEBCb6W9pdBzknshvuYaDCXYhAZKStsY14m9sddbSytFWn1P+U+srbxZNw3tqQPDSJrR/N578z6GkP97U/7pQiHE0LWKooh/DRR/bY6x/Dx0eWkUrxJCOQBE9+Zo6VnObW9vy/HQoUNlUD5kJMPAbIgABUjtdDqcc85831fjOGaKoii9Xk8CwzCUm1UqlUzX9ThN06zZbGaEkKLnQoiXoGxAO3S11Wox0zQ113V1ADzPU13XpXEcK+jVapVrmiaq1Wqu67oYHR01OOeZ53m9KIriZrOZlKB5Gdo3qRBCagUhnj59aiRJwsMw1BuNxrvPnz+nmqbNoqdpSvI8V1RVFYClabr06NGj703TjKBhvV7PGGNBo9GICSHpnnn7UKWknYQ5jlNxXdf0PM+YnJz8Lsuy95MkIYwxEsexHBXlhZxBEBBKKVFV9UfG2C+2bX8bRdFGrVYTpmm6JWimKIo8V7YHK5yDJUliOI5DJyYmPkjT9H1oBND9+/eJaZpkaWmJrKyskDNnzpDz588TTdNIlmUnkiQ5YVnWjG3bn3e73d+yLKsKIYRlWVJDcKSWeBBCAAxQ48mTJ1PLy8vvrK+vf7m1tSXW19fFuXPnpMvj3EruL06ePCkuXLgglpeXRbvdFpubm6Lb7Qbtdvuzhw8fvrW1tTUuhDCFELyIAMCkZp1ORw+CYMT3/WqtVvtQCPEJ53zqzp075PLly9J0eZ7LESaFB+IdbXZ2lty4cYNMT0/Ld8Mwdlqt1nuaprXr9XrPsqwQpoVZ+zGmaRqcRBkdHT1hmuY3SZJM6bpObNuWkAIESJZlfTjO9MGDB2Rubo4sLi5KE8dxPGYYxvTu7i5lWFByTlqMYRhyx3EUXdfnoigigN2+fZvcvHlTLgAEWpUboDhjVVVJr9cj169fJ+12W87FcVyBAkEQqOXE0Y/DIAiUKIoQZ28YhkHu3btHrly58iJ29kx4UIMwWAPY48ePyfj4OASAA8JRlGEayuZ5HoIbZiB3796Vm8BEfwcrxXGhGYEAgEEB3/f3pU8JbLVa8mOapnlhKt/3+9K/ThNCer5MDshKg/MSePjwYSmeYRjSxNBsYmJC/lgE+X/VaPkFccY5F8gsp0+flrDX1VBRFNkppWJkZIQeCDRNEwtyxlgL53Dq1Cly9uxZqSW88FUQNHi2ZVnyHwiOb9VqVQwDCsMwUvwQRdEPWIwYu3r1Ksz8StMWWk1NTZHJyUlpFewHBZDeSkVaAmXBTJIkqdVq+bNnz5YppUv46fjx4zK24ETQ8iAo5rDv/Pw8qdfr+BTnef4HFDBNszgTUQYiyaac8xhSOY7zdaWCuA3JpUuXZGpDgBeaDnac+czMDLl48SIKM8y55nne75VKBeWrKFH7TIoPmaZpEUqL7/s/p2n6VbValZtdu3aNLCws9M+n3GF6ONitW7ekdowxWGQRuQS10bKsbN99Z6D4ctd1K0EQjG5ubqpHjhxZIIR8XKS6tbU1srq6KoUADN8AOXbsmHxG0zTt142NjXnOeXd8fNyv1Wq9Uk18UTJKNVFCW62WgRTX6XTo0aNHP6WUfhRFUQNnhY4zLZsXVmOModKvOI7zhe/7q9CMUhqMjY3JIlwU4PIVo4CynZ0dniRJJc/zSrfbpbquv6lp2tthGFbiOFaRtuR5UIprRs45Dznnu7Zt/8QYC5vNZq6qaq/ZbMbFpWrfFaMELSq/ur29zXRdB9iwbRvVROl2uzJdua4rpeWcUzgZ7jb1eh2hJTjnCQQYGxvrX6Sw9UHAIrP3Tbyzs8NwVQyCgKmqSgeTMZppmjniLssyOEkZtA/2ErAELebKF+J9ZWZIG7wMyz54Gf4Tg1FS1ySXRIYAAAAASUVORK5CYII=",
+} as const;
+
+function prismAppCursorPngDataUri(base64: string): string {
+  return `data:image/png;base64,${base64}`;
+}
+const PRISM_APP_CURSOR_NATIVE_DARK_SURFACE: PrismNativeCursorSet = {
+  pointer: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.pointerDark),
+    hotspotX: 7,
+    hotspotY: 6,
+    fallback: "default",
+  },
+  finger: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.fingerDark),
+    hotspotX: 10,
+    hotspotY: 6,
+    fallback: "pointer",
+  },
+  text: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.textDark),
+    hotspotX: 11,
+    hotspotY: 17,
+    fallback: "text",
+  },
+  grab: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.grabDark),
+    hotspotX: 14,
+    hotspotY: 15,
+    fallback: "grab",
+  },
+  grabbing: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.grabbingDark),
+    hotspotX: 13,
+    hotspotY: 17,
+    fallback: "grabbing",
+  },
+};
+
+const PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE: PrismNativeCursorSet = {
+  pointer: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.pointerLight),
+    hotspotX: 7,
+    hotspotY: 6,
+    fallback: "default",
+  },
+  finger: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.fingerLight),
+    hotspotX: 10,
+    hotspotY: 6,
+    fallback: "pointer",
+  },
+  text: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.textLight),
+    hotspotX: 11,
+    hotspotY: 17,
+    fallback: "text",
+  },
+  grab: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.grabLight),
+    hotspotX: 14,
+    hotspotY: 15,
+    fallback: "grab",
+  },
+  grabbing: {
+    path: prismAppCursorPngDataUri(PRISM_APP_CURSOR_PNG_DATA.grabbingLight),
+    hotspotX: 13,
+    hotspotY: 17,
+    fallback: "grabbing",
+  },
+};
+
+function prismNativeCursorRule(
+  selector: string,
+  asset: PrismNativeCursorAsset
+): string {
+  return `${selector} { cursor: url("${asset.path}") ${asset.hotspotX} ${asset.hotspotY}, ${asset.fallback} !important; }`;
+}
+
+function prismNativeCursorThemeRules(
+  scopeSelector: string,
+  cursors: PrismNativeCursorSet
+): string {
+  return [
+    prismNativeCursorRule(`${scopeSelector}, ${scopeSelector} *`, cursors.pointer),
+    prismNativeCursorRule(
+      `${scopeSelector} :is(${PRISM_APP_CURSOR_FINGER_SELECTOR})`,
+      cursors.finger
+    ),
+    prismNativeCursorRule(
+      `${scopeSelector} :is(${PRISM_APP_CURSOR_DISABLED_SELECTOR})`,
+      cursors.pointer
+    ),
+    prismNativeCursorRule(
+      `${scopeSelector} :is(${PRISM_APP_CURSOR_TEXT_SELECTOR})`,
+      cursors.text
+    ),
+    prismNativeCursorRule(
+      `${scopeSelector} :is(${PRISM_APP_CURSOR_GRAB_SELECTOR})`,
+      cursors.grab
+    ),
+  ].join("\n");
+}
+
+const PRISM_APP_CURSOR_ACTIVE_SCOPE = `body.${PRISM_APP_CURSOR_BODY_CLASS}`;
+const PRISM_APP_CURSOR_DARK_THEME_SCOPE =
+  `${PRISM_APP_CURSOR_ACTIVE_SCOPE}.${PRISM_APP_CURSOR_DARK_BODY_CLASS}`;
+const PRISM_APP_CURSOR_LIGHT_THEME_SCOPE =
+  `${PRISM_APP_CURSOR_ACTIVE_SCOPE}.${PRISM_APP_CURSOR_LIGHT_BODY_CLASS}`;
+const PRISM_APP_CURSOR_GLOBAL_STYLE = [
+  prismNativeCursorThemeRules(
+    PRISM_APP_CURSOR_ACTIVE_SCOPE,
+    PRISM_APP_CURSOR_NATIVE_DARK_SURFACE
+  ),
+  prismNativeCursorThemeRules(
+    PRISM_APP_CURSOR_DARK_THEME_SCOPE,
+    PRISM_APP_CURSOR_NATIVE_DARK_SURFACE
+  ),
+  prismNativeCursorThemeRules(
+    PRISM_APP_CURSOR_LIGHT_THEME_SCOPE,
+    PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE
+  ),
+  prismNativeCursorThemeRules(
+    `${PRISM_APP_CURSOR_ACTIVE_SCOPE} [data-app-cursor-theme="dark"]`,
+    PRISM_APP_CURSOR_NATIVE_DARK_SURFACE
+  ),
+  prismNativeCursorThemeRules(
+    `${PRISM_APP_CURSOR_ACTIVE_SCOPE} [data-app-cursor-theme="light"]`,
+    PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE
+  ),
+  prismNativeCursorRule(
+    `${PRISM_APP_CURSOR_ACTIVE_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS}, ${PRISM_APP_CURSOR_ACTIVE_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS} *`,
+    PRISM_APP_CURSOR_NATIVE_DARK_SURFACE.grabbing
+  ),
+  prismNativeCursorRule(
+    `${PRISM_APP_CURSOR_DARK_THEME_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS}, ${PRISM_APP_CURSOR_DARK_THEME_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS} *`,
+    PRISM_APP_CURSOR_NATIVE_DARK_SURFACE.grabbing
+  ),
+  prismNativeCursorRule(
+    `${PRISM_APP_CURSOR_LIGHT_THEME_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS}, ${PRISM_APP_CURSOR_LIGHT_THEME_SCOPE}.${PRISM_APP_CURSOR_GRABBING_BODY_CLASS} *`,
+    PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE.grabbing
+  ),
+  `${PRISM_APP_CURSOR_ACTIVE_SCOPE} :is(${PRISM_APP_CURSOR_EXCLUDED_SELECTOR}), ${PRISM_APP_CURSOR_ACTIVE_SCOPE} :is(${PRISM_APP_CURSOR_EXCLUDED_SELECTOR}) * { cursor: auto !important; }`,
+].join("\n");
+
+const ZEN_LIVE_BOT_AVATAR_SURFACE_SELECTOR = "[data-zen-surface='true']";
+const ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR = [
+  "[data-zen-live-bot-composer-boundary='true']",
+  "[data-zen-live-bot-drag-exclusion='top-bar']",
+].join(", ");
+const ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR = [
+  PRISM_APP_CURSOR_TEXT_SELECTOR,
+  PRISM_APP_CURSOR_FINGER_SELECTOR,
+].join(", ");
+const ZEN_LIVE_BOT_PROSE_HILL_SELECTOR = "[data-zen-live-prose-target='true']";
+const ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX = 34;
+const ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX = 18;
+const ZEN_LIVE_BOT_PROSE_HILL_ACCELERATION_PX_PER_SEC = 1600;
+const ZEN_LIVE_BOT_PROSE_HILL_MAX_SIDE_SPEED = 960;
+const ZEN_LIVE_BOT_PROSE_HILL_INERTIA_DAMPING_PER_FRAME = 0.955;
+const ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_DAMPING_PER_FRAME = 0.88;
+const ZEN_LIVE_BOT_PROSE_HILL_ROLLING_FRICTION_PER_FRAME = 0.972;
+const ZEN_LIVE_BOT_PROSE_HILL_SIDE_WALL_RESTITUTION = 0.34;
 const ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX = 190;
+const ZEN_LIVE_BOT_AVATAR_METAL_ROTATION_SPEED_SCALE = 0.42;
+const ZEN_LIVE_BOT_AVATAR_METAL_MAX_ROTATION_STEP_DEGREES = 24;
+const ZEN_LIVE_BOT_AVATAR_METAL_DEGREES_PER_PX =
+  (360 / (ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX * Math.PI)) *
+  ZEN_LIVE_BOT_AVATAR_METAL_ROTATION_SPEED_SCALE;
+const ZEN_LIVE_BOT_SCREEN_GLARE_DEFAULT: ZenLiveBotScreenGlareState = {
+  xPct: 34,
+  yPct: 30,
+  angleDeg: -28,
+  opacity: 0.4,
+};
+const ZEN_LIVE_BOT_SCREEN_GLARE_LIGHT_X_RATIO = 0.22;
+const ZEN_LIVE_BOT_SCREEN_GLARE_LIGHT_Y_RATIO = 0.16;
+const ZEN_LIVE_BOT_SCREEN_GLARE_X_GAIN = 32;
+const ZEN_LIVE_BOT_SCREEN_GLARE_Y_GAIN = 20;
+const ZEN_LIVE_BOT_SCREEN_GLARE_X_MIN_PCT = 28;
+const ZEN_LIVE_BOT_SCREEN_GLARE_X_MAX_PCT = 72;
+const ZEN_LIVE_BOT_SCREEN_GLARE_Y_MIN_PCT = 30;
+const ZEN_LIVE_BOT_SCREEN_GLARE_Y_MAX_PCT = 58;
+const ZEN_LIVE_BOT_SCREEN_GLARE_ANGLE_Y_WEIGHT = 0.46;
 const ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT: ZenLiveBotBodyPlacement = {
   xPct: 76.81,
   yPct: -38.51,
 };
+const BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT: ZenLiveBotBodyPlacement = {
+  xPct: 50,
+  yPct: 50,
+};
+const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;
+const BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX = 300;
+const BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM = 3.8;
 const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT: ZenLiveBotFacePlacement = {
-  xPct: 93.0,
-  yPct: 92.5,
+  xPct: 50.0,
+  yPct: 45.0,
   scale: 1.68,
 };
 
@@ -2189,8 +2507,6 @@ function measureZenLiveBotAvatarBounds(node: HTMLElement): ZenLiveBotAvatarBound
   node
     .querySelectorAll<HTMLElement>(
       [
-        "[data-zen-live-bot-action-copy='true']",
-        "[data-zen-live-bot-question-marker='true']",
         "[data-zen-live-bot-body-layer='true']",
         "[data-zen-live-bot-body-frame='true']",
         "[data-zen-live-bot-face-rig='true']",
@@ -2211,22 +2527,307 @@ function measureZenLiveBotAvatarBounds(node: HTMLElement): ZenLiveBotAvatarBound
   };
 }
 
+function zenLiveBotRectFromEdges(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number
+): ZenLiveBotAvatarRect {
+  const normalizedLeft = Math.min(left, right);
+  const normalizedRight = Math.max(left, right);
+  const normalizedTop = Math.min(top, bottom);
+  const normalizedBottom = Math.max(top, bottom);
+  const width = Math.max(0, normalizedRight - normalizedLeft);
+  const height = Math.max(0, normalizedBottom - normalizedTop);
+  return {
+    left: normalizedLeft,
+    top: normalizedTop,
+    right: normalizedRight,
+    bottom: normalizedBottom,
+    width,
+    height,
+    centerX: normalizedLeft + width / 2,
+    centerY: normalizedTop + height / 2,
+  };
+}
+
+function zenLiveBotAvatarRectForPosition(
+  position: ZenLiveBotAvatarPosition,
+  bounds: ZenLiveBotAvatarBounds
+): ZenLiveBotAvatarRect {
+  return zenLiveBotRectFromEdges(
+    position.x + bounds.offsetX,
+    position.y + bounds.offsetY,
+    position.x + bounds.offsetX + bounds.width,
+    position.y + bounds.offsetY + bounds.height
+  );
+}
+
+function zenLiveBotRectsOverlap(
+  first: ZenLiveBotAvatarRect,
+  second: ZenLiveBotAvatarRect
+): boolean {
+  return (
+    first.left < second.right &&
+    first.right > second.left &&
+    first.top < second.bottom &&
+    first.bottom > second.top
+  );
+}
+
+function zenLiveBotRectOverlapArea(
+  first: ZenLiveBotAvatarRect,
+  second: ZenLiveBotAvatarRect
+): number {
+  const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+  const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+  return width * height;
+}
+
+function collectZenLiveBotProseHillRect(
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): ZenLiveBotProseHillRect | null {
+  if (typeof document === "undefined") return null;
+  const safeTop = safeAreaInsets.top;
+  const safeBottom = viewportHeight - safeAreaInsets.bottom;
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+
+  document
+    .querySelectorAll<HTMLElement>(ZEN_LIVE_BOT_PROSE_HILL_SELECTOR)
+    .forEach((target) => {
+      const rect = target.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      if (
+        rect.bottom <= safeTop ||
+        rect.top >= safeBottom ||
+        rect.right <= 0 ||
+        rect.left >= viewportWidth
+      ) {
+        return;
+      }
+      left = Math.min(left, Math.max(0, rect.left));
+      top = Math.min(top, Math.max(safeTop, rect.top));
+      right = Math.max(right, Math.min(viewportWidth, rect.right));
+      bottom = Math.max(bottom, Math.min(safeBottom, rect.bottom));
+    });
+
+  if (
+    !Number.isFinite(left) ||
+    !Number.isFinite(top) ||
+    !Number.isFinite(right) ||
+    !Number.isFinite(bottom) ||
+    right <= left ||
+    bottom <= top
+  ) {
+    return null;
+  }
+  return zenLiveBotRectFromEdges(left, top, right, bottom);
+}
+
+function zenLiveBotGrabGeometryFromElement(element: Element): ZenLiveBotGrabGeometry | null {
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    centerX: rect.left + rect.width / 2,
+    centerY: rect.top + rect.height / 2,
+    radiusX: rect.width / 2,
+    radiusY: rect.height / 2,
+  };
+}
+
+function measureZenLiveBotGrabGeometries(node: HTMLElement): ZenLiveBotGrabGeometry[] {
+  const hitTargetGeometries = Array.from(
+    node.querySelectorAll("[data-zen-live-bot-body-hit-target='true']")
+  ).flatMap((target) => {
+    const geometry = zenLiveBotGrabGeometryFromElement(target);
+    return geometry ? [geometry] : [];
+  });
+  if (hitTargetGeometries.length > 0) return hitTargetGeometries;
+
+  const body =
+    node.querySelector<HTMLElement>("[data-zen-live-bot-body-frame='true']") ??
+    node.querySelector<HTMLElement>("[data-zen-live-bot-body-layer='true']") ??
+    node;
+  const geometry = zenLiveBotGrabGeometryFromElement(body);
+  return geometry ? [geometry] : [];
+}
+
+function measureZenLiveBotGrabGeometry(node: HTMLElement): ZenLiveBotGrabGeometry | null {
+  return measureZenLiveBotGrabGeometries(node)[0] ?? null;
+}
+
+function zenLiveBotGrabGeometryContainsPointer(
+  geometry: ZenLiveBotGrabGeometry | null,
+  clientX: number,
+  clientY: number
+): boolean {
+  if (!geometry) return false;
+  if (geometry.radiusX <= 0 || geometry.radiusY <= 0) return false;
+  const normalizedX = (clientX - geometry.centerX) / geometry.radiusX;
+  const normalizedY = (clientY - geometry.centerY) / geometry.radiusY;
+  return normalizedX * normalizedX + normalizedY * normalizedY <= 1;
+}
+
 function zenLiveBotAvatarPointerIsInsideBody(
   node: HTMLElement,
   clientX: number,
   clientY: number
 ): boolean {
-  const body =
-    node.querySelector<HTMLElement>("[data-zen-live-bot-body-frame='true']") ??
-    node.querySelector<HTMLElement>("[data-zen-live-bot-body-hit-target='true']") ??
-    node.querySelector<HTMLElement>("[data-zen-live-bot-body-layer='true']") ??
-    node;
-  const rect = body.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return false;
-  const radius = Math.min(rect.width, rect.height) / 2;
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
-  return Math.hypot(clientX - centerX, clientY - centerY) <= radius;
+  return measureZenLiveBotGrabGeometries(node).some((geometry) =>
+    zenLiveBotGrabGeometryContainsPointer(geometry, clientX, clientY)
+  );
+}
+
+function zenLiveBotAvatarPointMatchesSelector(
+  clientX: number,
+  clientY: number,
+  selector: string
+): boolean {
+  if (typeof document === "undefined") return false;
+  return document.elementsFromPoint(clientX, clientY).some((element) =>
+    element.closest(selector)
+  );
+}
+
+function zenLiveBotAvatarSurfaceCanStartGrab(
+  target: EventTarget | null | undefined,
+  clientX: number,
+  clientY: number
+): boolean {
+  if (!(target instanceof Element)) return false;
+  if (!target.isConnected) return false;
+  if (!target.closest(ZEN_LIVE_BOT_AVATAR_SURFACE_SELECTOR)) return false;
+  if (target.closest(ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR)) return false;
+  if (target.closest(ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR)) return false;
+  if (
+    zenLiveBotAvatarPointMatchesSelector(
+      clientX,
+      clientY,
+      ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR
+    )
+  ) {
+    return false;
+  }
+  if (
+    zenLiveBotAvatarPointMatchesSelector(
+      clientX,
+      clientY,
+      ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function zenLiveBotAvatarPointerCanStartGrab(
+  node: HTMLElement,
+  clientX: number,
+  clientY: number,
+  options: ZenLiveBotAvatarGrabStartOptions = {}
+): boolean {
+  if (zenLiveBotAvatarPointerIsInsideBody(node, clientX, clientY)) return true;
+  if (!options.allowSurfaceDrag) return false;
+  return zenLiveBotAvatarSurfaceCanStartGrab(
+    options.eventTarget,
+    clientX,
+    clientY
+  );
+}
+
+function PrismAppCursor(): React.JSX.Element | null {
+  const [mounted, setMounted] = useState(false);
+  const activeGrabPointerIdRef = useRef<number | null>(null);
+
+  const clearGrabCursor = useCallback((): void => {
+    activeGrabPointerIdRef.current = null;
+    if (typeof document === "undefined") return;
+    document.body.classList.remove(PRISM_APP_CURSOR_GRABBING_BODY_CLASS);
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => {
+      if (typeof document === "undefined") return;
+      document.body.classList.remove(PRISM_APP_CURSOR_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_DARK_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_LIGHT_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_GRABBING_BODY_CLASS);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || typeof document === "undefined") return;
+    const applyCursorTheme = (): void => {
+      const theme = document.body.dataset.prismTheme === "light" ? "light" : "dark";
+      document.body.classList.toggle(PRISM_APP_CURSOR_DARK_BODY_CLASS, theme === "dark");
+      document.body.classList.toggle(PRISM_APP_CURSOR_LIGHT_BODY_CLASS, theme === "light");
+    };
+    applyCursorTheme();
+    const observer = new MutationObserver(applyCursorTheme);
+    observer.observe(document.body, {
+      attributeFilter: ["data-prism-theme"],
+      attributes: true,
+    });
+    return () => {
+      observer.disconnect();
+      document.body.classList.remove(PRISM_APP_CURSOR_DARK_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_LIGHT_BODY_CLASS);
+    };
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted || typeof window === "undefined") return;
+
+    document.body.classList.add(PRISM_APP_CURSOR_BODY_CLASS);
+
+    const startGrabCursor = (event: PointerEvent): void => {
+      if (event.pointerType && event.pointerType !== "mouse") {
+        clearGrabCursor();
+        return;
+      }
+      if (event.button !== 0) return;
+      if (!(event.target instanceof Element)) return;
+      if (!event.target.closest(PRISM_APP_CURSOR_GRAB_SELECTOR)) return;
+      activeGrabPointerIdRef.current = event.pointerId;
+      document.body.classList.add(PRISM_APP_CURSOR_GRABBING_BODY_CLASS);
+    };
+    const finishGrabCursor = (event: PointerEvent): void => {
+      if (activeGrabPointerIdRef.current === event.pointerId) {
+        clearGrabCursor();
+      }
+    };
+    const handlePointerOut = (event: PointerEvent): void => {
+      if (event.relatedTarget) return;
+      clearGrabCursor();
+    };
+
+    window.addEventListener("pointerdown", startGrabCursor, true);
+    window.addEventListener("pointerup", finishGrabCursor, true);
+    window.addEventListener("pointercancel", finishGrabCursor, true);
+    window.addEventListener("pointerout", handlePointerOut, true);
+    window.addEventListener("blur", clearGrabCursor);
+    return () => {
+      window.removeEventListener("pointerdown", startGrabCursor, true);
+      window.removeEventListener("pointerup", finishGrabCursor, true);
+      window.removeEventListener("pointercancel", finishGrabCursor, true);
+      window.removeEventListener("pointerout", handlePointerOut, true);
+      window.removeEventListener("blur", clearGrabCursor);
+      clearGrabCursor();
+      document.body.classList.remove(PRISM_APP_CURSOR_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_DARK_BODY_CLASS);
+      document.body.classList.remove(PRISM_APP_CURSOR_LIGHT_BODY_CLASS);
+    };
+  }, [clearGrabCursor, mounted]);
+
+  if (!mounted || typeof document === "undefined") return null;
+
+  return createPortal(<style>{PRISM_APP_CURSOR_GLOBAL_STYLE}</style>, document.body);
 }
 
 function resolveZenLiveBotActionCopyPlacement(
@@ -2235,7 +2836,9 @@ function resolveZenLiveBotActionCopyPlacement(
   viewportHeight: number,
   safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): ZenLiveBotActionCopyPlacement {
-  const copy = node.querySelector<HTMLElement>("[data-zen-live-bot-action-copy='true']");
+  const copy = node.querySelector<HTMLElement>(
+    "[data-zen-live-bot-action-copy-measure='true']"
+  );
   const body =
     node.querySelector<HTMLElement>("[data-zen-live-bot-body-layer='true']") ??
     node.querySelector<HTMLElement>("[data-zen-live-bot-body-frame='true']") ??
@@ -2253,16 +2856,61 @@ function resolveZenLiveBotActionCopyPlacement(
   const spaceAbove = bodyRect.top - safeTop;
   const spaceLeft = bodyRect.left - safeLeft;
   const spaceRight = safeRight - bodyRect.right;
-  const verticalNeed = copyHeight * 0.72;
+  const bodyGap = Math.max(
+    8,
+    Math.min(12, Math.min(bodyRect.width, bodyRect.height) * 0.07)
+  );
+  const verticalNeed = copyHeight + bodyGap;
   const horizontalNeed = copyWidth + margin;
+  const topFits = spaceAbove >= verticalNeed;
+  const bottomFits = spaceBelow >= verticalNeed;
+
+  if (topFits || bottomFits) {
+    if (topFits && bottomFits) {
+      const bodyCenterY = bodyRect.top + bodyRect.height / 2;
+      const safeCenterY = safeTop + (safeBottom - safeTop) / 2;
+      return bodyCenterY > safeCenterY ? "top" : "bottom";
+    }
+    return topFits ? "top" : "bottom";
+  }
+
+  const proseHillRect = collectZenLiveBotProseHillRect(
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+
+  if (proseHillRect) {
+    const proseGap = Math.max(12, ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX * 0.5);
+    const rightCopyLeft = clampZenLiveBotActionCopyAnchor(
+      bodyRect.right,
+      safeLeft,
+      safeRight - copyWidth
+    );
+    if (
+      bodyRect.left >= proseHillRect.right &&
+      rightCopyLeft >= proseHillRect.right + proseGap
+    ) {
+      return "right";
+    }
+
+    const leftCopyRight = clampZenLiveBotActionCopyAnchor(
+      bodyRect.left,
+      safeLeft + copyWidth,
+      safeRight
+    );
+    if (
+      bodyRect.right <= proseHillRect.left &&
+      leftCopyRight <= proseHillRect.left - proseGap
+    ) {
+      return "left";
+    }
+  }
 
   if (spaceRight >= horizontalNeed || spaceLeft >= horizontalNeed) {
     return spaceRight >= spaceLeft ? "right" : "left";
   }
-  if (spaceAbove >= verticalNeed) {
-    return "top";
-  }
-  return "bottom";
+  return spaceAbove > spaceBelow ? "top" : "bottom";
 }
 
 function resolveZenLiveBotActionCopyOffsetX(
@@ -2273,7 +2921,9 @@ function resolveZenLiveBotActionCopyOffsetX(
   placement: ZenLiveBotActionCopyPlacement = "bottom"
 ): number {
   if (placement === "left" || placement === "right") return 0;
-  const copy = node.querySelector<HTMLElement>("[data-zen-live-bot-action-copy='true']");
+  const copy = node.querySelector<HTMLElement>(
+    "[data-zen-live-bot-action-copy-measure='true']"
+  );
   if (!copy) return 0;
   const rootRect = node.getBoundingClientRect();
   const copyRect = copy.getBoundingClientRect();
@@ -2305,6 +2955,108 @@ function resolveZenLiveBotActionCopyOffsetX(
   if (leftOverflow > 0) return Math.ceil(leftOverflow);
   if (rightOverflow > 0) return -Math.ceil(rightOverflow);
   return 0;
+}
+
+function clampZenLiveBotActionCopyAnchor(
+  value: number,
+  min: number,
+  max: number
+): number {
+  if (max < min) return value;
+  return Math.max(min, Math.min(max, value));
+}
+
+function resolveZenLiveBotActionCopyAnchor(
+  node: HTMLElement,
+  placement: ZenLiveBotActionCopyPlacement,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): Omit<ZenLiveBotActionCopyAnchor, "key"> {
+  const copy = node.querySelector<HTMLElement>(
+    "[data-zen-live-bot-action-copy-measure='true']"
+  );
+  const body =
+    node.querySelector<HTMLElement>("[data-zen-live-bot-body-layer='true']") ??
+    node.querySelector<HTMLElement>("[data-zen-live-bot-body-frame='true']") ??
+    node;
+  const bodyRect = body.getBoundingClientRect();
+  const copyRect = copy?.getBoundingClientRect();
+  const copyWidth = copyRect?.width || 260;
+  const copyHeight = copyRect?.height || 48;
+  const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
+  const safeLeft = safeAreaInsets.left + margin;
+  const safeTop = safeAreaInsets.top + margin;
+  const safeRight = viewportWidth - safeAreaInsets.right - margin;
+  const safeBottom = viewportHeight - safeAreaInsets.bottom - margin;
+  const bodyGap = Math.max(
+    8,
+    Math.min(12, Math.min(bodyRect.width, bodyRect.height) * 0.07)
+  );
+  const centerX = bodyRect.left + bodyRect.width / 2;
+  const centerY = bodyRect.top + bodyRect.height / 2;
+
+  if (placement === "top") {
+    return {
+      placement,
+      x: clampZenLiveBotActionCopyAnchor(
+        centerX,
+        safeLeft + copyWidth / 2,
+        safeRight - copyWidth / 2
+      ),
+      y: clampZenLiveBotActionCopyAnchor(
+        bodyRect.top - bodyGap,
+        safeTop + copyHeight,
+        safeBottom
+      ),
+    };
+  }
+
+  if (placement === "right") {
+    return {
+      placement,
+      x: clampZenLiveBotActionCopyAnchor(
+        bodyRect.right + bodyGap,
+        safeLeft,
+        safeRight - copyWidth
+      ),
+      y: clampZenLiveBotActionCopyAnchor(
+        centerY,
+        safeTop + copyHeight / 2,
+        safeBottom - copyHeight / 2
+      ),
+    };
+  }
+
+  if (placement === "left") {
+    return {
+      placement,
+      x: clampZenLiveBotActionCopyAnchor(
+        bodyRect.left - bodyGap,
+        safeLeft + copyWidth,
+        safeRight
+      ),
+      y: clampZenLiveBotActionCopyAnchor(
+        centerY,
+        safeTop + copyHeight / 2,
+        safeBottom - copyHeight / 2
+      ),
+    };
+  }
+
+  return {
+    placement,
+    x: clampZenLiveBotActionCopyAnchor(
+      centerX,
+      safeLeft + copyWidth / 2,
+      safeRight - copyWidth / 2
+    ),
+    y: clampZenLiveBotActionCopyAnchor(
+      bodyRect.bottom + bodyGap,
+      safeTop,
+      safeBottom - copyHeight
+    ),
+  };
 }
 
 function zenLiveBotAvatarPositionLimits(
@@ -2356,6 +3108,163 @@ function clampZenLiveBotAvatarPosition(
   return {
     x: Math.max(minX, Math.min(maxX, position.x)),
     y: Math.max(minY, Math.min(maxY, position.y)),
+  };
+}
+
+function resolveZenLiveBotAvatarProseHillPosition(
+  position: ZenLiveBotAvatarPosition,
+  bounds: ZenLiveBotAvatarBounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  velocity: ZenLiveBotAvatarVelocity = { x: 0, y: 0 }
+): ZenLiveBotAvatarPosition {
+  const proseHillRect = collectZenLiveBotProseHillRect(
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  if (!proseHillRect) return position;
+
+  const horizontalClearance = Math.max(
+    ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX,
+    Math.min(320, bounds.width * 1.18)
+  );
+  const inflatedHillRect = zenLiveBotRectFromEdges(
+    proseHillRect.left - horizontalClearance,
+    proseHillRect.top - ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX,
+    proseHillRect.right + horizontalClearance,
+    proseHillRect.bottom + ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX
+  );
+  const currentRect = zenLiveBotAvatarRectForPosition(position, bounds);
+  if (!zenLiveBotRectsOverlap(currentRect, inflatedHillRect)) return position;
+
+  const { minX, maxX } = zenLiveBotAvatarPositionLimits(
+    bounds,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  const leftPosition = clampZenLiveBotAvatarPosition(
+    {
+      x: inflatedHillRect.left - bounds.width - bounds.offsetX,
+      y: position.y,
+    },
+    bounds,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  const rightPosition = clampZenLiveBotAvatarPosition(
+    {
+      x: inflatedHillRect.right - bounds.offsetX,
+      y: position.y,
+    },
+    bounds,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  const leftFreeSpace = Math.max(0, proseHillRect.left - minX);
+  const rightFreeSpace = Math.max(
+    0,
+    maxX + bounds.offsetX + bounds.width - proseHillRect.right
+  );
+  const preferredSide =
+    Math.abs(velocity.x) > 42
+      ? velocity.x < 0
+        ? "left"
+        : "right"
+      : currentRect.centerX < proseHillRect.centerX
+        ? "left"
+        : currentRect.centerX > proseHillRect.centerX
+          ? "right"
+          : rightFreeSpace >= leftFreeSpace
+            ? "right"
+            : "left";
+  const candidates: Array<{
+    side: "left" | "right";
+    position: ZenLiveBotAvatarPosition;
+  }> = [
+    { side: "left", position: leftPosition },
+    { side: "right", position: rightPosition },
+  ];
+
+  return candidates
+    .map((candidate) => {
+      const candidateRect = zenLiveBotAvatarRectForPosition(
+        candidate.position,
+        bounds
+      );
+      const overlapArea = zenLiveBotRectOverlapArea(
+        candidateRect,
+        inflatedHillRect
+      );
+      const distance = Math.hypot(
+        candidate.position.x - position.x,
+        candidate.position.y - position.y
+      );
+      const sidePenalty = candidate.side === preferredSide ? 0 : 24;
+      return {
+        ...candidate,
+        score: overlapArea * 100 + distance + sidePenalty,
+      };
+    })
+    .sort((first, second) => first.score - second.score)[0]!.position;
+}
+
+function resolveZenLiveBotAvatarProseHillMotion(
+  position: ZenLiveBotAvatarPosition,
+  velocity: ZenLiveBotAvatarVelocity,
+  bounds: ZenLiveBotAvatarBounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  dtSeconds = 1 / 60
+): { velocity: ZenLiveBotAvatarVelocity; affected: boolean } {
+  const target = resolveZenLiveBotAvatarProseHillPosition(
+    position,
+    bounds,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets,
+    velocity
+  );
+  const deltaX = target.x - position.x;
+  if (Math.abs(deltaX) < 0.75) {
+    return { velocity, affected: false };
+  }
+
+  const direction = Math.sign(deltaX);
+  const distanceRatio = Math.min(1, Math.abs(deltaX) / Math.max(1, bounds.width * 1.15));
+  const hillStrength = Math.max(0.22, distanceRatio);
+  const acceleration =
+    ZEN_LIVE_BOT_PROSE_HILL_ACCELERATION_PX_PER_SEC * hillStrength;
+  const inertiaDamping = Math.pow(
+    ZEN_LIVE_BOT_PROSE_HILL_INERTIA_DAMPING_PER_FRAME,
+    dtSeconds * 60
+  );
+  const verticalDamping = Math.pow(
+    ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_DAMPING_PER_FRAME,
+    dtSeconds * 60
+  );
+  const speedTowardSide = velocity.x * direction * inertiaDamping;
+  const acceleratedSpeedTowardSide =
+    speedTowardSide + acceleration * Math.max(0.001, dtSeconds);
+  const nextSpeedTowardSide = Math.min(
+    ZEN_LIVE_BOT_PROSE_HILL_MAX_SIDE_SPEED,
+    Math.max(
+      -ZEN_LIVE_BOT_PROSE_HILL_MAX_SIDE_SPEED * 0.42,
+      acceleratedSpeedTowardSide
+    )
+  );
+
+  return {
+    velocity: {
+      x: direction * nextSpeedTowardSide,
+      y: velocity.y * verticalDamping,
+    },
+    affected: true,
   };
 }
 
@@ -2446,6 +3355,65 @@ function resolveZenLiveBotAvatarReleaseVelocity(
   return {
     x: (dx / distance) * fallbackSpeed,
     y: (dy / distance) * fallbackSpeed,
+  };
+}
+
+function advanceZenLiveBotAvatarMetalRotationDegrees(
+  currentDegrees: number,
+  previousPosition: ZenLiveBotAvatarPosition | null,
+  nextPosition: ZenLiveBotAvatarPosition
+): number {
+  if (!previousPosition) return currentDegrees;
+  const horizontalDeltaPx = nextPosition.x - previousPosition.x;
+  if (Math.abs(horizontalDeltaPx) < 0.05) return currentDegrees;
+  const rotationDelta = Math.sign(horizontalDeltaPx) * Math.min(
+    Math.abs(horizontalDeltaPx) * ZEN_LIVE_BOT_AVATAR_METAL_DEGREES_PER_PX,
+    ZEN_LIVE_BOT_AVATAR_METAL_MAX_ROTATION_STEP_DEGREES
+  );
+  return currentDegrees + rotationDelta;
+}
+
+function resolveZenLiveBotScreenGlareState(
+  position: ZenLiveBotAvatarPosition,
+  avatarWidthPx: number,
+  viewportWidth: number,
+  viewportHeight: number
+): ZenLiveBotScreenGlareState {
+  const safeViewportWidth = Math.max(1, viewportWidth);
+  const safeViewportHeight = Math.max(1, viewportHeight);
+  const centerX = position.x + avatarWidthPx / 2;
+  const centerY = position.y + avatarWidthPx / 2;
+  const lightX = safeViewportWidth * ZEN_LIVE_BOT_SCREEN_GLARE_LIGHT_X_RATIO;
+  const lightY = safeViewportHeight * ZEN_LIVE_BOT_SCREEN_GLARE_LIGHT_Y_RATIO;
+  const normalizedX = (lightX - centerX) / safeViewportWidth;
+  const normalizedY = (lightY - centerY) / safeViewportHeight;
+  const xPct = Math.max(
+    ZEN_LIVE_BOT_SCREEN_GLARE_X_MIN_PCT,
+    Math.min(
+      ZEN_LIVE_BOT_SCREEN_GLARE_X_MAX_PCT,
+      50 + normalizedX * ZEN_LIVE_BOT_SCREEN_GLARE_X_GAIN
+    )
+  );
+  const yPct = Math.max(
+    ZEN_LIVE_BOT_SCREEN_GLARE_Y_MIN_PCT,
+    Math.min(
+      ZEN_LIVE_BOT_SCREEN_GLARE_Y_MAX_PCT,
+      42 + normalizedY * ZEN_LIVE_BOT_SCREEN_GLARE_Y_GAIN
+    )
+  );
+  const angleDeg =
+    Math.atan2(
+      normalizedY * ZEN_LIVE_BOT_SCREEN_GLARE_ANGLE_Y_WEIGHT,
+      normalizedX
+    ) *
+      (180 / Math.PI) +
+    96;
+  const distance = Math.min(1, Math.hypot(normalizedX, normalizedY) * 1.7);
+  return {
+    xPct,
+    yPct,
+    angleDeg,
+    opacity: 0.38 + distance * 0.16,
   };
 }
 
@@ -5937,7 +6905,11 @@ function resolveBotFaceStyleForBot(
   bot:
     | Pick<
         Bot,
-        "system_prompt" | "face_eyes_font" | "face_mouth_font" | "face_font_weight"
+        | "system_prompt"
+        | "face_eyes_font"
+        | "face_eye_character"
+        | "face_mouth_font"
+        | "face_font_weight"
       >
     | null
     | undefined
@@ -5945,6 +6917,7 @@ function resolveBotFaceStyleForBot(
   return resolveBotFaceStyle(
     {
       faceEyesFont: bot?.face_eyes_font,
+      faceEyeCharacter: bot?.face_eye_character,
       faceMouthFont: bot?.face_mouth_font,
       faceFontWeight: bot?.face_font_weight,
     },
@@ -5991,6 +6964,109 @@ function resolveMessageFaceStyleForDisplayBot(
 function botStoredImageUrl(imageId: string | null | undefined): string | null {
   const trimmed = imageId?.trim();
   return trimmed ? `/api/images/${encodeURIComponent(trimmed)}/file` : null;
+}
+
+function botAccessoryPlacementFromBot(bot: Bot | null | undefined): BotAccessoryPlacement {
+  return normalizeBotAccessoryPlacement({
+    xPct: bot?.accessory_x_pct,
+    yPct: bot?.accessory_y_pct,
+    sizePct: bot?.accessory_size_pct,
+    layer: bot?.accessory_layer,
+  });
+}
+
+function clearBotAccessoryFields(bot: Bot): Bot {
+  return {
+    ...bot,
+    accessory_image_id: null,
+    accessory_x_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.xPct,
+    accessory_y_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.yPct,
+    accessory_size_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.sizePct,
+    accessory_layer: DEFAULT_BOT_ACCESSORY_PLACEMENT.layer,
+  };
+}
+
+const BOT_ACCESSORY_RENDER_FIELD_SCALE = 4.4;
+const BOT_ACCESSORY_RENDER_FIELD_INSET_PCT =
+  -((BOT_ACCESSORY_RENDER_FIELD_SCALE - 1) / 2) * 100;
+
+function botAccessoryPlacementLayerStyle(
+  accessoryUrl: string,
+  placement: BotAccessoryPlacement
+): CSSProperties {
+  const normalized = normalizeBotAccessoryPlacement(placement);
+  const fieldOffsetScale = BOT_ACCESSORY_RENDER_FIELD_SCALE;
+  return {
+    backgroundImage: `url("${accessoryUrl}")`,
+    "--bot-accessory-x-pct": `${normalized.xPct}%`,
+    "--bot-accessory-y-pct": `${normalized.yPct}%`,
+    "--bot-accessory-size-pct": `${normalized.sizePct}%`,
+    "--bot-accessory-field-inset-pct": `${BOT_ACCESSORY_RENDER_FIELD_INSET_PCT}%`,
+    "--bot-accessory-field-x-pct": `${normalized.xPct / fieldOffsetScale}%`,
+    "--bot-accessory-field-y-pct": `${normalized.yPct / fieldOffsetScale}%`,
+    "--bot-accessory-field-size-pct": `${normalized.sizePct / fieldOffsetScale}%`,
+  } as CSSProperties;
+}
+
+function useBotAccessoryRenderUrl(
+  accessoryUrl: string | null,
+  botColor: string | null | undefined
+): string | null {
+  const normalizedBotColor = normalizeBotAccessoryTintHex(botColor);
+  const [renderUrl, setRenderUrl] = useState<string | null>(accessoryUrl);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRenderUrl(accessoryUrl);
+    if (!accessoryUrl || !normalizedBotColor) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    void loadTintedBotAccessoryUrl(accessoryUrl, normalizedBotColor).then((tintedUrl) => {
+      if (cancelled) return;
+      setRenderUrl(tintedUrl ?? accessoryUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessoryUrl, normalizedBotColor]);
+
+  return renderUrl;
+}
+
+interface BotAccessoryRasterProps {
+  className: string;
+  accessoryUrl: string;
+  accessoryPlacement: BotAccessoryPlacement;
+  botColor: string | null | undefined;
+}
+
+function BotAccessoryRaster({
+  className,
+  accessoryUrl,
+  accessoryPlacement,
+  botColor,
+}: BotAccessoryRasterProps): React.JSX.Element {
+  const renderUrl = useBotAccessoryRenderUrl(accessoryUrl, botColor) ?? accessoryUrl;
+  return (
+    <span
+      className={className}
+      style={botAccessoryPlacementLayerStyle(renderUrl, accessoryPlacement)}
+      aria-hidden="true"
+    />
+  );
+}
+
+function botAccessoryPlacementEditorStyle(
+  placement: BotAccessoryPlacement
+): CSSProperties {
+  const normalized = normalizeBotAccessoryPlacement(placement);
+  return {
+    "--bot-accessory-x-pct": `${normalized.xPct}%`,
+    "--bot-accessory-y-pct": `${normalized.yPct}%`,
+    "--bot-accessory-size-pct": `${normalized.sizePct}%`,
+  } as CSSProperties;
 }
 
 function readImageFileAsDataUrl(file: File): Promise<string> {
@@ -7470,9 +8546,10 @@ interface ChatPostEnvelope {
 type ChatPsychicDebugPayload = NonNullable<ChatPostEnvelope["psychicDebug"]>;
 
 function psychicTextEnabledForConversation(
-  conversation: Pick<ConversationDetail, "mode"> | null | undefined
+  _conversation: Pick<ConversationDetail, "mode"> | null | undefined,
+  options: { productChatSurface?: boolean } = {}
 ): boolean {
-  return conversation?.mode === "chat";
+  return options.productChatSurface === true;
 }
 
 function livePsychicScratchpadFromDebug(
@@ -7679,6 +8756,20 @@ interface UserSettings {
   prismDefaultLlmModel: string;
   /** Empty → use hub chat model for turns that may emit in-thread image tool JSON. */
   prismImageToolLlmModel: string;
+  /** Kept empty in the UI/API; the built-in Default assistant only exposes avatar customization. */
+  prismDefaultBotName: string;
+  prismDefaultBotSystemPrompt: string;
+  prismDefaultBotColor: string;
+  prismDefaultBotGlyph: string;
+  prismDefaultBotFaceEyesFont: BotFaceFontId;
+  prismDefaultBotFaceEyeCharacter: string | null;
+  prismDefaultBotFaceMouthFont: BotFaceFontId;
+  prismDefaultBotFaceFontWeight: number;
+  prismDefaultBotTemperature: number;
+  prismDefaultBotMaxTokens: number;
+  prismDefaultBotTopP: number;
+  prismDefaultBotTopK: number;
+  prismDefaultBotRepetitionPenalty: number;
   /** Empty string means server auto-picks from the catalog. */
   preferredLocalModel: string;
   preferredOnlineModel: string;
@@ -8167,12 +9258,43 @@ interface Bot {
   color: string | null;
   glyph: string | null;
   face_eyes_font?: string | null;
+  face_eye_character?: string | null;
   face_mouth_font?: string | null;
   face_font_weight?: number | null;
   profile_picture_image_id?: string | null;
   accessory_image_id?: string | null;
+  accessory_x_pct?: number | null;
+  accessory_y_pct?: number | null;
+  accessory_size_pct?: number | null;
+  accessory_layer?: string | null;
   chat_enabled: number;
 }
+
+type BotEditOriginalSnapshot = {
+  name: string;
+  prompt: string;
+  rawPrompt?: string;
+  localModel: string;
+  onlineModel: string;
+  localImageModel: string;
+  openAiImageModel: string;
+  onlineEnabled: boolean;
+  deleteProtected: boolean;
+  flirtEnabled: boolean;
+  temperature: number;
+  maxTokens: number;
+  topP: number;
+  topK: number;
+  repetitionPenalty: number;
+  color: string;
+  glyph: BotGlyphName;
+  faceEyesFont: BotFaceFontId;
+  faceEyeCharacter: string | null;
+  faceMouthFont: BotFaceFontId;
+  faceFontWeight: number;
+  profilePictureImageId: string | null;
+  accessoryPlacement: BotAccessoryPlacement;
+};
 
 function replaceBotRowById(rows: Bot[], updatedBot: Bot): Bot[] {
   const index = rows.findIndex((bot) => bot.id === updatedBot.id);
@@ -8180,6 +9302,72 @@ function replaceBotRowById(rows: Bot[], updatedBot: Bot): Bot[] {
   const next = rows.slice();
   next[index] = updatedBot;
   return next;
+}
+
+function normalizeBotAvatarAutosavePatch(
+  patch: BotCustomizerSavePatch
+): BotCustomizerSavePatch {
+  const next: BotCustomizerSavePatch = {};
+  if (patch.color !== undefined) next.color = patch.color;
+  if (patch.glyph !== undefined) next.glyph = patch.glyph;
+  if (patch.faceEyesFont !== undefined) next.faceEyesFont = patch.faceEyesFont;
+  if (patch.faceEyeCharacter !== undefined) {
+    next.faceEyeCharacter = normalizeBotFaceEyeCharacter(patch.faceEyeCharacter);
+  }
+  if (patch.faceMouthFont !== undefined) next.faceMouthFont = patch.faceMouthFont;
+  if (patch.faceFontWeight !== undefined) {
+    next.faceFontWeight =
+      normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight;
+  }
+  if (patch.accessoryPlacement !== undefined) {
+    next.accessoryPlacement = normalizeBotAccessoryPlacement(patch.accessoryPlacement);
+  }
+  return next;
+}
+
+function mergeBotAvatarAutosavePatch(
+  current: BotCustomizerSavePatch,
+  patch: BotCustomizerSavePatch
+): BotCustomizerSavePatch {
+  return {
+    ...current,
+    ...normalizeBotAvatarAutosavePatch(patch),
+  };
+}
+
+function botAvatarAutosavePatchHasFields(patch: BotCustomizerSavePatch): boolean {
+  return Object.keys(patch).length > 0;
+}
+
+function applyBotAvatarAutosavePatchToSnapshot(
+  snapshot: BotEditOriginalSnapshot,
+  patch: BotCustomizerSavePatch
+): BotEditOriginalSnapshot {
+  return {
+    ...snapshot,
+    color: patch.color !== undefined ? patch.color : snapshot.color,
+    glyph: patch.glyph !== undefined ? (patch.glyph as BotGlyphName) : snapshot.glyph,
+    faceEyesFont:
+      patch.faceEyesFont !== undefined
+        ? (patch.faceEyesFont as BotFaceFontId)
+        : snapshot.faceEyesFont,
+    faceEyeCharacter:
+      patch.faceEyeCharacter !== undefined
+        ? normalizeBotFaceEyeCharacter(patch.faceEyeCharacter)
+        : snapshot.faceEyeCharacter,
+    faceMouthFont:
+      patch.faceMouthFont !== undefined
+        ? (patch.faceMouthFont as BotFaceFontId)
+        : snapshot.faceMouthFont,
+    faceFontWeight:
+      patch.faceFontWeight !== undefined
+        ? normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight
+        : snapshot.faceFontWeight,
+    accessoryPlacement:
+      patch.accessoryPlacement !== undefined
+        ? normalizeBotAccessoryPlacement(patch.accessoryPlacement)
+        : snapshot.accessoryPlacement,
+  };
 }
 
 interface AccountExportBundleV1 {
@@ -10083,6 +11271,7 @@ function createBotFormHasEnteredData(options: {
 	  topK: number;
 	  repetitionPenalty: number;
 	  faceEyesFont?: BotFaceFontId;
+  faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId;
   faceFontWeight?: number;
 }): boolean {
@@ -10101,6 +11290,7 @@ function createBotFormHasEnteredData(options: {
 	  if (options.topK !== BOT_TOP_K_DEFAULT) return true;
 	  if (options.repetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT) return true;
 	  if ((options.faceEyesFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
+  if ((options.faceEyeCharacter ?? DEFAULT_BOT_FACE_EYE_CHARACTER) !== DEFAULT_BOT_FACE_EYE_CHARACTER) return true;
   if ((options.faceMouthFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
   if ((options.faceFontWeight ?? DEFAULT_BOT_FACE_FONT_WEIGHT) !== DEFAULT_BOT_FACE_FONT_WEIGHT) return true;
   return false;
@@ -11920,6 +13110,7 @@ type BotPanelView =
   | "marketplace"
   | "botHub"
   | "customize"
+  | "defaultCustomize"
   | "settings";
 
 function botMarketplaceThemeStateLabel(
@@ -12805,8 +13996,10 @@ function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
 function BotFaceFrame(): React.JSX.Element {
   return (
     <>
+      <BotFaceScreenFill />
       <span className={styles.botFaceFrame} aria-hidden="true">
         <span className={styles.botFaceFrameTint} />
+        <span className={styles.botFaceFrameLed} />
       </span>
       <span className={styles.botFaceFrameMetalLight} aria-hidden="true">
         <span className={styles.botFaceFrameMetalLightRaster} />
@@ -12815,8 +14008,24 @@ function BotFaceFrame(): React.JSX.Element {
   );
 }
 
-function BotPreviewFaceGlare(): React.JSX.Element {
-  return <span className={styles.botPreviewFaceGlare} aria-hidden="true" />;
+function BotFaceScreenFill(): React.JSX.Element {
+  return (
+    <>
+      <span className={styles.botFaceScreenFill} aria-hidden="true" />
+      <BotFaceScreenGlass />
+    </>
+  );
+}
+
+function BotFaceScreenGlass({ className }: { className?: string } = {}): React.JSX.Element {
+  return (
+    <span
+      className={
+        className ? `${styles.botFaceScreenGlass} ${className}` : styles.botFaceScreenGlass
+      }
+      aria-hidden="true"
+    />
+  );
 }
 
 function MessageMoodFace(props: {
@@ -12829,6 +14038,7 @@ function MessageMoodFace(props: {
   isTalking?: boolean;
   mouthOpen?: boolean;
   mouthShape?: ZenLiveBotMouthShape | null;
+  questionMarkActive?: boolean;
 }): React.JSX.Element {
   const variant = props.variant ?? "classic";
   const placement = props.placement ?? "trailing";
@@ -12837,10 +14047,12 @@ function MessageMoodFace(props: {
   const seatMouthShape =
     props.mouthShape ?? (props.mouthOpen === true ? "open-wide" : "closed");
   const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, seatMouthShape);
+  const questionMarkActive = props.questionMarkActive === true;
   const color = props.color?.trim();
   const style = color
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
     : undefined;
+  const showRasterFrame = variant === "prism";
   return (
     <span
       className={styles.messageMoodBadge}
@@ -12855,15 +14067,17 @@ function MessageMoodFace(props: {
         enabled={variant === "prism"}
         isTalking={props.isTalking === true}
         scheduleKey={`message-mood-${variant}-${moodKey}`}
+        showQuestionMark={questionMarkActive}
         baseText={seatPlateGlyph.text}
         rotateDeg={seatPlateGlyph.rotateDeg}
         voicePreset={props.voicePreset ?? "neutral"}
         faceEyesFont={props.faceStyle?.eyesFont}
+        faceEyeCharacter={props.faceStyle?.eyeCharacter}
         faceMouthFont={props.faceStyle?.mouthFont}
         faceFontWeight={props.faceStyle?.weight}
         className={styles.messageMoodCoffeeFace}
       />
-      <BotFaceFrame />
+      {showRasterFrame ? <BotFaceFrame /> : null}
     </span>
   );
 }
@@ -12926,6 +14140,7 @@ function conversationEffectiveBotId(c: ConversationGroupKeyInput): string | null
     return c.hubBotId ?? null;
   }
   if (c.hubBotId) return c.hubBotId;
+  if (c.mode === "zen" && c.hasAssistantReply) return c.lastBotId ?? null;
   if (c.mode === "chat" && c.botId) return c.botId;
   return null;
 }
@@ -15357,6 +16572,7 @@ const BOT_GLYPHS: Record<string, BotGlyphDefinition> = {
 };
 
 const DEFAULT_BOT_GLYPH: BotGlyphName = "bot";
+const DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR = "#f3f3f3";
 
 function isBotGlyphName(value: string | null | undefined): value is BotGlyphName {
   return typeof value === "string" && value in BOT_GLYPHS;
@@ -22617,6 +23833,149 @@ function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Ele
   );
 }
 
+interface ZenLiveBotMannequinProps {
+  glyph: BotGlyphName;
+  accessoryUrl: string | null;
+  accessoryPlacement: BotAccessoryPlacement;
+  accessoryTintColor?: string | null;
+  faceStyle: BotFaceStyle;
+  voicePreset: BotVoicePreset;
+  isTalking: boolean;
+  blinkWhileTalking?: boolean;
+  mouthShape: ZenLiveBotMouthShape;
+  moodHint: NonNullable<ZenLiveBotActionState["moodHint"]>;
+  scheduleKey: string;
+  thinkingScheduleKey?: string;
+  showThinkingSpinner?: boolean;
+  showQuestionMark?: boolean;
+  accessoryLayerRef?: RefObject<HTMLSpanElement | null>;
+  accessoryEditorOverlay?: React.ReactNode;
+}
+
+function ZenLiveBotMannequin({
+  glyph,
+  accessoryUrl,
+  accessoryPlacement,
+  accessoryTintColor,
+  faceStyle,
+  voicePreset,
+  isTalking,
+  blinkWhileTalking = false,
+  mouthShape,
+  moodHint,
+  scheduleKey,
+  thinkingScheduleKey,
+  showThinkingSpinner = false,
+  showQuestionMark = false,
+  accessoryLayerRef,
+  accessoryEditorOverlay,
+}: ZenLiveBotMannequinProps): React.JSX.Element {
+  const plateFace =
+    isTalking && mouthShape === "closed"
+      ? { text: ":|", rotateDeg: 90 }
+      : zenLiveActionPlateFace(moodHint, mouthShape);
+  const normalizedAccessoryPlacement = normalizeBotAccessoryPlacement(accessoryPlacement);
+  const accessoryRasterLayer = accessoryUrl ? (
+    <span
+      ref={accessoryEditorOverlay ? undefined : accessoryLayerRef}
+      className={styles.zenLiveBotPresenceAccessoryLayer}
+      data-accessory-layer={normalizedAccessoryPlacement.layer}
+      aria-hidden="true"
+    >
+      <BotAccessoryRaster
+        className={styles.zenLiveBotPresenceAccessoryRaster}
+        accessoryUrl={accessoryUrl}
+        accessoryPlacement={normalizedAccessoryPlacement}
+        botColor={accessoryTintColor}
+      />
+    </span>
+  ) : null;
+  const accessoryEditLayer = accessoryEditorOverlay ? (
+    <span
+      ref={accessoryLayerRef}
+      className={styles.zenLiveBotPresenceAccessoryEditLayer}
+      aria-hidden="true"
+    >
+      {accessoryEditorOverlay}
+    </span>
+  ) : null;
+
+  return (
+    <span
+      className={styles.zenLiveBotPresenceBody}
+      data-zen-live-bot-body-layer="true"
+    >
+      {accessoryRasterLayer}
+      {accessoryEditLayer}
+      <span
+        className={styles.zenLiveBotPresenceFace}
+        data-zen-live-bot-body-frame="true"
+        aria-hidden="true"
+      >
+        <span
+          className={styles.zenLiveBotPresenceHitTarget}
+          data-zen-live-bot-body-hit-target="true"
+          aria-hidden="true"
+        />
+        {showThinkingSpinner ? (
+          <span
+            className={styles.zenLiveBotPresenceThinkingGlyphAnchor}
+            aria-hidden="true"
+          >
+            <CoffeeSeatPlateEmoji
+              enabled
+              isTalking={false}
+              scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
+              showThinkingSpinner
+              baseText={plateFace.text}
+              rotateDeg={plateFace.rotateDeg}
+              voicePreset={voicePreset}
+              faceEyesFont={faceStyle.eyesFont}
+              faceEyeCharacter={faceStyle.eyeCharacter}
+              faceMouthFont={faceStyle.mouthFont}
+              faceFontWeight={faceStyle.weight}
+              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
+            />
+          </span>
+        ) : null}
+        <BotFaceFrame />
+      </span>
+      {!showThinkingSpinner ? (
+        <span
+          className={styles.zenLiveBotPresenceFaceRig}
+          data-zen-live-bot-face-rig="true"
+          aria-hidden="true"
+        >
+          <CoffeeSeatPlateEmoji
+            enabled
+            isTalking={isTalking}
+            scheduleKey={scheduleKey}
+            showQuestionMark={showQuestionMark}
+            baseText={plateFace.text}
+            rotateDeg={plateFace.rotateDeg}
+            voicePreset={voicePreset}
+            blinkWhileTalking={blinkWhileTalking}
+            faceEyesFont={faceStyle.eyesFont}
+            faceEyeCharacter={faceStyle.eyeCharacter}
+            faceMouthFont={faceStyle.mouthFont}
+            faceFontWeight={faceStyle.weight}
+            className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
+          />
+        </span>
+      ) : null}
+      <span className={styles.zenLiveBotPresenceScreenGlassOverlay} aria-hidden="true">
+        <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
+      </span>
+      <BotGlyph
+        name={glyph}
+        size={18}
+        strokeWidth={1.95}
+        className={styles.zenLiveBotPresenceBotGlyph}
+      />
+    </span>
+  );
+}
+
 function ZenLiveBotPresencePlate({
   bot,
   actionState,
@@ -22632,6 +23991,7 @@ function ZenLiveBotPresencePlate({
   presencePhase,
   resolvedTheme,
   atmosphereActive,
+  privateModeActive = false,
 }: {
   bot: Bot | null;
   actionState: ZenLiveBotActionState | null;
@@ -22647,6 +24007,7 @@ function ZenLiveBotPresencePlate({
   presencePhase: ZenPersonaPresencePhase;
   resolvedTheme: "light" | "dark";
   atmosphereActive: boolean;
+  privateModeActive?: boolean;
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const liveBotGlyphName: BotGlyphName =
@@ -22661,6 +24022,8 @@ function ZenLiveBotPresencePlate({
   const avatarMomentumFrameRef = useRef<number | null>(null);
   const avatarMomentumLastTimeRef = useRef<number | null>(null);
   const avatarVelocityRef = useRef<ZenLiveBotAvatarVelocity>({ x: 0, y: 0 });
+  const avatarProseHillRollingRef = useRef(false);
+  const avatarMetalRotationRef = useRef(0);
   const [avatarPosition, setAvatarPosition] =
     useState<ZenLiveBotAvatarPosition | null>(() => readZenLiveBotAvatarPosition());
   const avatarPositionRef = useRef<ZenLiveBotAvatarPosition | null>(avatarPosition);
@@ -22668,15 +24031,60 @@ function ZenLiveBotPresencePlate({
   const avatarFloating = avatarPosition !== null;
   const [avatarDragging, setAvatarDragging] = useState(false);
   const [avatarFlinging, setAvatarFlinging] = useState(false);
+  const [avatarMetalRotation, setAvatarMetalRotation] = useState(0);
+  const [avatarScreenGlare, setAvatarScreenGlare] =
+    useState<ZenLiveBotScreenGlareState>(ZEN_LIVE_BOT_SCREEN_GLARE_DEFAULT);
   const [avatarCopyOffsetX, setAvatarCopyOffsetX] = useState(0);
   const [avatarCopyPlacement, setAvatarCopyPlacement] =
     useState<ZenLiveBotActionCopyPlacement>("bottom");
   const [avatarCanvasSide, setAvatarCanvasSide] =
     useState<ZenLiveBotCanvasSide>("left");
+  const [actionCopyAnchor, setActionCopyAnchor] =
+    useState<ZenLiveBotActionCopyAnchor | null>(null);
+  const transitioning = presencePhase !== "stable";
+  const faceTalking = isTalking;
+  const faceMouthShape = faceTalking
+    ? mouthShape ?? (mouthOpen ? "open-wide" : "closed")
+    : "closed";
+  const faceMouthOpen = faceTalking && faceMouthShape !== "closed";
+  const faceSpinnerVisible = showThinkingSpinner || transitioning;
+  const actionText = transitioning
+    ? "[LOADING]"
+    : resolveZenLiveBotPresenceActionText({
+        action: actionState?.action,
+        replyAction: replyActionText,
+        isTalking: faceTalking,
+        userActionVisible,
+        hasBot: Boolean(bot),
+      });
+  const actionTextVerbose =
+    !transitioning && isZenLiveBotPresenceActionVerbose(actionText);
+  const actionCopyKey = actionText
+    ? `${actionState?.createdAtMs ?? "static"}:${actionText}`
+    : null;
+  const actionCopyAnchorForRender =
+    actionCopyKey && actionCopyAnchor?.key === actionCopyKey ? actionCopyAnchor : null;
 
   useEffect(() => {
     avatarPositionRef.current = avatarPosition;
   }, [avatarPosition]);
+
+  const advanceAvatarMetalRotation = useCallback(
+    (
+      previousPosition: ZenLiveBotAvatarPosition | null,
+      nextPosition: ZenLiveBotAvatarPosition
+    ): void => {
+      const nextRotation = advanceZenLiveBotAvatarMetalRotationDegrees(
+        avatarMetalRotationRef.current,
+        previousPosition,
+        nextPosition
+      );
+      if (nextRotation === avatarMetalRotationRef.current) return;
+      avatarMetalRotationRef.current = nextRotation;
+      setAvatarMetalRotation(nextRotation);
+    },
+    []
+  );
 
   const persistAvatarPositionIfUserRelocated = useCallback(
     (position: ZenLiveBotAvatarPosition): void => {
@@ -22693,6 +24101,7 @@ function ZenLiveBotPresencePlate({
     avatarMomentumFrameRef.current = null;
     avatarMomentumLastTimeRef.current = null;
     avatarVelocityRef.current = { x: 0, y: 0 };
+    avatarProseHillRollingRef.current = false;
     setAvatarFlinging(false);
     if (persist && avatarPositionRef.current) {
       persistAvatarPositionIfUserRelocated(avatarPositionRef.current);
@@ -22706,7 +24115,19 @@ function ZenLiveBotPresencePlate({
     ): ZenLiveBotAvatarPosition => {
       const node = avatarRef.current;
       if (typeof window === "undefined" || !node) {
+        const previousPosition = avatarPositionRef.current;
         avatarPositionRef.current = nextPosition;
+        advanceAvatarMetalRotation(previousPosition, nextPosition);
+        if (typeof window !== "undefined") {
+          setAvatarScreenGlare(
+            resolveZenLiveBotScreenGlareState(
+              nextPosition,
+              ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX,
+              window.innerWidth,
+              window.innerHeight
+            )
+          );
+        }
         setAvatarPosition(nextPosition);
         if (typeof window !== "undefined") {
           setAvatarCanvasSide(
@@ -22751,13 +24172,65 @@ function ZenLiveBotPresencePlate({
           copyPlacement
         )
       );
+      const previousPosition = avatarPositionRef.current;
+      advanceAvatarMetalRotation(previousPosition, clamped);
+      setAvatarScreenGlare(
+        resolveZenLiveBotScreenGlareState(
+          clamped,
+          rootWidth,
+          window.innerWidth,
+          window.innerHeight
+        )
+      );
       avatarPositionRef.current = clamped;
       setAvatarPosition(clamped);
       if (persist) persistAvatarPositionIfUserRelocated(clamped);
       return clamped;
     },
-    [persistAvatarPositionIfUserRelocated]
+    [advanceAvatarMetalRotation, persistAvatarPositionIfUserRelocated]
   );
+
+  const captureActionCopyAnchor = useCallback((key: string): void => {
+    if (typeof window === "undefined") return;
+    const node = avatarRef.current;
+    if (!node) return;
+    const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
+      window.innerWidth,
+      window.innerHeight
+    );
+    const placement = resolveZenLiveBotActionCopyPlacement(
+      node,
+      window.innerWidth,
+      window.innerHeight,
+      safeAreaInsets
+    );
+    const anchor = resolveZenLiveBotActionCopyAnchor(
+      node,
+      placement,
+      window.innerWidth,
+      window.innerHeight,
+      safeAreaInsets
+    );
+    setAvatarCopyPlacement(placement);
+    setActionCopyAnchor({ key, ...anchor });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!actionCopyKey) {
+      if (actionCopyAnchor !== null) setActionCopyAnchor(null);
+      return;
+    }
+    if (actionCopyAnchor?.key === actionCopyKey) return;
+    if (!avatarPositionRef.current && avatarPosition === null) return;
+    captureActionCopyAnchor(actionCopyKey);
+  }, [
+    actionCopyAnchor,
+    actionCopyAnchor?.key,
+    actionCopyKey,
+    avatarPosition,
+    captureActionCopyAnchor,
+  ]);
 
   useLayoutEffect(() => {
     if (typeof window === "undefined") return;
@@ -22800,11 +24273,6 @@ function ZenLiveBotPresencePlate({
     }
     const observer = new ResizeObserverCtor(scheduleClamp);
     observer.observe(node);
-    node
-      .querySelectorAll<HTMLElement>(
-        "[data-zen-live-bot-action-copy='true'], [data-zen-live-bot-question-marker='true']"
-      )
-      .forEach((child) => observer.observe(child));
     const observeSafeAreaNodes = (): void => {
       document
         .querySelectorAll<HTMLElement>(
@@ -22885,15 +24353,53 @@ function ZenLiveBotPresencePlate({
   const startAvatarMomentum = useCallback(
     (velocity: ZenLiveBotAvatarVelocity): void => {
       if (typeof window === "undefined") return;
-      const speed = Math.hypot(velocity.x, velocity.y);
+      const node = avatarRef.current;
+      const current = avatarPositionRef.current;
+      let initialVelocity = velocity;
+      const speed = Math.hypot(initialVelocity.x, initialVelocity.y);
       if (speed < ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED) {
-        stopAvatarMomentum(true);
-        return;
+        if (node && current) {
+          const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
+            window.innerWidth,
+            window.innerHeight
+          );
+          const hillMotion = resolveZenLiveBotAvatarProseHillMotion(
+            current,
+            initialVelocity,
+            measureZenLiveBotAvatarBounds(node),
+            window.innerWidth,
+            window.innerHeight,
+            safeAreaInsets
+          );
+          if (
+            hillMotion.affected &&
+            Math.hypot(hillMotion.velocity.x, hillMotion.velocity.y) >
+              ZEN_LIVE_BOT_AVATAR_STOP_SPEED
+          ) {
+            avatarProseHillRollingRef.current = true;
+            initialVelocity = hillMotion.velocity;
+          } else {
+            stopAvatarMomentum(false);
+            if (current) persistAvatarPositionIfUserRelocated(current);
+            return;
+          }
+        } else {
+          stopAvatarMomentum(false);
+          if (current) persistAvatarPositionIfUserRelocated(current);
+          return;
+        }
       }
-      const velocityScale = Math.min(1, ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED / speed);
+      const initialSpeed = Math.max(
+        ZEN_LIVE_BOT_AVATAR_STOP_SPEED,
+        Math.hypot(initialVelocity.x, initialVelocity.y)
+      );
+      const velocityScale = Math.min(
+        1,
+        ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED / initialSpeed
+      );
       avatarVelocityRef.current = {
-        x: velocity.x * velocityScale,
-        y: velocity.y * velocityScale,
+        x: initialVelocity.x * velocityScale,
+        y: initialVelocity.y * velocityScale,
       };
       if (avatarMomentumFrameRef.current !== null) {
         window.cancelAnimationFrame(avatarMomentumFrameRef.current);
@@ -22916,23 +24422,45 @@ function ZenLiveBotPresencePlate({
           window.innerHeight
         );
         const rootWidth = node.getBoundingClientRect().width || 1;
+        const bounds = measureZenLiveBotAvatarBounds(node);
         const { minX, maxX, minY, maxY } = zenLiveBotAvatarPositionLimits(
-          measureZenLiveBotAvatarBounds(node),
+          bounds,
           window.innerWidth,
           window.innerHeight,
           safeAreaInsets
         );
-        let nextX = current.x + avatarVelocityRef.current.x * dt;
-        let nextY = current.y + avatarVelocityRef.current.y * dt;
-        let nextVx = avatarVelocityRef.current.x;
-        let nextVy = avatarVelocityRef.current.y;
+        const hillMotion = resolveZenLiveBotAvatarProseHillMotion(
+          current,
+          avatarVelocityRef.current,
+          bounds,
+          window.innerWidth,
+          window.innerHeight,
+          safeAreaInsets,
+          dt
+        );
+        if (hillMotion.affected) {
+          avatarProseHillRollingRef.current = true;
+        }
+        const hillRolling = hillMotion.affected || avatarProseHillRollingRef.current;
+        let nextVx = hillMotion.velocity.x;
+        let nextVy = hillMotion.velocity.y;
+        let nextX = current.x + nextVx * dt;
+        let nextY = current.y + nextVy * dt;
 
         if (nextX < minX) {
           nextX = minX;
-          nextVx = Math.abs(nextVx) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+          nextVx =
+            Math.abs(nextVx) *
+            (hillRolling
+              ? ZEN_LIVE_BOT_PROSE_HILL_SIDE_WALL_RESTITUTION
+              : ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION);
         } else if (nextX > maxX) {
           nextX = maxX;
-          nextVx = -Math.abs(nextVx) * ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION;
+          nextVx =
+            -Math.abs(nextVx) *
+            (hillRolling
+              ? ZEN_LIVE_BOT_PROSE_HILL_SIDE_WALL_RESTITUTION
+              : ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION);
         }
         if (nextY < minY) {
           nextY = minY;
@@ -22943,10 +24471,15 @@ function ZenLiveBotPresencePlate({
         }
 
         const friction = Math.pow(ZEN_LIVE_BOT_AVATAR_FRICTION_PER_FRAME, dt * 60);
-        nextVx *= friction;
-        nextVy *= friction;
+        const rollingFriction =
+          hillRolling && !hillMotion.affected
+            ? Math.pow(ZEN_LIVE_BOT_PROSE_HILL_ROLLING_FRICTION_PER_FRAME, dt * 60)
+            : 1;
+        nextVx *= friction * rollingFriction;
+        nextVy *= friction * rollingFriction;
         const next = { x: nextX, y: nextY };
         avatarVelocityRef.current = { x: nextVx, y: nextVy };
+        advanceAvatarMetalRotation(current, next);
         avatarPositionRef.current = next;
         const copyPlacement = resolveZenLiveBotActionCopyPlacement(
           node,
@@ -22979,106 +24512,284 @@ function ZenLiveBotPresencePlate({
         avatarMomentumFrameRef.current = null;
         avatarMomentumLastTimeRef.current = null;
         avatarVelocityRef.current = { x: 0, y: 0 };
+        avatarProseHillRollingRef.current = false;
         setAvatarFlinging(false);
         persistAvatarPositionIfUserRelocated(next);
       };
 
       avatarMomentumFrameRef.current = window.requestAnimationFrame(step);
     },
-    [persistAvatarPositionIfUserRelocated, stopAvatarMomentum]
+    [
+      advanceAvatarMetalRotation,
+      persistAvatarPositionIfUserRelocated,
+      stopAvatarMomentum,
+    ]
   );
 
-  const handleAvatarPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>): void => {
-      if (event.pointerType === "mouse") return;
+  const beginAvatarGrab = useCallback(
+    (
+      pointerId: number,
+      clientX: number,
+      clientY: number,
+      timeStamp: number,
+      options: ZenLiveBotAvatarGrabStartOptions = {}
+    ): boolean => {
       const node = avatarRef.current;
-      if (!node) return;
-      if (!zenLiveBotAvatarPointerIsInsideBody(node, event.clientX, event.clientY)) {
-        return;
+      if (!node || !zenLiveBotAvatarPointerCanStartGrab(node, clientX, clientY, options)) {
+        return false;
       }
       avatarLastPointerDownMsRef.current = Date.now();
       stopAvatarMomentum();
+      avatarMouseDragCleanupRef.current?.();
       const rect = node.getBoundingClientRect();
       const current = avatarPositionRef.current ?? { x: rect.left, y: rect.top };
       const positioned = setAvatarPositionClamped(current);
       avatarDragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - positioned.x,
-        offsetY: event.clientY - positioned.y,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        lastClientX: event.clientX,
-        lastClientY: event.clientY,
-        startTimeMs: event.timeStamp || Date.now(),
-        lastTimeMs: event.timeStamp || Date.now(),
+        pointerId,
+        offsetX: clientX - positioned.x,
+        offsetY: clientY - positioned.y,
+        startClientX: clientX,
+        startClientY: clientY,
+        lastClientX: clientX,
+        lastClientY: clientY,
+        startTimeMs: timeStamp || Date.now(),
+        lastTimeMs: timeStamp || Date.now(),
         velocityX: 0,
         velocityY: 0,
         moved: false,
       };
       setAvatarDragging(false);
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is not available in every browser/test environment.
+      const { captureTarget } = options;
+      if (captureTarget) {
+        try {
+          captureTarget.setPointerCapture(pointerId);
+        } catch {
+          // Pointer capture is not available in every browser/test environment.
+        }
       }
-      event.preventDefault();
+      return true;
     },
     [setAvatarPositionClamped, stopAvatarMomentum]
   );
 
-  const handleAvatarPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>): void => {
+  const moveAvatarGrab = useCallback(
+    (
+      pointerId: number,
+      clientX: number,
+      clientY: number,
+      timeStamp: number
+    ): boolean => {
       const dragState = avatarDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const dx = event.clientX - dragState.startClientX;
-      const dy = event.clientY - dragState.startClientY;
+      if (!dragState || dragState.pointerId !== pointerId) return false;
+      const dx = clientX - dragState.startClientX;
+      const dy = clientY - dragState.startClientY;
       if (!dragState.moved && Math.hypot(dx, dy) >= 5) {
         dragState.moved = true;
         avatarPositionUserRelocatedRef.current = true;
         setAvatarDragging(true);
       }
-      if (!dragState.moved) return;
+      if (!dragState.moved) return true;
       sampleZenLiveBotAvatarDragVelocity(
         dragState,
-        event.clientX,
-        event.clientY,
-        event.timeStamp || Date.now()
+        clientX,
+        clientY,
+        timeStamp || Date.now()
       );
-      setAvatarPositionClamped(
-        {
-          x: event.clientX - dragState.offsetX,
-          y: event.clientY - dragState.offsetY,
-        }
-      );
-      event.preventDefault();
+      setAvatarPositionClamped({
+        x: clientX - dragState.offsetX,
+        y: clientY - dragState.offsetY,
+      });
+      return true;
     },
     [setAvatarPositionClamped]
   );
 
-  const handleAvatarPointerUp = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>): void => {
+  const finishAvatarGrab = useCallback(
+    (
+      pointerId: number,
+      clientX: number,
+      clientY: number,
+      timeStamp: number,
+      releaseTarget?: HTMLElement
+    ): boolean => {
       const dragState = avatarDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      if (!dragState || dragState.pointerId !== pointerId) return false;
       avatarDragRef.current = null;
       setAvatarDragging(false);
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
+      if (releaseTarget) {
+        try {
+          releaseTarget.releasePointerCapture(pointerId);
+        } catch {
+          // Safe no-op for environments without pointer capture support.
+        }
       }
       if (dragState.moved) {
         sampleZenLiveBotAvatarDragVelocity(
           dragState,
-          event.clientX,
-          event.clientY,
-          event.timeStamp || Date.now()
+          clientX,
+          clientY,
+          timeStamp || Date.now()
         );
         startAvatarMomentum(resolveZenLiveBotAvatarReleaseVelocity(dragState));
       } else if (avatarPositionRef.current) {
         persistAvatarPositionIfUserRelocated(avatarPositionRef.current);
       }
+      return true;
     },
-    [persistAvatarPositionIfUserRelocated, startAvatarMomentum]
+    [
+      persistAvatarPositionIfUserRelocated,
+      startAvatarMomentum,
+    ]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleGlobalPointerDown = (event: PointerEvent): void => {
+      if (event.button !== 0 || event.isPrimary === false || avatarDragRef.current) {
+        return;
+      }
+      const node = avatarRef.current;
+      if (node && zenLiveBotAvatarPointerIsInsideBody(node, event.clientX, event.clientY)) {
+        return;
+      }
+      if (
+        !beginAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now(),
+          {
+            allowSurfaceDrag: true,
+            eventTarget: event.target,
+          }
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const handleGlobalPointerMove = (event: PointerEvent): void => {
+      if (
+        moveAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        )
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    };
+
+    const handleGlobalPointerUp = (event: PointerEvent): void => {
+      if (
+        !finishAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const handleGlobalPointerCancel = (event: PointerEvent): void => {
+      if (
+        finishAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        )
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    const handleGlobalBlur = (): void => {
+      avatarDragRef.current = null;
+      setAvatarDragging(false);
+    };
+
+    window.addEventListener("pointerdown", handleGlobalPointerDown, true);
+    window.addEventListener("pointermove", handleGlobalPointerMove, true);
+    window.addEventListener("pointerup", handleGlobalPointerUp, true);
+    window.addEventListener("pointercancel", handleGlobalPointerCancel, true);
+    window.addEventListener("blur", handleGlobalBlur);
+    return () => {
+      window.removeEventListener("pointerdown", handleGlobalPointerDown, true);
+      window.removeEventListener("pointermove", handleGlobalPointerMove, true);
+      window.removeEventListener("pointerup", handleGlobalPointerUp, true);
+      window.removeEventListener("pointercancel", handleGlobalPointerCancel, true);
+      window.removeEventListener("blur", handleGlobalBlur);
+    };
+  }, [
+    beginAvatarGrab,
+    finishAvatarGrab,
+    moveAvatarGrab,
+  ]);
+
+  const handleAvatarPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      if (
+        beginAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now(),
+          {
+            captureTarget: event.currentTarget,
+            eventTarget: event.target,
+          }
+        )
+      ) {
+        event.preventDefault();
+      }
+    },
+    [beginAvatarGrab]
+  );
+
+  const handleAvatarPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (
+        moveAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        )
+      ) {
+        event.preventDefault();
+      }
+    },
+    [moveAvatarGrab]
+  );
+
+  const handleAvatarPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (
+        finishAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now(),
+          event.currentTarget
+        )
+      ) {
+        event.preventDefault();
+      }
+    },
+    [finishAvatarGrab]
   );
 
   const handleAvatarMouseDown = useCallback(
@@ -23086,32 +24797,16 @@ function ZenLiveBotPresencePlate({
       if (event.button !== 0) return;
       if (avatarDragRef.current) return;
       if (Date.now() - avatarLastPointerDownMsRef.current < 160) return;
-      const node = avatarRef.current;
-      if (!node || typeof window === "undefined") return;
-      if (!zenLiveBotAvatarPointerIsInsideBody(node, event.clientX, event.clientY)) {
+      if (
+        !beginAvatarGrab(
+          -1,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now()
+        )
+      ) {
         return;
       }
-      stopAvatarMomentum();
-      avatarMouseDragCleanupRef.current?.();
-      const rect = node.getBoundingClientRect();
-      const current = avatarPositionRef.current ?? { x: rect.left, y: rect.top };
-      const positioned = setAvatarPositionClamped(current);
-      const dragState: ZenLiveBotAvatarDragState = {
-        pointerId: -1,
-        offsetX: event.clientX - positioned.x,
-        offsetY: event.clientY - positioned.y,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        lastClientX: event.clientX,
-        lastClientY: event.clientY,
-        startTimeMs: event.timeStamp || Date.now(),
-        lastTimeMs: event.timeStamp || Date.now(),
-        velocityX: 0,
-        velocityY: 0,
-        moved: false,
-      };
-      avatarDragRef.current = dragState;
-      setAvatarDragging(false);
 
       const cleanup = (): void => {
         window.removeEventListener("mousemove", onMove);
@@ -23120,45 +24815,29 @@ function ZenLiveBotPresencePlate({
       };
 
       const onMove = (moveEvent: MouseEvent): void => {
-        if (avatarDragRef.current !== dragState) return;
-        const dx = moveEvent.clientX - dragState.startClientX;
-        const dy = moveEvent.clientY - dragState.startClientY;
-        if (!dragState.moved && Math.hypot(dx, dy) >= 5) {
-          dragState.moved = true;
-          avatarPositionUserRelocatedRef.current = true;
-          setAvatarDragging(true);
+        if (
+          moveAvatarGrab(
+            -1,
+            moveEvent.clientX,
+            moveEvent.clientY,
+            moveEvent.timeStamp || Date.now()
+          )
+        ) {
+          moveEvent.preventDefault();
         }
-        if (!dragState.moved) return;
-        sampleZenLiveBotAvatarDragVelocity(
-          dragState,
-          moveEvent.clientX,
-          moveEvent.clientY,
-          moveEvent.timeStamp || Date.now()
-        );
-        setAvatarPositionClamped(
-          {
-            x: moveEvent.clientX - dragState.offsetX,
-            y: moveEvent.clientY - dragState.offsetY,
-          }
-        );
-        moveEvent.preventDefault();
       };
 
       const onUp = (upEvent: MouseEvent): void => {
-        if (avatarDragRef.current !== dragState) return;
-        avatarDragRef.current = null;
-        setAvatarDragging(false);
         cleanup();
-        if (dragState.moved) {
-          sampleZenLiveBotAvatarDragVelocity(
-            dragState,
+        if (
+          finishAvatarGrab(
+            -1,
             upEvent.clientX,
             upEvent.clientY,
             upEvent.timeStamp || Date.now()
-          );
-          startAvatarMomentum(resolveZenLiveBotAvatarReleaseVelocity(dragState));
-        } else if (avatarPositionRef.current) {
-          persistAvatarPositionIfUserRelocated(avatarPositionRef.current);
+          )
+        ) {
+          upEvent.preventDefault();
         }
       };
 
@@ -23167,15 +24846,9 @@ function ZenLiveBotPresencePlate({
       window.addEventListener("mouseup", onUp);
       event.preventDefault();
     },
-    [
-      setAvatarPositionClamped,
-      startAvatarMomentum,
-      stopAvatarMomentum,
-      persistAvatarPositionIfUserRelocated,
-    ]
+    [beginAvatarGrab, finishAvatarGrab, moveAvatarGrab]
   );
 
-  const transitioning = presencePhase !== "stable";
   if (
     !bot &&
     !actionState &&
@@ -23190,33 +24863,17 @@ function ZenLiveBotPresencePlate({
   const defaultPrismPresence = bot === null;
   const moodHint =
     actionState?.moodHint ?? (bot ? "warm" : userActionVisible ? "attentive" : "waiting");
-  const faceTalking = isTalking;
-  const faceMouthShape = faceTalking
-    ? mouthShape ?? (mouthOpen ? "open-wide" : "closed")
-    : "closed";
-  const faceMouthOpen = faceTalking && faceMouthShape !== "closed";
-  const faceSpinnerVisible = showThinkingSpinner || transitioning;
-  const plateFace =
-    faceTalking && faceMouthShape === "closed"
-      ? { text: ":|", rotateDeg: 90 }
-      : zenLiveActionPlateFace(moodHint, faceMouthShape);
-  const actionText = transitioning
-    ? "[LOADING]"
-    : resolveZenLiveBotPresenceActionText({
-        action: actionState?.action,
-        replyAction: replyActionText,
-        isTalking: faceTalking,
-        userActionVisible,
-        hasBot: Boolean(bot),
-      });
-  const actionTextVerbose =
-    !transitioning && isZenLiveBotPresenceActionVerbose(actionText);
   const voicePreset = coffeeSeatVoicePreset(bot);
   const faceStyle = resolveBotFaceStyleForBot(bot);
   const accessoryUrl = botStoredImageUrl(bot?.accessory_image_id);
+  const accessoryPlacement = botAccessoryPlacementFromBot(bot);
+  const accessoryTintColor = bot?.color
+    ? normalizeAccentForTheme(bot.color, resolvedTheme)
+    : null;
   const faceScaleY = zenLiveBotFaceScaleYForCanvasSide(avatarCanvasSide);
+  const botAccent = botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme);
   const avatarStyle = {
-    ...botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme),
+    ...botAccent,
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
@@ -23226,11 +24883,16 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
     "--zen-live-bot-copy-center-anchor": `${Math.round(bodySize * 0.5)}px`,
-    "--zen-live-bot-copy-vertical-anchor": `${Math.round(bodySize * 1.08)}px`,
-    "--zen-live-bot-copy-top-anchor": `${Math.round(bodySize * -0.06)}px`,
-    "--zen-live-bot-copy-side-anchor": `${Math.round(bodySize * 0.58)}px`,
-    "--zen-live-bot-glyph-x-anchor": `${Math.round(bodySize * 0.5) + 1}px`,
-    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.78) + 1}px`,
+    "--zen-live-bot-copy-vertical-anchor": `${Math.round(bodySize * 0.72)}px`,
+    "--zen-live-bot-copy-top-anchor": `${Math.round(bodySize * -0.02)}px`,
+    "--zen-live-bot-copy-side-anchor": `${Math.round(bodySize * 0.42)}px`,
+    "--zen-live-bot-glyph-x-anchor": "1px",
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.29) + 1}px`,
+    "--bot-face-metal-light-rotation": `${avatarMetalRotation.toFixed(2)}deg`,
+    "--bot-face-screen-glare-x": `${avatarScreenGlare.xPct.toFixed(2)}%`,
+    "--bot-face-screen-glare-y": `${avatarScreenGlare.yPct.toFixed(2)}%`,
+    "--bot-face-screen-glare-angle": `${avatarScreenGlare.angleDeg.toFixed(2)}deg`,
+    "--bot-face-screen-glare-opacity": avatarScreenGlare.opacity.toFixed(3),
     ...(avatarPosition
       ? {
           "--zen-live-bot-avatar-x": `${avatarPosition.x}px`,
@@ -23238,6 +24900,13 @@ function ZenLiveBotPresencePlate({
         }
       : {}),
   } as React.CSSProperties;
+  const actionCopyStyle = actionCopyAnchorForRender
+    ? ({
+        ...botAccent,
+        "--zen-live-bot-action-copy-anchor-x": `${Math.round(actionCopyAnchorForRender.x)}px`,
+        "--zen-live-bot-action-copy-anchor-y": `${Math.round(actionCopyAnchorForRender.y)}px`,
+      } as React.CSSProperties)
+    : undefined;
   const plateNode = (
     <div
       ref={avatarRef}
@@ -23248,6 +24917,7 @@ function ZenLiveBotPresencePlate({
       data-prism-mood={zenLiveActionMoodToBotMood(moodHint)}
       data-source={actionState?.source ?? (bot ? "persona" : "prism")}
       data-prism-persona={defaultPrismPresence ? "true" : undefined}
+      data-private-mode={privateModeActive ? "true" : undefined}
       data-prism-forming={
         defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
       }
@@ -23262,15 +24932,16 @@ function ZenLiveBotPresencePlate({
       data-ask-question-active={askQuestionActive ? "true" : undefined}
       data-floating={avatarFloating ? "true" : undefined}
       data-canvas-side={avatarCanvasSide}
-      data-copy-placement={avatarCopyPlacement}
+      data-copy-placement={actionCopyAnchorForRender?.placement ?? avatarCopyPlacement}
       data-dragging={avatarDragging ? "true" : undefined}
       data-flinging={avatarFlinging ? "true" : undefined}
       data-body-sized="true"
+      data-zen-live-bot-presence-plate="true"
       data-accessory-equipped={accessoryUrl ? "true" : undefined}
       data-interrupt={actionState?.responseKind === "interrupt_candidate" ? "true" : undefined}
       role="status"
       aria-live="polite"
-      aria-label={`${botName}: ${actionText}`}
+      aria-label={actionText ? `${botName}: ${actionText}` : botName}
       title={`Drag or fling ${botName} from the orb.`}
       style={avatarStyle}
       onPointerDown={handleAvatarPointerDown}
@@ -23279,99 +24950,70 @@ function ZenLiveBotPresencePlate({
       onPointerCancel={handleAvatarPointerUp}
       onMouseDown={handleAvatarMouseDown}
     >
-      {askQuestionActive ? (
+      <ZenLiveBotMannequin
+        glyph={liveBotGlyphName}
+        accessoryUrl={accessoryUrl}
+        accessoryPlacement={accessoryPlacement}
+        accessoryTintColor={accessoryTintColor}
+        faceStyle={faceStyle}
+        voicePreset={voicePreset}
+        isTalking={faceTalking}
+        mouthShape={faceMouthShape}
+        moodHint={moodHint}
+        scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
+        thinkingScheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
+        showThinkingSpinner={faceSpinnerVisible}
+        showQuestionMark={askQuestionActive}
+      />
+      {actionText ? (
         <span
-          className={styles.zenLiveBotPresenceQuestionMark}
-          data-zen-live-bot-question-marker="true"
+          key={`measure-${actionCopyKey}`}
+          className={styles.zenLiveBotPresenceCopy}
+          data-zen-live-bot-action-copy-measure="true"
           aria-hidden="true"
         >
-          ?
+          <span className={styles.zenLiveBotPresenceCopyText}>
+            <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
+          </span>
         </span>
       ) : null}
-      <span
-        className={styles.zenLiveBotPresenceBody}
-        data-zen-live-bot-body-layer="true"
-      >
-        <span
-          className={styles.zenLiveBotPresenceHitTarget}
-          data-zen-live-bot-body-hit-target="true"
-          aria-hidden="true"
-        />
-        {accessoryUrl ? (
-          <span
-            className={styles.zenLiveBotPresenceBodyRaster}
-            style={{ backgroundImage: `url("${accessoryUrl}")` }}
-            aria-hidden="true"
-          />
-        ) : null}
-        <span
-          className={styles.zenLiveBotPresenceFace}
-          data-zen-live-bot-body-frame="true"
-          aria-hidden="true"
-        >
-          {faceSpinnerVisible ? (
-            <span
-              className={styles.zenLiveBotPresenceThinkingGlyphAnchor}
-              aria-hidden="true"
-            >
-              <CoffeeSeatPlateEmoji
-                enabled
-                isTalking={false}
-                scheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
-                showThinkingSpinner
-                baseText={plateFace.text}
-                rotateDeg={plateFace.rotateDeg}
-                voicePreset={voicePreset}
-                faceEyesFont={faceStyle.eyesFont}
-                faceMouthFont={faceStyle.mouthFont}
-                faceFontWeight={faceStyle.weight}
-                className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
-              />
-            </span>
-          ) : null}
-          <BotFaceFrame />
-        </span>
-        {!faceSpinnerVisible ? (
-          <span
-            className={styles.zenLiveBotPresenceFaceRig}
-            data-zen-live-bot-face-rig="true"
-            aria-hidden="true"
-          >
-            <CoffeeSeatPlateEmoji
-              enabled
-              isTalking={faceTalking}
-              scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
-              baseText={plateFace.text}
-              rotateDeg={plateFace.rotateDeg}
-              voicePreset={voicePreset}
-              faceEyesFont={faceStyle.eyesFont}
-              faceMouthFont={faceStyle.mouthFont}
-              faceFontWeight={faceStyle.weight}
-              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
-            />
-          </span>
-        ) : null}
-        <BotGlyph
-          name={liveBotGlyphName}
-          size={18}
-          strokeWidth={2.2}
-          className={styles.zenLiveBotPresenceBotGlyph}
-        />
-      </span>
-      <span
-        className={styles.zenLiveBotPresenceCopy}
-        data-zen-live-bot-action-copy="true"
-      >
-        <span className={styles.zenLiveBotPresenceCopyText}>
-          <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
-        </span>
-      </span>
     </div>
   );
+  const actionCopyNode =
+    actionText && actionCopyAnchorForRender && typeof document !== "undefined"
+      ? createPortal(
+          <span
+            key={actionCopyKey}
+            className={styles.zenLiveBotPresenceCopy}
+            data-zen-live-bot-action-copy="true"
+            data-copy-anchored="true"
+            data-copy-placement={actionCopyAnchorForRender.placement}
+            data-action-verbose={actionTextVerbose ? "true" : undefined}
+            data-loading={transitioning ? "true" : undefined}
+            data-theme={resolvedTheme}
+            style={actionCopyStyle}
+          >
+            <span className={styles.zenLiveBotPresenceCopyText}>
+              <span className={styles.zenLiveBotPresenceText}>{actionText}</span>
+            </span>
+          </span>,
+          document.body
+        )
+      : null;
   if (avatarFloating && typeof document !== "undefined") {
-    return createPortal(plateNode, document.body);
+    return (
+      <>
+        {createPortal(plateNode, document.body)}
+        {actionCopyNode}
+      </>
+    );
   }
-  return plateNode;
+  return (
+    <>
+      {plateNode}
+      {actionCopyNode}
+    </>
+  );
 }
 
 function wrapCleanupRevealMessageBody(
@@ -27520,26 +29162,45 @@ interface BotAiParameterCustomizerProps {
   onClose: () => void;
 }
 
-interface BotAvatarCustomizerProps {
+interface BotAvatarCustomizerModalProps {
   open: boolean;
   botName: string;
   scheduleKey: string;
+  color: string;
+  glyph: BotGlyphName;
+  colorPickerOpen: boolean;
+  resolvedTheme: "light" | "dark";
   faceEyesFont: BotFaceFontId;
+  faceEyeCharacter: string | null;
   faceMouthFont: BotFaceFontId;
   faceFontWeight: number;
   accessoryUrl: string | null;
   accessoryImageId: string | null;
+  accessoryPlacement: BotAccessoryPlacement;
   accessoryBusy: boolean;
   accessoryActionsDisabled: boolean;
   accessoryActionTitle?: string;
   accessoryUploadInputRef: RefObject<HTMLInputElement | null>;
+  hasUnsavedChanges: boolean;
+  saving: boolean;
+  saveError: string | null;
+  savePromptOpen: boolean;
+  onRequestClose: () => void;
+  onSave: () => void | Promise<void>;
+  onDiscard: () => void;
+  onCancelSavePrompt: () => void;
+  onColorChange: (next: string) => void;
+  onGlyphChange: (next: BotGlyphName) => void;
+  onColorPickerToggle: () => void;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
+  onEyeCharacterChange: (character: string | null) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onWeightChange: (weight: number) => void;
+  onAccessoryPlacementChange: (placement: BotAccessoryPlacement) => void;
+  onAccessoryPlacementCommit: (placement: BotAccessoryPlacement) => void;
   onAccessoryUploadInputChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onAccessoryUploadClick: () => void;
   onRemoveAccessory: () => void;
-  onClose: () => void;
 }
 
 function optionalScaleLabel(
@@ -27652,39 +29313,322 @@ function botAvatarWeightLabel(weight: number): string {
   return "Balanced";
 }
 
-function BotAvatarCustomizer({
+function botAvatarPreviewIdentityStyle(rawHex: string): CSSProperties {
+  const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
+  return {
+    ...accentStyle,
+    ["--zen-live-bot-face-ink" as string]: "var(--coffee-bot-color)",
+    ["--zen-live-bot-glyph-ink" as string]: "var(--coffee-bot-color)",
+  } as CSSProperties;
+}
+
+const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
+  "closed",
+  "open-small",
+  "open-wide",
+  "closed",
+  "open-round",
+  "open-small",
+] as const satisfies readonly ZenLiveBotMouthShape[];
+
+type BotAvatarAccessoryEditMode = "move" | "resize";
+
+type BotAvatarAccessoryDragState = {
+  pointerId: number;
+  mode: BotAvatarAccessoryEditMode;
+  startClientX: number;
+  startClientY: number;
+  startPlacement: BotAccessoryPlacement;
+};
+
+function BotAvatarCustomizerModal({
   open,
   botName,
   scheduleKey,
+  color,
+  glyph,
+  colorPickerOpen,
+  resolvedTheme,
   faceEyesFont,
+  faceEyeCharacter,
   faceMouthFont,
   faceFontWeight,
   accessoryUrl,
   accessoryImageId,
+  accessoryPlacement,
   accessoryBusy,
   accessoryActionsDisabled,
   accessoryActionTitle,
   accessoryUploadInputRef,
+  hasUnsavedChanges,
+  saving,
+  saveError,
+  savePromptOpen,
+  onRequestClose,
+  onSave,
+  onDiscard,
+  onCancelSavePrompt,
+  onColorChange,
+  onGlyphChange,
+  onColorPickerToggle,
   onEyesFontChange,
+  onEyeCharacterChange,
   onMouthFontChange,
   onWeightChange,
+  onAccessoryPlacementChange,
+  onAccessoryPlacementCommit,
   onAccessoryUploadInputChange,
   onAccessoryUploadClick,
   onRemoveAccessory,
-  onClose,
-}: BotAvatarCustomizerProps): React.JSX.Element | null {
-  if (!open) return null;
-  const botAvatarPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
+}: BotAvatarCustomizerModalProps): React.JSX.Element | null {
+  const accessoryLayerRef = useRef<HTMLSpanElement | null>(null);
+  const accessoryDragRef = useRef<BotAvatarAccessoryDragState | null>(null);
+  const [mouthPhase, setMouthPhase] = useState(0);
+  const [previewHovered, setPreviewHovered] = useState(false);
+  const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
+  const [accessoryLocked, setAccessoryLocked] = useState(false);
+  const normalizedPlacement = normalizeBotAccessoryPlacement(accessoryPlacement);
+  const placementDisabled = !accessoryUrl || accessoryActionsDisabled;
+  const accessoryPlacementLocked = Boolean(accessoryUrl && accessoryLocked);
+  const placementDragDisabled = placementDisabled || accessoryPlacementLocked;
+  const previewTalking = previewHovered;
+  const previewMouthShape =
+    BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
+      mouthPhase % BOT_AVATAR_PREVIEW_MOUTH_SHAPES.length
+    ] ?? "closed";
+  const displayedPreviewMouthShape = previewTalking ? previewMouthShape : "closed";
   const titleName = botName.trim() || "Bot";
+  const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
+  const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
+  const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
+  const previewAccessoryTintColor = normalizeAccentForTheme(color, "dark");
+  const avatarStyle = {
+    ...botAvatarPreviewIdentityStyle(color),
+    "--coffee-plate-emoji-face-scale-y": zenLiveBotFaceScaleYForCanvasSide("left"),
+    "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
+    "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
+    "--zen-live-bot-face-scale": facePlacement.scale,
+    "--zen-live-bot-body-x": `${bodyPlacement.xPct}%`,
+    "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
+    "--zen-live-bot-avatar-size": `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
+    "--zen-live-bot-avatar-body-size": `${bodySize}px`,
+    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM}rem`,
+    "--zen-live-bot-glyph-x-anchor": "1px",
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.29) + 1}px`,
+  } as CSSProperties;
 
-  return (
+  useEffect(() => {
+    if (!open) return;
+    setPreviewTheme(resolvedTheme);
+    setPreviewHovered(false);
+    setMouthPhase(0);
+    setAccessoryLocked(false);
+  }, [open, resolvedTheme]);
+
+  useEffect(() => {
+    setAccessoryLocked(false);
+  }, [accessoryImageId]);
+
+  useEffect(() => {
+    if (!accessoryPlacementLocked) return;
+    accessoryDragRef.current = null;
+  }, [accessoryPlacementLocked]);
+
+  useEffect(() => {
+    if (!open || !previewTalking) {
+      setMouthPhase(0);
+      return;
+    }
+    if (typeof window === "undefined") return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reducedMotion.matches) return;
+    const interval = window.setInterval(() => {
+      setMouthPhase((current) => current + 1);
+    }, Math.max(90, ZEN_LIVE_MOUTH_PHASE_MS));
+    return () => window.clearInterval(interval);
+  }, [open, previewTalking]);
+
+  const placementFromDrag = useCallback(
+    (dragState: BotAvatarAccessoryDragState, clientX: number, clientY: number) => {
+      const node = accessoryLayerRef.current;
+      if (!node) return dragState.startPlacement;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return dragState.startPlacement;
+      const faceFlipValue = window
+        .getComputedStyle(node)
+        .getPropertyValue("--coffee-plate-emoji-face-scale-y")
+        .trim();
+      const accessoryFaceFlipX =
+        faceFlipValue === "-1" ? -1 : 1;
+      const deltaXPct =
+        ((clientX - dragState.startClientX) / rect.width) * 100 * accessoryFaceFlipX;
+      const deltaYPct = ((clientY - dragState.startClientY) / rect.height) * 100;
+      if (dragState.mode === "resize") {
+        const deltaSizePct =
+          Math.abs(deltaXPct) >= Math.abs(deltaYPct) ? deltaXPct : deltaYPct;
+        return normalizeBotAccessoryPlacement({
+          ...dragState.startPlacement,
+          sizePct: dragState.startPlacement.sizePct + deltaSizePct,
+        });
+      }
+      return normalizeBotAccessoryPlacement({
+        ...dragState.startPlacement,
+        xPct: dragState.startPlacement.xPct + deltaXPct,
+        yPct: dragState.startPlacement.yPct + deltaYPct,
+      });
+    },
+    []
+  );
+  const beginAccessoryEdit = useCallback(
+    (mode: BotAvatarAccessoryEditMode, event: React.PointerEvent<HTMLElement>) => {
+      if (placementDragDisabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (event.button !== 0) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      accessoryDragRef.current = {
+        pointerId: event.pointerId,
+        mode,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startPlacement: normalizedPlacement,
+      };
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [normalizedPlacement, placementDragDisabled]
+  );
+
+  const handleAccessoryPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (placementDragDisabled) return;
+      const dragState = accessoryDragRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      onAccessoryPlacementChange(placementFromDrag(dragState, event.clientX, event.clientY));
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [onAccessoryPlacementChange, placementDragDisabled, placementFromDrag]
+  );
+
+  const finishAccessoryEdit = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const dragState = accessoryDragRef.current;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      accessoryDragRef.current = null;
+      const nextPlacement = placementFromDrag(dragState, event.clientX, event.clientY);
+      onAccessoryPlacementChange(nextPlacement);
+      onAccessoryPlacementCommit(nextPlacement);
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [onAccessoryPlacementChange, onAccessoryPlacementCommit, placementFromDrag]
+  );
+
+  const commitAccessoryLayer = useCallback(
+    (layer: BotAccessoryPlacement["layer"]) => {
+      if (!accessoryUrl || accessoryActionsDisabled) return;
+      const nextPlacement = normalizeBotAccessoryPlacement({
+        ...normalizedPlacement,
+        layer,
+      });
+      onAccessoryPlacementChange(nextPlacement);
+      onAccessoryPlacementCommit(nextPlacement);
+    },
+    [
+      accessoryActionsDisabled,
+      accessoryUrl,
+      normalizedPlacement,
+      onAccessoryPlacementChange,
+      onAccessoryPlacementCommit,
+    ]
+  );
+
+  if (!open) return null;
+
+  const accessoryEditorOverlay = accessoryUrl && !accessoryPlacementLocked ? (
+    <span
+      className={styles.botAvatarAccessoryEditHandle}
+      style={botAccessoryPlacementEditorStyle(normalizedPlacement)}
+      data-disabled={placementDisabled ? "true" : undefined}
+      onPointerDown={(event) => beginAccessoryEdit("move", event)}
+      onPointerMove={handleAccessoryPointerMove}
+      onPointerUp={finishAccessoryEdit}
+      onPointerCancel={finishAccessoryEdit}
+    >
+      <button
+        type="button"
+        className={styles.botAvatarAccessoryCancelButton}
+        disabled={!accessoryImageId || placementDisabled}
+        title={!accessoryImageId ? "No accessory to remove" : accessoryActionTitle}
+        aria-label="Remove accessory"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onRemoveAccessory();
+        }}
+      >
+        <X size={16} strokeWidth={2.8} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={styles.botAvatarAccessoryLockButton}
+        disabled={placementDisabled}
+        aria-label="Lock accessory placement"
+        title="Lock accessory placement"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onAccessoryPlacementCommit(normalizedPlacement);
+          setAccessoryLocked(true);
+        }}
+      >
+        <Lock size={15} strokeWidth={2.8} aria-hidden="true" />
+      </button>
+      <span
+        className={styles.botAvatarAccessoryResizeHandle}
+        onPointerDown={(event) => beginAccessoryEdit("resize", event)}
+        onPointerMove={handleAccessoryPointerMove}
+        onPointerUp={finishAccessoryEdit}
+        onPointerCancel={finishAccessoryEdit}
+      >
+        <MoveDiagonal2 size={17} strokeWidth={2.8} aria-hidden="true" />
+      </span>
+    </span>
+  ) : null;
+  const saveStatusState = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const saveStatusLabel =
+    saveStatusState === "saving"
+      ? "Saving"
+      : saveStatusState === "dirty"
+        ? "Unsaved"
+        : "Saved";
+  const previewFaceSummary = `${BOT_FACE_FONT_LABELS[faceEyesFont]} eyes · ${BOT_FACE_FONT_LABELS[faceMouthFont]} mouth`;
+  const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
+  const accessoryLayerLabel = normalizedPlacement.layer === "back" ? "Behind" : "Front";
+  const accessorySummary = accessoryUrl ? accessoryLayerLabel : "None";
+
+  const modal = (
     <div
-      className={styles.botProfileBuilderBackdrop}
+      className={styles.botAvatarCustomizerBackdrop}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
-        onClose();
+        onRequestClose();
       }}
     >
       <section
@@ -27695,134 +29639,306 @@ function BotAvatarCustomizer({
       >
         <header className={styles.botProfileBuilderHeader}>
           <div>
-            <span>Avatar Customizer</span>
+            <span>Avatar Studio</span>
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
-            <p>Face glyph and accessories for character presence.</p>
+            <p>Identity, face, and accessory.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close avatar customizer">
-            ×
-          </button>
+          <div className={styles.botAvatarCustomizerHeaderActions}>
+            <span
+              className={styles.botAvatarSaveStatus}
+              data-state={saveStatusState}
+            >
+              {saveStatusLabel}
+            </span>
+            <button
+              type="button"
+              className={styles.botAvatarCustomizerSaveButton}
+              onClick={() => void onSave()}
+              disabled={!hasUnsavedChanges || saving}
+              data-dirty={hasUnsavedChanges ? "true" : undefined}
+            >
+              <IconSave />
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              className={styles.botAvatarCustomizerCloseButton}
+              onClick={onRequestClose}
+              aria-label="Close avatar customizer"
+            >
+              <X size={16} strokeWidth={2.6} aria-hidden="true" />
+            </button>
+          </div>
         </header>
         <div className={styles.botAvatarCustomizerBody}>
-          <section className={styles.botAvatarModalFacePanel} aria-label="Face glyph">
-            <div className={styles.botAvatarModalPreview}>
-              <div className={styles.botAvatarFacePlate} aria-hidden="true">
-                <CoffeeSeatPlateEmoji
-                  enabled={false}
-                  isTalking={false}
-                  scheduleKey={scheduleKey}
-                  baseText={botAvatarPlateGlyph.text}
-                  rotateDeg={botAvatarPlateGlyph.rotateDeg}
-                  voicePreset="neutral"
-                  faceEyesFont={faceEyesFont}
-                  faceMouthFont={faceMouthFont}
-                  faceFontWeight={faceFontWeight}
-                  className={`${styles.coffeeSeatPlateEmoji} ${styles.botAvatarFaceGlyph}`}
-                />
-                <BotPreviewFaceGlare />
-                {accessoryUrl ? (
-                  <span
-                    className={styles.botAvatarAccessoryFaceOverlay}
-                    style={{ backgroundImage: `url("${accessoryUrl}")` }}
-                  />
-                ) : null}
+          <section className={styles.botAvatarMannequinPanel} aria-label="Avatar preview">
+            <header className={styles.botAvatarPanelHeader}>
+              <div>
+                <span>Preview</span>
+                <strong>Live avatar</strong>
               </div>
-              <div className={styles.botAvatarPreviewCopy}>
-                <span>Face</span>
-                <small>
-                  Eye: {BOT_FACE_FONT_LABELS[faceEyesFont]} · Mouth: {BOT_FACE_FONT_LABELS[faceMouthFont]}
-                </small>
+              <div
+                className={styles.botAvatarPreviewThemeToggle}
+                role="group"
+                aria-label="Preview theme"
+              >
+                <button
+                  type="button"
+                  data-active={previewTheme === "dark" ? "true" : undefined}
+                  aria-pressed={previewTheme === "dark"}
+                  onClick={() => setPreviewTheme("dark")}
+                >
+                  <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
+                  Dark
+                </button>
+                <button
+                  type="button"
+                  data-active={previewTheme === "light" ? "true" : undefined}
+                  aria-pressed={previewTheme === "light"}
+                  onClick={() => setPreviewTheme("light")}
+                >
+                  <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
+                  Light
+                </button>
+              </div>
+            </header>
+            <div
+              className={styles.botAvatarMannequinStage}
+              data-accessory-equipped={accessoryUrl ? "true" : undefined}
+              data-accessory-editable={!placementDragDisabled ? "true" : undefined}
+              data-app-cursor-theme={previewTheme}
+              data-preview-theme={previewTheme}
+            >
+              <div
+                className={styles.zenLiveBotPresencePlate}
+                data-theme={previewTheme}
+                data-mood="warm"
+                data-prism-mood="warm"
+                data-source="persona"
+                data-talking={previewTalking ? "true" : undefined}
+                data-mouth-open={
+                  previewTalking
+                    ? displayedPreviewMouthShape !== "closed"
+                      ? "true"
+                      : "false"
+                    : undefined
+                }
+                data-mouth-shape={previewTalking ? displayedPreviewMouthShape : undefined}
+                data-canvas-side="left"
+                data-body-sized="true"
+                data-zen-live-bot-presence-plate="true"
+                data-accessory-equipped={accessoryUrl ? "true" : undefined}
+                data-avatar-customizer-preview="true"
+                data-avatar-preview-theme={previewTheme}
+                style={avatarStyle}
+                role="img"
+                aria-label={`${titleName} avatar preview`}
+                onPointerEnter={() => setPreviewHovered(true)}
+                onPointerLeave={() => setPreviewHovered(false)}
+              >
+                <ZenLiveBotMannequin
+                  glyph={glyph}
+                  accessoryUrl={accessoryUrl}
+                  accessoryPlacement={normalizedPlacement}
+                  accessoryTintColor={previewAccessoryTintColor}
+                  faceStyle={{
+                    eyesFont: faceEyesFont,
+                    eyeCharacter: faceEyeCharacter,
+                    mouthFont: faceMouthFont,
+                    weight: faceFontWeight,
+                  }}
+                  voicePreset="warm"
+                  isTalking={previewTalking}
+                  blinkWhileTalking
+                  mouthShape={displayedPreviewMouthShape}
+                  moodHint="warm"
+                  scheduleKey={scheduleKey}
+                  accessoryLayerRef={accessoryLayerRef}
+                  accessoryEditorOverlay={accessoryEditorOverlay}
+                />
               </div>
             </div>
-            <div className={styles.botAvatarFontControls}>
-              <fieldset className={styles.botAvatarFontControl}>
-                <legend>Eye style</legend>
-                <div className={styles.botAvatarFontOptions}>
-                  {BOT_FACE_FONT_IDS.map((fontId) => (
-                    <BotAvatarFontOption
-                      key={`avatar-eyes-${fontId}`}
-                      fontId={fontId}
-                      part="eyes"
-                      selected={faceEyesFont === fontId}
-                      onClick={() => onEyesFontChange(fontId)}
-                    />
-                  ))}
-                </div>
-              </fieldset>
-              <fieldset className={styles.botAvatarFontControl}>
-                <legend>Mouth style</legend>
-                <div className={styles.botAvatarFontOptions}>
-                  {BOT_FACE_FONT_IDS.map((fontId) => (
-                    <BotAvatarFontOption
-                      key={`avatar-mouth-${fontId}`}
-                      fontId={fontId}
-                      part="mouth"
-                      selected={faceMouthFont === fontId}
-                      onClick={() => onMouthFontChange(fontId)}
-                    />
-                  ))}
-                </div>
-              </fieldset>
-              <label className={styles.botAvatarWeightControl}>
-                <span>
-                  Inflation
-                  <strong>{botAvatarWeightLabel(faceFontWeight)} · {faceFontWeight}</strong>
-                </span>
-                <input
-                  type="range"
-                  min={BOT_FACE_FONT_WEIGHT_MIN}
-                  max={BOT_FACE_FONT_WEIGHT_MAX}
-                  step={BOT_FACE_FONT_WEIGHT_STEP}
-                  value={faceFontWeight}
-                  onChange={(event) => onWeightChange(Number(event.currentTarget.value))}
-                />
-                <div className={styles.botAvatarWeightEnds} aria-hidden="true">
-                  <span>Deflate</span>
-                  <span>Inflate</span>
-                </div>
-              </label>
+            <div className={styles.botAvatarPreviewMeta}>
+              <span>{previewFaceSummary}</span>
+              <span>{previewWeightSummary}</span>
+              <span>Accessory: {accessorySummary}</span>
             </div>
           </section>
-          <section className={styles.botAvatarModalAccessoryPanel} aria-label="Accessories">
-            <div
-              className={styles.botAvatarAccessoryPreview}
-              data-empty={accessoryUrl ? undefined : "true"}
-              aria-hidden="true"
-            >
-              {accessoryUrl ? (
-                <span
-                  className={styles.botAvatarAccessoryImage}
-                  style={{ backgroundImage: `url("${accessoryUrl}")` }}
-                />
-              ) : (
-                <span className={styles.botAvatarAccessoryEmpty}>
-                  <Brush size={24} strokeWidth={1.8} />
-                </span>
-              )}
-            </div>
-            <div className={styles.botAvatarAccessoryCopy}>
-              <span>Accessories</span>
-              <small>{accessoryUrl ? "Transparent overlay set" : "512x512 transparent PNG/WebP"}</small>
-            </div>
-            <div className={styles.botAvatarAccessoryActions}>
-              <button
-                type="button"
-                onClick={onAccessoryUploadClick}
-                disabled={accessoryActionsDisabled}
-                title={accessoryActionTitle}
+          <section className={styles.botAvatarControlPanel} aria-label="Avatar controls">
+            <div className={styles.botAvatarControlStack}>
+              <section className={styles.botAvatarControlGroup} aria-label="Identity">
+                <header className={styles.botAvatarControlGroupHeader}>
+                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+                    <Brush size={16} strokeWidth={2.4} />
+                  </span>
+                  <div>
+                    <strong>Identity</strong>
+                    <small>Color and glyph</small>
+                  </div>
+                </header>
+                <div className={styles.botAvatarIdentityPicker}>
+                  <ColorGlyphPicker
+                    color={color}
+                    glyph={glyph}
+                    onColorChange={onColorChange}
+                    onGlyphChange={onGlyphChange}
+                    open={colorPickerOpen}
+                    onToggle={onColorPickerToggle}
+                    ariaLabel="Bot color and glyph"
+                    resolvedTheme={resolvedTheme}
+                  />
+                </div>
+              </section>
+
+              <section className={styles.botAvatarControlGroup} aria-label="Face">
+                <header className={styles.botAvatarControlGroupHeader}>
+                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+                    <Sparkles size={16} strokeWidth={2.4} />
+                  </span>
+                  <div>
+                    <strong>Face</strong>
+                    <small>{previewFaceSummary}</small>
+                  </div>
+                </header>
+                <div className={styles.botAvatarFontControls}>
+                  <fieldset className={styles.botAvatarFontControl}>
+                    <legend>Eye style</legend>
+                    <div className={styles.botAvatarFontOptions}>
+                      {BOT_FACE_FONT_IDS.map((fontId) => (
+                        <BotAvatarFontOption
+                          key={`avatar-eyes-${fontId}`}
+                          fontId={fontId}
+                          part="eyes"
+                          selected={faceEyesFont === fontId}
+                          onClick={() => onEyesFontChange(fontId)}
+                        />
+                      ))}
+                    </div>
+                  </fieldset>
+                  <label className={styles.botAvatarEyeCharacterControl}>
+                    <span>
+                      Eye character
+                      <strong>{faceEyeCharacter ?? ":"}</strong>
+                    </span>
+                    <input
+                      type="text"
+                      value={faceEyeCharacter ?? ""}
+                      placeholder=":"
+                      inputMode="text"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-label="Custom eye character"
+                      onChange={(event) =>
+                        onEyeCharacterChange(
+                          normalizeBotFaceEyeCharacter(event.currentTarget.value)
+                        )
+                      }
+                    />
+                  </label>
+                  <fieldset className={styles.botAvatarFontControl}>
+                    <legend>Mouth style</legend>
+                    <div className={styles.botAvatarFontOptions}>
+                      {BOT_FACE_FONT_IDS.map((fontId) => (
+                        <BotAvatarFontOption
+                          key={`avatar-mouth-${fontId}`}
+                          fontId={fontId}
+                          part="mouth"
+                          selected={faceMouthFont === fontId}
+                          onClick={() => onMouthFontChange(fontId)}
+                        />
+                      ))}
+                    </div>
+                  </fieldset>
+                  <label className={styles.botAvatarWeightControl}>
+                    <span>
+                      Inflation
+                      <strong>{previewWeightSummary}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min={BOT_FACE_FONT_WEIGHT_MIN}
+                      max={BOT_FACE_FONT_WEIGHT_MAX}
+                      step={BOT_FACE_FONT_WEIGHT_STEP}
+                      value={faceFontWeight}
+                      onChange={(event) => onWeightChange(Number(event.currentTarget.value))}
+                    />
+                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
+                      <span>Deflate</span>
+                      <span>Inflate</span>
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <section
+                className={`${styles.botAvatarControlGroup} ${styles.botAvatarAccessoryBuilderPanel}`}
+                aria-label="Accessories"
               >
-                <IconUpload />
-                {accessoryUrl ? "Replace" : "Upload"}
-              </button>
-              <button
-                type="button"
-                onClick={onRemoveAccessory}
-                disabled={!accessoryImageId || accessoryActionsDisabled}
-                title={!accessoryImageId ? "No accessory to remove" : accessoryActionTitle}
-              >
-                <X size={14} strokeWidth={2.1} />
-                Remove
-              </button>
+                <header className={styles.botAvatarControlGroupHeader}>
+                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+                    <ImageGlyph size={16} strokeWidth={2.4} />
+                  </span>
+                  <div>
+                    <strong>Accessory</strong>
+                    <small>{accessorySummary}</small>
+                  </div>
+                </header>
+                <div
+                  className={styles.botAvatarAccessoryLayerToggle}
+                  role="group"
+                  aria-label="Accessory layer"
+                >
+                  <button
+                    type="button"
+                    data-active={normalizedPlacement.layer === "front" ? "true" : undefined}
+                    aria-pressed={normalizedPlacement.layer === "front"}
+                    disabled={!accessoryUrl || accessoryActionsDisabled}
+                    onClick={() => commitAccessoryLayer("front")}
+                  >
+                    Front
+                  </button>
+                  <button
+                    type="button"
+                    data-active={normalizedPlacement.layer === "back" ? "true" : undefined}
+                    aria-pressed={normalizedPlacement.layer === "back"}
+                    disabled={!accessoryUrl || accessoryActionsDisabled}
+                    onClick={() => commitAccessoryLayer("back")}
+                  >
+                    Behind
+                  </button>
+                </div>
+                <div className={styles.botAvatarAccessoryHeader}>
+                  <div className={styles.botAvatarAccessoryCopy}>
+                    <span>{accessoryUrl ? "Transparent overlay" : "No accessory"}</span>
+                    <small>{accessoryUrl ? "Ready" : "Saved bots only"}</small>
+                  </div>
+                  <div className={styles.botAvatarAccessoryActions}>
+                    {accessoryUrl ? (
+                      <button
+                        type="button"
+                        onClick={onRemoveAccessory}
+                        disabled={!accessoryImageId || accessoryActionsDisabled}
+                        title={
+                          !accessoryImageId ? "No accessory to remove" : "Remove accessory"
+                        }
+                      >
+                        <X size={14} strokeWidth={2.6} aria-hidden="true" />
+                        Remove
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onAccessoryUploadClick}
+                      disabled={accessoryActionsDisabled}
+                      title={accessoryActionTitle}
+                    >
+                      <IconUpload />
+                      {accessoryUrl ? "Replace" : "Upload"}
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
             <input
               ref={accessoryUploadInputRef}
@@ -27833,10 +29949,78 @@ function BotAvatarCustomizer({
               disabled={accessoryBusy}
               tabIndex={-1}
             />
+            {saveError ? (
+              <p className={styles.botAvatarSaveError} role="alert">
+                {saveError}
+              </p>
+            ) : null}
           </section>
         </div>
       </section>
     </div>
+  );
+  const savePrompt = savePromptOpen ? (
+    <div
+      className={styles.botAvatarSavePromptBackdrop}
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onCancelSavePrompt();
+      }}
+    >
+      <section
+        className={styles.botAvatarSavePromptPanel}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="bot-avatar-save-prompt-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="bot-avatar-save-prompt-title">Do you want to save your changes?</h2>
+        {saveError ? (
+          <p className={styles.botAvatarSavePromptError} role="alert">
+            {saveError}
+          </p>
+        ) : null}
+        <div className={styles.botAvatarSavePromptActions}>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptCancel}
+            onClick={onCancelSavePrompt}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptDiscard}
+            onClick={onDiscard}
+            disabled={saving}
+          >
+            Don&apos;t Save
+          </button>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptSave}
+            onClick={() => void onSave()}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </section>
+    </div>
+  ) : null;
+
+  if (typeof document === "undefined") return (
+    <>
+      {modal}
+      {savePrompt}
+    </>
+  );
+  return createPortal(
+    <>
+      {modal}
+      {savePrompt}
+    </>,
+    document.body
   );
 }
 
@@ -28730,6 +30914,24 @@ function BotProfileBuilder({
           {renderPage()}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DesktopViewportNotice(): React.JSX.Element {
+  return (
+    <div className={styles.desktopViewportNotice} role="status" aria-live="polite">
+      <div className={styles.desktopViewportNoticeInner}>
+        <p className={styles.desktopViewportNoticeKicker}>Desktop viewport</p>
+        <h1 className={styles.desktopViewportNoticeTitle}>Scale your viewport up</h1>
+        <p className={styles.desktopViewportNoticeBody}>
+          PRISM needs a 1280px-wide desktop canvas right now. Enlarge the window or
+          switch to fullscreen to continue.
+        </p>
+        <p className={styles.desktopViewportNoticeSoon}>
+          PRISM will support mobile devices soon.
+        </p>
+      </div>
     </div>
   );
 }
@@ -30595,6 +32797,9 @@ function HomeContent(): React.JSX.Element {
   const [newBotFaceEyesFont, setNewBotFaceEyesFont] = useState<BotFaceFontId>(
     DEFAULT_BOT_FACE_STYLE.eyesFont
   );
+  const [newBotFaceEyeCharacter, setNewBotFaceEyeCharacter] = useState<string | null>(
+    DEFAULT_BOT_FACE_STYLE.eyeCharacter
+  );
   const [newBotFaceMouthFont, setNewBotFaceMouthFont] = useState<BotFaceFontId>(
     DEFAULT_BOT_FACE_STYLE.mouthFont
   );
@@ -30605,6 +32810,8 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [newBotAccessoryImageId, setNewBotAccessoryImageId] =
     useState<string | null>(null);
+  const [newBotAccessoryPlacement, setNewBotAccessoryPlacement] =
+    useState<BotAccessoryPlacement>(DEFAULT_BOT_ACCESSORY_PLACEMENT);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
   const [newBotGeneratedMemorySeeds, setNewBotGeneratedMemorySeeds] =
     useState<GeneratedBotMemorySeedSet | null>(null);
@@ -30616,10 +32823,12 @@ function HomeContent(): React.JSX.Element {
     y: number;
   } | null>(null);
   const [botAccessoryBusy, setBotAccessoryBusy] = useState(false);
+  const [botAvatarAutoSaving, setBotAvatarAutoSaving] = useState(false);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
+  const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
+  const [botAvatarSavePromptOpen, setBotAvatarSavePromptOpen] = useState(false);
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
   const [botAiParametersModalOpen, setBotAiParametersModalOpen] = useState(false);
-  const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
   const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] = useState(false);
   /** Which page is visible inside the bot model / image routing UI. */
   const [botModelRoutingPage, setBotModelRoutingPage] = useState<"chat" | "image">("chat");
@@ -30694,6 +32903,7 @@ function HomeContent(): React.JSX.Element {
     topK: BOT_TOP_K_DEFAULT,
     repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
     faceEyesFont: DEFAULT_BOT_FACE_STYLE.eyesFont,
+    faceEyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
     faceMouthFont: DEFAULT_BOT_FACE_STYLE.mouthFont,
     faceFontWeight: DEFAULT_BOT_FACE_STYLE.weight,
   });
@@ -30713,6 +32923,7 @@ function HomeContent(): React.JSX.Element {
     topK: newBotTopK,
     repetitionPenalty: newBotRepetitionPenalty,
     faceEyesFont: newBotFaceEyesFont,
+    faceEyeCharacter: newBotFaceEyeCharacter,
     faceMouthFont: newBotFaceMouthFont,
     faceFontWeight: newBotFaceFontWeight,
   };
@@ -30732,6 +32943,11 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyesFont(next);
   }, []);
 
+  const handleNewBotFaceEyeCharacterChange = useCallback((next: string | null) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceEyeCharacter(normalizeBotFaceEyeCharacter(next));
+  }, []);
+
   const handleNewBotFaceMouthFontChange = useCallback((next: BotFaceFontId) => {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceMouthFont(next);
@@ -30742,12 +32958,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight);
   }, []);
 
+  const handleNewBotAccessoryPlacementChange = useCallback((next: BotAccessoryPlacement) => {
+    setNewBotAccessoryPlacement(normalizeBotAccessoryPlacement(next));
+  }, []);
+
   const setBotEditorModeAdvanced = useCallback((advanced: boolean) => {
     setActiveFieldHelp(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
-    setBotAvatarCustomizerOpen(false);
     setBotPreferredModelsModalOpen(false);
     setBotLensDropActive(false);
     if (advanced) {
@@ -30794,32 +33013,35 @@ function HomeContent(): React.JSX.Element {
   // THIS snapshot rather than the raw bot row so legacy bots with no
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
-  const editOriginalRef = useRef<{
-    name: string;
-    prompt: string;
-    rawPrompt?: string;
-    localModel: string;
-    onlineModel: string;
-    localImageModel: string;
-    openAiImageModel: string;
-    onlineEnabled: boolean;
-    deleteProtected: boolean;
-	    flirtEnabled: boolean;
-	    temperature: number;
-	    maxTokens: number;
-	    topP: number;
-	    topK: number;
-	    repetitionPenalty: number;
-	    color: string;
-    glyph: BotGlyphName;
-    faceEyesFont: BotFaceFontId;
-    faceMouthFont: BotFaceFontId;
-    faceFontWeight: number;
-    profilePictureImageId: string | null;
-  } | null>(null);
+  const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
+  const botAvatarAutoSaveQueuedPatchRef = useRef<BotCustomizerSavePatch>({});
+  const botAvatarAutoSaveInFlightRef = useRef(false);
   const botDeleteProtectionProjectionRunRef = useRef(0);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
   const botAccessoryUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const restoreBotAvatarDraftFromPristine = useCallback((): void => {
+    const pristine = editOriginalRef.current;
+    if (!pristine) return;
+    setNewBotColor(pristine.color);
+    setNewBotGlyph(pristine.glyph);
+    setNewBotFaceEyesFont(pristine.faceEyesFont);
+    setNewBotFaceEyeCharacter(pristine.faceEyeCharacter);
+    setNewBotFaceMouthFont(pristine.faceMouthFont);
+    setNewBotFaceFontWeight(pristine.faceFontWeight);
+    setNewBotAccessoryPlacement(normalizeBotAccessoryPlacement(pristine.accessoryPlacement));
+  }, []);
+
+  const closeBotAvatarCustomizer = useCallback((): void => {
+    setBotAvatarCustomizerOpen(false);
+    setBotAvatarSavePromptOpen(false);
+    setColorWheelOpen(false);
+  }, []);
+
+  const discardBotAvatarCustomizerChanges = useCallback((): void => {
+    restoreBotAvatarDraftFromPristine();
+    closeBotAvatarCustomizer();
+  }, [closeBotAvatarCustomizer, restoreBotAvatarDraftFromPristine]);
+
   // Sentinel at the tail of the message stream. The scroll effect brings it
   // into view so the latest message is always visible without manual scrolling.
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -32210,7 +34432,6 @@ function HomeContent(): React.JSX.Element {
     if (nextPanel === "usage" && !selectedId) {
       setUsageScope("all");
     }
-    setSidebarOpen(false);
     if (nextPanel !== "images") {
       setImagePrivateMode(false);
       setImagePrivateRevealedIds((current) => (current.size === 0 ? current : new Set()));
@@ -32629,11 +34850,11 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   useEffect(() => {
-    if (panel !== "bots" || !editingBotId) return;
+    if (panel !== "bots" || (!editingBotId && botPanelView !== "defaultCustomize")) return;
     const input = botNameInputRef.current;
     if (!input) return;
     input.focus({ preventScroll: true });
-  }, [panel, editingBotId, bots]);
+  }, [panel, editingBotId, botPanelView]);
 
   useEffect(() => {
     if (!devToolsRuntimeActive) return;
@@ -32871,6 +35092,16 @@ function HomeContent(): React.JSX.Element {
   }, [effectiveThemeMode, systemTheme]);
   const resolvedThemeRef = useRef(resolvedTheme);
   resolvedThemeRef.current = resolvedTheme;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.dataset.prismTheme = resolvedTheme;
+    return () => {
+      if (document.body.dataset.prismTheme === resolvedTheme) {
+        delete document.body.dataset.prismTheme;
+      }
+    };
+  }, [resolvedTheme]);
 
   useEffect(() => {
     setImageReadyNotice((prev) => {
@@ -34749,48 +36980,14 @@ function HomeContent(): React.JSX.Element {
       {renderCoffeeHeaderModelPicker()}
     </div>
   );
-  const renderZenPrivateModeToggle = (): React.ReactNode => {
-    if (view !== "chat") return null;
-    const label = appWidePrivateMode
-      ? "Private mode on. Click to return to the saved conversation."
-      : "Private mode off. Click to continue privately from here.";
-    return (
-      <button
-        type="button"
-        className={styles.zenPrivateModeToggle}
-        data-active={appWidePrivateMode ? "true" : undefined}
-        aria-pressed={appWidePrivateMode}
-        aria-label={label}
-        title={pendingReplyVisible ? "Wait for the current reply to finish." : label}
-        data-glyph-tooltip={
-          appWidePrivateMode
-            ? "Return from private mode"
-            : "Private mode"
-        }
-        disabled={pendingReplyVisible}
-        onClick={toggleAppWidePrivateMode}
-      >
-        <span
-          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleKey}`}
-          aria-hidden="true"
-        >
-          <IconKey />
-        </span>
-        <span
-          className={`${styles.zenPrivateModeToggleGlyph} ${styles.zenPrivateModeToggleLock}`}
-          aria-hidden="true"
-        >
-          <BotGlyph name="lock" size={14} strokeWidth={2.05} />
-        </span>
-      </button>
-    );
-  };
   const renderHeaderModelPicker = (
     options: {
       modelMenuClassName?: string;
       modelMenuWidthPx?: number;
       botMenuClassName?: string;
       botMenuPlacement?: ComposeMenuPlacement;
+      showModelControls?: boolean;
+      showBotPicker?: boolean;
     } = {}
   ): React.ReactNode => {
     // Use the effective provider so the picker shows local options whenever
@@ -34829,70 +37026,78 @@ function HomeContent(): React.JSX.Element {
     const zenPersonaPickerDisabled =
       view === "chat" &&
       (pendingReplyVisible || activeSideChat);
+    const showModelControls = options.showModelControls ?? true;
+    const showBotPicker =
+      (options.showBotPicker ?? true) &&
+      view === "chat" &&
+      !activeSideChat &&
+      zenPersonaPickerBots.length > 0;
+    if (!showModelControls && !showBotPicker) return null;
     return (
       <div className={styles.chatHeaderModelPicker}>
-        {renderProviderModeToggle(styles.chatHeaderModeToggle)}
-        {renderZenPrivateModeToggle()}
-        <ComposerModelPicker
-          value={visibleModelChoice}
-          onChange={(nextChoice) => {
-            const appliedOnline =
-              responseMode === "online"
-                ? applyOnlineModelChoice({
-                    currentChoices: chatModelChoiceByProvider,
-                    nextChoice,
-                    onlineOptions: onlineChatModelOptions,
-                    providerPreference: effectivePreferredProvider,
-                  })
-                : null;
-            setChatModelChoiceByProvider((previous) => {
-              const next =
-                responseMode === "local"
-                  ? { ...previous, local: nextChoice }
-                  : applyOnlineModelChoice({
-                      currentChoices: previous,
-                      nextChoice,
-                      onlineOptions: onlineChatModelOptions,
-                      providerPreference: effectivePreferredProvider,
-                    }).choices;
-              persistChatModelChoicesForActiveScope(next);
-              return next;
-            });
-            if (appliedOnline) {
-              void switchProvider(appliedOnline.provider);
-            }
-          }}
-          options={modelOptions}
-          provider={isLocal ? "local" : "online"}
-          disabled={!settings || pendingReplyVisible}
-          title={`Model for ${responseModeShortLabel(responseMode)} replies`}
-          ariaLabel={`Model for ${
-            isLocal ? "local" : "online"
-          } replies`}
-          dismissPopoversSignal={composerPopoverDismissSignal}
-          placement="down"
-          minMenuWidthPx={options.modelMenuWidthPx ?? 180}
-          menuClassName={options.modelMenuClassName}
-          showDisabledOption
-          settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-            settings,
-            isLocal ? "local" : "online"
-          )}
-          effortControl={
-            effortAvailability.visible
-              ? {
-                  value: chatReasoningEffort,
-                  disabled: !effortAvailability.enabled,
-                  disabledReason: effortAvailability.disabledReason,
-                  onChange: (next) => {
-                    setChatReasoningEffort(next);
-                    persistChatReasoningEffortForActiveScope(next);
-                  },
+        {showModelControls ? (
+          <>
+            {renderProviderModeToggle(styles.chatHeaderModeToggle)}
+            <ComposerModelPicker
+              value={visibleModelChoice}
+              onChange={(nextChoice) => {
+                const appliedOnline =
+                  responseMode === "online"
+                    ? applyOnlineModelChoice({
+                        currentChoices: chatModelChoiceByProvider,
+                        nextChoice,
+                        onlineOptions: onlineChatModelOptions,
+                        providerPreference: effectivePreferredProvider,
+                      })
+                    : null;
+                setChatModelChoiceByProvider((previous) => {
+                  const next =
+                    responseMode === "local"
+                      ? { ...previous, local: nextChoice }
+                      : applyOnlineModelChoice({
+                          currentChoices: previous,
+                          nextChoice,
+                          onlineOptions: onlineChatModelOptions,
+                          providerPreference: effectivePreferredProvider,
+                        }).choices;
+                  persistChatModelChoicesForActiveScope(next);
+                  return next;
+                });
+                if (appliedOnline) {
+                  void switchProvider(appliedOnline.provider);
                 }
-              : undefined
-          }
-        />
-        {view === "chat" && !activeSideChat && zenPersonaPickerBots.length > 0 ? (
+              }}
+              options={modelOptions}
+              provider={isLocal ? "local" : "online"}
+              disabled={!settings || pendingReplyVisible}
+              title={`Model for ${responseModeShortLabel(responseMode)} replies`}
+              ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
+              dismissPopoversSignal={composerPopoverDismissSignal}
+              placement="down"
+              minMenuWidthPx={options.modelMenuWidthPx ?? 180}
+              menuClassName={options.modelMenuClassName}
+              showDisabledOption
+              settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+                settings,
+                isLocal ? "local" : "online"
+              )}
+              effortControl={
+                effortAvailability.visible
+                  ? {
+                      value: chatReasoningEffort,
+                      disabled: !effortAvailability.enabled,
+                      disabledReason: effortAvailability.disabledReason,
+                      onChange: (next) => {
+                        setChatReasoningEffort(next);
+                        persistChatReasoningEffortForActiveScope(next);
+                      },
+                    }
+                  : undefined
+              }
+            />
+          </>
+        ) : null}
+        {showBotPicker ? (
           <ComposerBotPicker
             value={zenPersonaBotId ?? ""}
             onChange={handleZenPersonaSelectionChange}
@@ -35060,16 +37265,10 @@ function HomeContent(): React.JSX.Element {
         .filter((conversation) => {
           if (conversation.incognito) return false;
           if (isZenSurfaceView(view)) {
-            return (
-              conversation.mode === "zen" ||
-              (conversation.mode === "chat" && Boolean(conversation.botId))
-            );
+            return conversation.mode === "zen";
           }
           if (isChatSurfaceView(view)) {
-            return (
-              conversation.mode === "zen" ||
-              (conversation.mode === "chat" && Boolean(conversation.botId))
-            );
+            return conversation.mode === "zen";
           }
           if (view === "coffee") return conversation.mode === "coffee";
           return true;
@@ -35106,6 +37305,7 @@ function HomeContent(): React.JSX.Element {
     const renderedGroupKeys = new Set<string>();
     const baseItems = visibleConversations.flatMap((conversation): SidebarConversationItem[] => {
       const key = conversationGroupKey(conversation);
+      if (view === "chat" && key === PRISM_CONVERSATION_GROUP_KEY) return [];
       const group = conversationGroupsByKey.get(key);
       if (group) {
         if (renderedGroupKeys.has(key)) return [];
@@ -36194,7 +38394,9 @@ function HomeContent(): React.JSX.Element {
     pendingReplyStartedAtMs !== null &&
     pendingReplyNowMs - pendingReplyStartedAtMs >= PSYCHIC_THINKING_INDICATOR_DELAY_MS;
   const psychicThinkingTargetMessageId = useMemo(() => {
-    if (!psychicTextEnabledForConversation(detail)) return null;
+    if (!psychicTextEnabledForConversation(detail, { productChatSurface: view === "chat" })) {
+      return null;
+    }
     if (effectivePreferredProvider !== "local") return null;
     if (!psychicThinkingDelayElapsed) return null;
     for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
@@ -36208,6 +38410,7 @@ function HomeContent(): React.JSX.Element {
     detail?.mode,
     effectivePreferredProvider,
     psychicThinkingDelayElapsed,
+    view,
     visibleDetailMessages,
   ]);
   const promptShortcutColorIndexByMessageId = useMemo(() => {
@@ -37025,7 +39228,9 @@ function HomeContent(): React.JSX.Element {
         ? attachLivePsychicScratchpadToConversation(
             applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
             undefined,
-            psychicTextEnabledForConversation(result.conversation)
+            psychicTextEnabledForConversation(result.conversation, {
+              productChatSurface: view === "chat",
+            })
           )
         : undefined;
       if (conversation) {
@@ -42944,7 +45149,10 @@ function HomeContent(): React.JSX.Element {
     }
     return next;
   }
-  async function refreshConversation(id: string): Promise<void> {
+  async function refreshConversation(
+    id: string,
+    options: { zenPersonaBotIdOverride?: string | null } = {}
+  ): Promise<void> {
     clearConversationUnread(id);
     const sameSurface =
       selectedId === id && detail != null && detail.id === id;
@@ -42972,7 +45180,20 @@ function HomeContent(): React.JSX.Element {
       if (selectedIdRef.current !== id) {
         return;
       }
-      setDetail(applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)));
+      const hydratedConversation = applyCommandDisplayAliases(
+        applyExplicitAskQuestionFallback(d.conversation)
+      );
+      const conversationForDisplay =
+        view === "chat" &&
+        hydratedConversation.mode === "zen" &&
+        options.zenPersonaBotIdOverride !== undefined
+          ? {
+              ...hydratedConversation,
+              hubRole: hydratedConversation.hubRole ?? ("hub" as const),
+              hubBotId: options.zenPersonaBotIdOverride,
+            }
+          : hydratedConversation;
+      setDetail(conversationForDisplay);
       setSessionOpinion(d.opinion ?? null);
       setBotOpinion(d.botOpinion ?? null);
       setSelectedId(id);
@@ -42988,18 +45209,18 @@ function HomeContent(): React.JSX.Element {
       //   - else: no replies yet (edge case from a failed send), fall
       //     back to the locked botId so the dropdown reflects the user's
       //     original intent.
-      const nextPickedBotId = d.conversation.mode === "zen"
-        ? d.conversation.hubBotId ?? d.conversation.lastBotId ?? null
-        : d.conversation.hasAssistantReply
-          ? d.conversation.lastBotId
-          : d.conversation.botId;
+      const nextPickedBotId = conversationForDisplay.mode === "zen"
+        ? conversationForDisplay.hubBotId ?? conversationForDisplay.lastBotId ?? null
+        : conversationForDisplay.hasAssistantReply
+          ? conversationForDisplay.lastBotId
+          : conversationForDisplay.botId;
       const nextGridSelectedBotId =
-        view === "chat" && d.conversation.hubRole === "hub"
-          ? d.conversation.hubBotId ?? null
+        view === "chat" && conversationForDisplay.hubRole === "hub"
+          ? conversationForDisplay.hubBotId ?? null
           : null;
       setSandboxGridSelectedBotId(nextGridSelectedBotId);
       setSelectedBotId(nextPickedBotId);
-      if (d.conversation.mode === "zen") {
+      if (conversationForDisplay.mode === "zen") {
         setZenPersonaBotId(nextPickedBotId);
       }
       if (nextPickedBotId) {
@@ -43166,6 +45387,59 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.prismImageToolLlmModel === "string"
           ? d.settings.prismImageToolLlmModel
           : "",
+      prismDefaultBotName:
+        typeof d.settings.prismDefaultBotName === "string"
+          ? d.settings.prismDefaultBotName
+          : "",
+      prismDefaultBotSystemPrompt:
+        typeof d.settings.prismDefaultBotSystemPrompt === "string"
+          ? d.settings.prismDefaultBotSystemPrompt
+          : "",
+      prismDefaultBotColor:
+        typeof d.settings.prismDefaultBotColor === "string"
+          ? d.settings.prismDefaultBotColor
+          : "",
+      prismDefaultBotGlyph:
+        typeof d.settings.prismDefaultBotGlyph === "string"
+          ? d.settings.prismDefaultBotGlyph
+          : "",
+      prismDefaultBotFaceEyesFont:
+        normalizeBotFaceFontId(d.settings.prismDefaultBotFaceEyesFont) ??
+        DEFAULT_BOT_FACE_STYLE.eyesFont,
+      prismDefaultBotFaceEyeCharacter:
+        normalizeBotFaceEyeCharacter(d.settings.prismDefaultBotFaceEyeCharacter) ??
+        DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+      prismDefaultBotFaceMouthFont:
+        normalizeBotFaceFontId(d.settings.prismDefaultBotFaceMouthFont) ??
+        DEFAULT_BOT_FACE_STYLE.mouthFont,
+      prismDefaultBotFaceFontWeight:
+        normalizeBotFaceFontWeight(d.settings.prismDefaultBotFaceFontWeight) ??
+        DEFAULT_BOT_FACE_STYLE.weight,
+      prismDefaultBotTemperature: normalizeBotTemperature(
+        typeof d.settings.prismDefaultBotTemperature === "number"
+          ? d.settings.prismDefaultBotTemperature
+          : null
+      ),
+      prismDefaultBotMaxTokens: normalizeBotMaxTokens(
+        typeof d.settings.prismDefaultBotMaxTokens === "number"
+          ? d.settings.prismDefaultBotMaxTokens
+          : null
+      ),
+      prismDefaultBotTopP: normalizeBotTopP(
+        typeof d.settings.prismDefaultBotTopP === "number"
+          ? d.settings.prismDefaultBotTopP
+          : null
+      ),
+      prismDefaultBotTopK: normalizeBotTopK(
+        typeof d.settings.prismDefaultBotTopK === "number"
+          ? d.settings.prismDefaultBotTopK
+          : null
+      ),
+      prismDefaultBotRepetitionPenalty: normalizeBotRepetitionPenalty(
+        typeof d.settings.prismDefaultBotRepetitionPenalty === "number"
+          ? d.settings.prismDefaultBotRepetitionPenalty
+          : null
+      ),
       ollamaAuxiliaryModel:
         typeof d.settings.ollamaAuxiliaryModel === "string"
           ? d.settings.ollamaAuxiliaryModel
@@ -43601,7 +45875,12 @@ function HomeContent(): React.JSX.Element {
           `${invocation.primaryProvider}:${invocation.primaryModel} -> local:${invocation.fallbackModel}`,
       });
     }
-    if (envelope.psychicDebug && psychicTextEnabledForConversation(envelope.conversation)) {
+    if (
+      envelope.psychicDebug &&
+      psychicTextEnabledForConversation(envelope.conversation, {
+        productChatSurface: view === "chat",
+      })
+    ) {
       const debug = envelope.psychicDebug;
       lines.push({
         kind: "summary",
@@ -44276,7 +46555,6 @@ function HomeContent(): React.JSX.Element {
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
-    setBotAvatarCustomizerOpen(false);
     setBotPreferredModelsModalOpen(false);
     setEditingBotId(null);
     setPanelBotDeleteConfirm(null);
@@ -44645,7 +46923,7 @@ function HomeContent(): React.JSX.Element {
       preferredProvider: providerForSend,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffort: reasoningEffortOverride } : {}),
-      psychicModeEnabled: mode === "chat",
+      psychicModeEnabled: mode === "chat" || view === "chat",
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.resolvedCommandCenterPrompt
         ? { resolvedCommandCenterPrompt: options.resolvedCommandCenterPrompt }
@@ -44761,6 +47039,7 @@ function HomeContent(): React.JSX.Element {
     }
 
     resumeChatModeAutoscrollForOutgoingTurn(detail.id ?? selectedId);
+    const previousSelectedId = selectedId;
     setPendingReply(true);
     setPendingReplyStartedAtMs(Date.now());
     setPendingReplyDenialRisk(promptLooksDenialProne(text));
@@ -44826,7 +47105,9 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation)
+          psychicTextEnabledForConversation(d.conversation, {
+            productChatSurface: view === "chat",
+          })
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -44839,24 +47120,42 @@ function HomeContent(): React.JSX.Element {
         editedConversation = patchedConversation;
         clearPendingReplyVisuals();
       } else {
-        setPendingReplyConversationId(selectedId);
+        const forkedZenConversation =
+          view === "chat"
+            ? await forkConversationFromMessage(messageId, {
+                includeMessage: false,
+                mode: "zen",
+              })
+            : null;
+        const targetConversationId = forkedZenConversation?.id ?? selectedId;
+        if (!targetConversationId) return;
+        const optimisticConversation = forkedZenConversation ?? previousDetail;
+        const optimisticMessages = forkedZenConversation
+          ? forkedZenConversation.messages
+          : rewoundMessages;
+        setPendingReplyConversationId(targetConversationId);
         setDetail({
-          ...previousDetail,
-          messages: [...rewoundMessages, optimisticEditedMessage],
+          ...optimisticConversation,
+          messages: [...optimisticMessages, optimisticEditedMessage],
         });
-        await api<{
-          ok: true;
-          message: string;
-          deletedMessages: number;
-          deletedMemories: number;
-        }>(
-          `/api/conversations/${selectedId}/rewind`,
-          {
-            method: "POST",
-            body: JSON.stringify({ messageId }),
-          }
-        );
-        const chatBody = buildChatRequestBody(text, editChatOptions);
+        if (!forkedZenConversation) {
+          await api<{
+            ok: true;
+            message: string;
+            deletedMessages: number;
+            deletedMemories: number;
+          }>(
+            `/api/conversations/${selectedId}/rewind`,
+            {
+              method: "POST",
+              body: JSON.stringify({ messageId }),
+            }
+          );
+        }
+        const chatBody = buildChatRequestBody(text, {
+          ...editChatOptions,
+          conversationIdOverride: targetConversationId,
+        });
         appendDevChatRouteStart("edit", chatBody);
         const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
@@ -44873,7 +47172,9 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation)
+          psychicTextEnabledForConversation(d.conversation, {
+            productChatSurface: view === "chat",
+          })
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -44908,7 +47209,10 @@ function HomeContent(): React.JSX.Element {
       } else {
         commandDisplayByMessageIdRef.current.delete(messageId);
       }
+      setSelectedId(previousSelectedId);
+      selectedIdRef.current = previousSelectedId;
       setDetail(previousDetail);
+      detailIdRef.current = previousDetail.id;
       setError(err instanceof Error ? err.message : "Message edit failed.");
     } finally {
       clearPendingReplyVisuals();
@@ -45594,7 +47898,9 @@ function HomeContent(): React.JSX.Element {
       const patchedConversation = attachLivePsychicScratchpadToConversation(
         applyCommandDisplayAliases(applyExplicitAskQuestionFallback(result.conversation)),
         undefined,
-        psychicTextEnabledForConversation(result.conversation)
+        psychicTextEnabledForConversation(result.conversation, {
+          productChatSurface: view === "chat",
+        })
       );
       setDetail(patchedConversation);
       setSelectedId(patchedConversation.id);
@@ -46307,7 +48613,9 @@ function HomeContent(): React.JSX.Element {
     const patchedConversation = attachLivePsychicScratchpadToConversation(
       applyCommandDisplayAliases(applyExplicitAskQuestionFallback(envelope.conversation)),
       envelope.psychicDebug,
-      psychicTextEnabledForConversation(envelope.conversation)
+      psychicTextEnabledForConversation(envelope.conversation, {
+        productChatSurface: view === "chat",
+      })
     );
     if (options.consumeCache) {
       clearZenInitialStarterReplyCache();
@@ -46629,6 +48937,7 @@ function HomeContent(): React.JSX.Element {
       zenFollowupDispatch?: boolean;
       zenFollowupCleanupMessageIds?: string[];
       onZenAutonomyResult?: (decision: ZenAutonomyDecision | null) => void;
+      conversationDetailOverride?: ConversationDetail;
     } = {}
   ) {
     e.preventDefault();
@@ -46935,7 +49244,7 @@ function HomeContent(): React.JSX.Element {
       scheduleZenFollowupMergedSend();
       return;
     }
-    let detailForSend = detail;
+    let detailForSend = options.conversationDetailOverride ?? detail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
     const isInitialZenOpeningTurn =
       view === "chat" &&
@@ -47595,7 +49904,9 @@ function HomeContent(): React.JSX.Element {
         const patchedConversation = attachLivePsychicScratchpadToConversation(
           applyCommandDisplayAliases(applyExplicitAskQuestionFallback(d.conversation)),
           d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation)
+          psychicTextEnabledForConversation(d.conversation, {
+            productChatSurface: view === "chat",
+          })
         );
         if (isInitialZenStarterPrompt) {
           zenInitialStarterLiveEnvelopeRef.current = {
@@ -48188,7 +50499,7 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  function resendUserMessage(msg: Message): void {
+  async function resendUserMessage(msg: Message): Promise<void> {
     if (msg.role !== "user") return;
     const commandAlias = commandDisplayByMessageIdRef.current.get(msg.id);
     const resendText = resendDraftTextForMessage({
@@ -48202,6 +50513,32 @@ function HomeContent(): React.JSX.Element {
     // Force normal send mode if an edit draft was active.
     setEditingMessageId(null);
     setEditingOriginalText("");
+    if (
+      view === "chat" &&
+      detail &&
+      !detail.incognito &&
+      !String(msg.id).startsWith("pending-")
+    ) {
+      try {
+        const forkedConversation = await forkConversationFromMessage(msg.id, {
+          includeMessage: false,
+          mode: "zen",
+        });
+        const syntheticSubmit = {
+          preventDefault: () => {
+            /* no-op — used so sendMessage can share the submit pathway */
+          },
+        } as React.FormEvent<HTMLFormElement>;
+        void sendMessage(syntheticSubmit, {
+          draftOverride: resendText,
+          queuedConversationId: forkedConversation.id,
+          conversationDetailOverride: forkedConversation,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Message resend failed.");
+      }
+      return;
+    }
     // Sandbox: rewind from this user message so the visible thread AND the
     // server-side conversation both drop everything after it before the
     // resend lands as a fresh turn. This piggybacks on the Edit pipeline
@@ -48503,7 +50840,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function renderPsychicThoughtLine(msg: Message): React.ReactNode {
-    if (!psychicTextEnabledForConversation(detail)) return null;
+    if (!psychicTextEnabledForConversation(detail, { productChatSurface: view === "chat" })) {
+      return null;
+    }
     const pendingThinking = msg.id === psychicThinkingTargetMessageId;
     const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
       pendingThinking,
@@ -49086,7 +51425,7 @@ function HomeContent(): React.JSX.Element {
     chatLikeSurface &&
     zenPersonaBotId === null &&
     zenPersonaPresence.visibleBotId === null &&
-    !zenEmptyHeroVisible;
+    (!zenEmptyHeroVisible || !sidebarOpen);
   const zenDefaultPrismPresenceForming =
     zenDefaultPrismPresenceVisible &&
     view === "chat" &&
@@ -50817,6 +53156,7 @@ function HomeContent(): React.JSX.Element {
                     presencePhase={zenPersonaPresence.phase}
                     resolvedTheme={resolvedTheme}
                     atmosphereActive={zenPresenceAtmosphereActive}
+                    privateModeActive={privateChatActive}
                   />
                   {zenComposerActionPreview ? (
                     <ZenActionComposerPreview cue={zenComposerActionPreview} />
@@ -51133,16 +53473,22 @@ function HomeContent(): React.JSX.Element {
       setPendingZenSessionResumeContext(null);
       chatSummaryRefreshMarkerRef.current = null;
       setChatAutoRestoreSuppressed(true);
-      setForceNewConversationOnNextSend(true);
+      setForceNewConversationOnNextSend(false);
       setSelectedId(null);
       setDetail(null);
       setSelectedBotId(null);
+      setSandboxGridSelectedBotId(null);
       setChatBotOverride(undefined);
       setZenPersonaBotId(null);
+      setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
       closeEmptyStateBotSearch();
-      setHueFilterCenter(null);
+      if (hueFilterCenter !== null) {
+        startBotPickerReturnToAll();
+      } else {
+        setHueFilterCenter(null);
+      }
       setPendingIncognito(privateMode);
-      setSidebarOpen(false);
       rotateZenFallbackWallpaperSeed();
       return;
     }
@@ -51175,7 +53521,6 @@ function HomeContent(): React.JSX.Element {
       setHueFilterCenter(null);
     }
     setPendingIncognito(privateMode);
-    setSidebarOpen(false);
   }
 
   function setAppWidePrivateMode(privateMode: boolean): void {
@@ -52003,6 +54348,49 @@ function HomeContent(): React.JSX.Element {
   // compatibility with older clients; the client-side tightening just
   // removes the whole-conversation clone code path we're no longer
   // exposing.
+  async function forkConversationFromMessage(
+    messageId: string,
+    options: {
+      includeMessage?: boolean;
+      independent?: boolean;
+      mode?: "zen";
+    } = {}
+  ): Promise<ConversationDetail> {
+    const sourceConversationId =
+      selectedId ??
+      (detail?.id && detail.id !== "pending" ? detail.id : null);
+    if (!sourceConversationId) {
+      throw new Error("Choose a conversation before forking.");
+    }
+    const fork = await api<{ conversationId: string }>(
+      `/api/conversations/${sourceConversationId}/fork`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          messageId,
+          ...(options.includeMessage === false ? { includeMessage: false } : {}),
+          ...(options.independent ? { independent: true } : {}),
+          ...(options.mode ? { mode: options.mode } : {}),
+        }),
+      }
+    );
+    const d = await api<{
+      conversation: ConversationDetail;
+      opinion?: SessionOpinion;
+      botOpinion?: BotOpinion;
+    }>(`/api/conversations/${fork.conversationId}`);
+    const forkedConversation = applyCommandDisplayAliases(
+      applyExplicitAskQuestionFallback(d.conversation)
+    );
+    setSelectedId(fork.conversationId);
+    selectedIdRef.current = fork.conversationId;
+    setDetail(forkedConversation);
+    detailIdRef.current = forkedConversation.id;
+    setSessionOpinion(d.opinion ?? null);
+    setBotOpinion(d.botOpinion ?? null);
+    return forkedConversation;
+  }
+
   async function forkChat(messageId: string) {
     if (!selectedId) return;
     const d = await api<{ conversationId: string }>(`/api/conversations/${selectedId}/fork`, { method: "POST", body: JSON.stringify({ messageId }) });
@@ -52065,6 +54453,29 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  function latestMessageInConversation(
+    conversation: ConversationDetail
+  ): Message | null {
+    return conversation.messages.reduce<Message | null>((latest, message) => {
+      if (!latest) return message;
+      return message.createdAt > latest.createdAt ? message : latest;
+    }, null);
+  }
+
+  function messageIsLatestInConversation(
+    conversation: ConversationDetail,
+    messageId: string
+  ): boolean {
+    return latestMessageInConversation(conversation)?.id === messageId;
+  }
+
+  function shouldBranchZenDelete(msg: Message): boolean {
+    if (view !== "chat") return false;
+    if (!detail || detail.incognito || !selectedId) return false;
+    if (String(msg.id).startsWith("pending-")) return false;
+    return !messageIsLatestInConversation(detail, msg.id);
+  }
+
   async function deleteMessageFromHistory(msg: Message): Promise<void> {
     closeMessageContextOverlay();
     if (!detail) return;
@@ -52077,6 +54488,34 @@ function HomeContent(): React.JSX.Element {
     const isLocalOnly = detail.incognito || String(msg.id).startsWith("pending-") || !selectedId;
     if (isLocalOnly) {
       removeFromVisibleThread();
+      return;
+    }
+    if (shouldBranchZenDelete(msg)) {
+      const previousDetail = detail;
+      const previousSelectedId = selectedId;
+      try {
+        const forkedConversation = await forkConversationFromMessage(msg.id, {
+          mode: "zen",
+        });
+        const clonedLastMessage = latestMessageInConversation(forkedConversation);
+        if (!clonedLastMessage) {
+          throw new Error("Could not find the forked message to remove.");
+        }
+        setDetail(removeMessageFromConversationDetail(forkedConversation, clonedLastMessage.id));
+        await api<{ ok: true; deleted: boolean; conversationId?: string }>(
+          `/api/messages/${encodeURIComponent(clonedLastMessage.id)}`,
+          { method: "DELETE" }
+        );
+        await refreshConversation(forkedConversation.id);
+        void refreshConversations();
+        await refreshOpenMemoryViews();
+      } catch (err) {
+        setSelectedId(previousSelectedId);
+        selectedIdRef.current = previousSelectedId;
+        setDetail(previousDetail);
+        detailIdRef.current = previousDetail.id;
+        setError(err instanceof Error ? err.message : "Message delete failed.");
+      }
       return;
     }
     const previousDetail = detail;
@@ -52704,6 +55143,7 @@ function HomeContent(): React.JSX.Element {
       .map((memory) => (typeof memory.text === "string" ? memory.text.trim() : ""))
       .filter((memory) => memory.length > 0);
     const accessoryPng = await fetchBotAccessoryPng(bot);
+    const accessoryPlacement = botAccessoryPlacementFromBot(bot);
     const exportPayload: PrismBotArchiveJson = {
       schema: PRISM_BOT_ARCHIVE_SCHEMA,
       botHash: exportHash ?? undefined,
@@ -52722,6 +55162,7 @@ function HomeContent(): React.JSX.Element {
         localImageModel: bot.local_image_model ?? null,
         openaiImageModel: bot.openai_image_model ?? null,
         faceEyesFont: faceStyle.eyesFont,
+        faceEyeCharacter: faceStyle.eyeCharacter,
         faceMouthFont: faceStyle.mouthFont,
         faceFontWeight: faceStyle.weight,
         onlineEnabled: bot.online_enabled === 1,
@@ -52733,7 +55174,10 @@ function HomeContent(): React.JSX.Element {
       accessory: accessoryPng
         ? {
             file: BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
-            placement: DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
+            placement: {
+              anchor: "avatar",
+              ...accessoryPlacement,
+            },
           }
         : null,
     };
@@ -53304,6 +55748,7 @@ function HomeContent(): React.JSX.Element {
           ? parsedBot.glyph.trim()
           : null,
         faceEyesFont: normalizeBotFaceFontId(parsedBot.faceEyesFont),
+        faceEyeCharacter: normalizeBotFaceEyeCharacter(parsedBot.faceEyeCharacter),
         faceMouthFont: normalizeBotFaceFontId(parsedBot.faceMouthFont),
         faceFontWeight: normalizeBotFaceFontWeight(parsedBot.faceFontWeight),
         exportHash: importedBotHash,
@@ -53317,7 +55762,10 @@ function HomeContent(): React.JSX.Element {
     if (parsed.accessoryPng) {
       await api(`/api/bots/${encodeURIComponent(createdBotId)}/accessory/upload`, {
         method: "POST",
-        body: JSON.stringify({ dataUrl: pngBytesToDataUrl(parsed.accessoryPng) }),
+        body: JSON.stringify({
+          dataUrl: pngBytesToDataUrl(parsed.accessoryPng),
+          placement: parsed.botJson.accessory?.placement ?? DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
+        }),
       });
     }
 
@@ -55396,6 +57844,220 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
+  const renderFocusedBotLibraryGroupDashboard = ({
+    emptyStateClassName,
+    heroBot,
+  }: {
+    emptyStateClassName: string;
+    heroBot: Bot | null;
+  }): React.JSX.Element | null => {
+    const focusedBotLibraryGroup = activeBotLibraryGroupFilter;
+    if (
+      !focusedBotLibraryGroup ||
+      pendingIncognito ||
+      emptyStateSearchActive ||
+      heroBot
+    ) {
+      return null;
+    }
+
+    const groupDashboardBots = baseFilteredPanelBots;
+    const groupDescription = focusedBotLibraryGroup.description.trim();
+    const groupProtectedBotCount = groupDashboardBots.filter((bot) =>
+      isBotDeleteProtected(bot.id)
+    ).length;
+    const groupEyebrowLabel = botLibraryGroupDashboardEyebrowLabel(
+      groupDashboardBots.length,
+      focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
+      groupProtectedBotCount
+    );
+    const groupDeleteProtected = focusedBotLibraryGroup.deleteProtected;
+    const nextGroupDeleteProtected = !groupDeleteProtected;
+    const groupProtectionLabel = groupDeleteProtected ? "Allow deletion" : "Protect group";
+    const groupProtectionTitle = groupDeleteProtected
+      ? `Allow deletion for bots in ${focusedBotLibraryGroup.name}`
+      : `Protect bots in ${focusedBotLibraryGroup.name} from deletion`;
+    const groupExportTitle =
+      groupDashboardBots.length > 0
+        ? `Export ${focusedBotLibraryGroup.name} as a bot collection`
+        : `${focusedBotLibraryGroup.name} has no bots to export`;
+
+    return (
+      <div
+        className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
+        onClick={handleEmptyStateBackgroundClick}
+      >
+        <section
+          className={styles.botGroupDashboard}
+          style={botLibraryGroupVisualStyle(
+            focusedBotLibraryGroup,
+            groupDashboardBots,
+            resolvedTheme
+          )}
+          data-starter-bot-affordance="true"
+          aria-labelledby="bot-library-group-dashboard-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <header className={styles.botGroupDashboardHeader}>
+            <div className={styles.botGroupDashboardCopy}>
+              <span className={styles.botGroupDashboardEyebrow}>
+                {groupEyebrowLabel}
+              </span>
+              <h2 id="bot-library-group-dashboard-title">
+                {focusedBotLibraryGroup.name}
+              </h2>
+              {groupDescription ? <p>{groupDescription}</p> : null}
+            </div>
+            <div className={styles.botGroupDashboardActions}>
+              <button
+                type="button"
+                className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
+                data-active={groupDeleteProtected ? "true" : undefined}
+                onClick={() =>
+                  setBotLibraryGroupDeleteProtection(
+                    focusedBotLibraryGroup.id,
+                    nextGroupDeleteProtected
+                  )
+                }
+                aria-label={groupProtectionTitle}
+                title={groupProtectionTitle}
+              >
+                <BotGlyph
+                  name={groupDeleteProtected ? "key" : "lock"}
+                  size={14}
+                  strokeWidth={2.05}
+                />
+                <span>{groupProtectionLabel}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.botGroupDashboardAction}
+                disabled={groupDashboardBots.length === 0 || botTransferBusy}
+                onClick={() =>
+                  void exportBotsAsCollection(groupDashboardBots, {
+                    group: {
+                      name: focusedBotLibraryGroup.name,
+                      description: focusedBotLibraryGroup.description,
+                    },
+                  })
+                }
+                aria-label={groupExportTitle}
+                title={groupExportTitle}
+              >
+                <Download size={14} strokeWidth={2.1} aria-hidden="true" />
+                <span>Export group</span>
+              </button>
+              {!focusedBotLibraryGroup.builtIn ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.botGroupDashboardAction}
+                    onClick={() => editBotLibraryGroup(focusedBotLibraryGroup.id)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardDangerAction}`}
+                    onClick={() => requestDeleteBotLibraryGroup(focusedBotLibraryGroup.id)}
+                    aria-label={`Delete ${focusedBotLibraryGroup.name}`}
+                  >
+                    <Trash2 size={14} strokeWidth={2.15} aria-hidden="true" />
+                    <span>Delete</span>
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </header>
+          {groupDashboardBots.length > 0 ? (
+            <div
+              className={styles.botGroupDashboardBotGrid}
+              role="list"
+              aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
+            >
+              {groupDashboardBots.map((b) => {
+                const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
+                const isProtected = isBotDeleteProtected(b.id);
+                const isFavorite = favoriteBotIdSet.has(b.id);
+                const tileTraits = [
+                  isFavorite ? "favorite" : null,
+                  isProtected ? "protected" : null,
+                ].filter(Boolean);
+                const rawColor = b.color?.trim();
+                const accent = rawColor
+                  ? displayAccentForMode(rawColor, resolvedTheme, appWidePrivateMode)
+                  : null;
+                const tileStyle = accent
+                  ? ({ "--bot-color": accent } as React.CSSProperties)
+                  : undefined;
+                const tileClassName = [
+                  styles.chatBotTile,
+                  styles.chatBotTileWithName,
+                  styles.botGroupDashboardBotTile,
+                  isProtected ? styles.chatBotTileProtected : null,
+                  isMarqueeSelected ? styles.chatBotTileMarqueeSelected : null,
+                ].filter(Boolean).join(" ");
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    className={tileClassName}
+                    style={tileStyle}
+                    data-bot-id={b.id}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openBotLibraryGroupBotContextMenu(
+                        focusedBotLibraryGroup.id,
+                        b,
+                        event.clientX,
+                        event.clientY
+                      );
+                    }}
+                    onClick={(event) => {
+                      if (canvasBotMarqueeSuppressClickRef.current) {
+                        canvasBotMarqueeSuppressClickRef.current = false;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                      }
+                      if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleCanvasBotSelection(b.id);
+                        return;
+                      }
+                      commitEmptyStateBotSelection(b.id);
+                    }}
+                    aria-label={
+                      tileTraits.length > 0
+                        ? `${b.name}, ${tileTraits.join(", ")}`
+                        : b.name
+                    }
+                    data-favorite={isFavorite ? "true" : undefined}
+                    data-delete-protected={isProtected ? "true" : undefined}
+                    title={b.name}
+                  >
+                    <span className={styles.chatBotTileBotGlyph}>
+                      <BotGlyph name={b.glyph} size={34} strokeWidth={1.9} />
+                    </span>
+                    <span className={styles.chatBotTileFeaturedName}>{b.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className={styles.botGroupDashboardEmpty} role="status">
+              {focusedBotLibraryGroup.id === BOT_LIBRARY_FAVORITES_GROUP_ID
+                ? "No favorite bots yet."
+                : "No bots in this group yet."}
+            </p>
+          )}
+        </section>
+      </div>
+    );
+  };
+
   const renderChatCanvasPickerControls = (
     style?: React.CSSProperties
   ): React.JSX.Element | null => {
@@ -55408,8 +58070,9 @@ function HomeContent(): React.JSX.Element {
           : `${filteredBots.length} bots found`;
     const botHasCommenced = !!detail && detail.messages.length > 0;
     const botPickerBots = botHasCommenced ? bots : filteredBots;
+    const showRailBotPicker = view === "sandbox" || botHasCommenced;
     const botPicker =
-      bots.length > 0 ? (
+      showRailBotPicker && bots.length > 0 ? (
         <ComposerBotPicker
           value={selectedBotId ?? ""}
           onChange={handleComposerBotSelectionChange}
@@ -56237,16 +58900,16 @@ function HomeContent(): React.JSX.Element {
   }, [botProfileBuilderOpen, editingBotId, newBotName]);
 
 	  useEffect(() => {
-	    if (botAvatarCustomizerOpen && panel !== "bots") {
-	      setBotAvatarCustomizerOpen(false);
-	    }
-	  }, [botAvatarCustomizerOpen, panel]);
-
-	  useEffect(() => {
 	    if (botAiParametersModalOpen && panel !== "bots") {
 	      setBotAiParametersModalOpen(false);
 	    }
 	  }, [botAiParametersModalOpen, panel]);
+
+  useEffect(() => {
+    if (botAvatarCustomizerOpen && panel !== "bots") {
+      closeBotAvatarCustomizer();
+    }
+  }, [botAvatarCustomizerOpen, closeBotAvatarCustomizer, panel]);
 
   // Close the color/glyph popover on any outside click or Escape. Only
   // one picker ever lives on screen (the top form in the Bots panel), so
@@ -56584,10 +59247,12 @@ function HomeContent(): React.JSX.Element {
     setNewBotColor(draft.color);
     setNewBotGlyph(draft.glyph);
     setNewBotFaceEyesFont(draft.faceStyle.eyesFont);
+    setNewBotFaceEyeCharacter(draft.faceStyle.eyeCharacter);
     setNewBotFaceMouthFont(draft.faceStyle.mouthFont);
     setNewBotFaceFontWeight(draft.faceStyle.weight);
     setNewBotProfilePictureImageId(null);
     setNewBotAccessoryImageId(null);
+    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
       botName: draft.name,
@@ -56595,7 +59260,6 @@ function HomeContent(): React.JSX.Element {
     });
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
-    setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
     setPanelNotice(
       draft.memorySeeds.length > 0
@@ -56633,14 +59297,15 @@ function HomeContent(): React.JSX.Element {
     ));
     setNewBotGlyph(randomBotGlyph());
     setNewBotFaceEyesFont(DEFAULT_BOT_FACE_STYLE.eyesFont);
+    setNewBotFaceEyeCharacter(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
     setNewBotFaceMouthFont(DEFAULT_BOT_FACE_STYLE.mouthFont);
     setNewBotFaceFontWeight(DEFAULT_BOT_FACE_STYLE.weight);
     setNewBotProfilePictureImageId(null);
     setNewBotAccessoryImageId(null);
+    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
-    setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
     setBotPreferredModelsModalOpen(false);
     setBotModelRoutingPage("chat");
@@ -56691,6 +59356,109 @@ function HomeContent(): React.JSX.Element {
     resetBotPanelDraftNavigation();
     setBotPanelView("library");
     setBotLibraryExpanded(true);
+    openRightPanel("bots");
+  }
+
+  function openDefaultBotCustomizer(): void {
+    if (!settings) return;
+    disarmDelete();
+    createBotAppearanceTouchedRef.current = false;
+    setColorWheelOpen(false);
+    setPanelError(null);
+    setPanelNotice(null);
+    setPanelBotDeleteConfirm(null);
+    setSelectedBotDeleteConfirm(null);
+    setSelectedBotPanelBotId(null);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setBotLibraryExpanded(false);
+    setBotLibraryClosing(false);
+    setBotPreferredModelsModalOpen(false);
+    setBotModelRoutingPage("chat");
+    setNewBotLensId("");
+    setNewBotGeneratedMemorySeeds(null);
+    setBotLensDropActive(false);
+
+    const seededName = "Default";
+    const rawStoredPrompt = "";
+    const { fields: seededProfile } = parseStoredBotPrompt(rawStoredPrompt);
+    const normalizedStoredPrompt = serializeStoredBotPrompt(seededProfile, seededName);
+    const seededColor =
+      settings.prismDefaultBotColor.trim() || DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR;
+    const seededGlyph = isBotGlyphName(settings.prismDefaultBotGlyph)
+      ? settings.prismDefaultBotGlyph
+      : DEFAULT_BOT_GLYPH;
+    const seededFaceEyesFont =
+      normalizeBotFaceFontId(settings.prismDefaultBotFaceEyesFont) ??
+      DEFAULT_BOT_FACE_STYLE.eyesFont;
+    const seededFaceEyeCharacter =
+      normalizeBotFaceEyeCharacter(settings.prismDefaultBotFaceEyeCharacter) ??
+      DEFAULT_BOT_FACE_STYLE.eyeCharacter;
+    const seededFaceMouthFont =
+      normalizeBotFaceFontId(settings.prismDefaultBotFaceMouthFont) ??
+      DEFAULT_BOT_FACE_STYLE.mouthFont;
+    const seededFaceFontWeight =
+      normalizeBotFaceFontWeight(settings.prismDefaultBotFaceFontWeight) ??
+      DEFAULT_BOT_FACE_STYLE.weight;
+    const seededTemperature = BOT_TEMPERATURE_DEFAULT;
+    const seededMaxTokens = BOT_REPLY_LENGTH_DEFAULT_TOKENS;
+    const seededTopP = BOT_TOP_P_DEFAULT;
+    const seededTopK = BOT_TOP_K_DEFAULT;
+    const seededRepetitionPenalty = BOT_REPETITION_PENALTY_DEFAULT;
+
+    setEditingBotId(null);
+    setNewBotName(seededName);
+    setBotProfile(seededProfile);
+    setNewBotSystemPrompt(rawStoredPrompt);
+    setNewBotLocalModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
+    setNewBotOnlineModel(DEFAULT_BOT_CHAT_MODEL_CHOICE);
+    setNewBotLocalImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOpenAiImageModel(AUTO_MODEL_CHOICE);
+    setNewBotOnlineEnabled(true);
+    setNewBotDeleteProtected(false);
+    setNewBotFlirtEnabled(false);
+    setNewBotTemperature(seededTemperature);
+    setNewBotMaxTokens(seededMaxTokens);
+    setNewBotTopP(seededTopP);
+    setNewBotTopK(seededTopK);
+    setNewBotRepetitionPenalty(seededRepetitionPenalty);
+    setNewBotColor(seededColor);
+    setNewBotGlyph(seededGlyph);
+    setNewBotFaceEyesFont(seededFaceEyesFont);
+    setNewBotFaceEyeCharacter(seededFaceEyeCharacter);
+    setNewBotFaceMouthFont(seededFaceMouthFont);
+    setNewBotFaceFontWeight(seededFaceFontWeight);
+    setNewBotProfilePictureImageId(null);
+    setNewBotAccessoryImageId(null);
+    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
+    setBotProfileBuilderOpen(false);
+    setBotAiParametersModalOpen(false);
+    setBotProfileActivePage("purpose");
+    editOriginalRef.current = {
+      name: seededName,
+      prompt: normalizedStoredPrompt,
+      rawPrompt: rawStoredPrompt,
+      localModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
+      onlineModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
+      localImageModel: AUTO_MODEL_CHOICE,
+      openAiImageModel: AUTO_MODEL_CHOICE,
+      onlineEnabled: true,
+      deleteProtected: false,
+      flirtEnabled: false,
+      temperature: seededTemperature,
+      maxTokens: seededMaxTokens,
+      topP: seededTopP,
+      topK: seededTopK,
+      repetitionPenalty: seededRepetitionPenalty,
+      color: seededColor,
+      glyph: seededGlyph,
+      faceEyesFont: seededFaceEyesFont,
+      faceEyeCharacter: seededFaceEyeCharacter,
+      faceMouthFont: seededFaceMouthFont,
+      faceFontWeight: seededFaceFontWeight,
+      profilePictureImageId: null,
+      accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
+    };
+    setBotPanelView("defaultCustomize");
     openRightPanel("bots");
   }
 
@@ -56786,9 +59554,10 @@ function HomeContent(): React.JSX.Element {
 	          topP: newBotTopP,
 	          topK: newBotTopK,
 	          repetitionPenalty: newBotRepetitionPenalty,
-	          color: newBotColor,
+          color: newBotColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
+          faceEyeCharacter: newBotFaceEyeCharacter,
           faceMouthFont: newBotFaceMouthFont,
           faceFontWeight: newBotFaceFontWeight,
         }),
@@ -56963,9 +59732,10 @@ function HomeContent(): React.JSX.Element {
 	          topP: normalizeBotTopP(bot.top_p),
 	          topK: normalizeBotTopK(bot.top_k),
 	          repetitionPenalty: normalizeBotRepetitionPenalty(bot.repetition_penalty),
-	          color: bot.color,
+          color: bot.color,
           glyph: bot.glyph,
           faceEyesFont: faceStyle.eyesFont,
+          faceEyeCharacter: faceStyle.eyeCharacter,
           faceMouthFont: faceStyle.mouthFont,
           faceFontWeight: faceStyle.weight,
         }),
@@ -57029,9 +59799,10 @@ function HomeContent(): React.JSX.Element {
 	          topP: newBotTopP,
 	          topK: newBotTopK,
 	          repetitionPenalty: newBotRepetitionPenalty,
-	          color: newBotColor,
+          color: newBotColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
+          faceEyeCharacter: newBotFaceEyeCharacter,
           faceMouthFont: newBotFaceMouthFont,
           faceFontWeight: newBotFaceFontWeight,
         }),
@@ -57048,6 +59819,7 @@ function HomeContent(): React.JSX.Element {
       );
       setNewBotDeleteProtected(false);
       setNewBotAccessoryImageId(null);
+      setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
       editOriginalRef.current = {
         name: copiedName,
         prompt: serializeStoredBotPrompt(
@@ -57070,9 +59842,11 @@ function HomeContent(): React.JSX.Element {
 	        color: newBotColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
+        faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: null,
+        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
       };
       if (result.bot?.id) {
         setEditingBotId(result.bot.id);
@@ -58212,6 +60986,7 @@ function HomeContent(): React.JSX.Element {
     const seededFaceStyle = resolveBotFaceStyleForBot(bot);
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
     const seededAccessoryImageId = bot.accessory_image_id?.trim() || null;
+    const seededAccessoryPlacement = botAccessoryPlacementFromBot(bot);
     setNewBotName(seededName);
     setBotProfile(seededProfile);
     setNewBotSystemPrompt(rawStoredPrompt);
@@ -58230,13 +61005,14 @@ function HomeContent(): React.JSX.Element {
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceStyle.eyesFont);
+    setNewBotFaceEyeCharacter(seededFaceStyle.eyeCharacter);
     setNewBotFaceMouthFont(seededFaceStyle.mouthFont);
     setNewBotFaceFontWeight(seededFaceStyle.weight);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
 	    setNewBotAccessoryImageId(seededAccessoryImageId);
+	    setNewBotAccessoryPlacement(seededAccessoryPlacement);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
-	    setBotAvatarCustomizerOpen(false);
     setBotProfileActivePage("purpose");
     setEditingBotId(bot.id);
     editOriginalRef.current = {
@@ -58258,9 +61034,11 @@ function HomeContent(): React.JSX.Element {
       color: seededColor,
       glyph: seededGlyph,
       faceEyesFont: seededFaceStyle.eyesFont,
+      faceEyeCharacter: seededFaceStyle.eyeCharacter,
       faceMouthFont: seededFaceStyle.mouthFont,
       faceFontWeight: seededFaceStyle.weight,
       profilePictureImageId: seededProfilePictureImageId,
+      accessoryPlacement: seededAccessoryPlacement,
     };
     setPanelError(null);
   }
@@ -58314,7 +61092,6 @@ function HomeContent(): React.JSX.Element {
   function openBotCustomizerFacts(bot: Bot) {
     openBotCustomizer(bot);
     setBotProfileActivePage("facts");
-    setBotAvatarCustomizerOpen(false);
     setBotProfileBuilderOpen(true);
   }
 
@@ -59845,10 +62622,157 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
+  async function saveDefaultBot(): Promise<boolean> {
+    const defaultBotName = "Default";
+    const defaultBotProfile = parseStoredBotPrompt("").fields;
+    const defaultBotPrompt = serializeStoredBotPrompt(defaultBotProfile, defaultBotName);
+    const editPristine = editOriginalRef.current;
+    const hasChanges = editPristine
+      ? newBotColor.trim().toLowerCase() !== editPristine.color.trim().toLowerCase()
+        || newBotGlyph !== editPristine.glyph
+        || newBotFaceEyesFont !== editPristine.faceEyesFont
+        || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
+        || newBotFaceMouthFont !== editPristine.faceMouthFont
+        || newBotFaceFontWeight !== editPristine.faceFontWeight
+      : true;
+    if (!hasChanges) return true;
 
-  async function saveBot(id: string) {
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api<{ defaultBot?: Record<string, unknown> }>("/api/default-bot", {
+        method: "PATCH",
+        body: JSON.stringify({
+          color: newBotColor,
+          glyph: newBotGlyph,
+          faceEyesFont: newBotFaceEyesFont,
+          faceEyeCharacter: newBotFaceEyeCharacter,
+          faceMouthFont: newBotFaceMouthFont,
+          faceFontWeight: newBotFaceFontWeight,
+        }),
+      });
+      setNewBotName(defaultBotName);
+      setBotProfile(defaultBotProfile);
+      setNewBotSystemPrompt("");
+      setNewBotTemperature(BOT_TEMPERATURE_DEFAULT);
+      setNewBotMaxTokens(BOT_REPLY_LENGTH_DEFAULT_TOKENS);
+      setNewBotTopP(BOT_TOP_P_DEFAULT);
+      setNewBotTopK(BOT_TOP_K_DEFAULT);
+      setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
+      editOriginalRef.current = {
+        name: defaultBotName,
+        prompt: defaultBotPrompt,
+        rawPrompt: "",
+        localModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
+        onlineModel: DEFAULT_BOT_CHAT_MODEL_CHOICE,
+        localImageModel: AUTO_MODEL_CHOICE,
+        openAiImageModel: AUTO_MODEL_CHOICE,
+        onlineEnabled: true,
+        deleteProtected: false,
+        flirtEnabled: false,
+        temperature: BOT_TEMPERATURE_DEFAULT,
+        maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+        topP: BOT_TOP_P_DEFAULT,
+        topK: BOT_TOP_K_DEFAULT,
+        repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
+        color: newBotColor,
+        glyph: newBotGlyph,
+        faceEyesFont: newBotFaceEyesFont,
+        faceEyeCharacter: newBotFaceEyeCharacter,
+        faceMouthFont: newBotFaceMouthFont,
+        faceFontWeight: newBotFaceFontWeight,
+        profilePictureImageId: null,
+        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
+      };
+      setSettings((previous) =>
+        previous
+          ? {
+              ...previous,
+              prismDefaultBotName: "",
+              prismDefaultBotSystemPrompt: "",
+              prismDefaultBotColor: newBotColor,
+              prismDefaultBotGlyph: newBotGlyph,
+              prismDefaultBotFaceEyesFont: newBotFaceEyesFont,
+              prismDefaultBotFaceEyeCharacter: newBotFaceEyeCharacter,
+              prismDefaultBotFaceMouthFont: newBotFaceMouthFont,
+              prismDefaultBotFaceFontWeight: newBotFaceFontWeight,
+              prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
+              prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
+              prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
+              prismDefaultBotTopK: BOT_TOP_K_DEFAULT,
+              prismDefaultBotRepetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
+            }
+          : previous
+      );
+      setColorWheelOpen(false);
+      setPanelNotice("Default avatar updated.");
+      return true;
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Save failed.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function flushBotAvatarAutosaveQueue(id: string): Promise<boolean> {
+    if (botAvatarAutoSaveInFlightRef.current) return true;
+    botAvatarAutoSaveInFlightRef.current = true;
+    setBotAvatarAutoSaving(true);
+    setPanelError(null);
+    setPanelNotice(null);
+
+    let saved = true;
+    try {
+      while (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
+        const patch = botAvatarAutoSaveQueuedPatchRef.current;
+        botAvatarAutoSaveQueuedPatchRef.current = {};
+        const result = await api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+        if (editOriginalRef.current) {
+          editOriginalRef.current = applyBotAvatarAutosavePatchToSnapshot(
+            editOriginalRef.current,
+            patch
+          );
+        }
+        if (result.bot?.id) {
+          setBots((list) => replaceBotRowById(list, result.bot as Bot));
+        } else {
+          await refreshBots();
+        }
+      }
+    } catch (err) {
+      saved = false;
+      setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
+    } finally {
+      botAvatarAutoSaveInFlightRef.current = false;
+      if (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
+        void flushBotAvatarAutosaveQueue(id);
+      } else {
+        setBotAvatarAutoSaving(false);
+      }
+    }
+
+    return saved;
+  }
+
+  function queueBotAvatarAutosave(id: string | null, patch: BotCustomizerSavePatch): void {
+    if (!id) return;
+    const normalizedPatch = normalizeBotAvatarAutosavePatch(patch);
+    if (!botAvatarAutosavePatchHasFields(normalizedPatch)) return;
+    botAvatarAutoSaveQueuedPatchRef.current = mergeBotAvatarAutosavePatch(
+      botAvatarAutoSaveQueuedPatchRef.current,
+      normalizedPatch
+    );
+    void flushBotAvatarAutosaveQueue(id);
+  }
+
+  async function saveBot(id: string): Promise<boolean> {
     const trimmedName = newBotName.trim();
-    if (!trimmedName) return;
+    if (!trimmedName) return false;
     const storedSystemPrompt = botEditorAdvancedMode
       ? newBotSystemPrompt
       : serializeStoredBotPrompt(botProfile, trimmedName);
@@ -59893,13 +62817,15 @@ function HomeContent(): React.JSX.Element {
         color: newBotColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
+        faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: newBotProfilePictureImageId,
+        accessoryPlacement: newBotAccessoryPlacement,
       },
       editOriginalRef.current
     );
-    if (Object.keys(patch).length === 0) return;
+    if (Object.keys(patch).length === 0) return true;
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -59940,9 +62866,11 @@ function HomeContent(): React.JSX.Element {
 	        color: newBotColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
+        faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: newBotProfilePictureImageId,
+        accessoryPlacement: newBotAccessoryPlacement,
       };
       setEditingBotId(id);
       setColorWheelOpen(false);
@@ -59952,8 +62880,10 @@ function HomeContent(): React.JSX.Element {
       } else {
         await refreshBots();
       }
+      return true;
     } catch (err) {
       setPanelError(err instanceof Error ? err.message : "Save failed.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -59970,14 +62900,25 @@ function HomeContent(): React.JSX.Element {
         `/api/bots/${encodeURIComponent(editingBotId)}/accessory/upload`,
         {
           method: "POST",
-          body: JSON.stringify({ dataUrl }),
+          body: JSON.stringify({
+            dataUrl,
+            placement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
+          }),
         }
       );
       const nextImageId =
         result.bot?.accessory_image_id?.trim() ||
         result.image?.id?.trim() ||
         null;
+      const nextPlacement = botAccessoryPlacementFromBot(result.bot ?? null);
       setNewBotAccessoryImageId(nextImageId);
+      setNewBotAccessoryPlacement(nextPlacement);
+      if (editOriginalRef.current) {
+        editOriginalRef.current = {
+          ...editOriginalRef.current,
+          accessoryPlacement: nextPlacement,
+        };
+      }
       if (result.bot?.id) {
         setBots((list) => replaceBotRowById(list, result.bot as Bot));
       } else {
@@ -60002,6 +62943,16 @@ function HomeContent(): React.JSX.Element {
 
   async function removeBotAccessory(): Promise<void> {
     if (!editingBotId || !newBotAccessoryImageId || botAccessoryBusy) return;
+    const previousAccessoryImageId = newBotAccessoryImageId;
+    const previousAccessoryPlacement = newBotAccessoryPlacement;
+    setNewBotAccessoryImageId(null);
+    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
+    if (editOriginalRef.current) {
+      editOriginalRef.current = {
+        ...editOriginalRef.current,
+        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
+      };
+    }
     setBotAccessoryBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -60010,14 +62961,21 @@ function HomeContent(): React.JSX.Element {
         `/api/bots/${encodeURIComponent(editingBotId)}/accessory`,
         { method: "DELETE" }
       );
-      setNewBotAccessoryImageId(null);
       if (result.bot?.id) {
-        setBots((list) => replaceBotRowById(list, result.bot as Bot));
+        setBots((list) => replaceBotRowById(list, clearBotAccessoryFields(result.bot as Bot)));
       } else {
         await refreshBots();
       }
       setPanelNotice("Accessory removed.");
     } catch (err) {
+      setNewBotAccessoryImageId(previousAccessoryImageId);
+      setNewBotAccessoryPlacement(previousAccessoryPlacement);
+      if (editOriginalRef.current) {
+        editOriginalRef.current = {
+          ...editOriginalRef.current,
+          accessoryPlacement: previousAccessoryPlacement,
+        };
+      }
       setPanelError(err instanceof Error ? err.message : "Could not remove accessory.");
     } finally {
       setBotAccessoryBusy(false);
@@ -60031,7 +62989,9 @@ function HomeContent(): React.JSX.Element {
   async function submitBotForm(event: React.FormEvent) {
     event.preventDefault();
     if (!newBotName.trim()) return;
-    if (editingBotId) {
+    if (botPanelView === "defaultCustomize") {
+      await saveDefaultBot();
+    } else if (editingBotId) {
       await saveBot(editingBotId);
     } else {
       await createBot();
@@ -61172,6 +64132,7 @@ function HomeContent(): React.JSX.Element {
     const msg = messageContextMenu.message;
     const isUser = msg.role === "user";
     const showFork = !detail?.incognito;
+    const branchZenDelete = shouldBranchZenDelete(msg);
     return (
       <>
         <button
@@ -61223,7 +64184,9 @@ function HomeContent(): React.JSX.Element {
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => resendUserMessage(msg)}
+                onClick={() => {
+                  void resendUserMessage(msg);
+                }}
               >
                 <span className={styles.contextMenuItemLabel}>
                   <span className={styles.contextMenuGlyph} aria-hidden="true">↻</span>
@@ -61255,8 +64218,10 @@ function HomeContent(): React.JSX.Element {
             }}
           >
             <span className={styles.contextMenuItemLabel}>
-              <span className={styles.contextMenuGlyph} aria-hidden="true">⌫</span>
-              <span>Delete</span>
+              <span className={styles.contextMenuGlyph} aria-hidden="true">
+                {branchZenDelete ? "⑂" : "⌫"}
+              </span>
+              <span>{branchZenDelete ? "Branch without this" : "Delete"}</span>
             </span>
           </button>
         </div>
@@ -61999,13 +64964,70 @@ function HomeContent(): React.JSX.Element {
     } as React.CSSProperties;
   };
 
+  function currentZenConversationIdForPersonaSwitch(): string | null {
+    if (detail?.mode === "zen" && detail.id !== "pending") {
+      return detail.id;
+    }
+    const selectedConversation = selectedId
+      ? conversations.find((conversation) => conversation.id === selectedId) ?? null
+      : null;
+    if (selectedConversation?.mode === "zen") {
+      return selectedConversation.id;
+    }
+    return (
+      conversations.find(
+        (conversation) =>
+          conversation.mode === "zen" &&
+          !conversation.incognito &&
+          !conversation.parentHubId
+      )?.id ??
+      conversations.find(
+        (conversation) => conversation.mode === "zen" && !conversation.incognito
+      )?.id ??
+      null
+    );
+  }
+
+  function selectZenPersonaFromSidebar(botId: string): void {
+    setSelectedBotId(botId);
+    setSandboxGridSelectedBotId(botId);
+    setZenPersonaBotId(botId);
+    setChatBotOverride(undefined);
+    setConversationStarterPrompts(null);
+    closeEmptyStateBotSearch();
+    const targetConversationId = currentZenConversationIdForPersonaSwitch();
+    if (targetConversationId) {
+      clearConversationUnread(targetConversationId);
+      void refreshConversation(targetConversationId, {
+        zenPersonaBotIdOverride: botId,
+      });
+    } else {
+      setChatAutoRestoreSuppressed(true);
+      setForceNewConversationOnNextSend(false);
+      setSelectedId(null);
+      setDetail(null);
+      setSessionOpinion(null);
+      setBotOpinion(null);
+    }
+    focusDraftInput();
+  }
+
   const renderConversationRow = (
     c: ConversationSummary,
     index: number,
-    nested = false
+    nested = false,
+    parentGroupBotId: string | null = null
   ): React.JSX.Element => {
     const isSelected = c.id === selectedId;
     const isUnread = unreadConversationIds.has(c.id);
+    const zenPersonaBotIdForRow =
+      view === "chat" && c.mode === "zen"
+        ? conversationEffectiveBotId(c) ?? parentGroupBotId
+        : undefined;
+    const rowSelectionComplete =
+      !isSelected ||
+      zenPersonaBotIdForRow === undefined ||
+      zenPersonaBotId === zenPersonaBotIdForRow;
     return (
       <li
         key={c.id}
@@ -62020,15 +65042,22 @@ function HomeContent(): React.JSX.Element {
         <button
           type="button"
           className={`${styles.conversationTitleButton} ${isSelected ? styles.selected : ""}`}
-          disabled={isSelected}
+          disabled={rowSelectionComplete && isSelected}
           aria-current={isSelected ? "page" : undefined}
           title={isSelected ? "Current chat" : undefined}
           onClick={() => {
-            if (isSelected) return;
+            if (rowSelectionComplete && isSelected) return;
             disarmDelete();
             clearConversationUnread(c.id);
-            void refreshConversation(c.id);
-            setSidebarOpen(false);
+            if (view === "chat" && c.mode !== "zen" && parentGroupBotId) {
+              selectZenPersonaFromSidebar(parentGroupBotId);
+              return;
+            }
+            void refreshConversation(c.id, {
+              ...(zenPersonaBotIdForRow !== undefined
+                ? { zenPersonaBotIdOverride: zenPersonaBotIdForRow }
+                : {}),
+            });
           }}
         >
           {c.title}
@@ -62136,9 +65165,15 @@ function HomeContent(): React.JSX.Element {
                 setConversationListScrollTop(0);
               }
               setExpandedConversationGroupKey(group.key);
-              if (hubConversation) {
+              if (view === "chat" && group.botId) {
+                selectZenPersonaFromSidebar(group.botId);
+              } else if (hubConversation) {
                 clearConversationUnread(hubConversation.id);
-                void refreshConversation(hubConversation.id);
+                void refreshConversation(hubConversation.id, {
+                  ...(view === "chat" && hubConversation.mode === "zen"
+                    ? { zenPersonaBotIdOverride: group.botId }
+                    : {}),
+                });
               } else if (group.botId) {
                 performShowAllBotsView(group.botId, { suppressChatAutoRestore: true });
               } else {
@@ -62191,7 +65226,12 @@ function HomeContent(): React.JSX.Element {
               aria-labelledby={groupNameLabelId}
             >
               {group.conversations.map((conversation, childIndex) =>
-                renderConversationRow(conversation, headerGlowIndex + 1 + childIndex, true)
+                renderConversationRow(
+                  conversation,
+                  headerGlowIndex + 1 + childIndex,
+                  true,
+                  group.botId
+                )
               )}
             </ul>
           </div>
@@ -71508,6 +74548,9 @@ function HomeContent(): React.JSX.Element {
         const editingBot = editingBotId
           ? bots.find(b => b.id === editingBotId) ?? null
           : null;
+        const editingDefaultBot = botPanelView === "defaultCustomize";
+        const botPanelCreateMode = botPanelView === "create";
+        const botPanelEditModeActive = Boolean(editingBotId) || editingDefaultBot;
         const selectedBotPanelBot = selectedBotPanelBotId
           ? bots.find((bot) => bot.id === selectedBotPanelBotId) ?? null
           : null;
@@ -71515,13 +74558,14 @@ function HomeContent(): React.JSX.Element {
         const botPanelFormActive =
           botPanelView === "create" ||
           botPanelView === "customize" ||
+          editingDefaultBot ||
           botPanelView === "settings";
         const botPanelAdvancedEditorAvailable =
           botPanelView === "create" || botPanelView === "customize";
         const botPanelAdvancedEditorActive =
           botPanelAdvancedEditorAvailable && botEditorAdvancedMode;
         const botPanelShowPersonaFields =
-          botPanelView === "create" || botPanelView === "customize";
+          botPanelView === "create" || botPanelView === "customize" || editingDefaultBot;
         const botPanelShowResponseSettings =
           botPanelView === "create" || botPanelView === "settings";
         const botPanelCanSave = botPanelFormActive;
@@ -71549,7 +74593,7 @@ function HomeContent(): React.JSX.Element {
         // raw bot row. This keeps legacy bots with no stored color from
         // reading as "dirty" the instant edit mode opens, since the
         // picker's random seed color matches the seed we captured.
-        const editPristine = editingBot ? editOriginalRef.current : null;
+        const editPristine = editingBot || editingDefaultBot ? editOriginalRef.current : null;
         const visibleLocalModelChoice = visibleConcreteModelChoiceForProvider(
           modelCatalog,
           settings,
@@ -71567,27 +74611,42 @@ function HomeContent(): React.JSX.Element {
         const pristineSystemPrompt = botEditorAdvancedMode
           ? editPristine?.rawPrompt ?? editPristine?.prompt ?? ""
           : editPristine?.prompt ?? "";
-        const hasEditChanges = editPristine
-          ? trimmedName !== editPristine.name
-            || currentStoredSystemPrompt !== pristineSystemPrompt
-            || visibleLocalModelChoice !== editPristine.localModel
-            || visibleOnlineModelChoice !== editPristine.onlineModel
-            || newBotLocalImageModel !== editPristine.localImageModel
-            || newBotOpenAiImageModel !== editPristine.openAiImageModel
-            || newBotOnlineEnabled !== editPristine.onlineEnabled
-            || newBotDeleteProtected !== editPristine.deleteProtected
-	            || newBotFlirtEnabled !== editPristine.flirtEnabled
-	            || newBotTemperature !== editPristine.temperature
-	            || newBotMaxTokens !== editPristine.maxTokens
-	            || newBotTopP !== editPristine.topP
-	            || newBotTopK !== editPristine.topK
-	            || newBotRepetitionPenalty !== editPristine.repetitionPenalty
-	            || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
+        const hasDefaultBotAvatarChanges = editPristine
+          ? normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
             || newBotGlyph !== editPristine.glyph
             || newBotFaceEyesFont !== editPristine.faceEyesFont
+            || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
             || newBotFaceMouthFont !== editPristine.faceMouthFont
             || newBotFaceFontWeight !== editPristine.faceFontWeight
-            || newBotProfilePictureImageId !== editPristine.profilePictureImageId
+          : false;
+        const hasEditChanges = editPristine
+          ? editingDefaultBot
+            ? hasDefaultBotAvatarChanges
+            : trimmedName !== editPristine.name
+              || currentStoredSystemPrompt !== pristineSystemPrompt
+              || visibleLocalModelChoice !== editPristine.localModel
+              || visibleOnlineModelChoice !== editPristine.onlineModel
+              || newBotLocalImageModel !== editPristine.localImageModel
+              || newBotOpenAiImageModel !== editPristine.openAiImageModel
+              || newBotOnlineEnabled !== editPristine.onlineEnabled
+              || newBotDeleteProtected !== editPristine.deleteProtected
+	              || newBotFlirtEnabled !== editPristine.flirtEnabled
+	              || newBotTemperature !== editPristine.temperature
+	              || newBotMaxTokens !== editPristine.maxTokens
+	              || newBotTopP !== editPristine.topP
+	              || newBotTopK !== editPristine.topK
+	              || newBotRepetitionPenalty !== editPristine.repetitionPenalty
+	              || normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
+              || newBotGlyph !== editPristine.glyph
+              || newBotFaceEyesFont !== editPristine.faceEyesFont
+              || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
+              || newBotFaceMouthFont !== editPristine.faceMouthFont
+              || newBotFaceFontWeight !== editPristine.faceFontWeight
+              || newBotProfilePictureImageId !== editPristine.profilePictureImageId
+              || !botAccessoryPlacementsEqual(
+                normalizeBotAccessoryPlacement(newBotAccessoryPlacement),
+                normalizeBotAccessoryPlacement(editPristine.accessoryPlacement)
+              )
           : false;
 
         // "Active" = pressing the button commits something useful.
@@ -71595,7 +74654,7 @@ function HomeContent(): React.JSX.Element {
         // color leaks into the button styling (so the picker feels
         // live as you type a name / tweak the swatch).
         const botPanelActionBusy = busy || botTransferBusy;
-        const primaryActive = botPanelCanSave && (editingBotId
+        const primaryActive = botPanelCanSave && (botPanelEditModeActive
           ? (nameIsPresent && hasEditChanges && !botPanelActionBusy)
           : (nameIsPresent && !botPanelActionBusy));
 
@@ -71608,7 +74667,7 @@ function HomeContent(): React.JSX.Element {
         const primaryLabel =
           botPanelView === "settings"
             ? "Save settings"
-            : editingBotId
+            : botPanelEditModeActive
               ? "Save changes"
               : "Create bot";
 
@@ -71682,6 +74741,17 @@ function HomeContent(): React.JSX.Element {
         const botLibraryTotal = bots.length + 1;
         const botLibrarySummary =
           botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
+        const defaultBotCardName = "Default";
+        const defaultBotCardGlyph = isBotGlyphName(settings?.prismDefaultBotGlyph)
+          ? settings.prismDefaultBotGlyph
+          : DEFAULT_BOT_GLYPH;
+        const defaultBotCardAccent = settings?.prismDefaultBotColor.trim() || "";
+        const defaultBotCardStyle = defaultBotCardAccent
+          ? ({
+              "--bot-color": defaultBotCardAccent,
+              "--bot-tile-ink": pickReadableText(defaultBotCardAccent),
+            } as React.CSSProperties)
+          : undefined;
         const editorPanelStyle = (() => {
           const panelAccentColor =
             botPanelView === "botHub" && selectedBotPanelBot?.color
@@ -71723,7 +74793,7 @@ function HomeContent(): React.JSX.Element {
           newBotRepetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT;
         const botIdentityDisplayName =
           trimmedName || profileReferenceName || editingBot?.name?.trim() || "Unnamed bot";
-        const botPanelMode = editingBotId ? "edit" : "create";
+        const botPanelMode = botPanelEditModeActive ? "edit" : "create";
         const botPanelTitle =
           botPanelView === "home"
             ? "Bots"
@@ -71735,6 +74805,8 @@ function HomeContent(): React.JSX.Element {
                 ? selectedBotPanelBot?.name ?? "Bot"
                 : botPanelView === "settings"
                   ? "Bot settings"
+                  : editingDefaultBot
+                    ? "Customize avatar"
                   : editingBotId
                     ? "Customize bot"
                     : "Create bot";
@@ -71751,13 +74823,17 @@ function HomeContent(): React.JSX.Element {
                 ? "Choose what to manage"
                 : botPanelView === "settings"
                   ? botIdentityDisplayName
+                  : editingDefaultBot
+                    ? "Default Prism bot"
                   : editingBotId
                     ? botIdentityDisplayName
                 : "New custom bot";
-        const botAvatarPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
         const botAccessoryUrl = botStoredImageUrl(newBotAccessoryImageId);
+        const botAvatarSummaryEyeGlyph = newBotFaceEyeCharacter ?? "••";
         const botAccessoryActionsDisabled = !editingBotId || busy || botAccessoryBusy;
-        const botAccessoryActionTitle = !editingBotId
+        const botAccessoryActionTitle = editingDefaultBot
+          ? "Default does not support accessory uploads yet"
+          : !editingBotId
           ? "Save the bot before adding an accessory"
           : botAccessoryBusy
             ? "Accessory update in progress"
@@ -71847,10 +74923,11 @@ function HomeContent(): React.JSX.Element {
               : headerTrashTargetBot
                 ? `Delete ${headerTrashTargetBot.name}`
                 : "Delete bot";
-        const editorMode = botPanelView === "customize" || botPanelView === "settings";
+        const editorMode =
+          botPanelView === "customize" || botPanelView === "settings" || editingDefaultBot;
         const saveExportDisabled = busy || botTransferBusy || !headerTrashTargetBot;
         const importFromBotFileDisabled =
-          busy || botTransferBusy || (editorMode && editingBotId !== null);
+          busy || botTransferBusy || (editorMode && (editingBotId !== null || editingDefaultBot));
 
         return (
           <div
@@ -71861,7 +74938,7 @@ function HomeContent(): React.JSX.Element {
             data-closing={panelClosing ? "true" : undefined}
             data-color-picker-open={colorWheelOpen ? "true" : undefined}
             data-profile-builder-open={
-              botProfileBuilderOpen || botAiParametersModalOpen || botAvatarCustomizerOpen
+              botProfileBuilderOpen || botAiParametersModalOpen
                 ? "true"
                 : undefined
             }
@@ -71938,7 +75015,7 @@ function HomeContent(): React.JSX.Element {
                       ? "Wait for the current action to finish"
                       : botTransferBusy
                         ? "Wait for the current bot import or export to finish"
-                      : editorMode && editingBotId
+                      : editorMode && (editingBotId || editingDefaultBot)
                         ? "Import disabled while editing a bot"
                         : "Import bot from .bot or .bots file"
                   }
@@ -71947,7 +75024,7 @@ function HomeContent(): React.JSX.Element {
                       ? "Wait for the current action to finish"
                       : botTransferBusy
                         ? "Wait for the current bot import or export to finish"
-                      : editorMode && editingBotId
+                      : editorMode && (editingBotId || editingDefaultBot)
                         ? "Finish editing or go back to the list to import a .bot or .bots file"
                         : "Import Prism .bot or .bots file"
                   }
@@ -72510,69 +75587,62 @@ function HomeContent(): React.JSX.Element {
               >
               {botPanelShowPersonaFields ? (
                 <>
-              <section
-                className={styles.botIdentityCard}
-                data-mode={botPanelMode}
-                data-dirty={hasEditChanges ? "true" : undefined}
-                aria-label="Bot identity"
-	              >
-	                <div className={styles.botNameRow}>
-                  <ColorGlyphPicker
-                    color={newBotColor}
-                    glyph={newBotGlyph}
-                    onColorChange={handleNewBotColorChange}
-                    onGlyphChange={handleNewBotGlyphChange}
-                    open={colorWheelOpen}
-                    onToggle={() => setColorWheelOpen(o => !o)}
-                    resolvedTheme={resolvedTheme}
-                  />
-                  <label className={styles.botNameField}>
-                    <span>Bot name</span>
-                    <input
-                      ref={botNameInputRef}
-                      required
-                      placeholder="Name this bot"
-                      value={newBotName}
-                      onChange={e => setNewBotName(e.target.value)}
-                    />
-                  </label>
-                  {!editingBotId ? (
-	                  <span
-	                    className={styles.botRandomizerSocket}
-	                    data-lens-applied={newBotAppliedLens ? "true" : undefined}
-	                    data-drop-active={botLensDropActive ? "true" : undefined}
-	                  >
-                    <button
-                      type="button"
-                      className={styles.botRandomizeButton}
-                      data-lens-applied={newBotAppliedLens ? "true" : undefined}
-                      data-drop-active={botLensDropActive ? "true" : undefined}
-                      onClick={applyRandomBotDraft}
-	                      disabled={botTransferBusy}
-	                      onDragOver={handleRandomizerLensDragOver}
-	                      onDragLeave={handleRandomizerLensDragLeave}
-	                      onDrop={handleRandomizerLensDrop}
-                      aria-label={
-                        newBotAppliedLens
-                          ? `Randomize through ${newBotAppliedLens.displayName}`
-                          : "Randomize bot"
-                      }
-		                    >
-		                      {newBotAppliedLens ? (
-		                        <LensTile
-		                          lens={newBotAppliedLens}
-		                          size="button"
-		                          className={styles.botRandomizerLensTile}
-		                        />
-		                      ) : (
-		                        <BotGlyph name="dice" size={20} strokeWidth={1.8} />
-		                      )}
-		                    </button>
-		                  </span>
-	                  ) : null}
-	                </div>
-	              </section>
-	              {!editingBotId ? (
+              {!editingDefaultBot ? (
+                <section
+                  className={styles.botIdentityCard}
+                  data-mode={botPanelMode}
+                  data-dirty={hasEditChanges ? "true" : undefined}
+                  aria-label="Bot identity"
+	                >
+	                  <div className={styles.botNameRow}>
+                    <label className={styles.botNameField}>
+                      <span>Bot name</span>
+                      <input
+                        ref={botNameInputRef}
+                        required
+                        placeholder="Name this bot"
+                        value={newBotName}
+                        onChange={e => setNewBotName(e.target.value)}
+                      />
+                    </label>
+                    {botPanelCreateMode ? (
+	                    <span
+	                      className={styles.botRandomizerSocket}
+	                      data-lens-applied={newBotAppliedLens ? "true" : undefined}
+	                      data-drop-active={botLensDropActive ? "true" : undefined}
+	                    >
+                      <button
+                        type="button"
+                        className={styles.botRandomizeButton}
+                        data-lens-applied={newBotAppliedLens ? "true" : undefined}
+                        data-drop-active={botLensDropActive ? "true" : undefined}
+                        onClick={applyRandomBotDraft}
+	                        disabled={botTransferBusy}
+	                        onDragOver={handleRandomizerLensDragOver}
+	                        onDragLeave={handleRandomizerLensDragLeave}
+	                        onDrop={handleRandomizerLensDrop}
+                        aria-label={
+                          newBotAppliedLens
+                            ? `Randomize through ${newBotAppliedLens.displayName}`
+                            : "Randomize bot"
+                        }
+		                      >
+		                        {newBotAppliedLens ? (
+		                          <LensTile
+		                            lens={newBotAppliedLens}
+		                            size="button"
+		                            className={styles.botRandomizerLensTile}
+		                          />
+		                        ) : (
+		                          <BotGlyph name="dice" size={20} strokeWidth={1.8} />
+		                        )}
+		                      </button>
+		                    </span>
+	                    ) : null}
+	                  </div>
+	                </section>
+              ) : null}
+	              {botPanelCreateMode ? (
 	              <section
 	                className={`${styles.botParameterCard} ${styles.botLensPickerCard}`}
 	                aria-label="Generation Lens"
@@ -72699,91 +75769,167 @@ function HomeContent(): React.JSX.Element {
 		                  : null}
 		              </section>
 	              ) : null}
-	              <section
-	                className={`${styles.botParameterCard} ${styles.botAvatarCard} ${styles.botAvatarSummaryCard}`}
+              <section
+                className={`${styles.botParameterCard} ${styles.botAvatarSummaryCard}`}
                 aria-label="Avatar"
               >
                 <div className={styles.botParameterHeader}>
                   <span>Avatar</span>
-                  <small>Face glyph and accessories for character presence.</small>
+                  <small>{newBotAccessoryImageId ? "Accessory equipped" : "Face and identity"}</small>
                 </div>
                 <button
                   type="button"
                   className={styles.botAvatarSummaryButton}
                   onClick={() => {
-                    setColorWheelOpen(false);
                     setBotProfileBuilderOpen(false);
+                    setBotAiParametersModalOpen(false);
+                    setBotPreferredModelsModalOpen(false);
                     setBotAvatarCustomizerOpen(true);
                   }}
                 >
                   <span className={styles.botAvatarSummaryFace}>
-                    <span className={styles.botAvatarFacePlate} aria-hidden="true">
-                      <CoffeeSeatPlateEmoji
-                        enabled={false}
-                        isTalking={false}
-                        scheduleKey={`bot-avatar-preview-${editingBotId ?? "draft"}`}
-                        baseText={botAvatarPlateGlyph.text}
-                        rotateDeg={botAvatarPlateGlyph.rotateDeg}
-                        voicePreset="neutral"
-                        faceEyesFont={newBotFaceEyesFont}
-                        faceMouthFont={newBotFaceMouthFont}
-                        faceFontWeight={newBotFaceFontWeight}
-                        className={`${styles.coffeeSeatPlateEmoji} ${styles.botAvatarFaceGlyph}`}
-                      />
-                      <BotPreviewFaceGlare />
+                    <span className={styles.botAvatarSummaryGlyphSocket} aria-hidden="true">
+                      <BotGlyph name={newBotGlyph} size={22} strokeWidth={2.05} />
+                    </span>
+                    <span className={styles.botAvatarSummaryFaceParts} aria-hidden="true">
+                      <span className={styles.botAvatarSummaryFacePart} data-part="eyes">
+                        <span
+                          className={`${styles.botAvatarFontOptionSample} ${styles.botAvatarSummaryFacePartGlyph}`}
+                          data-face-font={newBotFaceEyesFont}
+                        >
+                          {botAvatarSummaryEyeGlyph}
+                        </span>
+                      </span>
+                      <span className={styles.botAvatarSummaryFacePart} data-part="mouth">
+                        <span
+                          className={`${styles.botAvatarFontOptionSample} ${styles.botAvatarSummaryFacePartGlyph}`}
+                          data-face-font={newBotFaceMouthFont}
+                        >
+                          ━
+                        </span>
+                      </span>
                     </span>
                     <span className={styles.botAvatarSummaryCopy}>
-                      <strong>Face</strong>
-                      <small>
-                        Eye: {BOT_FACE_FONT_LABELS[newBotFaceEyesFont]} · Mouth: {BOT_FACE_FONT_LABELS[newBotFaceMouthFont]} · {botAvatarWeightLabel(newBotFaceFontWeight)}
-                      </small>
+                      <strong>{BOT_FACE_FONT_LABELS[newBotFaceEyesFont]} eyes · {BOT_FACE_FONT_LABELS[newBotFaceMouthFont]} mouth</strong>
+                      <small>{botAvatarWeightLabel(newBotFaceFontWeight)} · {newBotColor}</small>
                     </span>
                   </span>
                   <span className={styles.botAvatarSummaryAccessory}>
-                    <span
-                      className={styles.botAvatarAccessoryPreview}
-                      data-empty={botAccessoryUrl ? undefined : "true"}
-                      aria-hidden="true"
-                    >
-                      {botAccessoryUrl ? (
-                        <span
-                          className={styles.botAvatarAccessoryImage}
-                          style={{ backgroundImage: `url("${botAccessoryUrl}")` }}
-                        />
-                      ) : (
-                        <span className={styles.botAvatarAccessoryEmpty}>
-                          <Brush size={18} strokeWidth={1.9} />
-                        </span>
-                      )}
-                    </span>
+                    {botAccessoryUrl ? (
+                      <BotAccessoryRaster
+                        className={styles.botAvatarAccessoryPreview}
+                        accessoryUrl={botAccessoryUrl}
+                        accessoryPlacement={newBotAccessoryPlacement}
+                        botColor={normalizeAccentForTheme(newBotColor, resolvedTheme)}
+                      />
+                    ) : (
+                      <span className={styles.botAvatarAccessoryEmpty} aria-hidden="true">
+                        <ImageGlyph size={16} strokeWidth={2} />
+                      </span>
+                    )}
                     <span className={styles.botAvatarSummaryCopy}>
-                      <strong>Accessories</strong>
-                      <small>{botAccessoryUrl ? "Overlay set" : "512x512 transparent PNG/WebP"}</small>
+                      <strong>{botAccessoryUrl ? "Accessory" : "No accessory"}</strong>
+                      <small>
+                        {editingDefaultBot
+                          ? "Default avatar"
+                          : editingBotId
+                            ? "Customize avatar"
+                            : "Create the bot to upload"}
+                      </small>
                     </span>
                   </span>
                 </button>
+                <BotAvatarCustomizerModal
+                  open={botAvatarCustomizerOpen}
+                  botName={profileReferenceName}
+                  scheduleKey={`bot-avatar-customizer-${
+                    editingDefaultBot ? "default" : editingBotId ?? "draft"
+                  }`}
+                  color={newBotColor}
+                  glyph={newBotGlyph}
+                  colorPickerOpen={colorWheelOpen}
+                  resolvedTheme={resolvedTheme}
+                  faceEyesFont={newBotFaceEyesFont}
+                  faceEyeCharacter={newBotFaceEyeCharacter}
+                  faceMouthFont={newBotFaceMouthFont}
+                  faceFontWeight={newBotFaceFontWeight}
+                  accessoryUrl={botAccessoryUrl}
+                  accessoryImageId={newBotAccessoryImageId}
+                  accessoryPlacement={newBotAccessoryPlacement}
+                  accessoryBusy={botAccessoryBusy}
+                  accessoryActionsDisabled={botAccessoryActionsDisabled}
+                  accessoryActionTitle={botAccessoryActionTitle}
+                  accessoryUploadInputRef={botAccessoryUploadInputRef}
+                  hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
+                  saving={busy || botAvatarAutoSaving}
+                  saveError={panelError}
+                  savePromptOpen={botAvatarSavePromptOpen}
+                  onRequestClose={() => {
+                    if ((editingBotId || editingDefaultBot) && hasEditChanges) {
+                      setBotAvatarSavePromptOpen(true);
+                      return;
+                    }
+                    closeBotAvatarCustomizer();
+                  }}
+                  onSave={async () => {
+                    if (editingDefaultBot) {
+                      const saved = await saveDefaultBot();
+                      if (saved) closeBotAvatarCustomizer();
+                      return;
+                    }
+                    if (!editingBotId) {
+                      closeBotAvatarCustomizer();
+                      return;
+                    }
+                    const saved = await saveBot(editingBotId);
+                    if (saved) closeBotAvatarCustomizer();
+                  }}
+                  onDiscard={discardBotAvatarCustomizerChanges}
+                  onCancelSavePrompt={() => setBotAvatarSavePromptOpen(false)}
+                  onColorChange={(next) => {
+                    handleNewBotColorChange(next);
+                    queueBotAvatarAutosave(editingBotId, { color: next });
+                  }}
+                  onGlyphChange={(next) => {
+                    handleNewBotGlyphChange(next);
+                    queueBotAvatarAutosave(editingBotId, { glyph: next });
+                  }}
+                  onColorPickerToggle={() => setColorWheelOpen((open) => !open)}
+                  onEyesFontChange={(next) => {
+                    handleNewBotFaceEyesFontChange(next);
+                    queueBotAvatarAutosave(editingBotId, { faceEyesFont: next });
+                  }}
+                  onEyeCharacterChange={(next) => {
+                    const normalized = normalizeBotFaceEyeCharacter(next);
+                    handleNewBotFaceEyeCharacterChange(normalized);
+                    queueBotAvatarAutosave(editingBotId, { faceEyeCharacter: normalized });
+                  }}
+                  onMouthFontChange={(next) => {
+                    handleNewBotFaceMouthFontChange(next);
+                    queueBotAvatarAutosave(editingBotId, { faceMouthFont: next });
+                  }}
+                  onWeightChange={(next) => {
+                    const normalizedWeight =
+                      normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight;
+                    handleNewBotFaceFontWeightChange(normalizedWeight);
+                    queueBotAvatarAutosave(editingBotId, { faceFontWeight: normalizedWeight });
+                  }}
+                  onAccessoryPlacementChange={(next) => {
+                    const normalized = normalizeBotAccessoryPlacement(next);
+                    handleNewBotAccessoryPlacementChange(normalized);
+                  }}
+                  onAccessoryPlacementCommit={(next) => {
+                    const normalized = normalizeBotAccessoryPlacement(next);
+                    handleNewBotAccessoryPlacementChange(normalized);
+                    queueBotAvatarAutosave(editingBotId, { accessoryPlacement: normalized });
+                  }}
+                  onAccessoryUploadInputChange={handleBotAccessoryUploadChange}
+                  onAccessoryUploadClick={() => botAccessoryUploadInputRef.current?.click()}
+                  onRemoveAccessory={() => void removeBotAccessory()}
+                />
               </section>
-              <BotAvatarCustomizer
-                open={botAvatarCustomizerOpen}
-                botName={profileReferenceName}
-                scheduleKey={`bot-avatar-modal-${editingBotId ?? "draft"}`}
-                faceEyesFont={newBotFaceEyesFont}
-                faceMouthFont={newBotFaceMouthFont}
-                faceFontWeight={newBotFaceFontWeight}
-                accessoryUrl={botAccessoryUrl}
-                accessoryImageId={newBotAccessoryImageId}
-                accessoryBusy={botAccessoryBusy}
-                accessoryActionsDisabled={botAccessoryActionsDisabled}
-                accessoryActionTitle={botAccessoryActionTitle}
-                accessoryUploadInputRef={botAccessoryUploadInputRef}
-                onEyesFontChange={handleNewBotFaceEyesFontChange}
-                onMouthFontChange={handleNewBotFaceMouthFontChange}
-                onWeightChange={handleNewBotFaceFontWeightChange}
-                onAccessoryUploadInputChange={handleBotAccessoryUploadChange}
-                onAccessoryUploadClick={() => botAccessoryUploadInputRef.current?.click()}
-                onRemoveAccessory={() => void removeBotAccessory()}
-                onClose={() => setBotAvatarCustomizerOpen(false)}
-              />
+              {!editingDefaultBot ? (
+                <>
 	              <section
 	                className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
 	                aria-label={botEditorAdvancedMode ? "AI Parameters" : "Profile Builder"}
@@ -72852,7 +75998,6 @@ function HomeContent(): React.JSX.Element {
 	                      data-complete={systemPromptSummary ? "true" : undefined}
 	                      onClick={() => {
 	                        setColorWheelOpen(false);
-	                        setBotAvatarCustomizerOpen(false);
 	                        setBotProfileBuilderOpen(false);
 	                        setBotAiParametersModalOpen(true);
 	                      }}
@@ -72926,7 +76071,6 @@ function HomeContent(): React.JSX.Element {
 	                            onClick={() => {
 	                              if (!profileDetailsAreUnlocked) return;
 	                              setColorWheelOpen(false);
-	                              setBotAvatarCustomizerOpen(false);
 	                              setBotAiParametersModalOpen(false);
 	                              setBotProfileActivePage(category);
 	                              setBotProfileBuilderOpen(true);
@@ -72972,6 +76116,8 @@ function HomeContent(): React.JSX.Element {
 	                onRepetitionPenaltyChange={setNewBotRepetitionPenalty}
 	                onClose={() => setBotAiParametersModalOpen(false)}
 	              />
+                </>
+              ) : null}
                 </>
               ) : null}
               {botPanelShowResponseSettings ? (
@@ -73505,20 +76651,30 @@ function HomeContent(): React.JSX.Element {
                   <h4 className={styles.sectionLabel}>Built-in</h4>
               <div
                 className={`${styles.botCard} ${styles.botCardDefault}`}
+                style={defaultBotCardStyle}
                 aria-label="Default bot: always available, cannot be deleted"
               >
                 <span className={styles.botCardGlyph} aria-hidden="true">
-                  <BotGlyph name="bot" />
+                  <BotGlyph name={defaultBotCardGlyph} />
                 </span>
                 <div className={styles.botCardBody}>
                   <div className={styles.botCardDefaultHeader}>
-                    <strong>Default</strong>
+                    <strong>{defaultBotCardName}</strong>
                     <span className={styles.botCardBadge}>Always on</span>
                   </div>
                   <small>
                     Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
                   </small>
                 </div>
+                <button
+                  type="button"
+                  className={styles.botCardDefaultCustomizeButton}
+                  onClick={openDefaultBotCustomizer}
+                  disabled={!settings}
+                  aria-label="Customize Default Prism bot"
+                >
+                  Customize
+                </button>
               </div>
 
               {baseFilteredPanelBots.length > 0 && botPanelDashboardActive && (
@@ -80083,10 +83239,34 @@ function HomeContent(): React.JSX.Element {
               ["--coffee-plate-emoji-face-scale-y" as string]: coffeePlateFaceScaleY,
               ["--coffee-seat-sip-mouth-offset-x" as string]: seatSipPresentation.mouthOffsetX,
               ["--coffee-seat-sip-mouth-offset-y" as string]: seatSipPresentation.mouthOffsetY,
+              ["--bot-face-screen-glare-x" as string]: rosterPreviewSeat
+                ? "34%"
+                : seatHorizontalSide < 0
+                  ? "62%"
+                  : seatHorizontalSide > 0
+                    ? "38%"
+                    : "48%",
+              ["--bot-face-screen-glare-y" as string]: rosterPreviewSeat
+                ? "24%"
+                : isTopHeadSeat
+                  ? "34%"
+                  : "22%",
+              ["--bot-face-screen-glare-angle" as string]: rosterPreviewSeat
+                ? "-28deg"
+                : seatHorizontalSide < 0
+                  ? "-42deg"
+                  : seatHorizontalSide > 0
+                    ? "34deg"
+                    : "-16deg",
             } as React.CSSProperties;
-            const coffeeSeatBodyRasterUrl = rosterPreviewSeat
+            const coffeeSeatAccessoryUrl = rosterPreviewSeat
               ? null
               : botStoredImageUrl(bot.accessory_image_id);
+            const coffeeSeatAccessoryPlacement = botAccessoryPlacementFromBot(bot);
+            const coffeeSeatAccessoryTintColor = normalizeAccentForTheme(
+              bot.color ?? PRISM_DEFAULT_ACCENT,
+              resolvedTheme
+            );
             const coffeeCupVisible =
               !rosterPreviewSeat &&
               seatIsFirmlySeated &&
@@ -80178,7 +83358,7 @@ function HomeContent(): React.JSX.Element {
 	                <div className={styles.coffeeSeatCluster}>
 	                  {rosterPreviewSeat ? (
 	                    <div className={styles.coffeeSeatPlate} style={coffeeHeadPlateStyle}>
-	                      <BotPreviewFaceGlare />
+		                      <BotFaceScreenFill />
 	                      <span className={styles.coffeeSeatPlateGlyph} aria-hidden="true">
 	                        <BotGlyph name={bot.glyph} size={32} strokeWidth={1.62} />
 	                      </span>
@@ -80187,17 +83367,29 @@ function HomeContent(): React.JSX.Element {
 	                    <div
 	                      className={styles.coffeeSeatPlate}
 	                      data-live-body-style="zen"
-	                      data-body-raster-equipped={
-	                        coffeeSeatBodyRasterUrl ? "true" : undefined
+	                      data-accessory-equipped={
+	                        coffeeSeatAccessoryUrl ? "true" : undefined
+	                      }
+	                      data-accessory-layer={
+	                        coffeeSeatAccessoryUrl
+	                          ? coffeeSeatAccessoryPlacement.layer
+	                          : undefined
 	                      }
 	                      style={coffeeHeadPlateStyle}
 	                    >
-                      {coffeeSeatBodyRasterUrl ? (
+                      {coffeeSeatAccessoryUrl ? (
                         <span
-                          className={styles.coffeeSeatBodyRaster}
-                          style={{ backgroundImage: `url("${coffeeSeatBodyRasterUrl}")` }}
+                          className={styles.coffeeSeatAccessoryLayer}
+                          data-accessory-layer={coffeeSeatAccessoryPlacement.layer}
                           aria-hidden="true"
-                        />
+                        >
+                          <BotAccessoryRaster
+                            className={styles.coffeeSeatAccessoryRaster}
+                            accessoryUrl={coffeeSeatAccessoryUrl}
+                            accessoryPlacement={coffeeSeatAccessoryPlacement}
+                            botColor={coffeeSeatAccessoryTintColor}
+                          />
+                        </span>
                       ) : null}
                       <CoffeeSeatPlateEmoji
                         key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
@@ -80209,6 +83401,7 @@ function HomeContent(): React.JSX.Element {
                         rotateDeg={seatPlateGlyph.rotateDeg}
                         voicePreset={seatVoicePreset}
                         faceEyesFont={seatFaceStyle.eyesFont}
+                        faceEyeCharacter={seatFaceStyle.eyeCharacter}
                         faceMouthFont={seatFaceStyle.mouthFont}
                         faceFontWeight={seatFaceStyle.weight}
                         className={styles.coffeeSeatPlateEmoji}
@@ -82978,6 +86171,8 @@ function HomeContent(): React.JSX.Element {
       !pendingReplyVisible;
     const zenCanvasModelPickerActive =
       chatLikeSurface && zenHeroSurfaceVisible && !emptyStateSearchActive;
+    const zenHeaderBotPickerActive =
+      view === "chat" && zenCanvasModelPickerActive && zenPersonaPickerBots.length > 0;
     const zenHeaderModelPickerActive =
       view === "chat" && !zenCanvasModelPickerActive && !zenFirstReplyPending;
     const activeSideChatSurface =
@@ -82991,6 +86186,7 @@ function HomeContent(): React.JSX.Element {
       data-accent-active={appShellStyle ? "true" : undefined}
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
       data-chat-sidebar-hidden={sidebarOpen ? undefined : "true"}
+      data-right-panel-open={panel !== null ? "true" : undefined}
       data-zen-surface="true"
       data-zen-atmosphere-active={zenAtmosphereWallpaperVisible ? "true" : undefined}
       data-zen-fallback-wallpaper-active={zenFallbackWallpaperVisible ? "true" : undefined}
@@ -83032,8 +86228,8 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
         data-dev-panel-safe-area="left"
         aria-label="Primary navigation"
-        aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
-        inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+        aria-hidden={panel !== null || (sidebarDrawerMode && !sidebarOpen) ? true : undefined}
+        inert={panel !== null || (sidebarDrawerMode && !sidebarOpen) ? true : undefined}
       >
         <button
           type="button"
@@ -83107,10 +86303,11 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
 	        <header
-	          ref={chatHeaderRef}
-	          className={styles.chatHeader}
-	          data-dev-panel-safe-area="top"
-          onPointerEnter={handleZenHeaderPointerEnter}
+		          ref={chatHeaderRef}
+		          className={styles.chatHeader}
+		          data-dev-panel-safe-area="top"
+              data-zen-live-bot-drag-exclusion="top-bar"
+	          onPointerEnter={handleZenHeaderPointerEnter}
           onPointerLeave={handleZenHeaderPointerLeave}
           onFocusCapture={handleZenHeaderFocusCapture}
           onBlurCapture={handleZenHeaderBlurCapture}
@@ -83146,7 +86343,11 @@ function HomeContent(): React.JSX.Element {
 	              ? renderMemoryToasts()
 	              : null}
           </div>
-          {zenHeaderModelPickerActive ? renderHeaderModelPicker() : null}
+          {zenHeaderModelPickerActive
+            ? renderHeaderModelPicker()
+            : zenHeaderBotPickerActive
+              ? renderHeaderModelPicker({ showModelControls: false })
+              : null}
           {!chatLikeSurface && view !== "chat" ? (
             <div className={styles.chatHeaderComposeToolsRow}>
               <div className={styles.composeTools}>
@@ -83544,6 +86745,11 @@ function HomeContent(): React.JSX.Element {
               emptyStateSearchActive ? styles.emptyStateSearching : null,
               suppressHeroCopy ? styles.emptyStateDensePicker : null,
             ].filter(Boolean).join(" ");
+            const groupDashboard = renderFocusedBotLibraryGroupDashboard({
+              emptyStateClassName,
+              heroBot,
+            });
+            if (groupDashboard) return groupDashboard;
             const titleSubject = heroBotName || "PRISM";
             const titleSubjectFontCapRem = Math.max(
               2.4,
@@ -83653,7 +86859,7 @@ function HomeContent(): React.JSX.Element {
                       <div className={styles.emptyStateHeader}>
                         <div className={styles.emptyStateTitleBlock}>
                           <div className={styles.emptyStateTitle}>
-                            {heroBotName}
+                            {`Zen with ${titleSubject}`}
                           </div>
                           {heroStartCue ? (
                             <p className={styles.emptyStateHeroCue}>{heroStartCue}</p>
@@ -83728,8 +86934,7 @@ function HomeContent(): React.JSX.Element {
                         {renderHeaderModelPicker({
                           modelMenuClassName: styles.zenSplashModelMenu,
                           modelMenuWidthPx: 220,
-                          botMenuClassName: styles.zenSplashBotMenu,
-                          botMenuPlacement: "right",
+                          showBotPicker: false,
                         })}
                       </div>
                     ) : null}
@@ -84052,7 +87257,6 @@ function HomeContent(): React.JSX.Element {
                 data-zen-persona-ink={zenPersonaInkSegment?.variant}
                 data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
-                  if (chatLikeSurface) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
@@ -84061,7 +87265,6 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
                 onClick={(event) => {
-                  if (chatLikeSurface) return;
                   if (!mobileContextMenu) {
                     return;
                   }
@@ -84094,6 +87297,7 @@ function HomeContent(): React.JSX.Element {
                             bots,
                             assistantFallbackBotId
                           )}
+                          questionMarkActive={resolveAssistantAskQuestion(msg) !== undefined}
                         />
                         {showMoodTooltip && assistantMoodKey ? (
                           <span className={styles.messageMoodTooltip}>
@@ -84381,6 +87585,7 @@ function HomeContent(): React.JSX.Element {
                       presencePhase={zenPersonaPresence.phase}
                       resolvedTheme={resolvedTheme}
                       atmosphereActive={zenAtmosphereWallpaperVisible}
+                      privateModeActive={privateChatActive}
                     />
                     {zenComposerActionPreview ? (
                       <ZenActionComposerPreview cue={zenComposerActionPreview} />
@@ -84506,6 +87711,7 @@ function HomeContent(): React.JSX.Element {
       data-private-poof={privatePoofActive ? "true" : undefined}
       data-accent-active={appShellStyle ? "true" : undefined}
       data-choice-composer-hidden={composerHiddenByChoiceChips ? "true" : undefined}
+      data-right-panel-open={panel !== null ? "true" : undefined}
       style={appShellStyle}
       onContextMenu={handleAppContextMenu}
       onTouchStart={beginSidebarEdgeSwipe}
@@ -84534,7 +87740,9 @@ function HomeContent(): React.JSX.Element {
           <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
         </button>
       ) : null}
-      {sidebarOpen && <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />}
+      {sidebarOpen && panel === null && (
+        <div className={styles.overlay} onClick={() => setSidebarOpen(false)} />
+      )}
 
       {/* Sidebar */}
       <aside
@@ -84542,8 +87750,8 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
         data-dev-panel-safe-area="left"
         aria-label="Primary navigation"
-        aria-hidden={sidebarDrawerMode && !sidebarOpen ? true : undefined}
-        inert={sidebarDrawerMode && !sidebarOpen ? true : undefined}
+        aria-hidden={panel !== null || (sidebarDrawerMode && !sidebarOpen) ? true : undefined}
+        inert={panel !== null || (sidebarDrawerMode && !sidebarOpen) ? true : undefined}
       >
         <button
           type="button"
@@ -84628,10 +87836,11 @@ function HomeContent(): React.JSX.Element {
         data-chat-mobile-msg-focus={mobileFocusedMessageId ? "true" : undefined}
       >
 	        <header
-	          ref={chatHeaderRef}
-	          className={styles.chatHeader}
-	          data-dev-panel-safe-area="top"
-          onPointerEnter={revealChatHeaderChrome}
+		          ref={chatHeaderRef}
+		          className={styles.chatHeader}
+		          data-dev-panel-safe-area="top"
+              data-zen-live-bot-drag-exclusion="top-bar"
+	          onPointerEnter={revealChatHeaderChrome}
           onFocusCapture={revealChatHeaderChrome}
         >
           <div className={styles.chatHeaderIdentityGroup}>
@@ -84953,218 +88162,11 @@ function HomeContent(): React.JSX.Element {
               !pendingIncognito &&
               Boolean(heroBot?.id) &&
               selectedBotId === heroBot?.id;
-            const focusedBotLibraryGroup = activeBotLibraryGroupFilter;
-            const showFocusedBotLibraryGroup =
-              Boolean(focusedBotLibraryGroup) &&
-              !pendingIncognito &&
-              !emptyStateSearchActive &&
-              !heroBot;
-            if (showFocusedBotLibraryGroup && focusedBotLibraryGroup) {
-              const groupDashboardBots = baseFilteredPanelBots;
-              const groupDescription = focusedBotLibraryGroup.description.trim();
-              const groupProtectedBotCount = groupDashboardBots.filter(
-                (bot) => isBotDeleteProtected(bot.id)
-              ).length;
-              const groupEyebrowLabel = botLibraryGroupDashboardEyebrowLabel(
-                groupDashboardBots.length,
-                focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
-                groupProtectedBotCount
-              );
-              const groupDeleteProtected = focusedBotLibraryGroup.deleteProtected;
-              const nextGroupDeleteProtected = !groupDeleteProtected;
-              const groupProtectionLabel = groupDeleteProtected
-                ? "Allow deletion"
-                : "Protect group";
-              const groupProtectionTitle = groupDeleteProtected
-                ? `Allow deletion for bots in ${focusedBotLibraryGroup.name}`
-                : `Protect bots in ${focusedBotLibraryGroup.name} from deletion`;
-              const groupExportTitle =
-                groupDashboardBots.length > 0
-                  ? `Export ${focusedBotLibraryGroup.name} as a bot collection`
-                  : `${focusedBotLibraryGroup.name} has no bots to export`;
-              return (
-                <div
-                  className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
-                  onClick={handleEmptyStateBackgroundClick}
-                >
-                  <section
-                    className={styles.botGroupDashboard}
-                    style={botLibraryGroupVisualStyle(
-                      focusedBotLibraryGroup,
-                      groupDashboardBots,
-                      resolvedTheme
-                    )}
-                    data-starter-bot-affordance="true"
-                    aria-labelledby="bot-library-group-dashboard-title"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <header className={styles.botGroupDashboardHeader}>
-                      <div className={styles.botGroupDashboardCopy}>
-                        <span className={styles.botGroupDashboardEyebrow}>
-                          {groupEyebrowLabel}
-                        </span>
-                        <h2 id="bot-library-group-dashboard-title">
-                          {focusedBotLibraryGroup.name}
-                        </h2>
-                        {groupDescription ? (
-                          <p>{groupDescription}</p>
-                        ) : null}
-                      </div>
-                      <div className={styles.botGroupDashboardActions}>
-                        <button
-                          type="button"
-                          className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
-                          data-active={groupDeleteProtected ? "true" : undefined}
-                          onClick={() =>
-                            setBotLibraryGroupDeleteProtection(
-                              focusedBotLibraryGroup.id,
-                              nextGroupDeleteProtected
-                            )
-                          }
-                          aria-label={groupProtectionTitle}
-                          title={groupProtectionTitle}
-                        >
-                          <BotGlyph
-                            name={groupDeleteProtected ? "key" : "lock"}
-                            size={14}
-                            strokeWidth={2.05}
-                          />
-                          <span>{groupProtectionLabel}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.botGroupDashboardAction}
-                          disabled={groupDashboardBots.length === 0 || botTransferBusy}
-                          onClick={() =>
-                            void exportBotsAsCollection(groupDashboardBots, {
-                              group: {
-                                name: focusedBotLibraryGroup.name,
-                                description: focusedBotLibraryGroup.description,
-                              },
-                            })
-                          }
-                          aria-label={groupExportTitle}
-                          title={groupExportTitle}
-                        >
-                          <Download size={14} strokeWidth={2.1} aria-hidden="true" />
-                          <span>Export group</span>
-                        </button>
-                        {!focusedBotLibraryGroup.builtIn ? (
-                          <>
-                            <button
-                              type="button"
-                              className={styles.botGroupDashboardAction}
-                              onClick={() => editBotLibraryGroup(focusedBotLibraryGroup.id)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardDangerAction}`}
-                              onClick={() => requestDeleteBotLibraryGroup(focusedBotLibraryGroup.id)}
-                              aria-label={`Delete ${focusedBotLibraryGroup.name}`}
-                            >
-                              <Trash2 size={14} strokeWidth={2.15} aria-hidden="true" />
-                              <span>Delete</span>
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </header>
-                    {groupDashboardBots.length > 0 ? (
-                      <div
-                        className={styles.botGroupDashboardBotGrid}
-                        role="list"
-                        aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
-                      >
-                        {groupDashboardBots.map((b) => {
-                          const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
-                          const isProtected = isBotDeleteProtected(b.id);
-                          const isFavorite = favoriteBotIdSet.has(b.id);
-                          const tileTraits = [
-                            isFavorite ? "favorite" : null,
-                            isProtected ? "protected" : null,
-                          ].filter(Boolean);
-                          const rawColor = b.color?.trim();
-                          const accent = rawColor
-                            ? displayAccentForMode(
-                                rawColor,
-                                resolvedTheme,
-                                appWidePrivateMode
-                              )
-                            : null;
-                          const tileStyle = accent
-                            ? ({ "--bot-color": accent } as React.CSSProperties)
-                            : undefined;
-                          const tileClassName = [
-                            styles.chatBotTile,
-                            styles.chatBotTileWithName,
-                            styles.botGroupDashboardBotTile,
-                            isProtected ? styles.chatBotTileProtected : null,
-                            isMarqueeSelected ? styles.chatBotTileMarqueeSelected : null,
-                          ].filter(Boolean).join(" ");
-                          return (
-                            <button
-                              key={b.id}
-                              type="button"
-                              className={tileClassName}
-                              style={tileStyle}
-                              data-bot-id={b.id}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                openBotLibraryGroupBotContextMenu(
-                                  focusedBotLibraryGroup.id,
-                                  b,
-                                  event.clientX,
-                                  event.clientY
-                                );
-                              }}
-                              onClick={(event) => {
-                                if (canvasBotMarqueeSuppressClickRef.current) {
-                                  canvasBotMarqueeSuppressClickRef.current = false;
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  return;
-                                }
-                                if (event.shiftKey || event.ctrlKey || event.metaKey) {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  toggleCanvasBotSelection(b.id);
-                                  return;
-                                }
-                                commitEmptyStateBotSelection(b.id);
-                              }}
-                              aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
-                              data-favorite={isFavorite ? "true" : undefined}
-                              data-delete-protected={isProtected ? "true" : undefined}
-                              title={b.name}
-                            >
-                              <span className={styles.chatBotTileBotGlyph}>
-                                <BotGlyph
-                                  name={b.glyph}
-                                  size={34}
-                                  strokeWidth={1.9}
-                                />
-                              </span>
-                              <span className={styles.chatBotTileFeaturedName}>
-                                {b.name}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className={styles.botGroupDashboardEmpty} role="status">
-                        {focusedBotLibraryGroup.id === BOT_LIBRARY_FAVORITES_GROUP_ID
-                          ? "No favorite bots yet."
-                          : "No bots in this group yet."}
-                      </p>
-                    )}
-                  </section>
-                </div>
-              );
-            }
+            const groupDashboard = renderFocusedBotLibraryGroupDashboard({
+              emptyStateClassName,
+              heroBot,
+            });
+            if (groupDashboard) return groupDashboard;
             return (
               <div
                 className={emptyStateClassName}
@@ -85954,7 +88956,6 @@ function HomeContent(): React.JSX.Element {
                 data-zen-persona-ink={zenPersonaInkSegment?.variant}
                 data-zen-persona-bot-id={zenPersonaInkSegment?.botId ?? undefined}
                 onContextMenuCapture={event => {
-                  if (chatLikeSurface) return;
                   event.preventDefault();
                   event.stopPropagation();
                   openMessageContextMenu(msg, event.clientX, event.clientY, {
@@ -85963,7 +88964,6 @@ function HomeContent(): React.JSX.Element {
                   });
                 }}
                 onClick={(event) => {
-                  if (chatLikeSurface) return;
                   if (!mobileContextMenu) {
                     return;
                   }
@@ -85996,6 +88996,7 @@ function HomeContent(): React.JSX.Element {
                             bots,
                             assistantFallbackBotId
                           )}
+                          questionMarkActive={resolveAssistantAskQuestion(msg) !== undefined}
                         />
                         {showMoodTooltip && assistantMoodKey ? (
                           <span className={styles.messageMoodTooltip}>
@@ -86299,8 +89300,12 @@ function HomeContent(): React.JSX.Element {
 
 export default function Home(): React.JSX.Element {
   return (
-    <Suspense fallback={null}>
-      <HomeContent />
-    </Suspense>
+    <>
+      <DesktopViewportNotice />
+      <Suspense fallback={null}>
+        <HomeContent />
+      </Suspense>
+      {PRISM_APP_CUSTOM_CURSOR_ENABLED ? <PrismAppCursor /> : null}
+    </>
   );
 }

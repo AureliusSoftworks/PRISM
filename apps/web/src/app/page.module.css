@@ -4945,9 +4945,9 @@
   /* Prevent grid/flex descendants with large intrinsic widths (compose rail,
      empty-state picker) from forcing horizontal overflow + asymmetric clipping
      against html/body overflow-x: hidden. */
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  width: max(100vw, 1280px);
+  max-width: none;
+  min-width: 1280px;
   /* Instrument Sans keeps body/supporting text flexible and readable while
      Raleway carries the thin Prism-line title treatment. */
   --font-size-conversation-title: 14px;
@@ -4960,8 +4960,8 @@
   background: var(--bg);
   background-image: var(--app-gradient);
   color: var(--fg);
-  min-height: 100dvh;
-  height: 100dvh;
+  min-height: 900px;
+  height: max(100dvh, 900px);
   display: grid;
   grid-template-columns: 280px 1fr;
   grid-template-rows: 1fr;
@@ -4976,6 +4976,72 @@
 }
 
 .appLayout[data-chat-sidebar-hidden="true"] > .sidebar {
+  display: none;
+}
+
+.desktopViewportNotice {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  .desktopViewportNotice {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: grid;
+    place-items: center;
+    width: 100vw;
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
+    padding: 32px;
+    overflow: hidden;
+    background: #07090f;
+    color: #f8fafc;
+    text-align: center;
+    cursor: default;
+  }
+
+  .desktopViewportNoticeInner {
+    display: grid;
+    gap: 14px;
+    width: min(520px, 100%);
+  }
+
+  .desktopViewportNoticeKicker {
+    margin: 0;
+    color: #9fb0c9;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .desktopViewportNoticeTitle {
+    margin: 0;
+    color: #ffffff;
+    font-family: var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: 0;
+  }
+
+  .desktopViewportNoticeBody,
+  .desktopViewportNoticeSoon {
+    margin: 0;
+    color: #d7deea;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .desktopViewportNoticeSoon {
+    color: #aebbd0;
+  }
+}
+
+.appLayout:not([data-chat-sidebar-hidden="true"]) .chatHeaderWordmarkColumn {
   display: none;
 }
 
@@ -9200,119 +9266,10 @@
   line-height: 1.2;
 }
 
-.zenPrivateModeToggle {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--fg) 34%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-surface) 88%, var(--fg) 6%),
-      color-mix(in srgb, var(--bg) 90%, var(--fg) 7%)
-    );
-  color: color-mix(in srgb, var(--fg) 72%, var(--fg-muted) 28%);
-  cursor: pointer;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
-    0 8px 18px rgba(0, 0, 0, 0.12);
-  transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.08s ease;
-}
-
-.zenPrivateModeToggle:hover:not(:disabled),
-.zenPrivateModeToggle:focus-visible:not(:disabled) {
-  border-color: color-mix(in srgb, var(--fg) 58%, var(--line));
-  color: var(--fg);
-  outline: none;
-}
-
-.zenPrivateModeToggle:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.zenPrivateModeToggle[data-active="true"] {
-  border-color: color-mix(in srgb, var(--fg) 62%, var(--line));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-deep) 72%, var(--fg) 18%),
-      color-mix(in srgb, var(--bg-surface) 74%, var(--fg) 16%)
-    );
-  color: var(--fg);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--fg) 20%, transparent),
-    0 8px 22px color-mix(in srgb, #000 20%, transparent);
-}
-
-.zenPrivateModeToggle:disabled {
-  opacity: 0.44;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.zenPrivateModeToggleGlyph {
-  grid-area: 1 / 1;
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  transform-origin: 50% 50%;
-  transition:
-    filter 0.18s ease,
-    opacity 0.16s ease,
-    transform 0.24s cubic-bezier(0.18, 0.9, 0.26, 1.18);
-}
-
-.zenPrivateModeToggleGlyph :where(svg) {
-  width: 14px;
-  height: 14px;
-  display: block;
-}
-
-.zenPrivateModeToggleLock {
-  opacity: 0;
-  transform: rotate(-210deg) scale(0.48);
-}
-
-.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleKey {
-  opacity: 0;
-  transform: rotate(520deg) scale(0.42);
-}
-
-.zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
-  opacity: 1;
-  transform: rotate(0deg) scale(1);
-  filter:
-    drop-shadow(0 0 7px rgba(255, 255, 255, 0.74))
-    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.34));
-}
-
-.themeLight .zenPrivateModeToggle[data-active="true"] .zenPrivateModeToggleLock {
-  filter:
-    drop-shadow(0 0 7px rgba(0, 0, 0, 0.36))
-    drop-shadow(0 1px 1px rgba(255, 255, 255, 0.38));
-}
-
 @media (prefers-reduced-motion: reduce) {
   .chatHeaderTitle,
   .chatHeaderTitlePlaceholder,
-  .chatHeaderModelPicker,
-  .zenPrivateModeToggle {
-    transition: none;
-  }
-
-  .zenPrivateModeToggleGlyph {
+  .chatHeaderModelPicker {
     transition: none;
   }
 
@@ -15279,15 +15236,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --coffee-bot-color: var(--accent);
   --bot-face-frame-color: var(--coffee-bot-color);
   --bot-face-frame-inset: -2px;
-  --bot-face-frame-opacity: 0.96;
+  --bot-face-frame-opacity: 1;
   --coffee-plate-emoji-face-scale-y: 1;
-  --coffee-plate-emoji-nudge-y: -5px;
+  --coffee-plate-emoji-nudge-y: 0px;
   position: relative;
   isolation: isolate;
   overflow: visible;
   color: var(--coffee-bot-color);
   background: transparent;
   border: 0;
+  box-shadow: none;
+}
+
+.messageMoodBadge[data-face="coffee"][data-variant="classic"] {
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, #ffffff 18%, transparent) 0 34%,
+      transparent 66%
+    ),
+    color-mix(in srgb, var(--coffee-bot-color) 24%, rgba(255, 255, 255, 0.04));
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 54%, rgba(255, 255, 255, 0.18));
+  box-shadow:
+    inset 0 0 8px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent),
+    0 0 8px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
+}
+
+.messageMoodBadge[data-face="coffee"][data-variant="prism"] {
+  --coffee-plate-emoji-nudge-y: -5px;
   box-shadow:
     0 0 12px color-mix(in srgb, var(--coffee-bot-color) 26%, transparent);
 }
@@ -19441,15 +19417,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translate3d(20px, 0, 0);
 }
 
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .zenPrivateModeToggle {
-  width: 32px;
-  height: 32px;
-  flex-basis: 32px;
-  border-radius: 999px;
-}
-
 .appLayout.themeDark[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .zenSplashModelPicker
   .modeToggleTrack[data-response-mode="local"],
@@ -19894,6 +19861,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate {
   --coffee-bot-color: var(--bot-color, var(--accent));
+  --zen-live-bot-face-ink: var(--coffee-bot-color);
+  --zen-live-bot-glyph-ink: var(--coffee-bot-color);
   --coffee-plate-emoji-nudge-y: clamp(0px, 1.4%, 5px);
   --coffee-plate-emoji-face-scale-y: 1;
   --zen-presence-face-bg:
@@ -19904,7 +19873,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-shadow:
     0 0 22px color-mix(in srgb, var(--coffee-bot-color) 46%, transparent),
     0 0 54px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent);
-  --zen-presence-face-ink: color-mix(in srgb, var(--coffee-bot-color) 78%, #ffffff);
+  --zen-presence-face-ink: var(--coffee-bot-color);
   --zen-presence-pill-bg:
     linear-gradient(
       180deg,
@@ -19974,6 +19943,55 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   will-change: transform;
 }
 
+.zenLiveBotPresenceAccessoryLayer {
+  position: absolute;
+  left: var(--zen-live-bot-face-x, 50%);
+  top: var(--zen-live-bot-face-y, 50%);
+  z-index: 6;
+  width: var(--zen-live-bot-body-frame-size);
+  height: var(--zen-live-bot-body-frame-size);
+  transform:
+    translate(-50%, -50%)
+    scaleX(var(--coffee-plate-emoji-face-scale-y, 1))
+    scale(var(--zen-live-bot-face-scale, 1));
+  transform-origin: 50% 50%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceAccessoryLayer[data-accessory-layer="back"] {
+  z-index: 2;
+}
+
+.zenLiveBotPresenceAccessoryEditLayer {
+  position: absolute;
+  left: var(--zen-live-bot-face-x, 50%);
+  top: var(--zen-live-bot-face-y, 50%);
+  z-index: 7;
+  width: var(--zen-live-bot-body-frame-size);
+  height: var(--zen-live-bot-body-frame-size);
+  transform:
+    translate(-50%, -50%)
+    scaleX(var(--coffee-plate-emoji-face-scale-y, 1))
+    scale(var(--zen-live-bot-face-scale, 1));
+  transform-origin: 50% 50%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceAccessoryRaster {
+  position: absolute;
+  inset: var(--bot-accessory-field-inset-pct, -170%);
+  z-index: 0;
+  overflow: visible;
+  background-position:
+    calc(50% + var(--bot-accessory-field-x-pct, 0%))
+    calc(50% + var(--bot-accessory-field-y-pct, 0%));
+  background-repeat: no-repeat;
+  background-size: var(--bot-accessory-field-size-pct, 22.727%) auto;
+  pointer-events: none;
+}
+
 .zenLiveBotPresenceBodyRaster {
   --bot-body-raster-mask-image:
     radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
@@ -19983,12 +20001,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-body-raster-mask-repeat: no-repeat, no-repeat;
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 0;
   width: 100%;
   height: 100%;
-  background-position: center;
+  background-position:
+    calc(50% + var(--bot-accessory-x-pct, 0%))
+    calc(50% + var(--bot-accessory-y-pct, 0%));
   background-repeat: no-repeat;
-  background-size: contain;
+  background-size: var(--bot-accessory-size-pct, 100%) auto;
   -webkit-mask-image: var(--bot-body-raster-mask-image);
   -webkit-mask-position: var(--bot-body-raster-mask-position);
   -webkit-mask-size: var(--bot-body-raster-mask-size);
@@ -20012,18 +20032,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
-.zenLiveBotPresenceHitTarget {
+.zenLiveBotPresenceScreenGlassOverlay {
   position: absolute;
   left: 50%;
   top: 50%;
-  z-index: 7;
-  box-sizing: border-box;
+  z-index: 5;
   width: var(--zen-live-bot-body-frame-size);
   height: var(--zen-live-bot-body-frame-size);
   transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.zenLiveBotPresenceScreenGlass {
+  --bot-face-screen-glass-z: 0;
+  --bot-face-screen-glass-opacity: var(--zen-live-bot-screen-glass-overlay-opacity, 0.2);
+  --bot-face-screen-glare-opacity: var(--zen-live-bot-screen-glare-overlay-opacity, 0.24);
+  --bot-face-screen-specular-opacity: 0.52;
+  --bot-face-screen-glass-shadow: none;
+  box-shadow: none;
+}
+
+.zenLiveBotPresenceHitTarget {
+  position: absolute;
+  left: 49.2%;
+  top: 50.9%;
+  z-index: 7;
+  box-sizing: border-box;
+  width: 77.4%;
+  height: 78.6%;
+  transform: translate(-50%, -50%);
   border-radius: 50%;
   background: transparent;
-  clip-path: circle(50% at 50% 50%);
+  clip-path: ellipse(50% 50% at 50% 50%);
   pointer-events: auto;
   cursor: grab;
   touch-action: none;
@@ -20092,11 +20132,55 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace {
-  animation: zenLiveBotPresenceTalk 260ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
+  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceBody {
   filter: none;
+}
+
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameTint {
+  --zen-live-bot-talking-light-opacity-high: var(
+    --bot-face-frame-tint-talking-opacity-high,
+    var(--bot-face-frame-tint-opacity, 1)
+  );
+  --zen-live-bot-talking-light-opacity-mid: var(
+    --bot-face-frame-tint-talking-opacity-mid,
+    0.74
+  );
+  --zen-live-bot-talking-light-opacity-low: var(
+    --bot-face-frame-tint-talking-opacity-low,
+    0.54
+  );
+  animation: zenLiveBotTalkingLightFlicker 840ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameLed {
+  --zen-live-bot-talking-light-opacity-high: var(
+    --bot-face-frame-led-talking-opacity-high,
+    var(--bot-face-frame-led-opacity, 1)
+  );
+  --zen-live-bot-talking-light-opacity-mid: var(
+    --bot-face-frame-led-talking-opacity-mid,
+    0.82
+  );
+  --zen-live-bot-talking-light-opacity-low: var(
+    --bot-face-frame-led-talking-opacity-low,
+    0.64
+  );
+  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part] {
+  --zen-live-bot-talking-light-opacity-high: 1;
+  --zen-live-bot-talking-light-opacity-mid: 1;
+  --zen-live-bot-talking-light-opacity-low: 1;
+  opacity: 1;
+  animation: zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
@@ -20110,25 +20194,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])[data-mouth-open="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part="mouth"] {
+  animation:
+    zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite,
+    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+}
+
 @keyframes zenLiveBotPresenceIdle {
   0%,
   100% {
-    transform: translateY(0) scale(1);
+    transform: translate(-50%, -50%) translateY(0) scale(1);
   }
 
   54% {
-    transform: translateY(-0.75px) scale(1.006);
-  }
-}
-
-@keyframes zenLiveBotPresenceTalk {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-
-  46% {
-    transform: translateY(-1px) scale(1.018);
+    transform: translate(-50%, -50%) translateY(-0.75px) scale(1.006);
   }
 }
 
@@ -20140,6 +20221,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   50% {
     transform: scale(1.14);
+  }
+}
+
+@keyframes zenLiveBotTalkingLightFlicker {
+  0%,
+  8%,
+  24%,
+  47%,
+  71%,
+  100% {
+    opacity: var(--zen-live-bot-talking-light-opacity-high, 1);
+  }
+
+  12%,
+  37%,
+  60%,
+  82% {
+    opacity: var(--zen-live-bot-talking-light-opacity-mid, 0.82);
+  }
+
+  15%,
+  55%,
+  87% {
+    opacity: var(--zen-live-bot-talking-light-opacity-low, 0.64);
   }
 }
 
@@ -20177,10 +20282,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-frame-glow-filter:
     drop-shadow(0 0 13px color-mix(in srgb, var(--coffee-bot-color) 44%, transparent))
     drop-shadow(0 0 30px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent));
-  --bot-face-frame-color: var(--coffee-bot-color);
+  --bot-face-frame-color: var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color));
   --bot-face-frame-inset: 0;
-  --bot-face-frame-opacity: 0.96;
-  --bot-face-metal-light-opacity: 0.68;
+  --bot-face-frame-opacity: 1;
+  --bot-face-metal-light-blend-mode: overlay;
+  --bot-face-metal-light-filter: grayscale(1) contrast(1.26) brightness(1.08) saturate(0.86);
+  --bot-face-metal-light-opacity: 0.58;
+  --bot-face-metal-light-raster-blend-mode: normal;
+  --bot-face-metal-light-raster-opacity: 1;
+  --bot-face-screen-glass-opacity: 0.56;
+  --bot-face-screen-glare-opacity: 0.34;
+  --bot-face-screen-specular-opacity: 0.72;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.26;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.32;
   position: absolute;
   isolation: isolate;
   left: 50%;
@@ -20208,66 +20322,101 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-dragging="true"] .zenLiveBotPresenceFace,
 .zenLiveBotPresencePlate[data-flinging="true"] .zenLiveBotPresenceFace {
-  --bot-face-metal-light-opacity: 0.68;
+  --bot-face-metal-light-opacity: 0.62;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.32;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.38;
 }
 
 .zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace {
-  --bot-face-metal-light-opacity: 0.54;
+  --bot-face-metal-light-base-color: var(--coffee-bot-color);
+  --bot-face-metal-light-background:
+    radial-gradient(
+      circle at 36% 22%,
+      rgba(255, 255, 255, 0.88) 0 9%,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 44%, transparent) 24%,
+      transparent 42%
+    ),
+    conic-gradient(
+      from 218deg at 50% 50%,
+      var(--bot-face-metal-light-base-color) 0deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 62%, #ffffff 38%) 54deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 92%, #000000 8%) 124deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 46%, #ffffff 54%) 188deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 86%, #000000 14%) 252deg,
+      var(--bot-face-metal-light-base-color) 360deg
+    ),
+    var(--bot-face-metal-light-base-color);
+  --bot-face-metal-light-blend-mode: luminosity;
+  --bot-face-metal-light-filter: grayscale(1) contrast(1.42) brightness(1.08);
+  --bot-face-metal-light-opacity: 0.34;
+  --bot-face-metal-light-raster-blend-mode: luminosity;
+  --bot-face-metal-light-raster-opacity: 0.86;
+  --bot-face-screen-glass-opacity: 0.46;
+  --bot-face-screen-glare-opacity: 0.22;
+  --bot-face-screen-specular-opacity: 0.58;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.22;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.26;
 }
 
 .zenLiveBotPresencePlate[data-theme="light"][data-dragging="true"]
   .zenLiveBotPresenceFace,
 .zenLiveBotPresencePlate[data-theme="light"][data-flinging="true"]
   .zenLiveBotPresenceFace {
-  --bot-face-metal-light-opacity: 0.54;
-}
-
-.zenLiveBotPresencePlate[data-dragging="true"] .botFaceFrameMetalLightRaster,
-.zenLiveBotPresencePlate[data-flinging="true"] .botFaceFrameMetalLightRaster {
-  animation: botFaceFrameMetalLightSweep 1.8s linear infinite;
-}
-
-.zenLiveBotPresenceQuestionMark {
-  position: absolute;
-  left: 50%;
-  top: 2px;
-  z-index: 8;
-  box-sizing: border-box;
-  width: clamp(28px, 3.1vw, 38px);
-  aspect-ratio: 1;
-  transform: translate(-50%, -48%);
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--zen-presence-pill-border);
-  border-radius: 999px;
-  background: var(--zen-presence-pill-bg);
-  color: var(--zen-presence-pill-ink);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.42) inset,
-    0 0 18px color-mix(in srgb, var(--coffee-bot-color) 36%, transparent),
-    0 10px 18px rgba(0, 0, 0, 0.34);
-  font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-size: clamp(1rem, 1.8vw, 1.36rem);
-  font-weight: 820;
-  line-height: 1;
-  text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-bot-color) 38%, transparent);
-  pointer-events: none;
+  --bot-face-metal-light-opacity: 0.38;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] {
   --coffee-bot-color: #f7f7f2;
+  --zen-live-bot-face-ink: #ffffff;
+  --zen-live-bot-glyph-ink: #ffffff;
+  --zen-live-bot-frame-tint-color: #f7f7f2;
+  --bot-face-frame-tint-background:
+    conic-gradient(
+      from 210deg at 50% 52%,
+      rgba(255, 63, 111, 0.92),
+      rgba(255, 182, 46, 0.74),
+      rgba(120, 242, 109, 0.7),
+      rgba(49, 215, 255, 0.84),
+      rgba(139, 124, 255, 0.88),
+      rgba(255, 63, 111, 0.92)
+    );
+  --bot-face-frame-tint-filter: saturate(1.24) contrast(1.04);
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 10px rgba(255, 63, 111, 0.18))
+    drop-shadow(0 0 18px rgba(255, 182, 46, 0.1))
+    drop-shadow(0 0 26px rgba(49, 215, 255, 0.1))
+    drop-shadow(0 0 36px rgba(139, 124, 255, 0.12));
+  --bot-face-frame-tint-opacity: 0.64;
+  --bot-face-metal-light-opacity: 0.3;
+  --bot-face-frame-tint-talking-opacity-high: 0.96;
+  --bot-face-frame-tint-talking-opacity-mid: 0.76;
+  --bot-face-frame-tint-talking-opacity-low: 0.52;
+  --bot-face-frame-led-talking-opacity-high: 1;
+  --bot-face-frame-led-talking-opacity-mid: 0.84;
+  --bot-face-frame-led-talking-opacity-low: 0.62;
+  --zen-live-bot-face-talking-opacity-high: 1;
+  --zen-live-bot-face-talking-opacity-mid: 1;
+  --zen-live-bot-face-talking-opacity-low: 1;
+  --zen-prism-ambient-inset: -48%;
+  --zen-prism-ambient-border-radius: 44% 46% 48% 45%;
+  --zen-prism-ambient-mask: none;
+  --zen-prism-ambient-opacity: 0.16;
+  --zen-prism-ambient-blend-mode: screen;
+  --zen-prism-ambient-filter: blur(32px) saturate(1.28) contrast(0.95);
+  --zen-prism-ambient-talking-opacity: 0.28;
+  --zen-prism-ambient-talking-opacity-mid: 0.18;
+  --zen-prism-ambient-talking-opacity-low: 0.09;
   --zen-presence-face-bg:
-    radial-gradient(circle at 46% 28%, rgba(255, 255, 255, 0.12), transparent 34%),
+    radial-gradient(circle at 46% 28%, rgba(255, 255, 255, 0.05), transparent 34%),
     linear-gradient(180deg, #111113 0%, #030304 100%);
-  --zen-presence-face-border: color-mix(in srgb, #ffffff 28%, transparent);
-  --zen-presence-face-ring: color-mix(in srgb, #ffffff 7%, transparent);
+  --zen-presence-face-border: color-mix(in srgb, #ff3f6f 12%, #ffb62e 8%);
+  --zen-presence-face-ring: transparent;
   --zen-presence-face-shadow: none;
-  --zen-presence-face-ink: #f7f7f2;
+  --zen-presence-face-ink: #ffffff;
   --zen-presence-pill-bg: color-mix(in srgb, #060608 88%, #ffffff 12%);
   --zen-presence-pill-border: color-mix(in srgb, #ffffff 18%, transparent);
   --zen-presence-pill-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.58) inset,
-    0 0 22px color-mix(in srgb, #ffffff 9%, transparent),
     0 14px 30px rgba(0, 0, 0, 0.5);
   --zen-presence-pill-ink: #f7f7f2;
 }
@@ -20275,6 +20424,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"],
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"] {
   --coffee-bot-color: #242a33;
+  --zen-live-bot-frame-tint-color: #f7f7f2;
+  --bot-face-frame-tint-filter: saturate(1.18) contrast(1.02);
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 10px rgba(255, 63, 111, 0.14))
+    drop-shadow(0 0 22px rgba(49, 215, 255, 0.14))
+    drop-shadow(0 0 32px rgba(139, 124, 255, 0.1));
+  --bot-face-frame-tint-opacity: 0.84;
+  --bot-face-frame-tint-talking-opacity-high: 0.94;
+  --bot-face-frame-tint-talking-opacity-mid: 0.78;
+  --bot-face-frame-tint-talking-opacity-low: 0.56;
+  --zen-live-bot-face-talking-opacity-mid: 1;
+  --zen-live-bot-face-talking-opacity-low: 1;
+  --zen-prism-ambient-opacity: 0.16;
+  --zen-prism-ambient-blend-mode: normal;
+  --zen-prism-ambient-filter: blur(8px) saturate(1.14) contrast(0.96);
+  --zen-prism-ambient-talking-opacity: 0.22;
+  --zen-prism-ambient-talking-opacity-mid: 0.15;
+  --zen-prism-ambient-talking-opacity-low: 0.08;
   --zen-presence-face-bg:
     radial-gradient(circle at 38% 22%, rgba(255, 255, 255, 0.98), transparent 34%),
     radial-gradient(circle at 66% 78%, rgba(49, 215, 255, 0.14), transparent 44%),
@@ -20291,7 +20458,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-border: color-mix(in srgb, #242a33 18%, #7bb7c5 16%);
   --zen-presence-face-ring: color-mix(in srgb, #ffffff 72%, #dce8f2 28%);
   --zen-presence-face-shadow: none;
-  --zen-presence-face-ink: #1d2430;
+  --zen-presence-face-ink: #ffffff;
   --zen-presence-pill-bg: linear-gradient(
     180deg,
     #ffffff,
@@ -20305,36 +20472,58 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-pill-ink: #243041;
 }
 
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] {
+  --bot-face-frame-tint-background: currentColor;
+  --bot-face-frame-tint-filter:
+    drop-shadow(0 0 6px color-mix(in srgb, currentColor 22%, transparent))
+    grayscale(1)
+    saturate(0.18)
+    contrast(0.96);
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 11px color-mix(in srgb, var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color)) 22%, transparent))
+    drop-shadow(0 0 24px color-mix(in srgb, var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color)) 14%, transparent));
+  --bot-face-frame-tint-opacity: 0.52;
+  --zen-prism-ambient-opacity: 0.14;
+  --zen-prism-ambient-blend-mode: normal;
+  --zen-prism-ambient-filter: blur(8px) grayscale(1) saturate(0.14) contrast(0.92);
+  --zen-prism-ambient-talking-opacity: 0.2;
+}
+
 .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace::before {
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: var(--zen-prism-ambient-inset, -1px);
   z-index: 0;
-  border-radius: inherit;
+  border-radius: var(--zen-prism-ambient-border-radius, inherit);
   pointer-events: none;
   background:
-    conic-gradient(
-      from 210deg at 50% 52%,
-      rgba(255, 63, 111, 0.32),
-      rgba(255, 182, 46, 0.22),
-      rgba(120, 242, 109, 0.18),
-      rgba(49, 215, 255, 0.24),
-      rgba(139, 124, 255, 0.28),
-      rgba(255, 63, 111, 0.32)
-    );
-  opacity: 0.18;
-  mix-blend-mode: screen;
+    radial-gradient(ellipse at 24% 58%, rgba(255, 63, 111, 0.28), rgba(255, 63, 111, 0.14) 30%, transparent 70%),
+    radial-gradient(ellipse at 48% 20%, rgba(255, 182, 46, 0.2), rgba(255, 182, 46, 0.1) 28%, transparent 68%),
+    radial-gradient(ellipse at 76% 54%, rgba(49, 215, 255, 0.2), rgba(49, 215, 255, 0.1) 32%, transparent 72%),
+    radial-gradient(ellipse at 56% 82%, rgba(139, 124, 255, 0.18), rgba(139, 124, 255, 0.09) 30%, transparent 70%);
+  opacity: var(--zen-prism-ambient-opacity, 0.16);
+  mix-blend-mode: var(--zen-prism-ambient-blend-mode, screen);
+  filter: var(--zen-prism-ambient-filter, blur(32px) saturate(1.28) contrast(0.95));
+  -webkit-mask-image: var(--zen-prism-ambient-mask, none);
+  -webkit-mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: var(--zen-prism-ambient-mask, none);
+  mask-position: center;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  transform-origin: center center;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace::before,
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"] .zenLiveBotPresenceFace::before {
-  opacity: 0.18;
-  mix-blend-mode: normal;
-  filter: saturate(0.86);
+  opacity: var(--zen-prism-ambient-opacity, 0.18);
+  mix-blend-mode: var(--zen-prism-ambient-blend-mode, normal);
+  filter: var(--zen-prism-ambient-filter, blur(8px) saturate(1.14) contrast(0.96));
 }
 
 .zenLiveBotPresenceFaceGlyph {
-  color: var(--zen-presence-face-ink);
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
   position: relative;
   z-index: 1;
   text-shadow:
@@ -20343,6 +20532,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0.76em color-mix(in srgb, var(--coffee-bot-color) 34%, transparent);
   pointer-events: none;
   transition: none;
+}
+
+.zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] .zenLiveBotPresenceFaceGlyph {
+  text-shadow:
+    0 0 0.12em color-mix(in srgb, currentColor 74%, transparent),
+    0 0 0.36em color-mix(in srgb, currentColor 38%, transparent);
 }
 
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
@@ -20403,7 +20598,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
-  color: var(--zen-presence-face-ink);
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
   font-size: clamp(1.82rem, 4.5vw, 3.08rem);
   text-shadow:
     0 0 0.1em color-mix(in srgb, currentColor 84%, transparent),
@@ -20414,7 +20609,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"],
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
-  color: var(--zen-presence-face-ink);
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
   text-shadow:
     0 0 0.08em color-mix(in srgb, currentColor 34%, transparent),
     0 0 0.28em color-mix(in srgb, var(--coffee-bot-color) 22%, transparent);
@@ -20422,8 +20617,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFace::before {
-  opacity: 0.34;
+  --zen-live-bot-talking-light-opacity-high: var(--zen-prism-ambient-talking-opacity, 0.34);
+  --zen-live-bot-talking-light-opacity-mid: var(--zen-prism-ambient-talking-opacity-mid, 0.24);
+  --zen-live-bot-talking-light-opacity-low: var(--zen-prism-ambient-talking-opacity-low, 0.16);
+  opacity: var(--zen-prism-ambient-talking-opacity, 0.34);
   animation: zenLivePrismRainbowAura 1.7s linear infinite;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameTint {
+  animation:
+    zenLivePrismEmitterHueRotate 1.7s linear infinite,
+    zenLiveBotTalkingLightFlicker 840ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameLed {
+  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -20440,25 +20650,83 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       rgba(82, 62, 176, 0.26),
       rgba(190, 20, 66, 0.28)
     );
-  opacity: 0.28;
-  mix-blend-mode: multiply;
-  filter: saturate(1.04) contrast(1.08);
+  opacity: var(--zen-prism-ambient-talking-opacity, 0.3);
+  mix-blend-mode: var(--zen-prism-ambient-blend-mode, normal);
+  filter: var(--zen-prism-ambient-filter, saturate(1.18) contrast(1.02));
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] .zenLiveBotPresenceFace::before {
+  opacity: var(--zen-prism-ambient-opacity, 0.16);
+  mix-blend-mode: normal;
+  filter: grayscale(1) saturate(0.14) contrast(0.92);
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"] .zenLiveBotPresenceFace::before {
+  opacity: var(--zen-prism-ambient-talking-opacity, 0.24);
+  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph {
-  color: #ff3f6f;
-  text-shadow: 0 0 0.2em rgba(255, 63, 111, 0.28);
-  animation: zenLivePrismRainbowInk 1.24s linear infinite;
+  color: #ffffff;
+  text-shadow: none;
+  filter: none;
+  animation: none;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part] {
+  filter:
+    drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
+    drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
+    drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
+    drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38));
+  animation:
+    zenLivePrismFaceGlowHueRotate 1.7s linear infinite,
+    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph,
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph {
-  color: #be1442;
-  text-shadow: 0 0 0.14em rgba(190, 20, 66, 0.2);
-  animation: zenLivePrismRainbowInkLight 1.24s linear infinite;
+  color: #ffffff;
+  text-shadow: none;
+  filter: none;
+  animation: none;
+}
+
+.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part],
+.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part] {
+  filter:
+    drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
+    drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
+    drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
+    drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28));
+  animation:
+    zenLivePrismFaceGlowHueRotateLight 1.7s linear infinite,
+    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph {
+  text-shadow: none;
+  filter: none;
+  animation: none;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part] {
+  filter:
+    drop-shadow(0 0 0.12em rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 0.32em rgba(255, 255, 255, 0.2));
+  animation: none;
 }
 
 @keyframes zenLivePrismRainbowAura {
@@ -20471,59 +20739,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-@keyframes zenLivePrismRainbowInk {
-  0%,
-  100% {
-    color: #ff3f6f;
-    text-shadow: 0 0 0.2em rgba(255, 63, 111, 0.28);
+@keyframes zenLivePrismEmitterHueRotate {
+  from {
+    filter: var(--bot-face-frame-tint-filter, saturate(1.24) contrast(1.04)) hue-rotate(0deg);
   }
 
-  20% {
-    color: #ffb62e;
-    text-shadow: 0 0 0.2em rgba(255, 182, 46, 0.26);
-  }
-
-  40% {
-    color: #78f26d;
-    text-shadow: 0 0 0.2em rgba(120, 242, 109, 0.24);
-  }
-
-  62% {
-    color: #31d7ff;
-    text-shadow: 0 0 0.2em rgba(49, 215, 255, 0.28);
-  }
-
-  82% {
-    color: #8b7cff;
-    text-shadow: 0 0 0.2em rgba(139, 124, 255, 0.28);
+  to {
+    filter: var(--bot-face-frame-tint-filter, saturate(1.24) contrast(1.04)) hue-rotate(360deg);
   }
 }
 
-@keyframes zenLivePrismRainbowInkLight {
-  0%,
-  100% {
-    color: #be1442;
-    text-shadow: 0 0 0.14em rgba(190, 20, 66, 0.2);
+@keyframes zenLivePrismFaceGlowHueRotate {
+  from {
+    filter:
+      drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
+      drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
+      drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
+      drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38))
+      hue-rotate(0deg);
   }
 
-  20% {
-    color: #965d00;
-    text-shadow: 0 0 0.14em rgba(150, 93, 0, 0.18);
+  to {
+    filter:
+      drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
+      drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
+      drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
+      drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38))
+      hue-rotate(360deg);
+  }
+}
+
+@keyframes zenLivePrismFaceGlowHueRotateLight {
+  from {
+    filter:
+      drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
+      drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
+      drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
+      drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28))
+      hue-rotate(0deg);
   }
 
-  40% {
-    color: #227b30;
-    text-shadow: 0 0 0.14em rgba(34, 123, 48, 0.18);
-  }
-
-  62% {
-    color: #007094;
-    text-shadow: 0 0 0.14em rgba(0, 112, 148, 0.2);
-  }
-
-  82% {
-    color: #523eb0;
-    text-shadow: 0 0 0.14em rgba(82, 62, 176, 0.2);
+  to {
+    filter:
+      drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
+      drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
+      drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
+      drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28))
+      hue-rotate(360deg);
   }
 }
 
@@ -20553,43 +20815,60 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceCopy {
+  --coffee-bot-color: var(--bot-color, var(--accent));
+  --zen-presence-pill-ink: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
+  --zen-live-bot-action-copy-start-transform: translateX(-50%) translateY(-8px) scale(0.982);
+  --zen-live-bot-action-copy-mid-transform: translateX(-50%) translateY(4px) scale(1);
+  --zen-live-bot-action-copy-end-transform: translateX(-50%) translateY(24px) scale(0.992);
   position: absolute;
   left: calc(
     var(--zen-live-bot-body-x, 50%) +
     var(--zen-live-bot-copy-center-anchor, 95px) +
     var(--zen-live-bot-copy-offset-x, 0px)
   );
-  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-vertical-anchor, 152px));
+  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-vertical-anchor, 136px));
   z-index: 13;
   box-sizing: border-box;
-  width: min(272px, 24vw, calc(100vw - 56px));
-  min-width: min(224px, calc(100vw - 56px));
+  width: min(318px, 28vw, calc(100vw - 56px));
+  min-width: min(190px, calc(100vw - 56px));
   max-width: calc(100vw - 56px);
-  min-height: 3.72rem;
+  min-height: 0;
   transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 12px 9px;
-  border: 1px solid var(--zen-presence-pill-border);
-  border-radius: 18px;
-  background-color: #050506;
-  background: var(--zen-presence-pill-bg);
+  display: block;
+  padding: 2px 0 4px 17px;
+  border: 0;
+  border-left: 3px solid color-mix(in srgb, var(--coffee-bot-color) 68%, rgba(255, 255, 255, 0.22));
+  border-radius: 0;
+  background: transparent;
   color: var(--zen-presence-pill-ink);
-  box-shadow: var(--zen-presence-pill-shadow);
+  box-shadow: none;
   line-height: 1.22;
   isolation: isolate;
-  overflow: hidden;
-  opacity: 1;
+  overflow: visible;
+  opacity: 0;
   pointer-events: none;
+  text-align: left;
+  filter: none;
 }
 
-.zenLiveBotPresencePlate[data-copy-placement="top"] .zenLiveBotPresenceCopy {
+.zenLiveBotPresenceCopy[data-theme="light"] {
+  --zen-presence-pill-ink: color-mix(in srgb, var(--coffee-bot-color) 72%, #2f241b 28%);
+}
+
+.zenLiveBotPresencePlate[data-copy-placement="top"] .zenLiveBotPresenceCopy,
+.zenLiveBotPresenceCopy[data-copy-placement="top"] {
+  --zen-live-bot-action-copy-start-transform: translateX(-50%) translateY(calc(-100% + 8px)) scale(0.982);
+  --zen-live-bot-action-copy-mid-transform: translateX(-50%) translateY(calc(-100% - 4px)) scale(1);
+  --zen-live-bot-action-copy-end-transform: translateX(-50%) translateY(calc(-100% - 24px)) scale(0.992);
   top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-top-anchor, 38px));
   transform: translateX(-50%) translateY(-100%);
 }
 
-.zenLiveBotPresencePlate[data-copy-placement="right"] .zenLiveBotPresenceCopy {
+.zenLiveBotPresencePlate[data-copy-placement="right"] .zenLiveBotPresenceCopy,
+.zenLiveBotPresenceCopy[data-copy-placement="right"] {
+  --zen-live-bot-action-copy-start-transform: translateX(-8px) translateY(-50%) scale(0.982);
+  --zen-live-bot-action-copy-mid-transform: translateX(4px) translateY(-50%) scale(1);
+  --zen-live-bot-action-copy-end-transform: translateX(24px) translateY(-50%) scale(0.992);
   left: calc(
     var(--zen-live-bot-body-x, 50%) +
     var(--zen-live-bot-copy-center-anchor, 95px) +
@@ -20599,7 +20878,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateY(-50%);
 }
 
-.zenLiveBotPresencePlate[data-copy-placement="left"] .zenLiveBotPresenceCopy {
+.zenLiveBotPresencePlate[data-copy-placement="left"] .zenLiveBotPresenceCopy,
+.zenLiveBotPresenceCopy[data-copy-placement="left"] {
+  --zen-live-bot-action-copy-start-transform: translateX(calc(-100% + 8px)) translateY(-50%) scale(0.982);
+  --zen-live-bot-action-copy-mid-transform: translateX(calc(-100% - 4px)) translateY(-50%) scale(1);
+  --zen-live-bot-action-copy-end-transform: translateX(calc(-100% - 24px)) translateY(-50%) scale(0.992);
   left: calc(
     var(--zen-live-bot-body-x, 50%) +
     var(--zen-live-bot-copy-center-anchor, 95px) -
@@ -20609,17 +20892,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateX(-100%) translateY(-50%);
 }
 
-.zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy {
-  width: min(328px, 28vw, calc(100vw - 56px));
-  min-width: min(260px, calc(100vw - 56px));
-  min-height: 4.55rem;
-  padding: 8px 12px 9px;
+.zenLiveBotPresenceCopy[data-copy-anchored="true"] {
+  position: fixed;
+  left: var(--zen-live-bot-action-copy-anchor-x, 50vw);
+  top: var(--zen-live-bot-action-copy-anchor-y, 50vh);
+  animation: zenLiveBotActionQuoteDrift 11800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy,
+.zenLiveBotPresenceCopy[data-action-verbose="true"] {
+  width: min(386px, 32vw, calc(100vw - 56px));
+  min-width: min(236px, calc(100vw - 56px));
+  padding-block: 0 4px;
 }
 
 .zenLiveBotPresenceBotGlyph {
   position: absolute;
-  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 96px));
-  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 149px));
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 1px));
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 56px));
   z-index: 12;
   box-sizing: border-box;
   width: clamp(23px, calc(var(--zen-live-bot-body-frame-size) * 0.16), 33px);
@@ -20630,10 +20920,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: color-mix(in srgb, var(--coffee-bot-color) 86%, #ffffff 14%);
+  --zen-live-bot-glyph-glow-color: var(--coffee-bot-color);
+  --zen-live-bot-glyph-edge-shadow: color-mix(
+    in srgb,
+    #020706 74%,
+    var(--coffee-bot-color) 26%
+  );
+  color: var(
+    --zen-live-bot-glyph-ink,
+    color-mix(in srgb, var(--coffee-bot-color) 86%, #ffffff 14%)
+  );
   filter:
-    drop-shadow(0 0 5px color-mix(in srgb, currentColor 92%, transparent))
-    drop-shadow(0 0 13px color-mix(in srgb, currentColor 64%, transparent));
+    drop-shadow(0 0 1px var(--zen-live-bot-glyph-edge-shadow))
+    drop-shadow(
+      0 0 4px
+      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 82%, transparent)
+    )
+    drop-shadow(
+      0 0 11px
+      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 52%, transparent)
+    )
+    drop-shadow(
+      0 0 19px
+      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 28%, transparent)
+    );
   line-height: 0;
   pointer-events: none;
 }
@@ -20641,14 +20951,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresenceCopyText {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
+  justify-items: start;
   gap: 2px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow: visible;
   box-sizing: border-box;
-  text-align: center;
+  text-align: left;
 }
 
 .zenLiveBotPresenceActor {
@@ -20680,7 +20990,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-border: color-mix(in srgb, var(--coffee-bot-color) 66%, rgba(69, 52, 38, 0.28));
   --zen-presence-face-ring: rgba(255, 255, 255, 0.78);
   --zen-presence-face-shadow: none;
-  --zen-presence-face-ink: color-mix(in srgb, var(--coffee-bot-color) 84%, #2f241b 16%);
+  --zen-presence-face-ink: var(--coffee-bot-color);
   --zen-presence-pill-bg: color-mix(in srgb, #fffdf8 70%, var(--coffee-bot-color) 30%);
   --zen-presence-pill-border: color-mix(in srgb, var(--coffee-bot-color) 48%, rgba(86, 67, 48, 0.22));
   --zen-presence-pill-shadow:
@@ -20730,7 +21040,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0 1px rgba(255, 255, 255, 0.92) inset,
     0 0 24px rgba(49, 215, 255, 0.1),
     0 13px 24px rgba(45, 58, 72, 0.17);
-  --zen-presence-face-ink: #1d2430;
+  --zen-presence-face-ink: #ffffff;
   --zen-presence-pill-ink: #243041;
 }
 
@@ -20745,28 +21055,67 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  max-height: 1.8rem;
+  max-height: 2.44em;
   overflow: hidden;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  color: var(--zen-presence-pill-ink);
+  line-clamp: 2;
+  color: color-mix(in srgb, var(--coffee-bot-color) 68%, #ffffff 32%);
   font-style: italic;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 1.22;
-  text-align: center;
-  text-shadow: 0 0 10px color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
-  opacity: 0.86;
+  font-size: clamp(1rem, 1.05vw, 1.2rem);
+  font-weight: 520;
+  letter-spacing: 0;
+  line-height: 1.18;
+  text-align: inherit;
+  text-shadow:
+    0 1px 8px rgba(0, 0, 0, 0.62),
+    0 0 16px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
+  opacity: 0.9;
 }
 
-.zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText {
-  max-height: 4.05rem;
-  -webkit-line-clamp: 4;
-  font-size: 0.7rem;
-  line-height: 1.25;
+.zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText,
+.zenLiveBotPresenceCopy[data-action-verbose="true"] .zenLiveBotPresenceText {
+  max-height: 3.66em;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  line-height: 1.2;
   opacity: 0.92;
+}
+
+.zenLiveBotPresencePlate[data-loading="true"] .zenLiveBotPresenceCopy[data-copy-anchored="true"],
+.zenLiveBotPresenceCopy[data-loading="true"][data-copy-anchored="true"] {
+  opacity: 0.86;
+  animation: none;
+}
+
+@keyframes zenLiveBotActionQuoteDrift {
+  0% {
+    opacity: 0;
+    transform: var(--zen-live-bot-action-copy-start-transform);
+    filter: blur(0.9px) saturate(0.86);
+  }
+
+  9% {
+    opacity: 0.95;
+    filter: blur(0) saturate(1);
+  }
+
+  34% {
+    opacity: 0.9;
+    transform: var(--zen-live-bot-action-copy-mid-transform);
+  }
+
+  72% {
+    opacity: 0.58;
+    filter: blur(0.15px) saturate(0.92);
+  }
+
+  100% {
+    opacity: 0;
+    transform: var(--zen-live-bot-action-copy-end-transform);
+    filter: blur(0.85px) saturate(0.72);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -20787,8 +21136,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
     .zenLiveBotPresenceFace::before,
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-    .zenLiveBotPresenceFaceGlyph {
+    .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part] {
     animation-duration: 1ms;
+  }
+
+  .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+    .botFaceFrameTint,
+  .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+    .botFaceFrameLed,
+  .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+    .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part],
+  .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+    .zenLiveBotPresenceFace::before {
+    animation: none;
+  }
+
+  .zenLiveBotPresenceCopy[data-copy-anchored="true"] {
+    opacity: 0.86;
+    animation: none;
   }
 
 }
@@ -20824,29 +21191,31 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .zenLiveBotPresenceCopy {
-    width: min(132px, calc(100vw - 28px));
-    min-width: min(116px, calc(100vw - 28px));
+    width: min(190px, calc(100vw - 28px));
+    min-width: min(132px, calc(100vw - 28px));
     max-width: calc(100vw - 28px);
-    min-height: 3.25rem;
-    padding: 6px 8px 7px;
-    border-radius: 12px;
+    min-height: 0;
+    padding: 1px 0 3px 14px;
+    border-radius: 0;
   }
 
   .zenLiveBotPresencePlate[data-action-verbose="true"] {
     width: var(--zen-live-bot-avatar-size, min(188px, calc(100vw - 40px)));
   }
 
-  .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy {
-    width: min(188px, calc(100vw - 28px));
+  .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceCopy,
+  .zenLiveBotPresenceCopy[data-action-verbose="true"] {
+    width: min(224px, calc(100vw - 28px));
     min-width: min(164px, calc(100vw - 28px));
-    min-height: 4.2rem;
-    padding: 7px 9px 8px;
+    min-height: 0;
+    padding: 1px 0 3px 14px;
   }
 
-  .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText {
-    max-height: 3.75rem;
-    -webkit-line-clamp: 4;
-    font-size: 0.66rem;
+  .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText,
+  .zenLiveBotPresenceCopy[data-action-verbose="true"] .zenLiveBotPresenceText {
+    max-height: 3.66em;
+    -webkit-line-clamp: 3;
+    font-size: 0.84rem;
   }
 
   .zenLiveBotPresenceText {
@@ -25848,7 +26217,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panel {
-  --panel-width: min(479px, calc(100vw - 32px));
+  --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
   position: fixed;
   top: 0;
   right: 0;
@@ -25913,7 +26282,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panelSettings {
-  --panel-width: min(1040px, calc(100vw - 32px));
+  --panel-width: min(1040px, calc(max(100vw, 1280px) - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
@@ -25932,7 +26301,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panelPromptCenter {
-  --panel-width: min(860px, calc(100vw - 32px));
+  --panel-width: min(860px, calc(max(100vw, 1280px) - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
@@ -25955,7 +26324,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .panelUsage {
-  --panel-width: min(560px, calc(100vw - 32px));
+  --panel-width: min(560px, calc(max(100vw, 1280px) - 32px));
   grid-template-rows: auto minmax(0, 1fr);
   align-content: stretch;
   overflow: hidden;
@@ -27500,15 +27869,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .panelBots[data-bot-panel-view="home"],
 .panelBots[data-bot-panel-view="library"] {
-  --panel-width: min(940px, max(620px, calc(100vw - 420px)), calc(100vw - 32px));
+  --panel-width: min(940px, max(620px, calc(max(100vw, 1280px) - 420px)), calc(max(100vw, 1280px) - 32px));
 }
 
 .panelBots[data-bot-panel-view="marketplace"] {
-  --panel-width: min(1240px, max(760px, calc(100vw - 160px)), calc(100vw - 32px));
+  --panel-width: min(1240px, max(760px, calc(max(100vw, 1280px) - 160px)), calc(max(100vw, 1280px) - 32px));
 }
 
 .panelBots[data-bot-panel-view="create"] {
-  --panel-width: min(1120px, max(620px, calc(100vw - 480px)), calc(100vw - 32px));
+  --panel-width: min(1120px, max(620px, calc(max(100vw, 1280px) - 480px)), calc(max(100vw, 1280px) - 32px));
 }
 
 @media (min-width: 1180px) {
@@ -27690,7 +28059,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 @media (min-width: 1120px) {
   .panel.panelImages {
-    --panel-width: min(880px, max(620px, calc(100vw - 430px)), calc(100vw - 32px));
+    --panel-width: min(880px, max(620px, calc(max(100vw, 1280px) - 430px)), calc(max(100vw, 1280px) - 32px));
   }
 }
 
@@ -27765,12 +28134,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .imagePanelToolsDock {
   --image-tools-gap: 14px;
-  --panel-width: min(479px, calc(100vw - 32px));
+  --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
   position: fixed;
   top: 20px;
   right: calc(var(--panel-width) + var(--image-tools-gap));
   bottom: 20px;
-  width: min(340px, calc(100vw - var(--panel-width) - 52px));
+  width: min(340px, calc(max(100vw, 1280px) - var(--panel-width) - 52px));
   min-width: 280px;
   border: 1px solid color-mix(in srgb, var(--line-strong) 76%, var(--accent-ink) 24%);
   border-radius: 14px;
@@ -32286,7 +32655,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAiParameterBuilder {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(600px, calc(100vw - var(--panel-width) - 56px));
+  width: min(600px, calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px));
   border-radius: 12px;
   background:
     linear-gradient(
@@ -32534,9 +32903,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botProfileBuilder {
   position: fixed;
   top: max(20px, env(safe-area-inset-top));
-  right: calc(var(--panel-width) + 28px);
-  width: min(560px, calc(100vw - var(--panel-width) - 56px));
-  max-height: calc(100dvh - 40px);
+  right: calc(var(--panel-width, 479px) + 28px);
+  width: min(560px, calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px));
+  max-height: calc(max(100dvh, 900px) - 40px);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
@@ -32551,7 +32920,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botProfileBuilder.botAiParameterBuilder {
-  width: min(660px, calc(100vw - var(--panel-width) - 56px));
+  width: min(660px, calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px));
   border-radius: 12px;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -33223,9 +33592,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botModelRoutingSheet {
   position: fixed;
   top: max(20px, env(safe-area-inset-top));
-  right: calc(var(--panel-width) + 28px);
-  width: min(560px, calc(100vw - var(--panel-width) - 56px));
-  max-height: calc(100dvh - 40px);
+  right: calc(var(--panel-width, 479px) + 28px);
+  width: min(560px, calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px));
+  max-height: calc(max(100dvh, 900px) - 40px);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
@@ -34236,6 +34605,169 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 10px;
 }
 
+.botAvatarBuilder {
+  gap: 12px;
+}
+
+.botAvatarBuilderBody {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.botAvatarBuilderPreviewColumn,
+.botAvatarBuilderControls {
+  min-width: 0;
+  display: grid;
+  gap: 11px;
+}
+
+.botAvatarBuilderPreviewColumn {
+  justify-items: center;
+}
+
+.botAvatarPlacementStage {
+  position: relative;
+  width: min(168px, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, var(--line));
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, transparent), transparent 58%),
+    color-mix(in srgb, var(--bg-deep) 84%, var(--bg) 16%);
+  overflow: hidden;
+  touch-action: none;
+}
+
+.botAvatarPlacementStage[data-draggable="true"] {
+  cursor: move;
+}
+
+.botAvatarPlacementStage[data-empty="true"] {
+  border-style: dashed;
+}
+
+.botAvatarPlacementStage .botAvatarFacePlate {
+  width: 126px;
+  height: 126px;
+}
+
+.botAvatarPlacementStage .botAvatarFaceGlyph {
+  --coffee-seat-emotion-face-scale: 1.15;
+  --coffee-plate-emoji-nudge-y: -5px;
+}
+
+.botAvatarIdentityPicker {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  padding: 8px 0 2px;
+}
+
+.botAvatarIdentityPicker .colorSwatchButton {
+  width: 72px;
+  height: 72px;
+  min-width: 72px;
+  min-height: 72px;
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
+    0 18px 36px color-mix(in srgb, var(--bot-color, var(--accent)) 22%, transparent);
+}
+
+.botAvatarAccessoryBuilderPanel {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #303846);
+  border-radius: 13px;
+  padding: 11px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.botAvatarAccessoryHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarAccessoryHeader .botAvatarAccessoryActions {
+  grid-template-columns: repeat(2, minmax(74px, 1fr));
+}
+
+.botAvatarAccessoryHeader .botAvatarAccessoryCopy {
+  text-align: left;
+}
+
+.botAvatarAccessoryLayerToggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, #303846);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.form .botAvatarAccessoryLayerToggle button,
+.botAvatarAccessoryLayerToggle button {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.form .botAvatarAccessoryLayerToggle button[data-active="true"],
+.botAvatarAccessoryLayerToggle button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 42%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, rgba(255, 255, 255, 0.055));
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.form .botAvatarAccessoryLayerToggle button:hover:not(:disabled),
+.form .botAvatarAccessoryLayerToggle button:focus-visible,
+.botAvatarAccessoryLayerToggle button:hover:not(:disabled),
+.botAvatarAccessoryLayerToggle button:focus-visible {
+  color: var(--fg);
+  outline: none;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, rgba(255, 255, 255, 0.04));
+}
+
+.form .botAvatarAccessoryLayerToggle button:disabled,
+.botAvatarAccessoryLayerToggle button:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+@media (max-width: 799px) {
+  .botAvatarBuilderBody {
+    grid-template-columns: 1fr;
+  }
+
+  .botAvatarAccessoryHeader {
+    grid-template-columns: 1fr;
+  }
+}
+
 .botAvatarSummaryCard {
   padding-bottom: 10px;
 }
@@ -34293,18 +34825,66 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
 }
 
-.botAvatarSummaryButton .botAvatarFacePlate {
-  width: 58px;
-  height: 58px;
+.botAvatarSummaryFace {
+  grid-template-columns: auto auto minmax(0, 1fr);
 }
 
-.botAvatarSummaryButton .botAvatarFaceGlyph {
-  --coffee-seat-emotion-face-scale: 1.04;
+.botAvatarSummaryFaceParts {
+  width: 58px;
+  min-width: 58px;
+  display: grid;
+  grid-template-rows: repeat(2, 28px);
+  gap: 4px;
+}
+
+.botAvatarSummaryFacePart {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, var(--line));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, transparent), transparent 66%),
+    color-mix(in srgb, var(--bg-deep) 82%, var(--bg) 18%);
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 88%, var(--fg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 5%, transparent);
+}
+
+.botAvatarSummaryFacePartGlyph {
+  min-width: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: inherit;
+}
+
+.botAvatarSummaryFacePart[data-part="mouth"] .botAvatarSummaryFacePartGlyph {
+  font-size: 20px;
+}
+
+.botAvatarSummaryGlyphSocket {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 42%, var(--line));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 45% 30%, color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, transparent), transparent 62%),
+    color-mix(in srgb, var(--bg-deep) 82%, var(--bg) 18%);
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 86%, var(--fg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 5%, transparent);
 }
 
 .botAvatarSummaryButton .botAvatarAccessoryPreview {
   width: 58px;
   border-radius: 14px;
+  background-position:
+    calc(50% + var(--bot-accessory-x-pct, 0%))
+    calc(50% + var(--bot-accessory-y-pct, 0%));
+  background-repeat: no-repeat;
+  background-size: var(--bot-accessory-size-pct, 100%) auto;
 }
 
 .botAvatarSummaryButton .botAvatarAccessoryEmpty {
@@ -34363,7 +34943,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarFacePlate {
   --bot-face-frame-color: var(--editor-bot-color, var(--accent));
   --bot-face-frame-inset: -15%;
-  --bot-face-frame-opacity: 0.96;
+  --bot-face-frame-opacity: 1;
   position: relative;
   isolation: isolate;
   width: 86px;
@@ -34400,9 +34980,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 8;
   width: 100%;
   height: 100%;
-  background-position: center;
+  background-position:
+    calc(50% + var(--bot-accessory-x-pct, 0%))
+    calc(50% + var(--bot-accessory-y-pct, 0%));
   background-repeat: no-repeat;
-  background-size: contain;
+  background-size: var(--bot-accessory-size-pct, 100%) auto;
   -webkit-mask-image: var(--bot-body-raster-mask-image);
   -webkit-mask-position: var(--bot-body-raster-mask-position);
   -webkit-mask-size: var(--bot-body-raster-mask-size);
@@ -34414,20 +34996,717 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   pointer-events: none;
 }
 
+.botAvatarCustomizerBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  pointer-events: auto;
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, #020308 70%, transparent),
+      color-mix(in srgb, #020308 42%, transparent)
+    );
+  backdrop-filter: blur(12px) saturate(112%);
+  -webkit-backdrop-filter: blur(12px) saturate(112%);
+}
+
 .botAvatarCustomizer {
-  width: min(620px, calc(100vw - var(--panel-width) - 56px));
+  top: max(28px, env(safe-area-inset-top));
+  left: max(32px, calc((100vw - 1180px) / 2));
+  right: auto;
+  width: min(1180px, calc(100vw - 64px));
+  min-width: min(980px, calc(100vw - 64px));
+  max-height: calc(max(100dvh, 900px) - 56px);
+  border-radius: 16px;
   grid-template-columns: 1fr;
   grid-template-rows: auto minmax(0, 1fr);
+  background: #0d1017;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, #303744);
+  box-shadow:
+    0 34px 96px rgba(0, 0, 0, 0.66),
+    0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+  isolation: isolate;
+}
+
+.botAvatarCustomizer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      #171b25,
+      #10131b 44%,
+      #090b10
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+}
+
+.botAvatarCustomizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  width: 3px;
+  border-radius: 16px 0 0 16px;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 92%, #ffffff 8%),
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 48%, #26d9c5 22%),
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #7b5cff 16%)
+  );
+  box-shadow: 0 0 22px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, transparent);
+}
+
+.botAvatarCustomizer > .botProfileBuilderHeader,
+.botAvatarCustomizerBody {
+  position: relative;
+  z-index: 1;
+}
+
+.botAvatarCustomizer > .botProfileBuilderHeader {
+  min-height: 78px;
+  padding: 15px 18px 14px 21px;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #2b3340);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent),
+      transparent 48%
+    ),
+    rgba(12, 15, 22, 0.92);
+}
+
+.botAvatarCustomizerHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.botAvatarSaveStatus {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #2e3541);
+  color: var(--fg-muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.botAvatarSaveStatus::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-muted) 72%, transparent);
+}
+
+.botAvatarSaveStatus[data-state="dirty"] {
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #ffffff);
+}
+
+.botAvatarSaveStatus[data-state="dirty"]::before {
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 46%, transparent);
+}
+
+.botAvatarSaveStatus[data-state="saving"] {
+  color: #ffffff;
+}
+
+.botAvatarSaveStatus[data-state="saving"]::before {
+  background: #26d9c5;
+}
+
+.botProfileBuilderHeader .botAvatarCustomizerSaveButton {
+  width: auto;
+  min-width: 92px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, #3a4250);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 78%, #ffffff 12%),
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #04060a 8%)
+    );
+  color: var(--editor-bot-ink, #ffffff);
+  font-size: 12px;
+  font-weight: 780;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 18px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, transparent);
+}
+
+.botProfileBuilderHeader .botAvatarCustomizerSaveButton:hover:not(:disabled),
+.botProfileBuilderHeader .botAvatarCustomizerSaveButton:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff);
+  filter: brightness(1.08);
+}
+
+.botProfileBuilderHeader .botAvatarCustomizerSaveButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  box-shadow: none;
+}
+
+.botProfileBuilderHeader .botAvatarCustomizerSaveButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.botAvatarSaveError {
+  margin: 2px 0 0;
+  color: #ff9cae;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.botAvatarSavePromptBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3010;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.botAvatarSavePromptPanel {
+  width: min(390px, calc(100vw - 40px));
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, var(--line));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elevated) 94%, var(--editor-bot-color, var(--accent)) 6%),
+      color-mix(in srgb, var(--bg) 92%, #000000 8%)
+    );
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.46),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.botAvatarSavePromptPanel h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.botAvatarSavePromptError {
+  margin: -4px 0 0;
+  color: #ff9cae;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.botAvatarSavePromptActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.botAvatarSavePromptCancel,
+.botAvatarSavePromptDiscard,
+.botAvatarSavePromptSave {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 34px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.botAvatarSavePromptCancel,
+.botAvatarSavePromptDiscard {
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  color: var(--fg);
+}
+
+.botAvatarSavePromptSave {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 66%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff 8%);
+  color: var(--editor-bot-ink, #ffffff);
+}
+
+.botAvatarSavePromptCancel:hover,
+.botAvatarSavePromptCancel:focus-visible,
+.botAvatarSavePromptDiscard:hover:not(:disabled),
+.botAvatarSavePromptDiscard:focus-visible,
+.botAvatarSavePromptSave:hover:not(:disabled),
+.botAvatarSavePromptSave:focus-visible {
+  outline: none;
+  filter: brightness(1.08);
+}
+
+.botAvatarSavePromptDiscard:disabled,
+.botAvatarSavePromptSave:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.botAvatarPreviewThemeToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.botAvatarPreviewThemeToggle button,
+.form .botAvatarPreviewThemeToggle button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: auto;
+  height: 28px;
+  min-width: 0;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.botAvatarCustomizerCloseButton,
+.form .botAvatarCustomizerCloseButton {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.botAvatarCustomizerCloseButton:hover,
+.botAvatarCustomizerCloseButton:focus-visible,
+.form .botAvatarCustomizerCloseButton:hover,
+.form .botAvatarCustomizerCloseButton:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, #ffffff);
+}
+
+.botAvatarPreviewThemeToggle button[data-active="true"],
+.form .botAvatarPreviewThemeToggle button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 42%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #06070b);
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.botAvatarPreviewThemeToggle button:not([data-active="true"]):hover,
+.botAvatarPreviewThemeToggle button:not([data-active="true"]):focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+  outline: none;
 }
 
 .botAvatarCustomizerBody {
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 14px;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(150px, 0.72fr);
+  grid-template-columns: minmax(500px, 1fr) minmax(380px, 420px);
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.018),
+      rgba(255, 255, 255, 0.004)
+    );
+}
+
+.botAvatarMannequinPanel,
+.botAvatarControlPanel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #2c3542);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 6%, transparent),
+      transparent 170px
+    ),
+    rgba(9, 12, 18, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 42px rgba(0, 0, 0, 0.22);
+}
+
+.botAvatarPanelHeader {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.botAvatarPanelHeader > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botAvatarPanelHeader span {
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 48%, var(--fg-muted));
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botAvatarPanelHeader strong {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.botAvatarControlPanel {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  align-content: stretch;
+}
+
+.botAvatarControlStack {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.botAvatarControlGroup {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, #303846);
+  border-radius: 13px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 5%, transparent),
+      rgba(255, 255, 255, 0.02)
+    );
+}
+
+.botAvatarControlGroupHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.botAvatarControlGroupHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botAvatarControlGroupHeader strong {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.botAvatarControlGroupHeader small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.botAvatarControlGroupIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, rgba(255, 255, 255, 0.035));
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+}
+
+.botAvatarControlPanel > *,
+.botAvatarCustomizer input,
+.botAvatarCustomizer button {
+  max-width: 100%;
+}
+
+.botAvatarMannequinStage {
+  --bot-avatar-preview-accessory-bleed: 180px;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 640px;
+  padding: var(--bot-avatar-preview-accessory-bleed);
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, #303846);
+  border-radius: 13px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 7%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 6%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      180deg,
+      #141924,
+      color-mix(in srgb, #090b10 92%, var(--editor-bot-color, var(--accent)) 8%)
+    );
+  background-size: 34px 34px, 34px 34px, auto;
+  overflow: visible;
+  touch-action: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.065),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarMannequinStage[data-preview-theme="light"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, rgba(20, 24, 32, 0.24));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(180deg, #f7f9fd, #e2e8f2);
+  background-size: 34px 34px, 34px 34px, auto;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 0 0 1px rgba(20, 24, 32, 0.08);
+}
+
+.botAvatarPreviewMeta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.botAvatarPreviewMeta span {
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #303846);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.botAvatarMannequinStage .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] {
+  margin: 0;
+  animation: none;
+  transform: scale(1);
+  transform-origin: center center;
+}
+
+.botAvatarMannequinStage .zenLiveBotPresenceAccessoryLayer {
+  overflow: visible;
+}
+
+.botAvatarMannequinStage .zenLiveBotPresenceAccessoryEditLayer {
+  overflow: visible;
+}
+
+.botAvatarMannequinStage .zenLiveBotPresenceBody {
+  pointer-events: auto;
+}
+
+.botAvatarMannequinStage .botAvatarAccessoryEditHandle,
+.botAvatarMannequinStage .botAvatarAccessoryEditHandle *,
+.botAvatarMannequinStage .botAvatarAccessoryCancelButton,
+.botAvatarMannequinStage .botAvatarAccessoryLockButton,
+.botAvatarMannequinStage .botAvatarAccessoryResizeHandle {
+  pointer-events: auto;
+}
+
+.botAvatarAccessoryEditHandle {
+  position: absolute;
+  left: calc(50% + var(--bot-accessory-x-pct, 0%));
+  top: calc(50% + var(--bot-accessory-y-pct, 0%));
+  z-index: 9;
+  width: var(--bot-accessory-size-pct, 100%);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 0 4px rgba(0, 0, 0, 0.2),
+    0 0 22px rgba(255, 255, 255, 0.18);
+  cursor: move;
+  touch-action: none;
+}
+
+.botAvatarAccessoryEditHandle[data-disabled="true"] {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.botAvatarAccessoryCancelButton {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  background: rgba(6, 2, 8, 0.68);
+  color: #ffffff;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.6),
+    0 0 16px rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.botAvatarAccessoryCancelButton:hover:not(:disabled),
+.botAvatarAccessoryCancelButton:focus-visible {
+  outline: none;
+  border-color: #ffffff;
+  background: rgba(12, 4, 14, 0.86);
+}
+
+.botAvatarAccessoryCancelButton:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+.botAvatarAccessoryLockButton {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  right: -14px;
+  top: -14px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  background: rgba(6, 2, 8, 0.68);
+  color: #ffffff;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.6),
+    0 0 16px rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+}
+
+.botAvatarAccessoryLockButton:hover:not(:disabled),
+.botAvatarAccessoryLockButton:focus-visible {
+  outline: none;
+  border-color: #ffffff;
+  background: rgba(12, 4, 14, 0.86);
+}
+
+.botAvatarAccessoryLockButton:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+.botAvatarAccessoryLockButton svg {
+  width: 17px;
+  height: 17px;
+  color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.58));
+  pointer-events: none;
+}
+
+.botAvatarAccessoryResizeHandle {
+  position: absolute;
+  right: -14px;
+  bottom: -14px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  background: rgba(6, 2, 8, 0.66);
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.62),
+    0 0 16px rgba(255, 255, 255, 0.2);
+  cursor: nwse-resize;
+}
+
+.botAvatarAccessoryResizeHandle svg {
+  width: 18px;
+  height: 18px;
+  color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.58));
+  pointer-events: none;
 }
 
 .botAvatarModalFacePanel,
@@ -34476,6 +35755,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarPreviewCopy span,
 .botAvatarAccessoryCopy span,
 .botAvatarFontControl legend,
+.botAvatarEyeCharacterControl > span,
 .botAvatarWeightControl > span {
   color: var(--fg);
   font-size: 12px;
@@ -34492,7 +35772,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botAvatarFontControls {
   display: grid;
-  gap: 9px;
+  gap: 12px;
 }
 
 .botAvatarFontControl {
@@ -34501,13 +35781,59 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 6px;
+  gap: 7px;
+}
+
+.botAvatarEyeCharacterControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarEyeCharacterControl > span {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.botAvatarEyeCharacterControl strong {
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 56%, var(--fg));
+  font-size: 15px;
+  font-weight: 820;
+}
+
+.botAvatarEyeCharacterControl input {
+  width: 46px;
+  min-width: 46px;
+  height: 38px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--fg);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 780;
+  text-align: center;
+  outline: none;
+}
+
+.botAvatarEyeCharacterControl input:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent);
 }
 
 .botAvatarFontOptions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 7px;
 }
 
 .form button.botAvatarFontOption,
@@ -34515,11 +35841,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   -webkit-appearance: none;
   appearance: none;
   min-width: 0;
-  min-height: 48px;
-  padding: 6px 7px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  min-height: 56px;
+  padding: 8px 7px;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, #303846);
+  background: rgba(255, 255, 255, 0.025);
   color: var(--fg-muted);
   font: inherit;
   font-size: 10.5px;
@@ -34536,7 +35862,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .form button.botAvatarFontOption:focus-visible,
 .botAvatarFontOption:hover,
 .botAvatarFontOption:focus-visible {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, var(--line-strong));
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, rgba(255, 255, 255, 0.035));
   color: var(--fg);
   outline: none;
 }
@@ -34544,9 +35871,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .form button.botAvatarFontOption[data-selected="true"],
 .botAvatarFontOption[data-selected="true"] {
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, var(--line));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, var(--bg));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 15%, rgba(255, 255, 255, 0.04));
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, transparent),
+    0 10px 20px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent);
 }
 
 .botAvatarFontOptionSample {
@@ -34594,7 +35923,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botAvatarWeightControl {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .botAvatarWeightControl > span {
@@ -34669,12 +36002,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarAccessoryCopy {
   display: grid;
   gap: 3px;
-  text-align: center;
+  text-align: left;
 }
 
 .botAvatarAccessoryActions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -34683,15 +36016,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  min-height: 34px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 7px 9px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #303846);
+  background: rgba(255, 255, 255, 0.035);
   color: var(--fg);
   font: inherit;
   font-size: 11.5px;
@@ -34699,12 +36032,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
 }
 
+.botAvatarAccessoryActions button:only-child {
+  grid-column: 1 / -1;
+}
+
 .form .botAvatarAccessoryActions button:hover:not(:disabled),
 .form .botAvatarAccessoryActions button:focus-visible,
 .botAvatarAccessoryActions button:hover:not(:disabled),
 .botAvatarAccessoryActions button:focus-visible {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--line-strong));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, rgba(255, 255, 255, 0.055));
   outline: none;
 }
 
@@ -36194,7 +37531,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 @media (min-width: 1120px) {
   .panelMemories[data-memory-scope="all"],
   .panelMemories[data-memory-scope="default"] {
-    --panel-width: min(900px, max(620px, calc(100vw - 420px)), calc(100vw - 32px));
+    --panel-width: min(900px, max(620px, calc(max(100vw, 1280px) - 420px)), calc(max(100vw, 1280px) - 32px));
   }
 
   .panelMemories[data-memory-scope="all"] .memoryTransitionLayer:not([data-memory-transition-phase="exiting"]):not([data-memory-transition-phase="entering"]) {
@@ -39867,6 +41204,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.2;
 }
 
+.botCardDefaultCustomizeButton {
+  -webkit-appearance: none;
+  appearance: none;
+  align-self: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  color: var(--fg);
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    transform 0.08s ease;
+}
+
+.botCardDefaultCustomizeButton:hover:not(:disabled),
+.botCardDefaultCustomizeButton:focus-visible:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.botCardDefaultCustomizeButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.botCardDefaultCustomizeButton:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 /* ── Bot card tile (click-to-edit affordance) ────────────────────────
    The whole glyph + body area is a single <button> so tapping anywhere
    on the tile hydrates the top form with that bot's values. Kept as
@@ -40816,6 +42189,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .sidebarHandleHidden {
   opacity: 0;
   pointer-events: none;
+}
+
+.appLayout[data-right-panel-open="true"] > .sidebar.sidebarOpen,
+.appLayout[data-right-panel-open="true"][data-zen-surface="true"] > .sidebar.sidebarOpen {
+  z-index: 98;
 }
 
 /* Chat overflow (wrench) — visual sibling to ☰ on mobile (fixed top-right). */
@@ -46573,6 +47951,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0;
   --coffee-seat-mood-contrast: 1;
   --coffee-seat-mood-brightness: 1;
+  --coffee-seat-mood-frame-raster-opacity: 1;
   --coffee-plate-emoji-face-scale-y: 1;
   --coffee-arrival-walk-duration: 3200ms;
   --coffee-arrival-walk-easing: cubic-bezier(0.16, 0.84, 0.26, 1);
@@ -47061,8 +48440,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatCluster {
   position: relative;
   display: block;
-  width: clamp(72px, 8.8vw, 108px);
-  height: clamp(72px, 8.8vw, 108px);
+  width: var(--coffee-seat-avatar-size, var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px)));
+  height: var(--coffee-seat-avatar-size, var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px)));
   aspect-ratio: 1;
   flex-shrink: 0;
   isolation: isolate;
@@ -47082,7 +48461,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlate {
   --bot-face-frame-color: var(--coffee-seat-emotion-color);
   --bot-face-frame-inset: -7%;
-  --bot-face-frame-opacity: 0.96;
+  --bot-face-frame-opacity: 1;
   --coffee-seat-plate-shift-x: clamp(-13px, -0.82vw, -8px);
   position: absolute;
   isolation: isolate;
@@ -47252,13 +48631,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     drop-shadow(0 0 24px color-mix(in srgb, var(--coffee-seat-emotion-color) 28%, transparent));
   --coffee-live-bot-body-inset: -24%;
   --bot-face-frame-inset: 0;
-  --bot-face-frame-opacity: 0.96;
+  --bot-face-frame-opacity: 1;
   --bot-face-frame-z: 0;
   --bot-face-metal-light-inset: 0;
-  --bot-face-metal-light-opacity: 0.68;
+  --bot-face-metal-light-blend-mode: overlay;
+  --bot-face-metal-light-opacity: 0.58;
   --bot-face-metal-light-z: 5;
+  --bot-face-screen-glass-opacity: 0.46;
+  --bot-face-screen-glare-opacity: 0.18;
+  --bot-face-screen-specular-opacity: 0.54;
   --bot-face-glyph-z: 6;
-  --coffee-seat-body-raster-inset: var(--coffee-live-bot-body-inset);
   --coffee-plate-emoji-nudge-y: -5px;
   place-items: center;
   padding-top: 0;
@@ -47273,37 +48655,44 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatPlate[data-live-body-style="zen"] .coffeeSeatPlateEmoji {
   --coffee-plate-emoji-flip-anchor-x: 0px;
-  font-size: clamp(1.36rem, 3.8vw, 1.9rem);
+  font-size: var(--zen-live-bot-avatar-face-glyph-size, clamp(1.74rem, 5.15vw, 2.58rem));
 }
 
-.coffeeSeatPlate[data-live-body-style="zen"][data-body-raster-equipped="true"] {
+.coffeeSeatPlate[data-live-body-style="zen"][data-accessory-equipped="true"][data-accessory-layer="back"] {
   --bot-face-frame-z: 2;
 }
 
-.coffeeSeatBodyRaster {
-  --bot-body-raster-mask-image:
-    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
-    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
-  --bot-body-raster-mask-position: center, center;
-  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
-  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
+.coffeeSeatAccessoryLayer {
   position: absolute;
-  inset: var(--coffee-seat-body-raster-inset, 0);
-  z-index: 1;
-  display: block;
+  left: 50%;
+  top: 50%;
+  z-index: 7;
   width: 100%;
   height: 100%;
-  background-position: center;
+  display: block;
+  transform:
+    translate(-50%, -50%)
+    scaleX(var(--coffee-plate-emoji-face-scale-y, 1));
+  transform-origin: 50% 50%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.coffeeSeatAccessoryLayer[data-accessory-layer="back"] {
+  z-index: -1;
+}
+
+.coffeeSeatAccessoryRaster {
+  position: absolute;
+  inset: var(--bot-accessory-field-inset-pct, -170%);
+  z-index: 0;
+  display: block;
+  overflow: visible;
+  background-position:
+    calc(50% + var(--bot-accessory-field-x-pct, 0%))
+    calc(50% + var(--bot-accessory-field-y-pct, 0%));
   background-repeat: no-repeat;
-  background-size: contain;
-  -webkit-mask-image: var(--bot-body-raster-mask-image);
-  -webkit-mask-position: var(--bot-body-raster-mask-position);
-  -webkit-mask-size: var(--bot-body-raster-mask-size);
-  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
-  mask-image: var(--bot-body-raster-mask-image);
-  mask-position: var(--bot-body-raster-mask-position);
-  mask-size: var(--bot-body-raster-mask-size);
-  mask-repeat: var(--bot-body-raster-mask-repeat);
+  background-size: var(--bot-accessory-field-size-pct, 22.727%) auto;
   pointer-events: none;
 }
 
@@ -47364,18 +48753,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(229, 255, 235, 0.92);
 }
 
-.botPreviewFaceGlare {
-  --bot-preview-face-color: var(
-    --coffee-seat-emotion-color,
-    var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
-  );
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: block;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
+.botFaceScreenFill {
+  --bot-face-screen-default-bg:
     radial-gradient(
       circle at 34% 24%,
       rgba(255, 255, 255, 0.38),
@@ -47392,13 +48771,145 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       color-mix(in srgb, #101014 82%, var(--bot-preview-face-color) 18%),
       color-mix(in srgb, #030304 88%, var(--bot-preview-face-color) 12%)
     );
-  border: 1px solid color-mix(in srgb, var(--bot-preview-face-color) 50%, rgba(255, 255, 255, 0.18));
-  box-shadow:
+  --bot-face-screen-default-border: color-mix(
+    in srgb,
+    var(--bot-preview-face-color) 50%,
+    rgba(255, 255, 255, 0.18)
+  );
+  --bot-face-screen-default-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    inset 0 -12px 22px rgba(0, 0, 0, 0.34),
+    inset 0 -12px 22px rgba(0, 0, 0, 0.34);
+  --bot-preview-face-color: var(
+    --coffee-seat-emotion-color,
+    var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+  );
+  position: absolute;
+  inset: var(--bot-face-screen-inset, 17%);
+  z-index: 0;
+  display: block;
+  border-radius: var(--bot-face-screen-radius, 50%);
+  pointer-events: none;
+  background: var(
+    --bot-face-screen-background,
+    var(--zen-presence-face-bg, var(--bot-face-screen-default-bg))
+  );
+  border: 1px solid
+    var(
+      --bot-face-screen-border,
+      var(--zen-presence-face-border, var(--bot-face-screen-default-border))
+  );
+  box-shadow: var(
+    --bot-face-screen-shadow,
+    var(--bot-face-screen-default-shadow)
+  );
+  opacity: 1;
+  transform: scaleX(var(--coffee-plate-emoji-face-scale-y, 1));
+  transform-origin: center center;
+}
+
+.botFaceScreenGlass {
+  position: absolute;
+  inset: var(--bot-face-screen-inset, 17%);
+  z-index: var(--bot-face-screen-glass-z, 3);
+  display: block;
+  overflow: hidden;
+  border-radius: var(--bot-face-screen-radius, 50%);
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 50% 52%,
+      transparent 0 58%,
+      rgba(255, 255, 255, 0.16) 62%,
+      rgba(255, 255, 255, 0.05) 69%,
+      transparent 76%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.1),
+      transparent 36%,
+      rgba(0, 0, 0, 0.18)
+    );
+  box-shadow: var(
+    --bot-face-screen-glass-shadow,
+    inset 0 1px 1px rgba(255, 255, 255, 0.34),
+    inset 0 -9px 16px rgba(0, 0, 0, 0.22),
+    inset 0 0 18px rgba(255, 255, 255, 0.05)
+  );
+  opacity: var(--bot-face-screen-glass-opacity, 0.42);
+  mix-blend-mode: var(--bot-face-screen-glass-blend-mode, screen);
+  transition: opacity 160ms ease;
+}
+
+.botFaceScreenGlass::before,
+.botFaceScreenGlass::after {
+  content: "";
+  position: absolute;
+  inset: -24%;
+  display: block;
+  pointer-events: none;
+}
+
+.botFaceScreenGlass::before {
+  background:
+    linear-gradient(
+      var(--bot-face-screen-glare-angle, -28deg),
+      transparent 0 34%,
+      rgba(255, 255, 255, 0.06) 41%,
+      rgba(255, 255, 255, 0.34) 48%,
+      rgba(255, 255, 255, 0.1) 53%,
+      transparent 64% 100%
+    );
+  opacity: var(--bot-face-screen-glare-opacity, 0.24);
+  filter: blur(0.6px);
+}
+
+.botFaceScreenGlass::after {
+  background:
+    radial-gradient(
+      circle at var(--bot-face-screen-glare-x, 34%) var(--bot-face-screen-glare-y, 30%),
+      rgba(255, 255, 255, 0.76) 0 2.8%,
+      rgba(255, 255, 255, 0.34) 6.4%,
+      transparent 18%
+    ),
+    radial-gradient(
+      ellipse at calc(var(--bot-face-screen-glare-x, 34%) + 17%)
+        calc(var(--bot-face-screen-glare-y, 30%) - 20%),
+      rgba(255, 255, 255, 0.22) 0 8%,
+      transparent 27%
+    ),
+    linear-gradient(
+      138deg,
+      rgba(255, 255, 255, 0.14),
+      transparent 22% 68%,
+      rgba(255, 255, 255, 0.08)
+    );
+  opacity: var(--bot-face-screen-specular-opacity, 0.66);
+  mix-blend-mode: screen;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botFaceScreenGlass,
+  .botFaceScreenGlass::before,
+  .botFaceScreenGlass::after {
+    transition: none;
+  }
+}
+
+.coffeeSeat[data-roster-preview="true"] .botFaceScreenFill {
+  --bot-face-screen-inset: 0;
+  --bot-face-screen-radius: inherit;
+  --bot-face-screen-shadow: var(--bot-face-screen-default-shadow),
     0 0 0 8px color-mix(in srgb, var(--bot-preview-face-color) 14%, transparent),
     0 0 28px color-mix(in srgb, var(--bot-preview-face-color) 38%, transparent),
     0 16px 28px rgba(0, 0, 0, 0.44);
+}
+
+.coffeeSeat[data-roster-preview="true"] .botFaceScreenGlass {
+  --bot-face-screen-inset: 0;
+  --bot-face-screen-radius: inherit;
+  --bot-face-screen-glass-opacity: 0.18;
+  --bot-face-screen-glare-opacity: 0.08;
+  --bot-face-screen-specular-opacity: 0.32;
 }
 
 .botFaceFrame {
@@ -47428,7 +48939,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inset: 0;
   display: block;
   color: var(--bot-face-frame-resolved-color);
-  background: currentColor;
+  background: var(--bot-face-frame-tint-background, currentColor);
   -webkit-mask-image: var(--bot-face-frame-tint-mask);
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
@@ -47437,9 +48948,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   mask-position: center;
   mask-size: contain;
   mask-repeat: no-repeat;
-  filter:
+  filter: var(
+    --bot-face-frame-tint-filter,
     drop-shadow(0 0 6px color-mix(in srgb, currentColor 28%, transparent))
-    saturate(1.08);
+      saturate(1.08)
+  );
+  opacity: var(--bot-face-frame-tint-opacity, var(--coffee-seat-mood-frame-raster-opacity, 1));
+  transition: opacity 280ms ease;
+}
+
+.botFaceFrameLed {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+  background: url("/bot-frame/bot-frame-led.png") center / contain no-repeat;
+  opacity: var(--bot-face-frame-led-opacity, var(--coffee-seat-mood-frame-raster-opacity, 1));
+  transition: opacity 280ms ease;
 }
 
 .botFaceFrameMetalLight {
@@ -47449,8 +48975,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: block;
   overflow: hidden;
   pointer-events: none;
+  background: var(--bot-face-metal-light-background, transparent);
   opacity: var(--bot-face-metal-light-opacity, 0);
-  mix-blend-mode: overlay;
+  mix-blend-mode: var(--bot-face-metal-light-blend-mode, overlay);
   transform: translateY(var(--bot-face-metal-light-y, 0px));
   clip-path: var(--bot-face-metal-light-clip-path, none);
   -webkit-mask-image: var(
@@ -47475,10 +49002,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inset: 0;
   display: block;
   background: url("/bot-frame/bot-frame-metal.png") center / contain no-repeat;
-  filter:
-    contrast(1.22)
-    brightness(1.08)
-    saturate(0.86);
+  opacity: var(--bot-face-metal-light-raster-opacity, 1);
+  mix-blend-mode: var(--bot-face-metal-light-raster-blend-mode, normal);
+  filter: var(
+    --bot-face-metal-light-filter,
+    grayscale(1) contrast(1.26) brightness(1.08) saturate(0.86)
+  );
   transform:
     rotate(var(--bot-face-metal-light-rotation, 0deg))
     scale(var(--bot-face-metal-light-scale, 1.06));
@@ -47486,34 +49015,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   will-change: transform;
 }
 
-@keyframes botFaceFrameMetalLightSweep {
-  from {
-    transform:
-      rotate(var(--bot-face-metal-light-rotation, 0deg))
-      scale(var(--bot-face-metal-light-scale, 1.06));
-  }
-
-  to {
-    transform:
-      rotate(calc(var(--bot-face-metal-light-rotation, 0deg) + 360deg))
-      scale(var(--bot-face-metal-light-scale, 1.06));
-  }
-}
-
 .themeLight .botFaceFrame,
 .themeLight.coffeeShell .botFaceFrame,
 .zenLiveBotPresencePlate[data-theme="light"] .botFaceFrame {
   --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png");
-  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-light-tint-mask.png");
+}
+
+.messageMoodBadge .botFaceScreenGlass {
+  --bot-face-screen-glass-opacity: 0.2;
+  --bot-face-screen-glare-opacity: 0.08;
+  --bot-face-screen-specular-opacity: 0.28;
 }
 
 .coffeeSeatPlateEmoji {
   --coffee-face-eye-track: 0.4em;
   --coffee-face-mouth-track: 0.4em;
   --coffee-face-gap: 0em;
-  --coffee-plate-emoji-flip-anchor-x: calc(
-    (1 - var(--coffee-plate-emoji-face-scale-y, 1)) * 0.1em
-  );
+  --coffee-face-mouth-font-size: 0.82em;
+  --coffee-plate-emoji-flip-anchor-x: 0px;
   display: block;
   font-family: var(--prism-face-font);
   font-size: clamp(1.97rem, 5.87vw, 2.93rem);
@@ -47561,6 +49080,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: none;
 }
 
+.coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
+}
+
 .zenLiveBotPresencePlate[data-transitioning="true"] .zenLiveBotPresenceFaceGlyph {
   opacity: 0;
 }
@@ -47585,6 +49108,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 780;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.coffeeSeatPlateEmoji[data-coffee-plate-mouth-open="true"],
+.messageMoodCoffeeFace[data-coffee-plate-mouth-open="true"],
+.zenLiveBotPresenceFaceGlyph[data-coffee-plate-mouth-open="true"] {
+  --coffee-face-gap: 0.08em;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame] {
@@ -47616,8 +49145,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1;
   position: relative;
   color: inherit;
+  -webkit-text-stroke: var(--bot-face-weight-stroke, 0) currentColor;
+  paint-order: stroke fill;
   transform-origin: center center;
   transition: none;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
+  font-size: var(--coffee-face-mouth-font-size, 0.82em);
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
@@ -47629,10 +49166,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] {
-  inline-size: 1.22em;
-  block-size: 1.28em;
-  margin: -0.14em -0.11em;
-  line-height: 1.2;
+  inline-size: 1.04em;
+  block-size: 1.12em;
+  margin: -0.06em -0.02em;
+  line-height: 1.08;
   overflow: visible;
 }
 
@@ -47694,53 +49231,126 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .messageMoodCoffeeFace[data-face-custom="true"],
 .zenLiveBotPresenceFaceGlyph[data-face-custom="true"] {
   font-weight: var(--bot-face-font-weight, var(--prism-face-weight));
+  font-variation-settings: "wght" var(--bot-face-font-weight, var(--prism-face-weight));
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="neutral"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="neutral"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="neutral"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="neutral"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="neutral"] {
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   font-weight: inherit;
+  font-variation-settings: inherit;
   letter-spacing: 0.016em;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="warm"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="warm"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="warm"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="warm"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="warm"] {
   font-family: var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
   font-weight: inherit;
+  font-variation-settings: inherit;
   letter-spacing: -0.04em;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="concise"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="concise"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="concise"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="concise"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="concise"] {
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: inherit;
+  font-variation-settings: inherit;
   letter-spacing: 0.035em;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="playful"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="playful"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="playful"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="playful"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="playful"] {
   font-family: var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 520;
+  font-weight: var(--bot-face-font-weight, 520);
+  font-variation-settings: "wght" var(--bot-face-font-weight, 520);
   letter-spacing: 0.02em;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="formal"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="formal"],
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="formal"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="formal"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="formal"] {
   font-family: var(--font-formal-serif), var(--font-chat-serif), Georgia, "Times New Roman", serif;
-  font-weight: 640;
+  font-weight: var(--bot-face-font-weight, 640);
+  font-variation-settings: "wght" var(--bot-face-font-weight, 640);
   letter-spacing: 0.015em;
   font-style: normal;
   font-variant-numeric: lining-nums;
+}
+
+.coffeeSeatPlateEmoji[data-coffee-plate-question-glyph="true"],
+.messageMoodCoffeeFace[data-coffee-plate-question-glyph="true"],
+.zenLiveBotPresenceFaceGlyph[data-coffee-plate-question-glyph="true"] {
+  --coffee-plate-emoji-nudge-y: 0px;
+  --coffee-seat-emotion-face-scale: 1;
+  --coffee-face-eye-track: 1em;
+  --coffee-face-mouth-track: 0em;
+  --coffee-face-gap: 0em;
+  grid-template-columns: 1em;
+  grid-template-rows: 1em;
+  inline-size: 1em;
+  block-size: 1em;
+  place-self: center;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 840;
+  font-variation-settings: "wght" 840;
+  letter-spacing: 0;
+  font-variant-numeric: normal;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame] {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  inline-size: 1em;
+  block-size: 1em;
+  color: inherit;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 1em;
+  font-weight: 840;
+  font-variation-settings: "wght" 840;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+  text-shadow:
+    0 0 0.12em color-mix(in srgb, currentColor 78%, transparent),
+    0 0 0.36em color-mix(in srgb, currentColor 44%, transparent),
+    0 0 0.68em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
+  transform: translateY(-0.01em);
+}
+
+.messageMoodCoffeeFace[data-coffee-plate-question-glyph="true"] {
+  font-size: 14px;
+}
+
+.coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph[data-coffee-plate-question-glyph="true"] {
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
+  font-size: var(--zen-live-bot-avatar-question-glyph-size, clamp(2rem, 4.25vw, 2.58rem));
 }
 
 .coffeeSeat[data-prism-mood="joyful"] {
@@ -47752,6 +49362,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0;
   --coffee-seat-mood-contrast: 1.05;
   --coffee-seat-mood-brightness: 1.04;
+  --coffee-seat-mood-frame-raster-opacity: 1;
 }
 
 .coffeeSeat[data-prism-mood="warm"] {
@@ -47763,6 +49374,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0;
   --coffee-seat-mood-contrast: 1.02;
   --coffee-seat-mood-brightness: 1.02;
+  --coffee-seat-mood-frame-raster-opacity: 1;
 }
 
 .coffeeSeat[data-prism-mood="guarded"] {
@@ -47774,6 +49386,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0.16;
   --coffee-seat-mood-contrast: 0.97;
   --coffee-seat-mood-brightness: 0.95;
+  --coffee-seat-mood-frame-raster-opacity: 0.72;
 }
 
 .coffeeSeat[data-prism-mood="strained"] {
@@ -47785,6 +49398,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0.24;
   --coffee-seat-mood-contrast: 0.95;
   --coffee-seat-mood-brightness: 0.9;
+  --coffee-seat-mood-frame-raster-opacity: 0.56;
 }
 
 .coffeeSeat[data-mood-near-desaturated="true"] {
@@ -47795,6 +49409,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-mood-grayscale: 0.86;
   --coffee-seat-mood-contrast: 0.94;
   --coffee-seat-mood-brightness: 0.86;
+  --coffee-seat-mood-frame-raster-opacity: 0.1;
 }
 
 .coffeeSeat[data-table-speaking="true"] {
@@ -53308,12 +54923,41 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"] {
-  --bot-face-metal-light-opacity: 0.54;
+  --bot-face-metal-light-base-color: var(--coffee-bot-color);
+  --bot-face-metal-light-background:
+    radial-gradient(
+      circle at 36% 22%,
+      rgba(255, 255, 255, 0.88) 0 9%,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 44%, transparent) 24%,
+      transparent 42%
+    ),
+    conic-gradient(
+      from 218deg at 50% 50%,
+      var(--bot-face-metal-light-base-color) 0deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 62%, #ffffff 38%) 54deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 92%, #000000 8%) 124deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 46%, #ffffff 54%) 188deg,
+      color-mix(in srgb, var(--bot-face-metal-light-base-color) 86%, #000000 14%) 252deg,
+      var(--bot-face-metal-light-base-color) 360deg
+    ),
+    var(--bot-face-metal-light-base-color);
+  --bot-face-metal-light-blend-mode: luminosity;
+  --bot-face-metal-light-filter: grayscale(1) contrast(1.42) brightness(1.08);
+  --bot-face-metal-light-opacity: 0.34;
+  --bot-face-metal-light-raster-blend-mode: luminosity;
+  --bot-face-metal-light-raster-opacity: 0.86;
+  --bot-face-screen-glass-opacity: 0.34;
+  --bot-face-screen-glare-opacity: 0.12;
+  --bot-face-screen-specular-opacity: 0.44;
   box-shadow: none;
 }
 
 .themeLight.coffeeShell .coffeeSeatPlateEmoji {
-  color: color-mix(in srgb, var(--coffee-seat-emotion-color) 82%, #2b2118 18%);
+  color: var(--coffee-bot-color);
+}
+
+.themeLight.coffeeShell .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
 }
 
 .themeLight.coffeeShell .coffeeSeatGlowPill {
@@ -53964,5 +55608,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .installCoachIcon {
     width: 30px;
     height: 30px;
+  }
+}
+
+@media (max-width: 1399px) {
+  .panel,
+  .panelBots,
+  .panelMemories,
+  .panelSettings,
+  .panelPromptCenter,
+  .panelImages {
+    left: auto;
+    right: 0;
+    width: var(--panel-width);
+    max-height: none;
+    border-left: 1px solid var(--line);
+    padding: 20px;
+  }
+
+  .panelBots {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    align-content: stretch;
+  }
+
+  .panelBots .form {
+    gap: 10px;
+    margin-top: 0;
+    overflow-y: auto;
+    padding-bottom: 0;
+  }
+
+  .botProfileBuilder.botAvatarCustomizer {
+    inset: auto;
+    top: 28px;
+    left: max(32px, calc((100vw - 1180px) / 2));
+    right: auto;
+    bottom: auto;
+    width: min(1180px, calc(100vw - 64px));
+    min-width: min(980px, calc(100vw - 64px));
+    height: auto;
+    max-height: 844px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .botAvatarCustomizerBody {
+    grid-template-columns: minmax(500px, 1fr) minmax(380px, 420px);
+    padding: 14px;
   }
 }

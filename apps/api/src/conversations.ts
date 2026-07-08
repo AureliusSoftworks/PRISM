@@ -1846,12 +1846,19 @@ export function deleteConversationMessage(
   db: DatabaseSync,
   userId: string,
   messageId: string
-): { conversationId: string; deletedSummaries: number } {
+): {
+  conversationId: string;
+  deletedSummaries: number;
+  deletedZenSessionMemories: number;
+  deletedMoodEvents: number;
+} {
   const target = db
     .prepare(
-      "SELECT id, conversation_id FROM messages WHERE id = ? AND user_id = ?"
+      "SELECT id, conversation_id, created_at FROM messages WHERE id = ? AND user_id = ?"
     )
-    .get(messageId, userId) as { id: string; conversation_id: string } | undefined;
+    .get(messageId, userId) as
+    | { id: string; conversation_id: string; created_at: string }
+    | undefined;
   if (!target) {
     throw new Error("Message not found.");
   }
@@ -1864,9 +1871,6 @@ export function deleteConversationMessage(
   if (!conversation?.id) {
     throw new Error("Conversation not found.");
   }
-  if (conversation.conversation_mode === "zen") {
-    throw new Error("Zen messages cannot be deleted.");
-  }
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
@@ -1876,6 +1880,19 @@ export function deleteConversationMessage(
         "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
       )
       .run(userId, target.conversation_id);
+    const zenSessionDelete =
+      conversation.conversation_mode === "zen"
+        ? db
+            .prepare(
+              "DELETE FROM zen_session_memories WHERE user_id = ? AND conversation_id = ? AND created_at >= ?"
+            )
+            .run(userId, target.conversation_id, target.created_at)
+        : { changes: 0 };
+    const moodEventDelete = db
+      .prepare(
+        "DELETE FROM prism_mood_events WHERE user_id = ? AND conversation_id = ? AND message_id = ?"
+      )
+      .run(userId, target.conversation_id, messageId);
     db.prepare(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(new Date().toISOString(), target.conversation_id, userId);
@@ -1883,6 +1900,8 @@ export function deleteConversationMessage(
     return {
       conversationId: target.conversation_id,
       deletedSummaries: Number(summaryDelete.changes ?? 0),
+      deletedZenSessionMemories: Number(zenSessionDelete.changes ?? 0),
+      deletedMoodEvents: Number(moodEventDelete.changes ?? 0),
     };
   } catch (error) {
     db.exec("ROLLBACK");

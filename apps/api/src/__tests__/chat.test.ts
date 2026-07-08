@@ -987,7 +987,7 @@ describe("processChatMessage Psychic planning", () => {
     );
   });
 
-  it("does not attach Psychic text to Zen turns even when the legacy setting is on", async () => {
+  it("attaches Psychic text to product Chat turns that use the Zen pipeline", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1017,6 +1017,52 @@ describe("processChatMessage Psychic planning", () => {
         mode: "zen",
         experimentalAllModelEffortEnabled: true,
         psychicModeEnabled: true,
+        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(result.psychicDebug?.simulated, false);
+    assert.equal(result.psychicDebug?.passCount, 0);
+    const userMessage = result.conversation.messages.find(
+      (message) => message.role === "user"
+    );
+    assert.match(
+      userMessage?.psychicThought?.summary ?? "",
+      /^I'm helping with this turn using the selected online model/
+    );
+  });
+
+  it("keeps internal Zen turns quiet when the product Chat signal is absent", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Zen answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Keep Zen quiet.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: false,
         botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
       }
     );
@@ -1059,7 +1105,7 @@ describe("processChatMessage Psychic planning", () => {
         incognito: true,
         mode: "zen",
         experimentalAllModelEffortEnabled: true,
-        psychicModeEnabled: true,
+        psychicModeEnabled: false,
         botOverrides: { model: "claude-opus-4-8", reasoningEffort: "xhigh" },
       }
     );

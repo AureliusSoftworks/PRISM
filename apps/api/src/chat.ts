@@ -2638,7 +2638,11 @@ export interface UserChatSettings {
   experimentalDualOllamaEnabled?: boolean;
   /** Experimental: allow non-reasoning models to simulate effort with a planning pass. */
   experimentalAllModelEffortEnabled?: boolean;
-  /** Legacy account setting; visible Psychic summaries are now derived from Chat mode. */
+  /**
+   * Request-scoped product Chat signal. Product Chat currently uses the Zen
+   * companion pipeline, so the client sends this to keep Psychic visible there
+   * without reviving the old account-wide toggle.
+   */
   psychicModeEnabled?: boolean;
   /** Optional local-only fallback model used when copyright refusals happen. */
   lenientLocalFallbackModel?: string | null;
@@ -6321,7 +6325,8 @@ export async function processChatMessage(
   };
   const now = new Date().toISOString();
   const mode: ChatMode = normalizeChatMode(settings.mode);
-  const psychicModeEnabledForTurn = mode === "chat";
+  const psychicModeEnabledForTurn =
+    mode === "chat" || (mode === "zen" && settings.psychicModeEnabled === true);
   // Incognito is a companion-mode concept (see shared types): keeps the thread
   // client-held and skips all memory. Provider choice remains the normal
   // local/online user setting; Sandbox ignores `incognito` entirely.

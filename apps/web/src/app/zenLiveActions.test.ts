@@ -79,6 +79,27 @@ describe("resolveZenLiveBotPresenceActionText", () => {
       "replying"
     );
   });
+
+  it("does not emit idle placeholder text", () => {
+    assert.equal(
+      resolveZenLiveBotPresenceActionText({
+        action: null,
+        isTalking: false,
+        userActionVisible: false,
+        hasBot: false,
+      }),
+      null
+    );
+    assert.equal(
+      resolveZenLiveBotPresenceActionText({
+        action: null,
+        isTalking: false,
+        userActionVisible: false,
+        hasBot: true,
+      }),
+      null
+    );
+  });
 });
 
 describe("zenLiveActionPlateFace", () => {

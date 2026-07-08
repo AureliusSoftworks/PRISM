@@ -5,6 +5,7 @@ import {
   BOT_FACE_FONT_WEIGHT_MIN,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   randomBotFaceStyle,
@@ -19,6 +20,14 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceFontId(null), null);
   });
 
+  it("normalizes custom eye characters to one visible character", () => {
+    assert.equal(normalizeBotFaceEyeCharacter("  =  "), "=");
+    assert.equal(normalizeBotFaceEyeCharacter("8)"), "8");
+    assert.equal(normalizeBotFaceEyeCharacter(""), null);
+    assert.equal(normalizeBotFaceEyeCharacter("   "), null);
+    assert.equal(normalizeBotFaceEyeCharacter(null), null);
+  });
+
   it("clamps and steps face font weight", () => {
     assert.equal(normalizeBotFaceFontWeight(612), 600);
     assert.equal(normalizeBotFaceFontWeight(613), 625);
@@ -30,24 +39,32 @@ describe("bot avatar face style", () => {
   it("falls back to voice preset for legacy bots without saved face fonts", () => {
     assert.deepEqual(resolveBotFaceStyle({}, "formal"), {
       eyesFont: "formal",
+      eyeCharacter: null,
       mouthFont: "formal",
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
     });
     assert.deepEqual(resolveBotFaceStyle({}, null), {
       eyesFont: DEFAULT_BOT_FACE_FONT_ID,
+      eyeCharacter: null,
       mouthFont: DEFAULT_BOT_FACE_FONT_ID,
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
     });
   });
 
-  it("keeps independently saved eyes and mouth fonts", () => {
+  it("keeps independently saved eyes, custom eye character, and mouth fonts", () => {
     assert.deepEqual(
       resolveBotFaceStyle(
-        { faceEyesFont: "concise", faceMouthFont: "playful", faceFontWeight: 725 },
+        {
+          faceEyesFont: "concise",
+          faceEyeCharacter: "B)",
+          faceMouthFont: "playful",
+          faceFontWeight: 725,
+        },
         "formal"
       ),
       {
         eyesFont: "concise",
+        eyeCharacter: "B",
         mouthFont: "playful",
         weight: 725,
       }
@@ -58,6 +75,7 @@ describe("bot avatar face style", () => {
     const values = [0, 0, 0.99, 0.51];
     const style = randomBotFaceStyle(() => values.shift() ?? 0);
     assert.equal(style.eyesFont, "neutral");
+    assert.equal(style.eyeCharacter, null);
     assert.equal(style.mouthFont, "formal");
     assert.equal(style.weight >= BOT_FACE_FONT_WEIGHT_MIN, true);
     assert.equal(style.weight <= BOT_FACE_FONT_WEIGHT_MAX, true);

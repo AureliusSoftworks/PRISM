@@ -113,6 +113,14 @@ test("blocks tab, window, and common browser panel shortcuts", () => {
   );
 });
 
+test("leaves Alt+Enter available for the desktop shell fullscreen toggle", () => {
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "Enter", code: "Enter", altKey: true })),
+    false
+  );
+  assert.equal(shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "F11" })), true);
+});
+
 test("keeps normal editing shortcuts available", () => {
   for (const key of ["a", "c", "v", "x", "y", "z"]) {
     assert.equal(
@@ -131,4 +139,3 @@ test("keeps normal editing shortcuts available", () => {
 test("blocks history-style backspace outside editable areas", () => {
   assert.equal(shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "Backspace" })), true);
 });
-

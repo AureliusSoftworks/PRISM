@@ -2201,6 +2201,77 @@ describe("deleteConversationMessage", () => {
     assert.equal(memory?.conversation_id, "chat-1");
   });
 
+  it("deletes Zen messages and clears derived Zen context", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "zen-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+      { id: "m3", role: "user", content: "third", seconds: 3 },
+    ]);
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("zen-1", "user-1");
+    insertSummary(db, "user-1", "zen-1", "sum-1", "summary 1", 2);
+    insertSummary(db, "user-1", "zen-1", "sum-2", "summary 2", 3);
+    insertLinkedMemory(db, "user-1", "zen-1", "memory-1", ["m1", "m2"]);
+    db.prepare(`
+      INSERT INTO zen_session_memories (
+        id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "zen-old",
+      "user-1",
+      "zen-1",
+      "cipher",
+      "iv",
+      "tag",
+      "1970-01-01T00:00:01.000Z",
+      "1970-01-02T00:00:01.000Z"
+    );
+    db.prepare(`
+      INSERT INTO zen_session_memories (
+        id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "zen-new",
+      "user-1",
+      "zen-1",
+      "cipher",
+      "iv",
+      "tag",
+      "1970-01-01T00:00:02.000Z",
+      "1970-01-02T00:00:02.000Z"
+    );
+    db.prepare(
+      "INSERT INTO prism_mood_events (user_id, conversation_id, message_id, event_type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("user-1", "zen-1", "m2", "ignored_question", "1970-01-01T00:00:02.000Z", "{}");
+
+    const result = deleteConversationMessage(db, "user-1", "m2");
+
+    assert.equal(result.conversationId, "zen-1");
+    assert.equal(result.deletedSummaries, 2);
+    assert.equal(result.deletedZenSessionMemories, 1);
+    assert.equal(result.deletedMoodEvents, 1);
+    const remainingMessages = db
+      .prepare("SELECT id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all("zen-1") as Array<{ id: string }>;
+    assert.deepEqual(
+      remainingMessages.map((row) => row.id),
+      ["m1", "m3"]
+    );
+    const remainingZenMemories = db
+      .prepare("SELECT id FROM zen_session_memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      remainingZenMemories.map((row) => row.id),
+      ["zen-old"]
+    );
+    const memory = db
+      .prepare("SELECT id, conversation_id FROM memories WHERE id = ?")
+      .get("memory-1") as { id: string; conversation_id: string | null } | undefined;
+    assert.equal(memory?.conversation_id, "zen-1");
+  });
+
   it("rejects deletion when the message belongs to another user", () => {
     const db = createTestDb();
     seedConversationAt(db, "user-1", "chat-1", [

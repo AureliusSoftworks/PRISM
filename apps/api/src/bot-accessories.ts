@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
+import { DEFAULT_BOT_ACCESSORY_PLACEMENT } from "@localai/shared";
 import { tryUnlinkGeneratedImageFile } from "./image-storage.ts";
 
 export const BOT_ACCESSORY_IMAGE_PURPOSE = "bot_accessory";
@@ -67,8 +68,16 @@ export function clearBotAccessoryReference(
   updatedAt = new Date().toISOString()
 ): void {
   db.prepare(
-    "UPDATE bots SET accessory_image_id = NULL, updated_at = ? WHERE user_id = ? AND accessory_image_id = ?"
-  ).run(updatedAt, userId, imageId);
+    "UPDATE bots SET accessory_image_id = NULL, accessory_x_pct = ?, accessory_y_pct = ?, accessory_size_pct = ?, accessory_layer = ?, updated_at = ? WHERE user_id = ? AND accessory_image_id = ?"
+  ).run(
+    DEFAULT_BOT_ACCESSORY_PLACEMENT.xPct,
+    DEFAULT_BOT_ACCESSORY_PLACEMENT.yPct,
+    DEFAULT_BOT_ACCESSORY_PLACEMENT.sizePct,
+    DEFAULT_BOT_ACCESSORY_PLACEMENT.layer,
+    updatedAt,
+    userId,
+    imageId
+  );
 }
 
 export function deleteBotAccessoryImageIfOwned(

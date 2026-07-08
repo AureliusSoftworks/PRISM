@@ -6,7 +6,6 @@ import {
   BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
   BOT_ARCHIVE_BOT_ENTRY_NAME,
   BOT_ARCHIVE_MEMORIES_ENTRY_NAME,
-  DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
   PRISM_BOT_ARCHIVE_SCHEMA,
   createPrismBotArchive,
   parsePrismBotArchive,
@@ -23,6 +22,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       color: "#4F46A5",
       glyph: "lucideDrama",
       faceEyesFont: "formal",
+      faceEyeCharacter: "8",
       faceMouthFont: "formal",
       faceFontWeight: 675,
     },
@@ -43,6 +43,7 @@ describe("botArchive", () => {
 
     assert.equal(parsed.botJson.schema, PRISM_BOT_ARCHIVE_SCHEMA);
     assert.equal(parsed.botJson.bot.name, "Plato");
+    assert.equal(parsed.botJson.bot.faceEyeCharacter, "8");
     assert.deepEqual(parsed.memories, ["Loves dialogue.", "Founded the Academy."]);
     assert.equal(parsed.accessoryPng, null);
   });
@@ -58,11 +59,18 @@ describe("botArchive", () => {
 
   it("round-trips an accessory png only with matching bot metadata", () => {
     const accessoryPng = new Uint8Array([137, 80, 78, 71]);
+    const placement = {
+      anchor: "avatar" as const,
+      xPct: 12,
+      yPct: -8,
+      sizePct: 134,
+      layer: "front" as const,
+    };
     const archive = createPrismBotArchive({
       botJson: baseBotJson({
         accessory: {
           file: BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
-          placement: DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
+          placement,
         },
       }),
       memories: [],
@@ -73,6 +81,7 @@ describe("botArchive", () => {
 
     assert.deepEqual(parsed.accessoryPng, accessoryPng);
     assert.equal(parsed.botJson.accessory?.file, BOT_ARCHIVE_ACCESSORY_ENTRY_NAME);
+    assert.deepEqual(parsed.botJson.accessory?.placement, placement);
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {
