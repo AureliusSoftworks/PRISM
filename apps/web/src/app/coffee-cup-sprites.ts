@@ -148,9 +148,11 @@ export function coffeeCupSippingActive(args: {
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
   const cycleMs = coffeeCupSipCycleMs(args.seed, args.durationMinutes);
+  const sipAnimationMs = coffeeCupSipAnimationTiming({ seed: args.seed }).durationMs;
   const sipWindowMs = Math.max(
     COFFEE_CUP_MIN_SIP_WINDOW_MS,
-    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood)
+    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood),
+    sipAnimationMs
   );
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
   return positiveModulo(args.nowMs + offsetMs, cycleMs) < sipWindowMs;
@@ -518,6 +520,7 @@ export function buildCoffeeCupVisualState(args: {
   topOff?: CoffeeCupTopOffSnapshot | null;
   sipCount?: number | null;
   sippingOverride?: boolean | null;
+  sipLockedUntilMs?: number | null;
   speaking?: boolean;
   forceEmpty?: boolean;
   finished?: boolean;
@@ -525,6 +528,12 @@ export function buildCoffeeCupVisualState(args: {
 }): CoffeeCupVisualState {
   const color = coffeeCupColorForBotColor(args.botColor);
   const finishSeed = args.finishSeed?.trim() || args.seed;
+  const sipLocked =
+    typeof args.sipLockedUntilMs === "number" &&
+    Number.isFinite(args.sipLockedUntilMs) &&
+    Number.isFinite(args.nowMs) &&
+    args.nowMs < args.sipLockedUntilMs;
+  const sippingOverride = sipLocked ? false : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)
@@ -538,7 +547,7 @@ export function buildCoffeeCupVisualState(args: {
     });
   const finished = args.finished === true || finishedBySip;
   const finishingSipActive =
-    finishedBySip && args.sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
+    finishedBySip && sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
   const sipProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
@@ -664,8 +673,8 @@ export function buildCoffeeCupVisualState(args: {
   const sipping =
     args.forceEmpty === true || args.finished === true
       ? false
-      : typeof args.sippingOverride === "boolean"
-      ? args.sippingOverride && (status.progress < 0.96 || finishingSipActive)
+      : typeof sippingOverride === "boolean"
+      ? sippingOverride && (status.progress < 0.96 || finishingSipActive)
       : coffeeCupSippingActive({
           seed: args.seed,
           nowMs: args.nowMs,

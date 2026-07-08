@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
+  coffeeGeneratedReplyRevealDeferralMs,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
@@ -107,6 +109,53 @@ describe("coffee user reveal flow", () => {
       }),
       0
     );
+  });
+
+  it("does not hide generated bot replies behind an empty Table Talk grace window", () => {
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "",
+        includeCooldown: false,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      0
+    );
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "wait",
+        includeCooldown: false,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      5200
+    );
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "wait",
+        includeCooldown: true,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      0
+    );
+  });
+
+  it("does not treat no-op empty Table Talk syncs as typing activity", () => {
+    assert.equal(coffeeDraftChangeCountsAsTyping("", ""), false);
+    assert.equal(coffeeDraftChangeCountsAsTyping("  ", ""), false);
+    assert.equal(coffeeDraftChangeCountsAsTyping("", "hi"), true);
+    assert.equal(coffeeDraftChangeCountsAsTyping("hi", ""), true);
+    assert.equal(coffeeDraftChangeCountsAsTyping("hi", "hi there"), true);
   });
 
   it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {

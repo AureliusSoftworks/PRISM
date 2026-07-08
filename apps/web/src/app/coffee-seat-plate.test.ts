@@ -59,7 +59,7 @@ describe("coffeeSeatPlateGlyph", () => {
 
   it("uses a puckered face while sipping", () => {
     assert.deepEqual(COFFEE_SEAT_SIP_PLATE_GLYPH, {
-      text: ":*",
+      text: ":⁎",
       rotateDeg: 90,
     });
   });
@@ -217,14 +217,22 @@ describe("coffeeSeatPlateGlyph", () => {
     assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }), "0.13em");
   });
 
-  it("centers center-band sip mouths closer to the face", () => {
+  it("keeps center-band sip mouths on the cup side even when the top head flips gaze", () => {
     assert.equal(
       coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "1", seatHorizontalSide: 0 }),
       "0.36em"
     );
     assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 0 }),
+      coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "-1", seatHorizontalSide: 0 }),
       "0.36em"
+    );
+    assert.equal(
+      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "1", seatHorizontalSide: 0 }),
+      "-0.36em"
+    );
+    assert.equal(
+      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 0 }),
+      "-0.36em"
     );
   });
 });

@@ -197,6 +197,7 @@ export function createDatabase(): DatabaseSync {
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random',
       prism_default_bot_name TEXT,
       prism_default_bot_system_prompt TEXT,
       prism_default_bot_color TEXT,
@@ -417,11 +418,6 @@ export function createDatabase(): DatabaseSync {
       face_mouth_font TEXT,
       face_font_weight INTEGER,
       profile_picture_image_id TEXT,
-      accessory_image_id TEXT,
-      accessory_x_pct REAL NOT NULL DEFAULT 0,
-      accessory_y_pct REAL NOT NULL DEFAULT 0,
-      accessory_size_pct REAL NOT NULL DEFAULT 100,
-      accessory_layer TEXT NOT NULL DEFAULT 'front',
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -889,6 +885,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenAutonomyEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenPersonaTransitionChoice = userColumns.some(
+    (column) => column.name === "zen_persona_transition_choice"
+  );
+  if (!hasZenPersonaTransitionChoice) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';");
   }
   const defaultBotColumns: Array<[string, string]> = [
     ["prism_default_bot_name", "TEXT"],
@@ -1415,36 +1417,6 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotProfilePictureImageIdColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN profile_picture_image_id TEXT;");
-  }
-  const hasBotAccessoryImageIdColumn = botColumns.some(
-    (column) => column.name === "accessory_image_id"
-  );
-  if (!hasBotAccessoryImageIdColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN accessory_image_id TEXT;");
-  }
-  const hasBotAccessoryXPctColumn = botColumns.some(
-    (column) => column.name === "accessory_x_pct"
-  );
-  if (!hasBotAccessoryXPctColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN accessory_x_pct REAL NOT NULL DEFAULT 0;");
-  }
-  const hasBotAccessoryYPctColumn = botColumns.some(
-    (column) => column.name === "accessory_y_pct"
-  );
-  if (!hasBotAccessoryYPctColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN accessory_y_pct REAL NOT NULL DEFAULT 0;");
-  }
-  const hasBotAccessorySizePctColumn = botColumns.some(
-    (column) => column.name === "accessory_size_pct"
-  );
-  if (!hasBotAccessorySizePctColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN accessory_size_pct REAL NOT NULL DEFAULT 100;");
-  }
-  const hasBotAccessoryLayerColumn = botColumns.some(
-    (column) => column.name === "accessory_layer"
-  );
-  if (!hasBotAccessoryLayerColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN accessory_layer TEXT NOT NULL DEFAULT 'front';");
   }
   const hasBotChatEnabledColumn = botColumns.some(
     (column) => column.name === "chat_enabled"

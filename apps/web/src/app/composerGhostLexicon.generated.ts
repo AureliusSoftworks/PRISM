@@ -7670,7 +7670,6 @@ export const COMPOSER_GHOST_LEXICON: readonly string[] = [
   "stages",
   "implying",
   "superb",
-  "accessory",
   "necessity",
   "cutie",
   "isolate",

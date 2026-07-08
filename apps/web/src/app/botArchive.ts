@@ -1,31 +1,15 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import {
-  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT,
-  normalizeBotAccessoryArchivePlacement,
-  type BotAccessoryArchivePlacement,
-  type BotFaceFontId,
-  type BotProfileFields,
-} from "@localai/shared";
+import { type BotFaceFontId, type BotProfileFields } from "@localai/shared";
 
 export const PRISM_BOT_ARCHIVE_SCHEMA = "prism-bot-export-v2";
 export const BOT_ARCHIVE_MIME = "application/vnd.prism.bot+zip";
 export const BOT_ARCHIVE_BOT_ENTRY_NAME = "bot.json";
 export const BOT_ARCHIVE_MEMORIES_ENTRY_NAME = "memories.json";
-export const BOT_ARCHIVE_ACCESSORY_ENTRY_NAME = "accessory.png";
 
 const ALLOWED_BOT_ARCHIVE_ENTRIES = new Set([
   BOT_ARCHIVE_BOT_ENTRY_NAME,
   BOT_ARCHIVE_MEMORIES_ENTRY_NAME,
-  BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
 ]);
-
-export const DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT =
-  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT;
-
-export interface PrismBotArchiveAccessoryMetadata {
-  file: typeof BOT_ARCHIVE_ACCESSORY_ENTRY_NAME;
-  placement: BotAccessoryArchivePlacement;
-}
 
 export interface PrismBotArchiveJson {
   schema: typeof PRISM_BOT_ARCHIVE_SCHEMA;
@@ -54,19 +38,16 @@ export interface PrismBotArchiveJson {
   };
   profile?: BotProfileFields;
   systemPrompt?: string;
-  accessory?: PrismBotArchiveAccessoryMetadata | null;
 }
 
 export interface ParsedPrismBotArchive {
   botJson: PrismBotArchiveJson;
   memories: string[];
-  accessoryPng: Uint8Array | null;
 }
 
 export function createPrismBotArchive(args: {
   botJson: PrismBotArchiveJson;
   memories: readonly string[];
-  accessoryPng?: Uint8Array | null;
 }): Uint8Array {
   const files: Record<string, Uint8Array> = {
     [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(`${JSON.stringify(args.botJson, null, 2)}\n`),
@@ -76,9 +57,6 @@ export function createPrismBotArchive(args: {
     .filter((memory) => memory.length > 0);
   if (memories.length > 0) {
     files[BOT_ARCHIVE_MEMORIES_ENTRY_NAME] = strToU8(`${JSON.stringify(memories, null, 2)}\n`);
-  }
-  if (args.accessoryPng && args.accessoryPng.byteLength > 0) {
-    files[BOT_ARCHIVE_ACCESSORY_ENTRY_NAME] = args.accessoryPng;
   }
   return zipSync(files, { level: 6 });
 }
@@ -103,13 +81,10 @@ export function parsePrismBotArchive(bytes: Uint8Array): ParsedPrismBotArchive {
   }
 
   const botJson = parseBotJson(botEntry);
-  const accessoryPng = entries[BOT_ARCHIVE_ACCESSORY_ENTRY_NAME] ?? null;
-  validateAccessoryPairing(botJson, accessoryPng);
 
   return {
     botJson,
     memories: parseMemoriesJson(entries[BOT_ARCHIVE_MEMORIES_ENTRY_NAME]),
-    accessoryPng,
   };
 }
 
@@ -147,28 +122,6 @@ function parseMemoriesJson(bytes: Uint8Array | undefined): string[] {
   return parsed
     .map((memory) => memory.trim())
     .filter((memory) => memory.length > 0);
-}
-
-function validateAccessoryPairing(
-  botJson: PrismBotArchiveJson,
-  accessoryPng: Uint8Array | null
-): void {
-  if (botJson.accessory !== null && botJson.accessory !== undefined) {
-    const placement = botJson.accessory.placement;
-    if (
-      botJson.accessory.file !== BOT_ARCHIVE_ACCESSORY_ENTRY_NAME ||
-      normalizeBotAccessoryArchivePlacement(placement) === null
-    ) {
-      throw new Error("bot.json has invalid accessory metadata.");
-    }
-    if (!accessoryPng || accessoryPng.byteLength === 0) {
-      throw new Error("bot.json references accessory.png, but the file is missing.");
-    }
-    return;
-  }
-  if (accessoryPng && accessoryPng.byteLength > 0) {
-    throw new Error("accessory.png requires matching bot.json accessory metadata.");
-  }
 }
 
 function stripOptionalLeadingUtf8Bom(text: string): string {

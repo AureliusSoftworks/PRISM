@@ -64,6 +64,12 @@ export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
 export const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 export const STEP_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
+export type ZenPersonaTransitionChoice =
+  | "random"
+  | "new-speaks"
+  | "previous-introduces"
+  | "off";
+export const DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE: ZenPersonaTransitionChoice = "random";
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -116,6 +122,7 @@ export interface CurrentSettings {
   zenAskQuestionPatienceEnabled: number | null;
   zenAskQuestionPatienceMs: number | null;
   zenAutonomyEnabled: number | null;
+  zenPersonaTransitionChoice: string | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -166,6 +173,7 @@ export interface NextSettings {
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
+  zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
@@ -187,6 +195,24 @@ function isTheme(value: unknown): value is Theme {
 
 function isProvider(value: unknown): value is Provider {
   return value === "local" || value === "openai" || value === "anthropic";
+}
+
+function isZenPersonaTransitionChoice(
+  value: unknown
+): value is ZenPersonaTransitionChoice {
+  return (
+    value === "random" ||
+    value === "new-speaks" ||
+    value === "previous-introduces" ||
+    value === "off"
+  );
+}
+
+export function normalizeZenPersonaTransitionChoice(
+  value: unknown,
+  fallback: ZenPersonaTransitionChoice = DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE
+): ZenPersonaTransitionChoice {
+  return isZenPersonaTransitionChoice(value) ? value : fallback;
 }
 
 function normalizeOllamaHostValue(input: string): string {
@@ -972,6 +998,16 @@ export function resolveNextSettings(
           body.zenAutonomyEnabled,
           currentZenAutonomyEnabled
         );
+  const currentZenPersonaTransitionChoice = normalizeZenPersonaTransitionChoice(
+    current.zenPersonaTransitionChoice
+  );
+  const zenPersonaTransitionChoice =
+    body.zenPersonaTransitionChoice === undefined
+      ? currentZenPersonaTransitionChoice
+      : normalizeZenPersonaTransitionChoice(
+          body.zenPersonaTransitionChoice,
+          currentZenPersonaTransitionChoice
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -1063,6 +1099,7 @@ export function resolveNextSettings(
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,
+    zenPersonaTransitionChoice,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,

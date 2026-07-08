@@ -5,6 +5,7 @@ export const COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS = 180;
 export const COFFEE_POT_POUR_FRAME_MS = 40;
 export const COFFEE_POT_FILL_FRAME_MS = 180;
 export const COFFEE_POT_FILL_CLEAR_MS = 360;
+export const COFFEE_POT_RETURN_MS = 280;
 export const COFFEE_POT_TARGET_HIT_SLOP_PX = 18;
 export const COFFEE_POT_POUR_FRAME_INDICES = [0, 1, 2, 3, 4] as const;
 export const COFFEE_POT_ASSET_VERSION = "dark-refill-2026-07-02";

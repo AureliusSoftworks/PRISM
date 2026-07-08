@@ -326,7 +326,7 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     label: "CLOTHING",
     aliases: ["clothing", "clothes", "garment"],
     title: "Generate a random clothing item.",
-    generationHint: "Return one clothing item or accessory.",
+    generationHint: "Return one clothing item or garment.",
     pickerVisibility: "searchable",
   },
   {

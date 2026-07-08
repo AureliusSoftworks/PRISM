@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { DEFAULT_BOT_ACCESSORY_PLACEMENT } from "@localai/shared";
 import {
   buildBotCustomizerSavePatch,
   type BotCustomizerSaveCurrent,
@@ -31,7 +30,6 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthFont: "warm",
   faceFontWeight: 500,
   profilePictureImageId: null,
-  accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
 };
 
 const currentFromPristine = (
@@ -63,7 +61,6 @@ const currentFromPristine = (
   faceMouthFont: pristine.faceMouthFont,
   faceFontWeight: pristine.faceFontWeight,
   profilePictureImageId: pristine.profilePictureImageId,
-  accessoryPlacement: pristine.accessoryPlacement,
   ...overrides,
 });
 
@@ -105,30 +102,6 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       {}
-    );
-  });
-
-  it("patches normalized accessory placement edits", () => {
-    assert.deepEqual(
-      buildBotCustomizerSavePatch(
-        currentFromPristine({
-          accessoryPlacement: {
-            xPct: 84.126,
-            yPct: -112.5,
-            sizePct: 125.333,
-            layer: "front",
-          },
-        }),
-        pristine
-      ),
-      {
-        accessoryPlacement: {
-          xPct: 84.13,
-          yPct: -112.5,
-          sizePct: 125.33,
-          layer: "front",
-        },
-      }
     );
   });
 

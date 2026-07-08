@@ -3,11 +3,9 @@ import { decryptJson, decryptText, encryptJson, encryptText } from "./security.t
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
-  normalizeBotAccessoryPlacement,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
-  type BotAccessoryLayer,
   type BotFaceFontId,
 } from "@localai/shared";
 import {
@@ -90,10 +88,6 @@ export interface BackupBotSnapshot {
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
   faceFontWeight?: number | null;
-  accessoryXPct?: number | null;
-  accessoryYPct?: number | null;
-  accessorySizePct?: number | null;
-  accessoryLayer?: BotAccessoryLayer | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -401,10 +395,6 @@ export function exportUserSnapshot(
          face_eye_character,
          face_mouth_font,
          face_font_weight,
-         accessory_x_pct,
-         accessory_y_pct,
-         accessory_size_pct,
-         accessory_layer,
          chat_enabled,
          visibility,
          created_at,
@@ -437,10 +427,6 @@ export function exportUserSnapshot(
     face_eye_character: string | null;
     face_mouth_font: string | null;
     face_font_weight: number | null;
-    accessory_x_pct: number | null;
-    accessory_y_pct: number | null;
-    accessory_size_pct: number | null;
-    accessory_layer: string | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -527,14 +513,7 @@ export function exportUserSnapshot(
     version: 1,
     exportedAt: new Date().toISOString(),
     settings,
-    bots: bots.map((bot) => {
-      const accessoryPlacement = normalizeBotAccessoryPlacement({
-        xPct: bot.accessory_x_pct,
-        yPct: bot.accessory_y_pct,
-        sizePct: bot.accessory_size_pct,
-        layer: bot.accessory_layer,
-      });
-      return {
+    bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
         systemPrompt: bot.system_prompt,
@@ -559,16 +538,11 @@ export function exportUserSnapshot(
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
-        accessoryXPct: accessoryPlacement.xPct,
-        accessoryYPct: accessoryPlacement.yPct,
-        accessorySizePct: accessoryPlacement.sizePct,
-        accessoryLayer: accessoryPlacement.layer,
         chatEnabled: bot.chat_enabled !== 0,
         visibility: bot.visibility === "public" ? "public" : "private",
         createdAt: bot.created_at,
         updatedAt: bot.updated_at,
-      };
-    }),
+      })),
     conversations: conversationPayload,
     memories: memories.map((memory) => ({
       id: memory.id,
@@ -770,25 +744,15 @@ export function importUserSnapshot(
         face_eye_character,
         face_mouth_font,
         face_font_weight,
-        accessory_x_pct,
-        accessory_y_pct,
-        accessory_size_pct,
-        accessory_layer,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
       const now = new Date().toISOString();
-      const accessoryPlacement = normalizeBotAccessoryPlacement({
-        xPct: bot.accessoryXPct,
-        yPct: bot.accessoryYPct,
-        sizePct: bot.accessorySizePct,
-        layer: bot.accessoryLayer,
-      });
       insertBot.run(
         bot.id.trim(),
         userId,
@@ -826,10 +790,6 @@ export function importUserSnapshot(
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
         normalizeBotFaceFontId(bot.faceMouthFont),
         normalizeBotFaceFontWeight(bot.faceFontWeight),
-        accessoryPlacement.xPct,
-        accessoryPlacement.yPct,
-        accessoryPlacement.sizePct,
-        accessoryPlacement.layer,
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,

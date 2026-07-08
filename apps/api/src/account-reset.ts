@@ -5,6 +5,7 @@ import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   DEFAULT_ZEN_MOOD_SENSITIVITY,
+  DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE,
   DEFAULT_ZEN_WALLPAPER_BLURRED_EDGES_ENABLED,
   DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
@@ -89,6 +90,7 @@ export function restoreFactoryDefaultsInDatabase(
           zen_ask_question_patience_enabled = ?,
           zen_ask_question_patience_ms = ?,
           zen_autonomy_enabled = 0,
+          zen_persona_transition_choice = ?,
           composer_writing_assist = 1,
           fallback_model_message_stripe = 1,
           prism_default_bot_name = NULL,
@@ -132,6 +134,7 @@ export function restoreFactoryDefaultsInDatabase(
         DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
         DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
         DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+        DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE,
         nowIso,
         userId
       ) as {

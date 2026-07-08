@@ -31,7 +31,7 @@ interface SettingsPanelProps {
   scope: SettingsScope;
   settingsLoaded: boolean;
   panelClosing?: boolean;
-  headerAccessory?: ReactNode;
+  headerAction?: ReactNode;
   onScopeChange: (scope: SettingsScope) => void;
   onClose: () => void;
   renderScopeContent: (scope: SettingsLeafScope) => ReactNode;
@@ -75,7 +75,7 @@ export function SettingsPanel({
   scope,
   settingsLoaded,
   panelClosing,
-  headerAccessory,
+  headerAction,
   onScopeChange,
   onClose,
   renderScopeContent,
@@ -98,7 +98,7 @@ export function SettingsPanel({
           <h3 id="settings-panel-title">Settings</h3>
         </div>
         <div className={styles.panelHeaderActions}>
-          {headerAccessory}
+          {headerAction}
           <button
             type="button"
             className={styles.panelClose}
