@@ -39,8 +39,10 @@ function coffeeSeatEmojiPartForGlyph(args: {
   baseGlyph: string | undefined;
   index: number;
 }): "eyes" | "mouth" {
-  if (args.baseText.includes("*")) {
-    return args.baseGlyph === "*" ? "mouth" : "eyes";
+  if (Array.from(args.baseText).some((glyph) => COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph))) {
+    return args.baseGlyph !== undefined && COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(args.baseGlyph)
+      ? "mouth"
+      : "eyes";
   }
   return args.index === 0 ? "eyes" : "mouth";
 }
@@ -86,6 +88,7 @@ type CoffeeSeatPlateBlinkState = {
 const COFFEE_SEAT_BLINK_HALF_FRAME_MS = 46;
 const COFFEE_SEAT_THINKING_SPINNER_FRAME_MS = 142;
 const COFFEE_SEAT_THINKING_SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
+const COFFEE_SEAT_SIP_MOUTH_GLYPHS = new Set(["*", "⁎"]);
 
 function coffeeSeatClosedBlinkHoldMs(): number {
   return randomBetween(58, 92);
@@ -221,7 +224,11 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceWeight = thinkingSpinnerActive
     ? undefined
     : normalizeFaceFontWeight(faceFontWeight);
-  const mouthOpen = !thinkingSpinnerActive && !questionGlyphActive && /[0oO*]/.test(baseText);
+  const mouthOpen =
+    !thinkingSpinnerActive &&
+    !questionGlyphActive &&
+    (/[0oO]/.test(baseText) ||
+      Array.from(baseText).some((glyph) => COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph)));
   const thinkingSpinnerGlyph =
     COFFEE_SEAT_THINKING_SPINNER_FRAMES[
       thinkingSpinnerFrameIndex % COFFEE_SEAT_THINKING_SPINNER_FRAMES.length

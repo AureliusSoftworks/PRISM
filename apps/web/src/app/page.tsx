@@ -50,8 +50,11 @@ import {
   shouldRedirectToLoginForApiFailure,
   type AuthReauthRequiredDetail,
 } from "./authReauth";
+import {
+  decideAuthBootstrapFailure,
+  isAbortLikeError,
+} from "./authBootstrap";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
-import { loadTintedBotAccessoryUrl, normalizeBotAccessoryTintHex } from "./botAccessoryTint";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
 import {
   buildCoffeeCupVisualState,
@@ -75,6 +78,7 @@ import {
   COFFEE_POT_FINAL_POUR_FRAME_INDEX,
   COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS,
   COFFEE_POT_POUR_FRAME_INDICES,
+  COFFEE_POT_RETURN_MS,
   coffeeCupTopOffFillFrameIndices,
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
@@ -86,9 +90,12 @@ import {
   coffeePotRefillCanComplete,
   coffeePotRestImageUrl,
   coffeePotRefillTargetState,
+  type CoffeePotAssetTheme,
 } from "./coffee-pot-refill";
 import {
   coffeePlateFaceScaleYFromSeatHorizontalSide,
+  coffeeSeatCanvasLeftPercent,
+  coffeeSeatCanvasLightingFromLeftPercent,
   coffeeHeadGazeHorizontalSign,
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeSeatHorizontalSideFromLeftPercent,
@@ -103,7 +110,9 @@ import {
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
+  coffeeGeneratedReplyRevealDeferralMs,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
@@ -300,8 +309,9 @@ import {
 	  Pause,
 	  PencilLine,
 	  Play,
-	  Plus,
-	  RotateCcw,
+  Plus,
+  Recycle,
+  RotateCcw,
   ScanLine,
   SkipBack,
   SkipForward,
@@ -325,7 +335,6 @@ import {
   BOT_FACE_FONT_WEIGHT_STEP,
   BOT_VOICE_PRESET_LABELS,
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
-  DEFAULT_BOT_ACCESSORY_PLACEMENT,
   MAX_CUSTOM_FACTS,
   ageFromIsoBirthday,
   classifyMemoryCategoryFromText,
@@ -360,8 +369,6 @@ import {
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
-  botAccessoryPlacementsEqual,
-  normalizeBotAccessoryPlacement,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
@@ -386,7 +393,6 @@ import {
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
   derivePrismMoodKey,
-  type BotAccessoryPlacement,
   type BotCustomFact,
   type BotFaceFontId,
   type BotFaceStyle,
@@ -599,9 +605,7 @@ import {
 } from "./prismBotMarkdownNav";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
-  BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
   BOT_ARCHIVE_MIME,
-  DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
   PRISM_BOT_ARCHIVE_SCHEMA,
   createPrismBotArchive,
   parsePrismBotArchive,
@@ -626,7 +630,6 @@ import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 import {
   composerShortcutInsertionText,
-  composerShortcutTokenExactlyMatchesAnyCommand,
   normalizeComposerShortcutQuery,
 } from "./composerShortcutCompletion";
 import {
@@ -756,9 +759,9 @@ function ZenPersonaTransitionChoiceControl({
   compact?: boolean;
 }): React.JSX.Element {
   const labels: Record<ZenPersonaTransitionChoice, string> = {
-    random: compact ? "Rand" : "Random",
-    "new-speaks": compact ? "New" : "New speaks",
-    "previous-introduces": compact ? "Intro" : "Introduce",
+    random: "Random",
+    "new-speaks": "New",
+    "previous-introduces": "Intro",
     off: "Off",
   };
   return (
@@ -778,7 +781,7 @@ function ZenPersonaTransitionChoiceControl({
           icon="help"
         >
           Controls the handoff when you change Facets after Zen has started: Random chooses
-          between Off, New, and Introduce. Off switches silently.
+          between Off, New, and Intro. Off switches silently.
         </PanelSectionInfo>
       </span>
       <div className={styles.zenPersonaTransitionSegments}>
@@ -798,6 +801,16 @@ function ZenPersonaTransitionChoiceControl({
       </div>
     </div>
   );
+}
+
+function normalizeZenPersonaTransitionChoice(
+  value: unknown,
+  fallback: ZenPersonaTransitionChoice = "random"
+): ZenPersonaTransitionChoice {
+  return typeof value === "string" &&
+    (ZEN_PERSONA_TRANSITION_CHOICES as readonly string[]).includes(value)
+    ? (value as ZenPersonaTransitionChoice)
+    : fallback;
 }
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
@@ -2457,11 +2470,33 @@ const BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT: ZenLiveBotBodyPlacement = {
 const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;
 const BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX = 300;
 const BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM = 3.8;
+const BOT_AVATAR_SAVE_TIMEOUT_MS = 15000;
 const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT: ZenLiveBotFacePlacement = {
   xPct: 50.0,
-  yPct: 45.0,
+  yPct: 46.5,
   scale: 1.68,
 };
+
+async function withBotAvatarSaveTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, BOT_AVATAR_SAVE_TIMEOUT_MS);
+  try {
+    return await operation(controller.signal);
+  } catch (err) {
+    if (timedOut && isAbortLikeError(err)) {
+      throw new Error("Avatar save took too long. Please try again.");
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 function readZenLiveBotAvatarPosition(): ZenLiveBotAvatarPosition | null {
   if (typeof window === "undefined") return null;
@@ -5455,6 +5490,7 @@ function coffeeTeamOutcomeText(state: CoffeeTeamState | null | undefined): strin
 }
 const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
+const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
 const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
 const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
@@ -6116,6 +6152,9 @@ interface CoffeePotDragState {
   pointerId: number;
   x: number;
   y: number;
+  returnX?: number;
+  returnY?: number;
+  returning?: boolean;
   pouringBotId: string | null;
   pourProgress: number | null;
   pourReady: boolean;
@@ -6964,109 +7003,6 @@ function resolveMessageFaceStyleForDisplayBot(
 function botStoredImageUrl(imageId: string | null | undefined): string | null {
   const trimmed = imageId?.trim();
   return trimmed ? `/api/images/${encodeURIComponent(trimmed)}/file` : null;
-}
-
-function botAccessoryPlacementFromBot(bot: Bot | null | undefined): BotAccessoryPlacement {
-  return normalizeBotAccessoryPlacement({
-    xPct: bot?.accessory_x_pct,
-    yPct: bot?.accessory_y_pct,
-    sizePct: bot?.accessory_size_pct,
-    layer: bot?.accessory_layer,
-  });
-}
-
-function clearBotAccessoryFields(bot: Bot): Bot {
-  return {
-    ...bot,
-    accessory_image_id: null,
-    accessory_x_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.xPct,
-    accessory_y_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.yPct,
-    accessory_size_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.sizePct,
-    accessory_layer: DEFAULT_BOT_ACCESSORY_PLACEMENT.layer,
-  };
-}
-
-const BOT_ACCESSORY_RENDER_FIELD_SCALE = 4.4;
-const BOT_ACCESSORY_RENDER_FIELD_INSET_PCT =
-  -((BOT_ACCESSORY_RENDER_FIELD_SCALE - 1) / 2) * 100;
-
-function botAccessoryPlacementLayerStyle(
-  accessoryUrl: string,
-  placement: BotAccessoryPlacement
-): CSSProperties {
-  const normalized = normalizeBotAccessoryPlacement(placement);
-  const fieldOffsetScale = BOT_ACCESSORY_RENDER_FIELD_SCALE;
-  return {
-    backgroundImage: `url("${accessoryUrl}")`,
-    "--bot-accessory-x-pct": `${normalized.xPct}%`,
-    "--bot-accessory-y-pct": `${normalized.yPct}%`,
-    "--bot-accessory-size-pct": `${normalized.sizePct}%`,
-    "--bot-accessory-field-inset-pct": `${BOT_ACCESSORY_RENDER_FIELD_INSET_PCT}%`,
-    "--bot-accessory-field-x-pct": `${normalized.xPct / fieldOffsetScale}%`,
-    "--bot-accessory-field-y-pct": `${normalized.yPct / fieldOffsetScale}%`,
-    "--bot-accessory-field-size-pct": `${normalized.sizePct / fieldOffsetScale}%`,
-  } as CSSProperties;
-}
-
-function useBotAccessoryRenderUrl(
-  accessoryUrl: string | null,
-  botColor: string | null | undefined
-): string | null {
-  const normalizedBotColor = normalizeBotAccessoryTintHex(botColor);
-  const [renderUrl, setRenderUrl] = useState<string | null>(accessoryUrl);
-
-  useEffect(() => {
-    let cancelled = false;
-    setRenderUrl(accessoryUrl);
-    if (!accessoryUrl || !normalizedBotColor) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    void loadTintedBotAccessoryUrl(accessoryUrl, normalizedBotColor).then((tintedUrl) => {
-      if (cancelled) return;
-      setRenderUrl(tintedUrl ?? accessoryUrl);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [accessoryUrl, normalizedBotColor]);
-
-  return renderUrl;
-}
-
-interface BotAccessoryRasterProps {
-  className: string;
-  accessoryUrl: string;
-  accessoryPlacement: BotAccessoryPlacement;
-  botColor: string | null | undefined;
-}
-
-function BotAccessoryRaster({
-  className,
-  accessoryUrl,
-  accessoryPlacement,
-  botColor,
-}: BotAccessoryRasterProps): React.JSX.Element {
-  const renderUrl = useBotAccessoryRenderUrl(accessoryUrl, botColor) ?? accessoryUrl;
-  return (
-    <span
-      className={className}
-      style={botAccessoryPlacementLayerStyle(renderUrl, accessoryPlacement)}
-      aria-hidden="true"
-    />
-  );
-}
-
-function botAccessoryPlacementEditorStyle(
-  placement: BotAccessoryPlacement
-): CSSProperties {
-  const normalized = normalizeBotAccessoryPlacement(placement);
-  return {
-    "--bot-accessory-x-pct": `${normalized.xPct}%`,
-    "--bot-accessory-y-pct": `${normalized.yPct}%`,
-    "--bot-accessory-size-pct": `${normalized.sizePct}%`,
-  } as CSSProperties;
 }
 
 function readImageFileAsDataUrl(file: File): Promise<string> {
@@ -8793,6 +8729,7 @@ interface UserSettings {
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
+  zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   lenientLocalFallbackModel: string;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
   lenientLocalImageFallbackModel: string;
@@ -9262,11 +9199,6 @@ interface Bot {
   face_mouth_font?: string | null;
   face_font_weight?: number | null;
   profile_picture_image_id?: string | null;
-  accessory_image_id?: string | null;
-  accessory_x_pct?: number | null;
-  accessory_y_pct?: number | null;
-  accessory_size_pct?: number | null;
-  accessory_layer?: string | null;
   chat_enabled: number;
 }
 
@@ -9293,7 +9225,6 @@ type BotEditOriginalSnapshot = {
   faceMouthFont: BotFaceFontId;
   faceFontWeight: number;
   profilePictureImageId: string | null;
-  accessoryPlacement: BotAccessoryPlacement;
 };
 
 function replaceBotRowById(rows: Bot[], updatedBot: Bot): Bot[] {
@@ -9318,9 +9249,6 @@ function normalizeBotAvatarAutosavePatch(
   if (patch.faceFontWeight !== undefined) {
     next.faceFontWeight =
       normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight;
-  }
-  if (patch.accessoryPlacement !== undefined) {
-    next.accessoryPlacement = normalizeBotAccessoryPlacement(patch.accessoryPlacement);
   }
   return next;
 }
@@ -9363,10 +9291,6 @@ function applyBotAvatarAutosavePatchToSnapshot(
       patch.faceFontWeight !== undefined
         ? normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight
         : snapshot.faceFontWeight,
-    accessoryPlacement:
-      patch.accessoryPlacement !== undefined
-        ? normalizeBotAccessoryPlacement(patch.accessoryPlacement)
-        : snapshot.accessoryPlacement,
   };
 }
 
@@ -9485,7 +9409,6 @@ const BUILT_IN_COMMAND_NAMES = new Set([
   "compact",
   "clear",
   "atmosphere",
-  "refresh",
   "restart",
   "new-session",
   "forgive-me",
@@ -9512,6 +9435,8 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   "cls",
   "atmosphere",
   ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES,
+  // Deprecated: keep reserved so stale saved /refresh commands disappear
+  // instead of reappearing as editable custom prompts.
   "refresh",
   "restart",
   "new-session",
@@ -9853,22 +9778,6 @@ function createBuiltInAtmosphereCommand(): CommandCenterCommand {
     title: "atmosphere",
     command: "Generates a fresh Zen Atmosphere wallpaper immediately.",
     aliases: [...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES],
-    arguments: [],
-    builtIn: true,
-    readOnly: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function createBuiltInRefreshCommand(): CommandCenterCommand {
-  const now = new Date().toISOString();
-  return {
-    id: "builtin:/refresh",
-    name: "refresh",
-    title: "refresh",
-    command: "Refreshes the Prism web page.",
-    aliases: [],
     arguments: [],
     builtIn: true,
     readOnly: true,
@@ -10344,7 +10253,6 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInCompactCommand(),
     createBuiltInClearCommand(),
     createBuiltInAtmosphereCommand(),
-    createBuiltInRefreshCommand(),
     createBuiltInRestartCommand(),
     createBuiltInNewSessionCommand(),
     createBuiltInForgiveMeCommand(),
@@ -14630,17 +14538,6 @@ function formatImageGenElapsed(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** True when `fetch` was aborted (user cancel or navigation). */
-function isAbortLikeError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (err.name === "AbortError") return true;
-  return (
-    typeof DOMException !== "undefined" &&
-    err instanceof DOMException &&
-    err.name === "AbortError"
-  );
-}
-
 /** Transport-layer failures hide behind vague messages or bare `TypeError` on some browsers. */
 function looksLikeDisconnectedFetchFailure(err: unknown, path: string): boolean {
   const top = err instanceof Error ? err.message : String(err ?? "");
@@ -16572,6 +16469,7 @@ const BOT_GLYPHS: Record<string, BotGlyphDefinition> = {
 };
 
 const DEFAULT_BOT_GLYPH: BotGlyphName = "bot";
+const DEFAULT_PRISM_BOT_GLYPH: BotGlyphName = "triangle";
 const DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR = "#f3f3f3";
 
 function isBotGlyphName(value: string | null | undefined): value is BotGlyphName {
@@ -22570,29 +22468,6 @@ function replaceTextareaComposerShortcut(
   return replaceTextareaComposerShortcutWithText(text, caret, replacement, scope);
 }
 
-function editorComposerShortcutExactlyMatchesAnyCommand(
-  editor: Editor,
-  scope: ComposerShortcutScope,
-  commands: readonly CommandCenterCommand[]
-): boolean {
-  return composerShortcutTokenExactlyMatchesAnyCommand(
-    getComposerShortcutFromEditor(editor, scope),
-    commands.filter((command) => !isComposerTrueWildcardSlotPick(command))
-  );
-}
-
-function textareaComposerShortcutExactlyMatchesAnyCommand(
-  text: string,
-  caret: number,
-  scope: ComposerShortcutScope,
-  commands: readonly CommandCenterCommand[]
-): boolean {
-  return composerShortcutTokenExactlyMatchesAnyCommand(
-    getComposerShortcutFromTextarea(text, caret, scope),
-    commands.filter((command) => !isComposerTrueWildcardSlotPick(command))
-  );
-}
-
 function shouldBlockEditorTextAfterLeadingCommand(
   editor: Editor,
   from: number,
@@ -23835,9 +23710,6 @@ function ZenActionComposerPreview({ cue }: { cue: ZenActionCue }): React.JSX.Ele
 
 interface ZenLiveBotMannequinProps {
   glyph: BotGlyphName;
-  accessoryUrl: string | null;
-  accessoryPlacement: BotAccessoryPlacement;
-  accessoryTintColor?: string | null;
   faceStyle: BotFaceStyle;
   voicePreset: BotVoicePreset;
   isTalking: boolean;
@@ -23848,15 +23720,10 @@ interface ZenLiveBotMannequinProps {
   thinkingScheduleKey?: string;
   showThinkingSpinner?: boolean;
   showQuestionMark?: boolean;
-  accessoryLayerRef?: RefObject<HTMLSpanElement | null>;
-  accessoryEditorOverlay?: React.ReactNode;
 }
 
 function ZenLiveBotMannequin({
   glyph,
-  accessoryUrl,
-  accessoryPlacement,
-  accessoryTintColor,
   faceStyle,
   voicePreset,
   isTalking,
@@ -23867,46 +23734,17 @@ function ZenLiveBotMannequin({
   thinkingScheduleKey,
   showThinkingSpinner = false,
   showQuestionMark = false,
-  accessoryLayerRef,
-  accessoryEditorOverlay,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const plateFace =
     isTalking && mouthShape === "closed"
       ? { text: ":|", rotateDeg: 90 }
       : zenLiveActionPlateFace(moodHint, mouthShape);
-  const normalizedAccessoryPlacement = normalizeBotAccessoryPlacement(accessoryPlacement);
-  const accessoryRasterLayer = accessoryUrl ? (
-    <span
-      ref={accessoryEditorOverlay ? undefined : accessoryLayerRef}
-      className={styles.zenLiveBotPresenceAccessoryLayer}
-      data-accessory-layer={normalizedAccessoryPlacement.layer}
-      aria-hidden="true"
-    >
-      <BotAccessoryRaster
-        className={styles.zenLiveBotPresenceAccessoryRaster}
-        accessoryUrl={accessoryUrl}
-        accessoryPlacement={normalizedAccessoryPlacement}
-        botColor={accessoryTintColor}
-      />
-    </span>
-  ) : null;
-  const accessoryEditLayer = accessoryEditorOverlay ? (
-    <span
-      ref={accessoryLayerRef}
-      className={styles.zenLiveBotPresenceAccessoryEditLayer}
-      aria-hidden="true"
-    >
-      {accessoryEditorOverlay}
-    </span>
-  ) : null;
 
   return (
     <span
       className={styles.zenLiveBotPresenceBody}
       data-zen-live-bot-body-layer="true"
     >
-      {accessoryRasterLayer}
-      {accessoryEditLayer}
       <span
         className={styles.zenLiveBotPresenceFace}
         data-zen-live-bot-body-frame="true"
@@ -23917,10 +23755,12 @@ function ZenLiveBotMannequin({
           data-zen-live-bot-body-hit-target="true"
           aria-hidden="true"
         />
+        <BotFaceFrame />
+      </span>
+      <span className={styles.zenLiveBotPresenceFaceEmissionMask} aria-hidden="true">
         {showThinkingSpinner ? (
           <span
             className={styles.zenLiveBotPresenceThinkingGlyphAnchor}
-            aria-hidden="true"
           >
             <CoffeeSeatPlateEmoji
               enabled
@@ -23937,32 +23777,29 @@ function ZenLiveBotMannequin({
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
             />
           </span>
-        ) : null}
-        <BotFaceFrame />
+        ) : (
+          <span
+            className={styles.zenLiveBotPresenceFaceRig}
+            data-zen-live-bot-face-rig="true"
+          >
+            <CoffeeSeatPlateEmoji
+              enabled
+              isTalking={isTalking}
+              scheduleKey={scheduleKey}
+              showQuestionMark={showQuestionMark}
+              baseText={plateFace.text}
+              rotateDeg={plateFace.rotateDeg}
+              voicePreset={voicePreset}
+              blinkWhileTalking={blinkWhileTalking}
+              faceEyesFont={faceStyle.eyesFont}
+              faceEyeCharacter={faceStyle.eyeCharacter}
+              faceMouthFont={faceStyle.mouthFont}
+              faceFontWeight={faceStyle.weight}
+              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
+            />
+          </span>
+        )}
       </span>
-      {!showThinkingSpinner ? (
-        <span
-          className={styles.zenLiveBotPresenceFaceRig}
-          data-zen-live-bot-face-rig="true"
-          aria-hidden="true"
-        >
-          <CoffeeSeatPlateEmoji
-            enabled
-            isTalking={isTalking}
-            scheduleKey={scheduleKey}
-            showQuestionMark={showQuestionMark}
-            baseText={plateFace.text}
-            rotateDeg={plateFace.rotateDeg}
-            voicePreset={voicePreset}
-            blinkWhileTalking={blinkWhileTalking}
-            faceEyesFont={faceStyle.eyesFont}
-            faceEyeCharacter={faceStyle.eyeCharacter}
-            faceMouthFont={faceStyle.mouthFont}
-            faceFontWeight={faceStyle.weight}
-            className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
-          />
-        </span>
-      ) : null}
       <span className={styles.zenLiveBotPresenceScreenGlassOverlay} aria-hidden="true">
         <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
       </span>
@@ -23981,6 +23818,8 @@ function ZenLiveBotPresencePlate({
   actionState,
   replyActionText,
   userActionVisible,
+  defaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH,
+  defaultPrismFaceStyle,
   defaultPrismPresenceVisible = false,
   defaultPrismPresenceForming = false,
   askQuestionActive = false,
@@ -23997,6 +23836,8 @@ function ZenLiveBotPresencePlate({
   actionState: ZenLiveBotActionState | null;
   replyActionText?: string | null;
   userActionVisible: boolean;
+  defaultPrismGlyph?: BotGlyphName;
+  defaultPrismFaceStyle?: BotFaceStyle;
   defaultPrismPresenceVisible?: boolean;
   defaultPrismPresenceForming?: boolean;
   askQuestionActive?: boolean;
@@ -24011,7 +23852,7 @@ function ZenLiveBotPresencePlate({
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const liveBotGlyphName: BotGlyphName =
-    bot && isBotGlyphName(bot.glyph) ? bot.glyph : "triangle";
+    bot && isBotGlyphName(bot.glyph) ? bot.glyph : defaultPrismGlyph;
   const bodySize = ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
   const bodyPlacement = ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
@@ -24862,14 +24703,11 @@ function ZenLiveBotPresencePlate({
   }
   const defaultPrismPresence = bot === null;
   const moodHint =
-    actionState?.moodHint ?? (bot ? "warm" : userActionVisible ? "attentive" : "waiting");
+    actionState?.moodHint ?? (bot ? "warm" : userActionVisible ? "attentive" : "warm");
   const voicePreset = coffeeSeatVoicePreset(bot);
-  const faceStyle = resolveBotFaceStyleForBot(bot);
-  const accessoryUrl = botStoredImageUrl(bot?.accessory_image_id);
-  const accessoryPlacement = botAccessoryPlacementFromBot(bot);
-  const accessoryTintColor = bot?.color
-    ? normalizeAccentForTheme(bot.color, resolvedTheme)
-    : null;
+  const faceStyle = bot
+    ? resolveBotFaceStyleForBot(bot)
+    : defaultPrismFaceStyle ?? DEFAULT_BOT_FACE_STYLE;
   const faceScaleY = zenLiveBotFaceScaleYForCanvasSide(avatarCanvasSide);
   const botAccent = botAccentStyle(bot?.color ?? PRISM_DEFAULT_ACCENT, resolvedTheme);
   const avatarStyle = {
@@ -24886,8 +24724,8 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-copy-vertical-anchor": `${Math.round(bodySize * 0.72)}px`,
     "--zen-live-bot-copy-top-anchor": `${Math.round(bodySize * -0.02)}px`,
     "--zen-live-bot-copy-side-anchor": `${Math.round(bodySize * 0.42)}px`,
-    "--zen-live-bot-glyph-x-anchor": "1px",
-    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.29) + 1}px`,
+    "--zen-live-bot-glyph-x-anchor": "0px",
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
     "--bot-face-metal-light-rotation": `${avatarMetalRotation.toFixed(2)}deg`,
     "--bot-face-screen-glare-x": `${avatarScreenGlare.xPct.toFixed(2)}%`,
     "--bot-face-screen-glare-y": `${avatarScreenGlare.yPct.toFixed(2)}%`,
@@ -24937,7 +24775,6 @@ function ZenLiveBotPresencePlate({
       data-flinging={avatarFlinging ? "true" : undefined}
       data-body-sized="true"
       data-zen-live-bot-presence-plate="true"
-      data-accessory-equipped={accessoryUrl ? "true" : undefined}
       data-interrupt={actionState?.responseKind === "interrupt_candidate" ? "true" : undefined}
       role="status"
       aria-live="polite"
@@ -24952,9 +24789,6 @@ function ZenLiveBotPresencePlate({
     >
       <ZenLiveBotMannequin
         glyph={liveBotGlyphName}
-        accessoryUrl={accessoryUrl}
-        accessoryPlacement={accessoryPlacement}
-        accessoryTintColor={accessoryTintColor}
         faceStyle={faceStyle}
         voicePreset={voicePreset}
         isTalking={faceTalking}
@@ -26972,7 +26806,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             }
             if (
               activeEditor &&
-              (event.key !== "Enter" || event.shiftKey) &&
+              event.key !== "Enter" &&
               isPlainTextInsertionKey({
                 key: event.key,
                 altKey: event.altKey,
@@ -26992,26 +26826,11 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
             }
             if (activeEditor && !event.shiftKey) {
               if (
+                event.key !== "Enter" &&
                 shouldAcceptComposerShortcutCompletionKey(event) &&
                 commandUiRef.current.open &&
                 commandUiRef.current.filtered.length > 0
               ) {
-                if (
-                  event.key === "Enter" &&
-                  editorComposerShortcutExactlyMatchesAnyCommand(
-                    activeEditor,
-                    commandUiRef.current.scope,
-                    commandUiRef.current.filtered
-                  )
-                ) {
-                  event.preventDefault();
-                  setCommandUi((s) =>
-                    s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
-                  );
-                  const form = (event.target as HTMLElement).closest("form");
-                  form?.requestSubmit();
-                  return true;
-                }
                 event.preventDefault();
                 const filtered = commandUiRef.current.filtered;
                 const hi =
@@ -27030,7 +26849,7 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
                 return true;
               }
               if (
-                (event.key === "Tab" || event.key === "Enter") &&
+                event.key === "Tab" &&
                 !event.shiftKey
               ) {
                 if (mentionUiRef.current.open) {
@@ -27141,33 +26960,14 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
               }
             }
             if (submitOnEnter && event.key === "Enter" && !event.shiftKey) {
-              const activeEditor = editorRef.current;
-              const insideMarkdownList = Boolean(
-                (activeEditor && editorSelectionIsInsideMarkdownList(activeEditor)) ||
-                selectionIsInsideMarkdownList(view.state) ||
-                domSelectionIsInsideMarkdownList(view.dom)
-              );
-              if (activeEditor && insideMarkdownList) {
-                event.preventDefault();
-                event.stopPropagation();
-                if (
-                  activeEditor.commands.splitListItem("listItem") ||
-                  activeEditor.commands.liftListItem("listItem")
-                ) {
-                  return true;
-                }
-                const form = (event.target as HTMLElement).closest("form");
-                form?.requestSubmit();
-                return true;
-              }
-              if (
-                selectionIsInsideMarkdownList(view.state) ||
-                domSelectionIsInsideMarkdownList(view.dom)
-              ) {
-                event.stopPropagation();
-                return false;
-              }
               event.preventDefault();
+              event.stopPropagation();
+              setCommandUi((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
+              setMentionUi((s) =>
+                s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+              );
               const form = (event.target as HTMLElement).closest("form");
               form?.requestSubmit();
               return true;
@@ -27368,60 +27168,22 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
       (event: React.KeyboardEvent<HTMLDivElement>) => {
         if (!submitOnEnter) return;
         if (event.key !== "Enter") return;
-        const activeEditor = editor;
-        if (
-          !event.shiftKey &&
-          commandUiRef.current.open &&
-          commandUiRef.current.filtered.length > 0
-        ) {
-          if (
-            !activeEditor ||
-            !editorComposerShortcutExactlyMatchesAnyCommand(
-              activeEditor,
-              commandUiRef.current.scope,
-              commandUiRef.current.filtered
-            )
-          ) {
-            return;
-          }
-          setCommandUi((s) =>
-            s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
-          );
-        }
-
-        const root = event.currentTarget;
-        const insideMarkdownList = Boolean(
-          (activeEditor && editorSelectionIsInsideMarkdownList(activeEditor)) ||
-          domSelectionIsInsideMarkdownList(root)
+        if (event.shiftKey) return;
+        setCommandUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
+        );
+        setMentionUi((s) =>
+          s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
         );
 
-        if (event.shiftKey) {
-          if (!insideMarkdownList) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const form = root.closest("form");
-          form?.requestSubmit();
-          return;
-        }
-
+        const root = event.currentTarget;
         event.preventDefault();
         event.stopPropagation();
-
-        if (
-          insideMarkdownList &&
-          activeEditor &&
-          (
-            activeEditor.commands.splitListItem("listItem") ||
-            activeEditor.commands.liftListItem("listItem")
-          )
-        ) {
-          return;
-        }
 
         const form = root.closest("form");
         form?.requestSubmit();
       },
-      [editor, submitOnEnter]
+      [submitOnEnter]
     );
 
     const composeFormForTheme = getMountedEditorDom(editor)?.closest("form") ?? null;
@@ -28835,7 +28597,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     return;
                   }
                   if (
-                    (event.key !== "Enter" || event.shiftKey) &&
+                    event.key !== "Enter" &&
                     isPlainTextInsertionKey(event) &&
                     shouldBlockTextareaTextAfterLeadingCommand(
                       el.value,
@@ -28848,25 +28610,12 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     return;
                   }
                   if (
+                    event.key !== "Enter" &&
                     shouldAcceptComposerShortcutCompletionKey(event) &&
                     !event.shiftKey &&
                     taCommandRef.current.open &&
                     taCommandRef.current.filtered.length > 0
                   ) {
-                    if (
-                      event.key === "Enter" &&
-                      textareaComposerShortcutExactlyMatchesAnyCommand(
-                        el.value,
-                        el.selectionStart ?? 0,
-                        taCommandRef.current.scope,
-                        taCommandRef.current.filtered
-                      )
-                    ) {
-                      setTaCommand((s) =>
-                        s.open ? { ...s, open: false, caretRect: null, filtered: [] } : s
-                      );
-                      return;
-                    }
                     event.preventDefault();
                     const filtered = taCommandRef.current.filtered;
                     const hi =
@@ -28884,7 +28633,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
                     return;
                   }
                   if (
-                    (event.key === "Tab" || event.key === "Enter") &&
+                    event.key === "Tab" &&
                     !event.shiftKey &&
                     taMentionRef.current.open
                   ) {
@@ -29168,19 +28917,14 @@ interface BotAvatarCustomizerModalProps {
   scheduleKey: string;
   color: string;
   glyph: BotGlyphName;
+  isDefaultPrismBot?: boolean;
+  identityControlsVisible?: boolean;
   colorPickerOpen: boolean;
   resolvedTheme: "light" | "dark";
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
   faceMouthFont: BotFaceFontId;
   faceFontWeight: number;
-  accessoryUrl: string | null;
-  accessoryImageId: string | null;
-  accessoryPlacement: BotAccessoryPlacement;
-  accessoryBusy: boolean;
-  accessoryActionsDisabled: boolean;
-  accessoryActionTitle?: string;
-  accessoryUploadInputRef: RefObject<HTMLInputElement | null>;
   hasUnsavedChanges: boolean;
   saving: boolean;
   saveError: string | null;
@@ -29196,11 +28940,6 @@ interface BotAvatarCustomizerModalProps {
   onEyeCharacterChange: (character: string | null) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onWeightChange: (weight: number) => void;
-  onAccessoryPlacementChange: (placement: BotAccessoryPlacement) => void;
-  onAccessoryPlacementCommit: (placement: BotAccessoryPlacement) => void;
-  onAccessoryUploadInputChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  onAccessoryUploadClick: () => void;
-  onRemoveAccessory: () => void;
 }
 
 function optionalScaleLabel(
@@ -29313,7 +29052,8 @@ function botAvatarWeightLabel(weight: number): string {
   return "Balanced";
 }
 
-function botAvatarPreviewIdentityStyle(rawHex: string): CSSProperties {
+function botAvatarPreviewIdentityStyle(rawHex: string, prismPersona = false): CSSProperties {
+  if (prismPersona) return {};
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
   return {
     ...accentStyle,
@@ -29331,35 +29071,20 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
   "open-small",
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
-type BotAvatarAccessoryEditMode = "move" | "resize";
-
-type BotAvatarAccessoryDragState = {
-  pointerId: number;
-  mode: BotAvatarAccessoryEditMode;
-  startClientX: number;
-  startClientY: number;
-  startPlacement: BotAccessoryPlacement;
-};
-
 function BotAvatarCustomizerModal({
   open,
   botName,
   scheduleKey,
   color,
   glyph,
+  isDefaultPrismBot = false,
+  identityControlsVisible = true,
   colorPickerOpen,
   resolvedTheme,
   faceEyesFont,
   faceEyeCharacter,
   faceMouthFont,
   faceFontWeight,
-  accessoryUrl,
-  accessoryImageId,
-  accessoryPlacement,
-  accessoryBusy,
-  accessoryActionsDisabled,
-  accessoryActionTitle,
-  accessoryUploadInputRef,
   hasUnsavedChanges,
   saving,
   saveError,
@@ -29375,22 +29100,10 @@ function BotAvatarCustomizerModal({
   onEyeCharacterChange,
   onMouthFontChange,
   onWeightChange,
-  onAccessoryPlacementChange,
-  onAccessoryPlacementCommit,
-  onAccessoryUploadInputChange,
-  onAccessoryUploadClick,
-  onRemoveAccessory,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
-  const accessoryLayerRef = useRef<HTMLSpanElement | null>(null);
-  const accessoryDragRef = useRef<BotAvatarAccessoryDragState | null>(null);
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewHovered, setPreviewHovered] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
-  const [accessoryLocked, setAccessoryLocked] = useState(false);
-  const normalizedPlacement = normalizeBotAccessoryPlacement(accessoryPlacement);
-  const placementDisabled = !accessoryUrl || accessoryActionsDisabled;
-  const accessoryPlacementLocked = Boolean(accessoryUrl && accessoryLocked);
-  const placementDragDisabled = placementDisabled || accessoryPlacementLocked;
   const previewTalking = previewHovered;
   const previewMouthShape =
     BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
@@ -29401,9 +29114,8 @@ function BotAvatarCustomizerModal({
   const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
   const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
-  const previewAccessoryTintColor = normalizeAccentForTheme(color, "dark");
   const avatarStyle = {
-    ...botAvatarPreviewIdentityStyle(color),
+    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot),
     "--coffee-plate-emoji-face-scale-y": zenLiveBotFaceScaleYForCanvasSide("left"),
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
     "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
@@ -29413,8 +29125,8 @@ function BotAvatarCustomizerModal({
     "--zen-live-bot-avatar-size": `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
     "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM}rem`,
-    "--zen-live-bot-glyph-x-anchor": "1px",
-    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.29) + 1}px`,
+    "--zen-live-bot-glyph-x-anchor": "0px",
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
   } as CSSProperties;
 
   useEffect(() => {
@@ -29422,17 +29134,7 @@ function BotAvatarCustomizerModal({
     setPreviewTheme(resolvedTheme);
     setPreviewHovered(false);
     setMouthPhase(0);
-    setAccessoryLocked(false);
   }, [open, resolvedTheme]);
-
-  useEffect(() => {
-    setAccessoryLocked(false);
-  }, [accessoryImageId]);
-
-  useEffect(() => {
-    if (!accessoryPlacementLocked) return;
-    accessoryDragRef.current = null;
-  }, [accessoryPlacementLocked]);
 
   useEffect(() => {
     if (!open || !previewTalking) {
@@ -29448,167 +29150,8 @@ function BotAvatarCustomizerModal({
     return () => window.clearInterval(interval);
   }, [open, previewTalking]);
 
-  const placementFromDrag = useCallback(
-    (dragState: BotAvatarAccessoryDragState, clientX: number, clientY: number) => {
-      const node = accessoryLayerRef.current;
-      if (!node) return dragState.startPlacement;
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return dragState.startPlacement;
-      const faceFlipValue = window
-        .getComputedStyle(node)
-        .getPropertyValue("--coffee-plate-emoji-face-scale-y")
-        .trim();
-      const accessoryFaceFlipX =
-        faceFlipValue === "-1" ? -1 : 1;
-      const deltaXPct =
-        ((clientX - dragState.startClientX) / rect.width) * 100 * accessoryFaceFlipX;
-      const deltaYPct = ((clientY - dragState.startClientY) / rect.height) * 100;
-      if (dragState.mode === "resize") {
-        const deltaSizePct =
-          Math.abs(deltaXPct) >= Math.abs(deltaYPct) ? deltaXPct : deltaYPct;
-        return normalizeBotAccessoryPlacement({
-          ...dragState.startPlacement,
-          sizePct: dragState.startPlacement.sizePct + deltaSizePct,
-        });
-      }
-      return normalizeBotAccessoryPlacement({
-        ...dragState.startPlacement,
-        xPct: dragState.startPlacement.xPct + deltaXPct,
-        yPct: dragState.startPlacement.yPct + deltaYPct,
-      });
-    },
-    []
-  );
-  const beginAccessoryEdit = useCallback(
-    (mode: BotAvatarAccessoryEditMode, event: React.PointerEvent<HTMLElement>) => {
-      if (placementDragDisabled) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (event.button !== 0) return;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      accessoryDragRef.current = {
-        pointerId: event.pointerId,
-        mode,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startPlacement: normalizedPlacement,
-      };
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    [normalizedPlacement, placementDragDisabled]
-  );
-
-  const handleAccessoryPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (placementDragDisabled) return;
-      const dragState = accessoryDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      onAccessoryPlacementChange(placementFromDrag(dragState, event.clientX, event.clientY));
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    [onAccessoryPlacementChange, placementDragDisabled, placementFromDrag]
-  );
-
-  const finishAccessoryEdit = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = accessoryDragRef.current;
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      accessoryDragRef.current = null;
-      const nextPlacement = placementFromDrag(dragState, event.clientX, event.clientY);
-      onAccessoryPlacementChange(nextPlacement);
-      onAccessoryPlacementCommit(nextPlacement);
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    [onAccessoryPlacementChange, onAccessoryPlacementCommit, placementFromDrag]
-  );
-
-  const commitAccessoryLayer = useCallback(
-    (layer: BotAccessoryPlacement["layer"]) => {
-      if (!accessoryUrl || accessoryActionsDisabled) return;
-      const nextPlacement = normalizeBotAccessoryPlacement({
-        ...normalizedPlacement,
-        layer,
-      });
-      onAccessoryPlacementChange(nextPlacement);
-      onAccessoryPlacementCommit(nextPlacement);
-    },
-    [
-      accessoryActionsDisabled,
-      accessoryUrl,
-      normalizedPlacement,
-      onAccessoryPlacementChange,
-      onAccessoryPlacementCommit,
-    ]
-  );
-
   if (!open) return null;
 
-  const accessoryEditorOverlay = accessoryUrl && !accessoryPlacementLocked ? (
-    <span
-      className={styles.botAvatarAccessoryEditHandle}
-      style={botAccessoryPlacementEditorStyle(normalizedPlacement)}
-      data-disabled={placementDisabled ? "true" : undefined}
-      onPointerDown={(event) => beginAccessoryEdit("move", event)}
-      onPointerMove={handleAccessoryPointerMove}
-      onPointerUp={finishAccessoryEdit}
-      onPointerCancel={finishAccessoryEdit}
-    >
-      <button
-        type="button"
-        className={styles.botAvatarAccessoryCancelButton}
-        disabled={!accessoryImageId || placementDisabled}
-        title={!accessoryImageId ? "No accessory to remove" : accessoryActionTitle}
-        aria-label="Remove accessory"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onRemoveAccessory();
-        }}
-      >
-        <X size={16} strokeWidth={2.8} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className={styles.botAvatarAccessoryLockButton}
-        disabled={placementDisabled}
-        aria-label="Lock accessory placement"
-        title="Lock accessory placement"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onAccessoryPlacementCommit(normalizedPlacement);
-          setAccessoryLocked(true);
-        }}
-      >
-        <Lock size={15} strokeWidth={2.8} aria-hidden="true" />
-      </button>
-      <span
-        className={styles.botAvatarAccessoryResizeHandle}
-        onPointerDown={(event) => beginAccessoryEdit("resize", event)}
-        onPointerMove={handleAccessoryPointerMove}
-        onPointerUp={finishAccessoryEdit}
-        onPointerCancel={finishAccessoryEdit}
-      >
-        <MoveDiagonal2 size={17} strokeWidth={2.8} aria-hidden="true" />
-      </span>
-    </span>
-  ) : null;
   const saveStatusState = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
   const saveStatusLabel =
     saveStatusState === "saving"
@@ -29618,8 +29161,6 @@ function BotAvatarCustomizerModal({
         : "Saved";
   const previewFaceSummary = `${BOT_FACE_FONT_LABELS[faceEyesFont]} eyes · ${BOT_FACE_FONT_LABELS[faceMouthFont]} mouth`;
   const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
-  const accessoryLayerLabel = normalizedPlacement.layer === "back" ? "Behind" : "Front";
-  const accessorySummary = accessoryUrl ? accessoryLayerLabel : "None";
 
   const modal = (
     <div
@@ -29641,7 +29182,7 @@ function BotAvatarCustomizerModal({
           <div>
             <span>Avatar Studio</span>
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
-            <p>Identity, face, and accessory.</p>
+            <p>{identityControlsVisible ? "Identity and face." : "Default Prism face only."}</p>
           </div>
           <div className={styles.botAvatarCustomizerHeaderActions}>
             <span
@@ -29704,8 +29245,6 @@ function BotAvatarCustomizerModal({
             </header>
             <div
               className={styles.botAvatarMannequinStage}
-              data-accessory-equipped={accessoryUrl ? "true" : undefined}
-              data-accessory-editable={!placementDragDisabled ? "true" : undefined}
               data-app-cursor-theme={previewTheme}
               data-preview-theme={previewTheme}
             >
@@ -29714,7 +29253,8 @@ function BotAvatarCustomizerModal({
                 data-theme={previewTheme}
                 data-mood="warm"
                 data-prism-mood="warm"
-                data-source="persona"
+                data-source={isDefaultPrismBot ? "prism" : "persona"}
+                data-prism-persona={isDefaultPrismBot ? "true" : undefined}
                 data-talking={previewTalking ? "true" : undefined}
                 data-mouth-open={
                   previewTalking
@@ -29727,7 +29267,6 @@ function BotAvatarCustomizerModal({
                 data-canvas-side="left"
                 data-body-sized="true"
                 data-zen-live-bot-presence-plate="true"
-                data-accessory-equipped={accessoryUrl ? "true" : undefined}
                 data-avatar-customizer-preview="true"
                 data-avatar-preview-theme={previewTheme}
                 style={avatarStyle}
@@ -29738,9 +29277,6 @@ function BotAvatarCustomizerModal({
               >
                 <ZenLiveBotMannequin
                   glyph={glyph}
-                  accessoryUrl={accessoryUrl}
-                  accessoryPlacement={normalizedPlacement}
-                  accessoryTintColor={previewAccessoryTintColor}
                   faceStyle={{
                     eyesFont: faceEyesFont,
                     eyeCharacter: faceEyeCharacter,
@@ -29753,42 +29289,41 @@ function BotAvatarCustomizerModal({
                   mouthShape={displayedPreviewMouthShape}
                   moodHint="warm"
                   scheduleKey={scheduleKey}
-                  accessoryLayerRef={accessoryLayerRef}
-                  accessoryEditorOverlay={accessoryEditorOverlay}
                 />
               </div>
             </div>
             <div className={styles.botAvatarPreviewMeta}>
               <span>{previewFaceSummary}</span>
               <span>{previewWeightSummary}</span>
-              <span>Accessory: {accessorySummary}</span>
             </div>
           </section>
           <section className={styles.botAvatarControlPanel} aria-label="Avatar controls">
             <div className={styles.botAvatarControlStack}>
-              <section className={styles.botAvatarControlGroup} aria-label="Identity">
-                <header className={styles.botAvatarControlGroupHeader}>
-                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
-                    <Brush size={16} strokeWidth={2.4} />
-                  </span>
-                  <div>
-                    <strong>Identity</strong>
-                    <small>Color and glyph</small>
+              {identityControlsVisible ? (
+                <section className={styles.botAvatarControlGroup} aria-label="Identity">
+                  <header className={styles.botAvatarControlGroupHeader}>
+                    <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+                      <Brush size={16} strokeWidth={2.4} />
+                    </span>
+                    <div>
+                      <strong>Identity</strong>
+                      <small>Color and glyph</small>
+                    </div>
+                  </header>
+                  <div className={styles.botAvatarIdentityPicker}>
+                    <ColorGlyphPicker
+                      color={color}
+                      glyph={glyph}
+                      onColorChange={onColorChange}
+                      onGlyphChange={onGlyphChange}
+                      open={colorPickerOpen}
+                      onToggle={onColorPickerToggle}
+                      ariaLabel="Bot color and glyph"
+                      resolvedTheme={resolvedTheme}
+                    />
                   </div>
-                </header>
-                <div className={styles.botAvatarIdentityPicker}>
-                  <ColorGlyphPicker
-                    color={color}
-                    glyph={glyph}
-                    onColorChange={onColorChange}
-                    onGlyphChange={onGlyphChange}
-                    open={colorPickerOpen}
-                    onToggle={onColorPickerToggle}
-                    ariaLabel="Bot color and glyph"
-                    resolvedTheme={resolvedTheme}
-                  />
-                </div>
-              </section>
+                </section>
+              ) : null}
 
               <section className={styles.botAvatarControlGroup} aria-label="Face">
                 <header className={styles.botAvatarControlGroupHeader}>
@@ -29870,85 +29405,7 @@ function BotAvatarCustomizerModal({
                   </label>
                 </div>
               </section>
-
-              <section
-                className={`${styles.botAvatarControlGroup} ${styles.botAvatarAccessoryBuilderPanel}`}
-                aria-label="Accessories"
-              >
-                <header className={styles.botAvatarControlGroupHeader}>
-                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
-                    <ImageGlyph size={16} strokeWidth={2.4} />
-                  </span>
-                  <div>
-                    <strong>Accessory</strong>
-                    <small>{accessorySummary}</small>
-                  </div>
-                </header>
-                <div
-                  className={styles.botAvatarAccessoryLayerToggle}
-                  role="group"
-                  aria-label="Accessory layer"
-                >
-                  <button
-                    type="button"
-                    data-active={normalizedPlacement.layer === "front" ? "true" : undefined}
-                    aria-pressed={normalizedPlacement.layer === "front"}
-                    disabled={!accessoryUrl || accessoryActionsDisabled}
-                    onClick={() => commitAccessoryLayer("front")}
-                  >
-                    Front
-                  </button>
-                  <button
-                    type="button"
-                    data-active={normalizedPlacement.layer === "back" ? "true" : undefined}
-                    aria-pressed={normalizedPlacement.layer === "back"}
-                    disabled={!accessoryUrl || accessoryActionsDisabled}
-                    onClick={() => commitAccessoryLayer("back")}
-                  >
-                    Behind
-                  </button>
-                </div>
-                <div className={styles.botAvatarAccessoryHeader}>
-                  <div className={styles.botAvatarAccessoryCopy}>
-                    <span>{accessoryUrl ? "Transparent overlay" : "No accessory"}</span>
-                    <small>{accessoryUrl ? "Ready" : "Saved bots only"}</small>
-                  </div>
-                  <div className={styles.botAvatarAccessoryActions}>
-                    {accessoryUrl ? (
-                      <button
-                        type="button"
-                        onClick={onRemoveAccessory}
-                        disabled={!accessoryImageId || accessoryActionsDisabled}
-                        title={
-                          !accessoryImageId ? "No accessory to remove" : "Remove accessory"
-                        }
-                      >
-                        <X size={14} strokeWidth={2.6} aria-hidden="true" />
-                        Remove
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={onAccessoryUploadClick}
-                      disabled={accessoryActionsDisabled}
-                      title={accessoryActionTitle}
-                    >
-                      <IconUpload />
-                      {accessoryUrl ? "Replace" : "Upload"}
-                    </button>
-                  </div>
-                </div>
-              </section>
             </div>
-            <input
-              ref={accessoryUploadInputRef}
-              className={styles.botAvatarAccessoryFileInput}
-              type="file"
-              accept="image/png,image/webp"
-              onChange={onAccessoryUploadInputChange}
-              disabled={accessoryBusy}
-              tabIndex={-1}
-            />
             {saveError ? (
               <p className={styles.botAvatarSaveError} role="alert">
                 {saveError}
@@ -31191,6 +30648,8 @@ function HomeContent(): React.JSX.Element {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const userRef = useRef<SessionUser | null>(null);
+  userRef.current = user;
   const [hasAnyAccounts, setHasAnyAccounts] = useState(true);
   const authMode = hasAnyAccounts ? requestedAuthMode : "register";
   const [clientAccessState, setClientAccessState] = useState<ClientAccessState>(
@@ -32808,10 +32267,6 @@ function HomeContent(): React.JSX.Element {
   );
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
-  const [newBotAccessoryImageId, setNewBotAccessoryImageId] =
-    useState<string | null>(null);
-  const [newBotAccessoryPlacement, setNewBotAccessoryPlacement] =
-    useState<BotAccessoryPlacement>(DEFAULT_BOT_ACCESSORY_PLACEMENT);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
   const [newBotGeneratedMemorySeeds, setNewBotGeneratedMemorySeeds] =
     useState<GeneratedBotMemorySeedSet | null>(null);
@@ -32822,8 +32277,8 @@ function HomeContent(): React.JSX.Element {
     x: number;
     y: number;
   } | null>(null);
-  const [botAccessoryBusy, setBotAccessoryBusy] = useState(false);
   const [botAvatarAutoSaving, setBotAvatarAutoSaving] = useState(false);
+  const [botAvatarAutoSavingBotId, setBotAvatarAutoSavingBotId] = useState<string | null>(null);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
   const [botAvatarSavePromptOpen, setBotAvatarSavePromptOpen] = useState(false);
@@ -32958,10 +32413,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight);
   }, []);
 
-  const handleNewBotAccessoryPlacementChange = useCallback((next: BotAccessoryPlacement) => {
-    setNewBotAccessoryPlacement(normalizeBotAccessoryPlacement(next));
-  }, []);
-
   const setBotEditorModeAdvanced = useCallback((advanced: boolean) => {
     setActiveFieldHelp(null);
     setColorWheelOpen(false);
@@ -33016,9 +32467,9 @@ function HomeContent(): React.JSX.Element {
   const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
   const botAvatarAutoSaveQueuedPatchRef = useRef<BotCustomizerSavePatch>({});
   const botAvatarAutoSaveInFlightRef = useRef(false);
+  const botAvatarAutoSaveFlushPromiseRef = useRef<Promise<boolean> | null>(null);
   const botDeleteProtectionProjectionRunRef = useRef(0);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
-  const botAccessoryUploadInputRef = useRef<HTMLInputElement | null>(null);
   const restoreBotAvatarDraftFromPristine = useCallback((): void => {
     const pristine = editOriginalRef.current;
     if (!pristine) return;
@@ -33028,7 +32479,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(pristine.faceEyeCharacter);
     setNewBotFaceMouthFont(pristine.faceMouthFont);
     setNewBotFaceFontWeight(pristine.faceFontWeight);
-    setNewBotAccessoryPlacement(normalizeBotAccessoryPlacement(pristine.accessoryPlacement));
   }, []);
 
   const closeBotAvatarCustomizer = useCallback((): void => {
@@ -35128,6 +34578,7 @@ function HomeContent(): React.JSX.Element {
     () => (resolvedTheme === "light" ? styles.themeLight : styles.themeDark),
     [resolvedTheme]
   );
+  const coffeePotAssetTheme: CoffeePotAssetTheme = resolvedTheme;
   const settingsModalBackdropClassName = `${styles.settingsAboutModalBackdrop} ${themeClass}`;
   const openAiKeyDisplay = settings
     ? apiKeyConnectionDisplay(
@@ -35489,6 +34940,19 @@ function HomeContent(): React.JSX.Element {
       ? bots.find((bot) => bot.id === zenPersonaPresence.visibleBotId) ?? null
       : null;
   }, [bots, zenPersonaPresence.visibleBotId]);
+  const zenDefaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH;
+  const zenDefaultPrismFaceStyle = useMemo<BotFaceStyle>(() => ({
+    eyesFont: settings?.prismDefaultBotFaceEyesFont ?? DEFAULT_BOT_FACE_STYLE.eyesFont,
+    eyeCharacter:
+      settings?.prismDefaultBotFaceEyeCharacter ?? DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    mouthFont: settings?.prismDefaultBotFaceMouthFont ?? DEFAULT_BOT_FACE_STYLE.mouthFont,
+    weight: settings?.prismDefaultBotFaceFontWeight ?? DEFAULT_BOT_FACE_STYLE.weight,
+  }), [
+    settings?.prismDefaultBotFaceEyeCharacter,
+    settings?.prismDefaultBotFaceEyesFont,
+    settings?.prismDefaultBotFaceFontWeight,
+    settings?.prismDefaultBotFaceMouthFont,
+  ]);
 
   /**
    * Provider to actually treat as "preferred" for chat-side reads. When the
@@ -36965,15 +36429,6 @@ function HomeContent(): React.JSX.Element {
       />
     );
   };
-  const renderCoffeeSessionModelSetup = (): React.ReactNode => (
-    <div className={styles.coffeeSessionModelSetup}>
-      <span className={styles.coffeeGroupStartControlLabel}>Model</span>
-      <div className={styles.coffeeSessionModelSetupControls}>
-        {renderCoffeeProviderModeToggle()}
-        {renderCoffeeHeaderModelPicker()}
-      </div>
-    </div>
-  );
   const renderCoffeeHeaderModelChrome = (): React.ReactNode => (
     <div className={styles.chatHeaderModelPicker}>
       {renderCoffeeProviderModeToggle()}
@@ -38394,6 +37849,7 @@ function HomeContent(): React.JSX.Element {
     pendingReplyStartedAtMs !== null &&
     pendingReplyNowMs - pendingReplyStartedAtMs >= PSYCHIC_THINKING_INDICATOR_DELAY_MS;
   const psychicThinkingTargetMessageId = useMemo(() => {
+    if (isZenSurfaceView(view)) return null;
     if (!psychicTextEnabledForConversation(detail, { productChatSurface: view === "chat" })) {
       return null;
     }
@@ -40391,7 +39847,6 @@ function HomeContent(): React.JSX.Element {
   >(() => loadCoffeePausedSessionRemainingMsByIdFromBrowser());
   const [coffeeAutoplayPaused, setCoffeeAutoplayPaused] = useState<boolean>(false);
   const [coffeeError, setCoffeeError] = useState<string | null>(null);
-  const [coffeeTranscriptOpen, setCoffeeTranscriptOpen] = useState(false);
   const [coffeeTranscriptClosing, setCoffeeTranscriptClosing] = useState(false);
   const [coffeeTranscriptCopyState, setCoffeeTranscriptCopyState] = useState<
     "idle" | "copying" | "copied" | "failed"
@@ -40423,6 +39878,7 @@ function HomeContent(): React.JSX.Element {
   const coffeePotPourFrameIndexRef = useRef(0);
   const coffeePotFillFrameIndexRef = useRef(0);
   const coffeePotPourReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coffeePotReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const topOffCoffeeCupFromPotRef = useRef<
     (botId: string, progress: number, progressAfter?: number | null) => void
   >(() => {});
@@ -40434,6 +39890,15 @@ function HomeContent(): React.JSX.Element {
   const [coffeePotDrag, setCoffeePotDrag] = useState<CoffeePotDragState | null>(null);
   const [coffeePotPourFrameIndex, setCoffeePotPourFrameIndex] = useState(0);
   const [coffeePotFillFrameIndex, setCoffeePotFillFrameIndex] = useState(0);
+  const [coffeeCupSipLockedUntilMsByBotId, setCoffeeCupSipLockedUntilMsByBotId] =
+    useState<Record<string, number>>({});
+  const lockCoffeeCupSipForRefill = useCallback((botId: string, nowMs = Date.now()): void => {
+    const lockedUntilMs = nowMs + COFFEE_CUP_REFILL_SIP_LOCK_MS;
+    setCoffeeCupSipLockedUntilMsByBotId((current) => {
+      if ((current[botId] ?? 0) >= lockedUntilMs) return current;
+      return { ...current, [botId]: lockedUntilMs };
+    });
+  }, []);
   const coffeePotTopOffBusyBotIdRef = useRef<string | null>(null);
   const [coffeePotTopOffBusyBotIdState, setCoffeePotTopOffBusyBotIdState] =
     useState<string | null>(null);
@@ -40697,6 +40162,20 @@ function HomeContent(): React.JSX.Element {
   };
   /** Drives once-per-second updates for the Coffee session countdown in the autoplay dock. */
   const [coffeeSessionClockMs, setCoffeeSessionClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    setCoffeeCupSipLockedUntilMsByBotId((current) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const [botId, lockedUntilMs] of Object.entries(current)) {
+        if (lockedUntilMs > coffeeSessionClockMs) {
+          next[botId] = lockedUntilMs;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [coffeeSessionClockMs]);
   const [coffeeTurnRhythmState, setCoffeeTurnRhythmState] =
     useState<CoffeeTurnRhythmState>("idle");
   const coffeeTurnRhythmStateRef = useRef<CoffeeTurnRhythmState>("idle");
@@ -40895,6 +40374,10 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeePotPourReadyTimerRef.current);
       coffeePotPourReadyTimerRef.current = null;
     }
+    if (coffeePotReturnTimerRef.current) {
+      clearTimeout(coffeePotReturnTimerRef.current);
+      coffeePotReturnTimerRef.current = null;
+    }
     clearCoffeeCupTopOffFillAnimation();
     setCoffeePotDrag(null);
   }, [clearCoffeeCupTopOffFillAnimation, coffeeReplayActive, coffeeSessionPhase, view]);
@@ -40903,6 +40386,10 @@ function HomeContent(): React.JSX.Element {
       if (coffeePotPourReadyTimerRef.current) {
         clearTimeout(coffeePotPourReadyTimerRef.current);
         coffeePotPourReadyTimerRef.current = null;
+      }
+      if (coffeePotReturnTimerRef.current) {
+        clearTimeout(coffeePotReturnTimerRef.current);
+        coffeePotReturnTimerRef.current = null;
       }
       if (coffeeCupTopOffAnimationClearTimerRef.current) {
         clearTimeout(coffeeCupTopOffAnimationClearTimerRef.current);
@@ -40992,7 +40479,6 @@ function HomeContent(): React.JSX.Element {
       coffeeTranscriptCloseTimerRef.current = null;
     }
     setCoffeeTranscriptClosing(false);
-    setCoffeeTranscriptOpen(false);
     setCoffeeReplayActionPanelBotId(null);
     setStoryMapOpen(false);
     setStoryInventoryOpen(false);
@@ -41020,32 +40506,23 @@ function HomeContent(): React.JSX.Element {
       coffeeTranscriptCopyResetTimerRef.current = null;
     }
   };
-  const openCoffeeTranscript = (): void => {
-    clearCoffeeTranscriptCloseTimer();
-    clearCoffeeTranscriptCopyResetTimer();
-    setCoffeeTranscriptCopyState("idle");
-    setCoffeeTranscriptClosing(false);
-    setCoffeeTranscriptOpen(true);
-  };
   const closeCoffeeTranscript = (options: { animate?: boolean } = {}): void => {
     clearCoffeeTranscriptCloseTimer();
     clearCoffeeTranscriptCopyResetTimer();
     setCoffeeTranscriptCopyState("idle");
     if (!options.animate) {
       setCoffeeTranscriptClosing(false);
-      setCoffeeTranscriptOpen(false);
       return;
     }
     setCoffeeTranscriptClosing(true);
     coffeeTranscriptCloseTimerRef.current = setTimeout(() => {
-      setCoffeeTranscriptOpen(false);
       setCoffeeTranscriptClosing(false);
       coffeeTranscriptCloseTimerRef.current = null;
     }, COFFEE_TRANSCRIPT_CLOSE_MS);
   };
   useEffect(() => {
     const conversationId = coffeeConversation?.id;
-    if (!coffeeTranscriptOpen || !conversationId) return;
+    if (!conversationId) return;
     if (coffeeTranscriptMessagesByConversationId[conversationId]) {
       setCoffeeTranscriptLoadError((current) =>
         current?.conversationId === conversationId ? null : current
@@ -41084,7 +40561,6 @@ function HomeContent(): React.JSX.Element {
   }, [
     coffeeConversation?.id,
     coffeeTranscriptMessagesByConversationId,
-    coffeeTranscriptOpen,
   ]);
   const loadCoffeeTranscriptMessagesForClipboard = async (
     conversation: CoffeeConversationState
@@ -41756,7 +41232,6 @@ function HomeContent(): React.JSX.Element {
       setCoffeeError(null);
       clearCoffeeTranscriptCloseTimer();
       setCoffeeTranscriptClosing(false);
-      setCoffeeTranscriptOpen(false);
       setCoffeeTranscriptMessagesByConversationId({});
       setCoffeeTranscriptLoadingConversationId(null);
       setCoffeeTranscriptLoadError(null);
@@ -43607,7 +43082,14 @@ function HomeContent(): React.JSX.Element {
       setHasAnyAccounts(d.hasAnyAccounts !== false);
       setUser(d.user);
       return d.user;
-    } catch {
+    } catch (err) {
+      const decision = decideAuthBootstrapFailure(err, userRef.current, {
+        path: "/api/auth/me",
+      });
+      if (decision.kind === "reconnecting") {
+        setBackendUnavailable(decision.detail);
+        return decision.user;
+      }
       setUser(null);
       return null;
     } finally {
@@ -43625,11 +43107,18 @@ function HomeContent(): React.JSX.Element {
       try {
         await api("/api/client-access/me");
         if (!cancelled) setClientAccessState("allowed");
-      } catch {
-        if (!cancelled) {
-          setClientAccessState("blocked");
-          setUser(null);
+      } catch (err) {
+        if (cancelled) return;
+        const decision = decideAuthBootstrapFailure(err, userRef.current, {
+          path: "/api/client-access/me",
+        });
+        if (decision.kind === "reconnecting") {
+          setBackendUnavailable(decision.detail);
+          if (decision.user) setClientAccessState("allowed");
+          return;
         }
+        setClientAccessState("blocked");
+        setUser(null);
       }
     }
 
@@ -45073,8 +44562,8 @@ function HomeContent(): React.JSX.Element {
       await requestApiWithLoopbackFallback("/api/health");
       setBackendUnavailable(null);
       setError(null);
-      await bootstrap();
-      if (user) {
+      const bootstrappedUser = await bootstrap();
+      if (bootstrappedUser ?? userRef.current) {
         await refreshAll();
       }
     } catch (err) {
@@ -45115,10 +44604,14 @@ function HomeContent(): React.JSX.Element {
   ): React.JSX.Element | null {
     if (!backendUnavailable) return null;
     const showRestart = variant === "banner" && Boolean(user);
+    const message =
+      backendUnavailable.message === "Prism is waiting for its local API."
+        ? "Trying to reconnect to Prism..."
+        : backendUnavailable.message;
     return (
       <BackendUnavailableNotice
         variant={variant}
-        message={backendUnavailable.message}
+        message={message}
         retryBusy={backendReconnectBusy}
         restartBusy={backendRestartBusy}
         showRestart={showRestart}
@@ -45324,6 +44817,10 @@ function HomeContent(): React.JSX.Element {
         : "";
     const keySettings = normalizeSavedApiKeySettingsState(d.settings);
     const zenModeSettings = normalizeZenModeSettingsFields(d.settings);
+    const zenPersonaTransitionChoice = normalizeZenPersonaTransitionChoice(
+      d.settings.zenPersonaTransitionChoice
+    );
+    setZenPersonaTransitionChoice(zenPersonaTransitionChoice);
     setSettings({
       ...d.settings,
       displayName,
@@ -45379,6 +44876,7 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.devMemoriesText === "string"
           ? d.settings.devMemoriesText
           : "",
+      zenPersonaTransitionChoice,
       prismDefaultLlmModel:
         typeof d.settings.prismDefaultLlmModel === "string"
           ? d.settings.prismDefaultLlmModel
@@ -46598,7 +46096,6 @@ function HomeContent(): React.JSX.Element {
     coffeeAutoplayPausedRef.current = false;
     setCoffeeAutoplayPaused(false);
     setCoffeeError(null);
-    setCoffeeTranscriptOpen(false);
     setCoffeeTranscriptClosing(false);
     setCoffeeSessionPhase("selecting");
     setCoffeeTurnRhythmState("idle");
@@ -48055,6 +47552,41 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
+  function refreshPrismFromNavbar(): void {
+    if (typeof window === "undefined") return;
+    window.location.reload();
+  }
+
+  function consumeDeprecatedRefreshCommand(trimmedLine: string, source: "chat" | "coffee"): boolean {
+    const tokens = normalizeComposerSlashCommandLine(trimmedLine)
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    const normalizedCommand = tokens[0]?.toLowerCase() ?? "";
+    if (normalizedCommand !== "/refresh") return false;
+    if (tokens.length > 1) {
+      const message = "/refresh does not take extra text. Use it by itself.";
+      if (source === "coffee") {
+        setCoffeeError(message);
+      } else {
+        setError(message);
+      }
+      return true;
+    }
+    if (source === "coffee") {
+      setCoffeeError(null);
+      setCoffeeDraft("");
+      coffeeDraftRef.current = "";
+      coffeeComposerRichRef.current?.setValue("");
+    } else {
+      setError(null);
+      setConversationStarterPrompts(null);
+      clearComposerDraftNow();
+    }
+    showLocalCommandToast("Refresh moved", "Use the recycle icon in the navbar.");
+    return true;
+  }
+
   function clearReplyWorkForLocalTopicReset(): void {
     const starterRequest = zenInitialStarterRequestRef.current;
     if (starterRequest) {
@@ -48214,7 +47746,7 @@ function HomeContent(): React.JSX.Element {
       return true;
     }
     if (normalizedCommand === "/refresh") {
-      window.location.reload();
+      consumeDeprecatedRefreshCommand(trimmedLine, "chat");
       return true;
     }
     if (normalizedCommand === "/restart") {
@@ -50840,6 +50372,9 @@ function HomeContent(): React.JSX.Element {
   }
 
   function renderPsychicThoughtLine(msg: Message): React.ReactNode {
+    if (isZenSurfaceView(view)) {
+      return null;
+    }
     if (!psychicTextEnabledForConversation(detail, { productChatSurface: view === "chat" })) {
       return null;
     }
@@ -52971,10 +52506,12 @@ function HomeContent(): React.JSX.Element {
   }
 
   function updateCoffeeDraftFromComposer(next: string): void {
+    const previous = coffeeDraftRef.current;
+    const countsAsTyping = coffeeDraftChangeCountsAsTyping(previous, next);
     coffeeDraftRef.current = next;
     const activeCoffeeConversationId =
       coffeeConversationRef.current?.id ?? coffeeConversation?.id ?? null;
-    if (activeCoffeeConversationId) {
+    if (activeCoffeeConversationId && countsAsTyping) {
       coffeeTableTalkLastTypedAtRef.current = Date.now();
       coffeeTableTalkLastTypedConversationIdRef.current = activeCoffeeConversationId;
     }
@@ -53146,6 +52683,8 @@ function HomeContent(): React.JSX.Element {
                     actionState={zenLiveVisibleBotAction}
                     replyActionText={zenLiveReplyActionText}
                     userActionVisible={Boolean(zenComposerActionPreview)}
+                    defaultPrismGlyph={zenDefaultPrismGlyph}
+                    defaultPrismFaceStyle={zenDefaultPrismFaceStyle}
                     defaultPrismPresenceVisible={zenDefaultPrismPresenceVisible}
                     defaultPrismPresenceForming={zenDefaultPrismPresenceForming}
                     askQuestionActive={zenLiveAskQuestionMarkerVisible}
@@ -55061,26 +54600,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function fetchBotAccessoryPng(bot: Bot): Promise<Uint8Array | null> {
-    const accessoryUrl = botStoredImageUrl(bot.accessory_image_id);
-    if (!accessoryUrl) return null;
-    const response = await fetch(accessoryUrl, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error("Could not export bot accessory.");
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return bytes.byteLength > 0 ? bytes : null;
-  }
-
-  function pngBytesToDataUrl(bytes: Uint8Array): string {
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let index = 0; index < bytes.length; index += chunkSize) {
-      binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
-    }
-    return `data:image/png;base64,${btoa(binary)}`;
-  }
-
   function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
     const buffer = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(buffer).set(bytes);
@@ -55107,7 +54626,6 @@ function HomeContent(): React.JSX.Element {
     exportHash: string | null;
     memoriesCount: number;
     archiveBytes: Uint8Array;
-    accessoryIncluded: boolean;
   }> {
     const trimmedName = bot.name.trim() || "Unnamed bot";
     let exportHash = normalizeImportedBotHash(bot.export_hash);
@@ -55142,8 +54660,6 @@ function HomeContent(): React.JSX.Element {
     const memories = (memoryResult.memories ?? [])
       .map((memory) => (typeof memory.text === "string" ? memory.text.trim() : ""))
       .filter((memory) => memory.length > 0);
-    const accessoryPng = await fetchBotAccessoryPng(bot);
-    const accessoryPlacement = botAccessoryPlacementFromBot(bot);
     const exportPayload: PrismBotArchiveJson = {
       schema: PRISM_BOT_ARCHIVE_SCHEMA,
       botHash: exportHash ?? undefined,
@@ -55171,15 +54687,6 @@ function HomeContent(): React.JSX.Element {
       },
       profile,
       systemPrompt: visiblePrompt,
-      accessory: accessoryPng
-        ? {
-            file: BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
-            placement: {
-              anchor: "avatar",
-              ...accessoryPlacement,
-            },
-          }
-        : null,
     };
     return {
       trimmedName,
@@ -55188,9 +54695,7 @@ function HomeContent(): React.JSX.Element {
       archiveBytes: createPrismBotArchive({
         botJson: exportPayload,
         memories,
-        accessoryPng,
       }),
-      accessoryIncluded: Boolean(accessoryPng),
     };
   }
 
@@ -55757,16 +55262,6 @@ function HomeContent(): React.JSX.Element {
     const createdBotId = created.bot?.id;
     if (!createdBotId) {
       throw new Error("Imported bot was created without an id.");
-    }
-
-    if (parsed.accessoryPng) {
-      await api(`/api/bots/${encodeURIComponent(createdBotId)}/accessory/upload`, {
-        method: "POST",
-        body: JSON.stringify({
-          dataUrl: pngBytesToDataUrl(parsed.accessoryPng),
-          placement: parsed.botJson.accessory?.placement ?? DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT,
-        }),
-      });
     }
 
     const memories = parsed.memories;
@@ -57508,11 +57003,47 @@ function HomeContent(): React.JSX.Element {
     commitZenPersonaTransition(botId);
   }
 
+  async function persistZenPersonaTransitionChoice(
+    next: ZenPersonaTransitionChoice
+  ): Promise<void> {
+    const normalized = normalizeZenPersonaTransitionChoice(next);
+    if (zenPersonaTransitionChoice === normalized) return;
+    const previousChoice = zenPersonaTransitionChoice;
+    setZenPersonaTransitionChoice(normalized);
+    setSettings((previous) =>
+      previous
+        ? { ...previous, zenPersonaTransitionChoice: normalized }
+        : previous
+    );
+    if (!settings) return;
+    setError(null);
+    setPanelError(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ zenPersonaTransitionChoice: normalized }),
+      });
+      await refreshSettings();
+    } catch (err) {
+      setZenPersonaTransitionChoice(previousChoice);
+      setSettings((previous) =>
+        previous
+          ? { ...previous, zenPersonaTransitionChoice: previousChoice }
+          : previous
+      );
+      setError(
+        err instanceof Error ? err.message : "Facet switch mode failed to save."
+      );
+    }
+  }
+
   function renderZenPersonaTransitionChoiceControl(compact = false): React.ReactNode {
     return (
       <ZenPersonaTransitionChoiceControl
         value={zenPersonaTransitionChoice}
-        onChange={setZenPersonaTransitionChoice}
+        onChange={(next) => {
+          void persistZenPersonaTransitionChoice(next);
+        }}
         compact={compact}
       />
     );
@@ -59251,8 +58782,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthFont(draft.faceStyle.mouthFont);
     setNewBotFaceFontWeight(draft.faceStyle.weight);
     setNewBotProfilePictureImageId(null);
-    setNewBotAccessoryImageId(null);
-    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
       botName: draft.name,
@@ -59301,8 +58830,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthFont(DEFAULT_BOT_FACE_STYLE.mouthFont);
     setNewBotFaceFontWeight(DEFAULT_BOT_FACE_STYLE.weight);
     setNewBotProfilePictureImageId(null);
-    setNewBotAccessoryImageId(null);
-    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
@@ -59382,11 +58909,8 @@ function HomeContent(): React.JSX.Element {
     const rawStoredPrompt = "";
     const { fields: seededProfile } = parseStoredBotPrompt(rawStoredPrompt);
     const normalizedStoredPrompt = serializeStoredBotPrompt(seededProfile, seededName);
-    const seededColor =
-      settings.prismDefaultBotColor.trim() || DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR;
-    const seededGlyph = isBotGlyphName(settings.prismDefaultBotGlyph)
-      ? settings.prismDefaultBotGlyph
-      : DEFAULT_BOT_GLYPH;
+    const seededColor = DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR;
+    const seededGlyph = DEFAULT_PRISM_BOT_GLYPH;
     const seededFaceEyesFont =
       normalizeBotFaceFontId(settings.prismDefaultBotFaceEyesFont) ??
       DEFAULT_BOT_FACE_STYLE.eyesFont;
@@ -59428,8 +58952,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthFont(seededFaceMouthFont);
     setNewBotFaceFontWeight(seededFaceFontWeight);
     setNewBotProfilePictureImageId(null);
-    setNewBotAccessoryImageId(null);
-    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
@@ -59456,7 +58978,6 @@ function HomeContent(): React.JSX.Element {
       faceMouthFont: seededFaceMouthFont,
       faceFontWeight: seededFaceFontWeight,
       profilePictureImageId: null,
-      accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
     };
     setBotPanelView("defaultCustomize");
     openRightPanel("bots");
@@ -59818,8 +59339,6 @@ function HomeContent(): React.JSX.Element {
         openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
       );
       setNewBotDeleteProtected(false);
-      setNewBotAccessoryImageId(null);
-      setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
       editOriginalRef.current = {
         name: copiedName,
         prompt: serializeStoredBotPrompt(
@@ -59846,7 +59365,6 @@ function HomeContent(): React.JSX.Element {
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: null,
-        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
       };
       if (result.bot?.id) {
         setEditingBotId(result.bot.id);
@@ -60985,8 +60503,6 @@ function HomeContent(): React.JSX.Element {
       : AUTO_MODEL_CHOICE;
     const seededFaceStyle = resolveBotFaceStyleForBot(bot);
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
-    const seededAccessoryImageId = bot.accessory_image_id?.trim() || null;
-    const seededAccessoryPlacement = botAccessoryPlacementFromBot(bot);
     setNewBotName(seededName);
     setBotProfile(seededProfile);
     setNewBotSystemPrompt(rawStoredPrompt);
@@ -61009,8 +60525,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthFont(seededFaceStyle.mouthFont);
     setNewBotFaceFontWeight(seededFaceStyle.weight);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
-	    setNewBotAccessoryImageId(seededAccessoryImageId);
-	    setNewBotAccessoryPlacement(seededAccessoryPlacement);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
@@ -61038,7 +60552,6 @@ function HomeContent(): React.JSX.Element {
       faceMouthFont: seededFaceStyle.mouthFont,
       faceFontWeight: seededFaceStyle.weight,
       profilePictureImageId: seededProfilePictureImageId,
-      accessoryPlacement: seededAccessoryPlacement,
     };
     setPanelError(null);
   }
@@ -62628,9 +62141,7 @@ function HomeContent(): React.JSX.Element {
     const defaultBotPrompt = serializeStoredBotPrompt(defaultBotProfile, defaultBotName);
     const editPristine = editOriginalRef.current;
     const hasChanges = editPristine
-      ? newBotColor.trim().toLowerCase() !== editPristine.color.trim().toLowerCase()
-        || newBotGlyph !== editPristine.glyph
-        || newBotFaceEyesFont !== editPristine.faceEyesFont
+      ? newBotFaceEyesFont !== editPristine.faceEyesFont
         || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
         || newBotFaceMouthFont !== editPristine.faceMouthFont
         || newBotFaceFontWeight !== editPristine.faceFontWeight
@@ -62641,17 +62152,18 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      await api<{ defaultBot?: Record<string, unknown> }>("/api/default-bot", {
-        method: "PATCH",
-        body: JSON.stringify({
-          color: newBotColor,
-          glyph: newBotGlyph,
-          faceEyesFont: newBotFaceEyesFont,
-          faceEyeCharacter: newBotFaceEyeCharacter,
-          faceMouthFont: newBotFaceMouthFont,
-          faceFontWeight: newBotFaceFontWeight,
-        }),
-      });
+      await withBotAvatarSaveTimeout((signal) =>
+        api<{ defaultBot?: Record<string, unknown> }>("/api/default-bot", {
+          method: "PATCH",
+          body: JSON.stringify({
+            faceEyesFont: newBotFaceEyesFont,
+            faceEyeCharacter: newBotFaceEyeCharacter,
+            faceMouthFont: newBotFaceMouthFont,
+            faceFontWeight: newBotFaceFontWeight,
+          }),
+          signal,
+        })
+      );
       setNewBotName(defaultBotName);
       setBotProfile(defaultBotProfile);
       setNewBotSystemPrompt("");
@@ -62676,14 +62188,13 @@ function HomeContent(): React.JSX.Element {
         topP: BOT_TOP_P_DEFAULT,
         topK: BOT_TOP_K_DEFAULT,
         repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
-        color: newBotColor,
-        glyph: newBotGlyph,
+        color: DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
+        glyph: DEFAULT_PRISM_BOT_GLYPH,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: null,
-        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
       };
       setSettings((previous) =>
         previous
@@ -62691,8 +62202,8 @@ function HomeContent(): React.JSX.Element {
               ...previous,
               prismDefaultBotName: "",
               prismDefaultBotSystemPrompt: "",
-              prismDefaultBotColor: newBotColor,
-              prismDefaultBotGlyph: newBotGlyph,
+              prismDefaultBotColor: "",
+              prismDefaultBotGlyph: "",
               prismDefaultBotFaceEyesFont: newBotFaceEyesFont,
               prismDefaultBotFaceEyeCharacter: newBotFaceEyeCharacter,
               prismDefaultBotFaceMouthFont: newBotFaceMouthFont,
@@ -62717,46 +62228,69 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function flushBotAvatarAutosaveQueue(id: string): Promise<boolean> {
-    if (botAvatarAutoSaveInFlightRef.current) return true;
-    botAvatarAutoSaveInFlightRef.current = true;
-    setBotAvatarAutoSaving(true);
-    setPanelError(null);
-    setPanelNotice(null);
-
-    let saved = true;
-    try {
-      while (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-        const patch = botAvatarAutoSaveQueuedPatchRef.current;
-        botAvatarAutoSaveQueuedPatchRef.current = {};
-        const result = await api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        });
-        if (editOriginalRef.current) {
-          editOriginalRef.current = applyBotAvatarAutosavePatchToSnapshot(
-            editOriginalRef.current,
-            patch
-          );
-        }
-        if (result.bot?.id) {
-          setBots((list) => replaceBotRowById(list, result.bot as Bot));
-        } else {
-          await refreshBots();
-        }
-      }
-    } catch (err) {
-      saved = false;
-      setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
-    } finally {
-      botAvatarAutoSaveInFlightRef.current = false;
-      if (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-        void flushBotAvatarAutosaveQueue(id);
-      } else {
-        setBotAvatarAutoSaving(false);
-      }
+    if (!botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
+      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
+    }
+    if (botAvatarAutoSaveInFlightRef.current) {
+      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
     }
 
-    return saved;
+    const flushPromise = (async (): Promise<boolean> => {
+      botAvatarAutoSaveInFlightRef.current = true;
+      setBotAvatarAutoSaving(true);
+      setBotAvatarAutoSavingBotId(id);
+      setPanelError(null);
+      setPanelNotice(null);
+
+      let saved = true;
+      try {
+        while (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
+          const patch = botAvatarAutoSaveQueuedPatchRef.current;
+          botAvatarAutoSaveQueuedPatchRef.current = {};
+          const result = await withBotAvatarSaveTimeout((signal) =>
+            api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
+              method: "PATCH",
+              body: JSON.stringify(patch),
+              signal,
+            })
+          );
+          if (editOriginalRef.current) {
+            editOriginalRef.current = applyBotAvatarAutosavePatchToSnapshot(
+              editOriginalRef.current,
+              patch
+            );
+          }
+          if (result.bot?.id) {
+            setBots((list) => replaceBotRowById(list, result.bot as Bot));
+          } else {
+            await refreshBots();
+          }
+        }
+      } catch (err) {
+        saved = false;
+        setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
+      } finally {
+        botAvatarAutoSaveInFlightRef.current = false;
+      }
+
+      if (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
+        const nextSaved = await flushBotAvatarAutosaveQueue(id);
+        return saved && nextSaved;
+      }
+
+      setBotAvatarAutoSaving(false);
+      setBotAvatarAutoSavingBotId(null);
+      return saved;
+    })();
+
+    botAvatarAutoSaveFlushPromiseRef.current = flushPromise;
+    try {
+      return await flushPromise;
+    } finally {
+      if (botAvatarAutoSaveFlushPromiseRef.current === flushPromise) {
+        botAvatarAutoSaveFlushPromiseRef.current = null;
+      }
+    }
   }
 
   function queueBotAvatarAutosave(id: string | null, patch: BotCustomizerSavePatch): void {
@@ -62773,6 +62307,8 @@ function HomeContent(): React.JSX.Element {
   async function saveBot(id: string): Promise<boolean> {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return false;
+    const avatarSaved = await flushBotAvatarAutosaveQueue(id);
+    if (!avatarSaved) return false;
     const storedSystemPrompt = botEditorAdvancedMode
       ? newBotSystemPrompt
       : serializeStoredBotPrompt(botProfile, trimmedName);
@@ -62821,7 +62357,6 @@ function HomeContent(): React.JSX.Element {
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: newBotProfilePictureImageId,
-        accessoryPlacement: newBotAccessoryPlacement,
       },
       editOriginalRef.current
     );
@@ -62830,10 +62365,13 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      const result = await api<{ bot?: Bot }>(`/api/bots/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
+      const result = await withBotAvatarSaveTimeout((signal) =>
+        api<{ bot?: Bot }>(`/api/bots/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+          signal,
+        })
+      );
       setNewBotLocalModel(localModel);
       setNewBotOnlineModel(onlineModel);
       setBotProfile(parseStoredBotPrompt(storedSystemPrompt).fields);
@@ -62870,7 +62408,6 @@ function HomeContent(): React.JSX.Element {
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
         profilePictureImageId: newBotProfilePictureImageId,
-        accessoryPlacement: newBotAccessoryPlacement,
       };
       setEditingBotId(id);
       setColorWheelOpen(false);
@@ -62886,99 +62423,6 @@ function HomeContent(): React.JSX.Element {
       return false;
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function uploadBotAccessoryFile(file: File): Promise<void> {
-    if (!editingBotId || botAccessoryBusy) return;
-    setBotAccessoryBusy(true);
-    setPanelError(null);
-    setPanelNotice(null);
-    try {
-      const dataUrl = await readImageFileAsDataUrl(file);
-      const result = await api<{ ok?: boolean; bot?: Bot; image?: ImageRecord }>(
-        `/api/bots/${encodeURIComponent(editingBotId)}/accessory/upload`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            dataUrl,
-            placement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
-          }),
-        }
-      );
-      const nextImageId =
-        result.bot?.accessory_image_id?.trim() ||
-        result.image?.id?.trim() ||
-        null;
-      const nextPlacement = botAccessoryPlacementFromBot(result.bot ?? null);
-      setNewBotAccessoryImageId(nextImageId);
-      setNewBotAccessoryPlacement(nextPlacement);
-      if (editOriginalRef.current) {
-        editOriginalRef.current = {
-          ...editOriginalRef.current,
-          accessoryPlacement: nextPlacement,
-        };
-      }
-      if (result.bot?.id) {
-        setBots((list) => replaceBotRowById(list, result.bot as Bot));
-      } else {
-        await refreshBots();
-      }
-      setPanelNotice("Accessory updated.");
-    } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Accessory upload failed.");
-    } finally {
-      setBotAccessoryBusy(false);
-    }
-  }
-
-  function handleBotAccessoryUploadChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ): void {
-    const file = event.currentTarget.files?.[0] ?? null;
-    event.currentTarget.value = "";
-    if (!file) return;
-    void uploadBotAccessoryFile(file);
-  }
-
-  async function removeBotAccessory(): Promise<void> {
-    if (!editingBotId || !newBotAccessoryImageId || botAccessoryBusy) return;
-    const previousAccessoryImageId = newBotAccessoryImageId;
-    const previousAccessoryPlacement = newBotAccessoryPlacement;
-    setNewBotAccessoryImageId(null);
-    setNewBotAccessoryPlacement(DEFAULT_BOT_ACCESSORY_PLACEMENT);
-    if (editOriginalRef.current) {
-      editOriginalRef.current = {
-        ...editOriginalRef.current,
-        accessoryPlacement: DEFAULT_BOT_ACCESSORY_PLACEMENT,
-      };
-    }
-    setBotAccessoryBusy(true);
-    setPanelError(null);
-    setPanelNotice(null);
-    try {
-      const result = await api<{ ok?: boolean; bot?: Bot }>(
-        `/api/bots/${encodeURIComponent(editingBotId)}/accessory`,
-        { method: "DELETE" }
-      );
-      if (result.bot?.id) {
-        setBots((list) => replaceBotRowById(list, clearBotAccessoryFields(result.bot as Bot)));
-      } else {
-        await refreshBots();
-      }
-      setPanelNotice("Accessory removed.");
-    } catch (err) {
-      setNewBotAccessoryImageId(previousAccessoryImageId);
-      setNewBotAccessoryPlacement(previousAccessoryPlacement);
-      if (editOriginalRef.current) {
-        editOriginalRef.current = {
-          ...editOriginalRef.current,
-          accessoryPlacement: previousAccessoryPlacement,
-        };
-      }
-      setPanelError(err instanceof Error ? err.message : "Could not remove accessory.");
-    } finally {
-      setBotAccessoryBusy(false);
     }
   }
 
@@ -66177,11 +65621,12 @@ function HomeContent(): React.JSX.Element {
     onHub?: () => void;
     imageReadyChip?: React.ReactNode;
     toolStyles?: {
-      memories?: React.CSSProperties;
-      atmosphere?: React.CSSProperties;
-      images?: React.CSSProperties;
-      bots?: React.CSSProperties;
-      usage?: React.CSSProperties;
+	      memories?: React.CSSProperties;
+	      refresh?: React.CSSProperties;
+	      atmosphere?: React.CSSProperties;
+	      images?: React.CSSProperties;
+	      bots?: React.CSSProperties;
+	      usage?: React.CSSProperties;
       theme?: React.CSSProperties;
     };
   } = {}): React.ReactNode => {
@@ -66304,6 +65749,17 @@ function HomeContent(): React.JSX.Element {
           disabled={disabled}
         >
           <SlashCommandGlyph />
+        </button>
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          onClick={() => runAction(refreshPrismFromNavbar)}
+          aria-label="Refresh Prism"
+          data-glyph-tooltip="Refresh"
+          disabled={disabled}
+          style={toolStyles.refresh}
+        >
+          <Recycle size={18} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -66568,18 +66024,22 @@ function HomeContent(): React.JSX.Element {
       activeBot &&
       favoriteBotIdSet.has(activeBot.id)
     );
-    const handleToggleFavorite = () => {
-      if (!activeBot) return;
-      closeMenu();
-      toggleBotFavorite(activeBot.id);
-    };
-    const handleOpenCommandCenter = () => {
-      closeMenu();
-      openRightPanel("command-center");
-    };
-    const handleEditBot = () => {
-      closeMenu();
-      if (navbarCustomizerBot) {
+	    const handleToggleFavorite = () => {
+	      if (!activeBot) return;
+	      closeMenu();
+	      toggleBotFavorite(activeBot.id);
+	    };
+	    const handleOpenCommandCenter = () => {
+	      closeMenu();
+	      openRightPanel("command-center");
+	    };
+	    const handleRefreshPage = () => {
+	      closeMenu();
+	      refreshPrismFromNavbar();
+	    };
+	    const handleEditBot = () => {
+	      closeMenu();
+	      if (navbarCustomizerBot) {
         openActiveBotCustomizer();
       } else {
         openFreshBotCustomizer();
@@ -66788,10 +66248,22 @@ function HomeContent(): React.JSX.Element {
                 swallowMenuEvent(event);
                 handleOpenCommandCenter();
               }}
-            >
-              Prompt Center
-            </button>
-            {showZenAtmosphereButton ? (
+	            >
+	              Prompt Center
+	            </button>
+	            <button
+	              type="button"
+	              role="menuitem"
+	              className={styles.chatOverflowMenuItem}
+	              disabled={headerActionsDisabled}
+	              onClick={(event) => {
+	                swallowMenuEvent(event);
+		                handleRefreshPage();
+	              }}
+	            >
+	              Refresh
+	            </button>
+	            {showZenAtmosphereButton ? (
               <button
                 type="button"
                 role="menuitem"
@@ -67370,10 +66842,6 @@ function HomeContent(): React.JSX.Element {
       effectiveThemeMode === "system"
         ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
         : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
-    const transcriptLabel = coffeeTranscriptOpen
-      ? "Close Coffee transcript"
-      : "Open Coffee transcript";
-    const transcriptDisabled = !coffeeConversation;
     const menuStyle = {
       left: `${coffeeShellContextMenu.x}px`,
       top: `${coffeeShellContextMenu.y}px`,
@@ -67434,25 +66902,6 @@ function HomeContent(): React.JSX.Element {
             <span>Switch to Chat</span>
           </span>
         </button>
-        {coffeeConversation ? (
-          <button
-            type="button"
-            role="menuitem"
-            disabled={transcriptDisabled}
-            onClick={() => {
-              if (transcriptDisabled) return;
-              runAndClose(() => {
-                if (coffeeTranscriptOpen) {
-                  closeCoffeeTranscript({ animate: true });
-                } else {
-                  openCoffeeTranscript();
-                }
-              });
-            }}
-          >
-            {transcriptLabel}
-          </button>
-        ) : null}
       </div>
     );
   }
@@ -72654,7 +72103,7 @@ function HomeContent(): React.JSX.Element {
             scope={settingsScope}
             settingsLoaded={Boolean(settings)}
             panelClosing={panelClosing}
-            headerAccessory={
+            headerAction={
               <button
                 type="button"
                 className={`${styles.panelHeaderIconButton} ${styles.settingsHeaderThemeButton}`}
@@ -74612,9 +74061,7 @@ function HomeContent(): React.JSX.Element {
           ? editPristine?.rawPrompt ?? editPristine?.prompt ?? ""
           : editPristine?.prompt ?? "";
         const hasDefaultBotAvatarChanges = editPristine
-          ? normalizeColor(newBotColor) !== normalizeColor(editPristine.color)
-            || newBotGlyph !== editPristine.glyph
-            || newBotFaceEyesFont !== editPristine.faceEyesFont
+          ? newBotFaceEyesFont !== editPristine.faceEyesFont
             || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
             || newBotFaceMouthFont !== editPristine.faceMouthFont
             || newBotFaceFontWeight !== editPristine.faceFontWeight
@@ -74643,11 +74090,14 @@ function HomeContent(): React.JSX.Element {
               || newBotFaceMouthFont !== editPristine.faceMouthFont
               || newBotFaceFontWeight !== editPristine.faceFontWeight
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
-              || !botAccessoryPlacementsEqual(
-                normalizeBotAccessoryPlacement(newBotAccessoryPlacement),
-                normalizeBotAccessoryPlacement(editPristine.accessoryPlacement)
-              )
           : false;
+        const avatarCustomizerSaving =
+          busy ||
+          Boolean(
+            editingBotId &&
+              botAvatarAutoSaving &&
+              botAvatarAutoSavingBotId === editingBotId
+          );
 
         // "Active" = pressing the button commits something useful.
         // Drives BOTH the enabled/disabled flag AND whether the bot
@@ -74742,16 +74192,8 @@ function HomeContent(): React.JSX.Element {
         const botLibrarySummary =
           botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
         const defaultBotCardName = "Default";
-        const defaultBotCardGlyph = isBotGlyphName(settings?.prismDefaultBotGlyph)
-          ? settings.prismDefaultBotGlyph
-          : DEFAULT_BOT_GLYPH;
-        const defaultBotCardAccent = settings?.prismDefaultBotColor.trim() || "";
-        const defaultBotCardStyle = defaultBotCardAccent
-          ? ({
-              "--bot-color": defaultBotCardAccent,
-              "--bot-tile-ink": pickReadableText(defaultBotCardAccent),
-            } as React.CSSProperties)
-          : undefined;
+        const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;
+        const defaultBotCardStyle = undefined;
         const editorPanelStyle = (() => {
           const panelAccentColor =
             botPanelView === "botHub" && selectedBotPanelBot?.color
@@ -74828,16 +74270,7 @@ function HomeContent(): React.JSX.Element {
                   : editingBotId
                     ? botIdentityDisplayName
                 : "New custom bot";
-        const botAccessoryUrl = botStoredImageUrl(newBotAccessoryImageId);
         const botAvatarSummaryEyeGlyph = newBotFaceEyeCharacter ?? "••";
-        const botAccessoryActionsDisabled = !editingBotId || busy || botAccessoryBusy;
-        const botAccessoryActionTitle = editingDefaultBot
-          ? "Default does not support accessory uploads yet"
-          : !editingBotId
-          ? "Save the bot before adding an accessory"
-          : botAccessoryBusy
-            ? "Accessory update in progress"
-            : "Use a transparent 512x512 PNG or WebP";
         const botLibraryHandleTitle = botLibraryExpanded
           ? editingBotId
             ? "Back to editor"
@@ -75775,7 +75208,7 @@ function HomeContent(): React.JSX.Element {
               >
                 <div className={styles.botParameterHeader}>
                   <span>Avatar</span>
-                  <small>{newBotAccessoryImageId ? "Accessory equipped" : "Face and identity"}</small>
+                  <small>Face and identity</small>
                 </div>
                 <button
                   type="button"
@@ -75814,30 +75247,6 @@ function HomeContent(): React.JSX.Element {
                       <small>{botAvatarWeightLabel(newBotFaceFontWeight)} · {newBotColor}</small>
                     </span>
                   </span>
-                  <span className={styles.botAvatarSummaryAccessory}>
-                    {botAccessoryUrl ? (
-                      <BotAccessoryRaster
-                        className={styles.botAvatarAccessoryPreview}
-                        accessoryUrl={botAccessoryUrl}
-                        accessoryPlacement={newBotAccessoryPlacement}
-                        botColor={normalizeAccentForTheme(newBotColor, resolvedTheme)}
-                      />
-                    ) : (
-                      <span className={styles.botAvatarAccessoryEmpty} aria-hidden="true">
-                        <ImageGlyph size={16} strokeWidth={2} />
-                      </span>
-                    )}
-                    <span className={styles.botAvatarSummaryCopy}>
-                      <strong>{botAccessoryUrl ? "Accessory" : "No accessory"}</strong>
-                      <small>
-                        {editingDefaultBot
-                          ? "Default avatar"
-                          : editingBotId
-                            ? "Customize avatar"
-                            : "Create the bot to upload"}
-                      </small>
-                    </span>
-                  </span>
                 </button>
                 <BotAvatarCustomizerModal
                   open={botAvatarCustomizerOpen}
@@ -75847,21 +75256,16 @@ function HomeContent(): React.JSX.Element {
                   }`}
                   color={newBotColor}
                   glyph={newBotGlyph}
+                  isDefaultPrismBot={editingDefaultBot}
+                  identityControlsVisible={!editingDefaultBot}
                   colorPickerOpen={colorWheelOpen}
                   resolvedTheme={resolvedTheme}
                   faceEyesFont={newBotFaceEyesFont}
                   faceEyeCharacter={newBotFaceEyeCharacter}
                   faceMouthFont={newBotFaceMouthFont}
                   faceFontWeight={newBotFaceFontWeight}
-                  accessoryUrl={botAccessoryUrl}
-                  accessoryImageId={newBotAccessoryImageId}
-                  accessoryPlacement={newBotAccessoryPlacement}
-                  accessoryBusy={botAccessoryBusy}
-                  accessoryActionsDisabled={botAccessoryActionsDisabled}
-                  accessoryActionTitle={botAccessoryActionTitle}
-                  accessoryUploadInputRef={botAccessoryUploadInputRef}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
-                  saving={busy || botAvatarAutoSaving}
+                  saving={avatarCustomizerSaving}
                   saveError={panelError}
                   savePromptOpen={botAvatarSavePromptOpen}
                   onRequestClose={() => {
@@ -75914,18 +75318,6 @@ function HomeContent(): React.JSX.Element {
                     handleNewBotFaceFontWeightChange(normalizedWeight);
                     queueBotAvatarAutosave(editingBotId, { faceFontWeight: normalizedWeight });
                   }}
-                  onAccessoryPlacementChange={(next) => {
-                    const normalized = normalizeBotAccessoryPlacement(next);
-                    handleNewBotAccessoryPlacementChange(normalized);
-                  }}
-                  onAccessoryPlacementCommit={(next) => {
-                    const normalized = normalizeBotAccessoryPlacement(next);
-                    handleNewBotAccessoryPlacementChange(normalized);
-                    queueBotAvatarAutosave(editingBotId, { accessoryPlacement: normalized });
-                  }}
-                  onAccessoryUploadInputChange={handleBotAccessoryUploadChange}
-                  onAccessoryUploadClick={() => botAccessoryUploadInputRef.current?.click()}
-                  onRemoveAccessory={() => void removeBotAccessory()}
                 />
               </section>
               {!editingDefaultBot ? (
@@ -78032,12 +77424,26 @@ function HomeContent(): React.JSX.Element {
     clearCoffeeRhythmTimers();
     setCoffeePendingRevealConversation(args.conversation);
     setCoffeePendingSpeakerBotId(args.speakerBotId);
-    const typingDeferralMs = args.includeCooldown
-      ? 0
-      : coffeeTableTalkAutonomousDeferralMs(args.conversation.id);
+    const typingDeferralMs = coffeeGeneratedReplyRevealDeferralMs({
+      conversationId: args.conversation.id,
+      draft: coffeeDraftRef.current,
+      includeCooldown: args.includeCooldown,
+      lastTypedAtMs: coffeeTableTalkLastTypedAtRef.current,
+      lastTypedConversationId: coffeeTableTalkLastTypedConversationIdRef.current,
+      nowMs: Date.now(),
+      graceMs: COFFEE_TABLE_TALK_TYPING_GRACE_MS,
+    });
     if (typingDeferralMs > 0) {
       const revealAfterTypingGrace = () => {
-        const nextDeferralMs = coffeeTableTalkAutonomousDeferralMs(args.conversation.id);
+        const nextDeferralMs = coffeeGeneratedReplyRevealDeferralMs({
+          conversationId: args.conversation.id,
+          draft: coffeeDraftRef.current,
+          includeCooldown: args.includeCooldown,
+          lastTypedAtMs: coffeeTableTalkLastTypedAtRef.current,
+          lastTypedConversationId: coffeeTableTalkLastTypedConversationIdRef.current,
+          nowMs: Date.now(),
+          graceMs: COFFEE_TABLE_TALK_TYPING_GRACE_MS,
+        });
         if (nextDeferralMs > 0) {
           setCoffeeTurnRhythmState(
             coffeeDraftRef.current.trim().length > 0 ? "playerComposing" : "cooldown"
@@ -78362,10 +77768,23 @@ function HomeContent(): React.JSX.Element {
     const runtime = coffeePotDragRuntimeRef.current;
     if (!runtime || runtime.pointerId !== event.pointerId) return;
     commitPartialCoffeePotRefill(event.pointerId);
+    const latest = coffeePotDragRef.current;
     const activeTopOffBotId = coffeeCupTopOffAnimationActiveBotIdRef.current;
     const keepFillAnimation =
       coffeePotTopOffBusyBotIdRef.current !== null ||
       (activeTopOffBotId !== null && runtime.completedBotIds.has(activeTopOffBotId));
+    const trayRect = event.currentTarget.getBoundingClientRect();
+    const returnX = Math.max(
+      0,
+      Math.min(runtime.stageRect.width, trayRect.left - runtime.stageRect.left + trayRect.width / 2)
+    );
+    const returnY = Math.max(
+      0,
+      Math.min(runtime.stageRect.height, trayRect.top - runtime.stageRect.top + trayRect.height / 2)
+    );
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -78375,7 +77794,30 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeePotPourReadyTimerRef.current);
       coffeePotPourReadyTimerRef.current = null;
     }
-    setCoffeePotDrag(null);
+    if (coffeePotReturnTimerRef.current) {
+      clearTimeout(coffeePotReturnTimerRef.current);
+      coffeePotReturnTimerRef.current = null;
+    }
+    if (latest && !prefersReducedMotion) {
+      const returningDrag: CoffeePotDragState = {
+        ...latest,
+        returnX,
+        returnY,
+        returning: true,
+        pouringBotId: null,
+        pourProgress: null,
+        pourReady: false,
+      };
+      setCoffeePotDrag(returningDrag);
+      coffeePotReturnTimerRef.current = setTimeout(() => {
+        coffeePotReturnTimerRef.current = null;
+        setCoffeePotDrag((current) =>
+          current?.returning && current.pointerId === returningDrag.pointerId ? null : current
+        );
+      }, COFFEE_POT_RETURN_MS);
+    } else {
+      setCoffeePotDrag(null);
+    }
     if (!keepFillAnimation) {
       clearCoffeeCupTopOffFillAnimation();
     }
@@ -78418,6 +77860,7 @@ function HomeContent(): React.JSX.Element {
       );
       setCoffeeConversation(response.conversation);
       coffeeConversationRef.current = response.conversation;
+      lockCoffeeCupSipForRefill(botId);
       if (coffeeCupTopOffAnimationClearTimerRef.current) {
         clearTimeout(coffeeCupTopOffAnimationClearTimerRef.current);
       }
@@ -80277,6 +79720,7 @@ function HomeContent(): React.JSX.Element {
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
+    if (consumeDeprecatedRefreshCommand(trimmed, "coffee")) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (await consumeCoffeeNvmCommand(trimmed)) return;
     if (liveDraft !== coffeeDraft) {
@@ -81085,10 +80529,6 @@ function HomeContent(): React.JSX.Element {
       </li>
     );
   };
-  const coffeeModelQualityHintText =
-    coffeeAnyOfflineProtected || coffeeProvider === "local"
-      ? "Model caliber matters: stronger local models carry banter, interruptions, and persona contrast better. If the table feels flat, try a stronger local model before judging the group."
-      : "Model caliber matters: stronger models carry banter, interruptions, and persona contrast better. If the table feels flat, try a stronger model before judging the group.";
   const renderCoffeeSessionSettingsFields = (
     settings = coffeeSessionSettings,
     setSettings = setCoffeeSessionSettings,
@@ -81375,15 +80815,6 @@ function HomeContent(): React.JSX.Element {
             : "Copy review";
     return (
       <>
-        <div
-          className={`${styles.panelOverlay} ${styles.coffeeTranscriptOverlay}`}
-          data-closing={coffeeTranscriptClosing ? "true" : undefined}
-          onClick={(event) => {
-            if (event.button !== 0 || event.ctrlKey) return;
-            closeCoffeeTranscript({ animate: true });
-          }}
-          aria-hidden="true"
-        />
         <aside
           className={styles.coffeeTranscriptPanel}
           data-dev-panel-safe-area="right"
@@ -81421,15 +80852,6 @@ function HomeContent(): React.JSX.Element {
                 ) : (
                   <Copy aria-hidden="true" />
                 )}
-              </button>
-              <button
-                type="button"
-                className={styles.headerIconButton}
-                onClick={() => closeCoffeeTranscript({ animate: true })}
-                aria-label="Close Coffee transcript"
-                title="Close Coffee transcript"
-              >
-                ×
               </button>
             </div>
           </header>
@@ -82415,66 +81837,73 @@ function HomeContent(): React.JSX.Element {
             </div>
           </div>
           {coffeePotVisible ? (
-            <div className={styles.coffeePotLayer}>
-            <button
-              type="button"
-              className={styles.coffeePotTray}
-              data-dragging={coffeePotDrag ? "true" : undefined}
-              disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
-              aria-label="Drag coffee pot or press Enter to refill the lowest mug"
-              title="Drag coffee pot"
-              onPointerDown={startCoffeePotDrag}
-              onPointerMove={moveCoffeePotDrag}
-              onPointerUp={finishCoffeePotDrag}
-              onPointerCancel={finishCoffeePotDrag}
-              onKeyDown={handleCoffeePotKeyDown}
-            >
-              <img src={coffeePotRestImageUrl(resolvedTheme)} alt="" draggable={false} />
-            </button>
-            {coffeePotDrag ? (
-              <div
-                className={styles.coffeePotDrag}
-                data-pour-target={coffeePotDrag.pouringBotId ? "true" : undefined}
-                data-pouring={coffeePotDrag.pourReady ? "true" : undefined}
-                aria-hidden="true"
-                style={
-                  {
-                    "--coffee-pot-drag-x": `${coffeePotDrag.x}px`,
-                    "--coffee-pot-drag-y": `${coffeePotDrag.y}px`,
-                  } as React.CSSProperties
-                }
+            <div className={styles.coffeePotLayer} data-coffee-pot-theme={coffeePotAssetTheme}>
+              <button
+                type="button"
+                className={styles.coffeePotTray}
+                data-dragging={coffeePotDrag ? "true" : undefined}
+                disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
+                aria-label="Drag coffee pot or press Enter to refill the lowest mug"
+                title="Drag coffee pot"
+                onPointerDown={startCoffeePotDrag}
+                onPointerMove={moveCoffeePotDrag}
+                onPointerUp={finishCoffeePotDrag}
+                onPointerCancel={finishCoffeePotDrag}
+                onKeyDown={handleCoffeePotKeyDown}
               >
-                <img
-                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImageRest}`}
-                  src={coffeePotRestImageUrl(resolvedTheme)}
-                  alt=""
-                  draggable={false}
-                />
-                <img
-                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImagePour}`}
-                  src={coffeePotPourImageUrl(resolvedTheme)}
-                  alt=""
-                  draggable={false}
-                />
-                {coffeePotDrag.pourReady ? (
-                  <span className={styles.coffeePotPourStream} aria-hidden="true">
-                    {COFFEE_POT_POUR_FRAME_INDICES.map((frameIndex) => (
-                      <img
-                        key={frameIndex}
-                        className={styles.coffeePotPourStreamFrame}
-                        src={coffeePotPourFrameImageUrl(resolvedTheme, frameIndex)}
-                        alt=""
-                        draggable={false}
-                        style={coffeePotPourStreamFrameStyle(
-                          frameIndex,
-                          coffeePotPourFrameIndex
-                        )}
-                      />
-                    ))}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
+                <img src={coffeePotRestImageUrl(coffeePotAssetTheme)} alt="" draggable={false} />
+              </button>
+              {coffeePotDrag ? (
+                <div
+                  className={styles.coffeePotDrag}
+                  data-pour-target={coffeePotDrag.pouringBotId ? "true" : undefined}
+                  data-pouring={coffeePotDrag.pourReady ? "true" : undefined}
+                  data-returning={coffeePotDrag.returning ? "true" : undefined}
+                  aria-hidden="true"
+                  style={
+                    {
+                      "--coffee-pot-drag-x": `${coffeePotDrag.x}px`,
+                      "--coffee-pot-drag-y": `${coffeePotDrag.y}px`,
+                      "--coffee-pot-return-x": `${
+                        coffeePotDrag.returnX ?? coffeePotDrag.x
+                      }px`,
+                      "--coffee-pot-return-y": `${
+                        coffeePotDrag.returnY ?? coffeePotDrag.y
+                      }px`,
+                    } as React.CSSProperties
+                  }
+                >
+                  <img
+                    className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImageRest}`}
+                    src={coffeePotRestImageUrl(coffeePotAssetTheme)}
+                    alt=""
+                    draggable={false}
+                  />
+                  <img
+                    className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImagePour}`}
+                    src={coffeePotPourImageUrl(coffeePotAssetTheme)}
+                    alt=""
+                    draggable={false}
+                  />
+                  {coffeePotDrag.pourReady ? (
+                    <span className={styles.coffeePotPourStream} aria-hidden="true">
+                      {COFFEE_POT_POUR_FRAME_INDICES.map((frameIndex) => (
+                        <img
+                          key={frameIndex}
+                          className={styles.coffeePotPourStreamFrame}
+                          src={coffeePotPourFrameImageUrl(coffeePotAssetTheme, frameIndex)}
+                          alt=""
+                          draggable={false}
+                          style={coffeePotPourStreamFrameStyle(
+                            frameIndex,
+                            coffeePotPourFrameIndex
+                          )}
+                        />
+                      ))}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className={styles.coffeeTableScene} data-coffee-table-scene="true">
@@ -83096,6 +82525,20 @@ function HomeContent(): React.JSX.Element {
               layoutIndex
             );
             const seatDebugOverride = coffeeSeatDebugOverrides[bot.id];
+            const seatCanvasLeftPercent = seatDebugOverride
+              ? seatDebugOverride.leftPct
+              : coffeeSeatCanvasLeftPercent({
+                  compact: compactCoffeeStage,
+                  seatIndex,
+                  seatCount: coffeeSeatLayoutCount,
+                  layoutIndex,
+                  phase: coffeeSessionPhase,
+                  groupReady: coffeeGroupReadyToStart,
+                  autoplayDock: coffeeSessionJoinedDock,
+                  experimentalTableAngle:
+                    settings?.coffeeExperimentalTableAngleEnabled === true,
+                  replayActive: coffeeReplayActive,
+                });
             const resolvedSeatHorizontalSide = seatDebugOverride
               ? coffeeSeatHorizontalSideFromLeftPercent(seatDebugOverride.leftPct)
               : seatHorizontalSide;
@@ -83117,6 +82560,15 @@ function HomeContent(): React.JSX.Element {
                   })
                 )
               : coffeePlateFaceScaleYFromSeatHorizontalSide(resolvedSeatHorizontalSide);
+            const refillSipLockUntilMs = Math.max(
+              coffeeCupSipLockedUntilMsByBotId[bot.id] ?? 0,
+              !coffeeReplayActive &&
+                (coffeePotDrag?.pouringBotId === bot.id || coffeePotTopOffBusyBotId === bot.id)
+                ? coffeeSessionClockMs + COFFEE_CUP_REFILL_SIP_LOCK_MS
+                : 0
+            );
+            const refillSipLocked = refillSipLockUntilMs > coffeeSessionClockMs;
+            const visualSeatSipInProgress = refillSipLocked ? false : seatSipInProgress;
             const completedSipAnimation = coffeeCupLastSipAnimationByBotId.get(bot.id) ?? null;
             const completedSipAnimationTiming = completedSipAnimation
               ? coffeeCupSipAnimationTiming({
@@ -83129,15 +82581,16 @@ function HomeContent(): React.JSX.Element {
               : Number.POSITIVE_INFINITY;
             const completedSipAnimationActive =
               seatIsFirmlySeated &&
+              !refillSipLocked &&
               !isTableTypingThisSeat &&
-              !seatSipInProgress &&
+              !visualSeatSipInProgress &&
               completedSipAnimationTiming != null &&
               completedSipAnimationAgeMs >= 0 &&
               completedSipAnimationAgeMs <= completedSipAnimationTiming.durationMs;
             const cupSipCount =
               (coffeeCupSipCountByBotId.get(bot.id) ?? 0) +
-              (seatSipInProgress ? 1 : 0);
-            const activeSipAnimationCount = seatSipInProgress
+              (visualSeatSipInProgress ? 1 : 0);
+            const activeSipAnimationCount = visualSeatSipInProgress
               ? cupSipCount
               : completedSipAnimationActive && completedSipAnimation
                 ? completedSipAnimation.sipCount
@@ -83165,10 +82618,11 @@ function HomeContent(): React.JSX.Element {
                 coffeeConversation?.coffeeSessionDurationMinutes ?? coffeeSelectedDurationMinutes,
               sipCount: seatIsFirmlySeated && hasExplicitCupSipState ? visualCupSipCount : null,
               topOff: seatIsFirmlySeated ? coffeeCupTopOff : null,
+              sipLockedUntilMs: refillSipLockUntilMs || null,
               sippingOverride:
-                !seatIsFirmlySeated
+                refillSipLocked || !seatIsFirmlySeated
                   ? false
-                  : seatSipInProgress || completedSipAnimationActive
+                  : visualSeatSipInProgress || completedSipAnimationActive
                     ? true
                     : hasExplicitCupSipState
                       ? false
@@ -83177,10 +82631,12 @@ function HomeContent(): React.JSX.Element {
               finishSeed: coffeeCupFinishSeed,
             });
             const seatSipPresentation = resolveCoffeeSeatSipFacePresentation({
-              sipInProgress: seatSipInProgress,
-              completedSipAnimationAgeMs,
+              sipInProgress: visualSeatSipInProgress,
+              completedSipAnimationAgeMs: refillSipLocked
+                ? Number.POSITIVE_INFINITY
+                : completedSipAnimationAgeMs,
               completedSipAnimationDurationMs: completedSipAnimationTiming?.durationMs ?? null,
-              cupSipping: coffeeCupVisual.sipping,
+              cupSipping: refillSipLocked ? false : coffeeCupVisual.sipping,
               seatIsFirmlySeated,
               isSpeaking: isTableTypingThisSeat,
               cupSide: coffeeCupSide,
@@ -83189,6 +82645,13 @@ function HomeContent(): React.JSX.Element {
             });
             const seatPlateGlyph =
               seatSipPresentation.glyph ?? coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+            const coffeeSeatLighting = coffeeSeatCanvasLightingFromLeftPercent(
+              seatCanvasLeftPercent,
+              {
+                rosterPreview: rosterPreviewSeat,
+                topHead: isTopHeadSeat,
+              }
+            );
             const replayActiveTopOffEvent =
               coffeeReplayActive && replayState?.activeTopOffEvent?.botId === bot.id
                 ? replayState.activeTopOffEvent
@@ -83239,34 +82702,15 @@ function HomeContent(): React.JSX.Element {
               ["--coffee-plate-emoji-face-scale-y" as string]: coffeePlateFaceScaleY,
               ["--coffee-seat-sip-mouth-offset-x" as string]: seatSipPresentation.mouthOffsetX,
               ["--coffee-seat-sip-mouth-offset-y" as string]: seatSipPresentation.mouthOffsetY,
-              ["--bot-face-screen-glare-x" as string]: rosterPreviewSeat
-                ? "34%"
-                : seatHorizontalSide < 0
-                  ? "62%"
-                  : seatHorizontalSide > 0
-                    ? "38%"
-                    : "48%",
-              ["--bot-face-screen-glare-y" as string]: rosterPreviewSeat
-                ? "24%"
-                : isTopHeadSeat
-                  ? "34%"
-                  : "22%",
-              ["--bot-face-screen-glare-angle" as string]: rosterPreviewSeat
-                ? "-28deg"
-                : seatHorizontalSide < 0
-                  ? "-42deg"
-                  : seatHorizontalSide > 0
-                    ? "34deg"
-                    : "-16deg",
+              ["--bot-face-metal-light-rotation" as string]:
+                `${coffeeSeatLighting.metalRotationDeg.toFixed(2)}deg`,
+              ["--bot-face-screen-glare-x" as string]:
+                `${coffeeSeatLighting.glareXPct.toFixed(2)}%`,
+              ["--bot-face-screen-glare-y" as string]:
+                `${coffeeSeatLighting.glareYPct.toFixed(2)}%`,
+              ["--bot-face-screen-glare-angle" as string]:
+                `${coffeeSeatLighting.glareAngleDeg.toFixed(2)}deg`,
             } as React.CSSProperties;
-            const coffeeSeatAccessoryUrl = rosterPreviewSeat
-              ? null
-              : botStoredImageUrl(bot.accessory_image_id);
-            const coffeeSeatAccessoryPlacement = botAccessoryPlacementFromBot(bot);
-            const coffeeSeatAccessoryTintColor = normalizeAccentForTheme(
-              bot.color ?? PRISM_DEFAULT_ACCENT,
-              resolvedTheme
-            );
             const coffeeCupVisible =
               !rosterPreviewSeat &&
               seatIsFirmlySeated &&
@@ -83364,49 +82808,29 @@ function HomeContent(): React.JSX.Element {
 	                      </span>
 	                    </div>
 	                  ) : (
-	                    <div
-	                      className={styles.coffeeSeatPlate}
-	                      data-live-body-style="zen"
-	                      data-accessory-equipped={
-	                        coffeeSeatAccessoryUrl ? "true" : undefined
-	                      }
-	                      data-accessory-layer={
-	                        coffeeSeatAccessoryUrl
-	                          ? coffeeSeatAccessoryPlacement.layer
-	                          : undefined
-	                      }
-	                      style={coffeeHeadPlateStyle}
-	                    >
-                      {coffeeSeatAccessoryUrl ? (
-                        <span
-                          className={styles.coffeeSeatAccessoryLayer}
-                          data-accessory-layer={coffeeSeatAccessoryPlacement.layer}
-                          aria-hidden="true"
-                        >
-                          <BotAccessoryRaster
-                            className={styles.coffeeSeatAccessoryRaster}
-                            accessoryUrl={coffeeSeatAccessoryUrl}
-                            accessoryPlacement={coffeeSeatAccessoryPlacement}
-                            botColor={coffeeSeatAccessoryTintColor}
-                          />
-                        </span>
-                      ) : null}
-                      <CoffeeSeatPlateEmoji
-                        key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
-                        enabled={coffeeSessionJoinedDock || coffeeReplayActive}
-                        isTalking={isTableTypingThisSeat}
-                        scheduleKey={bot.id}
-                        showThinkingSpinner={seatIsThinkingThisSeat}
-                        baseText={seatPlateGlyph.text}
-                        rotateDeg={seatPlateGlyph.rotateDeg}
-                        voicePreset={seatVoicePreset}
-                        faceEyesFont={seatFaceStyle.eyesFont}
-                        faceEyeCharacter={seatFaceStyle.eyeCharacter}
-                        faceMouthFont={seatFaceStyle.mouthFont}
-                        faceFontWeight={seatFaceStyle.weight}
-                        className={styles.coffeeSeatPlateEmoji}
-                      />
-                      <BotFaceFrame />
+		                    <div
+		                      className={styles.coffeeSeatPlate}
+		                      data-live-body-style="zen"
+		                      style={coffeeHeadPlateStyle}
+		                    >
+	                      <span className={styles.coffeeSeatFaceEmissionMask} aria-hidden="true">
+	                        <CoffeeSeatPlateEmoji
+	                          key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
+	                          enabled={coffeeSessionJoinedDock || coffeeReplayActive}
+	                          isTalking={isTableTypingThisSeat}
+	                          scheduleKey={bot.id}
+	                          showThinkingSpinner={seatIsThinkingThisSeat}
+	                          baseText={seatPlateGlyph.text}
+	                          rotateDeg={seatPlateGlyph.rotateDeg}
+	                          voicePreset={seatVoicePreset}
+	                          faceEyesFont={seatFaceStyle.eyesFont}
+	                          faceEyeCharacter={seatFaceStyle.eyeCharacter}
+	                          faceMouthFont={seatFaceStyle.mouthFont}
+	                          faceFontWeight={seatFaceStyle.weight}
+	                          className={styles.coffeeSeatPlateEmoji}
+	                        />
+	                      </span>
+	                      <BotFaceFrame />
                       {seatTeamId && seatTeamLabel ? (
                         <span
                           className={styles.coffeeSeatTeamBadge}
@@ -83473,7 +82897,7 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.coffeeReplayRefillBot}>
                         <BotGlyph name="triangle" size={18} strokeWidth={2.1} />
                       </span>
-                      <img src={coffeePotPourImageUrl(resolvedTheme)} alt="" draggable={false} />
+                      <img src={coffeePotPourImageUrl(coffeePotAssetTheme)} alt="" draggable={false} />
                     </span>
                   ) : null}
                   <div className={styles.coffeeSeatGlowPill}>
@@ -84561,7 +83985,6 @@ function HomeContent(): React.JSX.Element {
                 </select>
               </div>
             ) : null}
-            {renderCoffeeSessionModelSetup()}
             <label className={styles.coffeeAutoTopicToggle}>
               <input
                 type="checkbox"
@@ -84576,7 +83999,6 @@ function HomeContent(): React.JSX.Element {
                 </small>
               </span>
             </label>
-            <p className={styles.coffeeModelQualityHint}>{coffeeModelQualityHintText}</p>
           </div>
         </div>
         <div className={styles.coffeeGroupOverviewGrid}>
@@ -84701,8 +84123,7 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionPhase === "preview" &&
       coffeeConversation != null &&
       !coffeeSessionHasStarted(coffeeConversation);
-    /** Transcript is only available once a real Coffee conversation exists. */
-    const coffeeTranscriptToggleEnabled = conversationActive;
+    const coffeeTranscriptPermanent = coffeeSessionJoined;
     const coffeeArrivalHasSeatedBot =
       coffeeSessionPhase !== "arriving" ||
       coffeeArrivedBotIds.some((id) => coffeeActiveSeatBotIds.includes(id));
@@ -84780,9 +84201,7 @@ function HomeContent(): React.JSX.Element {
       <main
         className={`${styles.appLayout} ${themeClass} ${styles.coffeeShell}`}
         data-session-active={coffeeSessionJoined ? "true" : undefined}
-        data-transcript-open={
-          coffeeTranscriptOpen && coffeeTranscriptToggleEnabled ? "true" : undefined
-        }
+        data-transcript-open={coffeeTranscriptPermanent ? "true" : undefined}
         data-accent-active={appShellStyle ? "true" : undefined}
         style={coffeeMainSurfaceStyle}
         onContextMenu={handleCoffeeShellContextMenu}
@@ -84903,25 +84322,6 @@ function HomeContent(): React.JSX.Element {
                   void exitCoffeeToChat();
                 },
               })}
-              {coffeeTranscriptToggleEnabled ? (
-                <button
-                  type="button"
-                  className={styles.headerIconButton}
-                  data-active={coffeeTranscriptOpen ? "true" : undefined}
-                  onClick={() => {
-                    if (coffeeTranscriptOpen) {
-                      closeCoffeeTranscript({ animate: true });
-                    } else {
-                      openCoffeeTranscript();
-                    }
-                  }}
-                  aria-pressed={coffeeTranscriptOpen}
-                  aria-label={coffeeTranscriptOpen ? "Close Coffee transcript" : "Open Coffee transcript"}
-                  title={coffeeTranscriptOpen ? "Close Coffee transcript" : "Open Coffee transcript"}
-                >
-                  <MessageBubbleGlyph />
-                </button>
-              ) : null}
             </div>
           </header>
 
@@ -85157,7 +84557,7 @@ function HomeContent(): React.JSX.Element {
               })}
         </section>
 
-        {coffeeTranscriptOpen && conversationActive ? renderCoffeeTranscriptPanel() : null}
+        {coffeeTranscriptPermanent ? renderCoffeeTranscriptPanel() : null}
         {renderCoffeeGroupSettingsModal()}
 
         {renderSharedPanels()}
@@ -87575,6 +86975,8 @@ function HomeContent(): React.JSX.Element {
                       actionState={zenLiveVisibleBotAction}
                       replyActionText={zenLiveReplyActionText}
                       userActionVisible={Boolean(zenComposerActionPreview)}
+                      defaultPrismGlyph={zenDefaultPrismGlyph}
+                      defaultPrismFaceStyle={zenDefaultPrismFaceStyle}
                       defaultPrismPresenceVisible={zenDefaultPrismPresenceVisible}
                       defaultPrismPresenceForming={zenDefaultPrismPresenceForming}
                       askQuestionActive={zenLiveAskQuestionMarkerVisible}

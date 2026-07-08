@@ -87,6 +87,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: 0,
+    zenPersonaTransitionChoice: "random",
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
@@ -995,6 +996,29 @@ describe("resolveNextSettings — Zen Atmosphere style notes", () => {
 });
 
 describe("resolveNextSettings — Zen Mode settings", () => {
+  it("stores the Zen persona transition switch choice", () => {
+    const next = resolveNextSettings(
+      { zenPersonaTransitionChoice: "previous-introduces" },
+      baseline()
+    );
+
+    assert.equal(next.zenPersonaTransitionChoice, "previous-introduces");
+  });
+
+  it("keeps the stored Zen persona transition choice when omitted or invalid", () => {
+    const current = baseline({ zenPersonaTransitionChoice: "new-speaks" });
+
+    assert.equal(
+      resolveNextSettings({}, current).zenPersonaTransitionChoice,
+      "new-speaks"
+    );
+    assert.equal(
+      resolveNextSettings({ zenPersonaTransitionChoice: "fade-wipe" }, current)
+        .zenPersonaTransitionChoice,
+      "new-speaks"
+    );
+  });
+
   it("stores Zen session and context settings", () => {
     const next = resolveNextSettings(
       {

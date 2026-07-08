@@ -14,7 +14,7 @@ type BackendUnavailableNoticeProps = {
 
 export function BackendUnavailableNotice({
   variant,
-  message = "Prism is waiting for its local API.",
+  message = "Trying to reconnect to Prism...",
   retryBusy = false,
   restartBusy = false,
   showRestart = false,
@@ -23,8 +23,8 @@ export function BackendUnavailableNotice({
 }: BackendUnavailableNoticeProps): React.JSX.Element {
   const body =
     variant === "full"
-      ? "The interface is still here. Once the local backend answers again, Prism will pick up where it left off."
-      : "Local connection paused. Your draft and canvas are still here.";
+      ? "The local server is offline or restarting. Once it answers again, Prism will pick up where it left off."
+      : "Server connection paused. Your draft and canvas are still here.";
   const card = (
     <section
       className={
@@ -39,7 +39,7 @@ export function BackendUnavailableNotice({
         <span />
       </div>
       <div className={styles.backendUnavailableBody}>
-        <p className={styles.backendUnavailableEyebrow}>Connection</p>
+        <p className={styles.backendUnavailableEyebrow}>Server offline</p>
         <h2>{message}</h2>
         <p>{body}</p>
       </div>

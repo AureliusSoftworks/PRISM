@@ -71,6 +71,25 @@ export function coffeeTableTalkAutoplayDeferralMs(args: {
   return Math.max(0, args.graceMs - (args.nowMs - args.lastTypedAtMs));
 }
 
+export function coffeeGeneratedReplyRevealDeferralMs(args: {
+  conversationId: string;
+  draft: string;
+  includeCooldown: boolean;
+  lastTypedAtMs: number;
+  lastTypedConversationId: string | null;
+  nowMs: number;
+  graceMs: number;
+}): number {
+  if (args.includeCooldown) return 0;
+  if (args.draft.trim().length === 0) return 0;
+  return coffeeTableTalkAutoplayDeferralMs(args);
+}
+
+export function coffeeDraftChangeCountsAsTyping(previousDraft: string, nextDraft: string): boolean {
+  if (previousDraft === nextDraft) return false;
+  return previousDraft.trim().length > 0 || nextDraft.trim().length > 0;
+}
+
 export function coffeeDirectedMentionBotIds(
   text: string,
   seatedBotIds: Iterable<string>

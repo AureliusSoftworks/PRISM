@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
 
 import {
-  BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
   BOT_ARCHIVE_BOT_ENTRY_NAME,
   BOT_ARCHIVE_MEMORIES_ENTRY_NAME,
   PRISM_BOT_ARCHIVE_SCHEMA,
@@ -27,7 +26,6 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       faceFontWeight: 675,
     },
     systemPrompt: "Ask good questions.",
-    accessory: null,
     ...overrides,
   };
 }
@@ -45,7 +43,6 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.faceEyeCharacter, "8");
     assert.deepEqual(parsed.memories, ["Loves dialogue.", "Founded the Academy."]);
-    assert.equal(parsed.accessoryPng, null);
   });
 
   it("omits empty memories and accepts missing memories.json", () => {
@@ -55,33 +52,6 @@ describe("botArchive", () => {
     });
 
     assert.deepEqual(parsePrismBotArchive(archive).memories, []);
-  });
-
-  it("round-trips an accessory png only with matching bot metadata", () => {
-    const accessoryPng = new Uint8Array([137, 80, 78, 71]);
-    const placement = {
-      anchor: "avatar" as const,
-      xPct: 12,
-      yPct: -8,
-      sizePct: 134,
-      layer: "front" as const,
-    };
-    const archive = createPrismBotArchive({
-      botJson: baseBotJson({
-        accessory: {
-          file: BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
-          placement,
-        },
-      }),
-      memories: [],
-      accessoryPng,
-    });
-
-    const parsed = parsePrismBotArchive(archive);
-
-    assert.deepEqual(parsed.accessoryPng, accessoryPng);
-    assert.equal(parsed.botJson.accessory?.file, BOT_ARCHIVE_ACCESSORY_ENTRY_NAME);
-    assert.deepEqual(parsed.botJson.accessory?.placement, placement);
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {

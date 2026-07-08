@@ -117,24 +117,6 @@ export {
 } from "./botAvatar.js";
 
 export {
-  BOT_ACCESSORY_PLACEMENT_SIZE_PCT_MAX,
-  BOT_ACCESSORY_PLACEMENT_SIZE_PCT_MIN,
-  BOT_ACCESSORY_PLACEMENT_X_PCT_MAX,
-  BOT_ACCESSORY_PLACEMENT_X_PCT_MIN,
-  BOT_ACCESSORY_PLACEMENT_Y_PCT_MAX,
-  BOT_ACCESSORY_PLACEMENT_Y_PCT_MIN,
-  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT,
-  DEFAULT_BOT_ACCESSORY_PLACEMENT,
-  botAccessoryPlacementsEqual,
-  normalizeBotAccessoryArchivePlacement,
-  normalizeBotAccessoryLayer,
-  normalizeBotAccessoryPlacement,
-  type BotAccessoryArchivePlacement,
-  type BotAccessoryLayer,
-  type BotAccessoryPlacement,
-} from "./botAccessoryPlacement.js";
-
-export {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,

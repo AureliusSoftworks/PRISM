@@ -6,6 +6,7 @@ import {
   COFFEE_POT_FINAL_POUR_FRAME_INDEX,
   COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS,
   COFFEE_POT_POUR_FRAME_MS,
+  COFFEE_POT_RETURN_MS,
   COFFEE_POT_TARGET_HIT_SLOP_PX,
   coffeeCupTopOffFillFrameIndices,
   coffeeCupTopOffFrameIndexForPour,
@@ -25,6 +26,7 @@ describe("Coffee pot refill timing", () => {
     assert.ok(COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS <= 220);
     assert.ok(COFFEE_POT_POUR_FRAME_MS <= 50);
     assert.ok(COFFEE_POT_FILL_FRAME_MS >= 160);
+    assert.equal(COFFEE_POT_RETURN_MS, 280);
     assert.equal(
       coffeePotFillFrameDelayMs(COFFEE_POT_FINAL_POUR_FRAME_INDEX),
       720

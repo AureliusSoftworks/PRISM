@@ -8717,6 +8717,8 @@
   flex-wrap: nowrap;
   background: var(--bg-surface);
   min-width: 0;
+  position: relative;
+  z-index: 180;
 }
 
 .chatHeaderComposeToolsRow {
@@ -19943,81 +19945,105 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   will-change: transform;
 }
 
-.zenLiveBotPresenceAccessoryLayer {
+.zenLiveBotPresenceFaceEmissionMask {
   position: absolute;
-  left: var(--zen-live-bot-face-x, 50%);
-  top: var(--zen-live-bot-face-y, 50%);
-  z-index: 6;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
   width: var(--zen-live-bot-body-frame-size);
   height: var(--zen-live-bot-body-frame-size);
-  transform:
-    translate(-50%, -50%)
-    scaleX(var(--coffee-plate-emoji-face-scale-y, 1))
-    scale(var(--zen-live-bot-face-scale, 1));
-  transform-origin: 50% 50%;
-  overflow: visible;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
   pointer-events: none;
+  isolation: isolate;
+  --bot-face-crt-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  --bot-face-crt-texture-size: 100% 100%;
+  --bot-face-crt-texture-repeat: repeat;
+  --bot-face-crt-color: var(--coffee-seat-emotion-color, var(--coffee-bot-color, currentColor));
+  --bot-face-crt-cell-width: clamp(2.2px, 1.62%, 4.4px);
+  --bot-face-crt-cell-height: clamp(2.6px, 1.9%, 5.2px);
+  --bot-face-crt-subpixel-width: calc(var(--bot-face-crt-cell-width) / 3);
+  --bot-face-crt-phosphor-opacity: 0.18;
+  --bot-face-crt-gap-opacity: 0.42;
+  --bot-face-crt-scanline-opacity: 0.14;
+  mix-blend-mode: plus-lighter;
+  filter:
+    drop-shadow(0 0 2px color-mix(in srgb, var(--bot-face-crt-color) 30%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--bot-face-crt-color) 12%, transparent));
+  -webkit-mask-image: var(--bot-face-crt-texture-image);
+  -webkit-mask-position: center;
+  -webkit-mask-size: var(--bot-face-crt-texture-size);
+  -webkit-mask-repeat: var(--bot-face-crt-texture-repeat);
+  -webkit-mask-mode: alpha;
+  mask-image: var(--bot-face-crt-texture-image);
+  mask-position: center;
+  mask-size: var(--bot-face-crt-texture-size);
+  mask-repeat: var(--bot-face-crt-texture-repeat);
+  mask-mode: alpha;
 }
 
-.zenLiveBotPresenceAccessoryLayer[data-accessory-layer="back"] {
-  z-index: 2;
-}
-
-.zenLiveBotPresenceAccessoryEditLayer {
-  position: absolute;
-  left: var(--zen-live-bot-face-x, 50%);
-  top: var(--zen-live-bot-face-y, 50%);
-  z-index: 7;
-  width: var(--zen-live-bot-body-frame-size);
-  height: var(--zen-live-bot-body-frame-size);
-  transform:
-    translate(-50%, -50%)
-    scaleX(var(--coffee-plate-emoji-face-scale-y, 1))
-    scale(var(--zen-live-bot-face-scale, 1));
-  transform-origin: 50% 50%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.zenLiveBotPresenceAccessoryRaster {
-  position: absolute;
-  inset: var(--bot-accessory-field-inset-pct, -170%);
-  z-index: 0;
-  overflow: visible;
-  background-position:
-    calc(50% + var(--bot-accessory-field-x-pct, 0%))
-    calc(50% + var(--bot-accessory-field-y-pct, 0%));
-  background-repeat: no-repeat;
-  background-size: var(--bot-accessory-field-size-pct, 22.727%) auto;
-  pointer-events: none;
-}
-
-.zenLiveBotPresenceBodyRaster {
-  --bot-body-raster-mask-image:
-    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
-    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
-  --bot-body-raster-mask-position: center, center;
-  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
-  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
+.zenLiveBotPresenceFaceEmissionMask::before,
+.zenLiveBotPresenceFaceEmissionMask::after,
+.coffeeSeatFaceEmissionMask::before,
+.coffeeSeatFaceEmissionMask::after {
+  content: "";
   position: absolute;
   inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  background-position:
-    calc(50% + var(--bot-accessory-x-pct, 0%))
-    calc(50% + var(--bot-accessory-y-pct, 0%));
-  background-repeat: no-repeat;
-  background-size: var(--bot-accessory-size-pct, 100%) auto;
-  -webkit-mask-image: var(--bot-body-raster-mask-image);
-  -webkit-mask-position: var(--bot-body-raster-mask-position);
-  -webkit-mask-size: var(--bot-body-raster-mask-size);
-  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
-  mask-image: var(--bot-body-raster-mask-image);
-  mask-position: var(--bot-body-raster-mask-position);
-  mask-size: var(--bot-body-raster-mask-size);
-  mask-repeat: var(--bot-body-raster-mask-repeat);
+  display: block;
   pointer-events: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask::before,
+.coffeeSeatFaceEmissionMask::before {
+  z-index: 12;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 28, 52, 0.9) 0 calc(var(--bot-face-crt-subpixel-width) * 0.92),
+      rgba(36, 255, 92, 0.86) calc(var(--bot-face-crt-subpixel-width) * 0.92)
+        calc(var(--bot-face-crt-subpixel-width) * 1.86),
+      rgba(54, 120, 255, 0.88) calc(var(--bot-face-crt-subpixel-width) * 1.86)
+        calc(var(--bot-face-crt-subpixel-width) * 2.78),
+      rgba(0, 0, 0, 0.72) calc(var(--bot-face-crt-subpixel-width) * 2.78)
+        var(--bot-face-crt-cell-width)
+    ),
+    var(--bot-face-crt-texture-image);
+  background-size:
+    var(--bot-face-crt-cell-width) 100%,
+    var(--bot-face-crt-texture-size);
+  background-repeat:
+    repeat,
+    var(--bot-face-crt-texture-repeat);
+  background-blend-mode: multiply;
+  opacity: var(--bot-face-crt-phosphor-opacity);
+  mix-blend-mode: color-dodge;
+  filter: brightness(1.18) contrast(1.08) saturate(1.35);
+}
+
+.zenLiveBotPresenceFaceEmissionMask::after,
+.coffeeSeatFaceEmissionMask::after {
+  z-index: 13;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.48) 0 calc(var(--bot-face-crt-subpixel-width) * 0.13),
+      transparent calc(var(--bot-face-crt-subpixel-width) * 0.13)
+        calc(var(--bot-face-crt-subpixel-width) * 0.92),
+      rgba(0, 0, 0, 0.34) calc(var(--bot-face-crt-subpixel-width) * 0.92)
+        var(--bot-face-crt-subpixel-width)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, var(--bot-face-crt-scanline-opacity)) 0 1px,
+      transparent 1px var(--bot-face-crt-cell-height)
+    );
+  background-size:
+    var(--bot-face-crt-cell-width) 100%,
+    100% var(--bot-face-crt-cell-height);
+  background-repeat: repeat;
+  background-blend-mode: multiply;
+  opacity: var(--bot-face-crt-gap-opacity);
+  mix-blend-mode: multiply;
 }
 
 .zenLiveBotPresenceFaceRig {
@@ -20044,6 +20070,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceScreenGlass {
+  --bot-face-screen-inset: 0;
+  --bot-face-screen-left: 0;
+  --bot-face-screen-top: 0;
+  --bot-face-screen-right: 0;
+  --bot-face-screen-bottom: 0;
+  --bot-face-screen-radius: 0;
+  --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  --bot-face-screen-glass-background: transparent;
   --bot-face-screen-glass-z: 0;
   --bot-face-screen-glass-opacity: var(--zen-live-bot-screen-glass-overlay-opacity, 0.2);
   --bot-face-screen-glare-opacity: var(--zen-live-bot-screen-glare-overlay-opacity, 0.24);
@@ -20173,14 +20207,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
 }
 
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"]):not([data-prism-persona="true"])
+  .zenLiveBotPresenceFaceGlyph {
+  text-shadow: none;
+  filter: none;
+}
+
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
   --zen-live-bot-talking-light-opacity-high: 1;
   --zen-live-bot-talking-light-opacity-mid: 1;
   --zen-live-bot-talking-light-opacity-low: 1;
+  --zen-live-bot-talking-face-glow-filter-high:
+    drop-shadow(0 0 0.18em color-mix(in srgb, currentColor 76%, transparent))
+    drop-shadow(0 0 0.48em color-mix(in srgb, currentColor 48%, transparent))
+    drop-shadow(0 0 0.95em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent));
+  --zen-live-bot-talking-face-glow-filter-mid:
+    drop-shadow(0 0 0.14em color-mix(in srgb, currentColor 64%, transparent))
+    drop-shadow(0 0 0.36em color-mix(in srgb, currentColor 38%, transparent))
+    drop-shadow(0 0 0.72em color-mix(in srgb, var(--coffee-bot-color) 24%, transparent));
+  --zen-live-bot-talking-face-glow-filter-low:
+    drop-shadow(0 0 0.1em color-mix(in srgb, currentColor 46%, transparent))
+    drop-shadow(0 0 0.26em color-mix(in srgb, currentColor 28%, transparent))
+    drop-shadow(0 0 0.52em color-mix(in srgb, var(--coffee-bot-color) 16%, transparent));
   opacity: 1;
-  animation: zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+  filter: var(--zen-live-bot-talking-face-glow-filter-high);
+  animation:
+    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,
+    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
@@ -20199,6 +20254,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   [data-coffee-plate-emoji-part="mouth"] {
   animation:
     zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite,
+    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,
     zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
 }
 
@@ -20248,6 +20304,30 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes zenLiveBotTalkingFaceGlowFlicker {
+  0%,
+  8%,
+  24%,
+  47%,
+  71%,
+  100% {
+    filter: var(--zen-live-bot-talking-face-glow-filter-high);
+  }
+
+  12%,
+  37%,
+  60%,
+  82% {
+    filter: var(--zen-live-bot-talking-face-glow-filter-mid);
+  }
+
+  15%,
+  55%,
+  87% {
+    filter: var(--zen-live-bot-talking-face-glow-filter-low);
+  }
+}
+
 @keyframes zenLiveBotPresenceSaturateIn {
   from {
     filter: saturate(0.14) grayscale(0.72) contrast(0.9);
@@ -20279,9 +20359,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFace {
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 13px color-mix(in srgb, var(--coffee-bot-color) 44%, transparent))
-    drop-shadow(0 0 30px color-mix(in srgb, var(--coffee-bot-color) 28%, transparent));
+  --bot-face-frame-glow-filter: drop-shadow(0 0 0 transparent);
   --bot-face-frame-color: var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color));
   --bot-face-frame-inset: 0;
   --bot-face-frame-opacity: 1;
@@ -20290,6 +20368,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-metal-light-opacity: 0.58;
   --bot-face-metal-light-raster-blend-mode: normal;
   --bot-face-metal-light-raster-opacity: 1;
+  --bot-face-screen-left: 16.6%;
+  --bot-face-screen-top: 11.5%;
+  --bot-face-screen-right: 15.2%;
+  --bot-face-screen-bottom: 20.3%;
   --bot-face-screen-glass-opacity: 0.56;
   --bot-face-screen-glare-opacity: 0.34;
   --bot-face-screen-specular-opacity: 0.72;
@@ -20381,11 +20463,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       rgba(255, 63, 111, 0.92)
     );
   --bot-face-frame-tint-filter: saturate(1.24) contrast(1.04);
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 10px rgba(255, 63, 111, 0.18))
-    drop-shadow(0 0 18px rgba(255, 182, 46, 0.1))
-    drop-shadow(0 0 26px rgba(49, 215, 255, 0.1))
-    drop-shadow(0 0 36px rgba(139, 124, 255, 0.12));
   --bot-face-frame-tint-opacity: 0.64;
   --bot-face-metal-light-opacity: 0.3;
   --bot-face-frame-tint-talking-opacity-high: 0.96;
@@ -20397,15 +20474,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-face-talking-opacity-high: 1;
   --zen-live-bot-face-talking-opacity-mid: 1;
   --zen-live-bot-face-talking-opacity-low: 1;
-  --zen-prism-ambient-inset: -48%;
-  --zen-prism-ambient-border-radius: 44% 46% 48% 45%;
-  --zen-prism-ambient-mask: none;
-  --zen-prism-ambient-opacity: 0.16;
-  --zen-prism-ambient-blend-mode: screen;
-  --zen-prism-ambient-filter: blur(32px) saturate(1.28) contrast(0.95);
-  --zen-prism-ambient-talking-opacity: 0.28;
-  --zen-prism-ambient-talking-opacity-mid: 0.18;
-  --zen-prism-ambient-talking-opacity-low: 0.09;
   --zen-presence-face-bg:
     radial-gradient(circle at 46% 28%, rgba(255, 255, 255, 0.05), transparent 34%),
     linear-gradient(180deg, #111113 0%, #030304 100%);
@@ -20426,22 +20494,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --coffee-bot-color: #242a33;
   --zen-live-bot-frame-tint-color: #f7f7f2;
   --bot-face-frame-tint-filter: saturate(1.18) contrast(1.02);
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 10px rgba(255, 63, 111, 0.14))
-    drop-shadow(0 0 22px rgba(49, 215, 255, 0.14))
-    drop-shadow(0 0 32px rgba(139, 124, 255, 0.1));
   --bot-face-frame-tint-opacity: 0.84;
   --bot-face-frame-tint-talking-opacity-high: 0.94;
   --bot-face-frame-tint-talking-opacity-mid: 0.78;
   --bot-face-frame-tint-talking-opacity-low: 0.56;
   --zen-live-bot-face-talking-opacity-mid: 1;
   --zen-live-bot-face-talking-opacity-low: 1;
-  --zen-prism-ambient-opacity: 0.16;
-  --zen-prism-ambient-blend-mode: normal;
-  --zen-prism-ambient-filter: blur(8px) saturate(1.14) contrast(0.96);
-  --zen-prism-ambient-talking-opacity: 0.22;
-  --zen-prism-ambient-talking-opacity-mid: 0.15;
-  --zen-prism-ambient-talking-opacity-low: 0.08;
   --zen-presence-face-bg:
     radial-gradient(circle at 38% 22%, rgba(255, 255, 255, 0.98), transparent 34%),
     radial-gradient(circle at 66% 78%, rgba(49, 215, 255, 0.14), transparent 44%),
@@ -20479,47 +20537,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     grayscale(1)
     saturate(0.18)
     contrast(0.96);
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 11px color-mix(in srgb, var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color)) 22%, transparent))
-    drop-shadow(0 0 24px color-mix(in srgb, var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color)) 14%, transparent));
   --bot-face-frame-tint-opacity: 0.52;
-  --zen-prism-ambient-opacity: 0.14;
-  --zen-prism-ambient-blend-mode: normal;
-  --zen-prism-ambient-filter: blur(8px) grayscale(1) saturate(0.14) contrast(0.92);
-  --zen-prism-ambient-talking-opacity: 0.2;
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace::before {
-  content: "";
-  position: absolute;
-  inset: var(--zen-prism-ambient-inset, -1px);
-  z-index: 0;
-  border-radius: var(--zen-prism-ambient-border-radius, inherit);
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at 24% 58%, rgba(255, 63, 111, 0.28), rgba(255, 63, 111, 0.14) 30%, transparent 70%),
-    radial-gradient(ellipse at 48% 20%, rgba(255, 182, 46, 0.2), rgba(255, 182, 46, 0.1) 28%, transparent 68%),
-    radial-gradient(ellipse at 76% 54%, rgba(49, 215, 255, 0.2), rgba(49, 215, 255, 0.1) 32%, transparent 72%),
-    radial-gradient(ellipse at 56% 82%, rgba(139, 124, 255, 0.18), rgba(139, 124, 255, 0.09) 30%, transparent 70%);
-  opacity: var(--zen-prism-ambient-opacity, 0.16);
-  mix-blend-mode: var(--zen-prism-ambient-blend-mode, screen);
-  filter: var(--zen-prism-ambient-filter, blur(32px) saturate(1.28) contrast(0.95));
-  -webkit-mask-image: var(--zen-prism-ambient-mask, none);
-  -webkit-mask-position: center;
-  -webkit-mask-size: 100% 100%;
-  -webkit-mask-repeat: no-repeat;
-  mask-image: var(--zen-prism-ambient-mask, none);
-  mask-position: center;
-  mask-size: 100% 100%;
-  mask-repeat: no-repeat;
-  transform-origin: center center;
-}
-
-.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace::before,
-.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"] .zenLiveBotPresenceFace::before {
-  opacity: var(--zen-prism-ambient-opacity, 0.18);
-  mix-blend-mode: var(--zen-prism-ambient-blend-mode, normal);
-  filter: var(--zen-prism-ambient-filter, blur(8px) saturate(1.14) contrast(0.96));
 }
 
 .zenLiveBotPresenceFaceGlyph {
@@ -20551,6 +20569,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline-block;
   color: currentColor;
   transform-origin: center center;
+}
+
+.zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part],
+.coffeeSeat:not([data-table-speaking="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part] {
+  --zen-live-bot-idle-face-glow-filter:
+    drop-shadow(0 0 0.07em color-mix(in srgb, currentColor 46%, transparent))
+    drop-shadow(0 0 0.22em color-mix(in srgb, currentColor 28%, transparent))
+    drop-shadow(0 0 0.42em color-mix(in srgb, var(--coffee-bot-color) 14%, transparent));
+  filter: var(--zen-live-bot-idle-face-glow-filter);
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
@@ -20615,15 +20647,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0.28em color-mix(in srgb, var(--coffee-bot-color) 22%, transparent);
 }
 
-.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFace::before {
-  --zen-live-bot-talking-light-opacity-high: var(--zen-prism-ambient-talking-opacity, 0.34);
-  --zen-live-bot-talking-light-opacity-mid: var(--zen-prism-ambient-talking-opacity-mid, 0.24);
-  --zen-live-bot-talking-light-opacity-low: var(--zen-prism-ambient-talking-opacity-low, 0.16);
-  opacity: var(--zen-prism-ambient-talking-opacity, 0.34);
-  animation: zenLivePrismRainbowAura 1.7s linear infinite;
-}
-
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"])
   .botFaceFrameTint {
   animation:
@@ -20634,36 +20657,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"])
   .botFaceFrameLed {
   animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
-}
-
-.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFace::before,
-.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
-  .zenLiveBotPresenceFace::before {
-  background:
-    conic-gradient(
-      from 210deg at 50% 52%,
-      rgba(190, 20, 66, 0.28),
-      rgba(150, 93, 0, 0.2),
-      rgba(34, 123, 48, 0.2),
-      rgba(0, 112, 148, 0.24),
-      rgba(82, 62, 176, 0.26),
-      rgba(190, 20, 66, 0.28)
-    );
-  opacity: var(--zen-prism-ambient-talking-opacity, 0.3);
-  mix-blend-mode: var(--zen-prism-ambient-blend-mode, normal);
-  filter: var(--zen-prism-ambient-filter, saturate(1.18) contrast(1.02));
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] .zenLiveBotPresenceFace::before {
-  opacity: var(--zen-prism-ambient-opacity, 0.16);
-  mix-blend-mode: normal;
-  filter: grayscale(1) saturate(0.14) contrast(0.92);
-}
-
-.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"] .zenLiveBotPresenceFace::before {
-  opacity: var(--zen-prism-ambient-talking-opacity, 0.24);
-  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -20727,16 +20720,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 0 0.12em rgba(255, 255, 255, 0.38))
     drop-shadow(0 0 0.32em rgba(255, 255, 255, 0.2));
   animation: none;
-}
-
-@keyframes zenLivePrismRainbowAura {
-  from {
-    transform: rotate(0deg) scale(1.01);
-  }
-
-  to {
-    transform: rotate(360deg) scale(1.01);
-  }
 }
 
 @keyframes zenLivePrismEmitterHueRotate {
@@ -20908,8 +20891,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceBotGlyph {
   position: absolute;
-  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 1px));
-  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 56px));
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px));
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px));
   z-index: 12;
   box-sizing: border-box;
   width: clamp(23px, calc(var(--zen-live-bot-body-frame-size) * 0.16), 33px);
@@ -21134,8 +21117,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .zenLiveBotPresenceFaceGlyph
     [data-coffee-plate-emoji-part="mouth"],
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-    .zenLiveBotPresenceFace::before,
-  .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
     .zenLiveBotPresenceFaceGlyph
     [data-coffee-plate-emoji-part] {
     animation-duration: 1ms;
@@ -21147,9 +21128,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .botFaceFrameLed,
   .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part],
-  .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
-    .zenLiveBotPresenceFace::before {
+    [data-coffee-plate-emoji-part] {
     animation: none;
   }
 
@@ -34678,92 +34657,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 18px 36px color-mix(in srgb, var(--bot-color, var(--accent)) 22%, transparent);
 }
 
-.botAvatarAccessoryBuilderPanel {
-  min-width: 0;
-  display: grid;
-  gap: 10px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #303846);
-  border-radius: 13px;
-  padding: 11px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.botAvatarAccessoryHeader {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.botAvatarAccessoryHeader .botAvatarAccessoryActions {
-  grid-template-columns: repeat(2, minmax(74px, 1fr));
-}
-
-.botAvatarAccessoryHeader .botAvatarAccessoryCopy {
-  text-align: left;
-}
-
-.botAvatarAccessoryLayerToggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, #303846);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.18);
-}
-
-.form .botAvatarAccessoryLayerToggle button,
-.botAvatarAccessoryLayerToggle button {
-  -webkit-appearance: none;
-  appearance: none;
-  min-width: 0;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg-muted);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 760;
-  cursor: pointer;
-}
-
-.form .botAvatarAccessoryLayerToggle button[data-active="true"],
-.botAvatarAccessoryLayerToggle button[data-active="true"] {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 42%, #ffffff);
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, rgba(255, 255, 255, 0.055));
-  color: var(--fg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.form .botAvatarAccessoryLayerToggle button:hover:not(:disabled),
-.form .botAvatarAccessoryLayerToggle button:focus-visible,
-.botAvatarAccessoryLayerToggle button:hover:not(:disabled),
-.botAvatarAccessoryLayerToggle button:focus-visible {
-  color: var(--fg);
-  outline: none;
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, rgba(255, 255, 255, 0.04));
-}
-
-.form .botAvatarAccessoryLayerToggle button:disabled,
-.botAvatarAccessoryLayerToggle button:disabled {
-  cursor: default;
-  opacity: 0.46;
-}
-
 @media (max-width: 799px) {
   .botAvatarBuilderBody {
-    grid-template-columns: 1fr;
-  }
-
-  .botAvatarAccessoryHeader {
     grid-template-columns: 1fr;
   }
 }
@@ -34816,8 +34711,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform: translateY(1px);
 }
 
-.botAvatarSummaryFace,
-.botAvatarSummaryAccessory {
+.botAvatarSummaryFace {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -34877,21 +34771,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 5%, transparent);
 }
 
-.botAvatarSummaryButton .botAvatarAccessoryPreview {
-  width: 58px;
-  border-radius: 14px;
-  background-position:
-    calc(50% + var(--bot-accessory-x-pct, 0%))
-    calc(50% + var(--bot-accessory-y-pct, 0%));
-  background-repeat: no-repeat;
-  background-size: var(--bot-accessory-size-pct, 100%) auto;
-}
-
-.botAvatarSummaryButton .botAvatarAccessoryEmpty {
-  width: 34px;
-  height: 34px;
-}
-
 .botAvatarSummaryCopy {
   min-width: 0;
   display: grid;
@@ -34921,15 +34800,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: start;
 }
 
-.botAvatarFaceArea,
-.botAvatarAccessoryArea {
+.botAvatarFaceArea {
   min-width: 0;
   display: grid;
   gap: 11px;
-}
-
-.botAvatarAccessoryArea {
-  align-content: start;
 }
 
 .botAvatarPreviewRow {
@@ -34966,34 +34840,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-shadow:
     0 0 5px color-mix(in srgb, currentColor 72%, transparent),
     0 0 12px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 52%, transparent);
-}
-
-.botAvatarAccessoryFaceOverlay {
-  --bot-body-raster-mask-image:
-    radial-gradient(circle at 50% 45%, #000 0 40%, transparent 41%),
-    radial-gradient(circle at 50% 78%, #000 0 12%, transparent 13%);
-  --bot-body-raster-mask-position: center, center;
-  --bot-body-raster-mask-size: 100% 100%, 100% 100%;
-  --bot-body-raster-mask-repeat: no-repeat, no-repeat;
-  position: absolute;
-  inset: 0;
-  z-index: 8;
-  width: 100%;
-  height: 100%;
-  background-position:
-    calc(50% + var(--bot-accessory-x-pct, 0%))
-    calc(50% + var(--bot-accessory-y-pct, 0%));
-  background-repeat: no-repeat;
-  background-size: var(--bot-accessory-size-pct, 100%) auto;
-  -webkit-mask-image: var(--bot-body-raster-mask-image);
-  -webkit-mask-position: var(--bot-body-raster-mask-position);
-  -webkit-mask-size: var(--bot-body-raster-mask-size);
-  -webkit-mask-repeat: var(--bot-body-raster-mask-repeat);
-  mask-image: var(--bot-body-raster-mask-image);
-  mask-position: var(--bot-body-raster-mask-position);
-  mask-size: var(--bot-body-raster-mask-size);
-  mask-repeat: var(--bot-body-raster-mask-repeat);
-  pointer-events: none;
 }
 
 .botAvatarCustomizerBackdrop {
@@ -35487,11 +35333,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarMannequinStage {
-  --bot-avatar-preview-accessory-bleed: 180px;
   box-sizing: border-box;
   min-width: 0;
   min-height: 640px;
-  padding: var(--bot-avatar-preview-accessory-bleed);
+  padding: 24px;
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, #303846);
@@ -35565,152 +35410,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform-origin: center center;
 }
 
-.botAvatarMannequinStage .zenLiveBotPresenceAccessoryLayer {
-  overflow: visible;
-}
-
-.botAvatarMannequinStage .zenLiveBotPresenceAccessoryEditLayer {
-  overflow: visible;
-}
-
 .botAvatarMannequinStage .zenLiveBotPresenceBody {
   pointer-events: auto;
 }
 
-.botAvatarMannequinStage .botAvatarAccessoryEditHandle,
-.botAvatarMannequinStage .botAvatarAccessoryEditHandle *,
-.botAvatarMannequinStage .botAvatarAccessoryCancelButton,
-.botAvatarMannequinStage .botAvatarAccessoryLockButton,
-.botAvatarMannequinStage .botAvatarAccessoryResizeHandle {
-  pointer-events: auto;
-}
-
-.botAvatarAccessoryEditHandle {
-  position: absolute;
-  left: calc(50% + var(--bot-accessory-x-pct, 0%));
-  top: calc(50% + var(--bot-accessory-y-pct, 0%));
-  z-index: 9;
-  width: var(--bot-accessory-size-pct, 100%);
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  border-radius: 8px;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.72),
-    0 0 0 4px rgba(0, 0, 0, 0.2),
-    0 0 22px rgba(255, 255, 255, 0.18);
-  cursor: move;
-  touch-action: none;
-}
-
-.botAvatarAccessoryEditHandle[data-disabled="true"] {
-  opacity: 0.42;
-  cursor: default;
-}
-
-.botAvatarAccessoryCancelButton {
-  -webkit-appearance: none;
-  appearance: none;
-  position: absolute;
-  left: -14px;
-  top: -14px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 999px;
-  background: rgba(6, 2, 8, 0.68);
-  color: #ffffff;
-  box-shadow:
-    0 0 0 2px rgba(0, 0, 0, 0.6),
-    0 0 16px rgba(255, 255, 255, 0.2);
-  cursor: pointer;
-}
-
-.botAvatarAccessoryCancelButton:hover:not(:disabled),
-.botAvatarAccessoryCancelButton:focus-visible {
-  outline: none;
-  border-color: #ffffff;
-  background: rgba(12, 4, 14, 0.86);
-}
-
-.botAvatarAccessoryCancelButton:disabled {
-  cursor: default;
-  opacity: 0.46;
-}
-
-.botAvatarAccessoryLockButton {
-  -webkit-appearance: none;
-  appearance: none;
-  position: absolute;
-  right: -14px;
-  top: -14px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 999px;
-  background: rgba(6, 2, 8, 0.68);
-  color: #ffffff;
-  box-shadow:
-    0 0 0 2px rgba(0, 0, 0, 0.6),
-    0 0 16px rgba(255, 255, 255, 0.2);
-  cursor: pointer;
-}
-
-.botAvatarAccessoryLockButton:hover:not(:disabled),
-.botAvatarAccessoryLockButton:focus-visible {
-  outline: none;
-  border-color: #ffffff;
-  background: rgba(12, 4, 14, 0.86);
-}
-
-.botAvatarAccessoryLockButton:disabled {
-  cursor: default;
-  opacity: 0.46;
-}
-
-.botAvatarAccessoryLockButton svg {
-  width: 17px;
-  height: 17px;
-  color: #ffffff;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.58));
-  pointer-events: none;
-}
-
-.botAvatarAccessoryResizeHandle {
-  position: absolute;
-  right: -14px;
-  bottom: -14px;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 2px solid rgba(255, 255, 255, 0.95);
-  border-radius: 999px;
-  background: rgba(6, 2, 8, 0.66);
-  box-shadow:
-    0 0 0 2px rgba(0, 0, 0, 0.62),
-    0 0 16px rgba(255, 255, 255, 0.2);
-  cursor: nwse-resize;
-}
-
-.botAvatarAccessoryResizeHandle svg {
-  width: 18px;
-  height: 18px;
-  color: #ffffff;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.58));
-  pointer-events: none;
-}
-
-.botAvatarModalFacePanel,
-.botAvatarModalAccessoryPanel {
+.botAvatarModalFacePanel {
   min-width: 0;
   display: grid;
   gap: 12px;
@@ -35742,10 +35446,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-plate-emoji-nudge-y: -5px;
 }
 
-.botAvatarModalAccessoryPanel {
-  justify-items: center;
-}
-
 .botAvatarPreviewCopy {
   min-width: 0;
   display: grid;
@@ -35753,7 +35453,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarPreviewCopy span,
-.botAvatarAccessoryCopy span,
 .botAvatarFontControl legend,
 .botAvatarEyeCharacterControl > span,
 .botAvatarWeightControl > span {
@@ -35762,8 +35461,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 720;
 }
 
-.botAvatarPreviewCopy small,
-.botAvatarAccessoryCopy small {
+.botAvatarPreviewCopy small {
   min-width: 0;
   color: var(--fg-muted);
   font-size: 11.5px;
@@ -35952,113 +35650,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   justify-content: space-between;
   color: var(--fg-muted);
   font-size: 10px;
-}
-
-.botAvatarAccessoryPreview {
-  width: 112px;
-  max-width: 100%;
-  aspect-ratio: 1;
-  justify-self: center;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, var(--line));
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, transparent),
-      transparent 58%
-    ),
-    color-mix(in srgb, var(--bg-deep) 82%, var(--bg) 18%);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent),
-    0 16px 30px -28px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, #000000);
-}
-
-.botAvatarAccessoryPreview[data-empty="true"] {
-  border-style: dashed;
-}
-
-.botAvatarAccessoryImage {
-  width: 100%;
-  height: 100%;
-  display: block;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
-}
-
-.botAvatarAccessoryEmpty {
-  width: 46px;
-  height: 46px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 52%, var(--fg-muted));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, var(--bg));
-}
-
-.botAvatarAccessoryCopy {
-  display: grid;
-  gap: 3px;
-  text-align: left;
-}
-
-.botAvatarAccessoryActions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.form .botAvatarAccessoryActions button,
-.botAvatarAccessoryActions button {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, #303846);
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--fg);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 720;
-  cursor: pointer;
-}
-
-.botAvatarAccessoryActions button:only-child {
-  grid-column: 1 / -1;
-}
-
-.form .botAvatarAccessoryActions button:hover:not(:disabled),
-.form .botAvatarAccessoryActions button:focus-visible,
-.botAvatarAccessoryActions button:hover:not(:disabled),
-.botAvatarAccessoryActions button:focus-visible {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, #ffffff);
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, rgba(255, 255, 255, 0.055));
-  outline: none;
-}
-
-.form .botAvatarAccessoryActions button:disabled,
-.botAvatarAccessoryActions button:disabled {
-  cursor: default;
-  opacity: 0.46;
-}
-
-.botAvatarAccessoryFileInput {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 /* Wide-screen affordance: when there's room to the left of the bot
@@ -44509,20 +44100,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .botAvatarAccessoryPreview {
-    width: 96px;
-  }
-
-  .botAvatarAccessoryActions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .form .botAvatarAccessoryActions button,
-  .botAvatarAccessoryActions button {
-    min-width: 0;
-    padding-inline: 6px;
-  }
-
   .panelBots .form > button[type="submit"]:last-child {
     min-height: 44px;
   }
@@ -45627,6 +45204,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-columns: minmax(0, 1fr);
 }
 
+.coffeeShell[data-session-active="true"] .coffeeMain {
+  --coffee-stage-max-width: 1500px;
+}
+
 .coffeeSidebar {
   box-sizing: border-box;
   backdrop-filter: blur(18px);
@@ -46272,7 +45853,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeStage[data-phase="arriving"],
 .coffeeStage[data-phase="live"],
 .coffeeStage[data-phase="finished"] {
-  --coffee-canvas-y: clamp(18px, 3vh, 30px);
+  --coffee-canvas-y: clamp(40px, 5vh, 56px);
 }
 
 .coffeeStage[data-autoplay-dock="true"] {
@@ -46721,6 +46302,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-compact="true"] .coffeeSeatGlowPill {
   --coffee-seat-glyph-slot-width: 28px;
+  --coffee-seat-name-glyph-gap: 3px;
   --coffee-seat-name-plate-y: clamp(-24px, -3vw, -12px);
   max-width: min(148px, 58vw);
   min-width: min(96px, 44vw);
@@ -46735,8 +46317,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeStage[data-compact="true"] .coffeeCup {
-  width: 34px;
-  height: 39px;
+  width: 38px;
+  height: 44px;
 }
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not([data-group-ready="true"]) .coffeeCup {
@@ -46745,8 +46327,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-phase="selecting"][data-group-ready="true"][data-compact="true"] .coffeeCup {
   display: block;
-  width: clamp(42px, 4.75vw, 56px);
-  height: clamp(48px, 5.5vw, 65px);
+  width: clamp(48px, 5.35vw, 64px);
+  height: clamp(55px, 6.1vw, 74px);
   bottom: clamp(7px, 0.85vw, 12px);
 }
 
@@ -46780,6 +46362,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inset: 0;
   z-index: 14;
   pointer-events: none;
+  --coffee-pot-pour-stream-blend-mode: normal;
+  --coffee-pot-pour-stream-filter:
+    saturate(0.98)
+    brightness(0.92)
+    drop-shadow(0 0 7px rgba(255, 106, 32, 0.24));
+}
+
+.coffeePotLayer[data-coffee-pot-theme="light"] {
+  --coffee-pot-pour-stream-blend-mode: screen;
+  --coffee-pot-pour-stream-filter:
+    saturate(1.18)
+    drop-shadow(0 0 8px rgba(255, 116, 36, 0.42));
 }
 
 .coffeePotTray {
@@ -46874,6 +46468,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-pot-drag-rotate: 4deg;
 }
 
+.coffeePotDrag[data-returning="true"] {
+  animation: coffeePotReturnToTray 280ms cubic-bezier(0.22, 0.78, 0.24, 1) both;
+}
+
 .coffeePotDragImage {
   position: absolute;
   inset: 0;
@@ -46925,10 +46523,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   object-position: right top;
   pointer-events: none;
   opacity: var(--coffee-pot-pour-frame-opacity, 0);
-  mix-blend-mode: screen;
-  filter:
-    saturate(1.18)
-    drop-shadow(0 0 8px rgba(255, 116, 36, 0.42));
+  mix-blend-mode: var(--coffee-pot-pour-stream-blend-mode, normal);
+  filter: var(--coffee-pot-pour-stream-filter);
   transition: opacity 55ms ease;
 }
 
@@ -46941,6 +46537,26 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   to {
     opacity: 1;
     transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes coffeePotReturnToTray {
+  0% {
+    left: var(--coffee-pot-drag-x);
+    top: var(--coffee-pot-drag-y);
+    opacity: 1;
+    transform: translate(-52%, -55%) rotate(0deg) scale(1);
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    left: var(--coffee-pot-return-x, var(--coffee-pot-drag-x));
+    top: var(--coffee-pot-return-y, var(--coffee-pot-drag-y));
+    opacity: 0.96;
+    transform: translate(-52%, -55%) rotate(0deg) scale(0.98);
   }
 }
 
@@ -47028,7 +46644,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] {
-  --coffee-live-table-y: clamp(28px, 5vh, 42px);
+  --coffee-live-table-y: clamp(18px, 3vh, 32px);
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"] .coffeeTableGlow,
@@ -47054,6 +46670,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-phase="finished"][data-autoplay-dock="true"] .coffeeTableFocalColumn {
   transform: translateY(var(--coffee-finished-table-y));
+}
+
+.coffeeStage:is([data-phase="arriving"], [data-phase="live"], [data-phase="finished"][data-replay-active="true"])
+  .coffeeTableScene {
+  min-height: clamp(480px, 62vh, 660px);
 }
 
 .coffeeStage[data-phase="finished"] .coffeeCup {
@@ -47466,6 +47087,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-top: 8px;
 }
 
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="0"][data-layout-seat="0"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeat[data-seat-count="5"][data-seat="0"][data-layout-seat="0"] {
+  top: 11%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="0"][data-layout-seat="0"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="0"][data-layout-seat="0"] {
+  top: 11%;
+}
+
 .coffeeStage[data-phase="arriving"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster,
 .coffeeStage[data-phase="live"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster,
 .coffeeStage[data-phase="finished"] .coffeeSeat[data-table-speaking="true"] .coffeeSeatCluster {
@@ -47476,64 +47111,135 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
-  left: 30%;
-  top: 42%;
+  left: 25%;
+  top: 45%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="1"][data-layout-seat="1"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="1"][data-layout-seat="1"] {
-  left: 30%;
-  top: 42%;
+  left: 25%;
+  top: 45%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
-  left: 70%;
-  top: 42%;
+  left: 75%;
+  top: 45%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="2"][data-layout-seat="2"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="2"][data-layout-seat="2"] {
-  left: 70%;
-  top: 42%;
+  left: 75%;
+  top: 45%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
-  left: 31%;
-  top: 79%;
+  left: 29%;
+  top: 77%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="3"][data-layout-seat="3"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="3"][data-layout-seat="3"] {
-  left: 31%;
-  top: 79%;
+  left: 29%;
+  top: 77%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
-  left: 69%;
-  top: 79%;
+  left: 71%;
+  top: 77%;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="4"][data-layout-seat="4"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"]
   .coffeeSeatActionAnchor[data-seat-count="5"][data-seat="4"][data-layout-seat="4"] {
-  left: 69%;
-  top: 79%;
+  left: 71%;
+  top: 77%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="0"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="0"] {
+  left: 28%;
+  top: 50%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="1"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="1"] {
+  left: 72%;
+  top: 50%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="0"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="0"] {
+  top: 15%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="1"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="1"] {
+  left: 30%;
+  top: 66%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="2"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="2"] {
+  left: 70%;
+  top: 66%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="0"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="0"] {
+  left: 27%;
+  top: 37%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="1"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="1"] {
+  left: 73%;
+  top: 37%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="2"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="2"] {
+  left: 73%;
+  top: 71%;
+}
+
+.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="3"],
+.coffeeStage[data-phase="live"][data-autoplay-dock="true"]
+  :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="3"] {
+  left: 27%;
+  top: 71%;
 }
 
 /*
@@ -47637,7 +47343,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(72%, 600px);
+  width: min(84%, 760px);
   aspect-ratio: 1;
   border-radius: 50%;
   background:
@@ -47668,8 +47374,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(51vw, 468px);
-  max-width: calc(100% - 100px);
+  width: min(58vw, 560px);
+  max-width: calc(100% - 56px);
   aspect-ratio: 1;
   border-radius: 50%;
   z-index: 1;
@@ -48495,8 +48201,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatGlowPill {
-  --coffee-seat-name-plate-y: clamp(-30px, -3.8vw, -16px);
+  --coffee-seat-name-plate-y: clamp(-58px, -5.2vw, -38px);
   --coffee-seat-glyph-slot-width: 31px;
+  --coffee-seat-name-glyph-gap: 4px;
   position: absolute;
   left: 50%;
   /* Entire chip sits below the plate box so it never covers the seat emoji. */
@@ -48514,7 +48221,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   grid-template-columns: var(--coffee-seat-glyph-slot-width) minmax(0, 1fr) var(--coffee-seat-glyph-slot-width);
   align-items: center;
-  column-gap: 8px;
+  column-gap: var(--coffee-seat-name-glyph-gap);
   pointer-events: none;
   color: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
   border: 1px solid color-mix(in srgb, var(--coffee-seat-emotion-color) 48%, rgba(255, 255, 255, 0.14));
@@ -48560,16 +48267,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 3px;
-  justify-items: center;
+  justify-items: start;
   min-width: 0;
   max-width: none;
   overflow: hidden;
   box-sizing: border-box;
-  text-align: center;
+  text-align: left;
   font-size: 0.84rem;
   line-height: 1.22;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+.coffeeSeat[data-cup-side="left"] .coffeeSeatGlowText {
+  justify-items: end;
+  text-align: right;
 }
 
 .coffeeSeatGlowText span {
@@ -48627,9 +48339,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatPlate[data-live-body-style="zen"] {
   --bot-face-frame-glow-filter:
-    drop-shadow(0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 44%, transparent))
-    drop-shadow(0 0 24px color-mix(in srgb, var(--coffee-seat-emotion-color) 28%, transparent));
-  --coffee-live-bot-body-inset: -24%;
+    drop-shadow(0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 34%, transparent))
+    drop-shadow(0 0 30px color-mix(in srgb, var(--coffee-seat-emotion-color) 18%, transparent))
+    drop-shadow(0 0 58px color-mix(in srgb, var(--coffee-seat-emotion-color) 8%, transparent));
+  --coffee-live-bot-face-scale: 1.68;
   --bot-face-frame-inset: 0;
   --bot-face-frame-opacity: 1;
   --bot-face-frame-z: 0;
@@ -48637,6 +48350,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-metal-light-blend-mode: overlay;
   --bot-face-metal-light-opacity: 0.58;
   --bot-face-metal-light-z: 5;
+  --bot-face-screen-left: 16.6%;
+  --bot-face-screen-top: 11.5%;
+  --bot-face-screen-right: 15.2%;
+  --bot-face-screen-bottom: 20.3%;
   --bot-face-screen-glass-opacity: 0.46;
   --bot-face-screen-glare-opacity: 0.18;
   --bot-face-screen-specular-opacity: 0.54;
@@ -48647,6 +48364,41 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: none;
 }
 
+.coffeeSeatFaceEmissionMask {
+  position: absolute;
+  inset: 0;
+  z-index: var(--bot-face-glyph-z, 6);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+  --bot-face-crt-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  --bot-face-crt-texture-size: 100% 100%;
+  --bot-face-crt-texture-repeat: repeat;
+  --bot-face-crt-color: var(--coffee-seat-emotion-color, var(--coffee-bot-color, currentColor));
+  --bot-face-crt-cell-width: clamp(2.2px, 1.62%, 4.4px);
+  --bot-face-crt-cell-height: clamp(2.6px, 1.9%, 5.2px);
+  --bot-face-crt-subpixel-width: calc(var(--bot-face-crt-cell-width) / 3);
+  --bot-face-crt-phosphor-opacity: 0.18;
+  --bot-face-crt-gap-opacity: 0.42;
+  --bot-face-crt-scanline-opacity: 0.14;
+  mix-blend-mode: plus-lighter;
+  filter:
+    drop-shadow(0 0 2px color-mix(in srgb, var(--bot-face-crt-color) 30%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--bot-face-crt-color) 12%, transparent));
+  -webkit-mask-image: var(--bot-face-crt-texture-image);
+  -webkit-mask-position: center;
+  -webkit-mask-size: var(--bot-face-crt-texture-size);
+  -webkit-mask-repeat: var(--bot-face-crt-texture-repeat);
+  -webkit-mask-mode: alpha;
+  mask-image: var(--bot-face-crt-texture-image);
+  mask-position: center;
+  mask-size: var(--bot-face-crt-texture-size);
+  mask-repeat: var(--bot-face-crt-texture-repeat);
+  mask-mode: alpha;
+}
+
 .coffeeStage[data-phase="arriving"] .coffeeSeatPlate[data-live-body-style="zen"],
 .coffeeStage[data-phase="live"] .coffeeSeatPlate[data-live-body-style="zen"],
 .coffeeStage[data-compact="true"] .coffeeSeatPlate[data-live-body-style="zen"] {
@@ -48655,45 +48407,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatPlate[data-live-body-style="zen"] .coffeeSeatPlateEmoji {
   --coffee-plate-emoji-flip-anchor-x: 0px;
-  font-size: var(--zen-live-bot-avatar-face-glyph-size, clamp(1.74rem, 5.15vw, 2.58rem));
-}
-
-.coffeeSeatPlate[data-live-body-style="zen"][data-accessory-equipped="true"][data-accessory-layer="back"] {
-  --bot-face-frame-z: 2;
-}
-
-.coffeeSeatAccessoryLayer {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 7;
-  width: 100%;
-  height: 100%;
-  display: block;
-  transform:
-    translate(-50%, -50%)
-    scaleX(var(--coffee-plate-emoji-face-scale-y, 1));
-  transform-origin: 50% 50%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.coffeeSeatAccessoryLayer[data-accessory-layer="back"] {
-  z-index: -1;
-}
-
-.coffeeSeatAccessoryRaster {
-  position: absolute;
-  inset: var(--bot-accessory-field-inset-pct, -170%);
-  z-index: 0;
-  display: block;
-  overflow: visible;
-  background-position:
-    calc(50% + var(--bot-accessory-field-x-pct, 0%))
-    calc(50% + var(--bot-accessory-field-y-pct, 0%));
-  background-repeat: no-repeat;
-  background-size: var(--bot-accessory-field-size-pct, 22.727%) auto;
-  pointer-events: none;
+  font-size: calc(
+    var(--zen-live-bot-avatar-face-glyph-size, clamp(1.74rem, 5.15vw, 2.58rem)) *
+    var(--coffee-live-bot-face-scale, 1)
+  );
 }
 
 .coffeeSeatTeamBadge {
@@ -48784,7 +48501,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
   );
   position: absolute;
-  inset: var(--bot-face-screen-inset, 17%);
+  inset: auto;
+  left: var(--bot-face-screen-left, var(--bot-face-screen-inset, 17%));
+  top: var(--bot-face-screen-top, var(--bot-face-screen-inset, 17%));
+  right: var(--bot-face-screen-right, var(--bot-face-screen-inset, 17%));
+  bottom: var(--bot-face-screen-bottom, var(--bot-face-screen-inset, 17%));
   z-index: 0;
   display: block;
   border-radius: var(--bot-face-screen-radius, 50%);
@@ -48809,13 +48530,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botFaceScreenGlass {
   position: absolute;
-  inset: var(--bot-face-screen-inset, 17%);
+  inset: auto;
+  left: var(--bot-face-screen-left, var(--bot-face-screen-inset, 17%));
+  top: var(--bot-face-screen-top, var(--bot-face-screen-inset, 17%));
+  right: var(--bot-face-screen-right, var(--bot-face-screen-inset, 17%));
+  bottom: var(--bot-face-screen-bottom, var(--bot-face-screen-inset, 17%));
   z-index: var(--bot-face-screen-glass-z, 3);
   display: block;
   overflow: hidden;
   border-radius: var(--bot-face-screen-radius, 50%);
   pointer-events: none;
-  background:
+  background: var(
+    --bot-face-screen-glass-background,
     radial-gradient(
       circle at 50% 52%,
       transparent 0 58%,
@@ -48828,13 +48554,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       rgba(255, 255, 255, 0.1),
       transparent 36%,
       rgba(0, 0, 0, 0.18)
-    );
+    )
+  );
   box-shadow: var(
     --bot-face-screen-glass-shadow,
     inset 0 1px 1px rgba(255, 255, 255, 0.34),
     inset 0 -9px 16px rgba(0, 0, 0, 0.22),
     inset 0 0 18px rgba(255, 255, 255, 0.05)
   );
+  -webkit-mask-image: var(--bot-face-screen-mask-image, none);
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-mode: alpha;
+  mask-image: var(--bot-face-screen-mask-image, none);
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-mode: alpha;
   opacity: var(--bot-face-screen-glass-opacity, 0.42);
   mix-blend-mode: var(--bot-face-screen-glass-blend-mode, screen);
   transition: opacity 160ms ease;
@@ -48850,38 +48587,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botFaceScreenGlass::before {
-  background:
-    linear-gradient(
-      var(--bot-face-screen-glare-angle, -28deg),
-      transparent 0 34%,
-      rgba(255, 255, 255, 0.06) 41%,
-      rgba(255, 255, 255, 0.34) 48%,
-      rgba(255, 255, 255, 0.1) 53%,
-      transparent 64% 100%
-    );
-  opacity: var(--bot-face-screen-glare-opacity, 0.24);
-  filter: blur(0.6px);
+  background: none;
+  opacity: 0;
+  filter: none;
 }
 
 .botFaceScreenGlass::after {
   background:
     radial-gradient(
       circle at var(--bot-face-screen-glare-x, 34%) var(--bot-face-screen-glare-y, 30%),
-      rgba(255, 255, 255, 0.76) 0 2.8%,
-      rgba(255, 255, 255, 0.34) 6.4%,
-      transparent 18%
+      rgba(255, 255, 255, 0.72) 0 2.1%,
+      rgba(255, 255, 255, 0.3) 4.8%,
+      transparent 11.5%
     ),
     radial-gradient(
       ellipse at calc(var(--bot-face-screen-glare-x, 34%) + 17%)
         calc(var(--bot-face-screen-glare-y, 30%) - 20%),
-      rgba(255, 255, 255, 0.22) 0 8%,
-      transparent 27%
-    ),
-    linear-gradient(
-      138deg,
-      rgba(255, 255, 255, 0.14),
-      transparent 22% 68%,
-      rgba(255, 255, 255, 0.08)
+      rgba(255, 255, 255, 0.18) 0 5%,
+      transparent 15%
     );
   opacity: var(--bot-face-screen-specular-opacity, 0.66);
   mix-blend-mode: screen;
@@ -48897,6 +48620,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeat[data-roster-preview="true"] .botFaceScreenFill {
   --bot-face-screen-inset: 0;
+  --bot-face-screen-left: 0;
+  --bot-face-screen-top: 0;
+  --bot-face-screen-right: 0;
+  --bot-face-screen-bottom: 0;
   --bot-face-screen-radius: inherit;
   --bot-face-screen-shadow: var(--bot-face-screen-default-shadow),
     0 0 0 8px color-mix(in srgb, var(--bot-preview-face-color) 14%, transparent),
@@ -48906,6 +48633,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeat[data-roster-preview="true"] .botFaceScreenGlass {
   --bot-face-screen-inset: 0;
+  --bot-face-screen-left: 0;
+  --bot-face-screen-top: 0;
+  --bot-face-screen-right: 0;
+  --bot-face-screen-bottom: 0;
   --bot-face-screen-radius: inherit;
   --bot-face-screen-glass-opacity: 0.18;
   --bot-face-screen-glare-opacity: 0.08;
@@ -48913,12 +48644,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botFaceFrame {
-  --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png");
-  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png");
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png?v=1000");
+  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
   z-index: var(--bot-face-frame-z, 0);
   display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
   pointer-events: none;
   background: var(--bot-face-frame-base-image) center / contain no-repeat;
   opacity: var(--bot-face-frame-opacity, 1);
@@ -48963,7 +48697,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 1;
   display: block;
   pointer-events: none;
-  background: url("/bot-frame/bot-frame-led.png") center / contain no-repeat;
+  background: url("/bot-frame/bot-frame-led.png?v=1000") center / contain no-repeat;
   opacity: var(--bot-face-frame-led-opacity, var(--coffee-seat-mood-frame-raster-opacity, 1));
   transition: opacity 280ms ease;
 }
@@ -48974,26 +48708,29 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: var(--bot-face-metal-light-z, 6);
   display: block;
   overflow: hidden;
+  border-radius: 50%;
   pointer-events: none;
   background: var(--bot-face-metal-light-background, transparent);
   opacity: var(--bot-face-metal-light-opacity, 0);
   mix-blend-mode: var(--bot-face-metal-light-blend-mode, overlay);
   transform: translateY(var(--bot-face-metal-light-y, 0px));
-  clip-path: var(--bot-face-metal-light-clip-path, none);
+  clip-path: var(--bot-face-metal-light-clip-path, circle(50% at 50% 50%));
   -webkit-mask-image: var(
     --bot-face-metal-light-mask-image,
-    url("/bot-frame/bot-frame-metal-mask.png")
+    url("/bot-frame/bot-frame-metal-mask.png?v=1000")
   );
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
   -webkit-mask-repeat: no-repeat;
+  -webkit-mask-mode: luminance;
   mask-image: var(
     --bot-face-metal-light-mask-image,
-    url("/bot-frame/bot-frame-metal-mask.png")
+    url("/bot-frame/bot-frame-metal-mask.png?v=1000")
   );
   mask-position: center;
   mask-size: contain;
   mask-repeat: no-repeat;
+  mask-mode: luminance;
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
@@ -49001,13 +48738,39 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   position: absolute;
   inset: 0;
   display: block;
-  background: url("/bot-frame/bot-frame-metal.png") center / contain no-repeat;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: var(--bot-face-metal-light-clip-path, circle(50% at 50% 50%));
+  -webkit-mask-image: var(
+    --bot-face-metal-light-mask-image,
+    url("/bot-frame/bot-frame-metal-mask.png?v=1000")
+  );
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-mode: luminance;
+  mask-image: var(
+    --bot-face-metal-light-mask-image,
+    url("/bot-frame/bot-frame-metal-mask.png?v=1000")
+  );
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-mode: luminance;
   opacity: var(--bot-face-metal-light-raster-opacity, 1);
   mix-blend-mode: var(--bot-face-metal-light-raster-blend-mode, normal);
   filter: var(
     --bot-face-metal-light-filter,
     grayscale(1) contrast(1.26) brightness(1.08) saturate(0.86)
   );
+}
+
+.botFaceFrameMetalLightRaster::before {
+  content: "";
+  position: absolute;
+  inset: -7%;
+  display: block;
+  background: url("/bot-frame/bot-frame-metal.png?v=1000") center / contain no-repeat;
   transform:
     rotate(var(--bot-face-metal-light-rotation, 0deg))
     scale(var(--bot-face-metal-light-scale, 1.06));
@@ -49018,7 +48781,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight .botFaceFrame,
 .themeLight.coffeeShell .botFaceFrame,
 .zenLiveBotPresencePlate[data-theme="light"] .botFaceFrame {
-  --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png");
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png?v=1000");
 }
 
 .messageMoodBadge .botFaceScreenGlass {
@@ -49432,7 +49195,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlateEmoji
-  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="*"] {
+  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="⁎"] {
   /* Sip puckers need stable optical centering; bot mouth fonts vary too much. */
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   font-style: normal;
@@ -49507,10 +49270,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-cup-sip-sprite: url("/coffee-cups/coffee_red_sip.png");
   --coffee-cup-frame-x: 0%;
   --coffee-cup-frame-y: 0%;
-  --coffee-cup-side-offset: clamp(-26px, -2.25vw, -15px);
+  --coffee-cup-side-offset: clamp(-16px, -1.35vw, -8px);
   --coffee-cup-facing-scale-x: 1;
-  --coffee-cup-sip-x: -34px;
-  --coffee-cup-sip-y: 2px;
+  --coffee-cup-sip-x: clamp(-64px, -4.8vw, -44px);
+  --coffee-cup-sip-y: clamp(-30px, -2.6vw, -20px);
   --coffee-cup-sip-duration-ms: 1400ms;
   --coffee-cup-sip-hold-ms: 500ms;
   --coffee-cup-sip-rest-scale: 0.84;
@@ -49538,8 +49301,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   right: var(--coffee-cup-side-offset);
   bottom: clamp(8px, 1.05vw, 16px);
   z-index: 4;
-  width: clamp(46px, 5.35vw, 62px);
-  height: clamp(53px, 6.15vw, 72px);
+  width: clamp(52px, 6vw, 70px);
+  height: clamp(60px, 6.9vw, 82px);
   border-radius: 3px;
   transform: translateY(0) scale(1);
   transform-origin: center;
@@ -49555,7 +49318,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeCup[data-cup-side="left"] {
-  --coffee-cup-sip-x: 22px;
+  --coffee-cup-sip-x: clamp(44px, 4.8vw, 64px);
   right: auto;
   left: var(--coffee-cup-side-offset);
 }
@@ -49855,13 +49618,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   22%,
-  82% {
+  94% {
     opacity: var(--coffee-cup-rest-sip-opacity);
     transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 
-  94%,
-  99%,
   100% {
     opacity: 1;
     transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
@@ -49886,7 +49647,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   94% {
-    opacity: 0;
+    opacity: 1;
     transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   }
 
@@ -51077,7 +50838,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeGroupStartPanel {
   display: grid;
-  grid-template-columns: minmax(166px, 0.64fr) minmax(160px, 0.64fr) minmax(260px, 1.05fr);
+  grid-template-columns: minmax(166px, 0.72fr) minmax(160px, 0.72fr) minmax(220px, 1fr);
   align-items: end;
   gap: 3px 7px;
   min-width: 0;
@@ -51097,29 +50858,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   gap: 4px;
   min-width: 0;
-}
-
-.coffeeSessionModelSetup {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.coffeeGroupOverview .coffeeSessionModelSetup {
-  grid-column: 3;
-}
-
-.coffeeSessionModelSetupControls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.coffeeSessionModelSetupControls .composeModelControl {
-  flex: 1 1 auto;
-  min-width: min(172px, 100%);
 }
 
 .coffeeGroupStartControlLabel {
@@ -51145,7 +50883,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeGroupOverview .coffeeAutoTopicToggle {
-  grid-column: 1;
   align-self: stretch;
   align-items: center;
   gap: 7px;
@@ -53524,7 +53261,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTranscriptPanel {
-  --coffee-transcript-width: min(360px, calc(100vw - 32px));
+  --coffee-transcript-width: min(340px, calc(100vw - 32px));
   position: fixed;
   top: 0;
   right: 0;
@@ -53551,20 +53288,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: panelOut 0.18s ease-in forwards;
 }
 
-.coffeeTranscriptOverlay {
-  background: rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-}
-
 /* Wide viewports: dock Table Talk in-layout (chat-like), not overlay. */
 @media (min-width: 1160px) {
   .coffeeShell[data-session-active="true"][data-transcript-open="true"] {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
-  }
-
-  .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptOverlay {
-    display: none;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptPanel {
@@ -53679,29 +53406,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 0.72rem;
   line-height: 1.35;
   color: var(--coffee-muted);
-}
-
-.coffeeModelQualityHint {
-  grid-column: 1 / -1;
-  margin: 2px 0 0;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.045);
-  color: rgba(255, 255, 255, 0.74);
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.coffeeGroupOverview .coffeeModelQualityHint {
-  grid-column: 2 / -1;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  margin: 0;
-  padding: 3px 7px;
-  font-size: 0.64rem;
-  line-height: 1.18;
 }
 
 .coffeeSettingsSelect {
@@ -54158,9 +53862,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .coffeeGroupOverview .coffeeSessionModelSetup,
-  .coffeeGroupOverview .coffeeAutoTopicToggle,
-  .coffeeGroupOverview .coffeeModelQualityHint {
+  .coffeeGroupOverview .coffeeAutoTopicToggle {
     grid-column: 1 / -1;
   }
 }
@@ -54177,6 +53879,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"] {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(220px, 34dvh);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptPanel {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    z-index: 2;
+    width: 100%;
+    height: auto;
+    min-height: 220px;
+    max-height: 34dvh;
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    animation: none;
   }
 
   .coffeeSidebar {
@@ -54199,6 +53917,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     min-height: 100dvh;
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 0;
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"] .coffeeTranscriptPanel {
+    width: 100%;
+    min-height: 220px;
+    max-height: 34dvh;
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .coffeePicker {
@@ -54261,10 +53987,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeGroupStartPanel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     min-width: 0;
-  }
-
-  .coffeeSessionModelSetupControls {
-    flex-wrap: wrap;
   }
 
   .coffeeGroupOverview .coffeeAutoTopicToggle,
@@ -54491,10 +54213,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeCup {
-    --coffee-cup-side-offset: -16px;
+    --coffee-cup-side-offset: -10px;
     bottom: 8px;
-    width: 38px;
-    height: 44px;
+    width: 42px;
+    height: 49px;
   }
 
   .coffeeComposer {
@@ -54536,7 +54258,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell :where(
-  .coffeeTranscriptOverlay,
   .coffeeSettingsModalBackdrop,
   .coffeePollModalBackdrop
 ) {
@@ -54580,7 +54301,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeSettingsIntro,
   .coffeeSettingsSectionLabel,
   .coffeeSettingsHint,
-  .coffeeModelQualityHint,
   .coffeeSettingsRangeLabels,
   .coffeeGroupOverviewHeader p,
   .coffeeGroupStartLabel,
@@ -54923,6 +54643,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"] {
+  --bot-face-frame-glow-filter:
+    drop-shadow(0 0 9px color-mix(in srgb, var(--coffee-seat-emotion-color) 22%, transparent))
+    drop-shadow(0 0 34px color-mix(in srgb, var(--coffee-seat-emotion-color) 11%, transparent))
+    drop-shadow(0 0 72px color-mix(in srgb, var(--coffee-seat-emotion-color) 5%, transparent));
   --bot-face-metal-light-base-color: var(--coffee-bot-color);
   --bot-face-metal-light-background:
     radial-gradient(

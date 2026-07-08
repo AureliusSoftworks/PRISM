@@ -15,11 +15,26 @@ describe("Psychic Chat surface wiring", () => {
     );
   });
 
-  it("renders Psychic lines from the active product Chat surface", () => {
+  it("does not render visible Psychic lines from the Zen surface", () => {
+    const renderSource = pageSource.match(
+      /function renderPsychicThoughtLine[\s\S]*?\n  }/
+    )?.[0];
+
+    assert.ok(renderSource);
+    assert.match(renderSource, /if \(isZenSurfaceView\(view\)\) \{\s*return null;\s*\}/);
     assert.match(
-      pageSource,
+      renderSource,
       /psychicTextEnabledForConversation\(detail,\s*\{\s*productChatSurface:\s*view === "chat",?\s*\}\)/
     );
+  });
+
+  it("does not show the delayed Psychic thinking indicator on the Zen surface", () => {
+    const thinkingTargetSource = pageSource.match(
+      /const psychicThinkingTargetMessageId = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[/
+    )?.[0];
+
+    assert.ok(thinkingTargetSource);
+    assert.match(thinkingTargetSource, /if \(isZenSurfaceView\(view\)\) return null;/);
   });
 
   it("does not render Psychic lines from Zen conversation mode alone", () => {

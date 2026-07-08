@@ -191,14 +191,6 @@ import {
   readProfilePictureImageIdForBot,
 } from "./bot-profile-pictures.ts";
 import {
-  BOT_ACCESSORY_IMAGE_PURPOSE,
-  BOT_ACCESSORY_SIZE,
-  clearBotAccessoryReference,
-  deleteBotAccessoryImageIfOwned,
-  normalizeBotAccessoryPngBytes,
-  parseBotAccessoryDataUrl,
-} from "./bot-accessories.ts";
-import {
   normalizeComfyUiHostForStatusCheck,
   normalizeOllamaHostForStatusCheck,
   normalizeZenAskQuestionPatienceEnabled,
@@ -208,6 +200,7 @@ import {
   normalizeZenFreshStartGapMs,
   normalizeZenMessageFontMaxPx,
   normalizeZenMessageFontMinPx,
+  normalizeZenPersonaTransitionChoice,
   normalizeZenWallpaperBlurredEdgesEnabled,
   normalizeZenMoodSensitivity,
   normalizeZenRecentContextMessages,
@@ -252,12 +245,10 @@ import {
   composeVerbatimFirstImagePrompt,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
-  DEFAULT_BOT_ACCESSORY_PLACEMENT,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
-  normalizeBotAccessoryPlacement,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
@@ -291,7 +282,6 @@ import {
   type BotOpinionBoundaryLevel,
   type ChatMessage,
   type BotFaceFontId,
-  type BotAccessoryPlacement,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -561,6 +551,7 @@ interface UserDbRow {
   zen_ask_question_patience_enabled: number | null;
   zen_ask_question_patience_ms: number | null;
   zen_autonomy_enabled: number | null;
+  zen_persona_transition_choice: string | null;
   comfyui_workflows: string | null;
   prism_default_bot_name: string | null;
   prism_default_bot_system_prompt: string | null;
@@ -734,7 +725,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_mouth_font, prism_default_bot_face_font_weight, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_mouth_font, prism_default_bot_face_font_weight, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1503,8 +1494,8 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
   return {
     prismDefaultBotName: "",
     prismDefaultBotSystemPrompt: "",
-    prismDefaultBotColor: user.prism_default_bot_color ?? "",
-    prismDefaultBotGlyph: user.prism_default_bot_glyph ?? "",
+    prismDefaultBotColor: "",
+    prismDefaultBotGlyph: "",
     prismDefaultBotFaceEyesFont:
       normalizeBotFaceFontId(user.prism_default_bot_face_eyes_font) ??
       DEFAULT_BOT_FACE_FONT_ID,
@@ -1523,10 +1514,6 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotTopK: BOT_TOP_K_DEFAULT,
     prismDefaultBotRepetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
   };
-}
-
-function readBotAccessoryPlacementForStorage(value: unknown): BotAccessoryPlacement {
-  return normalizeBotAccessoryPlacement(value);
 }
 
 type ZenWallpaperDbRow = {
@@ -5963,6 +5950,9 @@ function buildRoutes(): RouteDefinition[] {
           zenAutonomyEnabled: normalizeZenAutonomyEnabled(
             user.zen_autonomy_enabled
           ),
+          zenPersonaTransitionChoice: normalizeZenPersonaTransitionChoice(
+            user.zen_persona_transition_choice
+          ),
           comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
@@ -6118,14 +6108,6 @@ function buildRoutes(): RouteDefinition[] {
     route("PATCH", "/api/default-bot", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const color =
-        typeof body.color === "string" && body.color.trim().length > 0
-          ? body.color.trim()
-          : null;
-      const glyph =
-        typeof body.glyph === "string" && body.glyph.trim().length > 0
-          ? body.glyph.trim()
-          : null;
       const faceEyesFont =
         readBotFaceFontForStorage(body.faceEyesFont) ?? DEFAULT_BOT_FACE_FONT_ID;
       const faceEyeCharacter = readBotFaceEyeCharacterForStorage(body.faceEyeCharacter);
@@ -6138,8 +6120,8 @@ function buildRoutes(): RouteDefinition[] {
         UPDATE users
         SET prism_default_bot_name = NULL,
             prism_default_bot_system_prompt = NULL,
-            prism_default_bot_color = ?,
-            prism_default_bot_glyph = ?,
+            prism_default_bot_color = NULL,
+            prism_default_bot_glyph = NULL,
             prism_default_bot_face_eyes_font = ?,
             prism_default_bot_face_eye_character = ?,
             prism_default_bot_face_mouth_font = ?,
@@ -6151,8 +6133,6 @@ function buildRoutes(): RouteDefinition[] {
             prism_default_bot_repetition_penalty = NULL
         WHERE id = ?
       `).run(
-        color,
-        glyph,
         faceEyesFont,
         faceEyeCharacter,
         faceMouthFont,
@@ -6228,6 +6208,7 @@ function buildRoutes(): RouteDefinition[] {
         zenAskQuestionPatienceEnabled: user.zen_ask_question_patience_enabled,
         zenAskQuestionPatienceMs: user.zen_ask_question_patience_ms,
         zenAutonomyEnabled: user.zen_autonomy_enabled,
+        zenPersonaTransitionChoice: user.zen_persona_transition_choice,
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
@@ -6287,7 +6268,7 @@ function buildRoutes(): RouteDefinition[] {
         SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
-            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?,
+            zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -6335,6 +6316,7 @@ function buildRoutes(): RouteDefinition[] {
         next.zenAskQuestionPatienceEnabled ? 1 : 0,
         next.zenAskQuestionPatienceMs,
         next.zenAutonomyEnabled ? 1 : 0,
+        next.zenPersonaTransitionChoice,
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,
@@ -6360,6 +6342,7 @@ function buildRoutes(): RouteDefinition[] {
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
           psychicModeEnabled: next.psychicModeEnabled === 1,
+          zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
@@ -7059,7 +7042,6 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Image not found.");
       }
       clearBotProfilePictureReference(db, userId, imageId);
-      clearBotAccessoryReference(db, userId, imageId);
       db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
         imageId,
         userId
@@ -7147,7 +7129,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, {
@@ -7162,137 +7144,6 @@ function buildRoutes(): RouteDefinition[] {
           model: "upload",
         },
       });
-    }),
-    route("POST", "/api/bots/:id/accessory/upload", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const botId = ctx.params.id;
-      const existing = db
-        .prepare(
-          "SELECT id, accessory_image_id FROM bots WHERE id = ? AND user_id = ?"
-        )
-        .get(botId, userId) as
-        | { id?: string; accessory_image_id?: string | null }
-        | undefined;
-      if (!existing?.id) {
-        throw new Error("Bot not found.");
-      }
-      const body = ctx.body as Record<string, unknown>;
-      const accessoryPlacement = readBotAccessoryPlacementForStorage(
-        body.accessoryPlacement ?? body.placement
-      );
-      const sourceBytes = parseBotAccessoryDataUrl(body.dataUrl);
-      let pngBytes: Buffer;
-      try {
-        pngBytes = await normalizeBotAccessoryPngBytes(sourceBytes);
-      } catch {
-        throw new Error("Could not read that accessory image.");
-      }
-
-      const imageId = randomId(12);
-      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
-      try {
-        writeGeneratedImageBytes(localRelPath, pngBytes);
-        await tryGenerateThumbAfterPngWrite(localRelPath);
-      } catch (error) {
-        tryUnlinkGeneratedImageFile(localRelPath);
-        const detail = error instanceof Error ? error.message : "write failed";
-        throw new Error(`Could not save accessory (${detail}).`);
-      }
-
-      const now = new Date().toISOString();
-      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
-      try {
-        db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(
-          imageId,
-          userId,
-          botId,
-          "Uploaded bot accessory",
-          "Uploaded bot accessory",
-          displayUrl,
-          BOT_ACCESSORY_SIZE,
-          "upload",
-          "upload",
-          "upload",
-          localRelPath,
-          BOT_ACCESSORY_IMAGE_PURPOSE,
-          now
-        );
-        db.prepare(
-          "UPDATE bots SET accessory_image_id = ?, accessory_x_pct = ?, accessory_y_pct = ?, accessory_size_pct = ?, accessory_layer = ?, updated_at = ? WHERE id = ? AND user_id = ?"
-        ).run(
-          imageId,
-          accessoryPlacement.xPct,
-          accessoryPlacement.yPct,
-          accessoryPlacement.sizePct,
-          accessoryPlacement.layer,
-          now,
-          botId,
-          userId
-        );
-      } catch (error) {
-        tryUnlinkGeneratedImageFile(localRelPath);
-        throw error;
-      }
-      deleteBotAccessoryImageIfOwned(
-        db,
-        userId,
-        botId,
-        existing.accessory_image_id
-      );
-
-      const updatedBot = db
-        .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
-        )
-        .get(botId, userId);
-      json(ctx.res, 200, {
-        ok: true,
-        bot: updatedBot,
-        image: {
-          id: imageId,
-          url: displayUrl,
-          displayUrl,
-          hasLocalFile: true,
-          purpose: BOT_ACCESSORY_IMAGE_PURPOSE,
-          model: "upload",
-        },
-      });
-    }),
-    route("DELETE", "/api/bots/:id/accessory", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const botId = ctx.params.id;
-      const existing = db
-        .prepare(
-          "SELECT id, accessory_image_id FROM bots WHERE id = ? AND user_id = ?"
-        )
-        .get(botId, userId) as
-        | { id?: string; accessory_image_id?: string | null }
-        | undefined;
-      if (!existing?.id) {
-        throw new Error("Bot not found.");
-      }
-      const now = new Date().toISOString();
-      db.prepare(
-        "UPDATE bots SET accessory_image_id = NULL, accessory_x_pct = ?, accessory_y_pct = ?, accessory_size_pct = ?, accessory_layer = ?, updated_at = ? WHERE id = ? AND user_id = ?"
-      ).run(
-        DEFAULT_BOT_ACCESSORY_PLACEMENT.xPct,
-        DEFAULT_BOT_ACCESSORY_PLACEMENT.yPct,
-        DEFAULT_BOT_ACCESSORY_PLACEMENT.sizePct,
-        DEFAULT_BOT_ACCESSORY_PLACEMENT.layer,
-        now,
-        botId,
-        userId
-      );
-      deleteBotAccessoryImageIfOwned(db, userId, botId, existing.accessory_image_id);
-
-      const updatedBot = db
-        .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
-        )
-        .get(botId, userId);
-      json(ctx.res, 200, { ok: true, bot: updatedBot });
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7406,11 +7257,6 @@ function buildRoutes(): RouteDefinition[] {
           face_mouth_font: faceMouthFont,
           face_font_weight: faceFontWeight,
           profile_picture_image_id: null,
-          accessory_image_id: null,
-          accessory_x_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.xPct,
-          accessory_y_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.yPct,
-          accessory_size_pct: DEFAULT_BOT_ACCESSORY_PLACEMENT.sizePct,
-          accessory_layer: DEFAULT_BOT_ACCESSORY_PLACEMENT.layer,
           chat_enabled: chatEnabled,
         },
       });
@@ -7418,7 +7264,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -7568,17 +7414,6 @@ function buildRoutes(): RouteDefinition[] {
           profilePictureImageId === null &&
           Boolean(existing.profile_picture_image_id?.trim());
       }
-      if (body.accessoryPlacement !== undefined) {
-        const accessoryPlacement = readBotAccessoryPlacementForStorage(body.accessoryPlacement);
-        fields.push("accessory_x_pct = ?");
-        values.push(accessoryPlacement.xPct);
-        fields.push("accessory_y_pct = ?");
-        values.push(accessoryPlacement.yPct);
-        fields.push("accessory_size_pct = ?");
-        values.push(accessoryPlacement.sizePct);
-        fields.push("accessory_layer = ?");
-        values.push(accessoryPlacement.layer);
-      }
       // Color update semantics: non-empty string updates, explicit null clears,
       // empty string or missing field leaves it unchanged.
       if (typeof body.color === "string" && body.color.trim().length > 0) {
@@ -7644,7 +7479,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, { ok: true, bot: updatedBot });

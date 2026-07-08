@@ -1,9 +1,3 @@
-import {
-  botAccessoryPlacementsEqual,
-  normalizeBotAccessoryPlacement,
-  type BotAccessoryPlacement,
-} from "@localai/shared";
-
 export interface BotCustomizerSavePristine {
   name: string;
   prompt: string;
@@ -27,7 +21,6 @@ export interface BotCustomizerSavePristine {
   faceMouthFont: string;
   faceFontWeight: number;
   profilePictureImageId: string | null;
-  accessoryPlacement: BotAccessoryPlacement;
 }
 
 export interface BotCustomizerSaveCurrent {
@@ -57,7 +50,6 @@ export interface BotCustomizerSaveCurrent {
   faceMouthFont: string;
   faceFontWeight: number;
   profilePictureImageId: string | null;
-  accessoryPlacement: BotAccessoryPlacement;
 }
 
 export interface BotCustomizerSavePatch {
@@ -82,7 +74,6 @@ export interface BotCustomizerSavePatch {
   faceMouthFont?: string;
   faceFontWeight?: number;
   profilePictureImageId?: string | null;
-  accessoryPlacement?: BotAccessoryPlacement;
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>
@@ -115,7 +106,6 @@ export function buildBotCustomizerSavePatch(
       faceMouthFont: current.faceMouthFont,
       faceFontWeight: current.faceFontWeight,
       profilePictureImageId: current.profilePictureImageId,
-      accessoryPlacement: normalizeBotAccessoryPlacement(current.accessoryPlacement),
     };
   }
 
@@ -174,11 +164,6 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;
-  }
-  const currentAccessoryPlacement = normalizeBotAccessoryPlacement(current.accessoryPlacement);
-  const pristineAccessoryPlacement = normalizeBotAccessoryPlacement(pristine.accessoryPlacement);
-  if (!botAccessoryPlacementsEqual(currentAccessoryPlacement, pristineAccessoryPlacement)) {
-    patch.accessoryPlacement = currentAccessoryPlacement;
   }
 
   return patch;

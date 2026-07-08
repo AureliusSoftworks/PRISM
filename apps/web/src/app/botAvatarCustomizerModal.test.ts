@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const appDir = dirname(fileURLToPath(import.meta.url));
 const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8");
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
+const apiServerSource = readFileSync(resolve(appDir, "../../../api/src/server.ts"), "utf8");
 const tauriConfig = JSON.parse(
   readFileSync(resolve(appDir, "../../../desktop/src-tauri/tauri.conf.json"), "utf8")
 ) as {
@@ -31,7 +32,6 @@ test("avatar customization is a floating modal that reuses the Zen mannequin", (
   assert.doesNotMatch(pageSource, /<BotAvatarBuilder\b/);
   assert.match(pageSource, /data-avatar-customizer-preview="true"/);
   assert.match(pageSource, /function ZenLiveBotMannequin\(/);
-  assert.match(pageSource, /<ZenLiveBotMannequin[\s\S]*accessoryEditorOverlay/);
   assert.match(cssSource, /\.botAvatarCustomizerBackdrop/);
   assert.match(cssSource, /\.botProfileBuilder\.botAvatarCustomizer/);
 });
@@ -45,112 +45,39 @@ test("avatar customizer supports one-character eye overrides", () => {
   assert.match(cssSource, /\.botAvatarEyeCharacterControl/);
 });
 
-test("avatar face and placement edits autosave immediately to saved bots", () => {
+test("avatar face edits autosave immediately to saved bots", () => {
   assert.match(pageSource, /const \[botAvatarAutoSaving, setBotAvatarAutoSaving\] = useState\(false\);/);
+  assert.match(pageSource, /const \[botAvatarAutoSavingBotId, setBotAvatarAutoSavingBotId\] = useState<string \| null>\(null\);/);
+  assert.match(pageSource, /const botAvatarAutoSaveFlushPromiseRef = useRef<Promise<boolean> \| null>\(null\);/);
   assert.match(pageSource, /function queueBotAvatarAutosave\(id: string \| null, patch: BotCustomizerSavePatch\): void/);
   assert.match(pageSource, /async function flushBotAvatarAutosaveQueue\(id: string\): Promise<boolean>/);
   assert.match(pageSource, /botAvatarAutoSaveQueuedPatchRef\.current = mergeBotAvatarAutosavePatch/);
   assert.match(pageSource, /applyBotAvatarAutosavePatchToSnapshot/);
-  assert.match(pageSource, /saving=\{busy \|\| botAvatarAutoSaving\}/);
+  assert.match(pageSource, /setBotAvatarAutoSavingBotId\(id\);/);
+  assert.match(pageSource, /return botAvatarAutoSaveFlushPromiseRef\.current \?\? true;/);
+  assert.match(pageSource, /const avatarSaved = await flushBotAvatarAutosaveQueue\(id\);/);
+  assert.match(pageSource, /if \(!avatarSaved\) return false;/);
+  assert.match(pageSource, /saving=\{avatarCustomizerSaving\}/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ color: next \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ glyph: next \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyesFont: next \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeCharacter: normalized \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceMouthFont: next \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceFontWeight: normalizedWeight \}\);/);
-  assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ accessoryPlacement: normalized \}\);/);
 });
 
-test("avatar accessory placement uses direct manipulation controls", () => {
-  assert.doesNotMatch(pageSource, /BOT_ACCESSORY_PLACEMENT_X_PCT_MIN/);
-  assert.doesNotMatch(pageSource, /BOT_ACCESSORY_PLACEMENT_Y_PCT_MIN/);
-  assert.doesNotMatch(pageSource, /BOT_ACCESSORY_PLACEMENT_SIZE_PCT_MIN/);
-  assert.doesNotMatch(pageSource, />\s*Horizontal\s*<strong>\{Math\.round\(normalizedPlacement\.xPct\)\}%/);
-  assert.doesNotMatch(pageSource, />\s*Vertical\s*<strong>\{Math\.round\(normalizedPlacement\.yPct\)\}%/);
-  assert.doesNotMatch(pageSource, />\s*Size\s*<strong>\{Math\.round\(normalizedPlacement\.sizePct\)\}%/);
-  assert.match(pageSource, /className=\{styles\.botAvatarAccessoryEditHandle\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarAccessoryResizeHandle\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarAccessoryCancelButton\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarAccessoryLockButton\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarAccessoryLayerToggle\}/);
-  assert.match(pageSource, /aria-label="Accessory layer"/);
-  assert.match(pageSource, /commitAccessoryLayer\("front"\)/);
-  assert.match(pageSource, /commitAccessoryLayer\("back"\)/);
-  assert.match(pageSource, /aria-label="Remove accessory"/);
-  assert.match(pageSource, /const \[accessoryLocked, setAccessoryLocked\] = useState\(false\);/);
-  assert.match(pageSource, /const placementDragDisabled = placementDisabled \|\| accessoryPlacementLocked;/);
-  assert.match(pageSource, /if \(placementDragDisabled\) \{/);
-  assert.match(pageSource, /const accessoryEditorOverlay = accessoryUrl && !accessoryPlacementLocked \? \(/);
-  assert.match(pageSource, /aria-label="Lock accessory placement"/);
-  assert.match(pageSource, /onAccessoryPlacementCommit\(normalizedPlacement\);\s*setAccessoryLocked\(true\);/);
-  assert.match(pageSource, /setAccessoryLocked\(true\);/);
-  assert.match(pageSource, /onAccessoryPlacementCommit\(normalizedPlacement\);/);
-  assert.doesNotMatch(pageSource, /aria-pressed=\{accessoryPlacementLocked\}/);
-  assert.doesNotMatch(pageSource, /Unlock accessory placement/);
-  assert.match(pageSource, /<X size=\{16\} strokeWidth=\{2\.8\} aria-hidden="true" \/>/);
-  assert.match(pageSource, /<X size=\{14\} strokeWidth=\{2\.6\} aria-hidden="true" \/>[\s\S]*Remove/);
-  assert.match(pageSource, /<Lock size=\{15\} strokeWidth=\{2\.8\} aria-hidden="true" \/>/);
-  assert.doesNotMatch(pageSource, /<Unlock size=\{15\} strokeWidth=\{2\.8\} aria-hidden="true" \/>/);
-  assert.match(pageSource, /<MoveDiagonal2 size=\{17\} strokeWidth=\{2\.8\} aria-hidden="true" \/>/);
-  assert.match(pageSource, /const deltaSizePct =/);
-});
-
-test("avatar accessory layer toggle persists front/back placement", () => {
-  assert.match(pageSource, /const accessoryLayerLabel = normalizedPlacement\.layer === "back" \? "Behind" : "Front";/);
-  assert.match(pageSource, /const accessorySummary = accessoryUrl \? accessoryLayerLabel : "None";/);
-  assert.match(pageSource, /const commitAccessoryLayer = useCallback/);
-  assert.match(pageSource, /\.\.\.normalizedPlacement,\s*layer,/);
-  assert.match(pageSource, /onAccessoryPlacementChange\(nextPlacement\);/);
-  assert.match(pageSource, /onAccessoryPlacementCommit\(nextPlacement\);/);
-  assert.match(pageSource, /data-active=\{normalizedPlacement\.layer === "front" \? "true" : undefined\}/);
-  assert.match(pageSource, /data-active=\{normalizedPlacement\.layer === "back" \? "true" : undefined\}/);
-  assert.match(cssSource, /\.botAvatarAccessoryLayerToggle/);
-  assert.match(cssRuleBody(".botAvatarAccessoryLayerToggle"), /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
-});
-
-test("avatar accessory editor controls use high-contrast white chrome", () => {
-  const editHandleRule = cssRuleBody(".botAvatarAccessoryEditHandle");
-  assert.match(editHandleRule, /border:\s*2px solid rgba\(255, 255, 255, 0\.92\);/);
-  assert.match(editHandleRule, /0 0 0 1px rgba\(0, 0, 0, 0\.72\)/);
-
-  const cancelButtonRule = cssRuleBody(".botAvatarAccessoryCancelButton");
-  assert.match(cancelButtonRule, /width:\s*28px;/);
-  assert.match(cancelButtonRule, /height:\s*28px;/);
-  assert.match(cancelButtonRule, /border:\s*1px solid rgba\(255, 255, 255, 0\.88\);/);
-  assert.match(cancelButtonRule, /color:\s*#ffffff;/);
-
-  const lockButtonRule = cssRuleBody(".botAvatarAccessoryLockButton");
-  assert.match(lockButtonRule, /right:\s*-14px;/);
-  assert.match(lockButtonRule, /top:\s*-14px;/);
-  assert.match(lockButtonRule, /width:\s*28px;/);
-  assert.match(lockButtonRule, /height:\s*28px;/);
-  assert.match(lockButtonRule, /border:\s*1px solid rgba\(255, 255, 255, 0\.9\);/);
-  assert.match(lockButtonRule, /color:\s*#ffffff;/);
-  assert.match(cssRuleBody(".botAvatarAccessoryLockButton svg"), /color:\s*#ffffff;/);
-  assert.doesNotMatch(cssSource, /\.botAvatarAccessoryEditHandle\[data-locked="true"\]/);
-
-  const resizeHandleRule = cssSource.match(
-    /^\.botAvatarAccessoryResizeHandle\s*\{([\s\S]*?)\n\}/m
-  )?.[1] ?? "";
-  assert.notEqual(resizeHandleRule, "");
-  assert.match(resizeHandleRule, /right:\s*-14px;/);
-  assert.match(resizeHandleRule, /bottom:\s*-14px;/);
-  assert.match(resizeHandleRule, /width:\s*28px;/);
-  assert.match(resizeHandleRule, /height:\s*28px;/);
-  assert.match(resizeHandleRule, /display:\s*grid;/);
-  assert.match(resizeHandleRule, /place-items:\s*center;/);
-  assert.match(resizeHandleRule, /border:\s*2px solid rgba\(255, 255, 255, 0\.95\);/);
-  assert.match(cssRuleBody(".botAvatarAccessoryResizeHandle svg"), /color:\s*#ffffff;/);
-});
-
-test("avatar accessory removal clears preview state without avatar auto-save", () => {
-  assert.match(pageSource, /function clearBotAccessoryFields\(bot: Bot\): Bot/);
-  assert.match(pageSource, /setNewBotAccessoryImageId\(null\);/);
-  assert.match(pageSource, /setNewBotAccessoryPlacement\(DEFAULT_BOT_ACCESSORY_PLACEMENT\);/);
-  assert.match(pageSource, /clearBotAccessoryFields\(result\.bot as Bot\)/);
-  assert.doesNotMatch(pageSource, /queueBotAvatarLiveSave/);
-  assert.doesNotMatch(pageSource, /botAvatarLiveSave/);
-  assert.doesNotMatch(pageSource, /botAccessoryClearedBotIdsRef/);
+test("avatar save state is scoped and bounded so prompts cannot stay stuck", () => {
+  assert.match(pageSource, /const BOT_AVATAR_SAVE_TIMEOUT_MS = 15000;/);
+  assert.match(pageSource, /async function withBotAvatarSaveTimeout<T>/);
+  assert.match(pageSource, /controller\.abort\(\);/);
+  assert.match(pageSource, /Avatar save took too long\. Please try again\./);
+  assert.match(pageSource, /withBotAvatarSaveTimeout\(\(signal\) =>\s*api<\{ defaultBot\?: Record<string, unknown> \}>/);
+  assert.match(pageSource, /withBotAvatarSaveTimeout\(\(signal\) =>\s*api<\{ bot\?: Bot \}>/);
+  assert.match(
+    pageSource,
+    /const avatarCustomizerSaving =\s*busy \|\|\s*Boolean\(\s*editingBotId &&\s*botAvatarAutoSaving &&\s*botAvatarAutoSavingBotId === editingBotId\s*\);/
+  );
+  assert.doesNotMatch(pageSource, /saving=\{busy \|\| botAvatarAutoSaving\}/);
 });
 
 test("avatar customizer keeps explicit save and dirty prompts for broader edits", () => {
@@ -190,19 +117,16 @@ test("avatar summary card previews identity, eyes, and mouth", () => {
 
   const summaryFaceStart = pageSource.indexOf("className={styles.botAvatarSummaryFace}");
   assert.notEqual(summaryFaceStart, -1);
-  const summaryAccessoryStart = pageSource.indexOf(
-    "className={styles.botAvatarSummaryAccessory}",
-    summaryFaceStart
-  );
-  assert.notEqual(summaryAccessoryStart, -1);
-  const summaryFaceMarkup = pageSource.slice(summaryFaceStart, summaryAccessoryStart);
+  const summaryButtonEnd = pageSource.indexOf("</button>", summaryFaceStart);
+  assert.notEqual(summaryButtonEnd, -1);
+  const summaryFaceMarkup = pageSource.slice(summaryFaceStart, summaryButtonEnd);
   assert.doesNotMatch(summaryFaceMarkup, /<BotFaceFrame/);
   assert.doesNotMatch(summaryFaceMarkup, /<CoffeeSeatPlateEmoji/);
   assert.doesNotMatch(summaryFaceMarkup, /botAvatarFacePlate/);
 
   assert.match(
     cssRuleBody(".botAvatarSummaryFace"),
-    /grid-template-columns:\s*auto auto minmax\(0,\s*1fr\);/
+    /grid-template-columns:\s*auto minmax\(0,\s*1fr\);/
   );
   assert.match(cssRuleBody(".botAvatarSummaryFaceParts"), /grid-template-rows:\s*repeat\(2,\s*28px\);/);
   assert.match(cssRuleBody(".botAvatarSummaryFacePart"), /place-items:\s*center;/);
@@ -211,43 +135,79 @@ test("avatar summary card previews identity, eyes, and mouth", () => {
 
 test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(pageSource, /\| "defaultCustomize"/);
+  assert.match(pageSource, /const DEFAULT_PRISM_BOT_GLYPH: BotGlyphName = "triangle";/);
+  assert.match(pageSource, /const zenDefaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH;/);
+  assert.doesNotMatch(pageSource, /const zenDefaultPrismGlyph = useMemo<BotGlyphName>/);
+  assert.match(pageSource, /const zenDefaultPrismFaceStyle = useMemo<BotFaceStyle>/);
+  assert.match(pageSource, /defaultPrismGlyph\?: BotGlyphName;/);
+  assert.match(pageSource, /defaultPrismFaceStyle\?: BotFaceStyle;/);
+  assert.match(pageSource, /defaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH/);
+  assert.match(pageSource, /bot && isBotGlyphName\(bot\.glyph\) \? bot\.glyph : defaultPrismGlyph/);
+  assert.match(pageSource, /defaultPrismFaceStyle \?\? DEFAULT_BOT_FACE_STYLE/);
+  assert.match(pageSource, /userActionVisible \? "attentive" : "warm"/);
+  assert.match(pageSource, /defaultPrismGlyph=\{zenDefaultPrismGlyph\}/);
+  assert.match(pageSource, /defaultPrismFaceStyle=\{zenDefaultPrismFaceStyle\}/);
   assert.match(pageSource, /function openDefaultBotCustomizer\(\): void/);
   assert.match(pageSource, /async function saveDefaultBot\(\): Promise<boolean>/);
   assert.match(pageSource, /"\/api\/default-bot"/);
   assert.match(pageSource, /const seededName = "Default";/);
   assert.match(pageSource, /const rawStoredPrompt = "";/);
+  assert.match(pageSource, /const seededColor = DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR;/);
+  assert.match(pageSource, /const seededGlyph = DEFAULT_PRISM_BOT_GLYPH;/);
   assert.match(pageSource, /const hasDefaultBotAvatarChanges = editPristine/);
   assert.match(pageSource, /\? hasDefaultBotAvatarChanges/);
+  assert.match(pageSource, /identityControlsVisible\?: boolean;/);
+  assert.match(pageSource, /identityControlsVisible = true/);
+  assert.match(pageSource, /identityControlsVisible=\{!editingDefaultBot\}/);
+  assert.match(pageSource, /Default Prism face only\./);
+  assert.match(pageSource, /\{identityControlsVisible \? \(/);
+  assert.match(pageSource, /const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;/);
+  assert.match(pageSource, /const defaultBotCardStyle = undefined;/);
   assert.match(pageSource, /botPanelAdvancedEditorAvailable =\s*botPanelView === "create" \|\| botPanelView === "customize";/);
   assert.match(pageSource, /!editingDefaultBot \? \(/);
   assert.match(pageSource, /className=\{styles\.botCardDefaultCustomizeButton\}/);
   assert.match(pageSource, /aria-label="Customize Default Prism bot"/);
   assert.match(pageSource, /onClick=\{openDefaultBotCustomizer\}/);
   assert.match(cssSource, /\.botCardDefaultCustomizeButton/);
-});
 
-test("avatar accessory editor is anchored to the rendered face layer", () => {
-  assert.match(pageSource, /accessoryLayerRef = useRef<HTMLSpanElement \| null>\(null\)/);
-  assert.match(pageSource, /const node = accessoryLayerRef\.current/);
-  assert.match(pageSource, /className=\{styles\.zenLiveBotPresenceAccessoryLayer\}/);
-  assert.match(pageSource, /className=\{styles\.zenLiveBotPresenceAccessoryEditLayer\}/);
-  assert.match(pageSource, /className=\{styles\.zenLiveBotPresenceAccessoryRaster\}/);
-  assert.match(pageSource, /accessoryLayerRef=\{accessoryLayerRef\}/);
-  assert.match(pageSource, /data-accessory-layer=\{normalizedAccessoryPlacement\.layer\}/);
-  assert.match(pageSource, /ref=\{accessoryEditorOverlay \? undefined : accessoryLayerRef\}/);
+  const openDefaultStart = pageSource.indexOf("function openDefaultBotCustomizer(): void");
+  assert.notEqual(openDefaultStart, -1);
+  const openDefaultEnd = pageSource.indexOf("function openBotMarketplace(): void", openDefaultStart);
+  assert.notEqual(openDefaultEnd, -1);
+  const openDefaultSource = pageSource.slice(openDefaultStart, openDefaultEnd);
+  assert.doesNotMatch(openDefaultSource, /settings\.prismDefaultBotColor/);
+  assert.doesNotMatch(openDefaultSource, /settings\.prismDefaultBotGlyph/);
 
-  const accessoryLayerRule = cssRuleBody(".zenLiveBotPresenceAccessoryLayer");
-  assert.match(accessoryLayerRule, /left:\s*var\(--zen-live-bot-face-x,\s*50%\);/);
-  assert.match(accessoryLayerRule, /top:\s*var\(--zen-live-bot-face-y,\s*50%\);/);
-  assert.match(accessoryLayerRule, /width:\s*var\(--zen-live-bot-body-frame-size\);/);
-  assert.match(accessoryLayerRule, /height:\s*var\(--zen-live-bot-body-frame-size\);/);
-  assert.match(accessoryLayerRule, /scaleX\(var\(--coffee-plate-emoji-face-scale-y,\s*1\)\)/);
-  assert.match(accessoryLayerRule, /overflow:\s*visible\s*;/);
-  assert.match(cssRuleBody('.zenLiveBotPresenceAccessoryLayer[data-accessory-layer="back"]'), /z-index:\s*2;/);
-  const accessoryEditLayerRule = cssRuleBody(".zenLiveBotPresenceAccessoryEditLayer");
-  assert.match(accessoryEditLayerRule, /z-index:\s*7;/);
-  assert.match(accessoryEditLayerRule, /scaleX\(var\(--coffee-plate-emoji-face-scale-y,\s*1\)\)/);
-  assert.match(pageSource, /getPropertyValue\("--coffee-plate-emoji-face-scale-y"\)/);
+  const saveDefaultStart = pageSource.indexOf("async function saveDefaultBot(): Promise<boolean>");
+  assert.notEqual(saveDefaultStart, -1);
+  const saveDefaultEnd = pageSource.indexOf("async function flushBotAvatarAutosaveQueue", saveDefaultStart);
+  assert.notEqual(saveDefaultEnd, -1);
+  const saveDefaultSource = pageSource.slice(saveDefaultStart, saveDefaultEnd);
+  assert.doesNotMatch(saveDefaultSource, /color:\s*newBotColor/);
+  assert.doesNotMatch(saveDefaultSource, /glyph:\s*newBotGlyph/);
+  assert.match(saveDefaultSource, /faceEyesFont: newBotFaceEyesFont/);
+  assert.match(saveDefaultSource, /prismDefaultBotColor: ""/);
+  assert.match(saveDefaultSource, /prismDefaultBotGlyph: ""/);
+
+  const defaultDirtyStart = pageSource.indexOf("const hasDefaultBotAvatarChanges = editPristine");
+  assert.notEqual(defaultDirtyStart, -1);
+  const defaultDirtyEnd = pageSource.indexOf("const hasEditChanges = editPristine", defaultDirtyStart);
+  assert.notEqual(defaultDirtyEnd, -1);
+  const defaultDirtySource = pageSource.slice(defaultDirtyStart, defaultDirtyEnd);
+  assert.doesNotMatch(defaultDirtySource, /newBotColor/);
+  assert.doesNotMatch(defaultDirtySource, /newBotGlyph/);
+
+  const defaultBotRouteStart = apiServerSource.indexOf('route("PATCH", "/api/default-bot"');
+  assert.notEqual(defaultBotRouteStart, -1);
+  const defaultBotRouteEnd = apiServerSource.indexOf('route("PATCH", "/api/settings"', defaultBotRouteStart);
+  assert.notEqual(defaultBotRouteEnd, -1);
+  const defaultBotRouteSource = apiServerSource.slice(defaultBotRouteStart, defaultBotRouteEnd);
+  assert.doesNotMatch(defaultBotRouteSource, /body\.color/);
+  assert.doesNotMatch(defaultBotRouteSource, /body\.glyph/);
+  assert.match(defaultBotRouteSource, /prism_default_bot_color = NULL/);
+  assert.match(defaultBotRouteSource, /prism_default_bot_glyph = NULL/);
+  assert.match(apiServerSource, /prismDefaultBotColor: ""/);
+  assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });
 
 test("avatar customization modal is a contained foreground sheet", () => {
@@ -282,10 +242,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /className=\{styles\.botAvatarControlStack\}/);
   assert.match(pageSource, /aria-label="Identity"[\s\S]*<Brush size=\{16\}/);
   assert.match(pageSource, /aria-label="Face"[\s\S]*<Sparkles size=\{16\}/);
-  assert.match(pageSource, /aria-label="Accessories"[\s\S]*<ImageGlyph size=\{16\}/);
   assert.match(pageSource, /const previewFaceSummary =/);
   assert.match(pageSource, /const previewWeightSummary =/);
-  assert.match(pageSource, /const accessorySummary =/);
 
   const controlGroupRule = cssRuleBody(".botAvatarControlGroup");
   assert.match(controlGroupRule, /border-radius:\s*13px;/);
@@ -302,7 +260,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
 test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {
   assert.match(pageSource, /const \[previewTheme, setPreviewTheme\] = useState<"light" \| "dark">\(resolvedTheme\)/);
   assert.match(pageSource, /setPreviewTheme\(resolvedTheme\)/);
-  assert.match(pageSource, /function botAvatarPreviewIdentityStyle\(rawHex: string\): CSSProperties/);
+  assert.match(pageSource, /function botAvatarPreviewIdentityStyle\(rawHex: string, prismPersona = false\): CSSProperties/);
+  assert.match(pageSource, /if \(prismPersona\) return \{\};/);
   assert.match(pageSource, /const accentStyle = botAccentStyle\(rawHex, "dark"\) \?\? \{\};/);
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT: ZenLiveBotBodyPlacement = \{\s*xPct: 50,\s*yPct: 50,\s*\};/);
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;/);
@@ -310,8 +269,13 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM = 3\.8;/);
   assert.match(pageSource, /\["--zen-live-bot-face-ink" as string\]: "var\(--coffee-bot-color\)"/);
   assert.match(pageSource, /\["--zen-live-bot-glyph-ink" as string\]: "var\(--coffee-bot-color\)"/);
-  assert.match(pageSource, /\.\.\.botAvatarPreviewIdentityStyle\(color\)/);
+  assert.match(pageSource, /\.\.\.botAvatarPreviewIdentityStyle\(color, isDefaultPrismBot\)/);
   assert.doesNotMatch(pageSource, /\.\.\.botAccentStyle\(color, previewTheme\)/);
+  assert.match(pageSource, /isDefaultPrismBot\?: boolean;/);
+  assert.match(pageSource, /isDefaultPrismBot = false/);
+  assert.match(pageSource, /isDefaultPrismBot=\{editingDefaultBot\}/);
+  assert.match(pageSource, /data-source=\{isDefaultPrismBot \? "prism" : "persona"\}/);
+  assert.match(pageSource, /data-prism-persona=\{isDefaultPrismBot \? "true" : undefined\}/);
   assert.match(pageSource, /data-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-avatar-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-theme=\{previewTheme\}/);
@@ -369,31 +333,11 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.doesNotMatch(previewPlateRule, /scale\(1\.28\)/);
 });
 
-test("avatar customizer preview uses in-game accessory placement math", () => {
-  assert.match(pageSource, /const BOT_ACCESSORY_RENDER_FIELD_SCALE = 4\.4;/);
-  assert.match(pageSource, /"--bot-accessory-field-x-pct"/);
-  assert.match(pageSource, /"--bot-accessory-field-y-pct"/);
-  assert.match(pageSource, /"--bot-accessory-field-size-pct"/);
-
+test("avatar customizer preview uses ordinary avatar-only framing", () => {
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
-  assert.match(stageRule, /--bot-avatar-preview-accessory-bleed:\s*180px\s*;/);
   assert.match(stageRule, /min-height:\s*640px\s*;/);
-  assert.match(stageRule, /padding:\s*var\(--bot-avatar-preview-accessory-bleed\)\s*;/);
+  assert.match(stageRule, /padding:\s*24px\s*;/);
   assert.match(stageRule, /overflow:\s*visible\s*;/);
-
-  const accessoryLayerRule = cssRuleBody(".botAvatarMannequinStage .zenLiveBotPresenceAccessoryLayer");
-  assert.match(accessoryLayerRule, /overflow:\s*visible\s*;/);
-
-  assert.doesNotMatch(cssSource, /\.botAvatarMannequinStage\s+\.zenLiveBotPresenceBodyRaster\s*\{/);
-  const accessoryRasterRule = cssRuleBody(".zenLiveBotPresenceAccessoryRaster");
-  assert.match(accessoryRasterRule, /inset:\s*var\(--bot-accessory-field-inset-pct,\s*-170%\);/);
-  assert.match(accessoryRasterRule, /overflow:\s*visible\s*;/);
-  assert.match(accessoryRasterRule, /background-position:\s*[\s\S]*calc\(50% \+ var\(--bot-accessory-field-x-pct,\s*0%\)\)[\s\S]*calc\(50% \+ var\(--bot-accessory-field-y-pct,\s*0%\)\)/);
-  assert.match(accessoryRasterRule, /background-size:\s*var\(--bot-accessory-field-size-pct,\s*22\.727%\) auto;/);
-  assert.doesNotMatch(accessoryRasterRule, /width:\s*100%;/);
-  assert.doesNotMatch(accessoryRasterRule, /height:\s*100%;/);
-  assert.doesNotMatch(accessoryRasterRule, /mask-image:/);
-  assert.doesNotMatch(accessoryRasterRule, /clip-path:/);
 });
 
 test("avatar customizer preview only talks while hovered", () => {

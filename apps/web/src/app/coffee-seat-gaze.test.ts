@@ -5,6 +5,8 @@ import {
   coffeeHeadPlateFaceScaleYFromGazeTargetSide,
   coffeeHeadSpeakingGazeTargetBotId,
   coffeePlateFaceScaleYFromSeatHorizontalSide,
+  coffeeSeatCanvasLeftPercent,
+  coffeeSeatCanvasLightingFromLeftPercent,
   coffeeSeatHorizontalSideFromLeftPercent,
   coffeeSeatHorizontalTableSide,
   coffeeSeatIsTopHead,
@@ -52,6 +54,91 @@ describe("coffeeSeatHorizontalTableSide", () => {
   it("classifies two-bot layout as left/right", () => {
     assert.equal(coffeeSeatHorizontalTableSide(false, 0, 2, 0), -1);
     assert.equal(coffeeSeatHorizontalTableSide(false, 1, 2, 1), 1);
+  });
+});
+
+describe("coffeeSeatCanvasLeftPercent", () => {
+  it("returns continuous authored left coordinates for live docked seats", () => {
+    assert.equal(
+      coffeeSeatCanvasLeftPercent({
+        compact: false,
+        seatIndex: 1,
+        seatCount: 5,
+        layoutIndex: 1,
+        phase: "live",
+        autoplayDock: true,
+      }),
+      25
+    );
+    assert.equal(
+      coffeeSeatCanvasLeftPercent({
+        compact: false,
+        seatIndex: 4,
+        seatCount: 5,
+        layoutIndex: 4,
+        phase: "live",
+        autoplayDock: true,
+      }),
+      71
+    );
+  });
+
+  it("uses the wider x coordinates from the experimental table angle layout", () => {
+    assert.equal(
+      coffeeSeatCanvasLeftPercent({
+        compact: false,
+        seatIndex: 1,
+        seatCount: 5,
+        layoutIndex: 1,
+        phase: "live",
+        autoplayDock: true,
+        experimentalTableAngle: true,
+      }),
+      14
+    );
+    assert.equal(
+      coffeeSeatCanvasLeftPercent({
+        compact: false,
+        seatIndex: 2,
+        seatCount: 5,
+        layoutIndex: 2,
+        phase: "live",
+        autoplayDock: true,
+        experimentalTableAngle: true,
+      }),
+      86
+    );
+  });
+});
+
+describe("coffeeSeatCanvasLightingFromLeftPercent", () => {
+  it("derives metal rotation and glare from x-axis placement", () => {
+    assert.deepEqual(coffeeSeatCanvasLightingFromLeftPercent(14), {
+      leftPercent: 14,
+      metalRotationDeg: -42,
+      glareXPct: 62,
+      glareYPct: 22,
+      glareAngleDeg: -42,
+    });
+    assert.deepEqual(coffeeSeatCanvasLightingFromLeftPercent(50, { topHead: true }), {
+      leftPercent: 50,
+      metalRotationDeg: 0,
+      glareXPct: 48,
+      glareYPct: 34,
+      glareAngleDeg: -16,
+    });
+    assert.deepEqual(coffeeSeatCanvasLightingFromLeftPercent(86), {
+      leftPercent: 86,
+      metalRotationDeg: 42,
+      glareXPct: 38,
+      glareYPct: 22,
+      glareAngleDeg: 34,
+    });
+  });
+
+  it("keeps roster preview glare lower while still following x placement", () => {
+    assert.equal(coffeeSeatCanvasLightingFromLeftPercent(22, { rosterPreview: true }).glareYPct, 24);
+    assert.ok(coffeeSeatCanvasLightingFromLeftPercent(22, { rosterPreview: true }).glareXPct > 48);
   });
 });
 

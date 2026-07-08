@@ -1,7 +1,35 @@
 /** Horizontal band of the table oval: left of center, center column, or right. */
 export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
+export type CoffeeSeatLayoutPhase =
+  | "selecting"
+  | "preview"
+  | "topic"
+  | "arriving"
+  | "live"
+  | "finished";
+
+export interface CoffeeSeatCanvasLeftPercentArgs {
+  compact: boolean;
+  seatIndex: number;
+  seatCount: number;
+  layoutIndex: number;
+  phase?: CoffeeSeatLayoutPhase;
+  groupReady?: boolean;
+  autoplayDock?: boolean;
+  experimentalTableAngle?: boolean;
+  replayActive?: boolean;
+}
+
+export interface CoffeeSeatCanvasLighting {
+  leftPercent: number;
+  metalRotationDeg: number;
+  glareXPct: number;
+  glareYPct: number;
+  glareAngleDeg: number;
+}
 
 const COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE = 4;
+const COFFEE_SEAT_LIGHTING_HALF_SPAN_PERCENT = 36;
 
 export function coffeeSeatHorizontalSideFromLeftPercent(
   leftPercent: number
@@ -10,6 +38,151 @@ export function coffeeSeatHorizontalSideFromLeftPercent(
   if (leftPercent < 50 - COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return -1;
   if (leftPercent > 50 + COFFEE_SEAT_CENTER_LEFT_PERCENT_TOLERANCE) return 1;
   return 0;
+}
+
+function finiteSeatLeftPercent(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 50;
+}
+
+function compactCoffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs): number {
+  if (args.phase === "selecting" && args.groupReady) {
+    if (args.seatCount === 5) {
+      return ({ 0: 50, 1: 29, 2: 71, 3: 33, 4: 67 } as Record<number, number>)[
+        args.layoutIndex
+      ] ?? 50;
+    }
+    if (args.seatCount === 4) {
+      return ({ 0: 22, 1: 78, 2: 78, 3: 22 } as Record<number, number>)[
+        args.layoutIndex
+      ] ?? 50;
+    }
+  }
+
+  if (args.phase === "selecting" && !args.groupReady && args.seatCount !== 4) {
+    return ({ 0: 50, 1: 28, 2: 72, 3: 32, 4: 68 } as Record<number, number>)[
+      args.seatIndex
+    ] ?? 50;
+  }
+
+  if (args.seatCount === 4) {
+    return ({ 0: 22, 1: 78, 2: 78, 3: 22 } as Record<number, number>)[
+      args.layoutIndex
+    ] ?? 50;
+  }
+
+  return ({ 0: 50, 1: 21, 2: 79, 3: 28, 4: 72 } as Record<number, number>)[
+    args.seatIndex
+  ] ?? 50;
+}
+
+function defaultCoffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs): number {
+  if (args.seatCount === 2) return args.layoutIndex === 0 ? 25 : 75;
+  return ({
+    "3:0": 50,
+    "3:1": 26,
+    "3:2": 74,
+    "4:0": 24,
+    "4:1": 76,
+    "4:2": 76,
+    "4:3": 24,
+    "5:0": 50,
+    "5:1": 21,
+    "5:2": 79,
+    "5:3": 29,
+    "5:4": 71,
+  } as Record<string, number>)[`${args.seatCount}:${args.layoutIndex}`] ?? 50;
+}
+
+function dockedCoffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs): number {
+  return ({
+    "2:0": 28,
+    "2:1": 72,
+    "3:0": 50,
+    "3:1": 30,
+    "3:2": 70,
+    "4:0": 27,
+    "4:1": 73,
+    "4:2": 73,
+    "4:3": 27,
+    "5:0": 50,
+    "5:1": 25,
+    "5:2": 75,
+    "5:3": 29,
+    "5:4": 71,
+  } as Record<string, number>)[`${args.seatCount}:${args.layoutIndex}`] ??
+    defaultCoffeeSeatCanvasLeftPercent(args);
+}
+
+function experimentalCoffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs): number {
+  return ({
+    "2:0": 18,
+    "2:1": 82,
+    "3:0": 50,
+    "3:1": 22,
+    "3:2": 78,
+    "4:0": 18,
+    "4:1": 82,
+    "4:2": 78,
+    "4:3": 22,
+    "5:0": 50,
+    "5:1": 14,
+    "5:2": 86,
+    "5:3": 16,
+    "5:4": 84,
+  } as Record<string, number>)[`${args.seatCount}:${args.layoutIndex}`] ??
+    dockedCoffeeSeatCanvasLeftPercent(args);
+}
+
+/**
+ * Returns the authored x-coordinate for a Coffee seat, matching the CSS table
+ * geometry closely enough to drive spatial lighting and gaze decisions.
+ */
+export function coffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs): number {
+  if (args.compact) return finiteSeatLeftPercent(compactCoffeeSeatCanvasLeftPercent(args));
+
+  const experimentalActive =
+    args.experimentalTableAngle === true &&
+    (args.phase === "live" || (args.phase === "finished" && args.replayActive === true));
+  if (experimentalActive) {
+    return finiteSeatLeftPercent(experimentalCoffeeSeatCanvasLeftPercent(args));
+  }
+
+  if (
+    args.autoplayDock === true &&
+    (args.phase === "arriving" || args.phase === "live")
+  ) {
+    return finiteSeatLeftPercent(dockedCoffeeSeatCanvasLeftPercent(args));
+  }
+
+  if (args.phase === "selecting" && args.groupReady === true && args.seatCount === 5) {
+    return finiteSeatLeftPercent(
+      ({ 0: 50, 1: 29, 2: 71, 3: 33, 4: 67 } as Record<number, number>)[
+        args.layoutIndex
+      ] ?? defaultCoffeeSeatCanvasLeftPercent(args)
+    );
+  }
+
+  return finiteSeatLeftPercent(defaultCoffeeSeatCanvasLeftPercent(args));
+}
+
+export function coffeeSeatCanvasLightingFromLeftPercent(
+  leftPercent: number,
+  options: { topHead?: boolean; rosterPreview?: boolean } = {}
+): CoffeeSeatCanvasLighting {
+  const safeLeftPercent = finiteSeatLeftPercent(leftPercent);
+  const xBalance = Math.max(
+    -1,
+    Math.min(1, (safeLeftPercent - 50) / COFFEE_SEAT_LIGHTING_HALF_SPAN_PERCENT)
+  );
+  const leftBias = Math.max(0, -xBalance);
+  const rightBias = Math.max(0, xBalance);
+  return {
+    leftPercent: safeLeftPercent,
+    metalRotationDeg: xBalance * 42,
+    glareXPct: 48 + leftBias * 14 - rightBias * 10,
+    glareYPct: options.rosterPreview ? 24 : options.topHead ? 34 : 22,
+    glareAngleDeg: -16 - leftBias * 26 + rightBias * 50,
+  };
 }
 
 /**
@@ -43,50 +216,9 @@ export function coffeeSeatHorizontalTableSide(
   seatCount: number,
   layoutIndex: number
 ): CoffeeSeatHorizontalSide {
-  if (compact && seatCount === 4) {
-    const left = ({ 0: 22, 1: 78, 2: 78, 3: 22 } as Record<number, number>)[
-      layoutIndex
-    ] ?? 50;
-    if (left < 50) return -1;
-    if (left > 50) return 1;
-    return 0;
-  }
-  if (compact) {
-    const leftBySeat: Record<number, number> = {
-      0: 50,
-      1: 21,
-      2: 79,
-      3: 28,
-      4: 72,
-    };
-    const left = leftBySeat[seatIndex] ?? 50;
-    if (left < 50) return -1;
-    if (left > 50) return 1;
-    return 0;
-  }
-  if (seatCount === 2) {
-    const left = layoutIndex === 0 ? 25 : 75;
-    return left < 50 ? -1 : 1;
-  }
-  const key = `${seatCount}:${layoutIndex}`;
-  const leftByLayout: Record<string, number> = {
-    "3:0": 50,
-    "3:1": 26,
-    "3:2": 74,
-    "4:0": 24,
-    "4:1": 76,
-    "4:2": 76,
-    "4:3": 24,
-    "5:0": 50,
-    "5:1": 21,
-    "5:2": 79,
-    "5:3": 29,
-    "5:4": 71,
-  };
-  const left = leftByLayout[key] ?? 50;
-  if (left < 50) return -1;
-  if (left > 50) return 1;
-  return 0;
+  return coffeeSeatHorizontalSideFromLeftPercent(
+    coffeeSeatCanvasLeftPercent({ compact, seatIndex, seatCount, layoutIndex })
+  );
 }
 
 /** Top-of-table head seat: compact `seatIndex === 0`, or the centered full-ring top seat. */
