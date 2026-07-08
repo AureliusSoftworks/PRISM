@@ -55,6 +55,15 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(">O", false), "\u00a0O");
   });
 
+  it("blinks custom leading eye characters when provided", () => {
+    assert.equal(applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }), "\u00a0)");
+    assert.equal(
+      applyCoffeeSeatBlink("8D", "half", { eyeCharacter: "8" }),
+      `${COFFEE_SEAT_BLINK_HALF_EYE}D`
+    );
+    assert.equal(applyCoffeeSeatBlink("B)", false), "B)");
+  });
+
   it("no-ops on empty or unknown first character", () => {
     assert.equal(applyCoffeeSeatBlink("", false), "");
     assert.equal(applyCoffeeSeatBlink("x0", false), "x0");

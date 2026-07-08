@@ -8,6 +8,10 @@ export type CoffeeSeatBlinkPhase = "open" | "half" | "closed";
 
 export const COFFEE_SEAT_BLINK_HALF_EYE = "|";
 
+export interface CoffeeSeatBlinkOptions {
+  eyeCharacter?: string | null;
+}
+
 function normalizeCoffeeSeatBlinkPhase(
   phaseOrEyesOpen: CoffeeSeatBlinkPhase | boolean
 ): CoffeeSeatBlinkPhase {
@@ -18,16 +22,29 @@ function normalizeCoffeeSeatBlinkPhase(
 
 export function applyCoffeeSeatBlink(
   text: string,
-  phaseOrEyesOpen: CoffeeSeatBlinkPhase | boolean
+  phaseOrEyesOpen: CoffeeSeatBlinkPhase | boolean,
+  options: CoffeeSeatBlinkOptions = {}
 ): string {
   const phase = normalizeCoffeeSeatBlinkPhase(phaseOrEyesOpen);
   if (phase === "open" || text.length === 0) return text;
-  const eye = text[0];
-  if (eye === ":" || eye === ";" || eye === ">" || eye === "\u02d0") {
+  const [eye] = Array.from(text);
+  if (!eye) return text;
+  const [customEye] =
+    typeof options.eyeCharacter === "string"
+      ? Array.from(options.eyeCharacter.trim())
+      : [];
+  if (
+    eye === ":" ||
+    eye === ";" ||
+    eye === ">" ||
+    eye === "\u02d0" ||
+    (customEye !== undefined && eye === customEye)
+  ) {
+    const rest = text.slice(eye.length);
     if (phase === "half") {
-      return `${COFFEE_SEAT_BLINK_HALF_EYE}${text.slice(1)}`;
+      return `${COFFEE_SEAT_BLINK_HALF_EYE}${rest}`;
     }
-    return `\u00a0${text.slice(1)}`;
+    return `\u00a0${rest}`;
   }
   return text;
 }

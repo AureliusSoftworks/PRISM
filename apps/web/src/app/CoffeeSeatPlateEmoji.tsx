@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type JSX } from "react";
-import type { BotFaceFontId, BotVoicePreset } from "@localai/shared";
+import {
+  normalizeBotFaceEyeCharacter,
+  type BotFaceFontId,
+  type BotVoicePreset,
+} from "@localai/shared";
 import {
   applyCoffeeSeatBlink,
   type CoffeeSeatBlinkPhase,
@@ -19,10 +23,15 @@ function scheduleKeyDigest(key: string): number {
   return n;
 }
 
-function faceInflateScaleForWeight(weight: number | null | undefined): number | undefined {
+function normalizeFaceFontWeight(weight: number | null | undefined): number | undefined {
   if (typeof weight !== "number" || !Number.isFinite(weight)) return undefined;
-  const clamped = Math.max(300, Math.min(900, weight));
-  return 0.92 + ((clamped - 300) / 600) * 0.18;
+  return Math.max(300, Math.min(800, weight));
+}
+
+function faceWeightStrokeForWeight(weight: number | undefined): string | undefined {
+  if (weight === undefined) return undefined;
+  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
+  return `${(t * 0.056).toFixed(3)}em`;
 }
 
 function coffeeSeatEmojiPartForGlyph(args: {
@@ -36,19 +45,34 @@ function coffeeSeatEmojiPartForGlyph(args: {
   return args.index === 0 ? "eyes" : "mouth";
 }
 
+function coffeeSeatFaceTextWithEyeCharacter(
+  baseText: string,
+  eyeCharacter: string | null
+): string {
+  if (!eyeCharacter) return baseText;
+  const [baseEye] = Array.from(baseText);
+  if (!baseEye) return eyeCharacter;
+  return `${eyeCharacter}${baseText.slice(baseEye.length)}`;
+}
+
 export type CoffeeSeatPlateEmojiProps = {
   /** When false, eyes stay open and timers are cleared (preview / not joined). */
   enabled: boolean;
   /** While this seat is doing table typewriter speech, no blink timers run. */
   isTalking: boolean;
+  /** Allows editor/previews to keep eye blinks independent of mouth motion. */
+  blinkWhileTalking?: boolean;
   /** Used only to de-sync blink timers between seats. */
   scheduleKey: string;
   /** Replaces the face while this seat is waiting for visible table text. */
   showThinkingSpinner?: boolean;
+  /** Replaces the two-part face with a single question-mark glyph. */
+  showQuestionMark?: boolean;
   baseText: string;
   rotateDeg: number;
   voicePreset: BotVoicePreset;
   faceEyesFont?: BotFaceFontId | null;
+  faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
   faceFontWeight?: number | null;
   className: string;
@@ -74,18 +98,33 @@ function coffeeSeatClosedBlinkHoldMs(): number {
 export function CoffeeSeatPlateEmoji({
   enabled,
   isTalking,
+  blinkWhileTalking = false,
   scheduleKey,
   showThinkingSpinner = false,
+  showQuestionMark = false,
   baseText,
   rotateDeg,
   voicePreset,
   faceEyesFont,
+  faceEyeCharacter,
   faceMouthFont,
   faceFontWeight,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const thinkingSpinnerActive = enabled && showThinkingSpinner && !isTalking;
-  const blinkKey = `${enabled ? "enabled" : "disabled"}:${isTalking ? "talking" : "idle"}:${thinkingSpinnerActive ? "thinking" : "face"}:${baseText}:${scheduleKey}`;
+  const questionGlyphActive = !thinkingSpinnerActive && showQuestionMark;
+  const faceMode = thinkingSpinnerActive
+    ? "thinking"
+    : questionGlyphActive
+      ? "question"
+      : "face";
+  const normalizedFaceEyeCharacter = normalizeBotFaceEyeCharacter(faceEyeCharacter);
+  const faceText = coffeeSeatFaceTextWithEyeCharacter(
+    baseText,
+    normalizedFaceEyeCharacter
+  );
+  const talkingPausesBlink = isTalking && !blinkWhileTalking;
+  const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
     phase: "open",
     key: blinkKey,
@@ -94,7 +133,9 @@ export function CoffeeSeatPlateEmoji({
   const blinkPhase = blinkState.key === blinkKey ? blinkState.phase : "open";
 
   useEffect(() => {
-    if (!enabled || isTalking || thinkingSpinnerActive) {
+    setBlinkState({ phase: "open", key: blinkKey });
+
+    if (!enabled || talkingPausesBlink || thinkingSpinnerActive || questionGlyphActive) {
       return;
     }
 
@@ -143,7 +184,14 @@ export function CoffeeSeatPlateEmoji({
       cancelled = true;
       clearAll();
     };
-  }, [blinkKey, enabled, isTalking, scheduleKey, thinkingSpinnerActive]);
+  }, [
+    blinkKey,
+    enabled,
+    questionGlyphActive,
+    scheduleKey,
+    thinkingSpinnerActive,
+    talkingPausesBlink,
+  ]);
 
   useEffect(() => {
     if (!thinkingSpinnerActive) {
@@ -162,14 +210,18 @@ export function CoffeeSeatPlateEmoji({
   }, [thinkingSpinnerActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
-    !enabled || isTalking || thinkingSpinnerActive ? "open" : blinkPhase;
-  const displayText = applyCoffeeSeatBlink(baseText, displayBlinkPhase);
+    !enabled || talkingPausesBlink || thinkingSpinnerActive || questionGlyphActive
+      ? "open"
+      : blinkPhase;
+  const displayText = applyCoffeeSeatBlink(faceText, displayBlinkPhase, {
+    eyeCharacter: normalizedFaceEyeCharacter,
+  });
   const glyphParts = Array.from(displayText);
   const baseGlyphParts = Array.from(baseText);
-  const faceInflateScale = thinkingSpinnerActive
+  const normalizedFaceWeight = thinkingSpinnerActive
     ? undefined
-    : faceInflateScaleForWeight(faceFontWeight);
-  const mouthOpen = !thinkingSpinnerActive && /[0oO*]/.test(baseText);
+    : normalizeFaceFontWeight(faceFontWeight);
+  const mouthOpen = !thinkingSpinnerActive && !questionGlyphActive && /[0oO*]/.test(baseText);
   const thinkingSpinnerGlyph =
     COFFEE_SEAT_THINKING_SPINNER_FRAMES[
       thinkingSpinnerFrameIndex % COFFEE_SEAT_THINKING_SPINNER_FRAMES.length
@@ -178,23 +230,27 @@ export function CoffeeSeatPlateEmoji({
   return (
     <span
       className={className}
-      data-coffee-plate-emoji-glyphs={thinkingSpinnerActive ? 1 : glyphParts.length}
+      data-coffee-plate-emoji-glyphs={
+        thinkingSpinnerActive || questionGlyphActive ? 1 : glyphParts.length
+      }
       data-coffee-plate-thinking-spinner={thinkingSpinnerActive ? "true" : undefined}
+      data-coffee-plate-question-glyph={questionGlyphActive ? "true" : undefined}
       data-coffee-plate-emoji-eyes-open={
         displayBlinkPhase === "closed" ? "false" : "true"
       }
       data-coffee-plate-emoji-blink-phase={displayBlinkPhase}
       data-voice-preset={voicePreset}
       data-face-custom={
-        faceEyesFont || faceMouthFont || faceFontWeight
+        faceEyesFont || normalizedFaceEyeCharacter || faceMouthFont || faceFontWeight
           ? "true"
           : undefined
       }
+      data-face-eye-character={normalizedFaceEyeCharacter ?? undefined}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
       style={{
-        ["--bot-face-font-weight" as string]: faceFontWeight ?? undefined,
-        ["--bot-face-inflate-scale" as string]: faceInflateScale,
-        transform: `translateX(${thinkingSpinnerActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scale(var(--bot-face-inflate-scale, 1)) scaleY(${thinkingSpinnerActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
+        ["--bot-face-font-weight" as string]: normalizedFaceWeight,
+        ["--bot-face-weight-stroke" as string]: faceWeightStrokeForWeight(normalizedFaceWeight),
+        transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
       } as CSSProperties}
       aria-hidden="true"
     >
@@ -206,6 +262,14 @@ export function CoffeeSeatPlateEmoji({
           data-face-font={faceMouthFont ?? undefined}
         >
           {thinkingSpinnerGlyph}
+        </span>
+      ) : questionGlyphActive ? (
+        <span
+          data-coffee-plate-question-frame="true"
+          data-coffee-plate-question-glyph="?"
+          data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
+        >
+          ?
         </span>
       ) : (
         glyphParts.map((glyph, index) => {

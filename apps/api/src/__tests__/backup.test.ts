@@ -132,17 +132,20 @@ describe("backup bot avatar face style", () => {
       db.prepare(
         `INSERT INTO bots (
           id, user_id, name, system_prompt,
-          face_eyes_font, face_mouth_font, face_font_weight,
+          face_eyes_font, face_eye_character, face_mouth_font, face_font_weight,
+          accessory_layer,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
         "You are Avatar Bot.",
         "warm",
+        "8",
         "formal",
         725,
+        "back",
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -169,8 +172,13 @@ describe("backup bot avatar face style", () => {
 	        color: null,
         glyph: null,
         faceEyesFont: "warm",
+        faceEyeCharacter: "8",
         faceMouthFont: "formal",
         faceFontWeight: 725,
+        accessoryXPct: 0,
+        accessoryYPct: 0,
+        accessorySizePct: 100,
+        accessoryLayer: "back",
         chatEnabled: true,
         visibility: "private",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -178,25 +186,35 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET face_eyes_font = NULL, face_mouth_font = NULL, face_font_weight = NULL WHERE id = ?"
+        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_mouth_font = NULL, face_font_weight = NULL, accessory_x_pct = 17, accessory_y_pct = 17, accessory_size_pct = 55, accessory_layer = 'front' WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         face_eyes_font: string | null;
+        face_eye_character: string | null;
         face_mouth_font: string | null;
         face_font_weight: number | null;
         profile_picture_image_id: string | null;
+        accessory_x_pct: number;
+        accessory_y_pct: number;
+        accessory_size_pct: number;
+        accessory_layer: string;
       };
       assert.equal(restored.face_eyes_font, "warm");
+      assert.equal(restored.face_eye_character, "8");
       assert.equal(restored.face_mouth_font, "formal");
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.profile_picture_image_id, null);
+      assert.equal(restored.accessory_x_pct, 0);
+      assert.equal(restored.accessory_y_pct, 0);
+      assert.equal(restored.accessory_size_pct, 100);
+      assert.equal(restored.accessory_layer, "back");
     });
   });
 });

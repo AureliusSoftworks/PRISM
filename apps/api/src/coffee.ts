@@ -219,6 +219,7 @@ export interface CoffeeBotProfile {
   color: string | null;
   glyph: string | null;
   faceEyesFont?: string | null;
+  faceEyeCharacter?: string | null;
   faceMouthFont?: string | null;
   faceFontWeight?: number | null;
   profilePictureImageId?: string | null;
@@ -4732,6 +4733,7 @@ type CoffeeBotProfileRow = {
   color: string | null;
   glyph: string | null;
   face_eyes_font: string | null;
+  face_eye_character: string | null;
   face_mouth_font: string | null;
   face_font_weight: number | null;
   profile_picture_image_id: string | null;
@@ -4758,6 +4760,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     color: row.color ?? null,
     glyph: row.glyph ?? null,
     faceEyesFont: row.face_eyes_font ?? null,
+    faceEyeCharacter: row.face_eye_character ?? null,
     faceMouthFont: row.face_mouth_font ?? null,
     faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
     profilePictureImageId: row.profile_picture_image_id ?? null,
@@ -4796,6 +4799,7 @@ function loadCoffeeGroupProfileRows(
     .prepare(
       `SELECT id, name, system_prompt, color, glyph,
               ${selectOptionalBotColumn("face_eyes_font")},
+              ${selectOptionalBotColumn("face_eye_character")},
               ${selectOptionalBotColumn("face_mouth_font")},
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("profile_picture_image_id")},

@@ -18,6 +18,10 @@ function createAccessoryDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       accessory_image_id TEXT,
+      accessory_x_pct REAL NOT NULL DEFAULT 0,
+      accessory_y_pct REAL NOT NULL DEFAULT 0,
+      accessory_size_pct REAL NOT NULL DEFAULT 100,
+      accessory_layer TEXT NOT NULL DEFAULT 'front',
       updated_at TEXT NOT NULL
     );
     CREATE TABLE images (
@@ -33,8 +37,8 @@ function createAccessoryDb(): DatabaseSync {
 
 function seedBot(db: DatabaseSync, id: string, userId: string, imageId: string | null = null): void {
   db.prepare(
-    "INSERT INTO bots (id, user_id, accessory_image_id, updated_at) VALUES (?, ?, ?, ?)"
-  ).run(id, userId, imageId, "2026-01-01T00:00:00.000Z");
+    "INSERT INTO bots (id, user_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, userId, imageId, 12, -7, 128, "back", "2026-01-01T00:00:00.000Z");
 }
 
 function seedImage(
@@ -113,18 +117,30 @@ describe("bot accessory ownership", () => {
     clearBotAccessoryReference(db, "user-1", "accessory-1", "2026-02-01T00:00:00.000Z");
 
     const rows = db
-      .prepare("SELECT id, accessory_image_id, updated_at FROM bots ORDER BY id")
+      .prepare("SELECT id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer, updated_at FROM bots ORDER BY id")
       .all() as Array<{
       id: string;
       accessory_image_id: string | null;
+      accessory_x_pct: number;
+      accessory_y_pct: number;
+      accessory_size_pct: number;
+      accessory_layer: string;
       updated_at: string;
     }>;
     assert.deepEqual(
-      rows.map((row) => [row.id, row.accessory_image_id, row.updated_at]),
+      rows.map((row) => [
+        row.id,
+        row.accessory_image_id,
+        row.accessory_x_pct,
+        row.accessory_y_pct,
+        row.accessory_size_pct,
+        row.accessory_layer,
+        row.updated_at,
+      ]),
       [
-        ["mine", null, "2026-02-01T00:00:00.000Z"],
-        ["mine-other-image", "accessory-2", "2026-01-01T00:00:00.000Z"],
-        ["theirs", "accessory-1", "2026-01-01T00:00:00.000Z"],
+        ["mine", null, 0, 0, 100, "front", "2026-02-01T00:00:00.000Z"],
+        ["mine-other-image", "accessory-2", 12, -7, 128, "back", "2026-01-01T00:00:00.000Z"],
+        ["theirs", "accessory-1", 12, -7, 128, "back", "2026-01-01T00:00:00.000Z"],
       ]
     );
   });

@@ -6,6 +6,10 @@ import {
   shouldBlockBrowserMouseShortcut,
   shouldBlockBrowserWheelShortcut,
 } from "./browserShortcutGuards";
+import {
+  isDesktopFullscreenToggleShortcut,
+  toggleDesktopFullscreen,
+} from "./desktopShell";
 import { closestTextEditingTarget } from "./editableTextContextMenuModel";
 
 const PRISM_HISTORY_GUARD_STATE_KEY = "__prismHistoryGuard";
@@ -140,6 +144,23 @@ export function BlockBrowserInspection(): null {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        isDesktopFullscreenToggleShortcut({
+          key: e.key,
+          code: e.code,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+          defaultPrevented: e.defaultPrevented,
+        })
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        void toggleDesktopFullscreen();
+        return;
+      }
+
       if (
         shouldBlockBrowserKeyboardShortcut({
           key: e.key,

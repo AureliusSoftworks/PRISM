@@ -19,6 +19,7 @@ export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
 };
 
 export const DEFAULT_BOT_FACE_FONT_ID: BotFaceFontId = "neutral";
+export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
 export const BOT_FACE_FONT_WEIGHT_MIN = 300;
 export const BOT_FACE_FONT_WEIGHT_MAX = 800;
@@ -26,12 +27,14 @@ export const BOT_FACE_FONT_WEIGHT_STEP = 25;
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
+  eyeCharacter: string | null;
   mouthFont: BotFaceFontId;
   weight: number;
 }
 
 export interface BotFaceStyleInput {
   faceEyesFont?: unknown;
+  faceEyeCharacter?: unknown;
   faceMouthFont?: unknown;
   faceFontWeight?: unknown;
 }
@@ -47,6 +50,12 @@ export function normalizeBotFaceFontId(
   value: unknown
 ): BotFaceFontId | null {
   return isBotFaceFontId(value) ? value : null;
+}
+
+export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const [character] = Array.from(value.trim());
+  return character ?? null;
 }
 
 export function normalizeBotFaceFontWeight(value: unknown): number | null {
@@ -72,6 +81,9 @@ export function resolveBotFaceStyle(
   const fallbackFont = botFaceFontFromVoicePreset(fallbackVoicePreset);
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
+    eyeCharacter:
+      normalizeBotFaceEyeCharacter(input.faceEyeCharacter) ??
+      DEFAULT_BOT_FACE_EYE_CHARACTER,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
@@ -92,6 +104,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     Math.round(random() * weightSteps) * BOT_FACE_FONT_WEIGHT_STEP;
   return {
     eyesFont: pickFont(),
+    eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     mouthFont: pickFont(),
     weight,
   };

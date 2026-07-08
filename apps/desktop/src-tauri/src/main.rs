@@ -632,10 +632,22 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let next_fullscreen = !window
+        .is_fullscreen()
+        .map_err(|error| format!("Could not read fullscreen state: {error}"))?;
+    window
+        .set_fullscreen(next_fullscreen)
+        .map_err(|error| format!("Could not toggle fullscreen: {error}"))?;
+    Ok(next_fullscreen)
+}
+
 fn main() {
     let app = match tauri::Builder::default()
         .manage(RuntimeState::new())
         .manage(AppLifecycleState::new())
+        .invoke_handler(tauri::generate_handler![toggle_fullscreen])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if is_app_quitting(&window.app_handle()) { return; }
@@ -696,9 +708,10 @@ fn main() {
                 )
                 .title("PRISM")
                 .inner_size(1400.0, 948.0)
-                .min_inner_size(948.0, 760.0)
+                .min_inner_size(1280.0, 900.0)
                 .resizable(true)
                 .maximizable(true)
+                .fullscreen(true)
                 .build() {
                     emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
                 }

@@ -197,6 +197,19 @@ export function createDatabase(): DatabaseSync {
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
+      prism_default_bot_name TEXT,
+      prism_default_bot_system_prompt TEXT,
+      prism_default_bot_color TEXT,
+      prism_default_bot_glyph TEXT,
+      prism_default_bot_face_eyes_font TEXT,
+      prism_default_bot_face_eye_character TEXT,
+      prism_default_bot_face_mouth_font TEXT,
+      prism_default_bot_face_font_weight INTEGER,
+      prism_default_bot_temperature REAL,
+      prism_default_bot_max_tokens INTEGER,
+      prism_default_bot_top_p REAL,
+      prism_default_bot_top_k INTEGER,
+      prism_default_bot_repetition_penalty REAL,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -400,10 +413,15 @@ export function createDatabase(): DatabaseSync {
       color TEXT,
       glyph TEXT,
       face_eyes_font TEXT,
+      face_eye_character TEXT,
       face_mouth_font TEXT,
       face_font_weight INTEGER,
       profile_picture_image_id TEXT,
       accessory_image_id TEXT,
+      accessory_x_pct REAL NOT NULL DEFAULT 0,
+      accessory_y_pct REAL NOT NULL DEFAULT 0,
+      accessory_size_pct REAL NOT NULL DEFAULT 100,
+      accessory_layer TEXT NOT NULL DEFAULT 'front',
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -871,6 +889,27 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenAutonomyEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const defaultBotColumns: Array<[string, string]> = [
+    ["prism_default_bot_name", "TEXT"],
+    ["prism_default_bot_system_prompt", "TEXT"],
+    ["prism_default_bot_color", "TEXT"],
+    ["prism_default_bot_glyph", "TEXT"],
+    ["prism_default_bot_face_eyes_font", "TEXT"],
+    ["prism_default_bot_face_eye_character", "TEXT"],
+    ["prism_default_bot_face_mouth_font", "TEXT"],
+    ["prism_default_bot_face_font_weight", "INTEGER"],
+    ["prism_default_bot_temperature", "REAL"],
+    ["prism_default_bot_max_tokens", "INTEGER"],
+    ["prism_default_bot_top_p", "REAL"],
+    ["prism_default_bot_top_k", "INTEGER"],
+    ["prism_default_bot_repetition_penalty", "REAL"],
+  ];
+  for (const [name, type] of defaultBotColumns) {
+    const hasColumn = userColumns.some((column) => column.name === name);
+    if (!hasColumn) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+    }
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
@@ -1353,6 +1392,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotFaceEyesFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eyes_font TEXT;");
   }
+  const hasBotFaceEyeCharacterColumn = botColumns.some(
+    (column) => column.name === "face_eye_character"
+  );
+  if (!hasBotFaceEyeCharacterColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
+  }
   const hasBotFaceMouthFontColumn = botColumns.some(
     (column) => column.name === "face_mouth_font"
   );
@@ -1376,6 +1421,30 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotAccessoryImageIdColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN accessory_image_id TEXT;");
+  }
+  const hasBotAccessoryXPctColumn = botColumns.some(
+    (column) => column.name === "accessory_x_pct"
+  );
+  if (!hasBotAccessoryXPctColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN accessory_x_pct REAL NOT NULL DEFAULT 0;");
+  }
+  const hasBotAccessoryYPctColumn = botColumns.some(
+    (column) => column.name === "accessory_y_pct"
+  );
+  if (!hasBotAccessoryYPctColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN accessory_y_pct REAL NOT NULL DEFAULT 0;");
+  }
+  const hasBotAccessorySizePctColumn = botColumns.some(
+    (column) => column.name === "accessory_size_pct"
+  );
+  if (!hasBotAccessorySizePctColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN accessory_size_pct REAL NOT NULL DEFAULT 100;");
+  }
+  const hasBotAccessoryLayerColumn = botColumns.some(
+    (column) => column.name === "accessory_layer"
+  );
+  if (!hasBotAccessoryLayerColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN accessory_layer TEXT NOT NULL DEFAULT 'front';");
   }
   const hasBotChatEnabledColumn = botColumns.some(
     (column) => column.name === "chat_enabled"

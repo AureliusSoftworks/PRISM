@@ -1,3 +1,9 @@
+import {
+  botAccessoryPlacementsEqual,
+  normalizeBotAccessoryPlacement,
+  type BotAccessoryPlacement,
+} from "@localai/shared";
+
 export interface BotCustomizerSavePristine {
   name: string;
   prompt: string;
@@ -17,9 +23,11 @@ export interface BotCustomizerSavePristine {
   color: string;
   glyph: string;
   faceEyesFont: string;
+  faceEyeCharacter: string | null;
   faceMouthFont: string;
   faceFontWeight: number;
   profilePictureImageId: string | null;
+  accessoryPlacement: BotAccessoryPlacement;
 }
 
 export interface BotCustomizerSaveCurrent {
@@ -45,9 +53,11 @@ export interface BotCustomizerSaveCurrent {
   color: string;
   glyph: string;
   faceEyesFont: string;
+  faceEyeCharacter: string | null;
   faceMouthFont: string;
   faceFontWeight: number;
   profilePictureImageId: string | null;
+  accessoryPlacement: BotAccessoryPlacement;
 }
 
 export interface BotCustomizerSavePatch {
@@ -68,9 +78,11 @@ export interface BotCustomizerSavePatch {
   color?: string;
   glyph?: string;
   faceEyesFont?: string;
+  faceEyeCharacter?: string | null;
   faceMouthFont?: string;
   faceFontWeight?: number;
   profilePictureImageId?: string | null;
+  accessoryPlacement?: BotAccessoryPlacement;
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>
@@ -99,9 +111,11 @@ export function buildBotCustomizerSavePatch(
       color: current.color,
       glyph: current.glyph,
       faceEyesFont: current.faceEyesFont,
+      faceEyeCharacter: current.faceEyeCharacter,
       faceMouthFont: current.faceMouthFont,
       faceFontWeight: current.faceFontWeight,
       profilePictureImageId: current.profilePictureImageId,
+      accessoryPlacement: normalizeBotAccessoryPlacement(current.accessoryPlacement),
     };
   }
 
@@ -149,6 +163,9 @@ export function buildBotCustomizerSavePatch(
   if (current.faceEyesFont !== pristine.faceEyesFont) {
     patch.faceEyesFont = current.faceEyesFont;
   }
+  if (current.faceEyeCharacter !== pristine.faceEyeCharacter) {
+    patch.faceEyeCharacter = current.faceEyeCharacter;
+  }
   if (current.faceMouthFont !== pristine.faceMouthFont) {
     patch.faceMouthFont = current.faceMouthFont;
   }
@@ -157,6 +174,11 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;
+  }
+  const currentAccessoryPlacement = normalizeBotAccessoryPlacement(current.accessoryPlacement);
+  const pristineAccessoryPlacement = normalizeBotAccessoryPlacement(pristine.accessoryPlacement);
+  if (!botAccessoryPlacementsEqual(currentAccessoryPlacement, pristineAccessoryPlacement)) {
+    patch.accessoryPlacement = currentAccessoryPlacement;
   }
 
   return patch;

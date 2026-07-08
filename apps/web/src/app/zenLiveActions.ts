@@ -146,15 +146,15 @@ export function resolveZenLiveBotPresenceActionText({
   isTalking: boolean;
   userActionVisible: boolean;
   hasBot: boolean;
-}): string {
+}): string | null {
+  void hasBot;
   const replyActionText = isTalking ? sanitizeZenLiveBotActionText(replyAction) : null;
   if (replyActionText) return replyActionText;
   const actionText = sanitizeZenLiveBotActionText(action);
   if (actionText) return actionText;
   if (isTalking) return "replying";
   if (userActionVisible) return "notices";
-  if (hasBot) return "listens";
-  return "waits";
+  return null;
 }
 
 export function isZenLiveBotPresenceActionVerbose(value: unknown): boolean {

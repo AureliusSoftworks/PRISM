@@ -127,10 +127,15 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "semantic_facets_source_hash"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
+      assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       assert.ok(columns.some((column) => column.name === "accessory_image_id"));
+      assert.ok(columns.some((column) => column.name === "accessory_x_pct"));
+      assert.ok(columns.some((column) => column.name === "accessory_y_pct"));
+      assert.ok(columns.some((column) => column.name === "accessory_size_pct"));
+      assert.ok(columns.some((column) => column.name === "accessory_layer"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
         .all() as Array<{ name: string }>;
@@ -155,27 +160,37 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ?, accessory_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ?, accessory_image_id = ?, accessory_x_pct = ?, accessory_y_pct = ?, accessory_size_pct = ?, accessory_layer = ? WHERE id = ?"
         )
-        .run("warm", "formal", 725, "img-profile", "img-accessory", "bot-1");
+        .run("warm", "8", "formal", 725, "img-profile", "img-accessory", 8, -6, 132, "back", "bot-1");
       const avatarRow = reopened
         .prepare(
-          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id, accessory_image_id, accessory_x_pct, accessory_y_pct, accessory_size_pct, accessory_layer FROM bots WHERE id = ?"
         )
         .get("bot-1") as
         | {
             face_eyes_font: string | null;
+            face_eye_character: string | null;
             face_mouth_font: string | null;
             face_font_weight: number | null;
             profile_picture_image_id: string | null;
             accessory_image_id: string | null;
+            accessory_x_pct: number;
+            accessory_y_pct: number;
+            accessory_size_pct: number;
+            accessory_layer: string;
           }
         | undefined;
       assert.equal(avatarRow?.face_eyes_font, "warm");
+      assert.equal(avatarRow?.face_eye_character, "8");
       assert.equal(avatarRow?.face_mouth_font, "formal");
       assert.equal(avatarRow?.face_font_weight, 725);
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
       assert.equal(avatarRow?.accessory_image_id, "img-accessory");
+      assert.equal(avatarRow?.accessory_x_pct, 8);
+      assert.equal(avatarRow?.accessory_y_pct, -6);
+      assert.equal(avatarRow?.accessory_size_pct, 132);
+      assert.equal(avatarRow?.accessory_layer, "back");
       const settingsRow = reopened
         .prepare(
           "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px FROM users WHERE id = ?"

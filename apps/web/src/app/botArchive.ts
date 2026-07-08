@@ -1,5 +1,11 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import type { BotFaceFontId, BotProfileFields } from "@localai/shared";
+import {
+  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT,
+  normalizeBotAccessoryArchivePlacement,
+  type BotAccessoryArchivePlacement,
+  type BotFaceFontId,
+  type BotProfileFields,
+} from "@localai/shared";
 
 export const PRISM_BOT_ARCHIVE_SCHEMA = "prism-bot-export-v2";
 export const BOT_ARCHIVE_MIME = "application/vnd.prism.bot+zip";
@@ -13,16 +19,12 @@ const ALLOWED_BOT_ARCHIVE_ENTRIES = new Set([
   BOT_ARCHIVE_ACCESSORY_ENTRY_NAME,
 ]);
 
-export const DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT = {
-  anchor: "avatar",
-  xPct: 0,
-  yPct: 0,
-  sizePct: 100,
-} as const;
+export const DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT =
+  DEFAULT_BOT_ACCESSORY_ARCHIVE_PLACEMENT;
 
 export interface PrismBotArchiveAccessoryMetadata {
   file: typeof BOT_ARCHIVE_ACCESSORY_ENTRY_NAME;
-  placement: typeof DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT;
+  placement: BotAccessoryArchivePlacement;
 }
 
 export interface PrismBotArchiveJson {
@@ -43,6 +45,7 @@ export interface PrismBotArchiveJson {
     localImageModel?: string | null;
     openaiImageModel?: string | null;
     faceEyesFont?: BotFaceFontId | null;
+    faceEyeCharacter?: string | null;
     faceMouthFont?: BotFaceFontId | null;
     faceFontWeight?: number | null;
     onlineEnabled?: boolean;
@@ -154,10 +157,7 @@ function validateAccessoryPairing(
     const placement = botJson.accessory.placement;
     if (
       botJson.accessory.file !== BOT_ARCHIVE_ACCESSORY_ENTRY_NAME ||
-      placement?.anchor !== DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT.anchor ||
-      placement.xPct !== DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT.xPct ||
-      placement.yPct !== DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT.yPct ||
-      placement.sizePct !== DEFAULT_BOT_ARCHIVE_ACCESSORY_PLACEMENT.sizePct
+      normalizeBotAccessoryArchivePlacement(placement) === null
     ) {
       throw new Error("bot.json has invalid accessory metadata.");
     }

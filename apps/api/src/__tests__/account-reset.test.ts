@@ -66,6 +66,13 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             zen_mood_sensitivity,
             zen_message_font_min_px, zen_message_font_max_px,
             composer_writing_assist, fallback_model_message_stripe,
+            prism_default_bot_name, prism_default_bot_system_prompt,
+            prism_default_bot_color, prism_default_bot_glyph,
+            prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character,
+            prism_default_bot_face_mouth_font, prism_default_bot_face_font_weight,
+            prism_default_bot_temperature, prism_default_bot_max_tokens,
+            prism_default_bot_top_p, prism_default_bot_top_k,
+            prism_default_bot_repetition_penalty,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
             anthropic_key_ciphertext, elevenlabs_key_ciphertext, last_active_at
@@ -123,6 +130,19 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.zen_message_font_max_px, DEFAULT_ZEN_MESSAGE_FONT_MAX_PX);
       assert.equal(user.composer_writing_assist, 1);
       assert.equal(user.fallback_model_message_stripe, 1);
+      assert.equal(user.prism_default_bot_name, null);
+      assert.equal(user.prism_default_bot_system_prompt, null);
+      assert.equal(user.prism_default_bot_color, null);
+      assert.equal(user.prism_default_bot_glyph, null);
+      assert.equal(user.prism_default_bot_face_eyes_font, null);
+      assert.equal(user.prism_default_bot_face_eye_character, null);
+      assert.equal(user.prism_default_bot_face_mouth_font, null);
+      assert.equal(user.prism_default_bot_face_font_weight, null);
+      assert.equal(user.prism_default_bot_temperature, null);
+      assert.equal(user.prism_default_bot_max_tokens, null);
+      assert.equal(user.prism_default_bot_top_p, null);
+      assert.equal(user.prism_default_bot_top_k, null);
+      assert.equal(user.prism_default_bot_repetition_penalty, null);
       assert.equal(user.prism_default_llm_model, null);
       assert.equal(user.prism_image_tool_llm_model, null);
       assert.equal(user.dev_memories_enabled, 0);
@@ -200,6 +220,19 @@ function seedResetFixture(db: DatabaseSync): void {
       zen_message_font_max_px = 38.2,
       composer_writing_assist = 0,
       fallback_model_message_stripe = 0,
+      prism_default_bot_name = 'My Prism',
+      prism_default_bot_system_prompt = 'Speak softly.',
+      prism_default_bot_color = '#ffee66',
+      prism_default_bot_glyph = 'sparkles',
+      prism_default_bot_face_eyes_font = 'warm',
+      prism_default_bot_face_eye_character = '8',
+      prism_default_bot_face_mouth_font = 'playful',
+      prism_default_bot_face_font_weight = 700,
+      prism_default_bot_temperature = 0.9,
+      prism_default_bot_max_tokens = 1536,
+      prism_default_bot_top_p = 0.8,
+      prism_default_bot_top_k = 24,
+      prism_default_bot_repetition_penalty = 1.2,
       prism_default_llm_model = 'aux-a',
       prism_image_tool_llm_model = 'tool-a',
       dev_memories_enabled = 1,
