@@ -330,6 +330,12 @@ import {
   BOT_FACT_KEY_LABELS,
   BOT_FACE_FONT_IDS,
   BOT_FACE_FONT_LABELS,
+  BOT_FACE_EYE_OFFSET_Y_MAX,
+  BOT_FACE_EYE_OFFSET_Y_MIN,
+  BOT_FACE_EYE_OFFSET_Y_STEP,
+  BOT_FACE_EYE_SCALE_MAX,
+  BOT_FACE_EYE_SCALE_MIN,
+  BOT_FACE_EYE_SCALE_STEP,
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
   BOT_FACE_FONT_WEIGHT_STEP,
@@ -340,6 +346,8 @@ import {
   classifyMemoryCategoryFromText,
   defaultBotPurpose,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
+  DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   isAllowedOpenAiImageModelId,
@@ -370,6 +378,8 @@ import {
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   randomBotFaceStyle,
@@ -6881,12 +6891,12 @@ function coffeeSeatFallbackSaturationForMood(mood: BotMoodKey): number {
     case "warm":
       return 1.12;
     case "guarded":
-      return 0.72;
+      return 1;
     case "strained":
-      return 0.56;
+      return 1;
     case "neutral":
     default:
-      return 0.92;
+      return 1;
   }
 }
 
@@ -6936,6 +6946,7 @@ function coffeeSeatEmojiMoodFromPrism(mood: BotMoodKey): CoffeeSeatEmojiMood {
   }
 }
 
+
 function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
   return resolveBotVoicePreset(bot);
 }
@@ -6949,6 +6960,8 @@ function resolveBotFaceStyleForBot(
         | "face_eye_character"
         | "face_mouth_font"
         | "face_font_weight"
+        | "face_eye_scale"
+        | "face_eye_offset_y"
       >
     | null
     | undefined
@@ -6959,6 +6972,8 @@ function resolveBotFaceStyleForBot(
       faceEyeCharacter: bot?.face_eye_character,
       faceMouthFont: bot?.face_mouth_font,
       faceFontWeight: bot?.face_font_weight,
+      faceEyeScale: bot?.face_eye_scale,
+      faceEyeOffsetY: bot?.face_eye_offset_y,
     },
     resolveBotVoicePreset(bot)
   );
@@ -7059,6 +7074,7 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
   }
   return undefined;
 }
+
 
 const ASKQUESTION_INTENT_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
@@ -8701,6 +8717,8 @@ interface UserSettings {
   prismDefaultBotFaceEyeCharacter: string | null;
   prismDefaultBotFaceMouthFont: BotFaceFontId;
   prismDefaultBotFaceFontWeight: number;
+  prismDefaultBotFaceEyeScale: number;
+  prismDefaultBotFaceEyeOffsetY: number;
   prismDefaultBotTemperature: number;
   prismDefaultBotMaxTokens: number;
   prismDefaultBotTopP: number;
@@ -9198,6 +9216,8 @@ interface Bot {
   face_eye_character?: string | null;
   face_mouth_font?: string | null;
   face_font_weight?: number | null;
+  face_eye_scale?: number | null;
+  face_eye_offset_y?: number | null;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
 }
@@ -9224,6 +9244,8 @@ type BotEditOriginalSnapshot = {
   faceEyeCharacter: string | null;
   faceMouthFont: BotFaceFontId;
   faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
   profilePictureImageId: string | null;
 };
 
@@ -9249,6 +9271,14 @@ function normalizeBotAvatarAutosavePatch(
   if (patch.faceFontWeight !== undefined) {
     next.faceFontWeight =
       normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight;
+  }
+  if (patch.faceEyeScale !== undefined) {
+    next.faceEyeScale =
+      normalizeBotFaceEyeScale(patch.faceEyeScale) ?? DEFAULT_BOT_FACE_STYLE.eyeScale;
+  }
+  if (patch.faceEyeOffsetY !== undefined) {
+    next.faceEyeOffsetY =
+      normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
   }
   return next;
 }
@@ -9291,6 +9321,14 @@ function applyBotAvatarAutosavePatchToSnapshot(
       patch.faceFontWeight !== undefined
         ? normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight
         : snapshot.faceFontWeight,
+    faceEyeScale:
+      patch.faceEyeScale !== undefined
+        ? normalizeBotFaceEyeScale(patch.faceEyeScale) ?? DEFAULT_BOT_FACE_STYLE.eyeScale
+        : snapshot.faceEyeScale,
+    faceEyeOffsetY:
+      patch.faceEyeOffsetY !== undefined
+        ? normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+        : snapshot.faceEyeOffsetY,
   };
 }
 
@@ -11182,6 +11220,8 @@ function createBotFormHasEnteredData(options: {
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId;
   faceFontWeight?: number;
+  faceEyeScale?: number;
+  faceEyeOffsetY?: number;
 }): boolean {
   if (options.name.trim().length > 0) return true;
   if (options.advancedMode) return true;
@@ -11201,6 +11241,8 @@ function createBotFormHasEnteredData(options: {
   if ((options.faceEyeCharacter ?? DEFAULT_BOT_FACE_EYE_CHARACTER) !== DEFAULT_BOT_FACE_EYE_CHARACTER) return true;
   if ((options.faceMouthFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
   if ((options.faceFontWeight ?? DEFAULT_BOT_FACE_FONT_WEIGHT) !== DEFAULT_BOT_FACE_FONT_WEIGHT) return true;
+  if ((options.faceEyeScale ?? DEFAULT_BOT_FACE_EYE_SCALE) !== DEFAULT_BOT_FACE_EYE_SCALE) return true;
+  if ((options.faceEyeOffsetY ?? DEFAULT_BOT_FACE_EYE_OFFSET_Y) !== DEFAULT_BOT_FACE_EYE_OFFSET_Y) return true;
   return false;
 }
 
@@ -13983,6 +14025,8 @@ function MessageMoodFace(props: {
         faceEyeCharacter={props.faceStyle?.eyeCharacter}
         faceMouthFont={props.faceStyle?.mouthFont}
         faceFontWeight={props.faceStyle?.weight}
+        faceEyeScale={props.faceStyle?.eyeScale}
+        faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
         className={styles.messageMoodCoffeeFace}
       />
       {showRasterFrame ? <BotFaceFrame /> : null}
@@ -23774,6 +23818,8 @@ function ZenLiveBotMannequin({
               faceEyeCharacter={faceStyle.eyeCharacter}
               faceMouthFont={faceStyle.mouthFont}
               faceFontWeight={faceStyle.weight}
+              faceEyeScale={faceStyle.eyeScale}
+              faceEyeOffsetY={faceStyle.eyeOffsetY}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
             />
           </span>
@@ -23795,6 +23841,8 @@ function ZenLiveBotMannequin({
               faceEyeCharacter={faceStyle.eyeCharacter}
               faceMouthFont={faceStyle.mouthFont}
               faceFontWeight={faceStyle.weight}
+              faceEyeScale={faceStyle.eyeScale}
+              faceEyeOffsetY={faceStyle.eyeOffsetY}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
             />
           </span>
@@ -28925,6 +28973,8 @@ interface BotAvatarCustomizerModalProps {
   faceEyeCharacter: string | null;
   faceMouthFont: BotFaceFontId;
   faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
   hasUnsavedChanges: boolean;
   saving: boolean;
   saveError: string | null;
@@ -28940,6 +28990,8 @@ interface BotAvatarCustomizerModalProps {
   onEyeCharacterChange: (character: string | null) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onWeightChange: (weight: number) => void;
+  onEyeScaleChange: (scale: number) => void;
+  onEyeOffsetYChange: (offsetY: number) => void;
 }
 
 function optionalScaleLabel(
@@ -29052,6 +29104,15 @@ function botAvatarWeightLabel(weight: number): string {
   return "Balanced";
 }
 
+function botAvatarEyeScaleLabel(scale: number): string {
+  return `${Math.round(scale * 100)}%`;
+}
+
+function botAvatarEyeOffsetYLabel(offsetY: number): string {
+  if (Math.abs(offsetY) < BOT_FACE_EYE_OFFSET_Y_STEP / 2) return "Centered";
+  return `${Math.round(Math.abs(offsetY) * 100)}% ${offsetY < 0 ? "up" : "down"}`;
+}
+
 function botAvatarPreviewIdentityStyle(rawHex: string, prismPersona = false): CSSProperties {
   if (prismPersona) return {};
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
@@ -29071,6 +29132,34 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
   "open-small",
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
+type BotAvatarScreenMaskBlendMode =
+  | "normal"
+  | "multiply"
+  | "screen"
+  | "overlay"
+  | "soft-light"
+  | "hard-light"
+  | "color-dodge"
+  | "plus-lighter"
+  | "color"
+  | "luminosity";
+
+const BOT_AVATAR_SCREEN_MASK_BLEND_MODES = [
+  { value: "screen", label: "Screen" },
+  { value: "normal", label: "Normal" },
+  { value: "multiply", label: "Multiply" },
+  { value: "overlay", label: "Overlay" },
+  { value: "soft-light", label: "Soft light" },
+  { value: "hard-light", label: "Hard light" },
+  { value: "color-dodge", label: "Color dodge" },
+  { value: "plus-lighter", label: "Plus lighter" },
+  { value: "color", label: "Color" },
+  { value: "luminosity", label: "Luminosity" },
+] as const satisfies readonly {
+  value: BotAvatarScreenMaskBlendMode;
+  label: string;
+}[];
+
 function BotAvatarCustomizerModal({
   open,
   botName,
@@ -29085,6 +29174,8 @@ function BotAvatarCustomizerModal({
   faceEyeCharacter,
   faceMouthFont,
   faceFontWeight,
+  faceEyeScale,
+  faceEyeOffsetY,
   hasUnsavedChanges,
   saving,
   saveError,
@@ -29100,10 +29191,14 @@ function BotAvatarCustomizerModal({
   onEyeCharacterChange,
   onMouthFontChange,
   onWeightChange,
+  onEyeScaleChange,
+  onEyeOffsetYChange,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewHovered, setPreviewHovered] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
+  const [screenMaskBlendMode, setScreenMaskBlendMode] =
+    useState<BotAvatarScreenMaskBlendMode>("screen");
   const previewTalking = previewHovered;
   const previewMouthShape =
     BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
@@ -29127,12 +29222,14 @@ function BotAvatarCustomizerModal({
     "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM}rem`,
     "--zen-live-bot-glyph-x-anchor": "0px",
     "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
+    "--bot-face-crt-screen-texture-blend-mode": screenMaskBlendMode,
   } as CSSProperties;
 
   useEffect(() => {
     if (!open) return;
     setPreviewTheme(resolvedTheme);
     setPreviewHovered(false);
+    setScreenMaskBlendMode("screen");
     setMouthPhase(0);
   }, [open, resolvedTheme]);
 
@@ -29161,6 +29258,8 @@ function BotAvatarCustomizerModal({
         : "Saved";
   const previewFaceSummary = `${BOT_FACE_FONT_LABELS[faceEyesFont]} eyes · ${BOT_FACE_FONT_LABELS[faceMouthFont]} mouth`;
   const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
+  const previewEyeTransformSummary =
+    `${botAvatarEyeScaleLabel(faceEyeScale)} · ${botAvatarEyeOffsetYLabel(faceEyeOffsetY)}`;
 
   const modal = (
     <div
@@ -29218,29 +29317,49 @@ function BotAvatarCustomizerModal({
                 <span>Preview</span>
                 <strong>Live avatar</strong>
               </div>
-              <div
-                className={styles.botAvatarPreviewThemeToggle}
-                role="group"
-                aria-label="Preview theme"
-              >
-                <button
-                  type="button"
-                  data-active={previewTheme === "dark" ? "true" : undefined}
-                  aria-pressed={previewTheme === "dark"}
-                  onClick={() => setPreviewTheme("dark")}
+              <div className={styles.botAvatarPreviewHeaderControls}>
+                <label className={styles.botAvatarMaskBlendProbe}>
+                  <span>Mask</span>
+                  <select
+                    value={screenMaskBlendMode}
+                    onChange={(event) =>
+                      setScreenMaskBlendMode(
+                        event.currentTarget.value as BotAvatarScreenMaskBlendMode
+                      )
+                    }
+                    aria-label="Screen mask blend mode"
+                  >
+                    {BOT_AVATAR_SCREEN_MASK_BLEND_MODES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div
+                  className={styles.botAvatarPreviewThemeToggle}
+                  role="group"
+                  aria-label="Preview theme"
                 >
-                  <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
-                  Dark
-                </button>
-                <button
-                  type="button"
-                  data-active={previewTheme === "light" ? "true" : undefined}
-                  aria-pressed={previewTheme === "light"}
-                  onClick={() => setPreviewTheme("light")}
-                >
-                  <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
-                  Light
-                </button>
+                  <button
+                    type="button"
+                    data-active={previewTheme === "dark" ? "true" : undefined}
+                    aria-pressed={previewTheme === "dark"}
+                    onClick={() => setPreviewTheme("dark")}
+                  >
+                    <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
+                    Dark
+                  </button>
+                  <button
+                    type="button"
+                    data-active={previewTheme === "light" ? "true" : undefined}
+                    aria-pressed={previewTheme === "light"}
+                    onClick={() => setPreviewTheme("light")}
+                  >
+                    <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
+                    Light
+                  </button>
+                </div>
               </div>
             </header>
             <div
@@ -29282,6 +29401,8 @@ function BotAvatarCustomizerModal({
                     eyeCharacter: faceEyeCharacter,
                     mouthFont: faceMouthFont,
                     weight: faceFontWeight,
+                    eyeScale: faceEyeScale,
+                    eyeOffsetY: faceEyeOffsetY,
                   }}
                   voicePreset="warm"
                   isTalking={previewTalking}
@@ -29295,6 +29416,7 @@ function BotAvatarCustomizerModal({
             <div className={styles.botAvatarPreviewMeta}>
               <span>{previewFaceSummary}</span>
               <span>{previewWeightSummary}</span>
+              <span>{previewEyeTransformSummary}</span>
             </div>
           </section>
           <section className={styles.botAvatarControlPanel} aria-label="Avatar controls">
@@ -29401,6 +29523,42 @@ function BotAvatarCustomizerModal({
                     <div className={styles.botAvatarWeightEnds} aria-hidden="true">
                       <span>Deflate</span>
                       <span>Inflate</span>
+                    </div>
+                  </label>
+                  <label className={styles.botAvatarWeightControl}>
+                    <span>
+                      Eye size
+                      <strong>{botAvatarEyeScaleLabel(faceEyeScale)}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min={BOT_FACE_EYE_SCALE_MIN}
+                      max={BOT_FACE_EYE_SCALE_MAX}
+                      step={BOT_FACE_EYE_SCALE_STEP}
+                      value={faceEyeScale}
+                      onChange={(event) => onEyeScaleChange(Number(event.currentTarget.value))}
+                    />
+                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
+                      <span>Smaller</span>
+                      <span>Larger</span>
+                    </div>
+                  </label>
+                  <label className={styles.botAvatarWeightControl}>
+                    <span>
+                      Eye height
+                      <strong>{botAvatarEyeOffsetYLabel(faceEyeOffsetY)}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min={BOT_FACE_EYE_OFFSET_Y_MIN}
+                      max={BOT_FACE_EYE_OFFSET_Y_MAX}
+                      step={BOT_FACE_EYE_OFFSET_Y_STEP}
+                      value={faceEyeOffsetY}
+                      onChange={(event) => onEyeOffsetYChange(Number(event.currentTarget.value))}
+                    />
+                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
+                      <span>Up</span>
+                      <span>Down</span>
                     </div>
                   </label>
                 </div>
@@ -32265,6 +32423,12 @@ function HomeContent(): React.JSX.Element {
   const [newBotFaceFontWeight, setNewBotFaceFontWeight] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.weight
   );
+  const [newBotFaceEyeScale, setNewBotFaceEyeScale] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.eyeScale
+  );
+  const [newBotFaceEyeOffsetY, setNewBotFaceEyeOffsetY] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+  );
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
@@ -32361,6 +32525,8 @@ function HomeContent(): React.JSX.Element {
     faceEyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
     faceMouthFont: DEFAULT_BOT_FACE_STYLE.mouthFont,
     faceFontWeight: DEFAULT_BOT_FACE_STYLE.weight,
+    faceEyeScale: DEFAULT_BOT_FACE_STYLE.eyeScale,
+    faceEyeOffsetY: DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
   });
   latestCreateBotDraftRef.current = {
     name: newBotName,
@@ -32381,6 +32547,8 @@ function HomeContent(): React.JSX.Element {
     faceEyeCharacter: newBotFaceEyeCharacter,
     faceMouthFont: newBotFaceMouthFont,
     faceFontWeight: newBotFaceFontWeight,
+    faceEyeScale: newBotFaceEyeScale,
+    faceEyeOffsetY: newBotFaceEyeOffsetY,
   };
 
   const handleNewBotColorChange = useCallback((next: string) => {
@@ -32411,6 +32579,18 @@ function HomeContent(): React.JSX.Element {
   const handleNewBotFaceFontWeightChange = useCallback((next: number) => {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceFontWeight(normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight);
+  }, []);
+
+  const handleNewBotFaceEyeScaleChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceEyeScale(normalizeBotFaceEyeScale(next) ?? DEFAULT_BOT_FACE_STYLE.eyeScale);
+  }, []);
+
+  const handleNewBotFaceEyeOffsetYChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceEyeOffsetY(
+      normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+    );
   }, []);
 
   const setBotEditorModeAdvanced = useCallback((advanced: boolean) => {
@@ -32479,6 +32659,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(pristine.faceEyeCharacter);
     setNewBotFaceMouthFont(pristine.faceMouthFont);
     setNewBotFaceFontWeight(pristine.faceFontWeight);
+    setNewBotFaceEyeScale(pristine.faceEyeScale);
+    setNewBotFaceEyeOffsetY(pristine.faceEyeOffsetY);
   }, []);
 
   const closeBotAvatarCustomizer = useCallback((): void => {
@@ -34947,9 +35129,15 @@ function HomeContent(): React.JSX.Element {
       settings?.prismDefaultBotFaceEyeCharacter ?? DEFAULT_BOT_FACE_STYLE.eyeCharacter,
     mouthFont: settings?.prismDefaultBotFaceMouthFont ?? DEFAULT_BOT_FACE_STYLE.mouthFont,
     weight: settings?.prismDefaultBotFaceFontWeight ?? DEFAULT_BOT_FACE_STYLE.weight,
+    eyeScale:
+      settings?.prismDefaultBotFaceEyeScale ?? DEFAULT_BOT_FACE_STYLE.eyeScale,
+    eyeOffsetY:
+      settings?.prismDefaultBotFaceEyeOffsetY ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
   }), [
     settings?.prismDefaultBotFaceEyeCharacter,
     settings?.prismDefaultBotFaceEyesFont,
+    settings?.prismDefaultBotFaceEyeOffsetY,
+    settings?.prismDefaultBotFaceEyeScale,
     settings?.prismDefaultBotFaceFontWeight,
     settings?.prismDefaultBotFaceMouthFont,
   ]);
@@ -44913,6 +45101,12 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceFontWeight:
         normalizeBotFaceFontWeight(d.settings.prismDefaultBotFaceFontWeight) ??
         DEFAULT_BOT_FACE_STYLE.weight,
+      prismDefaultBotFaceEyeScale:
+        normalizeBotFaceEyeScale(d.settings.prismDefaultBotFaceEyeScale) ??
+        DEFAULT_BOT_FACE_STYLE.eyeScale,
+      prismDefaultBotFaceEyeOffsetY:
+        normalizeBotFaceEyeOffsetY(d.settings.prismDefaultBotFaceEyeOffsetY) ??
+        DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
       prismDefaultBotTemperature: normalizeBotTemperature(
         typeof d.settings.prismDefaultBotTemperature === "number"
           ? d.settings.prismDefaultBotTemperature
@@ -54681,6 +54875,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: faceStyle.eyeCharacter,
         faceMouthFont: faceStyle.mouthFont,
         faceFontWeight: faceStyle.weight,
+        faceEyeScale: faceStyle.eyeScale,
+        faceEyeOffsetY: faceStyle.eyeOffsetY,
         onlineEnabled: bot.online_enabled === 1,
         flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
@@ -55256,6 +55452,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: normalizeBotFaceEyeCharacter(parsedBot.faceEyeCharacter),
         faceMouthFont: normalizeBotFaceFontId(parsedBot.faceMouthFont),
         faceFontWeight: normalizeBotFaceFontWeight(parsedBot.faceFontWeight),
+        faceEyeScale: normalizeBotFaceEyeScale(parsedBot.faceEyeScale),
+        faceEyeOffsetY: normalizeBotFaceEyeOffsetY(parsedBot.faceEyeOffsetY),
         exportHash: importedBotHash,
       }),
     });
@@ -55712,6 +55910,20 @@ function HomeContent(): React.JSX.Element {
     }
     if (normalizeBotFaceFontWeight(parsed.botJson.bot.faceFontWeight) === null) {
       throw new Error(`${prepared.entry.name} marketplace bundle is missing a valid face weight.`);
+    }
+    if (
+      parsed.botJson.bot.faceEyeScale !== undefined &&
+      parsed.botJson.bot.faceEyeScale !== null &&
+      normalizeBotFaceEyeScale(parsed.botJson.bot.faceEyeScale) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid eye scale.`);
+    }
+    if (
+      parsed.botJson.bot.faceEyeOffsetY !== undefined &&
+      parsed.botJson.bot.faceEyeOffsetY !== null &&
+      normalizeBotFaceEyeOffsetY(parsed.botJson.bot.faceEyeOffsetY) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid eye height.`);
     }
   }
 
@@ -58781,6 +58993,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(draft.faceStyle.eyeCharacter);
     setNewBotFaceMouthFont(draft.faceStyle.mouthFont);
     setNewBotFaceFontWeight(draft.faceStyle.weight);
+    setNewBotFaceEyeScale(draft.faceStyle.eyeScale);
+    setNewBotFaceEyeOffsetY(draft.faceStyle.eyeOffsetY);
     setNewBotProfilePictureImageId(null);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
@@ -58829,6 +59043,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
     setNewBotFaceMouthFont(DEFAULT_BOT_FACE_STYLE.mouthFont);
     setNewBotFaceFontWeight(DEFAULT_BOT_FACE_STYLE.weight);
+    setNewBotFaceEyeScale(DEFAULT_BOT_FACE_STYLE.eyeScale);
+    setNewBotFaceEyeOffsetY(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
     setNewBotProfilePictureImageId(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
@@ -58923,6 +59139,12 @@ function HomeContent(): React.JSX.Element {
     const seededFaceFontWeight =
       normalizeBotFaceFontWeight(settings.prismDefaultBotFaceFontWeight) ??
       DEFAULT_BOT_FACE_STYLE.weight;
+    const seededFaceEyeScale =
+      normalizeBotFaceEyeScale(settings.prismDefaultBotFaceEyeScale) ??
+      DEFAULT_BOT_FACE_STYLE.eyeScale;
+    const seededFaceEyeOffsetY =
+      normalizeBotFaceEyeOffsetY(settings.prismDefaultBotFaceEyeOffsetY) ??
+      DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
     const seededTemperature = BOT_TEMPERATURE_DEFAULT;
     const seededMaxTokens = BOT_REPLY_LENGTH_DEFAULT_TOKENS;
     const seededTopP = BOT_TOP_P_DEFAULT;
@@ -58951,6 +59173,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(seededFaceEyeCharacter);
     setNewBotFaceMouthFont(seededFaceMouthFont);
     setNewBotFaceFontWeight(seededFaceFontWeight);
+    setNewBotFaceEyeScale(seededFaceEyeScale);
+    setNewBotFaceEyeOffsetY(seededFaceEyeOffsetY);
     setNewBotProfilePictureImageId(null);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
@@ -58977,6 +59201,8 @@ function HomeContent(): React.JSX.Element {
       faceEyeCharacter: seededFaceEyeCharacter,
       faceMouthFont: seededFaceMouthFont,
       faceFontWeight: seededFaceFontWeight,
+      faceEyeScale: seededFaceEyeScale,
+      faceEyeOffsetY: seededFaceEyeOffsetY,
       profilePictureImageId: null,
     };
     setBotPanelView("defaultCustomize");
@@ -59081,6 +59307,8 @@ function HomeContent(): React.JSX.Element {
           faceEyeCharacter: newBotFaceEyeCharacter,
           faceMouthFont: newBotFaceMouthFont,
           faceFontWeight: newBotFaceFontWeight,
+          faceEyeScale: newBotFaceEyeScale,
+          faceEyeOffsetY: newBotFaceEyeOffsetY,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -59259,6 +59487,8 @@ function HomeContent(): React.JSX.Element {
           faceEyeCharacter: faceStyle.eyeCharacter,
           faceMouthFont: faceStyle.mouthFont,
           faceFontWeight: faceStyle.weight,
+          faceEyeScale: faceStyle.eyeScale,
+          faceEyeOffsetY: faceStyle.eyeOffsetY,
         }),
       });
       await refreshBots();
@@ -59326,6 +59556,8 @@ function HomeContent(): React.JSX.Element {
           faceEyeCharacter: newBotFaceEyeCharacter,
           faceMouthFont: newBotFaceMouthFont,
           faceFontWeight: newBotFaceFontWeight,
+          faceEyeScale: newBotFaceEyeScale,
+          faceEyeOffsetY: newBotFaceEyeOffsetY,
         }),
       });
       setNewBotName(copiedName);
@@ -59364,6 +59596,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
+        faceEyeScale: newBotFaceEyeScale,
+        faceEyeOffsetY: newBotFaceEyeOffsetY,
         profilePictureImageId: null,
       };
       if (result.bot?.id) {
@@ -60524,6 +60758,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(seededFaceStyle.eyeCharacter);
     setNewBotFaceMouthFont(seededFaceStyle.mouthFont);
     setNewBotFaceFontWeight(seededFaceStyle.weight);
+    setNewBotFaceEyeScale(seededFaceStyle.eyeScale);
+    setNewBotFaceEyeOffsetY(seededFaceStyle.eyeOffsetY);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
@@ -60551,6 +60787,8 @@ function HomeContent(): React.JSX.Element {
       faceEyeCharacter: seededFaceStyle.eyeCharacter,
       faceMouthFont: seededFaceStyle.mouthFont,
       faceFontWeight: seededFaceStyle.weight,
+      faceEyeScale: seededFaceStyle.eyeScale,
+      faceEyeOffsetY: seededFaceStyle.eyeOffsetY,
       profilePictureImageId: seededProfilePictureImageId,
     };
     setPanelError(null);
@@ -62145,6 +62383,8 @@ function HomeContent(): React.JSX.Element {
         || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
         || newBotFaceMouthFont !== editPristine.faceMouthFont
         || newBotFaceFontWeight !== editPristine.faceFontWeight
+        || newBotFaceEyeScale !== editPristine.faceEyeScale
+        || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
       : true;
     if (!hasChanges) return true;
 
@@ -62160,6 +62400,8 @@ function HomeContent(): React.JSX.Element {
             faceEyeCharacter: newBotFaceEyeCharacter,
             faceMouthFont: newBotFaceMouthFont,
             faceFontWeight: newBotFaceFontWeight,
+            faceEyeScale: newBotFaceEyeScale,
+            faceEyeOffsetY: newBotFaceEyeOffsetY,
           }),
           signal,
         })
@@ -62194,6 +62436,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
+        faceEyeScale: newBotFaceEyeScale,
+        faceEyeOffsetY: newBotFaceEyeOffsetY,
         profilePictureImageId: null,
       };
       setSettings((previous) =>
@@ -62208,6 +62452,8 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotFaceEyeCharacter: newBotFaceEyeCharacter,
               prismDefaultBotFaceMouthFont: newBotFaceMouthFont,
               prismDefaultBotFaceFontWeight: newBotFaceFontWeight,
+              prismDefaultBotFaceEyeScale: newBotFaceEyeScale,
+              prismDefaultBotFaceEyeOffsetY: newBotFaceEyeOffsetY,
               prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
               prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
               prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
@@ -62356,6 +62602,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
+        faceEyeScale: newBotFaceEyeScale,
+        faceEyeOffsetY: newBotFaceEyeOffsetY,
         profilePictureImageId: newBotProfilePictureImageId,
       },
       editOriginalRef.current
@@ -62407,6 +62655,8 @@ function HomeContent(): React.JSX.Element {
         faceEyeCharacter: newBotFaceEyeCharacter,
         faceMouthFont: newBotFaceMouthFont,
         faceFontWeight: newBotFaceFontWeight,
+        faceEyeScale: newBotFaceEyeScale,
+        faceEyeOffsetY: newBotFaceEyeOffsetY,
         profilePictureImageId: newBotProfilePictureImageId,
       };
       setEditingBotId(id);
@@ -74065,6 +74315,8 @@ function HomeContent(): React.JSX.Element {
             || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
             || newBotFaceMouthFont !== editPristine.faceMouthFont
             || newBotFaceFontWeight !== editPristine.faceFontWeight
+            || newBotFaceEyeScale !== editPristine.faceEyeScale
+            || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
           : false;
         const hasEditChanges = editPristine
           ? editingDefaultBot
@@ -74089,6 +74341,8 @@ function HomeContent(): React.JSX.Element {
               || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
               || newBotFaceMouthFont !== editPristine.faceMouthFont
               || newBotFaceFontWeight !== editPristine.faceFontWeight
+              || newBotFaceEyeScale !== editPristine.faceEyeScale
+              || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
           : false;
         const avatarCustomizerSaving =
@@ -75264,6 +75518,8 @@ function HomeContent(): React.JSX.Element {
                   faceEyeCharacter={newBotFaceEyeCharacter}
                   faceMouthFont={newBotFaceMouthFont}
                   faceFontWeight={newBotFaceFontWeight}
+                  faceEyeScale={newBotFaceEyeScale}
+                  faceEyeOffsetY={newBotFaceEyeOffsetY}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   saving={avatarCustomizerSaving}
                   saveError={panelError}
@@ -75317,6 +75573,18 @@ function HomeContent(): React.JSX.Element {
                       normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight;
                     handleNewBotFaceFontWeightChange(normalizedWeight);
                     queueBotAvatarAutosave(editingBotId, { faceFontWeight: normalizedWeight });
+                  }}
+                  onEyeScaleChange={(next) => {
+                    const normalizedScale =
+                      normalizeBotFaceEyeScale(next) ?? DEFAULT_BOT_FACE_STYLE.eyeScale;
+                    handleNewBotFaceEyeScaleChange(normalizedScale);
+                    queueBotAvatarAutosave(editingBotId, { faceEyeScale: normalizedScale });
+                  }}
+                  onEyeOffsetYChange={(next) => {
+                    const normalizedOffsetY =
+                      normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
+                    handleNewBotFaceEyeOffsetYChange(normalizedOffsetY);
+                    queueBotAvatarAutosave(editingBotId, { faceEyeOffsetY: normalizedOffsetY });
                   }}
                 />
               </section>
@@ -82827,6 +83095,8 @@ function HomeContent(): React.JSX.Element {
 	                          faceEyeCharacter={seatFaceStyle.eyeCharacter}
 	                          faceMouthFont={seatFaceStyle.mouthFont}
 	                          faceFontWeight={seatFaceStyle.weight}
+                          faceEyeScale={seatFaceStyle.eyeScale}
+                          faceEyeOffsetY={seatFaceStyle.eyeOffsetY}
 	                          className={styles.coffeeSeatPlateEmoji}
 	                        />
 	                      </span>

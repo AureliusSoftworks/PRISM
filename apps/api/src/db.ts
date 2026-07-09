@@ -206,6 +206,8 @@ export function createDatabase(): DatabaseSync {
       prism_default_bot_face_eye_character TEXT,
       prism_default_bot_face_mouth_font TEXT,
       prism_default_bot_face_font_weight INTEGER,
+      prism_default_bot_face_eye_scale REAL,
+      prism_default_bot_face_eye_offset_y REAL,
       prism_default_bot_temperature REAL,
       prism_default_bot_max_tokens INTEGER,
       prism_default_bot_top_p REAL,
@@ -417,6 +419,8 @@ export function createDatabase(): DatabaseSync {
       face_eye_character TEXT,
       face_mouth_font TEXT,
       face_font_weight INTEGER,
+      face_eye_scale REAL,
+      face_eye_offset_y REAL,
       profile_picture_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
@@ -901,6 +905,8 @@ export function createDatabase(): DatabaseSync {
     ["prism_default_bot_face_eye_character", "TEXT"],
     ["prism_default_bot_face_mouth_font", "TEXT"],
     ["prism_default_bot_face_font_weight", "INTEGER"],
+    ["prism_default_bot_face_eye_scale", "REAL"],
+    ["prism_default_bot_face_eye_offset_y", "REAL"],
     ["prism_default_bot_temperature", "REAL"],
     ["prism_default_bot_max_tokens", "INTEGER"],
     ["prism_default_bot_top_p", "REAL"],
@@ -1411,6 +1417,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotFaceFontWeightColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_font_weight INTEGER;");
+  }
+  const hasBotFaceEyeScaleColumn = botColumns.some(
+    (column) => column.name === "face_eye_scale"
+  );
+  if (!hasBotFaceEyeScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_scale REAL;");
+  }
+  const hasBotFaceEyeOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_eye_offset_y"
+  );
+  if (!hasBotFaceEyeOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
   }
   const hasBotProfilePictureImageIdColumn = botColumns.some(
     (column) => column.name === "profile_picture_image_id"

@@ -38,11 +38,21 @@ test("avatar customization is a floating modal that reuses the Zen mannequin", (
 
 test("avatar customizer supports one-character eye overrides", () => {
   assert.match(pageSource, /faceEyeCharacter: string \| null/);
+  assert.match(pageSource, /faceEyeScale: number/);
+  assert.match(pageSource, /faceEyeOffsetY: number/);
   assert.match(pageSource, /normalizeBotFaceEyeCharacter\(event\.currentTarget\.value\)/);
   assert.match(pageSource, /faceEyeCharacter=\{newBotFaceEyeCharacter\}/);
+  assert.match(pageSource, /faceEyeScale=\{newBotFaceEyeScale\}/);
+  assert.match(pageSource, /faceEyeOffsetY=\{newBotFaceEyeOffsetY\}/);
   assert.match(pageSource, /handleNewBotFaceEyeCharacterChange\(normalized\);/);
+  assert.match(pageSource, /handleNewBotFaceEyeScaleChange\(normalizedScale\);/);
+  assert.match(pageSource, /handleNewBotFaceEyeOffsetYChange\(normalizedOffsetY\);/);
   assert.match(pageSource, /eyeCharacter: faceEyeCharacter/);
+  assert.match(pageSource, /eyeScale: faceEyeScale/);
+  assert.match(pageSource, /eyeOffsetY: faceEyeOffsetY/);
   assert.match(cssSource, /\.botAvatarEyeCharacterControl/);
+  assert.match(pageSource, />\s*Eye size\s*</);
+  assert.match(pageSource, />\s*Eye height\s*</);
 });
 
 test("avatar face edits autosave immediately to saved bots", () => {
@@ -64,6 +74,8 @@ test("avatar face edits autosave immediately to saved bots", () => {
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeCharacter: normalized \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceMouthFont: next \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceFontWeight: normalizedWeight \}\);/);
+  assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeScale: normalizedScale \}\);/);
+  assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeOffsetY: normalizedOffsetY \}\);/);
 });
 
 test("avatar save state is scoped and bounded so prompts cannot stay stuck", () => {

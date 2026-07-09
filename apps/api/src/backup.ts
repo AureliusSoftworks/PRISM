@@ -4,6 +4,8 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   type BotFaceFontId,
@@ -88,6 +90,8 @@ export interface BackupBotSnapshot {
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
   faceFontWeight?: number | null;
+  faceEyeScale?: number | null;
+  faceEyeOffsetY?: number | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -395,6 +399,8 @@ export function exportUserSnapshot(
          face_eye_character,
          face_mouth_font,
          face_font_weight,
+         face_eye_scale,
+         face_eye_offset_y,
          chat_enabled,
          visibility,
          created_at,
@@ -427,6 +433,8 @@ export function exportUserSnapshot(
     face_eye_character: string | null;
     face_mouth_font: string | null;
     face_font_weight: number | null;
+    face_eye_scale: number | null;
+    face_eye_offset_y: number | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -538,6 +546,8 @@ export function exportUserSnapshot(
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
+        faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
+        faceEyeOffsetY: normalizeBotFaceEyeOffsetY(bot.face_eye_offset_y),
         chatEnabled: bot.chat_enabled !== 0,
         visibility: bot.visibility === "public" ? "public" : "private",
         createdAt: bot.created_at,
@@ -744,11 +754,13 @@ export function importUserSnapshot(
         face_eye_character,
         face_mouth_font,
         face_font_weight,
+        face_eye_scale,
+        face_eye_offset_y,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -790,6 +802,8 @@ export function importUserSnapshot(
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
         normalizeBotFaceFontId(bot.faceMouthFont),
         normalizeBotFaceFontWeight(bot.faceFontWeight),
+        normalizeBotFaceEyeScale(bot.faceEyeScale),
+        normalizeBotFaceEyeOffsetY(bot.faceEyeOffsetY),
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,

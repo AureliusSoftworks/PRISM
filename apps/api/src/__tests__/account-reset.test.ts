@@ -72,6 +72,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_color, prism_default_bot_glyph,
             prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character,
             prism_default_bot_face_mouth_font, prism_default_bot_face_font_weight,
+            prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_y,
             prism_default_bot_temperature, prism_default_bot_max_tokens,
             prism_default_bot_top_p, prism_default_bot_top_k,
             prism_default_bot_repetition_penalty,
@@ -144,6 +145,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_eye_character, null);
       assert.equal(user.prism_default_bot_face_mouth_font, null);
       assert.equal(user.prism_default_bot_face_font_weight, null);
+      assert.equal(user.prism_default_bot_face_eye_scale, null);
+      assert.equal(user.prism_default_bot_face_eye_offset_y, null);
       assert.equal(user.prism_default_bot_temperature, null);
       assert.equal(user.prism_default_bot_max_tokens, null);
       assert.equal(user.prism_default_bot_top_p, null);
@@ -235,6 +238,8 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_eye_character = '8',
       prism_default_bot_face_mouth_font = 'playful',
       prism_default_bot_face_font_weight = 700,
+      prism_default_bot_face_eye_scale = 1.15,
+      prism_default_bot_face_eye_offset_y = -0.08,
       prism_default_bot_temperature = 0.9,
       prism_default_bot_max_tokens = 1536,
       prism_default_bot_top_p = 0.8,

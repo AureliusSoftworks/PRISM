@@ -20590,9 +20590,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --eye-blink-scale-y: 1;
   transform:
     translate(
-      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
-      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
+      calc((var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)),
+      calc((var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em))
     )
+    scale(var(--bot-face-eye-scale, 1))
     scaleX(var(--eye-blink-scale-x))
     scaleY(var(--eye-blink-scale-y));
   will-change: transform;
@@ -48939,11 +48940,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part="eyes"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
+  --eye-blink-scale-x: 1;
+  --eye-blink-scale-y: 1;
   transform:
     translate(
-      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
-      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
-    );
+      calc((var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)),
+      calc((var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em))
+    )
+    scale(var(--bot-face-eye-scale, 1))
+    scaleX(var(--eye-blink-scale-x))
+    scaleY(var(--eye-blink-scale-y));
 }
 
 .coffeeSeatPlateEmoji[data-coffee-plate-emoji-blink-phase="half"]
@@ -48952,12 +48958,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   [data-coffee-plate-emoji-part="eyes"],
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-blink-phase="half"]
   [data-coffee-plate-emoji-part="eyes"] {
-  transform:
-    translate(
-      calc(var(--zen-live-bot-eye-local-x, 0) * 10px),
-      calc(var(--zen-live-bot-eye-local-y, 0) * 18px)
-    )
-    scaleX(0.42);
+  --eye-blink-scale-x: 0.42;
   transition: none;
 }
 

@@ -20,6 +20,8 @@ export interface BotCustomizerSavePristine {
   faceEyeCharacter: string | null;
   faceMouthFont: string;
   faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
   profilePictureImageId: string | null;
 }
 
@@ -49,6 +51,8 @@ export interface BotCustomizerSaveCurrent {
   faceEyeCharacter: string | null;
   faceMouthFont: string;
   faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
   profilePictureImageId: string | null;
 }
 
@@ -73,6 +77,8 @@ export interface BotCustomizerSavePatch {
   faceEyeCharacter?: string | null;
   faceMouthFont?: string;
   faceFontWeight?: number;
+  faceEyeScale?: number;
+  faceEyeOffsetY?: number;
   profilePictureImageId?: string | null;
 }
 
@@ -105,6 +111,8 @@ export function buildBotCustomizerSavePatch(
       faceEyeCharacter: current.faceEyeCharacter,
       faceMouthFont: current.faceMouthFont,
       faceFontWeight: current.faceFontWeight,
+      faceEyeScale: current.faceEyeScale,
+      faceEyeOffsetY: current.faceEyeOffsetY,
       profilePictureImageId: current.profilePictureImageId,
     };
   }
@@ -161,6 +169,12 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceFontWeight !== pristine.faceFontWeight) {
     patch.faceFontWeight = current.faceFontWeight;
+  }
+  if (current.faceEyeScale !== pristine.faceEyeScale) {
+    patch.faceEyeScale = current.faceEyeScale;
+  }
+  if (current.faceEyeOffsetY !== pristine.faceEyeOffsetY) {
+    patch.faceEyeOffsetY = current.faceEyeOffsetY;
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;
