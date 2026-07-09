@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rasterize design/app-icons/*.svg into platform app icons (macOS, iOS, web, Windows).
+Rasterize design/app-icons sources into platform app icons (macOS, iOS, web, Windows).
 
 Requires macOS qlmanage for SVG → PNG, plus Pillow for resize / ICO / JPEG.
 
@@ -24,7 +24,7 @@ except ImportError as exc:
 
 REPO = Path(__file__).resolve().parents[1]
 DESIGN = REPO / "design" / "app-icons"
-CLIENT_SVG = DESIGN / "prism-client-app-icon.svg"
+CLIENT_SOURCE = DESIGN / "prism-client-app-icon.png"
 SERVER_SVG = DESIGN / "prism-server-app-icon.svg"
 
 MASTER_PX = 1024
@@ -59,6 +59,14 @@ def resize_master(src: Path, size: int) -> Image.Image:
     if size == MASTER_PX:
         return im
     return im.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def prepare_raster_master(source: Path, out_png: Path) -> None:
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    im = Image.open(source).convert("RGBA")
+    if im.size != (MASTER_PX, MASTER_PX):
+        im = im.resize((MASTER_PX, MASTER_PX), Image.Resampling.LANCZOS)
+    im.save(out_png, format="PNG")
 
 
 def save_png(im: Image.Image, path: Path) -> None:
@@ -187,14 +195,16 @@ def write_ico(master: Path, ico_path: Path) -> None:
     )
 
 
-def write_web_assets(master: Path, public_dir: Path) -> None:
+def write_web_assets(master: Path, public_dir: Path, app_dir: Path) -> None:
     public_dir.mkdir(parents=True, exist_ok=True)
     save_png(resize_master(master, 192), public_dir / "icon-192.png")
     save_png(resize_master(master, 512), public_dir / "icon-512.png")
     save_png(resize_master(master, 180), public_dir / "apple-touch-icon.png")
-    # JPEG for existing in-app <img> references
+    # JPEG for existing in-app <img> references and Next app icon metadata.
     rgb = resize_master(master, 512).convert("RGB")
     rgb.save(public_dir / "icon.jpg", format="JPEG", quality=92)
+    app_dir.mkdir(parents=True, exist_ok=True)
+    rgb.save(app_dir / "icon.jpg", format="JPEG", quality=92)
 
 
 def main() -> None:
@@ -202,7 +212,7 @@ def main() -> None:
     cache.mkdir(parents=True, exist_ok=True)
     client_master = cache / "client-1024.png"
     server_master = cache / "server-1024.png"
-    rasterize_svg(CLIENT_SVG, client_master)
+    prepare_raster_master(CLIENT_SOURCE, client_master)
     rasterize_svg(SERVER_SVG, server_master)
 
     # macOS + iOS asset catalogs
@@ -211,7 +221,7 @@ def main() -> None:
     write_ios_appiconset(client_master, REPO / "apps" / "ios-client" / "PrismIOS" / "Assets.xcassets")
 
     # Web (client identity)
-    write_web_assets(client_master, REPO / "apps" / "web" / "public")
+    write_web_assets(client_master, REPO / "apps" / "web" / "public", REPO / "apps" / "web" / "src" / "app")
 
     # Windows server
     write_ico(server_master, REPO / "apps" / "server-windows" / "src" / "Assets" / "prism-server.ico")
