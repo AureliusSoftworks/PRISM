@@ -6,6 +6,7 @@ import {
   Geist_Mono,
   Instrument_Sans,
   Lora,
+  Oxanium,
   Raleway,
 } from "next/font/google";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
@@ -49,6 +50,12 @@ const conciseRounded = Fredoka({
   weight: ["600", "700"],
 });
 
+const sharpDisplay = Oxanium({
+  variable: "--font-sharp-display",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+});
+
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -87,7 +94,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${sharpDisplay.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>

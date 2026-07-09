@@ -208,7 +208,9 @@ export function createDatabase(): DatabaseSync {
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
       prism_default_bot_face_eye_offset_y REAL,
+      prism_default_bot_face_mouth_offset_y REAL,
       prism_default_bot_face_blink_bar TEXT,
+      prism_default_bot_face_thinking_frames TEXT,
       prism_default_bot_temperature REAL,
       prism_default_bot_max_tokens INTEGER,
       prism_default_bot_top_p REAL,
@@ -422,7 +424,9 @@ export function createDatabase(): DatabaseSync {
       face_font_weight INTEGER,
       face_eye_scale REAL,
       face_eye_offset_y REAL,
+      face_mouth_offset_y REAL,
       face_blink_bar TEXT,
+      face_thinking_frames TEXT,
       profile_picture_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
@@ -909,7 +913,9 @@ export function createDatabase(): DatabaseSync {
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
     ["prism_default_bot_face_eye_offset_y", "REAL"],
+    ["prism_default_bot_face_mouth_offset_y", "REAL"],
     ["prism_default_bot_face_blink_bar", "TEXT"],
+    ["prism_default_bot_face_thinking_frames", "TEXT"],
     ["prism_default_bot_temperature", "REAL"],
     ["prism_default_bot_max_tokens", "INTEGER"],
     ["prism_default_bot_top_p", "REAL"],
@@ -1433,11 +1439,23 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotFaceEyeOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
   }
+  const hasBotFaceMouthOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_mouth_offset_y"
+  );
+  if (!hasBotFaceMouthOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_y REAL;");
+  }
   const hasBotFaceBlinkBarColumn = botColumns.some(
     (column) => column.name === "face_blink_bar"
   );
   if (!hasBotFaceBlinkBarColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_bar TEXT;");
+  }
+  const hasBotFaceThinkingFramesColumn = botColumns.some(
+    (column) => column.name === "face_thinking_frames"
+  );
+  if (!hasBotFaceThinkingFramesColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_thinking_frames TEXT;");
   }
   const hasBotProfilePictureImageIdColumn = botColumns.some(
     (column) => column.name === "profile_picture_image_id"

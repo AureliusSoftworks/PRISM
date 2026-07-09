@@ -13,7 +13,7 @@ export type BotFaceFontId = (typeof BOT_FACE_FONT_IDS)[number];
 export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
   neutral: "Core",
   warm: "Soft",
-  concise: "Mono",
+  concise: "Sharp",
   playful: "Bounce",
   formal: "Serif",
 };
@@ -32,9 +32,21 @@ export const DEFAULT_BOT_FACE_EYE_OFFSET_Y = 0;
 export const BOT_FACE_EYE_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0;
+export const BOT_FACE_MOUTH_OFFSET_Y_MIN = -0.18;
+export const BOT_FACE_MOUTH_OFFSET_Y_MAX = 0.18;
+export const BOT_FACE_MOUTH_OFFSET_Y_STEP = 0.02;
 export const BOT_FACE_BLINK_BAR_VALUES = ["none", "¦", "❘", "|"] as const;
 export type BotFaceBlinkBar = string;
-export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "|";
+export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "¦";
+export const BOT_FACE_THINKING_FRAME_COUNT = 4;
+export type BotFaceThinkingFrames = readonly [string, string, string, string];
+export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
+  "|",
+  "/",
+  "-",
+  "\\",
+];
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
@@ -43,7 +55,9 @@ export interface BotFaceStyle {
   weight: number;
   eyeScale: number;
   eyeOffsetY: number;
+  mouthOffsetY: number;
   blinkBar: BotFaceBlinkBar;
+  thinkingFrames: BotFaceThinkingFrames;
 }
 
 export interface BotFaceStyleInput {
@@ -53,7 +67,9 @@ export interface BotFaceStyleInput {
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
   faceEyeOffsetY?: unknown;
+  faceMouthOffsetY?: unknown;
   faceBlinkBar?: unknown;
+  faceThinkingFrames?: unknown;
 }
 
 export function isBotFaceFontId(value: unknown): value is BotFaceFontId {
@@ -115,12 +131,99 @@ export function normalizeBotFaceEyeOffsetY(value: unknown): number | null {
   );
 }
 
+export function normalizeBotFaceMouthOffsetY(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_MOUTH_OFFSET_Y_MIN,
+    BOT_FACE_MOUTH_OFFSET_Y_MAX,
+    BOT_FACE_MOUTH_OFFSET_Y_STEP
+  );
+}
+
 export function normalizeBotFaceBlinkBar(value: unknown): BotFaceBlinkBar | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed === "none") return trimmed;
   const [character] = Array.from(trimmed);
   return character ?? null;
+}
+
+type BotFaceGraphemeSegment = {
+  segment: string;
+};
+
+type BotFaceGraphemeSegmenter = {
+  segment(input: string): Iterable<BotFaceGraphemeSegment>;
+};
+
+type BotFaceGraphemeSegmenterConstructor = new (
+  locale?: string | string[],
+  options?: { granularity?: "grapheme" }
+) => BotFaceGraphemeSegmenter;
+
+function splitBotFaceVisibleGraphemes(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  const segmenterConstructor = (
+    Intl as unknown as { Segmenter?: BotFaceGraphemeSegmenterConstructor }
+  ).Segmenter;
+  const segments = segmenterConstructor
+    ? Array.from(
+        new segmenterConstructor(undefined, { granularity: "grapheme" }).segment(
+          trimmed
+        ),
+        (part) => part.segment
+      )
+    : Array.from(trimmed);
+  return segments
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+function botFaceThinkingFramesFromList(
+  frames: readonly string[]
+): BotFaceThinkingFrames | null {
+  if (frames.length !== BOT_FACE_THINKING_FRAME_COUNT) return null;
+  const [first, second, third, fourth] = frames;
+  if (!first || !second || !third || !fourth) return null;
+  return [first, second, third, fourth];
+}
+
+export function normalizeBotFaceThinkingFrames(
+  value: unknown
+): BotFaceThinkingFrames | null {
+  if (typeof value === "string") {
+    return botFaceThinkingFramesFromList(splitBotFaceVisibleGraphemes(value));
+  }
+  if (!Array.isArray(value)) return null;
+  const frames = value.flatMap((entry) =>
+    typeof entry === "string" ? splitBotFaceVisibleGraphemes(entry) : []
+  );
+  return botFaceThinkingFramesFromList(frames);
+}
+
+export function parseStoredBotFaceThinkingFrames(
+  value: unknown
+): BotFaceThinkingFrames | null {
+  if (typeof value !== "string") return normalizeBotFaceThinkingFrames(value);
+  try {
+    return normalizeBotFaceThinkingFrames(JSON.parse(value));
+  } catch {
+    return normalizeBotFaceThinkingFrames(value);
+  }
+}
+
+export function serializeBotFaceThinkingFrames(value: unknown): string | null {
+  const frames = normalizeBotFaceThinkingFrames(value);
+  return frames ? JSON.stringify(frames) : null;
+}
+
+export function botFaceThinkingFramesEqual(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((frame, index) => frame === right[index]);
 }
 
 export function botFaceFontFromVoicePreset(
@@ -149,9 +252,15 @@ export function resolveBotFaceStyle(
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    mouthOffsetY:
+      normalizeBotFaceMouthOffsetY(input.faceMouthOffsetY) ??
+      DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
     blinkBar:
       normalizeBotFaceBlinkBar(input.faceBlinkBar) ??
       DEFAULT_BOT_FACE_BLINK_BAR,
+    thinkingFrames:
+      normalizeBotFaceThinkingFrames(input.faceThinkingFrames) ??
+      DEFAULT_BOT_FACE_THINKING_FRAMES,
   };
 }
 
@@ -173,6 +282,8 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     weight,
     eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
     blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+    thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
   };
 }

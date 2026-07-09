@@ -16,10 +16,12 @@ import {
   coffeeCupProgressForSipCount,
   coffeeCupPrismFamilyForBotColor,
   coffeeCupSessionDurationPaceMultiplier,
+  coffeeCupSeedWithTempoRole,
   coffeeCupSipBelongsToCurrentFill,
   coffeeCupSipCycleMs,
   coffeeCupSipGatedTimedProgress,
   coffeeCupSipAnimationTiming,
+  coffeeCupTempoRoleForBot,
   coffeeCupShouldMirrorForSeat,
   coffeeCupShouldFinishAfterSip,
   coffeeCupSideForSeat,
@@ -458,6 +460,34 @@ describe("coffee cup sprites", () => {
     assert.ok(fast.frameIndex >= slow.frameIndex);
   });
 
+  it("assigns one subtle faster and one subtle slower cup tempo per session", () => {
+    const sessionSeed = "coffee-session-tempo-demo";
+    const seatBotIds = ["alice", "boris", "cleo", "daria"];
+    const roles = seatBotIds.map((botId) =>
+      coffeeCupTempoRoleForBot({ sessionSeed, botId, seatBotIds })
+    );
+
+    assert.equal(roles.filter((role) => role === "faster").length, 1);
+    assert.equal(roles.filter((role) => role === "slower").length, 1);
+
+    const baseSeed = `${sessionSeed}:alice:0:0`;
+    const normalSeed = coffeeCupSeedWithTempoRole(baseSeed, "normal");
+    const fasterSeed = coffeeCupSeedWithTempoRole(baseSeed, "faster");
+    const slowerSeed = coffeeCupSeedWithTempoRole(baseSeed, "slower");
+    const normalRate = coffeeCupConsumptionRate(normalSeed);
+    const fasterRate = coffeeCupConsumptionRate(fasterSeed);
+    const slowerRate = coffeeCupConsumptionRate(slowerSeed);
+
+    assert.equal(normalSeed, baseSeed);
+    assert.equal(coffeeCupSeedWithTempoRole(fasterSeed, "slower"), slowerSeed);
+    assert.ok(fasterRate > normalRate);
+    assert.ok(slowerRate < normalRate);
+    assert.ok(fasterRate < normalRate * 1.1);
+    assert.ok(slowerRate > normalRate * 0.9);
+    assert.ok(coffeeCupSipCycleMs(fasterSeed) < coffeeCupSipCycleMs(normalSeed));
+    assert.ok(coffeeCupSipCycleMs(slowerSeed) > coffeeCupSipCycleMs(normalSeed));
+  });
+
   it("tops off non-full cups toward hot/full", () => {
     const toppedOffAt = "2026-07-01T12:00:00.000Z";
     const topOff = coffeeCupTopOffSnapshotForProgress(0.62, toppedOffAt);
@@ -533,6 +563,39 @@ describe("coffee cup sprites", () => {
     assert.ok(later > immediate);
     assert.ok(later < 0.3);
     assert.equal(naturalProgress, 0.72);
+  });
+
+  it("keeps fast and slow cup tempo after a top-off", () => {
+    const toppedOffAt = "2026-07-01T12:00:00.000Z";
+    const topOff = coffeeCupTopOffSnapshotForProgress(0.72, toppedOffAt);
+    assert.notEqual(topOff, null);
+    const nowMs = Date.parse(toppedOffAt) + 3 * 60 * 1000;
+    const baseSeed = "session:bot-alice";
+    const normalProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "normal"),
+    });
+    const fasterProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "faster"),
+    });
+    const slowerProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "slower"),
+    });
+
+    assert.ok(fasterProgress > normalProgress);
+    assert.ok(slowerProgress < normalProgress);
+    assert.ok(fasterProgress - slowerProgress < 0.08);
   });
 
   it("keeps a fresh top-off full when timed progress is already ahead", () => {

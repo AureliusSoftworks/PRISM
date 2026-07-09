@@ -41,29 +41,41 @@ test("avatar customizer supports one-character eye overrides", () => {
   assert.match(pageSource, /faceEyeScale: number/);
   assert.match(pageSource, /faceEyeOffsetY: number/);
   assert.match(pageSource, /faceBlinkBar: BotFaceBlinkBar/);
+  assert.match(pageSource, /faceThinkingFrames: BotFaceThinkingFrames/);
   assert.match(pageSource, /normalizeBotFaceEyeCharacter\(event\.currentTarget\.value\)/);
   assert.match(pageSource, /faceEyeCharacter=\{newBotFaceEyeCharacter\}/);
   assert.match(pageSource, /faceEyeScale=\{newBotFaceEyeScale\}/);
   assert.match(pageSource, /faceEyeOffsetY=\{newBotFaceEyeOffsetY\}/);
   assert.match(pageSource, /faceBlinkBar=\{newBotFaceBlinkBar\}/);
+  assert.match(pageSource, /faceThinkingFrames=\{newBotFaceThinkingFrames\}/);
   assert.match(pageSource, /handleNewBotFaceEyeCharacterChange\(normalized\);/);
   assert.match(pageSource, /handleNewBotFaceEyeScaleChange\(normalizedScale\);/);
   assert.match(pageSource, /handleNewBotFaceEyeOffsetYChange\(normalizedOffsetY\);/);
   assert.match(pageSource, /handleNewBotFaceBlinkBarChange\(normalizedBlinkBar\);/);
+  assert.match(pageSource, /handleNewBotFaceThinkingFramesChange\(normalizedFrames\);/);
   assert.match(pageSource, /const faceStyle = resolveBotFaceStyle\(/);
   assert.match(pageSource, /faceEyeCharacter,/);
   assert.match(pageSource, /faceEyeScale,/);
   assert.match(pageSource, /faceEyeOffsetY,/);
   assert.match(pageSource, /faceBlinkBar,/);
+  assert.match(pageSource, /faceThinkingFrames,/);
   assert.match(pageSource, /botAvatarBlinkBarInputValue\(faceBlinkBar\)/);
+  assert.match(pageSource, /botAvatarThinkingFramesFromPaste/);
   assert.match(cssSource, /\.botAvatarOverrideControl/);
+  assert.match(cssSource, /\.botAvatarThinkingControl/);
   assert.match(cssSource, /\.botAvatarInlineResetButton/);
   assert.match(pageSource, />\s*Eye override\s*</);
   assert.match(pageSource, />\s*Blink override\s*</);
+  assert.match(pageSource, />\s*Thinking\s*</);
   assert.match(pageSource, /aria-label="Blink override"/);
+  assert.match(pageSource, /aria-label=\{`Thinking frame \$\{index \+ 1\}`\}/);
   assert.match(pageSource, /label="Eye size"/);
   assert.match(pageSource, /label="Eye position"/);
   assert.match(pageSource, /label="Stroke weight"/);
+  assert.doesNotMatch(pageSource, /label="Mouth position"/);
+  assert.doesNotMatch(pageSource, /onMouthOffsetYChange/);
+  assert.doesNotMatch(pageSource, /handleNewBotFaceMouthOffsetYChange/);
+  assert.doesNotMatch(pageSource, /faceMouthOffsetY=\{newBotFaceMouthOffsetY\}/);
   assert.doesNotMatch(pageSource, />\s*Inflation\s*</);
   assert.doesNotMatch(pageSource, />\s*Eye height\s*</);
   assert.doesNotMatch(pageSource, />\s*Blink bar\s*</);
@@ -92,6 +104,8 @@ test("avatar face edits autosave immediately to saved bots", () => {
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeScale: normalizedScale \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceEyeOffsetY: normalizedOffsetY \}\);/);
   assert.match(pageSource, /queueBotAvatarAutosave\(editingBotId, \{ faceBlinkBar: normalizedBlinkBar \}\);/);
+  assert.doesNotMatch(pageSource, /faceMouthOffsetY: normalizedOffsetY/);
+  assert.match(pageSource, /faceThinkingFrames: normalizedFrames/);
 });
 
 test("avatar save state is scoped and bounded so prompts cannot stay stuck", () => {
@@ -217,6 +231,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.doesNotMatch(saveDefaultSource, /glyph:\s*newBotGlyph/);
   assert.match(saveDefaultSource, /faceEyesFont: newBotFaceEyesFont/);
   assert.match(saveDefaultSource, /faceBlinkBar: newBotFaceBlinkBar/);
+  assert.match(saveDefaultSource, /faceThinkingFrames: newBotFaceThinkingFrames/);
   assert.match(saveDefaultSource, /prismDefaultBotColor: ""/);
   assert.match(saveDefaultSource, /prismDefaultBotGlyph: ""/);
 
@@ -237,6 +252,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.doesNotMatch(defaultBotRouteSource, /body\.glyph/);
   assert.match(defaultBotRouteSource, /prism_default_bot_color = NULL/);
   assert.match(defaultBotRouteSource, /prism_default_bot_glyph = NULL/);
+  assert.match(defaultBotRouteSource, /prism_default_bot_face_thinking_frames = \?/);
   assert.match(apiServerSource, /prismDefaultBotColor: ""/);
   assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });
@@ -279,12 +295,16 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /className=\{styles\.botAvatarPresetStrip\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarExpressionMatrix\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarSliderStack\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarThinkingTiles\}/);
+  assert.match(pageSource, /const BOT_AVATAR_THINKING_PRESETS = \[/);
+  assert.match(pageSource, /Random thinking preset/);
   assert.match(pageSource, /aria-label="Identity"[\s\S]*<Brush size=\{16\}/);
   assert.match(pageSource, /aria-label="Face"[\s\S]*<Sparkles size=\{16\}/);
   assert.match(pageSource, /const previewFaceSummary =/);
   assert.match(pageSource, /const previewWeightSummary =/);
   assert.match(pageSource, /const BOT_AVATAR_FACE_PRESETS = \[/);
   assert.match(pageSource, /Classic/);
+  assert.match(pageSource, /Sharp/);
   assert.match(pageSource, /Bouncy/);
   assert.match(pageSource, /Reset face/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_SCREEN_MASK_BLEND_MODES/);
@@ -293,6 +313,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botAvatarControlGroup\s*\{[\s\S]*border-radius:\s*8px;/);
   assert.match(cssSource, /\.botAvatarControlGroupHeader\s*\{[\s\S]*grid-template-columns:\s*34px minmax\(0,\s*1fr\) auto;/);
   assert.match(cssSource, /\.botAvatarPresetStrip\s*\{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(cssSource, /\.botAvatarThinkingPresetStrip\s*\{[\s\S]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\) 34px 34px;/);
   assert.match(cssSource, /\.botAvatarPreviewModeToggle\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
   assert.match(cssSource, /\.botAvatarSectionResetButton/);
   assert.match(cssSource, /\.botAvatarRangeControl/);
@@ -331,6 +352,10 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /data-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-avatar-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-theme=\{previewTheme\}/);
+  assert.match(
+    pageSource,
+    /"--bot-face-crt-screen-texture-blend-mode":\s*previewTheme === "light" \? "overlay" : "luminosity"/
+  );
   assert.match(pageSource, /resolvedTheme=\{resolvedTheme\}/);
   assert.match(pageSource, /onPreviewThemeChange\("light"\)/);
   assert.match(pageSource, /onPreviewThemeChange\("dark"\)/);

@@ -19,8 +19,12 @@ describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1 WHERE id = ?"
-      ).run("  misty\n glass,   paper grain  ", "user-1");
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ? WHERE id = ?"
+      ).run(
+        "  misty\n glass,   paper grain  ",
+        '["?","!","?","…"]',
+        "user-1"
+      );
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
 
@@ -34,6 +38,12 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(snapshot.settings?.experimentalAllModelEffortEnabled, true);
       assert.equal(snapshot.settings?.coffeeExperimentalTableAngleEnabled, true);
       assert.equal(snapshot.settings?.psychicModeEnabled, true);
+      assert.deepEqual(snapshot.settings?.prismDefaultBotFaceThinkingFrames, [
+        "?",
+        "!",
+        "?",
+        "…",
+      ]);
 
       const longNotes = "x".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 10);
       importUserSnapshot(
@@ -50,6 +60,7 @@ describe("backup Zen Atmosphere style notes", () => {
             experimentalAllModelEffortEnabled: false,
             coffeeExperimentalTableAngleEnabled: false,
             psychicModeEnabled: false,
+            prismDefaultBotFaceThinkingFrames: [".", "o", "O", "o"],
           },
         },
         userKey
@@ -57,7 +68,7 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
@@ -67,6 +78,7 @@ describe("backup Zen Atmosphere style notes", () => {
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
+        prism_default_bot_face_thinking_frames: string | null;
       };
 
       assert.equal(
@@ -79,6 +91,7 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(restored.experimental_all_model_effort_enabled, 0);
       assert.equal(restored.coffee_experimental_table_angle_enabled, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
+      assert.equal(restored.prism_default_bot_face_thinking_frames, '[".","o","O","o"]');
     });
   });
 
@@ -133,9 +146,10 @@ describe("backup bot avatar face style", () => {
         `INSERT INTO bots (
           id, user_id, name, system_prompt,
           face_eyes_font, face_eye_character, face_mouth_font, face_font_weight,
-          face_eye_scale, face_eye_offset_y, face_blink_bar,
+          face_eye_scale, face_eye_offset_y, face_mouth_offset_y,
+          face_blink_bar, face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
@@ -147,7 +161,9 @@ describe("backup bot avatar face style", () => {
         725,
         1.15,
         -0.08,
+        0.06,
         "❘",
+        '["·","*","✦","*"]',
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -179,7 +195,9 @@ describe("backup bot avatar face style", () => {
         faceFontWeight: 725,
         faceEyeScale: 1.15,
         faceEyeOffsetY: -0.08,
+        faceMouthOffsetY: 0.06,
         faceBlinkBar: "❘",
+        faceThinkingFrames: ["·", "*", "✦", "*"],
         chatEnabled: true,
         visibility: "private",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -187,14 +205,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_mouth_font = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_y = NULL, face_blink_bar = NULL WHERE id = ?"
+        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_mouth_font = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_y = NULL, face_mouth_offset_y = NULL, face_blink_bar = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, face_blink_bar, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, face_mouth_offset_y, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         face_eyes_font: string | null;
@@ -203,7 +221,9 @@ describe("backup bot avatar face style", () => {
         face_font_weight: number | null;
         face_eye_scale: number | null;
         face_eye_offset_y: number | null;
+        face_mouth_offset_y: number | null;
         face_blink_bar: string | null;
+        face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
       assert.equal(restored.face_eyes_font, "warm");
@@ -212,7 +232,9 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
       assert.equal(restored.face_eye_offset_y, -0.08);
+      assert.equal(restored.face_mouth_offset_y, 0.06);
       assert.equal(restored.face_blink_bar, "❘");
+      assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
     });
   });

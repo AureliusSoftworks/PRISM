@@ -16,11 +16,13 @@ import {
 export {
   coffeeCupConsumptionRate,
   coffeeCupSessionDurationPaceMultiplier,
+  coffeeCupSeedWithTempoRole,
   coffeeCupSipMessageGapForDuration,
   coffeeCupSipBias,
   coffeeCupSipCycleMs,
   coffeeCupShouldFinishAfterSip,
   coffeeCupSipLikelihoodForProgress,
+  coffeeCupTempoRoleForBot,
   coffeeCupCanTopOff,
   coffeeCupProgressAfterTopOff,
   coffeeCupTopOffSnapshotForProgress,
@@ -627,6 +629,7 @@ export function buildCoffeeCupVisualState(args: {
     topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
+    seed: args.seed,
     lowerProgressMeansConsumption: sipProgress != null,
   });
   const rawTopOffBaseProgress =
@@ -636,6 +639,7 @@ export function buildCoffeeCupVisualState(args: {
     topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
+    seed: args.seed,
     lowerProgressMeansConsumption: sipProgress != null,
   });
   const status = coffeeCupStatusForProgress(visibleProgress, args.seed);
@@ -647,11 +651,12 @@ export function buildCoffeeCupVisualState(args: {
             args.seed,
             args.durationMinutes
           ),
-          topOff: args.topOff,
-          nowMs: args.nowMs,
-          durationMinutes: args.durationMinutes,
-          lowerProgressMeansConsumption: false,
-        })
+        topOff: args.topOff,
+        nowMs: args.nowMs,
+        durationMinutes: args.durationMinutes,
+        seed: args.seed,
+        lowerProgressMeansConsumption: false,
+      })
       : null;
   const previousSipGateFrameIndex =
     previousSipGateProgress != null
