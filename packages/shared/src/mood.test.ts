@@ -312,6 +312,13 @@ test("coffee social snapshots map into mood saturation", () => {
     ...sameMoodLowLeave,
     leavePressure: 0.9,
   };
+  const depressedButSettled = {
+    disposition: 0.14,
+    valuesFriction: 0.88,
+    restraint: 0.7,
+    engagement: 0.16,
+    leavePressure: 0.1,
+  };
 
   assert.ok(good > 1);
   assert.ok(strained < COFFEE_NEAR_DESATURATED_SATURATION);
@@ -321,9 +328,11 @@ test("coffee social snapshots map into mood saturation", () => {
   );
   const sameMoodLowLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodLowLeave);
   const sameMoodHighLeaveSaturation = coffeeMoodSaturationFromSocial(sameMoodHighLeave);
-  assert.ok(sameMoodHighLeaveSaturation < sameMoodLowLeaveSaturation);
-  assert.ok(sameMoodHighLeaveSaturation > 0.74);
+  assert.ok(sameMoodHighLeaveSaturation >= sameMoodLowLeaveSaturation - 0.02);
+  assert.ok(sameMoodHighLeaveSaturation >= 0.98);
   assert.equal(coffeeSocialSnapshotIsNearDesaturated(sameMoodHighLeave), false);
+  assert.ok(coffeeMoodSaturationFromSocial(depressedButSettled) >= 0.98);
+  assert.equal(coffeeSocialSnapshotIsNearDesaturated(depressedButSettled), false);
   assert.equal(
     coffeeSocialSnapshotIsNearDesaturated({
       disposition: 0.2,
